@@ -25,6 +25,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { Empty, EmptyDescription, EmptyMedia } from "../ui/empty";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -117,13 +118,21 @@ export function MessageFollowUpGlyph({ followUp }: { followUp: MessageFollowUp }
   );
 }
 
-function neighborCheckbox(row: HTMLElement | null) {
+/** Where focus goes when a row leaves: a neighbour, else the scope switch, which stays put. */
+function focusAfterRow(row: HTMLElement | null) {
   const boxes = [
     ...(row?.closest("[data-follow-ups]")?.querySelectorAll<HTMLElement>('[role="checkbox"]') ??
       []),
   ];
   const at = boxes.findIndex((box) => row?.contains(box));
-  return boxes[at + 1] ?? boxes[at - 1] ?? null;
+  return (
+    boxes[at + 1] ??
+    boxes[at - 1] ??
+    row
+      ?.closest("[data-todos-view]")
+      ?.querySelector<HTMLElement>('[aria-label="Todos scope"] [aria-pressed="true"]') ??
+    null
+  );
 }
 
 function FollowUpRow({
@@ -161,7 +170,7 @@ function FollowUpRow({
         checked={done}
         disabled={!canWrite}
         onCheckedChange={() => {
-          if (!done && hidesDone) neighborCheckbox(rowRef.current)?.focus();
+          if (!done && hidesDone) focusAfterRow(rowRef.current)?.focus();
           change(done ? "reopen" : "done");
         }}
       />
@@ -198,10 +207,7 @@ function FollowUpRow({
             <MenuItem
               disabled={!canWrite}
               onClick={() => {
-                focusAfterMenu.current =
-                  neighborCheckbox(rowRef.current) ??
-                  rowRef.current?.closest<HTMLElement>("[data-follow-ups]") ??
-                  null;
+                focusAfterMenu.current = focusAfterRow(rowRef.current);
                 change("unflag");
               }}
             >
@@ -214,113 +220,71 @@ function FollowUpRow({
   );
 }
 
-function FollowUpHeading({ count }: { count: number }) {
-  return (
-    <h3 className="flex items-center gap-1.5 px-0.5 text-3xs font-medium tracking-wide text-muted-foreground uppercase">
-      <FlagIcon aria-hidden className="size-3" />
-      Follow up
-      <span className="tabular-nums">{count}</span>
-    </h3>
-  );
-}
-
-/** The Thread scope's section above the todo tree; absent while the thread has none. */
+/**
+ * With a thread, its follow-ups above the todo tree, absent while it has none. Without one, the
+ * environment's open follow-ups grouped by thread.
+ */
 export function FollowUpSection({
-  threadRef,
+  environmentId,
+  threadId,
   showDone,
 }: {
-  threadRef: ScopedThreadRef;
+  environmentId: EnvironmentId;
+  threadId?: ThreadId;
   showDone: boolean;
 }) {
-  const query = useFollowUps(threadRef.environmentId, threadRef.threadId);
-  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId));
-  const items = query.data?.filter((item) => showDone || item.doneAt === null) ?? [];
-  if (!items.length) return null;
-  return (
-    <section
-      data-follow-ups
-      tabIndex={-1}
-      aria-label="Follow-ups"
-      className="space-y-0.5 border-b border-border/60 pb-2 outline-none"
-    >
-      <FollowUpHeading count={items.filter((item) => item.doneAt === null).length} />
-      <div role="list">
-        {items.map((item) => (
-          <FollowUpRow
-            key={item.messageId}
-            environmentId={threadRef.environmentId}
-            item={item}
-            hidesDone={!showDone}
-            canWrite={canWrite}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** Open follow-ups across the environment's threads, grouped by thread. */
-export function FollowUpsAcrossThreads({ environmentId }: { environmentId: EnvironmentId }) {
-  const query = useFollowUps(environmentId);
+  const query = useFollowUps(environmentId, threadId);
   const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
-  const items = query.data ?? [];
   if (query.error) return <p role="alert">{query.error}</p>;
-  if (!items.length) return null;
+  const items = query.data?.filter((item) => showDone || item.doneAt === null) ?? [];
+  if (!items.length)
+    return threadId === undefined && query.data ? (
+      <Empty size="compact">
+        <EmptyMedia variant="icon">
+          <FlagIcon />
+        </EmptyMedia>
+        <EmptyDescription>
+          No follow-ups. Flag a message you send to come back to it later.
+        </EmptyDescription>
+      </Empty>
+    ) : null;
   const groups = new Map<ThreadId, MessageFollowUp[]>();
   for (const item of items) groups.set(item.threadId, [...(groups.get(item.threadId) ?? []), item]);
   return (
     <section
       data-follow-ups
-      tabIndex={-1}
       aria-label="Follow-ups"
-      className="space-y-1 border-b border-border/60 pb-2 outline-none"
+      className="space-y-1 border-b border-border/60 pb-2"
     >
-      <FollowUpHeading count={items.length} />
-      {[...groups].map(([threadId, group]) => (
-        <ThreadGroup
-          key={threadId}
-          environmentId={environmentId}
-          threadId={threadId}
-          title={group[0]!.threadTitle}
-        >
+      <h3 className="flex items-center gap-1.5 px-0.5 text-3xs font-medium tracking-wide text-muted-foreground uppercase">
+        <FlagIcon aria-hidden className="size-3" />
+        Follow up
+        <span className="tabular-nums">{items.filter((item) => item.doneAt === null).length}</span>
+      </h3>
+      {[...groups].map(([groupThreadId, group]) => (
+        <div key={groupThreadId} className="space-y-0.5">
+          {threadId === undefined ? (
+            <Link
+              to="/$environmentId/$threadId"
+              params={{ environmentId, threadId: groupThreadId }}
+              className="block truncate px-0.5 text-xs text-primary hover:underline"
+            >
+              {group[0]!.threadTitle || "Untitled thread"}
+            </Link>
+          ) : null}
           <div role="list">
             {group.map((item) => (
               <FollowUpRow
                 key={item.messageId}
                 environmentId={environmentId}
                 item={item}
-                hidesDone
+                hidesDone={!showDone}
                 canWrite={canWrite}
               />
             ))}
           </div>
-        </ThreadGroup>
+        </div>
       ))}
     </section>
-  );
-}
-
-export function ThreadGroup({
-  environmentId,
-  threadId,
-  title,
-  children,
-}: {
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-0.5">
-      <Link
-        to="/$environmentId/$threadId"
-        params={{ environmentId, threadId }}
-        className="block truncate px-0.5 text-xs text-primary hover:underline"
-      >
-        {title || "Untitled thread"}
-      </Link>
-      {children}
-    </div>
   );
 }

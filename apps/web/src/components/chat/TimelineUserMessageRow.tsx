@@ -793,7 +793,7 @@ function UserTimelineRow({
             variant="ghost"
           />
         )}
-        {ctx.threadRef ? (
+        {ctx.threadRef && userMessage.attribution === null ? (
           <MessageFollowUpButton
             threadRef={ctx.threadRef}
             messageId={row.message.id}
