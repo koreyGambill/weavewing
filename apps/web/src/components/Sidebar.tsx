@@ -242,7 +242,7 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
-import { useScratchProject } from "../hooks/useScratchProject";
+import { readScratchProjectActions, useDefaultFolderLabel } from "../hooks/useScratchProject";
 import { TooltipProvider } from "./ui/tooltip";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import {
@@ -965,7 +965,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
-  const scratch = useScratchProject();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -2927,16 +2926,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       ? shortcutLabelForCommand(keybindings, "chat.newLocal")
       : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
-  const defaultFolderChoice = scratch.scratchEnvironmentChoice(
+  const defaultFolderFallbackEnvironmentId =
     newThreadContext.activeThread?.environmentId ??
-      newThreadContext.activeDraftThread?.environmentId ??
-      null,
-  );
-  const defaultFolderLabel =
-    defaultFolderChoice.kind === "none"
-      ? null
-      : (scratch.scratchWorkspaceLabelFor(defaultFolderChoice.environmentId) ??
-        "the default folder");
+    newThreadContext.activeDraftThread?.environmentId ??
+    null;
+  const defaultFolderLabel = useDefaultFolderLabel(defaultFolderFallbackEnvironmentId);
   return (
     <>
       <SidebarContent
@@ -3187,7 +3181,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               )}
               onNewDefaultFolderThread={() => {
                 if (isMobile) setOpenMobile(false);
-                scratch.startScratchChoice(defaultFolderChoice);
+                const scratch = readScratchProjectActions(appAtomRegistry, handleNewThread);
+                scratch.startScratchChoice(
+                  scratch.scratchEnvironmentChoice(defaultFolderFallbackEnvironmentId),
+                );
               }}
               showNewThreadInProjectHint={
                 !shouldCreateNewThreadInCurrentProject(

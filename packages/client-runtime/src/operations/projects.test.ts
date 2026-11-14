@@ -13,6 +13,7 @@ import {
   githubIncompleteOwnerRepositoryMessage,
   normalizePastedCloneUrl,
   scratchWorkspaceLabel,
+  scratchWorkspaceStatus,
   sortAddProjectProviderSources,
 } from "./projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
@@ -37,6 +38,10 @@ describe("add project shared logic", () => {
         settings: { scratchStartDirectory: "~/code" },
       }),
     ).toBe("/srv/scratch");
+    expect(scratchWorkspaceStatus(config("/home/u/code"))).toBe("in-use");
+    expect(scratchWorkspaceStatus(config("/home/u/.t3/userdata/scratch"))).toBe("fallback");
+    expect(scratchWorkspaceStatus(config(undefined))).toBe("refused");
+    expect(scratchWorkspaceStatus({ scratchWorkspaceRoot: "/srv/scratch" })).toBeNull();
   });
 
   it("offers only GitHub until other hosts are turned on", () => {

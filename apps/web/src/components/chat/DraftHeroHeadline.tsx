@@ -358,7 +358,11 @@ export function DraftHeroHeadline({
             />
           }
         >
-          <DraftProjectName value={projectTriggerLabel ?? "Choose a project"} singleLine />
+          <DraftProjectName
+            value={projectTriggerLabel ?? "Choose a project"}
+            singleLine
+            truncateStart={scratchDraftLabel !== null}
+          />
         </TooltipTrigger>
         {projectTriggerLabel ? <TooltipPopup side="top">{projectTriggerLabel}</TooltipPopup> : null}
       </Tooltip>
@@ -437,7 +441,7 @@ export function DraftHeroHeadline({
           render={
             <InlineButton
               tone="muted"
-              className="pointer-events-auto"
+              className="pointer-events-auto inline-flex min-w-0 max-w-full"
               onClick={() =>
                 void startScratch().then((started) => {
                   if (started) {
@@ -448,7 +452,11 @@ export function DraftHeroHeadline({
             />
           }
         >
-          or start in {scratchWorkspaceLabelFor(scratchTargetEnvironmentId)}
+          <span className="shrink-0 whitespace-pre">or start in </span>
+          <DraftProjectName
+            value={scratchWorkspaceLabelFor(scratchTargetEnvironmentId) ?? ""}
+            truncateStart
+          />
         </TooltipTrigger>
         {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
       </Tooltip>

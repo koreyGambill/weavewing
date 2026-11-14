@@ -15,7 +15,12 @@ export function discardComposerDraft(target: ComposerThreadTarget): void {
   const store = useComposerDraftStore.getState();
   const key = resolveComposerDraftKey(store, target);
   const draft = key === null ? undefined : store.draftsByThreadKey[key];
-  if (key === null || !draft) return;
+  if (key === null) return;
+  if (!draft) {
+    // A new thread nobody typed into has nothing to restore.
+    if (typeof target === "string") store.clearDraftThread(target);
+    return;
+  }
   const session = store.draftThreadsByThreadKey[key];
   const logicalProjectKeys = Object.entries(store.logicalProjectDraftThreadKeyByLogicalProjectKey)
     .filter(([, draftKey]) => draftKey === key)

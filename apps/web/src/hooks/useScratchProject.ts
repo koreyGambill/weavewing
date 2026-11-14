@@ -1,4 +1,4 @@
-import { RegistryContext } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   chooseWorkEnvironment,
   chosenEnvironmentId,
@@ -16,17 +16,24 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { AtomRegistry } from "effect/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 import { useContext } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import {
   type EnvironmentPresentation,
+  environmentsAtom,
+  readEnvironments,
+  readPrimaryEnvironmentId,
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
-import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
+import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
+import {
+  readPreferredEnvironmentId,
+  usePreferredEnvironmentId,
+} from "~/state/preferredEnvironment";
 import { projectEnvironment } from "~/state/projects";
 import { type NewThreadHandler, useNewThreadHandler } from "./useHandleNewThread";
 
@@ -44,13 +51,13 @@ type ScratchEnvironment = Pick<EnvironmentPresentation, "connection" | "serverCo
   readonly environmentId: EnvironmentId;
 };
 
-export function createScratchProjectActions(input: {
+interface ScratchLookupInput {
   readonly environments: () => Iterable<ScratchEnvironment>;
   readonly primaryEnvironmentId: () => EnvironmentId | null;
   readonly preferredEnvironmentId: () => EnvironmentId | null;
-  readonly registry: AtomRegistry.AtomRegistry;
-  readonly handleNewThread: NewThreadHandler;
-}) {
+}
+
+function createScratchLookup(input: ScratchLookupInput) {
   const environmentFor = (environmentId: EnvironmentId | null) => {
     let environment: ScratchEnvironment | undefined;
     for (const entry of input.environments()) {
@@ -91,6 +98,22 @@ export function createScratchProjectActions(input: {
   const scratchEnvironmentId = (fallback: EnvironmentId | null): EnvironmentId | null =>
     chosenEnvironmentId(scratchEnvironmentChoice(fallback));
 
+  return {
+    scratchWorkspaceRootFor,
+    scratchWorkspaceLabelFor,
+    scratchEnvironmentChoice,
+    scratchEnvironmentId,
+  };
+}
+
+export function createScratchProjectActions(
+  input: ScratchLookupInput & {
+    readonly registry: AtomRegistry.AtomRegistry;
+    readonly handleNewThread: NewThreadHandler;
+  },
+) {
+  const lookup = createScratchLookup(input);
+
   const openScratchProject = async (
     environmentId: EnvironmentId,
     failureTitle = "Could not open the default folder",
@@ -128,14 +151,49 @@ export function createScratchProjectActions(input: {
   };
 
   return {
-    scratchWorkspaceRootFor,
-    scratchWorkspaceLabelFor,
-    scratchEnvironmentChoice,
-    scratchEnvironmentId,
+    ...lookup,
     openScratchProject,
     startScratchThread,
     startScratchChoice,
   };
+}
+
+// A string, so components re-render only when the label itself changes.
+const defaultFolderLabelAtom = Atom.family((key: string) => {
+  const [fallback, preferred] = JSON.parse(key) as [EnvironmentId | null, EnvironmentId | null];
+  return Atom.make((get) => {
+    const environments = get(environmentsAtom);
+    const primary = get(primaryEnvironmentIdAtom);
+    const lookup = createScratchLookup({
+      environments: () => environments,
+      primaryEnvironmentId: () => primary,
+      preferredEnvironmentId: () => preferred,
+    });
+    const choice = lookup.scratchEnvironmentChoice(fallback);
+    return choice.kind === "none"
+      ? null
+      : (lookup.scratchWorkspaceLabelFor(choice.environmentId) ?? "the default folder");
+  });
+});
+
+/** Null when no machine offers a default folder. */
+export function useDefaultFolderLabel(fallback: EnvironmentId | null): string | null {
+  const preferred = usePreferredEnvironmentId();
+  return useAtomValue(defaultFolderLabelAtom(JSON.stringify([fallback, preferred])));
+}
+
+/** Scratch actions that read environments when called, for handlers outside render. */
+export function readScratchProjectActions(
+  registry: AtomRegistry.AtomRegistry,
+  handleNewThread: NewThreadHandler,
+) {
+  return createScratchProjectActions({
+    environments: readEnvironments,
+    primaryEnvironmentId: readPrimaryEnvironmentId,
+    preferredEnvironmentId: readPreferredEnvironmentId,
+    registry,
+    handleNewThread,
+  });
 }
 
 export function useScratchProject() {

@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolvePastedPath } from "@t3tools/shared/path";
+import { scratchWorkspaceStatus } from "@t3tools/client-runtime/operations/projects";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -249,13 +250,38 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  const defaultFolderNotes = connectedEnvironments.flatMap((environment) => {
+    const config = environment.serverConfig;
+    const status = scratchWorkspaceStatus(config);
+    const where = connectedEnvironments.length > 1 ? `${environment.label}: ` : "";
+    if (status === "refused") {
+      return [`${where}This folder is refused, so new threads can't start outside a project.`];
+    }
+    if (status === "fallback") {
+      return [
+        `${where}This folder doesn't exist, so new threads use ${config?.scratchWorkspaceRoot}.`,
+      ];
+    }
+    return [];
+  });
   const defaultFolderRow = !isProjectScope ? (
     <SettingsRow
       serverScoped
       settingKeys={["scratchStartDirectory"]}
       mixed={mixedDefaultFolder}
       {...searchableSetting("default-folder")}
-      description="A folder on that machine for threads started outside a project. It must exist and sit outside a Git repository; otherwise T3 Code uses a folder in its own data directory."
+      description={
+        <>
+          A folder on that machine for threads started outside a project. A missing folder falls
+          back to one in T3 Code's data directory; a Git checkout, your home folder or ~/.xwing is
+          refused.
+          {defaultFolderNotes.map((note) => (
+            <span key={note} role="status" className="mt-1 block text-warning-foreground">
+              {note}
+            </span>
+          ))}
+        </>
+      }
       resetAction={
         settings.scratchStartDirectory !== DEFAULT_SERVER_SETTINGS.scratchStartDirectory ? (
           <SettingResetButton
