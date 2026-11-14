@@ -97,9 +97,11 @@ export default Effect.gen(function* () {
     });
     // A context review kept a $0.05 cap per run; it is now the automation's budget.
     const budget = profile.kind === "context-review" ? { budget: { maxCostUsd: 0.05 } } : {};
+    // json_patch(defaults, existing): a grant the row already has wins over the defaults.
     yield* sql`UPDATE scheduled_tasks SET agent_json = ${agent},
       title = ${profile.turnEnd === undefined ? profile.title : `${profile.title} (scheduled)`},
-      grant_json = coalesce(${Object.keys(budget).length === 0 ? null : toJson(budget)}, grant_json)
+      grant_json = CASE WHEN ${Object.keys(budget).length === 0 ? 0 : 1}
+        THEN json_patch(${toJson(budget)}, coalesce(grant_json, '{}')) ELSE grant_json END
       WHERE task_id = ${taskId}`;
     if (profile.turnEnd === undefined) continue;
     // Turn ends now come from an event trigger: the same review as its own automation.
@@ -114,7 +116,7 @@ export default Effect.gen(function* () {
       cooldownSeconds,
     });
     // The watcher listener had no hourly cap, only the per-thread cooldown.
-    const grant = toJson({ ...budget, maxRunsPerHour: 120 });
+    const twinGrant = toJson({ ...budget, maxRunsPerHour: 120 });
     yield* sql`INSERT INTO scheduled_tasks (task_id, title, prompt, enabled, schedule_json,
         project_id, thread_id, workspace_strategy_json, model_selection_json, runtime_mode,
         interaction_mode, created_by, creation_source, created_at, updated_at, next_run_at,
@@ -122,7 +124,7 @@ export default Effect.gen(function* () {
       SELECT ${turnEndTaskId(taskId)}, ${profile.title}, prompt, enabled, ${schedule},
         project_id, NULL, workspace_strategy_json, model_selection_json, runtime_mode,
         interaction_mode, created_by, creation_source, created_at, updated_at, NULL,
-        NULL, 'never', NULL, 0, 'new_thread', agent_json, ${grant}
+        NULL, 'never', NULL, 0, 'new_thread', agent_json, json_patch(${twinGrant}, coalesce(grant_json, '{}'))
       FROM scheduled_tasks WHERE task_id = ${taskId}
       ON CONFLICT (task_id) DO NOTHING`;
   }

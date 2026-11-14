@@ -75,16 +75,17 @@ layer("100_FoldWatchersIntoAutomations", (it) => {
   it.effect("folds watcher profiles, findings and runs into automations, once", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 98 });
-      const task = (id: string, enabled: boolean, schedule: unknown) => sql`
+      yield* runMigrations({ toMigrationInclusive: 99 });
+      const task = (id: string, enabled: boolean, schedule: unknown, grant?: unknown) => sql`
         INSERT INTO scheduled_tasks (task_id, title, prompt, enabled, schedule_json, project_id,
           thread_id, workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode,
           created_by, creation_source, created_at, updated_at, next_run_at, last_run_at,
-          last_run_status, last_run_error, run_count, thread_mode)
+          last_run_status, last_run_error, run_count, thread_mode, grant_json)
         VALUES (${id}, 'stale title', 'Read-only standards monitoring', ${enabled ? 1 : 0},
           ${JSON.stringify(schedule)}, 'project-1', NULL, '{"type":"root"}',
           ${JSON.stringify(model)}, 'approval-required', 'default', 'system', 'server', ${at}, ${at},
-          '2026-11-15T09:00:00.000Z', ${at}, 'succeeded', NULL, 7, 'new_thread')`;
+          '2026-11-15T09:00:00.000Z', ${at}, 'succeeded', NULL, 7, 'new_thread',
+          ${grant === undefined ? null : JSON.stringify(grant)})`;
       const both = profile("both", { turnEnd: { cooldownMs: 900_000 } });
       const alerts = profile("alerts", {
         delivery: "alerts",
@@ -97,8 +98,18 @@ layer("100_FoldWatchersIntoAutomations", (it) => {
         turnEnd: { allProjects: true },
         includeProjectAgents: true,
       });
+      // Grants set from the editor before the migration are merged with, not replaced by, the defaults.
+      const existingGrants: Record<string, unknown> = {
+        "monitoring:alerts": { notify: false },
+        "monitoring:context": { notify: false, budget: { maxTokens: 5000 } },
+      };
       for (const entry of [both, alerts, context]) {
-        yield* task(entry.scheduledTaskId, entry.enabled, entry.schedule);
+        yield* task(
+          entry.scheduledTaskId,
+          entry.enabled,
+          entry.schedule,
+          existingGrants[entry.scheduledTaskId],
+        );
         yield* sql`INSERT INTO monitoring_profiles (id, task_id, payload_json)
           VALUES (${entry.id}, ${entry.scheduledTaskId}, ${JSON.stringify(entry)})`;
       }
@@ -192,11 +203,14 @@ layer("100_FoldWatchersIntoAutomations", (it) => {
           row.grant_json === null ? null : decodeGrant(row.grant_json),
         ]),
         [
-          ["monitoring:alerts", null],
+          ["monitoring:alerts", { notify: false }],
           ["monitoring:both", null],
           ["monitoring:both:turn-end", { maxRunsPerHour: 120 }],
-          ["monitoring:context", { budget: { maxCostUsd: 0.05 } }],
-          ["monitoring:context:turn-end", { budget: { maxCostUsd: 0.05 }, maxRunsPerHour: 120 }],
+          ["monitoring:context", { notify: false, budget: { maxCostUsd: 0.05, maxTokens: 5000 } }],
+          [
+            "monitoring:context:turn-end",
+            { notify: false, budget: { maxCostUsd: 0.05, maxTokens: 5000 }, maxRunsPerHour: 120 },
+          ],
         ],
       );
 
