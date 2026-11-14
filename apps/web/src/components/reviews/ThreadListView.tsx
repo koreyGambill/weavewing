@@ -14,6 +14,9 @@ import {
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  ListIcon,
   ListChecksIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
@@ -53,6 +56,7 @@ import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Toggle } from "../ui/toggle";
+import { ToggleGroup, ToggleGroupItem as GroupToggle } from "../ui/toggle-group";
 import {
   todoIndentMove,
   todoTabUpdate,
@@ -66,6 +70,11 @@ type Owner = ListItem["owner"];
 type Change = ThreadListUpdateInput["changes"][number];
 
 const filterLabels: Record<TodoFilter, string> = { all: "All", mine: "Mine", agents: "Agents" };
+const filterOptions = [
+  { value: "all", Icon: ListIcon, iconClass: undefined },
+  { value: "mine", Icon: UserIcon, iconClass: "text-success-foreground" },
+  { value: "agents", Icon: BotIcon, iconClass: "text-(--weavewing-yellow)" },
+] as const;
 
 /** A radio item's label with its check on the right, which the menu's radio items omit. */
 export function CheckedLabel({ children }: { children: ReactNode }) {
@@ -228,30 +237,41 @@ export function ThreadListView({
     <div className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
       {!supplied ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <ToggleGroup
+            aria-label="Filter todos by who is responsible"
+            size="segmented-compact"
+            value={[filter]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "all" || next === "mine" || next === "agents")
+                useThreadContextSidebarStore.getState().setTodoFilter(next);
+            }}
+          >
+            {filterOptions.map(({ value, Icon, iconClass }) => (
+              <Tooltip key={value}>
+                <TooltipTrigger
+                  render={<GroupToggle value={value} aria-label={filterLabels[value]} />}
+                >
+                  <Icon className={iconClass} />
+                  <span className="hidden @min-[22rem]:inline">{filterLabels[value]}</span>
+                </TooltipTrigger>
+                <TooltipPopup>{filterLabels[value]}</TooltipPopup>
+              </Tooltip>
+            ))}
+          </ToggleGroup>
           <Menu>
-            <MenuTrigger render={<Button variant="outline" size="xs" aria-label="Filter todos" />}>
-              {filterLabels[filter]}
-              {showClosed ? " · with done" : ""}
-              <ChevronDownIcon />
+            <MenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-xs"
+                  aria-label={showClosed ? "Showing done and dropped" : "Hiding done and dropped"}
+                />
+              }
+            >
+              {showClosed ? <EyeIcon /> : <EyeOffIcon />}
             </MenuTrigger>
             <MenuPopup align="start">
-              <MenuGroup>
-                <MenuGroupLabel>Responsible</MenuGroupLabel>
-                <MenuRadioGroup
-                  value={filter}
-                  onValueChange={(next) => {
-                    if (next === "all" || next === "mine" || next === "agents")
-                      useThreadContextSidebarStore.getState().setTodoFilter(next);
-                  }}
-                >
-                  {(["all", "mine", "agents"] as const).map((value) => (
-                    <MenuRadioItem key={value} value={value}>
-                      <CheckedLabel>{filterLabels[value]}</CheckedLabel>
-                    </MenuRadioItem>
-                  ))}
-                </MenuRadioGroup>
-              </MenuGroup>
-              <MenuSeparator />
               <MenuCheckboxItem
                 variant="switch"
                 checked={showClosed}
