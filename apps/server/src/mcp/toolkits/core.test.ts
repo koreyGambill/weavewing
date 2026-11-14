@@ -1,6 +1,7 @@
 import * as ContextRecords from "../../threadInsights/ContextRecords.ts";
 import * as MonitoringDialogue from "../../monitoring/MonitoringDialogue.ts";
 import * as NotificationService from "../../notifications/NotificationService.ts";
+import * as EvidenceService from "../../evidence/EvidenceService.ts";
 import * as AssetSigner from "../../assets/AssetSigner.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -94,6 +95,7 @@ const layerThreadToolkit = McpHttpServer.layerThreadToolkit.pipe(
   Layer.provide(Layer.mock(ContextRecords.ContextRecords)({})),
   Layer.provide(Layer.mock(MonitoringDialogue.MonitoringDialogue)({})),
   Layer.provide(Layer.mock(NotificationService.NotificationService)({})),
+  Layer.provide(Layer.mock(EvidenceService.EvidenceService)({})),
 
   Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
   Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
@@ -856,6 +858,7 @@ it.effect("search names the calling thread, so an agent can tell its own match a
         Layer.provide(Layer.mock(ContextRecords.ContextRecords)({})),
         Layer.provide(Layer.mock(MonitoringDialogue.MonitoringDialogue)({})),
         Layer.provide(Layer.mock(NotificationService.NotificationService)({})),
+        Layer.provide(Layer.mock(EvidenceService.EvidenceService)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
@@ -1105,6 +1108,7 @@ it.effect.each([
             Layer.mock(ThreadSearch.ThreadSearch)({}),
             Layer.mock(MonitoringDialogue.MonitoringDialogue)({}),
             Layer.mock(NotificationService.NotificationService)({}),
+            Layer.mock(EvidenceService.EvidenceService)({}),
           ),
         ),
         Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),

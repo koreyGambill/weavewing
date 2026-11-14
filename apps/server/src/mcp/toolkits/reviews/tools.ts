@@ -11,17 +11,25 @@ import {
   ThreadArtifactReadInput,
   ThreadArtifactVersion,
   ThreadArtifactMetadata,
+  EvidenceLanding,
+  EvidenceListInput,
+  EvidenceListResult,
+  EvidenceRecordInput,
+  EvidenceRecordResult,
+  EvidenceSlug,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import { ThreadWorkspace as ThreadWorkspaceService } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as EvidenceService from "../../../evidence/EvidenceService.ts";
 
 const dependencies = [
   ThreadWorkspaceService,
   ThreadManagement.ThreadManagementService,
   McpInvocationContext.McpInvocationContext,
+  EvidenceService.EvidenceService,
 ];
 const common = { failure: OrchestratorMcpFailure, failureMode: "return" as const, dependencies };
 const optionalThread = { threadId: Schema.optional(ThreadId) };
@@ -87,5 +95,22 @@ export const ReviewToolkit = Toolkit.make(
       "List a thread's artifact titles, formats and latest versions. Omit threadId for this thread.",
     parameters: Schema.Struct(optionalThread),
     success: Schema.Array(ThreadArtifactMetadata),
+  }).annotate(Tool.Readonly, true),
+  Tool.make("evidence_record", {
+    ...common,
+    description:
+      "After work lands on the target branch, record its proof for the user to QA: one landing per merge or batch, one change per ask, with the user's ask, commits, review verdict, gate results, captures under ~/evidence and unproven gaps. Recording an id again replaces it and keeps the user's QA. Omit threadId for this thread.",
+    parameters: EvidenceRecordInput,
+    success: EvidenceRecordResult,
+  }).annotate(Tool.Readonly, true),
+  Tool.make("evidence_read", {
+    ...common,
+    description:
+      "Read recorded landings: summaries newest first (filter needsQa or threadId, page with before), or one landing by landingId with each change's QA state and the user's note. Only the user sets QA.",
+    parameters: Schema.Struct({
+      ...EvidenceListInput.fields,
+      landingId: Schema.optional(EvidenceSlug),
+    }),
+    success: Schema.Union([EvidenceListResult, EvidenceLanding]),
   }).annotate(Tool.Readonly, true),
 );

@@ -4,6 +4,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   ThreadWorkspaceError,
+  EvidenceError,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -11,6 +12,7 @@ import { McpSchema, McpServer } from "effect/ai";
 import { ThreadWorkspace, emptyWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
+import * as EvidenceService from "../../../evidence/EvidenceService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import { idleThreadProjection, liveThreadShell } from "../../McpToolAccess.testkit.ts";
 const threadId = ThreadId.make("list-caller");
@@ -97,6 +99,22 @@ const client = McpSchema.McpServerClient.of({
   getClient: Effect.die("unused"),
 });
 
+// Echoes what the handler resolved, so tests see the thread, project and recorder it passed.
+const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
+  record: (input) =>
+    Effect.succeed({
+      landingId: input.id,
+      changes: input.changes.map((change) => ({ id: change.id, qa: "pending" as const })),
+      warnings: [`${input.threadId} ${input.projectId} ${input.recordedBy}`],
+    }),
+  list: (input) =>
+    Effect.succeed({ items: [], next: input.needsQa ? { landedAt: "2026-01-01", id: "x" } : null }),
+  get: ({ landingId }) =>
+    Effect.fail(
+      new EvidenceError({ code: "not_found", message: `No evidence landing ${landingId}.` }),
+    ),
+});
+
 const call = (
   name: string,
   args: Record<string, unknown>,
@@ -115,6 +133,7 @@ const call = (
     Effect.provide(
       McpHttpServer.layerReviewToolkit.pipe(
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+        Layer.provide(layerEvidence),
         Layer.provide(
           Layer.mock(ThreadWorkspace)({
             get: () => Effect.succeed(workspace),
@@ -236,11 +255,14 @@ it.effect("exposes only the list and artifact schemas", () =>
     const server = yield* McpServer.McpServer;
     const tools = server.tools
       .map(({ tool }) => tool)
-      .filter((tool) => /^(list_|artifact_|thread_workspace_|review_)/.test(tool.name));
+      .filter((tool) => /^(list_|artifact_|thread_workspace_|review_|evidence_)/.test(tool.name));
+    // Agents record evidence and read QA; no tool sets QA.
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "artifact_list",
       "artifact_read",
       "artifact_write",
+      "evidence_read",
+      "evidence_record",
       "list_read",
       "list_rewrite",
       "list_update",
@@ -253,6 +275,7 @@ it.effect("exposes only the list and artifact schemas", () =>
       McpHttpServer.layerReviewToolkit.pipe(
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(Layer.mock(ThreadWorkspace)({})),
+        Layer.provide(Layer.mock(EvidenceService.EvidenceService)({})),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
       ),
     ),
@@ -335,4 +358,45 @@ it.effect.each(["list_update", "list_rewrite"])(
       });
       expect(JSON.stringify(created.structuredContent)).not.toContain("details");
     }),
+);
+
+it.effect("records evidence on the calling thread and reads summaries or one landing", () =>
+  Effect.gen(function* () {
+    const landing = {
+      id: "batch-1",
+      title: "Batch",
+      target: { branch: "main", sha: "abc1234" },
+      verifications: [{ label: "gate", result: "pass" }],
+      changes: [
+        {
+          id: "bw-1",
+          ask: "Fix it",
+          commits: ["abc1234"],
+          summary: "Fixed",
+          review: { verdict: "approved" },
+          captures: [],
+          gaps: [],
+        },
+      ],
+    };
+    const recorded = yield* call("evidence_record", landing);
+    const shell = liveThreadShell(threadId);
+    expect(recorded.structuredContent).toEqual({
+      landingId: "batch-1",
+      changes: [{ id: "bw-1", qa: "pending" }],
+      warnings: [`${threadId} ${shell.projectId} ${threadId}`],
+    });
+    const reader: Invocation.McpInvocationScope = {
+      ...scope,
+      thread: undefined,
+      client: { sessionId: "reader", label: "Reader", access: "read-only" },
+    };
+    expect((yield* call("evidence_read", { needsQa: true }, reader)).structuredContent).toEqual({
+      items: [],
+      next: { landedAt: "2026-01-01", id: "x" },
+    });
+    const missing = yield* call("evidence_read", { landingId: "nope" }, reader);
+    expect(failureCode(missing)).toBe("invalid_request");
+    expect(failureCode(yield* call("evidence_record", landing, reader))).toBe("capability_denied");
+  }),
 );
