@@ -799,6 +799,8 @@ export type ServerConfigProviderStatusDeltasPayload =
 
 export const ServerConfigSettingsUpdatedPayload = Schema.Struct({
   settings: ServerSettings,
+  /** The default folder after this change; null when it is unavailable, absent from older servers. */
+  scratchWorkspaceRoot: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
 });
 export type ServerConfigSettingsUpdatedPayload = typeof ServerConfigSettingsUpdatedPayload.Type;
 

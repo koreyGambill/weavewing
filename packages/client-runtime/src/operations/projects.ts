@@ -47,6 +47,25 @@ export function availableScratchWorkspaceRoot(
     : null;
 }
 
+/** How to name an environment's default folder: the folder as the user typed it, or its real path. */
+export function scratchWorkspaceLabel(
+  serverConfig:
+    | (Pick<ServerConfig, "scratchWorkspaceRoot" | "legacyScratchWorkspaceRoot"> & {
+        readonly settings: Pick<ServerSettings, "scratchStartDirectory">;
+      })
+    | null
+    | undefined,
+): string | null {
+  const root = serverConfig?.scratchWorkspaceRoot;
+  if (root === undefined) return null;
+  const typed = serverConfig?.settings.scratchStartDirectory.replace(/(.)[\\/]+$/, "$1") ?? "";
+  // Without the legacy root to compare, an older server may not honor the setting.
+  const usesSetting =
+    serverConfig?.legacyScratchWorkspaceRoot !== undefined &&
+    root !== serverConfig.legacyScratchWorkspaceRoot;
+  return usesSetting && typed.length > 0 ? typed : root;
+}
+
 export interface AddProjectRemoteSourceReadinessEntry {
   readonly ready: boolean;
   readonly hint: string | null;

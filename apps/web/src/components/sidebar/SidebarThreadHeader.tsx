@@ -1,4 +1,10 @@
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import {
+  FolderPlusIcon,
+  MessageSquareDashedIcon,
+  SearchIcon,
+  SquarePenIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -21,6 +27,10 @@ export interface SidebarThreadHeaderProps {
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
   showNewThreadInProjectHint: boolean;
+  /** Null when no connected machine offers a default folder. */
+  defaultFolderLabel: string | null;
+  defaultFolderShortcutLabel: string | null | undefined;
+  onNewDefaultFolderThread: () => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -40,6 +50,9 @@ export function SidebarThreadHeader({
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
+  defaultFolderLabel,
+  defaultFolderShortcutLabel,
+  onNewDefaultFolderThread,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
@@ -55,6 +68,10 @@ export function SidebarThreadHeader({
   const newThreadLabel = newThreadShortcutLabel
     ? `New thread (${newThreadShortcutLabel})`
     : "New thread";
+  const defaultFolderThreadLabel =
+    defaultFolderLabel === null
+      ? "No default folder available"
+      : `New thread in ${defaultFolderLabel}`;
 
   return (
     <div className="flex items-center gap-1">
@@ -105,6 +122,19 @@ export function SidebarThreadHeader({
             </SidebarHeaderIconButton>
           </>
         ) : null}
+        {/* Rendered even when unavailable, so New thread never moves. */}
+        <SidebarHeaderIconButton
+          label={defaultFolderThreadLabel}
+          tooltip={
+            defaultFolderShortcutLabel && defaultFolderLabel !== null
+              ? `${defaultFolderThreadLabel} (${defaultFolderShortcutLabel})`
+              : defaultFolderThreadLabel
+          }
+          disabled={defaultFolderLabel === null}
+          onClick={onNewDefaultFolderThread}
+        >
+          <MessageSquareDashedIcon />
+        </SidebarHeaderIconButton>
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={

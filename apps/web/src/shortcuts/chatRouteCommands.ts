@@ -131,9 +131,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         );
         if (choice.kind === "none") return;
         claim(event);
-        // The palette's No project row lets the user pick another machine.
-        if (choice.kind === "preferred-unavailable") openCommandPalette({ open: "new-thread-in" });
-        else void scratch.startScratchThread(choice.environmentId);
+        scratch.startScratchChoice(choice);
       },
       "chat.new": (event) => {
         const groups = readProjectGroups();

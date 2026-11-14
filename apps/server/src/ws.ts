@@ -3545,14 +3545,19 @@ export const layerWsRpc = (
                     )
                   : Stream.empty;
               const settingsUpdates = settingsChanges.pipe(
-                Stream.map((settings) =>
-                  ServerSettings.redactServerSettingsForClient(settings, client),
+                // The default folder follows its setting, so its resolved root travels with it.
+                Stream.mapEffect((settings) =>
+                  managedFolders.scratchRoot.pipe(
+                    Effect.map((root) => ({
+                      version: 1 as const,
+                      type: "settingsUpdated" as const,
+                      payload: {
+                        settings: ServerSettings.redactServerSettingsForClient(settings, client),
+                        scratchWorkspaceRoot: Option.getOrNull(root),
+                      },
+                    })),
+                  ),
                 ),
-                Stream.map((settings) => ({
-                  version: 1 as const,
-                  type: "settingsUpdated" as const,
-                  payload: { settings },
-                })),
               );
 
               const liveUpdates = Stream.merge(

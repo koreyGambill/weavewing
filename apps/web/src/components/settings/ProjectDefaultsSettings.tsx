@@ -5,6 +5,7 @@ import {
   managedRuntimeModeDenial,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import { resolvePastedPath } from "@t3tools/shared/path";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -22,6 +23,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
@@ -105,6 +107,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+  const mixedDefaultFolder = useScopedSettingsMixed(["scratchStartDirectory"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
@@ -246,6 +249,43 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  const defaultFolderRow = !isProjectScope ? (
+    <SettingsRow
+      serverScoped
+      settingKeys={["scratchStartDirectory"]}
+      mixed={mixedDefaultFolder}
+      {...searchableSetting("default-folder")}
+      description="A folder on that machine for threads started outside a project. It must exist and sit outside a Git repository; otherwise T3 Code uses a folder in its own data directory."
+      resetAction={
+        settings.scratchStartDirectory !== DEFAULT_SERVER_SETTINGS.scratchStartDirectory ? (
+          <SettingResetButton
+            label="default folder"
+            onClick={() =>
+              updateSettings({
+                scratchStartDirectory: DEFAULT_SERVER_SETTINGS.scratchStartDirectory,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <DraftInput
+          size="sm"
+          className="w-full sm:w-72"
+          value={mixedDefaultFolder ? "" : settings.scratchStartDirectory}
+          onCommit={(next) =>
+            updateSettings({
+              scratchStartDirectory: next || DEFAULT_SERVER_SETTINGS.scratchStartDirectory,
+            })
+          }
+          normalizeDraft={resolvePastedPath}
+          placeholder={mixedDefaultFolder ? "Mixed" : DEFAULT_SERVER_SETTINGS.scratchStartDirectory}
+          spellCheck={false}
+          aria-label="Default folder for new threads"
+        />
+      }
+    />
+  ) : null;
   const fallbackRow = !isProjectScope ? (
     <SettingsRow
       serverScoped
@@ -408,6 +448,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
           />
           {workspaceRow}
+          {defaultFolderRow}
           <TileLayoutDefaultRow />
         </>
       ) : (

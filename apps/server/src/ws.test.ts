@@ -1132,6 +1132,8 @@ it.effect.each([
         const event = yield* Queue.take(responses);
         if (event.type === "settingsUpdated") {
           assert.deepEqual(event.payload.settings, expectedSettings.shift());
+          // The default folder is re-resolved with each settings change.
+          assert.isNull(event.payload.scratchWorkspaceRoot);
         } else {
           assert.equal(event.type, "keybindingsUpdated");
           if (event.type !== "keybindingsUpdated")

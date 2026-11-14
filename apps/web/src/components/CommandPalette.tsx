@@ -468,8 +468,14 @@ function OpenCommandPaletteDialog(props: {
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     label: "project unarchive",
   });
-  const { scratchEnvironmentChoice, scratchWorkspaceRootFor, startScratchThread } =
-    useScratchProject();
+  const onProjectReady =
+    props.openIntent?.kind === "add-project" ? props.openIntent.onProjectReady : undefined;
+  const {
+    scratchEnvironmentChoice,
+    scratchWorkspaceRootFor,
+    scratchWorkspaceLabelFor,
+    startScratchThread,
+  } = useScratchProject();
   const startTriage = useStartTriage();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
@@ -711,6 +717,8 @@ function OpenCommandPaletteDialog(props: {
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
   const scratchChoice = scratchEnvironmentChoice(currentProjectEnvironmentId);
+  const scratchLabel =
+    scratchChoice.kind === "none" ? null : scratchWorkspaceLabelFor(scratchChoice.environmentId);
   // An unreachable preferred machine turns the row into a machine choice instead of
   // quietly starting the thread somewhere else.
   const runScratchChoice = (
@@ -922,8 +930,8 @@ function OpenCommandPaletteDialog(props: {
         {
           kind: "action" as const,
           value: NEW_THREAD_NO_PROJECT_VALUE,
-          searchTerms: ["no project", "without project", "none"],
-          title: "No project",
+          searchTerms: ["default folder", "no project", "without project", "none"],
+          title: scratchLabel ?? "Default folder",
           icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
           shortcutCommand: "chat.newWithoutProject" as const,
           ...runScratchChoice(scratchChoice),
@@ -1257,9 +1265,7 @@ function OpenCommandPaletteDialog(props: {
             ...environment,
             isConnected: offersScratch,
             status:
-              !offersScratch && environment.isConnected
-                ? "Cannot start without a project"
-                : environment.status,
+              !offersScratch && environment.isConnected ? "No default folder" : environment.status,
           };
         }),
         preferredEnvironmentId,
@@ -1391,8 +1397,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:new-thread-without-project",
-      searchTerms: ["new thread", "no project", "without project", "none", "chat"],
-      title: "New thread without a project",
+      searchTerms: ["new thread", "default folder", "no project", "without project", "chat"],
+      title: `New thread in ${scratchLabel ?? "the default folder"}`,
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.newWithoutProject",
       ...runScratchChoice(scratchChoice),
@@ -2142,7 +2148,7 @@ function OpenCommandPaletteDialog(props: {
         existing.id,
         clientSettings.sidebarThreadSortOrder,
       );
-      if (latestThread && latestThread.settledOverride !== "settled") {
+      if (!onProjectReady && latestThread && latestThread.settledOverride !== "settled") {
         await navigate({
           to: "/$environmentId/$threadId",
           params: buildThreadRouteParams(
@@ -2150,8 +2156,9 @@ function OpenCommandPaletteDialog(props: {
           ),
         });
       } else {
+        const existingRef = scopeProjectRef(existing.environmentId, existing.id);
         const navigationResult = await settlePromise(() =>
-          handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
+          onProjectReady ? onProjectReady(existingRef) : handleNewThread(existingRef),
         );
         if (navigationResult._tag === "Failure") {
           const error = squashAtomCommandFailure(navigationResult);
@@ -2204,8 +2211,9 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
+    const createdRef = scopeProjectRef(input.environmentId, projectId);
     const navigationResult = await settlePromise(() =>
-      handleNewThread(scopeProjectRef(input.environmentId, projectId)),
+      onProjectReady ? onProjectReady(createdRef) : handleNewThread(createdRef),
     );
     if (navigationResult._tag === "Failure") {
       const error = squashAtomCommandFailure(navigationResult);
@@ -2466,7 +2474,9 @@ function OpenCommandPaletteDialog(props: {
       startResult.value.projectId,
     );
     await waitForProject(projectRef, 3_000).catch(() => null);
-    const navigationResult = await settlePromise(() => handleNewThread(projectRef));
+    const navigationResult = await settlePromise(() =>
+      onProjectReady ? onProjectReady(projectRef) : handleNewThread(projectRef),
+    );
     if (navigationResult._tag === "Failure") {
       const error = squashAtomCommandFailure(navigationResult);
       toastManager.add(

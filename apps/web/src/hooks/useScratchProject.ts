@@ -5,7 +5,10 @@ import {
   scopeProjectRef,
   type WorkEnvironmentChoice,
 } from "@t3tools/client-runtime/environment";
-import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
+import {
+  availableScratchWorkspaceRoot,
+  scratchWorkspaceLabel,
+} from "@t3tools/client-runtime/operations/projects";
 import {
   isAtomCommandInterrupted,
   runAtomCommand,
@@ -16,6 +19,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { AtomRegistry } from "effect/reactivity";
 import { useContext } from "react";
 
+import { openCommandPalette } from "~/commandPaletteBus";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import {
   type EnvironmentPresentation,
@@ -47,13 +51,21 @@ export function createScratchProjectActions(input: {
   readonly registry: AtomRegistry.AtomRegistry;
   readonly handleNewThread: NewThreadHandler;
 }) {
-  const scratchWorkspaceRootFor = (environmentId: EnvironmentId | null): string | null => {
+  const environmentFor = (environmentId: EnvironmentId | null) => {
     let environment: ScratchEnvironment | undefined;
     for (const entry of input.environments()) {
       if (entry.environmentId === environmentId) environment = entry;
     }
+    return environment;
+  };
+  const scratchWorkspaceRootFor = (environmentId: EnvironmentId | null): string | null => {
+    const environment = environmentFor(environmentId);
     return availableScratchWorkspaceRoot(environment?.connection.phase, environment?.serverConfig);
   };
+  const scratchWorkspaceLabelFor = (environmentId: EnvironmentId | null): string | null =>
+    scratchWorkspaceRootFor(environmentId) === null
+      ? null
+      : scratchWorkspaceLabel(environmentFor(environmentId)?.serverConfig);
 
   // Without a preference the primary (local) environment wins; `fallback` only applies when it
   // offers no scratch root.
@@ -81,7 +93,7 @@ export function createScratchProjectActions(input: {
 
   const openScratchProject = async (
     environmentId: EnvironmentId,
-    failureTitle = "Could not start without a project",
+    failureTitle = "Could not open the default folder",
   ): Promise<EnvironmentProject | null> => {
     const command = projectEnvironment.openScratch;
     const result = await runAtomCommand(
@@ -103,17 +115,26 @@ export function createScratchProjectActions(input: {
       await input
         .handleNewThread(scopeProjectRef(project.environmentId, project.id))
         .catch((error: unknown) =>
-          reportScratchFailure("Could not start without a project", error),
+          reportScratchFailure("Could not start a thread in the default folder", error),
         );
     }
   };
 
+  // The palette's default-folder row lets the user pick another machine.
+  const startScratchChoice = (choice: WorkEnvironmentChoice<EnvironmentId>) => {
+    if (choice.kind === "none") return;
+    if (choice.kind === "preferred-unavailable") openCommandPalette({ open: "new-thread-in" });
+    else void startScratchThread(choice.environmentId);
+  };
+
   return {
     scratchWorkspaceRootFor,
+    scratchWorkspaceLabelFor,
     scratchEnvironmentChoice,
     scratchEnvironmentId,
     openScratchProject,
     startScratchThread,
+    startScratchChoice,
   };
 }
 

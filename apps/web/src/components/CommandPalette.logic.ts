@@ -11,7 +11,7 @@ import {
 } from "@t3tools/shared/paletteSearch";
 import { chooseWorkEnvironment, chosenEnvironmentId } from "@t3tools/client-runtime/environment";
 import { threadSearchSubject } from "@t3tools/client-runtime/state/thread-search";
-import type { CommandPaletteLinkedThreads } from "../commandPaletteBus";
+import type { CommandPaletteLinkedThreads, CommandPaletteOpenDetail } from "../commandPaletteBus";
 import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
@@ -75,7 +75,11 @@ export function browseInputEndPaddingClass(input: {
 export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
-  | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
+  | { readonly kind: "new-thread-in" | "change-theme" }
+  | {
+      readonly kind: "add-project";
+      readonly onProjectReady?: CommandPaletteOpenDetail["onProjectReady"];
+    }
   | {
       readonly kind: "search";
       readonly query: string;
@@ -101,7 +105,10 @@ export type CommandPaletteUiAction =
       readonly query: string;
       readonly linkedThreads?: CommandPaletteLinkedThreads;
     }
-  | { readonly _tag: "OpenAddProject" }
+  | {
+      readonly _tag: "OpenAddProject";
+      readonly onProjectReady?: CommandPaletteOpenDetail["onProjectReady"];
+    }
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "OpenChangeTheme" }
   | {
@@ -156,7 +163,10 @@ export function reduceCommandPaletteUiState(
         ...(action.linkedThreads ? { linkedThreads: action.linkedThreads } : {}),
       });
     case "OpenAddProject":
-      return openWithIntent({ kind: "add-project" });
+      return openWithIntent({
+        kind: "add-project",
+        ...(action.onProjectReady ? { onProjectReady: action.onProjectReady } : {}),
+      });
     case "OpenNewThreadIn":
       return openWithIntent({ kind: "new-thread-in" });
     case "OpenChangeTheme":

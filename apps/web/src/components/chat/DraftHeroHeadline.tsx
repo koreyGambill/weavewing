@@ -27,7 +27,7 @@ import {
   buildSidebarProjectSnapshots,
   projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
-import { useProjects, useVisibleThreadShells } from "~/state/entities";
+import { useProjects, useVisibleThreadShells, waitForProject } from "~/state/entities";
 import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
 import {
   useEnvironments,
@@ -92,8 +92,12 @@ export function DraftHeroHeadline({
   );
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
-  const openAddProject = () => openCommandPalette({ open: "add-project" });
-  const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
+  const {
+    scratchEnvironmentId,
+    scratchWorkspaceRootFor,
+    scratchWorkspaceLabelFor,
+    openScratchProject,
+  } = useScratchProject();
   const preferredEnvironmentId = usePreferredEnvironmentId();
   const openProjectDraft = useNewThreadHandler();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -163,12 +167,26 @@ export function DraftHeroHeadline({
   const isScratchDraft =
     activeProject !== null &&
     isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
+  const scratchDraftLabel = (() => {
+    if (!isScratchDraft) return null;
+    // An older No project home can sit in another folder than the current default.
+    const folder =
+      activeProject.workspaceRoot === scratchWorkspaceRootFor(activeProject.environmentId)
+        ? (scratchWorkspaceLabelFor(activeProject.environmentId) ?? activeProject.workspaceRoot)
+        : activeProject.workspaceRoot;
+    const connected = environments.filter(
+      (environment) => environment.connection.phase === "connected",
+    );
+    const machine = environmentLabelById.get(activeProject.environmentId);
+    return connected.length > 1 && machine ? `${folder} on ${machine}` : folder;
+  })();
+  const projectTriggerLabel = scratchDraftLabel ?? activeProjectTitle;
 
   // Pinning from a row keeps rows in place while the picker is open.
   const pickerItems: readonly PickerItem[] = useOrderWhileOpen(
     [
       ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-      { value: ADD_PROJECT_VALUE, label: "Add project" },
+      { value: ADD_PROJECT_VALUE, label: "Other folder or repository…" },
     ],
     (item) => item.value,
     pickerOpen,
@@ -247,6 +265,23 @@ export function DraftHeroHeadline({
       }
     }
   };
+  // The folder becomes a project; this draft, typed content included, moves into it.
+  const openAddProject = () =>
+    openCommandPalette({
+      open: "add-project",
+      onProjectReady: async (projectRef) => {
+        pendingScratchRef.current = null;
+        if (!draftId) {
+          await openProjectDraft(projectRef);
+          return;
+        }
+        const project = await waitForProject(projectRef, 5_000);
+        selectProject(
+          project,
+          deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+        );
+      },
+    });
   const startScratch = async (): Promise<boolean> => {
     if (scratchTargetEnvironmentId === null || isScratchDraft) {
       return false;
@@ -303,14 +338,9 @@ export function DraftHeroHeadline({
             />
           }
         >
-          <DraftProjectName
-            value={isScratchDraft ? "No project" : (activeProjectTitle ?? "Choose a project")}
-            singleLine
-          />
+          <DraftProjectName value={projectTriggerLabel ?? "Choose a project"} singleLine />
         </TooltipTrigger>
-        {activeProjectTitle && !isScratchDraft ? (
-          <TooltipPopup side="top">{activeProjectTitle}</TooltipPopup>
-        ) : null}
+        {projectTriggerLabel ? <TooltipPopup side="top">{projectTriggerLabel}</TooltipPopup> : null}
       </Tooltip>
       <ComboboxPopup align="center" className="w-72 overflow-hidden">
         <ComboboxSearchInput
@@ -396,7 +426,7 @@ export function DraftHeroHeadline({
             />
           }
         >
-          or start without a project
+          or start in {scratchWorkspaceLabelFor(scratchTargetEnvironmentId)}
         </TooltipTrigger>
         {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
       </Tooltip>

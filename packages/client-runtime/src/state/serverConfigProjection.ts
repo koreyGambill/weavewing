@@ -153,11 +153,22 @@ export function applyServerConfigProjection(
     case "settingsUpdated":
       return Option.map(current, (projection) => {
         const settings = reuseUnchanged(projection.config.settings, event.payload.settings);
+        const root = event.payload.scratchWorkspaceRoot;
+        const scratchWorkspaceRoot =
+          root === undefined ? projection.config.scratchWorkspaceRoot : (root ?? undefined);
+        if (
+          settings === projection.config.settings &&
+          scratchWorkspaceRoot === projection.config.scratchWorkspaceRoot
+        ) {
+          return { config: projection.config, latestEvent: event, source: "live" };
+        }
+        const { scratchWorkspaceRoot: _previous, ...rest } = projection.config;
         return {
-          config:
-            settings === projection.config.settings
-              ? projection.config
-              : { ...projection.config, settings },
+          config: {
+            ...rest,
+            settings,
+            ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
+          },
           latestEvent: event,
           source: "live",
         };
