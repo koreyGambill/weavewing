@@ -146,7 +146,11 @@ export const layer = Layer.effect(
       };
       yield* store.saveFinding(final);
       yield* notifications
-        .reviseFinding({ findingId: final.id, body: reviewNotificationBody(final) })
+        .reviseFinding({
+          scheduledTaskId: final.taskId,
+          findingId: final.id,
+          body: reviewNotificationBody(final),
+        })
         .pipe(
           Effect.catch((cause) =>
             Effect.logWarning("Could not update the finding's notification", { cause }),

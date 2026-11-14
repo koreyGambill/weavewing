@@ -2147,9 +2147,15 @@ export const layer = Layer.effect(
       const agent = input.agent ?? existingTask?.agent;
       const review = agent?.type === "review" ? agent : null;
       if (review !== null && Option.isSome(monitor))
-        yield* monitor.value
-          .validateModel(input.modelSelection, review.kind)
-          .pipe(Effect.mapError((cause) => taskError(cause.message, { taskId: id, cause })));
+        yield* monitor.value.validateModel(input.modelSelection, review.kind).pipe(
+          // The operation is the user-facing reason; the error's message wraps it for logs.
+          Effect.mapError((cause) =>
+            taskError(`${cause.operation.charAt(0).toUpperCase()}${cause.operation.slice(1)}.`, {
+              taskId: id,
+              cause,
+            }),
+          ),
+        );
       const threadMode = review !== null ? "new_thread" : resolveThreadMode(input, existingTask);
       const keptThreadId = input.threadId ?? existingTask?.threadId ?? null;
       // A bound thread belongs to its project, so moving the task leaves it for a new one.

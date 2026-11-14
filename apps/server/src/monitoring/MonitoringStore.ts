@@ -21,7 +21,7 @@ export class MonitoringStore extends Context.Service<
     readonly getFinding: (
       id: MonitoringFindingId,
     ) => Effect.Effect<MonitoringFinding | null, MonitoringError>;
-    /** The task's findings whose notification the user has not dismissed. */
+    /** The task's findings whose notification the user has neither read nor dismissed. */
     readonly listOpenFindings: (
       taskId: ScheduledTaskId,
     ) => Effect.Effect<ReadonlyArray<MonitoringFinding>, MonitoringError>;
@@ -53,8 +53,10 @@ const make = Effect.gen(function* () {
     listOpenFindings: Effect.fn("MonitoringStore.listOpenFindings")(function* (taskId) {
       return yield* sql<{ payload_json: string }>`SELECT f.payload_json FROM monitoring_findings f
         WHERE f.profile_id = ${taskId} AND NOT EXISTS (
-          SELECT 1 FROM notifications n WHERE json_extract(n.source_json, '$.findingId') = f.id
-            AND n.dismissed_at IS NOT NULL)
+          SELECT 1 FROM notifications n
+          -- reviewNotificationDedupeKey, in SQL so the lookup uses the dedupe index.
+          WHERE n.dedupe_key = 'review:' || f.profile_id || ':' || f.id || char(10) || f.id
+            AND (n.read_at IS NOT NULL OR n.dismissed_at IS NOT NULL))
         ORDER BY f.updated_at DESC LIMIT 500`.pipe(
         NodeSqliteClient.readOnly,
         Effect.flatMap((rows) => decodeFindings(rows.map((row) => row.payload_json))),

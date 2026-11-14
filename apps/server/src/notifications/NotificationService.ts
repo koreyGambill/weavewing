@@ -10,6 +10,7 @@ import {
   type NotificationUpdateInput,
   type NotificationUpdateResult,
   type ProjectId,
+  type ScheduledTaskId,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -26,6 +27,8 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+
+import { reviewNotificationDedupeKey } from "../monitoring/reviewNotification.ts";
 
 export const RATE_LIMIT_PER_HOUR = 10;
 const WAKE_RETRY = Duration.minutes(1);
@@ -79,6 +82,7 @@ export class NotificationService extends Context.Service<
     readonly markAllRead: () => Effect.Effect<NotificationMarkAllReadResult, NotificationError>;
     /** Rewrites a review finding's report after its discussion moves on, and marks it unread. */
     readonly reviseFinding: (input: {
+      readonly scheduledTaskId: ScheduledTaskId;
       readonly findingId: string;
       readonly body: string;
     }) => Effect.Effect<void, NotificationError>;
@@ -309,7 +313,8 @@ const make = Effect.gen(function* () {
   const raise = Effect.fn("NotificationService.raise")(
     function* (raw: RaiseInput) {
       const input = yield* validate(raw);
-      yield* reserveRaise(input.source);
+      // A review run is already capped per hour and yields at most 32 findings; dropping one would lose it.
+      if (input.source.kind !== "review") yield* reserveRaise(input.source);
       const now = yield* DateTime.now;
       const nowIso = DateTime.formatIso(now);
       const windowStart = DateTime.formatIso(
@@ -409,10 +414,15 @@ const make = Effect.gen(function* () {
   );
 
   const reviseFinding = Effect.fn("NotificationService.reviseFinding")(
-    function* (input: { readonly findingId: string; readonly body: string }) {
-      const rows = yield* sql<Row>`UPDATE notifications SET body = ${input.body}, read_at = NULL
-        WHERE json_extract(source_json, '$.kind') = 'review'
-          AND json_extract(source_json, '$.findingId') = ${input.findingId}
+    function* (input: {
+      readonly scheduledTaskId: ScheduledTaskId;
+      readonly findingId: string;
+      readonly body: string;
+    }) {
+      const now = DateTime.formatIso(yield* DateTime.now);
+      const rows =
+        yield* sql<Row>`UPDATE notifications SET body = ${input.body}, read_at = NULL, updated_at = ${now}
+        WHERE dedupe_key = ${reviewNotificationDedupeKey(input.scheduledTaskId, input.findingId)}
         RETURNING *`;
       yield* publish(yield* toNotifications(rows), rows.length > 0);
     },

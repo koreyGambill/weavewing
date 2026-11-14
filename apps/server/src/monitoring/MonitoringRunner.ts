@@ -173,19 +173,20 @@ const make = Effect.gen(function* () {
       .getInstance(selection.instanceId)
       .pipe(
         Effect.mapError(
-          (cause) => new MonitoringError({ operation: "resolve selected model", cause }),
+          (cause) =>
+            new MonitoringError({ operation: "could not resolve the selected model", cause }),
         ),
       );
     if (!instance || !instance.enabled || !instance.textGeneration.generateMonitoringReview)
       return yield* new MonitoringError({
-        operation: "selected provider does not support monitoring",
+        operation: "the selected provider cannot run reviews",
       });
     if (
       kind === "context-review" &&
       (instance.driverKind !== "claudeAgent" || !/haiku/i.test(selection.model))
     )
       return yield* new MonitoringError({
-        operation: "context reviews require an explicit Claude Haiku model",
+        operation: "context reviews need a Claude Haiku model",
       });
     const snapshot = yield* instance.snapshot.getSnapshot;
     if (
@@ -196,7 +197,7 @@ const make = Effect.gen(function* () {
       !snapshot.models.some((model) => model.slug === selection.model)
     )
       return yield* new MonitoringError({
-        operation: "selected model unavailable; choose an available model explicitly",
+        operation: "the selected model is unavailable; choose an available model",
       });
     return instance;
   });
@@ -219,7 +220,7 @@ const make = Effect.gen(function* () {
     const generate = instance.textGeneration.generateMonitoringReview;
     if (!generate)
       return yield* new MonitoringError({
-        operation: "selected provider does not support monitoring",
+        operation: "the selected provider cannot run reviews",
       });
     const instructionFiles = yield* instructions(profile, snapshot);
     const raw = yield* generate({

@@ -1,6 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
+  MonitoringFindingId,
   NotificationId,
   ScheduledTaskId,
   ThreadId,
@@ -222,6 +223,44 @@ it.effect("limits each thread or automation to ten raises an hour and dedupes wi
       (yield* service.raise(raiseInput({ ...task, runId: "next-day" }, "same finding"))).status,
       "delivered",
     );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("a reassessed finding returns unread with its new report, above newer items", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.NotificationService;
+    const taskId = ScheduledTaskId.make("monitoring:watcher");
+    const review = yield* service.raise({
+      ...raiseInput(
+        {
+          kind: "review",
+          scheduledTaskId: taskId,
+          runId: "run-1",
+          findingId: MonitoringFindingId.make("finding-1"),
+        },
+        "Pushed to main",
+      ),
+      body: "first report",
+      dedupeKey: "finding-1",
+    });
+    yield* service.update({ ids: [review.notification.id], action: { type: "read" } });
+    yield* TestClock.adjust("1 minute");
+    yield* service.raise(raiseInput(agent("t1"), "Newer"));
+    yield* TestClock.adjust("1 minute");
+    yield* service.reviseFinding({
+      scheduledTaskId: taskId,
+      findingId: "finding-1",
+      body: "second",
+    });
+    const events = yield* subscribe;
+    const snapshot = yield* Queue.take(events);
+    assert.deepInclude(snapshot.items[0], {
+      id: review.notification.id,
+      body: "second",
+      readAt: null,
+      updatedAt: "1970-01-01T00:02:00.000Z",
+    });
+    assert.strictEqual(snapshot.unreadCount, 2);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

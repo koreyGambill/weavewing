@@ -20,6 +20,9 @@ import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as SqlClient from "effect/sql/SqlClient";
+import type * as SecureRandom from "effect/crypto/SecureRandom";
+import Migration0097 from "../persistence/Migrations/097_Notifications.ts";
 import * as ServerConfig from "../config.ts";
 import * as Registry from "../provider/ProviderInstanceRegistry.ts";
 import * as Delivery from "./MonitoringDelivery.ts";
@@ -99,7 +102,9 @@ const notificationsLayer = (raised?: Ref.Ref<ReadonlyArray<Notifications.RaiseIn
 const baseLayers = Layer.mergeAll(
   NodeCrypto.layer,
   NodeServices.layer,
-  NodeSqliteClient.layer({ filename: ":memory:" }),
+  Layer.effectDiscard(Migration0097).pipe(
+    Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+  ),
 );
 
 it.effect(
@@ -121,7 +126,7 @@ it.effect(
       );
       const result = yield* run(profile).pipe(Effect.provide(layer));
       assert.equal(result.status, "failed");
-      assert.include(result.error, "selected provider does not support monitoring");
+      assert.include(result.error, "the selected provider cannot run reviews");
       assert.deepEqual(result.notificationIds, []);
     }).pipe(Effect.scoped),
 );
@@ -318,6 +323,11 @@ function runnerLayer(
   deliver: Delivery.MonitoringDelivery["Service"]["deliver"] = () =>
     Effect.succeed({ delivery: "workspace", messageId: null }),
   raised?: Ref.Ref<ReadonlyArray<Notifications.RaiseInput>>,
+  inbox: Layer.Layer<
+    Notifications.NotificationService,
+    never,
+    SqlClient.SqlClient | SecureRandom.SecureRandom
+  > = notificationsLayer(raised),
 ) {
   return Runner.layer.pipe(
     Layer.provide(
@@ -329,7 +339,7 @@ function runnerLayer(
           saveFinding: () => Effect.void,
           ...store,
         }),
-        notificationsLayer(raised),
+        inbox,
         Layer.succeed(Snapshot.MonitoringSnapshot, snapshot),
         Layer.mock(Delivery.MonitoringDelivery)({ deliver }),
         Layer.mock(Registry.ProviderInstanceRegistry)({
@@ -352,7 +362,7 @@ function runnerLayer(
         ServerConfig.layerTest("/workspace", { prefix: "t3-monitor-runner-" }),
       ),
     ),
-    Layer.provide(baseLayers),
+    Layer.provideMerge(baseLayers),
   );
 }
 
@@ -627,5 +637,62 @@ it.effect("raises each new finding in the inbox and records the message it was s
       },
     );
     assert.include(notification?.body, "Pushed straight to main");
+  }).pipe(Effect.scoped),
+);
+
+it.effect("sends every finding of a run to the inbox, past the agents' hourly limit", () =>
+  Effect.gen(function* () {
+    const count = Notifications.RATE_LIMIT_PER_HOUR + 1;
+    const indexes = Array.from({ length: count }, (_, index) => index);
+    const layer = runnerLayer(
+      {},
+      {
+        capture: () =>
+          Effect.succeed({
+            threads: [
+              {
+                id: ThreadId.make("thread"),
+                title: "Main",
+                parentThreadId: null,
+                messages: indexes.map((index) => ({
+                  id: `msg-${index}`,
+                  role: "assistant",
+                  text: `Pushed straight to main, change ${index}.`,
+                })),
+              },
+            ],
+            truncated: false,
+            coverage: "Recent turns",
+          }),
+      },
+      () =>
+        Effect.succeed({
+          findings: indexes.map((index) => ({
+            threadId: ThreadId.make("thread"),
+            ruleId: "verify",
+            summary: `Landed change ${index} without review`,
+            detail: "The lead pushed without a review.",
+            confidence: 0.9,
+            evidence: [
+              {
+                threadId: ThreadId.make("thread"),
+                messageId: MessageId.make(`msg-${index}`),
+                excerpt: `change ${index}.`,
+              },
+            ],
+          })),
+        }),
+      () => Effect.succeed({ delivery: "alert_only", messageId: null }),
+      undefined,
+      Notifications.layer,
+    );
+    yield* Effect.gen(function* () {
+      const outcome = yield* run(profile);
+      assert.equal(outcome.status, "notified");
+      assert.equal(outcome.notificationIds.length, count);
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ count: number }>`SELECT count(*) AS count FROM notifications`;
+      assert.equal(rows[0]?.count, count);
+    }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

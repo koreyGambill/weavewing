@@ -47,6 +47,6 @@ export function reviewNotificationBody(finding: FindingContent): string {
     : clip(`${clip(head, 1000)}\n\n${tail.slice(-(BODY_MAX - 1004))}`, BODY_MAX);
 }
 
-/** One notification per finding, under its review automation. */
+/** The key NotificationService stores for a finding raised with its id as the dedupe key. */
 export const reviewNotificationDedupeKey = (taskId: ScheduledTaskId | string, findingId: string) =>
   `review:${taskId}:${findingId}\n${findingId}`;
