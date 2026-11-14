@@ -48,7 +48,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { threadArtifactList, threadListRead, threadListUpdate } from "../../state/threadWorkspace";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Empty, EmptyDescription, EmptyMedia } from "../ui/empty";
@@ -307,13 +307,12 @@ export function ThreadListView({
             ) : (
               <>
                 Nothing here for this filter.{" "}
-                <button
-                  type="button"
-                  className="underline underline-offset-2 hover:text-foreground"
+                <InlineButton
+                  tone="muted"
                   onClick={() => useThreadContextSidebarStore.getState().setTodoFilter("all")}
                 >
                   Show all todos
-                </button>
+                </InlineButton>
               </>
             )}
           </p>
