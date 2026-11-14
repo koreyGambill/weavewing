@@ -1,4 +1,4 @@
-import type { SavedTileLayout } from "@t3tools/contracts";
+import { MAX_SAVED_TILE_GROUPS, type SavedTileLayout } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState, type ReactNode } from "react";
 
@@ -130,6 +130,7 @@ export function SaveTileLayoutDialog(props: {
   onOpenChange: (open: boolean) => void;
   layouts: readonly SavedTileLayout[];
   dropped: boolean;
+  tiles: number;
   onSave: (name: string) => void;
 }) {
   const id = useId();
@@ -137,6 +138,8 @@ export function SaveTileLayoutDialog(props: {
   const trimmed = name.trim();
   const replaces = props.layouts.some((layout) => layout.name === trimmed);
   const full = !replaces && props.layouts.length >= MAX_TILE_LAYOUTS;
+  const tooManyTiles = props.tiles > MAX_SAVED_TILE_GROUPS;
+  const blocked = !trimmed || full || tooManyTiles;
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="sm:max-w-md">
@@ -144,7 +147,7 @@ export function SaveTileLayoutDialog(props: {
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!trimmed || full) return;
+            if (blocked) return;
             props.onSave(trimmed);
             props.onOpenChange(false);
           }}
@@ -175,6 +178,12 @@ export function SaveTileLayoutDialog(props: {
                   A layout with this name exists and will be replaced.
                 </p>
               )}
+              {tooManyTiles && (
+                <p className="text-xs text-destructive-foreground">
+                  Layouts keep up to {MAX_SAVED_TILE_GROUPS} tiles; this one has {props.tiles}.
+                  Close or merge tiles to save it.
+                </p>
+              )}
               {full && (
                 <p className="text-xs text-destructive-foreground">
                   You have {MAX_TILE_LAYOUTS} layouts. Delete one in Settings to save another.
@@ -186,7 +195,7 @@ export function SaveTileLayoutDialog(props: {
             <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!trimmed || full}>
+            <Button type="submit" disabled={blocked}>
               Save
             </Button>
           </DialogFooter>

@@ -28,6 +28,7 @@ vi.mock("./useSavedTileLayouts", () => ({
   useSavedTileLayouts: () => ({
     layouts: [],
     globalDefaultId: null,
+    projectId: null,
     projectDefaultId: undefined,
     effectiveDefault: savedLayouts.effectiveDefault,
     save: () => {},

@@ -6,6 +6,7 @@ import {
 } from "../../shortcuts/dispatcher";
 import {
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   type CSSProperties,
@@ -90,7 +91,11 @@ import { PanelTabCloseButton } from "../ui/panel-tab-close-button";
 import { cn, randomUUID } from "../../lib/utils";
 import { ThreadPaneAttention } from "../ThreadAttentionOverlay";
 import { TILE_AREAS, tileCloseConfirmation, type TileAreaLabel } from "./ThreadTileWorkspace.logic";
-import { TILE_LAYOUT_AREA_LABELS, toSavedTileNode } from "../../savedTileLayouts";
+import {
+  savedTileGroupCount,
+  TILE_LAYOUT_AREA_LABELS,
+  toSavedTileNode,
+} from "../../savedTileLayouts";
 import { SaveTileLayoutDialog, TileLayoutsSubmenu } from "./TileLayoutsMenu";
 import { useSavedTileLayouts } from "./useSavedTileLayouts";
 
@@ -217,14 +222,12 @@ export function ThreadTileWorkspace(props: {
   );
   const rootRef = useRef<HTMLDivElement>(null);
   const tileLayouts = useSavedTileLayouts(props.threadRef.environmentId, props.projectId);
-  const [saveLayout, setSaveLayout] = useState<{ dropped: boolean } | null>(null);
+  const [saveLayout, setSaveLayout] = useState<{ dropped: boolean; tiles: number } | null>(null);
   const defaultLayout = props.newThread ? tileLayouts.effectiveDefault : null;
-  const appliedDefault = useRef(false);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lays out a new draft once, when the environment's settings name a default layout
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lays out a new draft once the environment's settings name a default layout
   useEffect(() => {
-    if (!defaultLayout || appliedDefault.current) return;
-    appliedDefault.current = true;
-    useRightPanelStore.getState().applySavedTileLayout(props.threadRef, defaultLayout.root, true);
+    if (defaultLayout)
+      useRightPanelStore.getState().applySavedTileLayout(props.threadRef, defaultLayout.root, true);
   }, [defaultLayout, props.threadRef]);
   const [dragging, setDragging] = useState<TileDrag | null>(null);
   const [dropTarget, setDropTarget] = useState<TileDrop | null>(null);
@@ -526,7 +529,10 @@ export function ThreadTileWorkspace(props: {
     });
   })();
   const restoreZoom = () => apply({ type: "maximize", groupId: null });
-  const saveLayoutAs = () => setSaveLayout({ dropped: toSavedTileNode(currentLayout()).dropped });
+  const saveLayoutAs = () => {
+    const { root, dropped } = toSavedTileNode(currentLayout());
+    setSaveLayout({ dropped, tiles: root ? savedTileGroupCount(root) : 0 });
+  };
   const applySavedLayout = (layout: SavedTileLayout) => {
     useRightPanelStore.getState().applySavedTileLayout(props.threadRef, layout.root);
     focus(currentLayout().focusedGroupId);
@@ -739,24 +745,35 @@ export function ThreadTileWorkspace(props: {
         }),
       );
     }
-    disposers.push(
-      registerMenuAction("workspace.tile.layout.save", saveLayoutAs),
-      ...tileLayouts.layouts.flatMap((layout) => [
-        registerMenuAction(`workspace.tile.layout.apply:${layout.id}`, () =>
-          applySavedLayout(layout),
-        ),
-        registerMenuAction(`workspace.tile.layout.projectDefault:${layout.id}`, () =>
-          tileLayouts.setProjectDefault(layout.id),
-        ),
-        registerMenuAction(`workspace.tile.layout.globalDefault:${layout.id}`, () =>
-          tileLayouts.setGlobalDefault(layout.id),
-        ),
-      ]),
-    );
     return () => {
       for (const dispose of disposers) dispose();
     };
   });
+  const runLayoutAction = useEffectEvent((kind: string, layoutId: string) => {
+    const layout = tileLayouts.layouts.find((entry) => entry.id === layoutId);
+    if (!layout) return;
+    if (kind === "apply") applySavedLayout(layout);
+    else if (kind === "projectDefault") tileLayouts.setProjectDefault(layout.id);
+    else tileLayouts.setGlobalDefault(layout.id);
+  });
+  const saveLayoutFromMenu = useEffectEvent(() => saveLayoutAs());
+  const layoutIds = tileLayouts.layouts.map((layout) => layout.id).join("\n");
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the palette's saved-layout actions for this mounted thread
+  useEffect(() => {
+    const disposers = [
+      registerMenuAction("workspace.tile.layout.save", () => saveLayoutFromMenu()),
+      ...(layoutIds ? layoutIds.split("\n") : []).flatMap((layoutId) =>
+        ["apply", "projectDefault", "globalDefault"].map((kind) =>
+          registerMenuAction(`workspace.tile.layout.${kind}:${layoutId}`, () =>
+            runLayoutAction(kind, layoutId),
+          ),
+        ),
+      ),
+    ];
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, [layoutIds]);
 
   const resize = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -1283,7 +1300,7 @@ export function ThreadTileWorkspace(props: {
                     <MenuSeparator />
                     <TileLayoutsSubmenu
                       api={tileLayouts}
-                      hasProject={props.projectId !== null}
+                      hasProject={tileLayouts.projectId !== null}
                       onSaveAs={saveLayoutAs}
                       onApply={applySavedLayout}
                     />
@@ -1541,6 +1558,7 @@ export function ThreadTileWorkspace(props: {
           }}
           layouts={tileLayouts.layouts}
           dropped={saveLayout.dropped}
+          tiles={saveLayout.tiles}
           onSave={(name) => {
             const { root } = toSavedTileNode(currentLayout());
             if (root) tileLayouts.save(name, root);
