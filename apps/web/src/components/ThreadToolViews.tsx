@@ -105,7 +105,7 @@ export function ThreadToolSection({
   detailsRef,
   actions,
 }: {
-  section: Exclude<ThreadContextSection, "automations">;
+  section: Exclude<ThreadContextSection, "automations" | "evidence">;
   threadRef: ScopedThreadRef;
   detailsRef: (element: HTMLDivElement | null) => void;
   actions: HTMLDivElement | null;

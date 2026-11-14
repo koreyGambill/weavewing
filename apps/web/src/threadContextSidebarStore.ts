@@ -12,6 +12,7 @@ import {
 
 export type ThreadContextSection =
   | "todos"
+  | "evidence"
   | "artifacts"
   | "links"
   | "related"
@@ -67,6 +68,10 @@ interface ThreadContextSidebarState {
   automationSelection: AutomationSelection | null;
   /** Null follows the context: Thread with a thread open, else Server. */
   automationScope: "thread" | "project" | "server" | null;
+  /** Null follows the context: Thread with a thread open, else All. */
+  evidenceScope: "thread" | "all" | null;
+  evidenceNeedsQa: boolean;
+  setEvidenceView: (view: { scope?: "thread" | "all"; needsQa?: boolean }) => void;
   selectAutomation: (selection: AutomationSelection | null) => void;
   setAutomationScope: (scope: "thread" | "project" | "server") => void;
   selectView: (view: SidebarView) => void;
@@ -100,6 +105,13 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       inboxSelection: null,
       automationSelection: null,
       automationScope: null,
+      evidenceScope: null,
+      evidenceNeedsQa: false,
+      setEvidenceView: ({ scope, needsQa }) =>
+        set((state) => ({
+          evidenceScope: scope ?? state.evidenceScope,
+          evidenceNeedsQa: needsQa ?? state.evidenceNeedsQa,
+        })),
       selectAutomation: (automationSelection) => set({ automationSelection }),
       setAutomationScope: (automationScope) => set({ automationScope }),
       selectView: (view) =>
