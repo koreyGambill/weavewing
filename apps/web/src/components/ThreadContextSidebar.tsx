@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { Link, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AuthOrchestrationReadScope, type ScopedThreadRef } from "@t3tools/contracts";
 import {
@@ -40,11 +40,7 @@ import {
   type StripItem,
   type ThreadContextSection,
 } from "../threadContextSidebarStore";
-import {
-  useSidebarHeaderOnBackdrop,
-  useThreadToolsSlots,
-  useThreadToolsTarget,
-} from "./threadToolsHost";
+import { useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
 import { useStatusSignal } from "./statusSources/StatusSources";
 import { InboxView } from "./inbox/InboxView";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
@@ -69,7 +65,6 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { useSidebar, useSidebarVisibility } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { WeavewingMark } from "./WeavewingMark";
 import { AutomationsView } from "./automations/AutomationsView";
 
 const tools: Record<ThreadContextSection, { title: string; icon: LucideIcon; about: string }> = {
@@ -160,15 +155,18 @@ export function ThreadToolsFrame({ children }: { children: ReactNode }) {
         {children}
       </div>
       {view !== "threads" && visible ? (
-        <ThreadToolView
-          key={
-            threadRef && view !== "inbox"
-              ? `${threadRef.environmentId}:${threadRef.threadId}:${view}`
-              : view
-          }
-          view={view}
-          threadRef={threadRef}
-        />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ThreadToolHeading view={view} />
+          <ThreadToolView
+            key={
+              threadRef && view !== "inbox"
+                ? `${threadRef.environmentId}:${threadRef.threadId}:${view}`
+                : view
+            }
+            view={view}
+            threadRef={threadRef}
+          />
+        </div>
       ) : null}
       <ThreadToolsCommands />
     </div>
@@ -220,94 +218,36 @@ function useShortcutTooltip() {
     }`;
 }
 
-/** The header's lockup: the mark opens the thread list, then the wordmark or the open tool's title. */
-export function ThreadToolsBrand({ onBackdrop }: { onBackdrop: boolean }) {
-  const view = useThreadContextSidebarStore((state) => state.view);
-  const tooltip = useShortcutTooltip();
-  return (
-    <div className="flex min-w-0 items-center gap-1 [-webkit-app-region:no-drag] md:ml-[calc(var(--workspace-titlebar-content-left)-0.5rem)]">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant={onBackdrop ? "media-navigation" : "ghost"}
-              size="icon-sm"
-              className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
-              aria-label="Thread list"
-              onClick={() => useThreadContextSidebarStore.getState().selectView("threads")}
-            />
-          }
-        >
-          <WeavewingMark
-            aria-hidden
-            // The mark's thin green and yellow strokes vanish on the light backdrop without a tile.
-            className={cn("size-5", onBackdrop && "rounded-md bg-background/85 p-0.5")}
-          />
-        </TooltipTrigger>
-        <TooltipPopup side="bottom">{tooltip("threads", "Thread list")}</TooltipPopup>
-      </Tooltip>
-      {view === "threads" ? (
-        <Link
-          to="/"
-          aria-label="Weavewing home"
-          className="shrink-0 rounded-md text-sm font-medium tracking-tight outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset"
-        >
-          <span className={onBackdrop ? "text-white/70" : "text-muted-foreground"}>weave</span>
-          <span className="text-(--weavewing-yellow)">wing</span>
-        </Link>
-      ) : (
-        <>
-          <h2
-            className={cn(
-              "min-w-0 truncate text-sm font-medium",
-              onBackdrop ? "text-white" : "text-foreground",
-            )}
-          >
-            {tools[view].title}
-          </h2>
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  variant={onBackdrop ? "media-navigation" : "ghost"}
-                  size="icon-xs"
-                  className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
-                  aria-label={`About ${tools[view].title}`}
-                />
-              }
-            >
-              <InfoIcon />
-            </PopoverTrigger>
-            <PopoverPopup side="bottom" align="start">
-              <p className="max-w-64 text-xs leading-5">{tools[view].about}</p>
-            </PopoverPopup>
-          </Popover>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** The header's right end: navigation on the thread list, the open tool's own buttons otherwise. */
-export function ThreadToolsHeaderEnd({ children }: { children: ReactNode }) {
-  const onBackdrop = useSidebarHeaderOnBackdrop();
+/** A tool view's heading row: its title and about note, then its own buttons and the pin. */
+function ThreadToolHeading({ view }: { view: ThreadContextSection }) {
   const { setActions } = useThreadToolsSlots();
-  const view = useThreadContextSidebarStore((state) => state.view);
   const pinned = useThreadContextSidebarStore((state) => state.pinned);
   const threadRef = useThreadToolsTarget();
   const shell = useThreadShell(threadRef);
-  if (view === "threads") return children;
   return (
-    <>
-      <div ref={setActions} className="flex items-center" />
+    <div className="flex h-10 shrink-0 items-center gap-1 px-2 pt-2">
+      <h2 className="min-w-0 truncate text-sm font-medium text-foreground">{tools[view].title}</h2>
+      <Popover>
+        <PopoverTrigger
+          render={
+            <Button variant="ghost" size="icon-xs" aria-label={`About ${tools[view].title}`} />
+          }
+        >
+          <InfoIcon />
+        </PopoverTrigger>
+        <PopoverPopup side="bottom" align="start">
+          <p className="max-w-64 text-xs leading-5">{tools[view].about}</p>
+        </PopoverPopup>
+      </Popover>
+      <div ref={setActions} className="ml-auto flex shrink-0 items-center" />
       {threadRef && view !== "inbox" ? (
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
-                variant={onBackdrop ? "media-navigation" : "ghost"}
+                variant="ghost"
                 size="icon-sm"
-                className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
+                className="shrink-0"
                 aria-label={pinned ? "Unpin thread tools" : "Pin thread tools"}
                 aria-pressed={pinned !== null}
                 onClick={() =>
@@ -325,7 +265,7 @@ export function ThreadToolsHeaderEnd({ children }: { children: ReactNode }) {
           </TooltipPopup>
         </Tooltip>
       ) : null}
-    </>
+    </div>
   );
 }
 

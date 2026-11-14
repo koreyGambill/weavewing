@@ -41,9 +41,10 @@ import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
 import {
-  SidebarBrandWidthProbe,
   SidebarChromeFooter,
   SidebarChromeHeader,
+  TitlebarControls,
+  TitlebarWidthProbe,
 } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
 import type { SidebarRouteReveal } from "./sidebar/routeReveal";
@@ -335,6 +336,8 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
   const collapsedAttention = showSidebar && !isSidebarVisible ? toolsAttention : null;
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
+  // Expanded, the cluster sits on the sidebar's title row and its stage backdrop.
+  const onBackdrop = isSidebarVisible && stageBackdropVariant !== null;
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen },
   });
@@ -398,32 +401,41 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
       data-sidebar-control=""
     >
       {showSidebar ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <SidebarTrigger
-                variant={isSidebarVisible && stageBackdropVariant ? "media-navigation" : "ghost"}
-                className={cn(
-                  "pointer-events-auto",
-                  isSidebarVisible && stageBackdropVariant && "relative top-auto translate-y-0",
-                )}
-                aria-label={
-                  collapsedAttention
-                    ? `Toggle main sidebar, ${collapsedAttention.summary}`
-                    : "Toggle main sidebar"
-                }
-              />
-            }
-          />
-          <TooltipPopup side="bottom">
-            Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
-            {collapsedAttention ? (
-              <span className="block text-muted-foreground">{collapsedAttention.summary}</span>
-            ) : null}
-          </TooltipPopup>
-        </Tooltip>
+        <TitlebarControls
+          compact
+          onBackdrop={onBackdrop}
+          collapser={
+            <span className="relative flex">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <SidebarTrigger
+                      variant={onBackdrop ? "media-navigation" : "ghost"}
+                      className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
+                      aria-label={
+                        collapsedAttention
+                          ? `Toggle main sidebar, ${collapsedAttention.summary}`
+                          : "Toggle main sidebar"
+                      }
+                    />
+                  }
+                />
+                <TooltipPopup side="bottom">
+                  Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
+                  {collapsedAttention ? (
+                    <span className="block text-muted-foreground">
+                      {collapsedAttention.summary}
+                    </span>
+                  ) : null}
+                </TooltipPopup>
+              </Tooltip>
+              {collapsedAttention ? (
+                <ThreadToolsAttentionDot tone={collapsedAttention.tone} />
+              ) : null}
+            </span>
+          }
+        />
       ) : null}
-      {collapsedAttention ? <ThreadToolsAttentionDot tone={collapsedAttention.tone} /> : null}
     </div>
   );
 }
@@ -449,8 +461,8 @@ export function AppSidebarLayout({
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // A clamped drag may not change width, so viewport changes need a separate subscription.
   const viewportWidth = useSyncExternalStore(subscribeToViewportWidth, readViewportWidth);
-  const [brandWidth, setBrandWidth] = useState(0);
-  const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(brandWidth);
+  const [titlebarWidth, setTitlebarWidth] = useState(0);
+  const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(titlebarWidth);
   const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(viewportWidth, sidebarMinimumWidth);
   const resetSidebarWidth = () => {
     try {
@@ -472,6 +484,8 @@ export function AppSidebarLayout({
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
+    "--workspace-titlebar-content-left":
+      "calc(var(--workspace-controls-left) + var(--workspace-titlebar-control-count) * var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap))",
     ...windowControlsInsetStyle,
   } as CSSProperties;
 
@@ -479,14 +493,15 @@ export function AppSidebarLayout({
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <ThreadToolsHost>
         <SidebarProvider
-          className="h-dvh! min-h-0!"
+          // Below md the fixed cluster is only the mark and collapser.
+          className="h-dvh! min-h-0! [--workspace-titlebar-control-count:2] md:[--workspace-titlebar-control-count:5]"
           data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
           storageKey="chat_thread_sidebar_open"
           style={sidebarProviderStyle}
         >
           {showSidebar ? (
             <>
-              <SidebarBrandWidthProbe isElectron={isElectron} onWidthChange={setBrandWidth} />
+              <TitlebarWidthProbe onWidthChange={setTitlebarWidth} />
               <Sidebar
                 side="left"
                 collapsible="offcanvas"

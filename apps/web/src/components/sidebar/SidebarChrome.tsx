@@ -16,7 +16,7 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
 import { WeavewingMark } from "../WeavewingMark";
-import { ThreadToolsBrand, ThreadToolsHeaderEnd } from "../ThreadContextSidebar";
+import { openCommandPalette } from "../../commandPaletteBus";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -67,43 +67,32 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       )}
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
+      {/* Wide layouts draw the cluster fixed in the window; the mobile sheet covers it. */}
       <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
-        <SidebarTrigger
-          variant={backdropVariant ? "media-navigation" : "ghost"}
-          className="relative top-auto translate-y-0"
-          aria-label="Toggle main sidebar"
+        <TitlebarControls
+          onBackdrop={backdropVariant !== null}
+          collapser={
+            <SidebarTrigger
+              variant={backdropVariant ? "media-navigation" : "ghost"}
+              className="relative top-auto translate-y-0"
+              aria-label="Toggle main sidebar"
+            />
+          }
         />
       </div>
-      <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        <div className="flex min-w-0 items-center gap-1">
-          <ThreadToolsBrand onBackdrop={backdropVariant !== null} />
+      {pillLabel ? (
+        <div className="relative z-10 flex h-7 items-center md:ml-[var(--workspace-titlebar-content-left)]">
+          <Badge data-environment-identification="pill" size="sm" variant="secondary">
+            {pillLabel}
+          </Badge>
         </div>
-        {pillLabel ? (
-          <div className="ml-1 flex h-7 items-center">
-            <Badge data-environment-identification="pill" size="sm" variant="secondary">
-              {pillLabel}
-            </Badge>
-          </div>
-        ) : null}
-      </div>
-      <div className="relative z-10 ml-auto flex shrink-0 items-center [-webkit-app-region:no-drag]">
-        <ThreadToolsHeaderEnd>
-          <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
-          <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
-          <WorkspaceHistoryButton />
-        </ThreadToolsHeaderEnd>
-      </div>
+      ) : null}
     </div>
   );
 });
 
-export function SidebarBrandWidthProbe({
-  isElectron,
-  onWidthChange,
-}: {
-  isElectron: boolean;
-  onWidthChange: (width: number) => void;
-}) {
+/** Reports the window-left width the title bar cluster needs, so the sidebar never sits under it. */
+export function TitlebarWidthProbe({ onWidthChange }: { onWidthChange: (width: number) => void }) {
   const observeWidth = (probe: HTMLDivElement) => {
     return observeResize(probe, ([entry]) => {
       if (entry) onWidthChange(entry.borderBoxSize[0]?.inlineSize ?? probe.offsetWidth);
@@ -113,14 +102,64 @@ export function SidebarBrandWidthProbe({
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
+      className="pointer-events-none invisible fixed top-0 left-0 w-[var(--workspace-titlebar-content-left)]"
       ref={observeWidth}
-    >
-      <div className="ml-[var(--workspace-titlebar-content-left)] flex gap-1">
-        <SidebarBrandMark onBackdrop={false} />
-        {isElectron ? <div className="w-[calc(3*var(--workspace-titlebar-control-size))]" /> : null}
+    />
+  );
+}
+
+/**
+ * The window's top-left controls, in one fixed order so none moves with the sidebar.
+ * `compact` keeps only the mark and collapser below md, where the header is narrow.
+ */
+export function TitlebarControls({
+  collapser,
+  onBackdrop,
+  compact = false,
+}: {
+  collapser: ReactNode;
+  onBackdrop: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className="pointer-events-auto flex items-center [-webkit-app-region:no-drag]">
+      <CommandPaletteMarkButton onBackdrop={onBackdrop} />
+      {collapser}
+      <div className={cn("flex items-center", compact && "max-md:hidden")}>
+        <HistoryNavigationButton direction="back" onBackdrop={onBackdrop} />
+        <HistoryNavigationButton direction="forward" onBackdrop={onBackdrop} />
+        <WorkspaceHistoryButton />
       </div>
     </div>
+  );
+}
+
+function CommandPaletteMarkButton({ onBackdrop }: { onBackdrop: boolean }) {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const shortcutLabel = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label="Command palette"
+            className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
+            onClick={() => openCommandPalette()}
+            size="icon-sm"
+            variant={onBackdrop ? "media-navigation" : "ghost"}
+          />
+        }
+      >
+        <WeavewingMark
+          aria-hidden
+          // The mark's thin green and yellow strokes vanish on the light backdrop without a tile.
+          className={cn("size-5", onBackdrop && "rounded-md bg-background/85 p-0.5")}
+        />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        Command palette{shortcutLabel ? ` (${shortcutLabel})` : ""}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -145,10 +184,7 @@ function HistoryNavigationButton({
         render={
           <Button
             aria-label={label}
-            className={cn(
-              "[-webkit-app-region:no-drag]",
-              onBackdrop && "relative top-auto translate-y-0",
-            )}
+            className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
             disabled={!enabled}
             onClick={() => navigateHistory(direction)}
             size="icon-sm"
@@ -163,22 +199,6 @@ function HistoryNavigationButton({
         {shortcutLabel ? ` (${shortcutLabel})` : ""}
       </TooltipPopup>
     </Tooltip>
-  );
-}
-
-function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium tracking-tight">
-      <WeavewingMark aria-hidden className="size-6 shrink-0" />
-      <span
-        className={cn(
-          "truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1",
-          onBackdrop ? "text-white/70" : "text-muted-foreground",
-        )}
-      >
-        weave<span className="text-(--weavewing-yellow)">wing</span>
-      </span>
-    </span>
   );
 }
 

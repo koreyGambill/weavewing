@@ -50,7 +50,7 @@ export function WorkspaceHistoryButton() {
             </Button>
           }
         />
-        <PopoverPopup side="bottom" align="end" className="w-[min(36rem,calc(100vw-1rem))]">
+        <PopoverPopup side="bottom" align="start" className="w-[min(36rem,calc(100vw-1rem))]">
           <h2 className="mb-1 border-b border-border px-2 py-2 text-center text-xs font-medium">
             Recent Threads
           </h2>
