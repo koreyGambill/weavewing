@@ -19,7 +19,7 @@ import {
 } from "./threadTileLayout";
 
 export const TILE_LAYOUT_AREA_LABELS = {
-  chat: "Chat",
+  chat: "Main chat",
   browser: "Browser",
   terminal: "Terminal",
   files: "Files",
@@ -124,8 +124,14 @@ export function buildTileLayoutFromSaved(
         : { ...node, first: replace(node.first), second: replace(node.second) };
     root = replace(root);
   }
+  const fill = (node: TileNode): TileNode =>
+    node.kind === "split"
+      ? { ...node, first: fill(node.first), second: fill(node.second) }
+      : node.tabs.length
+        ? node
+        : { ...node, tabs: [newTabId(node.id)], activeTabId: newTabId(node.id) };
   return {
-    root,
+    root: fill(root),
     focusedGroupId: home.id,
     maximizedGroupId: null,
     ...(Object.keys(pendingAreas).length ? { pendingAreas } : {}),

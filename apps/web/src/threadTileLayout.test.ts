@@ -100,7 +100,9 @@ describe("thread tile layout", () => {
     const stillNoChat = syncTileLayout(noChat, ["files"], ["files", "notes"], "notes", true);
     expect(getTileGroups(stillNoChat).map((group) => group.tabs)).toEqual([["files", "notes"]]);
     const chooser = syncTileLayout(noChat, ["files"], [], null, false);
-    expect(getTileGroups(chooser)).toMatchObject([{ tabs: [], activeTabId: "" }]);
+    const chooserTab = newTabId(chooser.focusedGroupId);
+    expect(getTileGroups(chooser)).toMatchObject([{ tabs: [chooserTab], activeTabId: chooserTab }]);
+    expect(applyTileAction(chooser, { type: "close-tab", tabId: chooserTab })).toBe(chooser);
     expect(applyTileAction(chooser, { type: "close-group", groupId: chooser.focusedGroupId })).toBe(
       chooser,
     );
@@ -113,7 +115,7 @@ describe("thread tile layout", () => {
       { tabs: [CONVERSATION_TAB_ID], activeTabId: CONVERSATION_TAB_ID },
     ]);
     const lastChat = applyTileAction(reopened, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
-    expect(getTileGroups(lastChat)).toMatchObject([{ tabs: [] }]);
+    expect(getTileGroups(lastChat)).toMatchObject([{ tabs: [newTabId(lastChat.focusedGroupId)] }]);
     const shared = applyTileAction(initial, {
       type: "move",
       tabId: "files",
@@ -129,8 +131,19 @@ describe("thread tile layout", () => {
       type: "close-group",
       groupId: "conversation-group",
     });
-    expect(getTileGroups(lastTile)).toMatchObject([{ id: "conversation-group", tabs: [] }]);
+    expect(getTileGroups(lastTile)).toMatchObject([
+      { id: "conversation-group", tabs: [newTabId("conversation-group")] },
+    ]);
     expect(parseTileLayout(JSON.parse(JSON.stringify(lastTile)))).toEqual(lastTile);
+    // Layouts persisted before empty tiles held a New tab still decode.
+    expect(
+      getTileGroups(
+        parseTileLayout({
+          root: { kind: "group", id: "old", tabs: [], activeTabId: "" },
+          focusedGroupId: "old",
+        })!,
+      ),
+    ).toMatchObject([{ tabs: [newTabId("old")], activeTabId: newTabId("old") }]);
   });
 
   it("replaces a new tab in place with the area chosen for it, and closes it on its own", () => {
@@ -391,7 +404,13 @@ describe("thread tile layout", () => {
     });
     expect(getTileGroups(empty)).toEqual([
       ...getTileGroups(initial),
-      { kind: "group", id: "chooser-group", tabs: [], activeTabId: "", colorIndex: 1 },
+      {
+        kind: "group",
+        id: "chooser-group",
+        tabs: [newTabId("chooser-group")],
+        activeTabId: newTabId("chooser-group"),
+        colorIndex: 1,
+      },
     ]);
     expect(empty.focusedGroupId).toBe("chooser-group");
     expect(applyTileAction(empty, { type: "close-group", groupId: "chooser-group" })).toEqual(

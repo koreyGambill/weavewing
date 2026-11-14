@@ -199,12 +199,18 @@ function settle(input: ThreadTileLayout): ThreadTileLayout {
           ),
         }
       : input;
-  const groups = getTileGroups(layout);
+  // A tile always holds a tab; an empty one holds a New tab showing the area chooser.
+  const filled = mapNode(layout.root, (node) => {
+    if (node.kind !== "group" || node.tabs.length) return node;
+    const tabId = newTabId(node.id);
+    return { ...node, tabs: [tabId], activeTabId: tabId };
+  });
+  const groups = getTileGroups(filled);
   const occupiedColors = new Set(
     groups.flatMap((group) => (group.colorIndex !== undefined ? [group.colorIndex] : [])),
   );
   let recycledColor = 0;
-  const root = mapNode(layout.root, (node) => {
+  const root = mapNode(filled, (node) => {
     if (node.kind !== "group" || node.colorIndex !== undefined) return node;
     const colorIndex =
       Array.from({ length: 8 }, (_, index) => index).find((index) => !occupiedColors.has(index)) ??
@@ -466,7 +472,7 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
   }
   if (action.type === "close-group") {
     const group = groups.find((entry) => entry.id === action.groupId);
-    if (!group || (groups.length === 1 && !group.tabs.length)) return layout;
+    if (!group || (groups.length === 1 && group.tabs.every(isNewTab))) return layout;
     const root = removeGroup(layout.root, group.id);
     return settle({
       ...layout,
@@ -545,7 +551,7 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
   if (action.type === "merge-groups") {
     const source = groups.find((group) => group.id === action.groupId);
     const target = groups.find((group) => group.id === action.targetGroupId);
-    if (!source?.tabs.length || !target || source.id === target.id) return layout;
+    if (!source || source.tabs.every(isNewTab) || !target || source.id === target.id) return layout;
     return settle({
       ...layout,
       root: mapNode(removeGroup(layout.root, source.id)!, (node) =>

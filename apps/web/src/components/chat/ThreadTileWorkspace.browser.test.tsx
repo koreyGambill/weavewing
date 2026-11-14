@@ -15,7 +15,7 @@ import {
   selectThreadTileLayout,
   useRightPanelStore,
 } from "../../rightPanelStore";
-import { getTileGroups } from "../../threadTileLayout";
+import { getTileGroups, isNewTab, newTabId } from "../../threadTileLayout";
 import { ThreadTileWorkspace } from "./ThreadTileWorkspace";
 
 vi.mock("../RightPanelTabs", () => ({
@@ -214,7 +214,7 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
     .toHaveValue("unfinished conversation");
   await newTileRight();
   await expect.element(screen.getByText("Choose an area", { exact: true })).toBeVisible();
-  const chooser = getTileGroups(layout()).find((group) => group.tabs.length === 0)!;
+  const chooser = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   expect(
     selectThreadRightPanelState(
       useRightPanelStore.getState().byThreadKey,
@@ -264,7 +264,7 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
   );
   await newTileRight();
   await expect.element(screen.getByText("Choose an area", { exact: true })).toBeVisible();
-  const empty = getTileGroups(layout()).find((group) => group.tabs.length === 0)!;
+  const empty = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   expect(empty).toBeDefined();
   expect(
     selectThreadRightPanelState(
@@ -274,12 +274,12 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
   ).toHaveLength(1);
   await userEvent.click(screen.getByRole("button", { name: "Close empty tile", exact: true }));
   expect(getTileGroups(layout()).some((group) => group.id === empty.id)).toBe(false);
-  await selectTab("Chat");
+  await selectTab("Main chat");
   const movedGroup = getTileGroups(layout()).find((group) => group.tabs.includes("files"))!;
   const targetGroup = getTileGroups(layout()).find((group) => group.tabs.includes("conversation"))!;
   await userEvent.dragAndDrop(
     screen.getByRole("toolbar", { name: "Move tile: files", exact: true }),
-    screen.getByRole("region", { name: "Tile: Chat", exact: true }),
+    screen.getByRole("region", { name: "Tile: Main chat", exact: true }),
     { sourcePosition: { x: 5, y: 12 }, force: true },
   );
   expect(getTileGroups(layout()).findIndex((group) => group.id === movedGroup.id)).toBeLessThan(
@@ -293,7 +293,7 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
     .toHaveValue("unsaved editor contents");
   await userEvent.dragAndDrop(
     screen.getByRole("toolbar", { name: "Move tile: files", exact: true }),
-    screen.getByRole("toolbar", { name: "Move tile: Chat", exact: true }),
+    screen.getByRole("toolbar", { name: "Move tile: Main chat", exact: true }),
     { sourcePosition: { x: 5, y: 12 }, force: true },
   );
   expect(getTileGroups(layout()).find((group) => group.tabs.includes("files"))?.tabs).toContain(
@@ -322,7 +322,7 @@ it("resizes, shows tiles beside a maximized one and opens independent area views
   await using fixture = await setup(true);
   const { screen, store, threadRef, layout, newTileRight } = fixture;
   await newTileRight();
-  const notesChooser = getTileGroups(layout()).find((group) => group.tabs.length === 0)!;
+  const notesChooser = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   await userEvent.click(screen.getByRole("button", { name: "Notes", exact: true }));
   await expect
     .element(screen.getByRole("textbox", { name: "Editor notes", exact: true }))
@@ -399,7 +399,7 @@ it("resizes, shows tiles beside a maximized one and opens independent area views
   await userEvent.keyboard("{/Alt}{/Control}");
   expect(JSON.stringify(layout().root)).not.toBe(beforeNativeResize);
   await newTileRight();
-  const secondNotesGroup = getTileGroups(layout()).find((group) => group.tabs.length === 0)!;
+  const secondNotesGroup = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   await userEvent.click(screen.getByRole("button", { name: "Notes", exact: true }));
   expect(
     selectThreadRightPanelState(
@@ -435,7 +435,7 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
   const floated = getTileGroups(layout()).find((group) => group.id === "terminal-group")!;
   expect(floated.floating).toBeDefined();
   const titlebar = screen.getByRole("toolbar", { name: "Move tile: terminal", exact: true });
-  const target = screen.getByRole("region", { name: "Tile: Chat", exact: true });
+  const target = screen.getByRole("region", { name: "Tile: Main chat", exact: true });
   const targetRect = target.element().getBoundingClientRect();
   const barRect = titlebar.element().getBoundingClientRect();
   // Over another tile's edge, where the old snapping would have docked it.
@@ -471,10 +471,23 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
     groupId: "chooser",
     splitId: "chooser-split",
   });
-  await expect.element(screen.getByRole("button", { name: "Chat", exact: true })).toBeVisible();
+  const mainChat = screen.getByRole("button", { name: "Main chat", exact: true });
+  await expect.element(mainChat).toBeVisible();
+  // Main chat opens in one tile at a time; choosing it here shows where it is.
+  await expect.element(mainChat).toHaveAttribute("aria-disabled", "true");
   // Focus is still on the other tile's Dock button, which keeps its keys.
   await userEvent.keyboard("n");
-  expect(getTileGroups(layout()).find((group) => group.id === "chooser")?.tabs).toEqual([]);
+  expect(getTileGroups(layout()).find((group) => group.id === "chooser")?.tabs).toEqual([
+    newTabId("chooser"),
+  ]);
+  await userEvent.click(screen.getByText("Choose an area", { exact: true }));
+  await userEvent.keyboard("c");
+  expect(layout().focusedGroupId).toBe(
+    getTileGroups(layout()).find((group) => group.tabs.includes("conversation"))?.id,
+  );
+  expect(getTileGroups(layout()).find((group) => group.id === "chooser")?.tabs).toEqual([
+    newTabId("chooser"),
+  ]);
   await userEvent.click(screen.getByText("Choose an area", { exact: true }));
   await userEvent.keyboard("{ArrowRight}{ArrowLeft}n");
   const chosen = getTileGroups(layout()).find((group) => group.id === "chooser")!.tabs[0]!;
@@ -505,7 +518,7 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
     splitId: "tabbed-split",
   });
   await userEvent.click(screen.getByText("Choose an area", { exact: true }));
-  // Chat is highlighted, but Enter on a Tabbed-to choice presses that choice.
+  // Main chat is highlighted, but Enter on a Tabbed-to choice presses that choice.
   await userEvent.keyboard("{Tab}{Tab}{Tab}");
   await expect.element(screen.getByRole("button", { name: "Notes", exact: true })).toHaveFocus();
   await userEvent.keyboard("{Enter}");

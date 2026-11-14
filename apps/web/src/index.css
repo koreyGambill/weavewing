@@ -2723,6 +2723,17 @@ code {
 .workspace-tile-grip {
   color: var(--tile-group-accent);
 }
+/* One shot per press, added by script; reduced motion never adds the class. */
+@keyframes tile-press-flash {
+  from {
+    color: var(--success-foreground);
+    background-color: color-mix(in srgb, var(--success) 22%, transparent);
+  }
+}
+.tile-press-flash {
+  --control-icon-color: currentColor;
+  animation: tile-press-flash 220ms ease-out;
+}
 .workspace-tile-tab[data-active="true"] {
   color: var(--foreground);
   background: color-mix(in srgb, var(--tile-group-accent) 15%, var(--background));
