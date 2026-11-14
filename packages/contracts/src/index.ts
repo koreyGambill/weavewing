@@ -88,4 +88,5 @@ export * from "./developmentEnvironmentLifecycle.ts";
 
 export * from "./monitoring.ts";
 export * from "./notification.ts";
+export * from "./messageFollowUp.ts";
 export * from "./statusSources.ts";

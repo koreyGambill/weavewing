@@ -110,6 +110,7 @@ import Migration0098 from "./Migrations/098_ScheduledTaskDisabledThreads.ts";
 import Migration0099 from "./Migrations/099_ScheduledTaskGrants.ts";
 import Migration0100 from "./Migrations/100_FoldWatchersIntoAutomations.ts";
 import Migration0101 from "./Migrations/101_MonitoringReviewWatermarks.ts";
+import Migration0103 from "./Migrations/103_MessageFollowUps.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -214,6 +215,7 @@ const migrationEntries = [
   [99, "ScheduledTaskGrants", Migration0099],
   [100, "FoldWatchersIntoAutomations", Migration0100],
   [101, "MonitoringReviewWatermarks", Migration0101],
+  [103, "MessageFollowUps", Migration0103],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

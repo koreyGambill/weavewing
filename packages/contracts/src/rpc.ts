@@ -8,6 +8,12 @@ import {
   NotificationUpdateResult,
 } from "./notification.ts";
 import {
+  MessageFollowUp,
+  MessageFollowUpError,
+  MessageFollowUpListInput,
+  MessageFollowUpUpdateInput,
+} from "./messageFollowUp.ts";
+import {
   ThreadMark,
   ThreadMarksGetInput,
   ThreadMarksAnnotateInput,
@@ -723,6 +729,8 @@ export const WS_METHODS = {
   notificationsSubscribe: "notifications.subscribe",
   notificationsUpdate: "notifications.update",
   notificationsMarkAllRead: "notifications.markAllRead",
+  messageFollowUpsList: "messageFollowUps.list",
+  messageFollowUpsUpdate: "messageFollowUps.update",
 
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
@@ -2462,6 +2470,17 @@ const WsNotificationsMarkAllReadRpc = Rpc.make(WS_METHODS.notificationsMarkAllRe
   error: Schema.Union([NotificationError, EnvironmentAuthorizationError]),
 });
 
+const WsMessageFollowUpsListRpc = Rpc.make(WS_METHODS.messageFollowUpsList, {
+  payload: MessageFollowUpListInput,
+  success: Schema.Array(MessageFollowUp),
+  error: Schema.Union([MessageFollowUpError, EnvironmentAuthorizationError]),
+});
+const WsMessageFollowUpsUpdateRpc = Rpc.make(WS_METHODS.messageFollowUpsUpdate, {
+  payload: MessageFollowUpUpdateInput,
+  success: Schema.NullOr(MessageFollowUp),
+  error: Schema.Union([MessageFollowUpError, EnvironmentAuthorizationError]),
+});
+
 const WsStatusSourcesSubscribeRpc = Rpc.make(WS_METHODS.statusSourcesSubscribe, {
   payload: Schema.Struct({}),
   success: StatusSourceList,
@@ -2656,6 +2675,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsNotificationsSubscribeRpc,
   WsNotificationsUpdateRpc,
   WsNotificationsMarkAllReadRpc,
+  WsMessageFollowUpsListRpc,
+  WsMessageFollowUpsUpdateRpc,
   WsScheduledTasksSubscribeRpc,
   WsStatusSourcesSubscribeRpc,
   WsStatusSourcesUpsertRpc,

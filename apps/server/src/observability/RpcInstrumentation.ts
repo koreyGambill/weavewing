@@ -286,6 +286,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.notificationsSubscribe]: "notifications",
   [WS_METHODS.notificationsUpdate]: "notifications",
   [WS_METHODS.notificationsMarkAllRead]: "notifications",
+  [WS_METHODS.messageFollowUpsList]: "workspace",
+  [WS_METHODS.messageFollowUpsUpdate]: "workspace",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";
