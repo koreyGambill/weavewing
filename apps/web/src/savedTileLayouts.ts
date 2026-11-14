@@ -3,8 +3,10 @@ import type {
   SavedTileLayout,
   SavedTileNode,
   ServerSettings,
+  ServerSettingsPatch,
   TileLayoutArea,
 } from "@t3tools/contracts";
+import { clearProjectSettingsOverrides } from "@t3tools/shared/projectSettings";
 
 import {
   CONVERSATION_TAB_ID,
@@ -42,6 +44,8 @@ export function toSavedTileNode(layout: ThreadTileLayout): {
         return null;
       }
       const areas = node.tabs.flatMap((tabId) => {
+        const pending = layout.pendingAreas?.[tabId];
+        if (pending) return [pending];
         if (isNewTab(tabId)) return [];
         const area = tabArea(tabId);
         if (!area) dropped = true;
@@ -143,4 +147,31 @@ export function resolveDefaultTileLayout(
     : undefined;
   if (override === null) return null;
   return find(override) ?? find(settings.defaultTileLayoutId) ?? null;
+}
+
+/** Removes a layout and every default that names it, global and per project, in one patch. */
+export function tileLayoutDeletePatch(
+  settings: Pick<
+    ServerSettings,
+    "tileLayouts" | "defaultTileLayoutId" | "projectSettingsOverrides"
+  >,
+  layoutId: string,
+): ServerSettingsPatch {
+  const projectIds = (Object.keys(settings.projectSettingsOverrides) as ProjectId[]).filter(
+    (projectId) => settings.projectSettingsOverrides[projectId]?.defaultTileLayoutId === layoutId,
+  );
+  return {
+    tileLayouts: settings.tileLayouts.filter((layout) => layout.id !== layoutId),
+    ...(settings.defaultTileLayoutId === layoutId ? { defaultTileLayoutId: null } : {}),
+    ...(projectIds.length
+      ? {
+          projectSettingsOverrides: Object.fromEntries(
+            projectIds.map((projectId) => [
+              projectId,
+              clearProjectSettingsOverrides(settings, projectId, ["defaultTileLayoutId"]),
+            ]),
+          ),
+        }
+      : {}),
+  };
 }

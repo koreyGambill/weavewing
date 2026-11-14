@@ -2,7 +2,11 @@ import { type SavedTileLayout } from "@t3tools/contracts";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { savedTileGroupCount, TILE_LAYOUT_AREA_LABELS } from "../../savedTileLayouts";
+import {
+  savedTileGroupCount,
+  TILE_LAYOUT_AREA_LABELS,
+  tileLayoutDeletePatch,
+} from "../../savedTileLayouts";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -19,6 +23,7 @@ import { SettingResetButton, SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
+  useRunScopedPlan,
   useScopedSettings,
   useScopedSettingsMixed,
   useUpdateScopedSettings,
@@ -104,6 +109,29 @@ export function TileLayoutsRow() {
   const [deleting, setDeleting] = useState<SavedTileLayout | null>(null);
   const renameButtons = useRef(new Map<string, HTMLButtonElement>());
   const cancelRename = useRef(false);
+  const { connectedEnvironments } = useSettingsScope();
+  const runPlan = useRunScopedPlan();
+  // Each environment's own defaults and project overrides lose the id in the same write.
+  const deleteLayout = (layoutId: string) => {
+    const serverWrites = connectedEnvironments.flatMap((environment) =>
+      environment.serverConfig
+        ? [
+            {
+              environmentId: environment.environmentId,
+              label: environment.label,
+              previous: environment.serverConfig.settings,
+              patch: tileLayoutDeletePatch(environment.serverConfig.settings, layoutId),
+            },
+          ]
+        : [],
+    );
+    runPlan({
+      clientPatch: {},
+      hasClientWrite: false,
+      serverWrites,
+      unavailableReason: serverWrites.length ? null : "Connect an environment to delete layouts.",
+    });
+  };
   const finishRename = (save: boolean) => {
     if (!renaming) return;
     const name = renaming.name.trim();
@@ -209,13 +237,7 @@ export function TileLayoutsRow() {
             <Button
               variant="destructive"
               onClick={() => {
-                if (deleting)
-                  updateSettings({
-                    tileLayouts: layouts.filter((layout) => layout.id !== deleting.id),
-                    ...(settings.defaultTileLayoutId === deleting.id
-                      ? { defaultTileLayoutId: null }
-                      : {}),
-                  });
+                if (deleting) deleteLayout(deleting.id);
                 setDeleting(null);
               }}
             >

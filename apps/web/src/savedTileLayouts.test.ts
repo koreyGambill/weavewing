@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildTileLayoutFromSaved,
   resolveDefaultTileLayout,
+  tileLayoutDeletePatch,
   toSavedTileNode,
 } from "./savedTileLayouts";
 import {
@@ -93,6 +94,8 @@ describe("saved tile layouts", () => {
     expect(parseTileLayout(JSON.parse(JSON.stringify(built)))?.pendingAreas).toEqual(
       built.pendingAreas,
     );
+    // Saving before the areas open keeps them as the areas they wait for.
+    expect(toSavedTileNode(built)).toEqual({ root: chatNotesTerminal, dropped: false });
     // Terminal opens while the draft exists; Notes waits for the thread.
     const withTerminal = syncTileLayout(built, [], ["terminal:fresh"], "terminal:fresh", true);
     expect(getTileGroups(withTerminal).map((group) => group.tabs)).toEqual([
@@ -197,5 +200,26 @@ describe("saved tile layouts", () => {
     expect(
       resolveDefaultTileLayout({ ...settings, defaultTileLayoutId: "deleted" }, null),
     ).toBeNull();
+  });
+
+  it("deletes a layout together with the global and every project default naming it", () => {
+    const [kept, removed] = [ProjectId.make("kept"), ProjectId.make("removed")];
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      defaultTileLayoutId: "chat-notes-terminal",
+      projectSettingsOverrides: {
+        [kept]: { defaultTileLayoutId: "other" },
+        [removed]: { defaultTileLayoutId: "chat-notes-terminal", defaultAutoPull: false },
+      },
+    };
+    expect(tileLayoutDeletePatch(settings, "chat-notes-terminal")).toEqual({
+      tileLayouts: [],
+      defaultTileLayoutId: null,
+      projectSettingsOverrides: { [removed]: { defaultAutoPull: false } },
+    });
+    expect(tileLayoutDeletePatch(settings, "other")).toEqual({
+      tileLayouts: DEFAULT_TILE_LAYOUTS,
+      projectSettingsOverrides: { [kept]: null },
+    });
   });
 });
