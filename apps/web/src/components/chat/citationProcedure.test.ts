@@ -57,12 +57,20 @@ describe("loadCitedHistory", () => {
     });
   });
 
-  it("rejects a citation that names a user message", async () => {
-    const history = scriptedHistory([{ message: "other", hasMoreHistory: false }]);
+  it("rejects a citation that names a user message, unless a follow-up reveals it", async () => {
+    const history = scriptedHistory([{ message: "user", hasMoreHistory: false }]);
     await expect(history.run()).resolves.toMatchObject({
       _tag: "failed",
       title: "The citation does not refer to an assistant response",
     });
+    await expect(
+      loadCitedHistory({
+        signal: new AbortController().signal,
+        readThread: async () => ({ message: "user", hasMoreHistory: false }),
+        loadThrough: async () => ({ _tag: "noop" }),
+        revealsUser: true,
+      }),
+    ).resolves.toEqual({ _tag: "found" });
   });
 
   it("stops on a failed page", async () => {
@@ -187,6 +195,15 @@ describe("resolveCitationPhase", () => {
       message: { ...entry.message, role: "user" },
     } as TimelineEntry;
     expect(phase({ entries: [userEntry] })).toEqual({ _tag: "failed" });
+    expect(
+      resolveCitationPhase({
+        history: { _tag: "loading" },
+        messageId,
+        entries: [userEntry],
+        rows: [row],
+        revealsUser: true,
+      }),
+    ).toEqual({ _tag: "ready", rowId: "cited-row" });
   });
 
   it("fails when the history procedure failed", () => {

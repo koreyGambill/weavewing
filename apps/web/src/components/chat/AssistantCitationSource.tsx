@@ -83,8 +83,15 @@ export function observeAssistantCitationCommentSource({
   return dispose;
 }
 
+/** A follow-up jump: the whole message, user or assistant, with no quoted range. */
+export type MessageReveal = Pick<AssistantCitation, "environmentId" | "threadId" | "messageId">;
+
+export const isMessageReveal = (
+  citation: AssistantCitation | MessageReveal,
+): citation is MessageReveal => !("text" in citation);
+
 export interface AssistantCitationRequest {
-  citation: AssistantCitation;
+  citation: AssistantCitation | MessageReveal;
   key: string;
 }
 
@@ -97,6 +104,12 @@ export interface AssistantCitationTarget extends AssistantCitationRequest {
     pulse?: { startedAt: number; reducedMotion: boolean };
   }>;
   onComplete: () => void;
+}
+
+function wholeMessageRange(root: HTMLElement) {
+  const range = root.ownerDocument.createRange();
+  range.selectNodeContents(root);
+  return range;
 }
 
 function observeAssistantCitationSource({
@@ -163,7 +176,9 @@ function observeAssistantCitationSource({
     const state = list.getState();
     const index = state.indexByKey(itemKey);
     if (index === undefined || !(state.sizeAtIndex(index) > 0)) return;
-    const range = resolveAssistantCitationRange(root, request.citation);
+    const range = isMessageReveal(request.citation)
+      ? wholeMessageRange(root)
+      : resolveAssistantCitationRange(root, request.citation);
     const rect = (range ?? root).getBoundingClientRect();
     if (rect.height <= 0 || scrollNode.clientHeight <= 0) {
       clear();
@@ -338,9 +353,12 @@ export function AssistantCitationSource({
   itemKey,
   request,
   listRef,
+  citable = true,
   children,
 }: {
   messageId: MessageId;
+  /** False for user messages: follow-ups can reveal them, but their text is not quotable. */
+  citable?: boolean;
   threadRef?: ScopedThreadRef;
   itemKey: string;
   request: AssistantCitationTarget | null;
@@ -359,9 +377,9 @@ export function AssistantCitationSource({
   return (
     <div
       ref={rootRef}
-      data-assistant-citation-source={messageId}
-      data-assistant-citation-environment={threadRef?.environmentId}
-      data-assistant-citation-thread={threadRef?.threadId}
+      data-assistant-citation-source={citable ? messageId : undefined}
+      data-assistant-citation-environment={citable ? threadRef?.environmentId : undefined}
+      data-assistant-citation-thread={citable ? threadRef?.threadId : undefined}
     >
       {children}
     </div>

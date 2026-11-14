@@ -63,6 +63,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BellIcon,
+  FlagIcon,
   BoxesIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
@@ -1862,6 +1863,24 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (activeThread !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:follow-ups",
+      title: "Show follow-ups",
+      searchTerms: [
+        "follow up",
+        "follow-ups",
+        "flagged",
+        "flag",
+        "pinned messages",
+        "waiting on me",
+      ],
+      icon: <FlagIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useThreadContextSidebarStore.getState().setTodoScope("all");
+        useThreadContextSidebarStore.getState().show("todos");
+      },
+    });
     actionItems.push({
       kind: "action",
       value: "action:thread-context",

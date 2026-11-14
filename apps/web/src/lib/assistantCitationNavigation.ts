@@ -1,10 +1,13 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { pipe } from "effect/Function";
-import type {
-  AssistantCitation,
-  OrchestrationV2ThreadShell,
-  ScopedThreadRef,
-  ThreadId,
+import {
+  MessageId,
+  ThreadId as ThreadIdSchema,
+  type AssistantCitation,
+  type EnvironmentId,
+  type OrchestrationV2ThreadShell,
+  type ScopedThreadRef,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { useRouter, type AnyRouter } from "@tanstack/react-router";
 import {
@@ -49,10 +52,49 @@ export function assistantCitationFromLocation(href: string) {
   }
 }
 
-/** Return paths drop the quote hash so going back does not reveal its source again. */
+const MESSAGE_HASH_PREFIX = "message=";
+
+/** The message a follow-up jump reveals, from `#message=<base64url thread id>~<base64url message id>`. */
+export function messageRevealFromLocation(
+  href: string,
+): { readonly threadId: ThreadId; readonly messageId: MessageId } | null {
+  const hashIndex = href.indexOf("#");
+  if (hashIndex === -1 || !href.startsWith(MESSAGE_HASH_PREFIX, hashIndex + 1)) return null;
+  const [thread, message, ...rest] = href
+    .slice(hashIndex + 1 + MESSAGE_HASH_PREFIX.length)
+    .split("~")
+    .map((part) => Result.getOrUndefined(Base64Url.decodeString(part)));
+  return thread && message && rest.length === 0
+    ? { threadId: ThreadIdSchema.make(thread), messageId: MessageId.make(message) }
+    : null;
+}
+
+/** The thread id rides along so a view still showing the previous thread ignores the hash. */
+export function messageRevealNavigation(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  messageId: MessageId,
+) {
+  return {
+    to: "/$environmentId/$threadId" as const,
+    params: { environmentId, threadId },
+    hash: `${MESSAGE_HASH_PREFIX}${Base64Url.encode(threadId)}~${Base64Url.encode(messageId)}`,
+    resetScroll: false,
+    state: { assistantCitationActivation: randomUUID() },
+  };
+}
+
+/** Return paths drop a reveal hash so going back does not reveal its source again. */
 export function withoutAssistantCitationHash(href: string) {
   const hashIndex = href.indexOf("#");
-  if (hashIndex === -1 || !href.startsWith(CITATION_HASH_PREFIX, hashIndex + 1)) return href;
+  if (
+    hashIndex === -1 ||
+    !(
+      href.startsWith(CITATION_HASH_PREFIX, hashIndex + 1) ||
+      href.startsWith(MESSAGE_HASH_PREFIX, hashIndex + 1)
+    )
+  )
+    return href;
   return href.slice(0, hashIndex);
 }
 

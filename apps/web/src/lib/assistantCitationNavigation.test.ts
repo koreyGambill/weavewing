@@ -12,6 +12,8 @@ import { selectActiveRightPanelSurface, useRightPanelStore } from "../rightPanel
 import {
   assistantCitationFromLocation,
   assistantCitationNavigation,
+  messageRevealFromLocation,
+  messageRevealNavigation,
   revealSideChatCitation,
 } from "./assistantCitationNavigation";
 
@@ -55,6 +57,20 @@ describe("assistant citation navigation", () => {
       href = reloaded.history.location.href;
       expect(assistantCitationFromLocation(href)).toEqual(citation);
     }
+  });
+
+  it("round-trips a follow-up's message reveal through the router", async () => {
+    const router = createCitationRouter();
+    const messageId = MessageId.make("user:turn/1#2 ä");
+    await router.navigate(
+      messageRevealNavigation(citation.environmentId, citation.threadId, messageId),
+    );
+    expect(messageRevealFromLocation(router.state.location.href)).toEqual({
+      threadId: citation.threadId,
+      messageId,
+    });
+    expect(assistantCitationFromLocation(router.state.location.href)).toBeNull();
+    expect(messageRevealFromLocation("/environment-one/thread-one#message=")).toBeNull();
   });
 
   it("reactivates an identical citation instead of deduplicating its navigation", async () => {

@@ -57,6 +57,8 @@ import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Toggle } from "../ui/toggle";
+import { FollowUpSection, FollowUpsAcrossThreads, ThreadGroup } from "./FollowUps";
+import { messageFollowUpsList } from "../../state/messageFollowUps";
 import { ToggleGroup, ToggleGroupItem as GroupToggle } from "../ui/toggle-group";
 import {
   todoIndentMove,
@@ -83,10 +85,13 @@ const ownerLabel = (owner: Owner) =>
 export function ThreadListView({
   threadRef,
   entry: supplied,
+  keep,
   onRefresh,
 }: {
   threadRef: ScopedThreadRef;
   entry?: ThreadListEntry;
+  /** With a supplied entry, which saved items stay listed. */
+  keep?: (item: ListItem) => boolean;
   onRefresh?: () => void;
 }) {
   const readable = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
@@ -139,7 +144,7 @@ export function ThreadListView({
       setSaved({
         ...entry,
         ...result.value,
-        items: supplied ? result.value.items.filter((item) => item.needsQa) : result.value.items,
+        items: keep ? result.value.items.filter(keep) : result.value.items,
       });
       query.refresh();
       artifacts.refresh();
@@ -288,6 +293,7 @@ export function ThreadListView({
           ) : null}
         </div>
       ) : null}
+      {!supplied ? <FollowUpSection threadRef={threadRef} showDone={showClosed} /> : null}
       <div role="list" aria-label="Todos">
         {tree.map((node) => renderBranch(node, 0))}
       </div>
@@ -869,6 +875,7 @@ export function YourQaView({ threadRef }: { threadRef: ScopedThreadRef }) {
             <ThreadListView
               threadRef={{ ...threadRef, threadId: entry.threadId }}
               entry={entry}
+              keep={(item) => item.needsQa}
               onRefresh={query.refresh}
             />
           </section>
@@ -877,6 +884,94 @@ export function YourQaView({ threadRef }: { threadRef: ScopedThreadRef }) {
         <p className="py-3 text-xs text-muted-foreground">Nothing needs your QA.</p>
       ) : null}
     </div>
+  );
+}
+
+const isYourOpenTodo = (item: ListItem) => item.owner === "you" && item.state === "open";
+
+/** Todos with a Thread | All switch; All gathers what waits on you across the environment. */
+export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const scope = useThreadContextSidebarStore((state) => state.todoScope);
+  return (
+    <div className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
+      <ToggleGroup
+        aria-label="Todos scope"
+        size="segmented-compact"
+        className="w-full *:flex-1"
+        value={[scope]}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next === "thread" || next === "all")
+            useThreadContextSidebarStore.getState().setTodoScope(next);
+        }}
+      >
+        <GroupToggle value="thread">Thread</GroupToggle>
+        <GroupToggle value="all">All</GroupToggle>
+      </ToggleGroup>
+      {scope === "thread" ? (
+        <ThreadListView threadRef={threadRef} />
+      ) : (
+        <WaitingOnYou threadRef={threadRef} />
+      )}
+    </div>
+  );
+}
+
+function WaitingOnYou({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const readable = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
+  const query = useEnvironmentQuery(
+    readable
+      ? threadListRead({ environmentId: threadRef.environmentId, input: { allThreads: true } })
+      : null,
+  );
+  const followUpCount = useEnvironmentQuery(
+    readable ? messageFollowUpsList({ environmentId: threadRef.environmentId, input: {} }) : null,
+  ).data?.length;
+  if (!readable) return <p className="text-muted-foreground">This connection cannot read todos.</p>;
+  const entries =
+    query.data
+      ?.map((entry) => ({ ...entry, items: entry.items.filter(isYourOpenTodo) }))
+      .filter((entry) => entry.items.length > 0) ?? [];
+  const todoCount = entries.reduce((sum, entry) => sum + entry.items.length, 0);
+  return (
+    <>
+      <FollowUpsAcrossThreads environmentId={threadRef.environmentId} />
+      {entries.length ? (
+        <section aria-label="Your todos" className="space-y-1">
+          <h3 className="flex items-center gap-1.5 px-0.5 text-3xs font-medium tracking-wide text-muted-foreground uppercase">
+            <UserIcon aria-hidden className="size-3" />
+            Your todos
+            <span className="tabular-nums">{todoCount}</span>
+          </h3>
+          {entries.map((entry) => (
+            <ThreadGroup
+              key={entry.threadId}
+              environmentId={threadRef.environmentId}
+              threadId={entry.threadId}
+              title={entry.threadTitle}
+            >
+              <ThreadListView
+                threadRef={{ ...threadRef, threadId: entry.threadId }}
+                entry={entry}
+                keep={isYourOpenTodo}
+                onRefresh={query.refresh}
+              />
+            </ThreadGroup>
+          ))}
+        </section>
+      ) : null}
+      {query.error ? <p role="alert">{query.error}</p> : null}
+      {query.data && !entries.length && followUpCount === 0 ? (
+        <Empty size="compact">
+          <EmptyMedia variant="icon">
+            <ListChecksIcon />
+          </EmptyMedia>
+          <EmptyDescription>
+            Nothing is waiting on you. Flag a message with Follow up, or add a todo for yourself.
+          </EmptyDescription>
+        </Empty>
+      ) : null}
+    </>
   );
 }
 

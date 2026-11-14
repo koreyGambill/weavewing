@@ -4,7 +4,7 @@ import { Atom, type AtomRegistry } from "effect/reactivity";
 import type { TimelineEntry } from "../../session-logic";
 import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
 import { toastManager } from "../ui/toast";
-import type { AssistantCitationRequest } from "./AssistantCitationSource";
+import { isMessageReveal, type AssistantCitationRequest } from "./AssistantCitationSource";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
 /** Whether the cited response is in the loaded history, after paging toward it. */
@@ -20,7 +20,7 @@ export type CitationPhase =
   | { readonly _tag: "failed" };
 
 export interface CitedThreadSnapshot {
-  readonly message: "assistant" | "other" | null;
+  readonly message: "assistant" | "user" | "other" | null;
   readonly hasMoreHistory: boolean;
   readonly loadFailed?: true;
 }
@@ -59,13 +59,16 @@ export async function loadCitedHistory(input: {
   readonly signal: AbortSignal;
   readonly readThread: () => Promise<CitedThreadSnapshot | null>;
   readonly loadThrough: () => Promise<HistoryPageResult>;
+  /** A follow-up jump reveals the user's own messages too. */
+  readonly revealsUser?: boolean;
 }): Promise<CitedHistoryOutcome> {
   for (let attempts = 0; ; attempts += 1) {
     const thread = await input.readThread();
     if (thread === null || input.signal.aborted) return { _tag: "aborted" };
     if (thread.loadFailed) return COULD_NOT_LOAD;
-    if (thread.message === "assistant") return { _tag: "found" };
-    if (thread.message === "other") {
+    if (thread.message === "assistant" || (thread.message === "user" && input.revealsUser))
+      return { _tag: "found" };
+    if (thread.message !== null) {
       return {
         _tag: "failed",
         title: "The citation does not refer to an assistant response",
@@ -89,6 +92,7 @@ export function resolveCitationPhase(input: {
   readonly messageId: string;
   readonly entries: ReadonlyArray<TimelineEntry>;
   readonly rows: ReadonlyArray<MessagesTimelineRow>;
+  readonly revealsUser?: boolean;
 }): CitationPhase {
   if (input.history._tag === "failed") return { _tag: "failed" };
   const source = input.entries.find(
@@ -96,7 +100,11 @@ export function resolveCitationPhase(input: {
   );
   // The history store can hold the message a render before the entries do.
   if (!source) return { _tag: "loading" };
-  if (source.kind !== "message" || source.message.role !== "assistant") return { _tag: "failed" };
+  if (
+    source.kind !== "message" ||
+    !(source.message.role === "assistant" || (source.message.role === "user" && input.revealsUser))
+  )
+    return { _tag: "failed" };
   const row = input.rows.find(
     (candidate) => candidate.kind === "message" && candidate.message.id === input.messageId,
   );
@@ -132,7 +140,7 @@ export function citedThreadSnapshot(input: {
       row.item.messageId === input.messageId,
   )?.item;
   return {
-    message: item === undefined ? null : item.type === "assistant_message" ? "assistant" : "other",
+    message: item === undefined ? null : item.type === "assistant_message" ? "assistant" : "user",
     hasMoreHistory: input.history.hasMoreHistory,
   };
 }
@@ -142,6 +150,7 @@ interface CitedHistoryKey {
   readonly environmentId: AssistantCitationRequest["citation"]["environmentId"];
   readonly threadId: AssistantCitationRequest["citation"]["threadId"];
   readonly messageId: AssistantCitationRequest["citation"]["messageId"];
+  readonly revealsUser: boolean;
 }
 
 function waitForSettledThread(
@@ -176,7 +185,7 @@ function waitForSettledThread(
  * Plain-object keys compare structurally, so one activation is one procedure.
  */
 const citedHistoryAtom = Atom.family(
-  ({ key, environmentId, threadId, messageId }: CitedHistoryKey) => {
+  ({ key, environmentId, threadId, messageId, revealsUser }: CitedHistoryKey) => {
     const ref = { environmentId, threadId };
     const threadAtom = environmentThreadDetails.quietThreadAtom(ref);
     const historyAtom = environmentThreadDetails.historyAtom(ref);
@@ -196,6 +205,7 @@ const citedHistoryAtom = Atom.family(
       get.addFinalizer(() => controller.abort());
       void loadCitedHistory({
         signal: controller.signal,
+        revealsUser,
         readThread: () => waitForSettledThread(get.registry, settledThreadAtom, controller.signal),
         loadThrough: async () => {
           const result = await runAtomCommand(
@@ -213,8 +223,12 @@ const citedHistoryAtom = Atom.family(
         if (outcome._tag === "failed") {
           toastManager.add({
             type: "warning",
-            title: outcome.title,
-            description: outcome.description,
+            ...(revealsUser
+              ? {
+                  title: "Could not open the message",
+                  description: "It may have been removed, or older history did not load.",
+                }
+              : { title: outcome.title, description: outcome.description }),
           });
         }
         get.setSelf({ _tag: outcome._tag });
@@ -235,6 +249,7 @@ export function useCitedHistory(request: AssistantCitationRequest | null): Cited
           environmentId: request.citation.environmentId,
           threadId: request.citation.threadId,
           messageId: request.citation.messageId,
+          revealsUser: isMessageReveal(request.citation),
         }),
   );
 }
