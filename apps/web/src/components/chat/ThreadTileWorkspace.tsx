@@ -1393,6 +1393,10 @@ export function ThreadTileWorkspace(props: {
                     aria-label="Areas"
                   >
                     {areaChoices.map((choice, index) => {
+                      const openNote =
+                        choice.openElsewhere && chatGroup?.id === id
+                          ? "Main chat is open in this tile"
+                          : choice.openElsewhere;
                       const button = (
                         <Button
                           key={choice.label}
@@ -1402,7 +1406,7 @@ export function ThreadTileWorkspace(props: {
                           size="sm"
                           aria-keyshortcuts={choice.key.toUpperCase()}
                           aria-disabled={choice.openElsewhere ? true : undefined}
-                          aria-description={choice.openElsewhere ?? undefined}
+                          aria-description={openNote ?? undefined}
                           onClick={() => choice.run(id)}
                         >
                           {choice.label}
@@ -1419,7 +1423,7 @@ export function ThreadTileWorkspace(props: {
                       return choice.openElsewhere ? (
                         <Tooltip key={choice.label}>
                           <TooltipTrigger render={button} />
-                          <TooltipPopup>{choice.openElsewhere}</TooltipPopup>
+                          <TooltipPopup>{openNote}</TooltipPopup>
                         </Tooltip>
                       ) : (
                         button
