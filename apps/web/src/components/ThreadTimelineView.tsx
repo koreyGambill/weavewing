@@ -28,7 +28,7 @@ import {
   type TimelineBar,
   type TimelineLaneLayout,
 } from "./threadTimeline.logic";
-import { CheckedLabel } from "./reviews/ThreadListView";
+import { CheckedLabel } from "./ToolFilterMenuTrigger";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyMedia } from "./ui/empty";
 import {

@@ -25,7 +25,8 @@ import {
   PlusIcon,
   UserIcon,
 } from "lucide-react";
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
+import { CheckedLabel } from "../ToolFilterMenuTrigger";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -39,7 +40,6 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuRadioItemIndicator,
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
@@ -76,16 +76,6 @@ const filterOptions = [
   { value: "mine", Icon: UserIcon, iconClass: "text-success-foreground" },
   { value: "agents", Icon: BotIcon, iconClass: "text-(--weavewing-yellow)" },
 ] as const;
-
-/** A radio item's label with its check on the right, which the menu's radio items omit. */
-export function CheckedLabel({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex items-center justify-between gap-4">
-      {children}
-      <MenuRadioItemIndicator />
-    </span>
-  );
-}
 
 const ownerLabel = (owner: Owner) =>
   owner === "agent" ? "Agent is responsible" : "You're responsible";
