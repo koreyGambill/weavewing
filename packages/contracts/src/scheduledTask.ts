@@ -332,9 +332,6 @@ export const ScheduledTaskAgent = Schema.Union([
 ]);
 export type ScheduledTaskAgent = typeof ScheduledTaskAgent.Type;
 
-export const isReviewTask = (task: { readonly agent?: ScheduledTaskAgent | undefined }) =>
-  task.agent?.type === "review";
-
 export const ScheduledTask = Schema.Struct({
   id: ScheduledTaskId,
   title: TrimmedNonEmptyString,
