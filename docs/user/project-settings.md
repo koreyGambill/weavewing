@@ -119,10 +119,21 @@ threads, optionally with their forks, subagents, and delegated threads. A status
 source event can be narrowed to one source and the state it changes to. The run's
 prompt ends with what happened. **Cooldown** sets the minimum time between runs for
 the same thread or status source; events during it run once when it ends.
-**Coalesce** waits after the first event and runs once with the latest. **Max runs**
-caps runs per hour (12 by default); events over it wait for the next hour. A task
-that runs when a turn ends waits 60 seconds per thread by default.
-Threads a task starts, and its own turns, never trigger it.
+**Coalesce** waits after the first event and runs once with the latest. Event
+tasks run at most 12 times an hour unless **Limits** sets another number; events
+over it wait for the next hour. A task that runs when a turn ends waits 60 seconds
+per thread by default. Threads a task starts, and its own turns, never trigger it.
+
+Every run uses the task's model, even in a thread that was switched to another
+one. **Limits** caps each run of the task's thread, including turns you start
+there: its cost in dollars, its tokens, how many subagents it may start, and runs
+per hour. A run over its cost or token budget stops mid-turn and shows as stopped
+at its budget. Cost counts the agent's priced usage plus an estimate for its
+subagents and compaction, so a run can stop a little early. With a subagent or
+budget limit, the agent's own subagent tools are off and subagents go through T3
+Code, on the task's model unless the agent was given others. Over the hourly
+limit, scheduled runs and webhook requests are skipped and listed as over the
+cap; **Run now** is never limited.
 
 Deleting a thread also deletes tasks that post into that thread. Tasks that start
 a new thread on each run survive deletion of their previous threads.

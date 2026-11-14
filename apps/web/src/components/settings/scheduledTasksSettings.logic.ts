@@ -9,10 +9,12 @@ import {
 import {
   EnvironmentId,
   MAX_EVENT_FILTER_THREADS,
+  MAX_GRANT_SUBAGENTS,
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
   type ProjectId,
   ScheduledTaskId,
   type ScheduledTask,
+  type ScheduledTaskGrant,
   type ScheduledTaskSchedule,
   type ScheduledTaskThreadMode,
   type ScheduledTaskUpsertSchedule,
@@ -156,8 +158,21 @@ export interface DraftState {
   readonly eventToState: StatusState | "";
   readonly eventCooldownSeconds: string;
   readonly eventCoalesceSeconds: string;
-  readonly eventMaxRunsPerHour: string;
+  readonly maxRunsPerHour: string;
+  readonly maxCostUsd: string;
+  readonly maxTokens: string;
+  readonly maxSubagents: string;
+  /** The stored grant, so a save keeps what the form doesn't edit: `notify`, subagent models. */
+  readonly savedGrant: ScheduledTaskGrant | null;
 }
+
+export const LIMIT_DRAFT_DEFAULTS = {
+  maxRunsPerHour: "",
+  maxCostUsd: "",
+  maxTokens: "",
+  maxSubagents: "",
+  savedGrant: null,
+} as const;
 
 export const EVENT_DRAFT_DEFAULTS = {
   eventKind: "run_ended",
@@ -168,7 +183,6 @@ export const EVENT_DRAFT_DEFAULTS = {
   eventToState: "",
   eventCooldownSeconds: "",
   eventCoalesceSeconds: "",
-  eventMaxRunsPerHour: "",
 } as const;
 
 function parseWhole(value: string, minimum: number, maximum: number): number | null | undefined {
@@ -213,11 +227,6 @@ export function scheduleDraftErrors(draft: DraftState) {
       errors.push({
         title: "Invalid coalescing window",
         description: "Enter whole seconds from 0 to 3600, or leave it blank.",
-      });
-    if (parseWhole(draft.eventMaxRunsPerHour, 1, 120) === null)
-      errors.push({
-        title: "Invalid run limit",
-        description: "Enter whole runs per hour from 1 to 120, or leave it blank.",
       });
     if (draft.eventThreadIds.length > MAX_EVENT_FILTER_THREADS)
       errors.push({
@@ -332,11 +341,9 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
   if (draft.scheduleMode === "event") {
     const cooldownSeconds = parseWhole(draft.eventCooldownSeconds, 0, 86_400) ?? undefined;
     const coalesceSeconds = parseWhole(draft.eventCoalesceSeconds, 0, 3600) ?? undefined;
-    const maxRunsPerHour = parseWhole(draft.eventMaxRunsPerHour, 1, 120) ?? undefined;
     const timing = {
       ...(cooldownSeconds === undefined ? {} : { cooldownSeconds }),
       ...(coalesceSeconds === undefined ? {} : { coalesceSeconds }),
-      ...(maxRunsPerHour === undefined ? {} : { maxRunsPerHour }),
     };
     if (draft.eventKind === "status_transition") {
       const statusSource = draft.eventStatusSource.trim();
@@ -452,11 +459,64 @@ export function taskToDraft(task: ScheduledTask): DraftState {
             schedule.cooldownSeconds === undefined ? "" : String(schedule.cooldownSeconds),
           eventCoalesceSeconds:
             schedule.coalesceSeconds === undefined ? "" : String(schedule.coalesceSeconds),
-          eventMaxRunsPerHour:
-            schedule.maxRunsPerHour === undefined ? "" : String(schedule.maxRunsPerHour),
         }
       : EVENT_DRAFT_DEFAULTS),
+    maxRunsPerHour: optionalText(task.grant?.maxRunsPerHour),
+    maxCostUsd: optionalText(task.grant?.budget?.maxCostUsd),
+    maxTokens: optionalText(task.grant?.budget?.maxTokens),
+    maxSubagents: optionalText(task.grant?.subagents?.max),
+    savedGrant: task.grant ?? null,
   };
+}
+
+const optionalText = (value: number | undefined) => (value === undefined ? "" : String(value));
+
+function parseCost(value: string): number | null | undefined {
+  const trimmed = value.trim().replace(/^\$/, "");
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed >= 0.01 && parsed <= 50 ? parsed : null;
+}
+
+export function limitsDraftErrors(draft: DraftState) {
+  const errors: Array<{ title: string; description: string }> = [];
+  if (parseCost(draft.maxCostUsd) === null)
+    errors.push({ title: "Invalid cost limit", description: "Enter dollars from 0.01 to 50." });
+  if (parseWhole(draft.maxTokens, 1, Number.MAX_SAFE_INTEGER) === null)
+    errors.push({ title: "Invalid token limit", description: "Enter a whole number of tokens." });
+  if (parseWhole(draft.maxSubagents, 0, MAX_GRANT_SUBAGENTS) === null)
+    errors.push({
+      title: "Invalid subagent limit",
+      description: `Enter whole subagents from 0 to ${MAX_GRANT_SUBAGENTS}.`,
+    });
+  if (parseWhole(draft.maxRunsPerHour, 1, 120) === null)
+    errors.push({ title: "Invalid run limit", description: "Enter whole runs from 1 to 120." });
+  return errors;
+}
+
+/** The grant to save, or null to remove it. Blank fields set no limit. */
+export function grantFromDraft(draft: DraftState): ScheduledTaskGrant | null {
+  const maxCostUsd = parseCost(draft.maxCostUsd) ?? undefined;
+  const maxTokens = parseWhole(draft.maxTokens, 1, Number.MAX_SAFE_INTEGER) ?? undefined;
+  const maxSubagents = parseWhole(draft.maxSubagents, 0, MAX_GRANT_SUBAGENTS) ?? undefined;
+  const maxRunsPerHour = parseWhole(draft.maxRunsPerHour, 1, 120) ?? undefined;
+  const saved = draft.savedGrant;
+  const grant: ScheduledTaskGrant = {
+    ...(saved?.notify === undefined ? {} : { notify: saved.notify }),
+    ...(maxSubagents === undefined
+      ? {}
+      : { subagents: { max: maxSubagents, models: saved?.subagents?.models ?? [] } }),
+    ...(maxCostUsd === undefined && maxTokens === undefined
+      ? {}
+      : {
+          budget: {
+            ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+            ...(maxTokens === undefined ? {} : { maxTokens }),
+          },
+        }),
+    ...(maxRunsPerHour === undefined ? {} : { maxRunsPerHour }),
+  };
+  return Object.keys(grant).length === 0 ? null : grant;
 }
 
 export function moveDraftToThread(

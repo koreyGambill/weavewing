@@ -24,6 +24,8 @@ import {
   scheduleFromDraft,
   scheduleLabel,
   taskToDraft,
+  grantFromDraft,
+  limitsDraftErrors,
   unbindDraftFromThread,
 } from "./scheduledTasksSettings.logic";
 
@@ -244,7 +246,6 @@ describe("event scheduled tasks", () => {
       includeDescendants: true,
       cooldownSeconds: 600,
       coalesceSeconds: 30,
-      maxRunsPerHour: 4,
     } as const;
     const draft = taskToDraft({ ...legacyTask, schedule });
     expect(draft.scheduleMode).toBe("event");
@@ -263,7 +264,6 @@ describe("event scheduled tasks", () => {
       toState: "fail",
       cooldownSeconds: 600,
       coalesceSeconds: 30,
-      maxRunsPerHour: 4,
     });
     expect(
       scheduleFromDraft({
@@ -271,11 +271,38 @@ describe("event scheduled tasks", () => {
         eventProjectOnly: false,
         eventThreadIds: [],
         eventCoalesceSeconds: "",
-        eventMaxRunsPerHour: "",
       }),
     ).toEqual({ type: "event", event: "run_ended", cooldownSeconds: 600 });
     expect(scheduleFromDraft({ ...draft, eventCoalesceSeconds: "3601" })).toBeNull();
-    expect(scheduleFromDraft({ ...draft, eventMaxRunsPerHour: "0" })).toBeNull();
+  });
+});
+
+describe("scheduled task limits", () => {
+  it("round-trips a grant, keeps what the form doesn't edit, and clears it when blank", () => {
+    const grant = {
+      notify: false,
+      subagents: {
+        max: 2,
+        models: [{ instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" }],
+      },
+      budget: { maxCostUsd: 0.5 },
+      maxRunsPerHour: 4,
+    };
+    const draft = taskToDraft({ ...legacyTask, grant });
+    expect(grantFromDraft(draft)).toEqual(grant);
+    expect(grantFromDraft({ ...draft, maxCostUsd: "$1.25", maxTokens: "200000" })).toEqual({
+      ...grant,
+      budget: { maxCostUsd: 1.25, maxTokens: 200_000 },
+    });
+    const cleared = { ...draft, maxCostUsd: "", maxSubagents: "", maxRunsPerHour: "" };
+    // Only `notify`, which the form doesn't show, is left.
+    expect(grantFromDraft(cleared)).toEqual({ notify: false });
+    expect(grantFromDraft({ ...cleared, savedGrant: null })).toBeNull();
+    expect(
+      limitsDraftErrors({ ...draft, maxCostUsd: "0", maxSubagents: "11", maxRunsPerHour: "0" }).map(
+        (error) => error.title,
+      ),
+    ).toEqual(["Invalid cost limit", "Invalid subagent limit", "Invalid run limit"]);
   });
 });
 

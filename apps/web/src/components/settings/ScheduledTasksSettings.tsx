@@ -88,6 +88,7 @@ import {
   DEFAULT_EVENT_MAX_RUNS_PER_HOUR,
   DEFAULT_RUN_ENDED_COOLDOWN_SECONDS,
   MAX_EVENT_FILTER_THREADS,
+  MAX_GRANT_SUBAGENTS,
   isEventDrivenWake,
   managedCapabilityDenial,
 } from "@t3tools/contracts";
@@ -101,7 +102,10 @@ import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import {
   EVENT_DRAFT_DEFAULTS,
+  LIMIT_DRAFT_DEFAULTS,
   WEBHOOK_SIGNATURE_DEFAULTS,
+  grantFromDraft,
+  limitsDraftErrors,
   changeDraftProject,
   moveDraftToThread,
   scheduleDraftErrors,
@@ -205,6 +209,7 @@ const EMPTY_DRAFT: DraftState = {
   filters: [],
   savedFilters: [],
   ...EVENT_DRAFT_DEFAULTS,
+  ...LIMIT_DRAFT_DEFAULTS,
 };
 
 const EVENT_KIND_LABELS: Record<DraftState["eventKind"], string> = {
@@ -480,7 +485,7 @@ function EventTriggerFields({
           ) : null}
         </>
       )}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Cooldown" hint="seconds" htmlFor="scheduled-task-event-cooldown">
           <Input
             id="scheduled-task-event-cooldown"
@@ -507,25 +512,82 @@ function EventTriggerFields({
             onChange={(event) => update({ eventCoalesceSeconds: event.target.value })}
           />
         </Field>
-        <Field label="Max runs" hint="per hour" htmlFor="scheduled-task-event-max-runs">
-          <Input
-            id="scheduled-task-event-max-runs"
-            type="number"
-            nativeInput
-            min={1}
-            max={120}
-            placeholder={String(DEFAULT_EVENT_MAX_RUNS_PER_HOUR)}
-            value={draft.eventMaxRunsPerHour}
-            onChange={(event) => update({ eventMaxRunsPerHour: event.target.value })}
-          />
-        </Field>
       </div>
       <p className="text-xs text-muted-foreground">
         {statusEvent
           ? "Cooldown and coalescing apply per status source."
           : "Cooldown and coalescing apply per thread. Threads this task starts never trigger it."}{" "}
-        Events over the hourly limit wait. The run&apos;s prompt ends with what happened.
+        Events over the hourly run limit wait. The run&apos;s prompt ends with what happened.
       </p>
+    </div>
+  );
+}
+
+function LimitFields({
+  draft,
+  setDraft,
+}: {
+  draft: DraftState;
+  setDraft: Dispatch<SetStateAction<DraftState>>;
+}) {
+  const update = (patch: Partial<DraftState>) => setDraft((current) => ({ ...current, ...patch }));
+  const models = draft.savedGrant?.subagents?.models ?? [];
+  const field = (
+    key: "maxCostUsd" | "maxTokens" | "maxSubagents" | "maxRunsPerHour",
+    label: string,
+    hint: string,
+    placeholder: string,
+    limits: { readonly min: number; readonly max?: number; readonly step?: string },
+  ) => (
+    <Field label={label} hint={hint} htmlFor={`scheduled-task-limit-${key}`}>
+      <Input
+        id={`scheduled-task-limit-${key}`}
+        type="number"
+        nativeInput
+        {...limits}
+        placeholder={placeholder}
+        value={draft[key]}
+        onChange={(event) => update({ [key]: event.target.value })}
+      />
+    </Field>
+  );
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label>Limits</Label>
+        <p className="text-xs text-muted-foreground">
+          Per run of this automation&apos;s thread, including turns you start there. A run over
+          budget stops mid-turn. Blank means no limit.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {field("maxCostUsd", "Cost", "USD per run", "No limit", {
+          min: 0.01,
+          max: 50,
+          step: "0.01",
+        })}
+        {field("maxTokens", "Tokens", "per run", "No limit", { min: 1 })}
+        {field("maxSubagents", "Subagents", "per run", "No limit", {
+          min: 0,
+          max: MAX_GRANT_SUBAGENTS,
+        })}
+        {field(
+          "maxRunsPerHour",
+          "Runs",
+          "per hour",
+          draft.scheduleMode === "event" ? String(DEFAULT_EVENT_MAX_RUNS_PER_HOUR) : "No limit",
+          { min: 1, max: 120 },
+        )}
+      </div>
+      {draft.maxSubagents.trim() ? (
+        <p className="text-xs break-words text-muted-foreground">
+          Subagents may use{" "}
+          {models.length === 0
+            ? "this automation's model only"
+            : models.map((model) => `${model.instanceId}/${model.model}`).join(", ")}
+          . The agent's own subagent tools are off.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1710,6 +1772,7 @@ function ScheduledTaskEditorForm({
     environment?.serverConfig?.environment.capabilities.scheduledTaskThreadModes === true;
   const eventTriggersSupported =
     environment?.serverConfig?.environment.capabilities.eventTriggers === true;
+  const offersLimits = environment?.serverConfig?.environment.capabilities.automations === true;
   const connected =
     environment?.connection.phase === "connected" && environment.serverConfig !== null;
   const tasksQuery = useEnvironmentQuery(
@@ -1832,6 +1895,11 @@ function ScheduledTaskEditorForm({
       for (const error of scheduleDraftErrors(draft)) reportFailure(error.title, error.description);
       return;
     }
+    const limitErrors = offersLimits ? limitsDraftErrors(draft) : [];
+    if (limitErrors.length > 0) {
+      for (const error of limitErrors) reportFailure(error.title, error.description);
+      return;
+    }
     if (
       schedule.type === "webhook" &&
       schedule.signature &&
@@ -1892,6 +1960,7 @@ function ScheduledTaskEditorForm({
         clampManagedRuntimeMode(environment?.serverConfig?.managedPolicy, draft.runtimeMode) ??
         draft.runtimeMode,
       interactionMode: draft.interactionMode,
+      ...(offersLimits ? { grant: grantFromDraft(draft) } : {}),
       creationSource: "web",
     };
     // Lock before React renders, and keep successful creates locked until the form closes.
@@ -2514,6 +2583,7 @@ function ScheduledTaskEditorForm({
               />
             </div>
           ) : null}
+          {offersLimits ? <LimitFields draft={draft} setDraft={setDraft} /> : null}
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0 space-y-1">
               <Label htmlFor="scheduled-task-enabled">Enabled</Label>
