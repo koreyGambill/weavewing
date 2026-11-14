@@ -30,53 +30,37 @@ const candidate = (...ids: ReadonlyArray<string>) => ({
   confidence: 0.5,
   evidence: cite(...ids),
 });
+type Filed = { readonly ids: ReadonlyArray<string>; readonly other?: true };
+const findings = (filed: ReadonlyArray<Filed>) =>
+  filed.map((item) => ({
+    threadId: item.other ? ThreadId.make("other") : thread,
+    evidence: cite(...item.ids),
+  }));
 
-it.each([
-  ["new evidence, nothing filed", candidate("a"), [], false],
-  ["only reviewed context", candidate("seen"), [], true],
-  ["new and reviewed context", candidate("seen", "a"), [], false],
+it.each<
+  [string, ReturnType<typeof candidate>, ReadonlyArray<Filed>, ReadonlyArray<Filed>, boolean]
+>([
+  ["new evidence, nothing filed", candidate("a"), [], [], false],
+  ["only reviewed context", candidate("seen"), [], [], true],
+  ["reviewed context and a new message", candidate("seen", "a"), [], [], false],
   [
-    "shares a message with an open finding",
-    candidate("a", "b"),
-    [{ ids: ["a"], outcome: null }],
-    true,
-  ],
-  ["shares with an unresolved one", candidate("a"), [{ ids: ["a"], outcome: "unresolved" }], true],
-  [
-    "recurs after a correction, same messages",
-    candidate("a"),
-    [{ ids: ["a", "b"], outcome: "corrected" }],
-    true,
-  ],
-  [
-    "recurs after a correction, new message",
-    candidate("a", "b"),
-    [{ ids: ["a"], outcome: "corrected" }],
+    "new message beside an open finding's context message",
+    candidate("seen", "a"),
+    [{ ids: ["seen"] }],
+    [],
     false,
   ],
+  ["only messages earlier findings cited", candidate("a"), [{ ids: ["a", "b"] }], [], true],
+  ["a cited message and an uncited one", candidate("a", "b"), [{ ids: ["a"] }], [], false],
   [
-    "after an accepted explanation, same messages",
-    candidate("a"),
-    [{ ids: ["a"], outcome: "accepted_explanation" }],
+    "shares a new message with this review's finding",
+    candidate("a", "b"),
+    [],
+    [{ ids: ["b"] }],
     true,
   ],
-  [
-    "open finding on another thread",
-    candidate("a"),
-    [{ ids: ["a"], outcome: null, other: true }],
-    false,
-  ],
-] as const)("%s", (_name, finding, prior, repeats) => {
-  assert.equal(
-    repeatsKnownIncident(
-      finding,
-      snapshot,
-      prior.map((item) => ({
-        threadId: "other" in item ? ThreadId.make("other") : thread,
-        evidence: cite(...item.ids),
-        outcome: item.outcome,
-      })),
-    ),
-    repeats,
-  );
+  ["new message this review has not filed", candidate("a"), [], [{ ids: ["b"] }], false],
+  ["earlier finding on another thread", candidate("a"), [{ ids: ["a"], other: true }], [], false],
+])("%s", (_name, finding, prior, raised, repeats) => {
+  assert.equal(repeatsKnownIncident(finding, snapshot, findings(prior), findings(raised)), repeats);
 });

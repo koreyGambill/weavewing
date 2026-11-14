@@ -27,6 +27,13 @@ const PRIOR_CONTEXT_MESSAGES = 2;
 const COVERAGE =
   "Chat messages and child-agent chat only; commands, tool activity and files were not inspected. Missing tracking or unobserved changes cannot be inferred from this snapshot.";
 
+/** A message's place in its thread's (created_at, message_id) order. */
+export interface ReviewMark {
+  readonly createdAt: string;
+  readonly messageId: string;
+}
+export type ReviewWatermark = Readonly<Record<string, ReviewMark>>;
+
 export interface MonitoringSnapshotData {
   readonly threads: ReadonlyArray<{
     readonly id: ThreadId;
@@ -41,7 +48,7 @@ export interface MonitoringSnapshotData {
     }>;
   }>;
   /** Per thread, the newest message this windowed snapshot shows; the next window starts after it. */
-  readonly reviewedThrough?: Readonly<Record<string, string>>;
+  readonly reviewedThrough?: ReviewWatermark;
   readonly newestContextAt?: string;
   readonly projectRoot?: string;
   readonly truncated: boolean;
@@ -101,7 +108,7 @@ export class MonitoringSnapshot extends Context.Service<
     readonly capture: (
       profile: ReviewProfile,
       threadId?: ThreadId,
-      watermark?: Readonly<Record<string, string>>,
+      watermark?: ReviewWatermark,
     ) => Effect.Effect<MonitoringSnapshotData, MonitoringError>;
   }
 >()("t3/monitoring/MonitoringSnapshot") {}
@@ -263,7 +270,7 @@ const make = Effect.gen(function* () {
         };
       }
       const result: Array<MonitoringSnapshotData["threads"][number]> = [];
-      const reviewedThrough: Record<string, string> = { ...watermark };
+      const reviewedThrough: Record<string, ReviewMark> = { ...watermark };
       let remaining = 80_000;
       let truncated =
         rows.length > 200 ||
@@ -293,21 +300,55 @@ const make = Effect.gen(function* () {
             break;
           }
           const since = watermark?.[item.id];
-          const records = yield* sql<{
-            payload_json: string;
-            created_at: string;
-          }>`SELECT payload_json, created_at FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=0 AND ${since === undefined ? sql`1` : sql`created_at > ${since}`} ORDER BY created_at DESC, message_id DESC LIMIT 41`.pipe(
-            NodeSqliteClient.readOnly,
-            Effect.mapError((cause) => new MonitoringError({ operation: "read messages", cause })),
-          );
+          const after = (mark: ReviewMark) =>
+            sql`(created_at > ${mark.createdAt} OR (created_at = ${mark.createdAt} AND message_id > ${mark.messageId}))`;
+          // A finished message cannot land before one still streaming and be skipped by the mark.
+          const [streaming] =
+            watermark === undefined
+              ? []
+              : yield* sql<{
+                  created_at: string;
+                  message_id: string;
+                }>`SELECT created_at, message_id FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=1 AND ${since === undefined ? sql`1` : after(since)} ORDER BY created_at, message_id LIMIT 1`.pipe(
+                  NodeSqliteClient.readOnly,
+                  Effect.mapError(
+                    (cause) => new MonitoringError({ operation: "read messages", cause }),
+                  ),
+                );
+          const window = sql`thread_id=${item.id} AND streaming=0 AND ${since === undefined ? sql`1` : after(since)} AND ${streaming === undefined ? sql`1` : sql`NOT ${after({ createdAt: streaming.created_at, messageId: streaming.message_id })}`}`;
+          // Past the mark, the oldest come first so the next window picks up the rest.
+          const records =
+            since === undefined
+              ? (yield* sql<{
+                  payload_json: string;
+                  created_at: string;
+                  message_id: string;
+                }>`SELECT payload_json, created_at, message_id FROM orchestration_v2_projection_messages WHERE ${window} ORDER BY created_at DESC, message_id DESC LIMIT 41`.pipe(
+                  NodeSqliteClient.readOnly,
+                  Effect.mapError(
+                    (cause) => new MonitoringError({ operation: "read messages", cause }),
+                  ),
+                )).toReversed()
+              : yield* sql<{
+                  payload_json: string;
+                  created_at: string;
+                  message_id: string;
+                }>`SELECT payload_json, created_at, message_id FROM orchestration_v2_projection_messages WHERE ${window} ORDER BY created_at, message_id LIMIT 41`.pipe(
+                  NodeSqliteClient.readOnly,
+                  Effect.mapError(
+                    (cause) => new MonitoringError({ operation: "read messages", cause }),
+                  ),
+                );
           if (records.length > 40) truncated = true;
+          const fresh = since === undefined ? records.slice(-40) : records.slice(0, 40);
           const earlier =
             since === undefined
               ? []
               : yield* sql<{
                   payload_json: string;
                   created_at: string;
-                }>`SELECT payload_json, created_at FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=0 AND created_at <= ${since} ORDER BY created_at DESC, message_id DESC LIMIT ${PRIOR_CONTEXT_MESSAGES}`.pipe(
+                  message_id: string;
+                }>`SELECT payload_json, created_at, message_id FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=0 AND NOT ${after(since)} ORDER BY created_at DESC, message_id DESC LIMIT ${PRIOR_CONTEXT_MESSAGES}`.pipe(
                   NodeSqliteClient.readOnly,
                   Effect.mapError(
                     (cause) => new MonitoringError({ operation: "read messages", cause }),
@@ -315,10 +356,7 @@ const make = Effect.gen(function* () {
                 );
           const ordered = [
             ...earlier.toReversed().map((record) => ({ record, priorContext: true })),
-            ...records
-              .slice(0, 40)
-              .toReversed()
-              .map((record) => ({ record, priorContext: false })),
+            ...fresh.map((record) => ({ record, priorContext: false })),
           ];
           const messages = yield* decodeMessages(
             ordered.map(({ record }) => record.payload_json),
@@ -327,7 +365,7 @@ const make = Effect.gen(function* () {
               (cause) => new MonitoringError({ operation: "decode messages", cause }),
             ),
           );
-          let newest: string | undefined;
+          let newest: ReviewMark | undefined;
           const bounded = messages.flatMap((message, index) => {
             const { record, priorContext } = ordered[index]!;
             const cap = priorContext ? 1000 : 4000;
@@ -336,7 +374,7 @@ const make = Effect.gen(function* () {
             if (!text) return [];
             if (!priorContext) {
               if (text.length < message.text.length) truncated = true;
-              newest = record.created_at;
+              newest = { createdAt: record.created_at, messageId: record.message_id };
             }
             return [
               {

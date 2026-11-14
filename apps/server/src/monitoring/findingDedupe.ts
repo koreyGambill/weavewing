@@ -2,36 +2,32 @@ import type { MonitoringFinding, MonitoringReviewOutput } from "@t3tools/contrac
 import type { MonitoringSnapshotData } from "./MonitoringSnapshot.ts";
 
 type Candidate = MonitoringReviewOutput["findings"][number];
-type Prior = Pick<MonitoringFinding, "threadId" | "evidence" | "outcome">;
+type Filed = Pick<MonitoringFinding, "threadId" | "evidence">;
 
-const RESOLVED = new Set(["corrected", "accepted_explanation"]);
-const cited = (evidence: Candidate["evidence"]) =>
-  new Set(evidence.map((item) => `${item.threadId}\0${item.messageId}`));
+const key = (item: { readonly threadId: string; readonly messageId: string }) =>
+  `${item.threadId}\0${item.messageId}`;
+const citedBy = (findings: ReadonlyArray<Filed>, threadId: string) =>
+  new Set(
+    findings.filter((finding) => finding.threadId === threadId).flatMap((f) => f.evidence.map(key)),
+  );
 
 /**
- * Whether a new review's finding repeats an incident already filed for its thread: it cites only
- * messages an earlier review saw, or shares evidence with an open finding. After a correction or
- * accepted explanation, it counts as new only when it also cites messages that finding did not.
+ * Whether a review's finding repeats an incident already filed for its thread. Messages an earlier
+ * review saw (prior context, or evidence of the thread's earlier findings) cannot make a finding
+ * new. A finding is a repeat when it cites nothing else, or when it shares one of its new messages
+ * with a finding this review already filed.
  */
 export function repeatsKnownIncident(
   candidate: Candidate,
   snapshot: MonitoringSnapshotData,
-  prior: ReadonlyArray<Prior>,
+  prior: ReadonlyArray<Filed>,
+  raised: ReadonlyArray<Filed>,
 ): boolean {
-  const priorContext = candidate.evidence.every((item) =>
-    snapshot.threads.some(
-      (thread) =>
-        thread.id === item.threadId &&
-        thread.messages.some((message) => message.id === item.messageId && message.priorContext),
-    ),
-  );
-  if (priorContext) return true;
-  const keys = cited(candidate.evidence);
-  return prior.some((finding) => {
-    if (finding.threadId !== candidate.threadId) return false;
-    const old = cited(finding.evidence);
-    return finding.outcome !== null && RESOLVED.has(finding.outcome)
-      ? [...keys].every((key) => old.has(key))
-      : [...keys].some((key) => old.has(key));
-  });
+  const seen = citedBy(prior, candidate.threadId);
+  for (const thread of snapshot.threads)
+    for (const message of thread.messages)
+      if (message.priorContext) seen.add(key({ threadId: thread.id, messageId: message.id }));
+  const fresh = candidate.evidence.map(key).filter((item) => !seen.has(item));
+  const filedNow = citedBy(raised, candidate.threadId);
+  return fresh.length === 0 || fresh.some((item) => filedNow.has(item));
 }

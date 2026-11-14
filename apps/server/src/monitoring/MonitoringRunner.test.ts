@@ -748,12 +748,13 @@ it.effect(
 it.effect("reviews a thread's turn end from its watermark and files each incident once", () =>
   Effect.gen(function* () {
     const thread = ThreadId.make("thread");
-    const watermark = yield* Ref.make<Readonly<Record<string, string>>>({ thread: "t1" });
+    const mark = (messageId: string) => ({ createdAt: `at ${messageId}`, messageId });
+    const watermark = yield* Ref.make<Snapshot.ReviewWatermark>({ thread: mark("old") });
     const findings = yield* Ref.make<ReadonlyArray<MonitoringFinding>>([]);
     const raised = yield* Ref.make<ReadonlyArray<Notifications.RaiseInput>>([]);
-    const fresh = yield* Ref.make(true);
+    const turn = yield* Ref.make<"first" | "second" | "none">("first");
     const failModel = yield* Ref.make(false);
-    const captured: Array<Readonly<Record<string, string>> | undefined> = [];
+    const captured: Array<Snapshot.ReviewWatermark | undefined> = [];
     const prompts: Array<string> = [];
     const evidence = (messageId: string, excerpt: string) => ({
       threadId: thread,
@@ -772,23 +773,30 @@ it.effect("reviews a thread's turn end from its watermark and files each inciden
       {
         capture: (_profile, _threadId, since) =>
           Effect.sync(() => captured.push(since)).pipe(
-            Effect.andThen(Ref.get(fresh)),
-            Effect.map((hasNew) => ({
-              reviewedThrough: hasNew ? { thread: "t3" } : (since ?? {}),
+            Effect.andThen(Ref.get(turn)),
+            Effect.map((current) => ({
+              reviewedThrough:
+                current === "first"
+                  ? { thread: mark("claim") }
+                  : current === "second"
+                    ? { thread: mark("next") }
+                    : (since ?? {}),
               threads: [
                 {
                   id: thread,
                   title: "Main",
                   parentThreadId: null,
                   messages: [
-                    { id: "old", role: "assistant", text: "Pushed to main", priorContext: true },
-                    ...(hasNew
-                      ? [
-                          { id: "new", role: "assistant", text: "Pushed to main again" },
-                          { id: "claim", role: "assistant", text: "Done, all verified" },
-                        ]
-                      : []),
-                  ],
+                    ["old", "Pushed to main", true],
+                    ["new", "Pushed to main again", current !== "first"],
+                    ["claim", "Done, all verified", current !== "first"],
+                    ...(current === "second" ? [["next", "Starting the next ticket", false]] : []),
+                  ].map(([id, text, seen]) => ({
+                    id: String(id),
+                    role: "assistant",
+                    text: String(text),
+                    ...(seen ? { priorContext: true as const } : {}),
+                  })),
                 },
               ],
               truncated: false,
@@ -850,23 +858,24 @@ it.effect("reviews a thread's turn end from its watermark and files each inciden
     yield* Effect.gen(function* () {
       yield* Ref.set(failModel, true);
       assert.equal((yield* runTurnEnd).status, "failed");
-      assert.deepEqual(yield* Ref.get(watermark), { thread: "t1" });
+      assert.deepEqual(yield* Ref.get(watermark), { thread: mark("old") });
       yield* Ref.set(failModel, false);
       assert.equal((yield* runTurnEnd).status, "notified");
-      assert.deepEqual(captured, [{ thread: "t1" }, { thread: "t1" }]);
+      assert.deepEqual(captured, [{ thread: mark("old") }, { thread: mark("old") }]);
       assert.deepEqual(
         (yield* Ref.get(raised)).map((input) => input.title),
         ["Pushed again"],
       );
-      assert.deepEqual(yield* Ref.get(watermark), { thread: "t3" });
+      assert.deepEqual(yield* Ref.get(watermark), { thread: mark("claim") });
       // The next turn sees the filed incident in its prompt and does not file it again.
+      yield* Ref.set(turn, "second");
       assert.equal((yield* runTurnEnd).status, "quiet");
       assert.include(
         prompts.at(-1),
-        '"priorFindings":[{"ruleId":"verify","summary":"Pushed again"',
+        '"priorFindings":[{"threadId":"thread","ruleId":"verify","summary":"Pushed again"',
       );
       assert.notInclude(prompts.at(-1), "reviewedThrough");
-      yield* Ref.set(fresh, false);
+      yield* Ref.set(turn, "none");
       const calls = prompts.length;
       assert.equal((yield* runTurnEnd).status, "quiet");
       assert.equal(prompts.length, calls);

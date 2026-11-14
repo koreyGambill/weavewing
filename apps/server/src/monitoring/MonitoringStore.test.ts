@@ -76,20 +76,33 @@ it.effect("keeps a turn-end watermark per task and thread and lists a thread's f
     })}`;
     const thread = ThreadId.make("thread");
     assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), {});
-    yield* store.saveReviewWatermark(taskId, thread, { thread: now });
-    yield* store.saveReviewWatermark(taskId, thread, { thread: "2026-11-11T00:00:00.000Z" });
-    assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), {
-      thread: "2026-11-11T00:00:00.000Z",
+    yield* store.saveReviewWatermark(taskId, thread, {
+      thread: { createdAt: now, messageId: "a" },
     });
-    for (const [id, threadId] of [
-      ["here", "thread"],
-      ["elsewhere", "other"],
-    ] as const)
+    const later = { createdAt: "2026-11-11T00:00:00.000Z", messageId: "b" };
+    yield* store.saveReviewWatermark(taskId, thread, { thread: later });
+    assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), { thread: later });
+    // A folded watcher's scheduled and turn-end halves share findings; each thread keeps its newest 20.
+    const filed = [
+      ...Array.from({ length: 21 }, (_, index) => [`busy-${index}`, "busy", taskId] as const),
+      ["turn-end", "thread", `${taskId}:turn-end`] as const,
+      ["elsewhere", "other", taskId] as const,
+      ["other-task", "thread", "monitoring:other"] as const,
+    ];
+    for (const [id, threadId, profileId] of filed)
       yield* sql`INSERT INTO monitoring_findings (id, profile_id, thread_id, updated_at, payload_json)
-        VALUES (${id}, ${taskId}, ${threadId}, ${now}, ${JSON.stringify({ ...finding(id), threadId })})`;
+        VALUES (${id}, ${profileId}, ${threadId}, ${now}, ${JSON.stringify({ ...finding(id), threadId })})`;
+    const listed = yield* store.listThreadFindings(taskId, [thread, ThreadId.make("busy")]);
     assert.deepStrictEqual(
-      (yield* store.listThreadFindings(taskId, [thread])).map((item) => item.id),
-      ["here"],
+      listed.filter((item) => item.threadId === thread).map((item) => item.id),
+      ["turn-end"],
+    );
+    assert.equal(listed.filter((item) => item.threadId === "busy").length, 20);
+    assert.deepStrictEqual(
+      (yield* store.listThreadFindings(ScheduledTaskId.make(`${taskId}:turn-end`), [thread])).map(
+        (item) => item.id,
+      ),
+      ["turn-end"],
     );
     yield* sql`DELETE FROM scheduled_tasks WHERE task_id = ${taskId}`;
     assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), {});

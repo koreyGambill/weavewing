@@ -11,13 +11,19 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import type { ReviewWatermark } from "./MonitoringSnapshot.ts";
 
 const decodeFinding = Schema.decodeEffect(Schema.fromJsonString(MonitoringFinding));
 const encodeFinding = Schema.encodeEffect(Schema.fromJsonString(MonitoringFinding));
 const decodeFindings = Schema.decodeEffect(Schema.Array(Schema.fromJsonString(MonitoringFinding)));
-const ReviewWatermark = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
-const decodeWatermark = Schema.decodeEffect(ReviewWatermark);
-const encodeWatermark = Schema.encodeEffect(ReviewWatermark);
+const ReviewWatermarkJson = Schema.fromJsonString(
+  Schema.Record(
+    Schema.String,
+    Schema.Struct({ createdAt: Schema.String, messageId: Schema.String }),
+  ),
+);
+const decodeWatermark = Schema.decodeEffect(ReviewWatermarkJson);
+const encodeWatermark = Schema.encodeEffect(ReviewWatermarkJson);
 
 export class MonitoringStore extends Context.Service<
   MonitoringStore,
@@ -35,20 +41,23 @@ export class MonitoringStore extends Context.Service<
       exceptRunId: string | null,
     ) => Effect.Effect<string | null, MonitoringError>;
     readonly saveFinding: (finding: MonitoringFinding) => Effect.Effect<void, MonitoringError>;
-    /** The task's newest findings, of any outcome, about these threads. */
+    /**
+     * Each thread's newest findings, of any outcome, from this task or the other half of the
+     * folded watcher it came from.
+     */
     readonly listThreadFindings: (
       taskId: ScheduledTaskId,
       threadIds: ReadonlyArray<ThreadId>,
     ) => Effect.Effect<ReadonlyArray<MonitoringFinding>, MonitoringError>;
-    /** Per reviewed thread, the newest message time a turn-end review of `threadId` has seen. */
+    /** Per reviewed thread, the newest message a turn-end review of `threadId` has seen. */
     readonly reviewWatermark: (
       taskId: ScheduledTaskId,
       threadId: ThreadId,
-    ) => Effect.Effect<Readonly<Record<string, string>>, MonitoringError>;
+    ) => Effect.Effect<ReviewWatermark, MonitoringError>;
     readonly saveReviewWatermark: (
       taskId: ScheduledTaskId,
       threadId: ThreadId,
-      reviewed: Readonly<Record<string, string>>,
+      reviewed: ReviewWatermark,
     ) => Effect.Effect<void, MonitoringError>;
   }
 >()("t3/monitoring/MonitoringStore") {}
@@ -104,9 +113,14 @@ const make = Effect.gen(function* () {
     listThreadFindings: Effect.fn("MonitoringStore.listThreadFindings")(
       function* (taskId, threadIds) {
         if (!threadIds.length) return [];
-        return yield* sql<{ payload_json: string }>`SELECT payload_json FROM monitoring_findings
-        WHERE profile_id = ${taskId} AND thread_id IN ${sql.in(threadIds)}
-        ORDER BY updated_at DESC LIMIT 50`.pipe(
+        // Migration 100 split a watcher into `<id>` and `<id>:turn-end`; both file one set of findings.
+        const base = taskId.replace(/:turn-end$/, "");
+        return yield* sql<{ payload_json: string }>`SELECT payload_json FROM (
+          SELECT payload_json, updated_at, ROW_NUMBER() OVER (
+            PARTITION BY thread_id ORDER BY updated_at DESC, id DESC) AS place
+          FROM monitoring_findings
+          WHERE profile_id IN (${base}, ${`${base}:turn-end`}) AND thread_id IN ${sql.in(threadIds)}
+        ) WHERE place <= 20 ORDER BY updated_at DESC`.pipe(
           NodeSqliteClient.readOnly,
           Effect.flatMap((rows) => decodeFindings(rows.map((row) => row.payload_json))),
           Effect.mapError((cause) => new MonitoringError({ operation: "read findings", cause })),

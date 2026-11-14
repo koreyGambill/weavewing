@@ -68,12 +68,20 @@ export function monitoringReviewPrompt(
       ...(profile.kind === "context-review"
         ? {}
         : {
-            priorFindings: priorFindings.slice(0, 30).map((finding) => ({
-              ruleId: finding.ruleId,
-              summary: finding.summary,
-              outcome: finding.outcome,
-              evidenceMessageIds: finding.evidence.map((item) => item.messageId),
-            })),
+            // The dedupe check uses each thread's newest 20; the model sees the newest 10.
+            priorFindings: priorFindings
+              .filter(
+                (finding, index) =>
+                  priorFindings.slice(0, index).filter((f) => f.threadId === finding.threadId)
+                    .length < 10,
+              )
+              .map((finding) => ({
+                threadId: finding.threadId,
+                ruleId: finding.ruleId,
+                summary: finding.summary,
+                outcome: finding.outcome,
+                evidenceMessageIds: finding.evidence.map((item) => item.messageId),
+              })),
           }),
       snapshot: { ...snapshot, reviewedThrough: undefined },
     }),
@@ -376,11 +384,14 @@ const make = Effect.gen(function* () {
           error: result.failure.message,
         } satisfies ReviewRunOutcome;
       const { output, snapshot } = result.success;
-      const known = [...result.success.priorFindings];
+      const raisedNow: Array<MonitoringFinding> = [];
       const completedAt = DateTime.formatIso(yield* DateTime.now);
       const notificationIds: string[] = [];
       for (const content of output.findings) {
-        if (profile.kind !== "context-review" && repeatsKnownIncident(content, snapshot, known))
+        if (
+          profile.kind !== "context-review" &&
+          repeatsKnownIncident(content, snapshot, result.success.priorFindings, raisedNow)
+        )
           continue;
         const fingerprint = yield* digest.digestHex(
           Digest.sha256,
@@ -427,7 +438,7 @@ const make = Effect.gen(function* () {
           outcome: null,
         };
         yield* store.saveFinding(finding);
-        known.push(finding);
+        raisedNow.push(finding);
         const notificationId = yield* raise(profile, finding);
         if (notificationId !== null) notificationIds.push(notificationId);
         const delivered = yield* delivery.deliver({ profile, finding }).pipe(
