@@ -80,6 +80,7 @@ describe("V2 preview upgrade", () => {
         [98, "ScheduledTaskDisabledThreads"],
         [99, "ScheduledTaskGrants"],
         [100, "FoldWatchersIntoAutomations"],
+        [101, "MonitoringReviewWatermarks"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -203,6 +204,7 @@ describe("V2 preview upgrade", () => {
         [98, "ScheduledTaskDisabledThreads"],
         [99, "ScheduledTaskGrants"],
         [100, "FoldWatchersIntoAutomations"],
+        [101, "MonitoringReviewWatermarks"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

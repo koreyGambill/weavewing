@@ -234,3 +234,85 @@ it.effect(
       ),
     ),
 );
+
+it.effect("windows a turn-end snapshot to messages after each thread's watermark", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const time = (second: number) => `1970-01-01T00:00:0${second}.000Z`;
+    for (const id of ["root", "other"]) {
+      const payload = JSON.stringify({
+        id,
+        projectId: "project",
+        title: id,
+        providerInstanceId: "claude",
+        modelSelection: { instanceId: "claude", model: "haiku" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+        forkedFrom: null,
+        createdBy: "user",
+        creationSource: "web",
+        createdAt: at,
+        updatedAt: at,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+      });
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},'project',${id},'claude','full-access','default',${at},${at},${payload})`;
+    }
+    const message = (threadId: string, second: number) => {
+      const id = `${threadId}:${second}`;
+      const payload = JSON.stringify({
+        id,
+        threadId,
+        runId: null,
+        nodeId: null,
+        role: "assistant",
+        text: `text ${id}`,
+        attachments: [],
+        streaming: false,
+        createdAt: time(second),
+        updatedAt: time(second),
+        createdBy: "agent",
+        creationSource: "server",
+      });
+      return sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES (${id},${threadId},'assistant',0,${time(second)},${time(second)},${payload})`;
+    };
+    for (const second of [1, 2, 3, 4, 5]) yield* message("root", second);
+    yield* message("other", 6);
+    const snapshots = yield* Snapshot.MonitoringSnapshot;
+    const turnEnd = { ...profile, targets: { ...profile.targets, threadIds: [] } };
+    const windowed = yield* snapshots.capture(turnEnd, ThreadId.make("root"), {
+      root: time(3),
+      other: time(1),
+    });
+    assert.deepEqual(
+      windowed.threads.map((thread) =>
+        thread.messages.map((m) => `${m.id}${m.priorContext ? " (context)" : ""}`),
+      ),
+      [["root:2 (context)", "root:3 (context)", "root:4", "root:5"]],
+    );
+    assert.deepEqual(windowed.reviewedThrough, { root: time(5), other: time(1) });
+    const caughtUp = yield* snapshots.capture(turnEnd, ThreadId.make("root"), { root: time(5) });
+    assert.isTrue(caughtUp.threads[0]?.messages.every((m) => m.priorContext));
+    assert.deepEqual(caughtUp.reviewedThrough, { root: time(5) });
+    const full = yield* snapshots.capture(turnEnd, ThreadId.make("root"));
+    assert.equal(full.reviewedThrough, undefined);
+    assert.deepEqual(
+      full.threads.map((thread) => thread.messages.length),
+      [5],
+    );
+  }).pipe(
+    Effect.provide(
+      Snapshot.layer.pipe(
+        Layer.provide(Layer.mock(ContextRecords.ContextRecords)({})),
+        Layer.provideMerge(Sqlite.layerMemory),
+      ),
+    ),
+  ),
+);

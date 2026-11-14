@@ -3,6 +3,7 @@ import {
   MonitoringFinding,
   type MonitoringFindingId,
   type ScheduledTaskId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
@@ -14,6 +15,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 const decodeFinding = Schema.decodeEffect(Schema.fromJsonString(MonitoringFinding));
 const encodeFinding = Schema.encodeEffect(Schema.fromJsonString(MonitoringFinding));
 const decodeFindings = Schema.decodeEffect(Schema.Array(Schema.fromJsonString(MonitoringFinding)));
+const ReviewWatermark = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
+const decodeWatermark = Schema.decodeEffect(ReviewWatermark);
+const encodeWatermark = Schema.encodeEffect(ReviewWatermark);
 
 export class MonitoringStore extends Context.Service<
   MonitoringStore,
@@ -31,6 +35,21 @@ export class MonitoringStore extends Context.Service<
       exceptRunId: string | null,
     ) => Effect.Effect<string | null, MonitoringError>;
     readonly saveFinding: (finding: MonitoringFinding) => Effect.Effect<void, MonitoringError>;
+    /** The task's newest findings, of any outcome, about these threads. */
+    readonly listThreadFindings: (
+      taskId: ScheduledTaskId,
+      threadIds: ReadonlyArray<ThreadId>,
+    ) => Effect.Effect<ReadonlyArray<MonitoringFinding>, MonitoringError>;
+    /** Per reviewed thread, the newest message time a turn-end review of `threadId` has seen. */
+    readonly reviewWatermark: (
+      taskId: ScheduledTaskId,
+      threadId: ThreadId,
+    ) => Effect.Effect<Readonly<Record<string, string>>, MonitoringError>;
+    readonly saveReviewWatermark: (
+      taskId: ScheduledTaskId,
+      threadId: ThreadId,
+      reviewed: Readonly<Record<string, string>>,
+    ) => Effect.Effect<void, MonitoringError>;
   }
 >()("t3/monitoring/MonitoringStore") {}
 
@@ -82,6 +101,47 @@ const make = Effect.gen(function* () {
         Effect.mapError((cause) => new MonitoringError({ operation: "save finding", cause })),
       );
     }),
+    listThreadFindings: Effect.fn("MonitoringStore.listThreadFindings")(
+      function* (taskId, threadIds) {
+        if (!threadIds.length) return [];
+        return yield* sql<{ payload_json: string }>`SELECT payload_json FROM monitoring_findings
+        WHERE profile_id = ${taskId} AND thread_id IN ${sql.in(threadIds)}
+        ORDER BY updated_at DESC LIMIT 50`.pipe(
+          NodeSqliteClient.readOnly,
+          Effect.flatMap((rows) => decodeFindings(rows.map((row) => row.payload_json))),
+          Effect.mapError((cause) => new MonitoringError({ operation: "read findings", cause })),
+        );
+      },
+    ),
+    reviewWatermark: Effect.fn("MonitoringStore.reviewWatermark")(function* (taskId, threadId) {
+      const rows = yield* sql<{ reviewed_json: string }>`SELECT reviewed_json
+        FROM monitoring_review_watermarks WHERE task_id = ${taskId} AND thread_id = ${threadId}`.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError((cause) => new MonitoringError({ operation: "read watermark", cause })),
+      );
+      return rows[0] === undefined
+        ? {}
+        : yield* decodeWatermark(rows[0].reviewed_json).pipe(
+            Effect.mapError(
+              (cause) => new MonitoringError({ operation: "decode watermark", cause }),
+            ),
+          );
+    }),
+    saveReviewWatermark: Effect.fn("MonitoringStore.saveReviewWatermark")(
+      function (taskId, threadId, reviewed) {
+        return encodeWatermark(reviewed).pipe(
+          Effect.flatMap(
+            (
+              json,
+            ) => sql`INSERT INTO monitoring_review_watermarks (task_id, thread_id, reviewed_json)
+            VALUES (${taskId}, ${threadId}, ${json})
+            ON CONFLICT(task_id, thread_id) DO UPDATE SET reviewed_json = excluded.reviewed_json`,
+          ),
+          Effect.asVoid,
+          Effect.mapError((cause) => new MonitoringError({ operation: "save watermark", cause })),
+        );
+      },
+    ),
   });
 });
 export const layer = Layer.effect(MonitoringStore, make);

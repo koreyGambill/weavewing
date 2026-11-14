@@ -23,6 +23,10 @@ const decodeMessages = Schema.decodeEffect(
   Schema.Array(Schema.fromJsonString(OrchestrationV2ConversationMessageJson)),
 );
 
+const PRIOR_CONTEXT_MESSAGES = 2;
+const COVERAGE =
+  "Chat messages and child-agent chat only; commands, tool activity and files were not inspected. Missing tracking or unobserved changes cannot be inferred from this snapshot.";
+
 export interface MonitoringSnapshotData {
   readonly threads: ReadonlyArray<{
     readonly id: ThreadId;
@@ -32,8 +36,12 @@ export interface MonitoringSnapshotData {
       readonly id: string;
       readonly role: string;
       readonly text: string;
+      /** Reviewed before; shown only so newer messages can be understood. */
+      readonly priorContext?: true;
     }>;
   }>;
+  /** Per thread, the newest message this windowed snapshot shows; the next window starts after it. */
+  readonly reviewedThrough?: Readonly<Record<string, string>>;
   readonly newestContextAt?: string;
   readonly projectRoot?: string;
   readonly truncated: boolean;
@@ -89,9 +97,11 @@ export function validateMonitoringEvidence(
 export class MonitoringSnapshot extends Context.Service<
   MonitoringSnapshot,
   {
+    /** With `watermark`, each thread shows only messages newer than its entry there. */
     readonly capture: (
       profile: ReviewProfile,
       threadId?: ThreadId,
+      watermark?: Readonly<Record<string, string>>,
     ) => Effect.Effect<MonitoringSnapshotData, MonitoringError>;
   }
 >()("t3/monitoring/MonitoringSnapshot") {}
@@ -100,7 +110,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const contexts = yield* ContextRecords.ContextRecords;
   return MonitoringSnapshot.of({
-    capture: Effect.fn("MonitoringSnapshot.capture")(function* (profile, threadId) {
+    capture: Effect.fn("MonitoringSnapshot.capture")(function* (profile, threadId, watermark) {
       if (threadId !== undefined)
         profile = {
           ...profile,
@@ -253,6 +263,7 @@ const make = Effect.gen(function* () {
         };
       }
       const result: Array<MonitoringSnapshotData["threads"][number]> = [];
+      const reviewedThrough: Record<string, string> = { ...watermark };
       let remaining = 80_000;
       let truncated =
         rows.length > 200 ||
@@ -281,31 +292,62 @@ const make = Effect.gen(function* () {
             truncated = true;
             break;
           }
+          const since = watermark?.[item.id];
           const records = yield* sql<{
             payload_json: string;
-          }>`SELECT payload_json FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=0 ORDER BY created_at DESC, message_id DESC LIMIT 41`.pipe(
+            created_at: string;
+          }>`SELECT payload_json, created_at FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=0 AND ${since === undefined ? sql`1` : sql`created_at > ${since}`} ORDER BY created_at DESC, message_id DESC LIMIT 41`.pipe(
             NodeSqliteClient.readOnly,
             Effect.mapError((cause) => new MonitoringError({ operation: "read messages", cause })),
           );
           if (records.length > 40) truncated = true;
-          const messages = yield* decodeMessages(
-            records
+          const earlier =
+            since === undefined
+              ? []
+              : yield* sql<{
+                  payload_json: string;
+                  created_at: string;
+                }>`SELECT payload_json, created_at FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=0 AND created_at <= ${since} ORDER BY created_at DESC, message_id DESC LIMIT ${PRIOR_CONTEXT_MESSAGES}`.pipe(
+                  NodeSqliteClient.readOnly,
+                  Effect.mapError(
+                    (cause) => new MonitoringError({ operation: "read messages", cause }),
+                  ),
+                );
+          const ordered = [
+            ...earlier.toReversed().map((record) => ({ record, priorContext: true })),
+            ...records
               .slice(0, 40)
-              .reverse()
-              .map((record) => record.payload_json),
+              .toReversed()
+              .map((record) => ({ record, priorContext: false })),
+          ];
+          const messages = yield* decodeMessages(
+            ordered.map(({ record }) => record.payload_json),
           ).pipe(
             Effect.mapError(
               (cause) => new MonitoringError({ operation: "decode messages", cause }),
             ),
           );
-          const bounded = messages
-            .map((message) => {
-              const text = message.text.slice(0, Math.min(4000, remaining));
-              remaining -= text.length;
+          let newest: string | undefined;
+          const bounded = messages.flatMap((message, index) => {
+            const { record, priorContext } = ordered[index]!;
+            const cap = priorContext ? 1000 : 4000;
+            const text = message.text.slice(0, Math.min(cap, remaining));
+            remaining -= text.length;
+            if (!text) return [];
+            if (!priorContext) {
               if (text.length < message.text.length) truncated = true;
-              return { id: message.id, role: message.role, text };
-            })
-            .filter((message) => message.text.length > 0);
+              newest = record.created_at;
+            }
+            return [
+              {
+                id: message.id,
+                role: message.role,
+                text,
+                ...(priorContext ? { priorContext: true as const } : {}),
+              },
+            ];
+          });
+          if (newest !== undefined) reviewedThrough[item.id] = newest;
           result.push({
             id: root.id === item.id ? root.id : ThreadId.make(item.id),
             title: item.parentThreadId === null ? root.title : "Child agent",
@@ -316,10 +358,13 @@ const make = Effect.gen(function* () {
       }
       return {
         ...(projectRoot === undefined ? {} : { projectRoot }),
+        ...(watermark === undefined ? {} : { reviewedThrough }),
         threads: result,
         truncated,
         coverage:
-          "Chat messages and child-agent chat only; commands, tool activity and files were not inspected. Missing tracking or unobserved changes cannot be inferred from this snapshot.",
+          watermark === undefined
+            ? COVERAGE
+            : `${COVERAGE} Only messages since this thread's last review; priorContext messages were reviewed before and are included for understanding.`,
       };
     }),
   });

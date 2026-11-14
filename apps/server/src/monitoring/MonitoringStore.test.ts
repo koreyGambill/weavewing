@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ScheduledTaskId } from "@t3tools/contracts";
+import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -47,5 +47,51 @@ it.effect("re-delivers only findings the user has neither read nor dismissed", (
       (yield* store.listOpenFindings(taskId)).map((open) => open.id),
       ["unread"],
     );
+  }).pipe(Effect.provide(Store.layer.pipe(Layer.provideMerge(Sqlite.layerMemory)))),
+);
+
+it.effect("keeps a turn-end watermark per task and thread and lists a thread's findings", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations();
+    const store = yield* Store.MonitoringStore;
+    const now = "2026-11-10T00:00:00.000Z";
+    yield* sql`INSERT INTO scheduled_tasks ${sql.insert({
+      task_id: taskId,
+      title: "Watcher",
+      prompt: "Review",
+      enabled: 1,
+      schedule_json: '{"type":"event","event":"run_ended"}',
+      project_id: "project",
+      workspace_strategy_json: '{"type":"root"}',
+      model_selection_json: '{"instanceId":"claude","model":"haiku"}',
+      runtime_mode: "approval-required",
+      interaction_mode: "default",
+      created_by: "user",
+      creation_source: "web",
+      created_at: now,
+      updated_at: now,
+      last_run_status: "never",
+      run_count: 0,
+    })}`;
+    const thread = ThreadId.make("thread");
+    assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), {});
+    yield* store.saveReviewWatermark(taskId, thread, { thread: now });
+    yield* store.saveReviewWatermark(taskId, thread, { thread: "2026-11-11T00:00:00.000Z" });
+    assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), {
+      thread: "2026-11-11T00:00:00.000Z",
+    });
+    for (const [id, threadId] of [
+      ["here", "thread"],
+      ["elsewhere", "other"],
+    ] as const)
+      yield* sql`INSERT INTO monitoring_findings (id, profile_id, thread_id, updated_at, payload_json)
+        VALUES (${id}, ${taskId}, ${threadId}, ${now}, ${JSON.stringify({ ...finding(id), threadId })})`;
+    assert.deepStrictEqual(
+      (yield* store.listThreadFindings(taskId, [thread])).map((item) => item.id),
+      ["here"],
+    );
+    yield* sql`DELETE FROM scheduled_tasks WHERE task_id = ${taskId}`;
+    assert.deepStrictEqual(yield* store.reviewWatermark(taskId, thread), {});
   }).pipe(Effect.provide(Store.layer.pipe(Layer.provideMerge(Sqlite.layerMemory)))),
 );

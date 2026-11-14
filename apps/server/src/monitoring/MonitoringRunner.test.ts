@@ -337,6 +337,9 @@ function runnerLayer(
           lastReviewAt: () => Effect.succeed(null),
           getFinding: () => Effect.succeed(null),
           saveFinding: () => Effect.void,
+          listThreadFindings: () => Effect.succeed([]),
+          reviewWatermark: () => Effect.succeed({}),
+          saveReviewWatermark: () => Effect.void,
           ...store,
         }),
         inbox,
@@ -740,4 +743,133 @@ it.effect(
       }).pipe(Effect.provide(layer));
       assert.deepEqual(budgets, [0.3, undefined, 0.05, 1]);
     }).pipe(Effect.scoped),
+);
+
+it.effect("reviews a thread's turn end from its watermark and files each incident once", () =>
+  Effect.gen(function* () {
+    const thread = ThreadId.make("thread");
+    const watermark = yield* Ref.make<Readonly<Record<string, string>>>({ thread: "t1" });
+    const findings = yield* Ref.make<ReadonlyArray<MonitoringFinding>>([]);
+    const raised = yield* Ref.make<ReadonlyArray<Notifications.RaiseInput>>([]);
+    const fresh = yield* Ref.make(true);
+    const failModel = yield* Ref.make(false);
+    const captured: Array<Readonly<Record<string, string>> | undefined> = [];
+    const prompts: Array<string> = [];
+    const evidence = (messageId: string, excerpt: string) => ({
+      threadId: thread,
+      messageId: MessageId.make(messageId),
+      excerpt,
+    });
+    const layer = runnerLayer(
+      {
+        getFinding: (id) =>
+          Ref.get(findings).pipe(Effect.map((all) => all.find((item) => item.id === id) ?? null)),
+        saveFinding: (finding) => Ref.update(findings, (all) => [...all, finding]),
+        listThreadFindings: () => Ref.get(findings),
+        reviewWatermark: () => Ref.get(watermark),
+        saveReviewWatermark: (_task, _thread, reviewed) => Ref.set(watermark, reviewed),
+      },
+      {
+        capture: (_profile, _threadId, since) =>
+          Effect.sync(() => captured.push(since)).pipe(
+            Effect.andThen(Ref.get(fresh)),
+            Effect.map((hasNew) => ({
+              reviewedThrough: hasNew ? { thread: "t3" } : (since ?? {}),
+              threads: [
+                {
+                  id: thread,
+                  title: "Main",
+                  parentThreadId: null,
+                  messages: [
+                    { id: "old", role: "assistant", text: "Pushed to main", priorContext: true },
+                    ...(hasNew
+                      ? [
+                          { id: "new", role: "assistant", text: "Pushed to main again" },
+                          { id: "claim", role: "assistant", text: "Done, all verified" },
+                        ]
+                      : []),
+                  ],
+                },
+              ],
+              truncated: false,
+              coverage: "Chat",
+            })),
+          ),
+      },
+      (input) =>
+        Effect.sync(() => prompts.push(input.prompt)).pipe(
+          Effect.andThen(Ref.get(failModel)),
+          Effect.flatMap((fail) =>
+            fail
+              ? Effect.fail(
+                  new TextGenerationError({ operation: "generateMonitoringReview", detail: "x" }),
+                )
+              : Effect.succeed({
+                  findings: [
+                    // Only the context message, which an earlier review already saw.
+                    {
+                      threadId: thread,
+                      ruleId: "verify",
+                      summary: "Old push",
+                      detail: "d",
+                      confidence: 0.9,
+                      evidence: [evidence("old", "Pushed to main")],
+                    },
+                    {
+                      threadId: thread,
+                      ruleId: "verify",
+                      summary: "Pushed again",
+                      detail: "d",
+                      confidence: 0.9,
+                      evidence: [evidence("new", "Pushed to main again")],
+                    },
+                    // The same incident under another rule.
+                    {
+                      threadId: thread,
+                      ruleId: "review",
+                      summary: "Landed unreviewed",
+                      detail: "d",
+                      confidence: 0.9,
+                      evidence: [evidence("new", "again"), evidence("claim", "Done")],
+                    },
+                  ],
+                }),
+          ),
+        ),
+      () => Effect.succeed({ delivery: "alert_only", messageId: null }),
+      raised,
+    );
+    const turnEnd: ReviewProfile = {
+      ...profile,
+      turnEnd: true,
+      rules: [...profile.rules, { id: "review", title: "Review", instructions: "Review." }],
+    };
+    const runTurnEnd = Effect.flatMap(Runner.MonitoringRunner, (runner) =>
+      runner.runTask({ task: taskFor(turnEnd), runId: null, threadId: thread }),
+    );
+    yield* Effect.gen(function* () {
+      yield* Ref.set(failModel, true);
+      assert.equal((yield* runTurnEnd).status, "failed");
+      assert.deepEqual(yield* Ref.get(watermark), { thread: "t1" });
+      yield* Ref.set(failModel, false);
+      assert.equal((yield* runTurnEnd).status, "notified");
+      assert.deepEqual(captured, [{ thread: "t1" }, { thread: "t1" }]);
+      assert.deepEqual(
+        (yield* Ref.get(raised)).map((input) => input.title),
+        ["Pushed again"],
+      );
+      assert.deepEqual(yield* Ref.get(watermark), { thread: "t3" });
+      // The next turn sees the filed incident in its prompt and does not file it again.
+      assert.equal((yield* runTurnEnd).status, "quiet");
+      assert.include(
+        prompts.at(-1),
+        '"priorFindings":[{"ruleId":"verify","summary":"Pushed again"',
+      );
+      assert.notInclude(prompts.at(-1), "reviewedThrough");
+      yield* Ref.set(fresh, false);
+      const calls = prompts.length;
+      assert.equal((yield* runTurnEnd).status, "quiet");
+      assert.equal(prompts.length, calls);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
