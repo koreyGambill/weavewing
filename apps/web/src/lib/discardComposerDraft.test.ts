@@ -1,4 +1,5 @@
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -53,8 +54,22 @@ beforeEach(() => {
 });
 
 describe("discardComposerDraft", () => {
-  it("drops a new-thread draft that holds nothing yet, with nothing to undo", () => {
+  it.each([
+    ["no composer entry", () => {}],
+    [
+      "only a model choice",
+      () =>
+        useComposerDraftStore
+          .getState()
+          .setModelSelection(
+            draftId,
+            createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+            { explicit: true },
+          ),
+    ],
+  ])("drops a new-thread draft with %s, with nothing to undo", (_, seed) => {
     useComposerDraftStore.getState().setProjectDraftThreadId(projectRef, draftId);
+    seed();
 
     discardComposerDraft(draftId);
     const after = useComposerDraftStore.getState();

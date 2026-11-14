@@ -16,7 +16,7 @@ export function discardComposerDraft(target: ComposerThreadTarget): void {
   const key = resolveComposerDraftKey(store, target);
   const draft = key === null ? undefined : store.draftsByThreadKey[key];
   if (key === null) return;
-  if (!draft) {
+  if (!draft || (typeof target === "string" && !composerDraftHasUserContent(draft))) {
     // A new thread nobody typed into has nothing to restore.
     if (typeof target === "string") store.clearDraftThread(target);
     return;
