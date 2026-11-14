@@ -28,7 +28,7 @@ import type { useSavedTileLayouts } from "./useSavedTileLayouts";
 
 const NONE = "none";
 const INHERIT = "inherit";
-export const MAX_TILE_LAYOUTS = 32;
+const MAX_TILE_LAYOUTS = 32;
 
 export const TILE_LAYOUTS_SETTINGS_TARGET = {
   to: "/settings/threads",

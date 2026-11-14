@@ -168,7 +168,7 @@ export const SavedTileNode = Schema.Union([
     second: SavedTileNodeRef,
   }),
 ]);
-export const MAX_SAVED_TILE_GROUPS = 16;
+const MAX_SAVED_TILE_GROUPS = 16;
 const countSavedTileGroups = (node: SavedTileNode): number =>
   node.kind === "group" ? 1 : countSavedTileGroups(node.first) + countSavedTileGroups(node.second);
 /** Tile tree, areas and split ratios only; applying one opens fresh surfaces. */
