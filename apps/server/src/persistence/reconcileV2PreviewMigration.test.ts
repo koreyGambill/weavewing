@@ -78,6 +78,7 @@ describe("V2 preview upgrade", () => {
         [96, "ScheduledTaskRuns"],
         [97, "Notifications"],
         [98, "ScheduledTaskDisabledThreads"],
+        [99, "ScheduledTaskGrants"],
         [100, "FoldWatchersIntoAutomations"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
@@ -200,6 +201,7 @@ describe("V2 preview upgrade", () => {
         [96, "ScheduledTaskRuns"],
         [97, "Notifications"],
         [98, "ScheduledTaskDisabledThreads"],
+        [99, "ScheduledTaskGrants"],
         [100, "FoldWatchersIntoAutomations"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),

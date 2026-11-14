@@ -187,6 +187,57 @@ describe("rightPanelStore", () => {
     ).toEqual([["conversation"]]);
   });
 
+  it("lays out a thread from a saved layout only while it shows nothing but chat", () => {
+    const store = useRightPanelStore.getState();
+    const saved = {
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.5,
+      first: { kind: "group", areas: ["chat"] },
+      second: { kind: "group", areas: ["notes"] },
+    } as const;
+    const tabs = (ref: typeof refA) =>
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, ref)).map(
+        (group) => group.tabs.length,
+      );
+    // Clicking into a fresh thread saves a chat-only layout; it still takes the default.
+    store.applyTileAction(refA, { type: "focus", groupId: "conversation-group" });
+    store.applySavedTileLayout(refA, saved, true);
+    expect(tabs(refA)).toEqual([1, 1]);
+    store.open(refB, "files");
+    store.applySavedTileLayout(refB, saved, true);
+    expect(tabs(refB)).toEqual([1, 1]);
+    expect(
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refB))[1]
+        ?.tabs,
+    ).toEqual(["files"]);
+  });
+
+  it("never re-applies a default layout to a thread the user cut back to chat, even after reload", async () => {
+    const store = useRightPanelStore.getState();
+    const saved = {
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.5,
+      first: { kind: "group", areas: ["chat"] },
+      second: { kind: "group", areas: ["notes"] },
+    } as const;
+    const groupCount = () =>
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA)).length;
+    store.applySavedTileLayout(refA, saved, true);
+    expect(groupCount()).toBe(2);
+    const placeholderGroup = getTileGroups(
+      selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA),
+    )[1]!;
+    useRightPanelStore
+      .getState()
+      .applyTileAction(refA, { type: "close-group", groupId: placeholderGroup.id });
+    expect(groupCount()).toBe(1);
+    await reloadRightPanelStore();
+    useRightPanelStore.getState().applySavedTileLayout(refA, saved, true);
+    expect(groupCount()).toBe(1);
+  });
+
   it("closing the active surface selects a neighbour from the same tile", () => {
     const store = useRightPanelStore.getState();
     for (const kind of ["files", "diff", "notes"] as const) store.open(refA, kind);

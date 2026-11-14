@@ -1,5 +1,4 @@
 import {
-  DEFAULT_EVENT_MAX_RUNS_PER_HOUR,
   eventCooldownSeconds,
   isListedThreadLineage,
   type OrchestrationV2DomainEvent,
@@ -309,7 +308,7 @@ export interface EventFire {
  */
 export const peekDueEvent = Effect.fn("ScheduledTaskEventTriggers.peekDueEvent")(function* (
   taskId: ScheduledTaskId,
-  schedule: ScheduledTaskEventSchedule,
+  cap: number,
   nowIso: string,
   disabledThreadIds: ReadonlyArray<ThreadId>,
 ) {
@@ -328,7 +327,6 @@ export const peekDueEvent = Effect.fn("ScheduledTaskEventTriggers.peekDueEvent")
         WHERE task_id = ${taskId} AND fired_at <= ${hourAgo}`;
       const fires = yield* sql<{ fired_at: string }>`SELECT fired_at FROM scheduled_task_event_fires
         WHERE task_id = ${taskId} ORDER BY fired_at`;
-      const cap = schedule.maxRunsPerHour ?? DEFAULT_EVENT_MAX_RUNS_PER_HOUR;
       const [row] = yield* sql<{
         subject: string;
         event_key: string;

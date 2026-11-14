@@ -135,6 +135,72 @@ export const DEFAULT_SNOOZE_PRESETS: ReadonlyArray<SnoozePresetSetting> = [
   { kind: "at", day: "monday", time: "09:00" },
 ];
 
+export const TileLayoutArea = Schema.Literals([
+  "chat",
+  "browser",
+  "terminal",
+  "files",
+  "notes",
+  "diff",
+  "pull-requests",
+]);
+export type TileLayoutArea = typeof TileLayoutArea.Type;
+export type SavedTileNode =
+  | { readonly kind: "group"; readonly areas: ReadonlyArray<TileLayoutArea> }
+  | {
+      readonly kind: "split";
+      readonly axis: "horizontal" | "vertical";
+      readonly ratio: number;
+      readonly first: SavedTileNode;
+      readonly second: SavedTileNode;
+    };
+const SavedTileNodeRef = Schema.suspend((): Schema.Codec<SavedTileNode> => SavedTileNode);
+export const SavedTileNode = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("group"),
+    areas: Schema.Array(TileLayoutArea).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("split"),
+    axis: Schema.Literals(["horizontal", "vertical"]),
+    ratio: Schema.Number.check(Schema.isBetween({ minimum: 0.1, maximum: 0.9 })),
+    first: SavedTileNodeRef,
+    second: SavedTileNodeRef,
+  }),
+]);
+export const MAX_SAVED_TILE_GROUPS = 16;
+const countSavedTileGroups = (node: SavedTileNode): number =>
+  node.kind === "group" ? 1 : countSavedTileGroups(node.first) + countSavedTileGroups(node.second);
+/** Tile tree, areas and split ratios only; applying one opens fresh surfaces. */
+export const SavedTileLayout = Schema.Struct({
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  root: SavedTileNode.check(
+    Schema.makeFilter((root) => countSavedTileGroups(root) <= MAX_SAVED_TILE_GROUPS),
+  ),
+});
+export type SavedTileLayout = typeof SavedTileLayout.Type;
+export const SavedTileLayouts = Schema.Array(SavedTileLayout).check(Schema.isMaxLength(32));
+export const DEFAULT_TILE_LAYOUTS: ReadonlyArray<SavedTileLayout> = [
+  {
+    id: "chat-notes-terminal",
+    name: "Chat + Notes + Terminal",
+    root: {
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.5,
+      first: { kind: "group", areas: ["chat"] },
+      second: {
+        kind: "split",
+        axis: "vertical",
+        ratio: 0.5,
+        first: { kind: "group", areas: ["notes"] },
+        second: { kind: "group", areas: ["terminal"] },
+      },
+    },
+  },
+];
+
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
 export const GlassOpacity = Schema.Int.check(
@@ -1188,6 +1254,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "continueThreadsAfterServerUpdate",
   "responseStreamingMode",
   "speechProjectCustomWords",
+  "defaultTileLayoutId",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -1226,6 +1293,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
+  defaultTileLayoutId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
   ),
@@ -1256,6 +1324,7 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
   "reviewGuideModelSelection",
   "pullRequestMergeMethod",
   "sidebarAutoSettleAfterDays",
+  "defaultTileLayoutId",
 ]);
 
 /** Reclaimable bytes from which the offline `t3 doctor` repair is worth suggesting. */
@@ -1410,6 +1479,13 @@ export const ServerSettings = Schema.Struct({
   ),
   // Vocabulary shared by everyone who dictates in a project; it lives with the project's environment.
   speechProjectCustomWords: SpeechCustomWords.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  tileLayouts: SavedTileLayouts.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TILE_LAYOUTS)),
+  ),
+  /** Applied to drafts the user starts; null opens new threads without a saved layout. */
+  defaultTileLayoutId: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // Null follows textGenerationModelSelection; a selection pins transcript cleanup to its own model.
   speechPostProcessingModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1864,6 +1940,8 @@ export const ServerSettingsPatch = Schema.Struct({
   speechAcceleration: Schema.optionalKey(SpeechAcceleration),
   speechModelUnloadTimeout: Schema.optionalKey(SpeechModelUnloadTimeout),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
+  tileLayouts: Schema.optionalKey(SavedTileLayouts),
+  defaultTileLayoutId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   speechPostProcessingModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),

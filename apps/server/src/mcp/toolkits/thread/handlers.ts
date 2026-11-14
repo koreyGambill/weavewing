@@ -10,10 +10,12 @@ import {
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
 } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as AutomationLimits from "../../../scheduledTasks/AutomationLimits.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   dispatchFailure,
@@ -95,6 +97,34 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
   handle: (params: P) => Effect.Effect<A, E, R>,
 ) => McpToolAccess.writesThreads((params: P) => [params.threadId], handle);
 
+/** Refuses a limited automation's agent changing turns in a thread outside the automation. */
+const limitedOutside = Effect.fn("ThreadToolkit.limitedOutside")(function* (
+  check: (
+    limits: AutomationLimits.AutomationLimits["Service"],
+    callerThreadId: ThreadId,
+  ) => Effect.Effect<void, OrchestratorMcpFailure>,
+) {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+  if (scope.thread !== undefined && Option.isSome(limits))
+    yield* check(limits.value, scope.thread.threadId);
+});
+
+/** `writesThread` for actions that start, resume or reorder turns there. */
+const movesTurns = <P extends { readonly threadId?: ThreadId | undefined }, A, E, R>(
+  action: string,
+  handle: (params: P) => Effect.Effect<A, E, R>,
+) =>
+  writesThread((params: P) =>
+    limitedOutside((limits, callerThreadId) =>
+      limits.refuseOtherThread({
+        callerThreadId,
+        targetThreadId: params.threadId ?? callerThreadId,
+        action,
+      }),
+    ).pipe(Effect.andThen(handle(params))),
+  );
+
 export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   t3_context_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
@@ -138,6 +168,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       );
       const threads = yield* ThreadManagement.ThreadManagementService;
       const callerId = scope.thread.threadId;
+      const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+      if (Option.isSome(limits) && !(yield* limits.value.allowsNotify(callerId)))
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "This automation's limits turn notifications off.",
+        });
       const targetId = threadId ?? callerId;
       const target = yield* threads.getThreadShell(targetId).pipe(Effect.mapError(unavailable));
       if (target === null || target.deletedAt !== null)
@@ -164,6 +200,10 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   run_scheduled_task_now: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
+      const caller = (yield* readCaller()).scope.thread;
+      const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+      if (Option.isSome(limits) && caller !== undefined)
+        yield* limits.value.refuseScheduling(caller.threadId);
       const scheduler = yield* ScheduledTasks.ScheduledTaskService;
       const { tasks } = yield* scheduler.list().pipe(Effect.mapError(unavailable));
       if (!tasks.some((task) => task.id === input.taskId))
@@ -232,6 +272,9 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       (input) => [input.threadId, input.targetThreadId],
       (input) =>
         Effect.gen(function* () {
+          yield* limitedOutside((limits, callerThreadId) =>
+            limits.refuseOutside(callerThreadId, "fork or merge threads"),
+          );
           const sourcePoint = input.sourcePoint ?? { type: "latest_stable" as const };
           const { threads, projection } = yield* readThread(input.threadId);
           const commandId = yield* newCommandId();
@@ -316,7 +359,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         return { requestId, questions: item.questions };
       }),
     ),
-    writesThread((input) =>
+    movesTurns("answer requests in threads outside it", (input) =>
       Effect.gen(function* () {
         const requestId = yield* required(input.requestId, "requestId");
         const answers = yield* required(input.answers, "answers");
@@ -373,7 +416,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         );
       }),
     ),
-    writesThread((input) =>
+    movesTurns("change queued turns in threads outside it", (input) =>
       Effect.gen(function* () {
         const runId = yield* required(input.queuedRunId, "queuedRunId");
         switch (input.action) {

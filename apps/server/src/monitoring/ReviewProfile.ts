@@ -23,7 +23,12 @@ export interface ReviewProfile {
   readonly includeProjectAgents?: boolean | undefined;
   readonly targets: ReviewTargets;
   readonly rules: ReadonlyArray<MonitoringRule>;
+  /** The most one review's model call may cost. */
+  readonly maxCostUsd?: number | undefined;
 }
+
+/** Context reviews always had a cap; one made without a budget keeps it. */
+const CONTEXT_REVIEW_MAX_COST_USD = 0.05;
 
 export function reviewProfile(task: ScheduledTask): ReviewProfile | null {
   const agent = task.agent;
@@ -41,5 +46,8 @@ export function reviewProfile(task: ScheduledTask): ReviewProfile | null {
     includeProjectAgents: agent.includeProjectAgents,
     targets: agent.targets,
     rules: agent.rules,
+    maxCostUsd:
+      task.grant?.budget?.maxCostUsd ??
+      (agent.kind === "context-review" ? CONTEXT_REVIEW_MAX_COST_USD : undefined),
   };
 }

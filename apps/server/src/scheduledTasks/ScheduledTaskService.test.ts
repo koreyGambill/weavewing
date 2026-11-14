@@ -38,6 +38,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as UsageService from "../usage/UsageService.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 
 const isScheduledTaskError = Schema.is(ScheduledTaskError);
 
@@ -949,7 +950,9 @@ it.effect("a bound run follows its thread when promotion moves it mid-send", () 
 it.effect("a fresh-session task launches one thread, then starts each later run fresh in it", () =>
   Effect.gen(function* () {
     const launches = yield* Ref.make(0);
-    const sends = yield* Ref.make<Array<{ threadId: ThreadId; freshContext?: boolean }>>([]);
+    const sends = yield* Ref.make<
+      Array<{ threadId: ThreadId; freshContext?: boolean; model?: string }>
+    >([]);
     const launched = ThreadId.make("thread:fresh-session-task");
     const layer = ScheduledTaskService.layer.pipe(
       Layer.provide(
@@ -972,6 +975,9 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
                 {
                   threadId: input.threadId,
                   ...(input.freshContext === undefined ? {} : { freshContext: input.freshContext }),
+                  ...(input.modelSelection === undefined
+                    ? {}
+                    : { model: input.modelSelection.model }),
                 },
               ]).pipe(Effect.as({} as never)),
           }),
@@ -1017,6 +1023,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       yield* service.runNow({ id: input.id });
 
       assert.equal(yield* Ref.get(launches), 1);
+      // Without a grant, a run never switches its thread's model.
       assert.deepEqual(yield* Ref.get(sends), [{ threadId: launched, freshContext: true }]);
       // Its thread stays in the old project, so moving the task leaves it for a new one.
       const moved = yield* service.upsert({
@@ -1028,6 +1035,176 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       assert.equal(moved.task.threadMode, "fresh_session");
       const unbound = yield* service.upsert({ ...input, threadMode: "new_thread" });
       assert.equal(unbound.task.threadId, null);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("caps runs per hour for every trigger but the user's Run now, and keeps the grant", () =>
+  Effect.gen(function* () {
+    const launches = yield* Ref.make(0);
+    const launchedIds = yield* Ref.make<Array<string | undefined>>([]);
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+            launch: (input) =>
+              Ref.update(launchedIds, (all) => [...all, input.threadId]).pipe(
+                Effect.andThen(Ref.updateAndGet(launches, (n) => n + 1)),
+                Effect.map((n) => ({ threadId: ThreadId.make(`thread:capped-${n}`) }) as never),
+              ),
+          }),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            streamDomainEvents: Stream.empty,
+            streamDomainEventsFrom: () => Stream.empty,
+            latestDomainEventSequence: Effect.succeed(0),
+            getThreadShell: () => Effect.succeed(null),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+          Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+            getInstance: (instanceId) =>
+              Effect.succeed({
+                driverKind: instanceId === "codex" ? "codex" : "opencode",
+              } as never),
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const input = {
+        id: ScheduledTaskId.make("task:capped"),
+        title: "Capped",
+        prompt: "Check",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 3_600_000 },
+        projectId: ProjectId.make("project:test"),
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      } as const;
+      const grant = { maxRunsPerHour: 1, budget: { maxCostUsd: 0.5 } };
+      assert.deepEqual((yield* service.upsert({ ...input, grant })).task.grant, grant);
+      // A client that doesn't know grants saves without one; it stays.
+      assert.deepEqual((yield* service.upsert(input)).task.grant, grant);
+
+      yield* service.runNow({ id: input.id }, { byAgent: true });
+      const refused = yield* Effect.exit(service.runNow({ id: input.id }, { byAgent: true }));
+      assert.isTrue(Exit.isFailure(refused));
+      assert.include(String(refused), "This automation allows 1 run per hour.");
+      // The user's Run now is never capped.
+      yield* service.runNow({ id: input.id });
+      assert.equal(yield* Ref.get(launches), 2);
+      const { runs } = yield* service.listRuns({ id: input.id });
+      assert.deepEqual(
+        runs.map((run) => run.trigger.type),
+        ["manual", "agent", "agent"],
+      );
+      assert.equal(runs[1]?.status, "capped");
+      assert.equal(runs[1]?.error, "This automation allows 1 run per hour.");
+
+      assert.isUndefined((yield* service.upsert({ ...input, grant: null })).task.grant);
+      // A subagent cap holds only where the provider's own subagents can be turned off.
+      const subagents = { subagents: { max: 2, models: [] } };
+      yield* service.upsert({ ...input, grant: subagents });
+      const opencode = yield* Effect.exit(
+        service.upsert({
+          ...input,
+          modelSelection: { instanceId: ProviderInstanceId.make("opencode"), model: "big" },
+          grant: subagents,
+        }),
+      );
+      assert.include(String(opencode), "Subagent limits work with Claude and Codex models only");
+      yield* service.upsert({ ...input, grant: null });
+      yield* service.runNow({ id: input.id }, { byAgent: true });
+      assert.equal(yield* Ref.get(launches), 3);
+      // Its threads' ids name the task, so its limits are known before any message.
+      for (const threadId of yield* Ref.get(launchedIds)) {
+        assert.isTrue(threadId?.startsWith("automation-thread:task:capped:"));
+      }
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a limited automation's runs use its model only in threads it started", () =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make("project:test");
+    const sends = yield* Ref.make<Array<{ threadId: ThreadId; model?: string }>>([]);
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            streamDomainEvents: Stream.empty,
+            streamDomainEventsFrom: () => Stream.empty,
+            latestDomainEventSequence: Effect.succeed(0),
+            getThreadShell: () => Effect.succeed(threadShell(projectId)),
+            sendToThread: (input) =>
+              Ref.update(sends, (all) => [
+                ...all,
+                {
+                  threadId: input.threadId,
+                  ...(input.modelSelection === undefined
+                    ? {}
+                    : { model: input.modelSelection.model }),
+                },
+              ]).pipe(Effect.as({} as never)),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+        ),
+      ),
+    );
+    // A thread a task's run launched has an id naming the task.
+    const owned = "automation-thread:task:owned:1";
+    const ownedNoGrant = "automation-thread:task:no-grant:1";
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const run = (
+        id: string,
+        threadId: string,
+        grant: { budget: { maxCostUsd: number } } | null,
+      ) =>
+        Effect.gen(function* () {
+          yield* service.upsert({
+            id: ScheduledTaskId.make(id),
+            title: id,
+            prompt: "Check",
+            enabled: true,
+            schedule: { type: "interval", everyMs: 3_600_000 },
+            projectId,
+            threadId: ThreadId.make(threadId),
+            threadMode: "continue",
+            workspaceStrategy: { type: "root" },
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            ...(grant === null ? {} : { grant }),
+          });
+          yield* service.runNow({ id: ScheduledTaskId.make(id) });
+        });
+      const grant = { budget: { maxCostUsd: 0.5 } };
+      yield* run("task:owned", owned, grant);
+      yield* run("task:user", "thread:user", grant);
+      yield* run("task:no-grant", ownedNoGrant, null);
+      assert.deepEqual(yield* Ref.get(sends), [
+        { threadId: ThreadId.make(owned), model: "gpt-5.4" },
+        { threadId: ThreadId.make("thread:user") },
+        { threadId: ThreadId.make(ownedNoGrant) },
+      ]);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

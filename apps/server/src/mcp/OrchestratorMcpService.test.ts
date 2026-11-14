@@ -3468,6 +3468,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       Effect.gen(function* () {
         const base = options.task ?? existing;
         const saved = yield* Ref.make<ReadonlyArray<ScheduledTask>>([]);
+        const grants: Array<ScheduledTaskUpsertInput["grant"]> = [];
         const disabled = yield* Ref.make<ReadonlyArray<ProviderInstanceId>>(
           options.disabledInstanceIds ?? [],
         );
@@ -3514,7 +3515,9 @@ describe("OrchestratorMcpService provider resolution", () => {
                         ...base,
                         id: input.id ?? ScheduledTaskId.make(`scheduled-task:${input.commandId}`),
                         modelSelection: input.modelSelection,
+                        ...(input.grant == null ? {} : { grant: input.grant }),
                       };
+                      if (input.grant !== undefined) grants.push(input.grant);
                       return Ref.update(saved, (all) => [...all, task]).pipe(Effect.as({ task }));
                     },
                   }),
@@ -3526,7 +3529,11 @@ describe("OrchestratorMcpService provider resolution", () => {
         const result = yield* Effect.exit(
           program(mcp, (instanceId) => Ref.update(disabled, (ids) => [...ids, instanceId])),
         );
-        return { result, saved: (yield* Ref.get(saved)).map((task) => task.modelSelection) };
+        return {
+          result,
+          saved: (yield* Ref.get(saved)).map((task) => task.modelSelection),
+          grants,
+        };
       });
 
     it.effect("creates a task on the requested model and shows it back", () =>
@@ -3592,29 +3599,47 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
 
-    it.effect(
-      "refuses a target for a bound task, but not once it is unbound in the same call",
-      () =>
-        Effect.gen(function* () {
-          const bound = { ...existing, threadId: ThreadId.make("thread:scheduled-model") };
-          const target = { model: "gpt-5-mini" };
-          const refused = yield* run(
-            (mcp) => mcp.updateScheduledTask(client, { scheduledTaskId: existing.id, target }),
-            { task: bound },
-          );
-          assert.deepEqual(refused.saved, []);
-          assert.deepEqual(failureCode(refused.result), "invalid_request");
-          const unbound = yield* run(
-            (mcp) =>
-              mcp.updateScheduledTask(client, {
+    it.effect("sets a bound task's model, and maps limits to its grant", () =>
+      Effect.gen(function* () {
+        const bound = { ...existing, threadId: ThreadId.make("thread:scheduled-model") };
+        const haikuRef = `${claudeInstanceId}/claude-haiku-5-5`;
+        const { result, saved, grants } = yield* run(
+          (mcp) =>
+            Effect.gen(function* () {
+              const limited = yield* mcp.updateScheduledTask(client, {
                 scheduledTaskId: existing.id,
-                bindToCurrentThread: false,
-                target,
-              }),
-            { task: bound },
-          );
-          assert.deepEqual(unbound.saved, [{ instanceId: codexInstanceId, model: "gpt-5-mini" }]);
-        }),
+                target: { model: "gpt-5-mini" },
+                limits: {
+                  maxCostUsd: 0.5,
+                  maxSubagents: 2,
+                  subagentModels: [haikuRef],
+                  maxRunsPerHour: 6,
+                },
+              });
+              yield* mcp.updateScheduledTask(client, { scheduledTaskId: existing.id, limits: {} });
+              return limited.limits;
+            }),
+          { task: bound },
+        );
+        assert.deepEqual(saved[0], { instanceId: codexInstanceId, model: "gpt-5-mini" });
+        assert.deepEqual(grants, [
+          {
+            subagents: {
+              max: 2,
+              models: [{ instanceId: claudeInstanceId, model: "claude-haiku-5-5" }],
+            },
+            budget: { maxCostUsd: 0.5 },
+            maxRunsPerHour: 6,
+          },
+          null,
+        ]);
+        assert.deepEqual(Exit.isSuccess(result) && result.value, {
+          maxCostUsd: 0.5,
+          maxSubagents: 2,
+          subagentModels: [haikuRef],
+          maxRunsPerHour: 6,
+        });
+      }),
     );
 
     it.effect("replays a retried create without resolving its target again", () =>

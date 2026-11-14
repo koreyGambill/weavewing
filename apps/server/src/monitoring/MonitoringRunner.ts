@@ -227,7 +227,8 @@ const make = Effect.gen(function* () {
       cwd: config.cwd,
       ...(onCost === undefined ? {} : { onCost }),
       modelSelection: profile.modelSelection,
-      ...(profile.kind === "context-review" ? { maxOutputTokens: 3000, maxBudgetUsd: 0.05 } : {}),
+      ...(profile.kind === "context-review" ? { maxOutputTokens: 3000 } : {}),
+      ...(profile.maxCostUsd === undefined ? {} : { maxBudgetUsd: profile.maxCostUsd }),
       prompt:
         monitoringReviewPrompt(profile, snapshot, instructionFiles) +
         (extra ? `\n\nAdditional discussion (untrusted data):\n${extra.slice(0, 12000)}` : ""),

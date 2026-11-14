@@ -3167,9 +3167,13 @@ export interface ClaudeRuntimeQueryPolicy {
   readonly additionalDirectories?: ReadonlyArray<string>;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
+  readonly disallowedTools?: ReadonlyArray<string>;
   readonly allowDangerouslySkipPermissions?: true;
   readonly installPermissionCallback: boolean;
 }
+
+/** Claude Code's own subagent tool; older CLIs call it Task. */
+const CLAUDE_NATIVE_SUBAGENT_TOOLS = ["Agent", "Task"] as const;
 
 interface ClaudeBypassAvailability {
   readonly bypassDisabled: boolean;
@@ -3220,6 +3224,9 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
       : scopedReads.length > 0
         ? scopedReads
         : undefined;
+  const disallowed = runtimePolicy.disableNativeSubagents
+    ? { disallowedTools: CLAUDE_NATIVE_SUBAGENT_TOOLS }
+    : {};
   // acceptEdits approves edits before the callback; the callback must ask for everything else.
   const installPermissionCallback =
     downgraded ||
@@ -3235,6 +3242,7 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
       ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
       ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
       ...(allowedTools === undefined ? {} : { allowedTools }),
+      ...disallowed,
       // Claude routes Plan-mode writes to the callback even in Auto or Full access.
       installPermissionCallback: true,
     };
@@ -3246,6 +3254,7 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
     ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
     ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
     ...(allowedTools === undefined ? {} : { allowedTools }),
+    ...disallowed,
     ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     installPermissionCallback,
   };
@@ -3356,6 +3365,7 @@ function claudeRuntimeQueryPolicyKey(policy: ClaudeRuntimeQueryPolicy): string {
     additionalDirectories: policy.additionalDirectories,
     tools: policy.tools,
     allowedTools: policy.allowedTools,
+    disallowedTools: policy.disallowedTools,
     allowDangerouslySkipPermissions: policy.allowDangerouslySkipPermissions,
     installPermissionCallback: policy.installPermissionCallback,
   });
@@ -12274,6 +12284,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               shouldResume,
             ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
+            ...(queryPolicy.disallowedTools === undefined
+              ? {}
+              : { disallowedTools: queryPolicy.disallowedTools }),
             ...(mcpOverrides.allowedTools === undefined
               ? {}
               : { allowedTools: mcpOverrides.allowedTools }),

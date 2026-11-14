@@ -728,8 +728,8 @@ it.effect("two tasks that trigger each other stay under the hourly cap", () =>
               type: "event",
               event: "run_ended",
               threadIds: [watched],
-              maxRunsPerHour: 3,
             },
+            grant: { maxRunsPerHour: 3 },
           });
         yield* service.upsert(yield* bound("thread:x", "thread:y"));
         yield* service.upsert(yield* bound("thread:y", "thread:x"));

@@ -28,6 +28,7 @@ import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as AutomationLimits from "../../../scheduledTasks/AutomationLimits.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as OrchestrationMcp from "../../OrchestratorMcpService.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
@@ -252,6 +253,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               (provider) => provider.instanceId === modelSelection.instanceId,
             )?.supportedRuntimeModes,
           });
+        }
+        if (!replaying && caller !== undefined) {
+          const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+          if (Option.isSome(limits))
+            yield* limits.value.refuseOutside(caller.id, "start new threads");
         }
         const result = yield* ThreadMessageIntake.launchThread({
           commandId,

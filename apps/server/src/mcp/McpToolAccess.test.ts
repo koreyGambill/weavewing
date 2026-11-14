@@ -17,6 +17,7 @@ import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 
 import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
+import * as AutomationLimits from "../scheduledTasks/AutomationLimits.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -450,6 +451,25 @@ it.effect.each([
   call(tool, scope, args).pipe(
     Effect.map((outcome) => expect(outcome).toBe(expected)),
     Effect.provide(linkedProbeServer),
+  ),
+);
+
+// A limited automation's thread may read a linked environment but not act there.
+const limitedAutomation = Layer.mock(AutomationLimits.AutomationLimits)({
+  refuseOutside: (threadId) =>
+    threadId === supervisedThreadId
+      ? Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message: "limited" }))
+      : Effect.void,
+});
+it.effect.each([
+  ["writes_threads", supervised, "capability_denied"],
+  ["writes", supervised, "capability_denied"],
+  ["reads", supervised, "reads in environment-box"],
+  ["writes", fullAccess, "writes in environment-box"],
+] as const)("a linked %s from a limited automation's %o: %s", ([tool, scope, expected]) =>
+  call(tool, scope, { environmentId: box }).pipe(
+    Effect.map((outcome) => expect(outcome).toBe(expected)),
+    Effect.provide(linkedProbeServer.pipe(Layer.provide(limitedAutomation))),
   ),
 );
 

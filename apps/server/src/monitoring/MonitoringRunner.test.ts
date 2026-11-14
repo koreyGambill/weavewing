@@ -696,3 +696,48 @@ it.effect("sends every finding of a run to the inbox, past the agents' hourly li
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
+
+it.effect(
+  "caps the reviewer's model call at the automation's budget, $0.05 for context reviews",
+  () =>
+    Effect.gen(function* () {
+      const budgets: Array<number | undefined> = [];
+      const layer = runnerLayer(
+        {},
+        {
+          capture: () =>
+            Effect.succeed({
+              threads: [
+                {
+                  id: ThreadId.make("thread"),
+                  title: "Main",
+                  parentThreadId: null,
+                  messages: [{ id: "message", role: "assistant", text: "Observed" }],
+                },
+              ],
+              truncated: false,
+              coverage: "Chat",
+            }),
+        },
+        (input) =>
+          Effect.sync(() => {
+            budgets.push(input.maxBudgetUsd);
+            return { findings: [] };
+          }),
+      );
+      yield* Effect.gen(function* () {
+        const runner = yield* Runner.MonitoringRunner;
+        const runWith = (review: ReviewProfile, grant?: ScheduledTask["grant"]) =>
+          runner.runTask({
+            task: { ...taskFor(review), ...(grant === undefined ? {} : { grant }) },
+            runId: null,
+            threadId: null,
+          });
+        yield* runWith(profile, { budget: { maxCostUsd: 0.3 } });
+        yield* runWith(profile);
+        yield* runWith({ ...profile, kind: "context-review" });
+        yield* runWith({ ...profile, kind: "context-review" }, { budget: { maxCostUsd: 1 } });
+      }).pipe(Effect.provide(layer));
+      assert.deepEqual(budgets, [0.3, undefined, 0.05, 1]);
+    }).pipe(Effect.scoped),
+);

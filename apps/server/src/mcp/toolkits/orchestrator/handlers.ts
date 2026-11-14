@@ -122,6 +122,7 @@ const handlers = {
         bindToCurrentThread,
         target,
         review,
+        limits,
       }) =>
         Effect.gen(function* () {
           if (scheduledTaskId === undefined) return yield* Effect.die("unreachable");
@@ -137,6 +138,7 @@ const handlers = {
             bindToCurrentThread,
             target,
             review,
+            limits,
           });
         }),
     ),

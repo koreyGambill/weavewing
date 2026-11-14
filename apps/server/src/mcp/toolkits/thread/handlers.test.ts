@@ -1,6 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  OrchestratorMcpFailure,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -13,6 +18,7 @@ import * as NotificationService from "../../../notifications/NotificationService
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as Sqlite from "../../../persistence/Sqlite.ts";
+import * as AutomationLimits from "../../../scheduledTasks/AutomationLimits.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ContextRecords from "../../../threadInsights/ContextRecords.ts";
 import * as Footprints from "../../../threadInsights/InstructionFootprints.ts";
@@ -154,25 +160,25 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
       getClient: Effect.die("unused"),
     });
     const callerId = ThreadId.make("notify-caller");
-    const scope = (thread: boolean): Invocation.McpInvocationScope => ({
+    const scope = (thread: boolean, threadId = callerId): Invocation.McpInvocationScope => ({
       environmentId: EnvironmentId.make("notify-environment"),
       requestNamespace: "notify-session",
       issuedAt: 0,
       capabilities: new Set(["orchestration"]),
       thread: thread
         ? {
-            threadId: callerId,
+            threadId,
             providerSessionId: "notify-session",
             providerInstanceId: ProviderInstanceId.make("codex"),
           }
         : undefined,
       client: undefined,
     });
-    const notify = (args: Record<string, unknown>, thread = true) =>
+    const notify = (args: Record<string, unknown>, thread = true, threadId = callerId) =>
       server
         .callTool({ name: "t3_notify", arguments: args })
         .pipe(
-          Effect.provideService(Invocation.McpInvocationContext, scope(thread)),
+          Effect.provideService(Invocation.McpInvocationContext, scope(thread, threadId)),
           Effect.provideService(McpSchema.McpServerClient, client),
         );
 
@@ -202,6 +208,18 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
       "thread was not found",
     );
     expect((yield* notify({ title: "x" }, false)).isError).toBe(true);
+    const muted = yield* notify({ title: "x" }, true, ThreadId.make("notify-muted"));
+    expect(JSON.stringify(muted.content)).toContain("turn notifications off");
+    const runNow = yield* server
+      .callTool({ name: "run_scheduled_task_now", arguments: { taskId: "task:any" } })
+      .pipe(
+        Effect.provideService(
+          Invocation.McpInvocationContext,
+          scope(true, ThreadId.make("notify-muted")),
+        ),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(JSON.stringify(runNow.content)).toContain("can't create tasks");
     const tooLong = yield* Effect.flip(notify({ title: "x".repeat(121) }));
     expect(tooLong.message).toContain("at most 120");
     expect(
@@ -217,6 +235,20 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
       McpHttpServer.layerThreadToolkit.pipe(
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provideMerge(NotificationService.layer),
+        Layer.provide(
+          Layer.mock(AutomationLimits.AutomationLimits)({
+            allowsNotify: (threadId) => Effect.succeed(threadId !== "notify-muted"),
+            refuseScheduling: (threadId) =>
+              threadId === "notify-muted"
+                ? Effect.fail(
+                    new OrchestratorMcpFailure({
+                      code: "capability_denied",
+                      message: "An agent in a limited automation can't create tasks.",
+                    }),
+                  )
+                : Effect.void,
+          }),
+        ),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(MonitoringDialogue.MonitoringDialogue)({})),
         Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),

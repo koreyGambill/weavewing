@@ -77,6 +77,13 @@ export function readEnvironment(environmentId: EnvironmentId): EnvironmentPresen
   return presentation ? projectEnvironmentPresentation(environmentId, presentation) : null;
 }
 
+/** Every environment now, for handlers that should not re-render on every change. */
+export function readEnvironments(): EnvironmentPresentation[] {
+  return [...appAtomRegistry.get(environmentPresentations.presentationsAtom).entries()].map(
+    ([environmentId, presentation]) => projectEnvironmentPresentation(environmentId, presentation),
+  );
+}
+
 export function useEnvironment(
   environmentId: EnvironmentId | null,
 ): EnvironmentPresentation | null {

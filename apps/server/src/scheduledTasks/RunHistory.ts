@@ -162,8 +162,11 @@ export const finishRun = Effect.fn("ScheduledTaskRunHistory.finishRun")(function
   const sql = yield* SqlClient.SqlClient;
   return yield* sql.withTransaction(
     Effect.gen(function* () {
+      // A budget stop marks the row before the interrupted run ends; that outcome stands.
       const closed = yield* sql<{ task_id: string }>`UPDATE scheduled_task_runs
-        SET status = ${outcome.status}, ended_at = ${outcome.endedAt}, error = ${outcome.error},
+        SET status = CASE WHEN status = 'budget_stopped' THEN status ELSE ${outcome.status} END,
+          error = CASE WHEN status = 'budget_stopped' THEN error ELSE ${outcome.error} END,
+          ended_at = ${outcome.endedAt},
           tokens = ${outcome.cost?.tokens ?? null}, cost_usd = ${outcome.cost?.costUsd ?? null},
           other_tokens = ${outcome.cost?.otherTokens ?? null},
           other_cost_usd_estimate = ${outcome.cost?.otherCostUsdEstimate ?? null},
@@ -177,6 +180,66 @@ export const finishRun = Effect.fn("ScheduledTaskRunHistory.finishRun")(function
       return true;
     }),
   );
+});
+
+/** The open run of `threadId` stopped at its budget; its close keeps this outcome. */
+export const markBudgetStopped = Effect.fn("ScheduledTaskRunHistory.markBudgetStopped")(function* (
+  threadId: ThreadId,
+  error: string,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ task_id: string }>`UPDATE scheduled_task_runs
+    SET status = 'budget_stopped', error = ${error}
+    WHERE thread_id = ${threadId} AND ended_at IS NULL AND status = 'running'
+    RETURNING task_id`;
+  return rows.map((row) => ScheduledTaskId.make(row.task_id));
+});
+
+/**
+ * Runs that count toward the hourly cap: the task's runs that were not skipped, capped or started
+ * by the user, and the follow-up turns its agents sent into the task's threads.
+ */
+export const countRecentRuns = Effect.fn("ScheduledTaskRunHistory.countRecentRuns")(function* (
+  taskId: ScheduledTaskId,
+  since: string,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const [row] = yield* sql<{ count: number }>`SELECT
+    (SELECT COUNT(*) FROM scheduled_task_runs
+      WHERE task_id = ${taskId} AND started_at > ${since}
+        AND status NOT IN ('skipped', 'capped')
+        AND json_extract(trigger_json, '$.type') != 'manual')
+    + (SELECT COUNT(*) FROM orchestration_v2_projection_runs r
+      JOIN orchestration_v2_projection_messages m
+        ON m.message_id = json_extract(r.payload_json, '$.userMessageId')
+      WHERE r.requested_at > ${since}
+        AND json_extract(m.payload_json, '$.senderThreadId') IS NOT NULL
+        AND r.thread_id IN (
+          SELECT thread_id FROM scheduled_tasks WHERE task_id = ${taskId} AND thread_id IS NOT NULL
+          UNION SELECT thread_id FROM scheduled_task_runs
+            WHERE task_id = ${taskId} AND thread_id IS NOT NULL)) AS count`;
+  return row?.count ?? 0;
+});
+
+export const recordCapped = Effect.fn("ScheduledTaskRunHistory.recordCapped")(function* (input: {
+  readonly id: ScheduledTaskRunId;
+  readonly taskId: ScheduledTaskId;
+  readonly at: string;
+  readonly trigger: RunTrigger;
+  readonly error: string;
+}) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`INSERT INTO scheduled_task_runs ${sql.insert({
+    id: input.id,
+    task_id: input.taskId,
+    started_at: input.at,
+    ended_at: input.at,
+    status: "capped",
+    trigger_json: encodeTrigger(input.trigger),
+    error: input.error,
+  })}`;
+  yield* sql`UPDATE scheduled_tasks SET last_run_ended_at = ${input.at} WHERE task_id = ${input.taskId}`;
+  yield* prune(input.taskId);
 });
 
 export const deleteRun = Effect.fn("ScheduledTaskRunHistory.deleteRun")(function* (
@@ -215,11 +278,68 @@ export interface RunUsage {
 
 const sum = (total: number | null, add: number) => (total ?? 0) + add;
 
+const pricedRecord = (model: string, totals: PricedRecord["totals"]): PricedRecord => ({
+  model,
+  totals,
+  speed: "standard",
+  reportedCostUsd: null,
+});
+
+/**
+ * One provider turn's main-agent tokens and record, and its `otherUsage` (native subagents,
+ * compaction). The ledger gives `otherUsage` neither a cache split nor a model, so its record takes
+ * the turn's main cache shares and `otherModel`, else the main model: an estimate.
+ */
+export function turnUsage(
+  usage: TurnTokenUsage,
+  turnModel: string | null,
+  otherModel: string | null,
+) {
+  // Local commands' counters describe the command's result, not model work.
+  if (usage.localCommand === true) return null;
+  const input = usage.inputTokens ?? 0;
+  const output = usage.outputTokens ?? 0;
+  const cached = usage.cachedInputTokens ?? 0;
+  const cacheCreation = usage.cacheCreationTokens ?? 0;
+  const model = usage.models?.[0] ?? turnModel;
+  const record =
+    model === null
+      ? null
+      : pricedRecord(model, {
+          uncachedInputTokens: Math.max(0, input - cached - cacheCreation),
+          cachedInputTokens: cached,
+          cacheCreationTokens: cacheCreation,
+          outputTokens: output,
+          reasoningTokens: usage.reasoningTokens ?? 0,
+        });
+  const other = usage.otherUsage;
+  const otherRecordModel = otherModel ?? model;
+  const otherCached =
+    other === undefined || input === 0 ? 0 : Math.round((other.inputTokens * cached) / input);
+  const otherCacheCreation =
+    other === undefined || input === 0
+      ? 0
+      : Math.round((other.inputTokens * cacheCreation) / input);
+  return {
+    tokens: input + output,
+    record,
+    otherTokens: other === undefined ? null : other.inputTokens + other.outputTokens,
+    otherRecord:
+      other === undefined || otherRecordModel === null
+        ? null
+        : pricedRecord(otherRecordModel, {
+            uncachedInputTokens: Math.max(0, other.inputTokens - otherCached - otherCacheCreation),
+            cachedInputTokens: otherCached,
+            cacheCreationTokens: otherCacheCreation,
+            outputTokens: other.outputTokens,
+            reasoningTokens: 0,
+          }),
+  };
+}
+
 /**
  * The main agent's tokens and priceable records for one orchestration run, kept apart from
- * `otherUsage` (native subagents, compaction). The ledger gives `otherUsage` neither a cache
- * split nor a model, so its records take the turn's main cache shares and the run's most used
- * native subagent model, else the main model: an estimate.
+ * `otherUsage`, which takes the run's most used native subagent model.
  */
 export const runUsage = Effect.fn("ScheduledTaskRunHistory.runUsage")(function* (
   threadId: ThreadId,
@@ -245,49 +365,14 @@ export const runUsage = Effect.fn("ScheduledTaskRunHistory.runUsage")(function* 
   const otherRecords: Array<PricedRecord> = [];
   for (const turn of turns) {
     const decoded = turn.usage_json === null ? Option.none() : decodeUsage(turn.usage_json);
-    // Local commands' counters describe the command's result, not model work.
-    if (Option.isNone(decoded) || decoded.value.localCommand === true) continue;
-    const usage = decoded.value;
-    const input = usage.inputTokens ?? 0;
-    const output = usage.outputTokens ?? 0;
-    const cached = usage.cachedInputTokens ?? 0;
-    const cacheCreation = usage.cacheCreationTokens ?? 0;
-    tokens = sum(tokens, input + output);
-    const model = usage.models?.[0] ?? turn.model;
-    if (model !== null) {
-      records.push({
-        model,
-        totals: {
-          uncachedInputTokens: Math.max(0, input - cached - cacheCreation),
-          cachedInputTokens: cached,
-          cacheCreationTokens: cacheCreation,
-          outputTokens: output,
-          reasoningTokens: usage.reasoningTokens ?? 0,
-        },
-        speed: "standard",
-        reportedCostUsd: null,
-      });
-    }
-    const other = usage.otherUsage;
-    if (other === undefined) continue;
-    otherTokens = sum(otherTokens, other.inputTokens + other.outputTokens);
-    const otherModel = subagentModel?.model ?? model;
-    if (otherModel === null) continue;
-    const otherCached = input === 0 ? 0 : Math.round((other.inputTokens * cached) / input);
-    const otherCacheCreation =
-      input === 0 ? 0 : Math.round((other.inputTokens * cacheCreation) / input);
-    otherRecords.push({
-      model: otherModel,
-      totals: {
-        uncachedInputTokens: Math.max(0, other.inputTokens - otherCached - otherCacheCreation),
-        cachedInputTokens: otherCached,
-        cacheCreationTokens: otherCacheCreation,
-        outputTokens: other.outputTokens,
-        reasoningTokens: 0,
-      },
-      speed: "standard",
-      reportedCostUsd: null,
-    });
+    if (Option.isNone(decoded)) continue;
+    const used = turnUsage(decoded.value, turn.model, subagentModel?.model ?? null);
+    if (used === null) continue;
+    tokens = sum(tokens, used.tokens);
+    if (used.record !== null) records.push(used.record);
+    if (used.otherTokens === null) continue;
+    otherTokens = sum(otherTokens, used.otherTokens);
+    if (used.otherRecord !== null) otherRecords.push(used.otherRecord);
   }
   const result: RunUsage = { tokens, records, otherTokens, otherRecords };
   return result;

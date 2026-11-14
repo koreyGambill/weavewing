@@ -95,8 +95,11 @@ export default Effect.gen(function* () {
       targets: profile.targets,
       delivery: profile.delivery ?? "thread-or-alert",
     });
+    // A context review kept a $0.05 cap per run; it is now the automation's budget.
+    const budget = profile.kind === "context-review" ? { budget: { maxCostUsd: 0.05 } } : {};
     yield* sql`UPDATE scheduled_tasks SET agent_json = ${agent},
-      title = ${profile.turnEnd === undefined ? profile.title : `${profile.title} (scheduled)`}
+      title = ${profile.turnEnd === undefined ? profile.title : `${profile.title} (scheduled)`},
+      grant_json = coalesce(${Object.keys(budget).length === 0 ? null : toJson(budget)}, grant_json)
       WHERE task_id = ${taskId}`;
     if (profile.turnEnd === undefined) continue;
     // Turn ends now come from an event trigger: the same review as its own automation.
@@ -109,17 +112,17 @@ export default Effect.gen(function* () {
       event: "run_ended",
       ...(profile.turnEnd.allProjects === true ? {} : { projectId: profile.projectId }),
       cooldownSeconds,
-      // The watcher listener had no hourly cap, only the per-thread cooldown.
-      maxRunsPerHour: 120,
     });
+    // The watcher listener had no hourly cap, only the per-thread cooldown.
+    const grant = toJson({ ...budget, maxRunsPerHour: 120 });
     yield* sql`INSERT INTO scheduled_tasks (task_id, title, prompt, enabled, schedule_json,
         project_id, thread_id, workspace_strategy_json, model_selection_json, runtime_mode,
         interaction_mode, created_by, creation_source, created_at, updated_at, next_run_at,
-        last_run_at, last_run_status, last_run_error, run_count, thread_mode, agent_json)
+        last_run_at, last_run_status, last_run_error, run_count, thread_mode, agent_json, grant_json)
       SELECT ${turnEndTaskId(taskId)}, ${profile.title}, prompt, enabled, ${schedule},
         project_id, NULL, workspace_strategy_json, model_selection_json, runtime_mode,
         interaction_mode, created_by, creation_source, created_at, updated_at, NULL,
-        NULL, 'never', NULL, 0, 'new_thread', agent_json
+        NULL, 'never', NULL, 0, 'new_thread', agent_json, ${grant}
       FROM scheduled_tasks WHERE task_id = ${taskId}
       ON CONFLICT (task_id) DO NOTHING`;
   }

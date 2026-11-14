@@ -11,6 +11,8 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as Upload from "../../../assets/AttachmentUpload.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
+import * as AutomationLimits from "../../../scheduledTasks/AutomationLimits.ts";
+import * as Option from "effect/Option";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { newCommandId, readThread, unavailable } from "../../threadAccess.ts";
 import { AttachmentToolkit } from "./tools.ts";
@@ -86,6 +88,12 @@ export const layer = McpToolAccess.toLayer(
         (input) =>
           Effect.gen(function* () {
             const scope = yield* McpInvocationContext.McpInvocationContext;
+            const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+            if (scope.thread !== undefined && Option.isSome(limits))
+              yield* limits.value.admitSend({
+                callerThreadId: scope.thread.threadId,
+                targetThreadId: input.threadId ?? scope.thread.threadId,
+              });
             const { caller, projection } = yield* readThread(input.threadId, ["messages"]);
             if (projection.thread.archivedAt !== null)
               return yield* new OrchestratorMcpFailure({

@@ -1,4 +1,9 @@
-import { MonitoringFinding, ScheduledTaskAgent, ScheduledTaskSchedule } from "@t3tools/contracts";
+import {
+  MonitoringFinding,
+  ScheduledTaskAgent,
+  ScheduledTaskGrant,
+  ScheduledTaskSchedule,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
@@ -11,6 +16,7 @@ import Migration0100 from "./100_FoldWatchersIntoAutomations.ts";
 const layer = it.layer(NodeSqliteClient.layer({ filename: ":memory:" }));
 const decodeAgent = Schema.decodeUnknownSync(Schema.fromJsonString(ScheduledTaskAgent));
 const decodeSchedule = Schema.decodeUnknownSync(Schema.fromJsonString(ScheduledTaskSchedule));
+const decodeGrant = Schema.decodeUnknownSync(Schema.fromJsonString(ScheduledTaskGrant));
 const decodeFinding = Schema.decodeUnknownSync(Schema.fromJsonString(MonitoringFinding));
 
 const model = { instanceId: "claudeAgent", model: "claude-haiku-4-5" };
@@ -137,9 +143,10 @@ layer("100_FoldWatchersIntoAutomations", (it) => {
         enabled: number;
         schedule_json: string;
         agent_json: string | null;
+        grant_json: string | null;
         run_count: number;
         next_run_at: string | null;
-      }>`SELECT task_id, title, enabled, schedule_json, agent_json, run_count, next_run_at
+      }>`SELECT task_id, title, enabled, schedule_json, agent_json, grant_json, run_count, next_run_at
         FROM scheduled_tasks ORDER BY task_id`;
       assert.deepEqual(
         tasks.map((row) => [row.task_id, row.title, row.enabled, row.run_count]),
@@ -165,19 +172,33 @@ layer("100_FoldWatchersIntoAutomations", (it) => {
         decodeAgent(byId.get("monitoring:context")!.agent_json),
       );
       assert.strictEqual(byId.get("monitoring:both")!.next_run_at, "2026-11-15T09:00:00.000Z");
-      assert.deepEqual(decodeSchedule(byId.get("monitoring:both:turn-end")!.schedule_json), {
+      // Raw JSON, so a cap left in the schedule would show; decoding would drop it.
+      assert.deepEqual(JSON.parse(byId.get("monitoring:both:turn-end")!.schedule_json), {
         type: "event",
         event: "run_ended",
         projectId: "project-1",
         cooldownSeconds: 900,
-        maxRunsPerHour: 120,
-      } as never);
-      assert.deepEqual(decodeSchedule(byId.get("monitoring:context:turn-end")!.schedule_json), {
+      });
+      assert.deepEqual(JSON.parse(byId.get("monitoring:context:turn-end")!.schedule_json), {
         type: "event",
         event: "run_ended",
         cooldownSeconds: 600,
-        maxRunsPerHour: 120,
-      } as never);
+      });
+      decodeSchedule(byId.get("monitoring:context:turn-end")!.schedule_json);
+      // The turn-end half keeps the watcher's uncapped runs; a context review keeps its $0.05 cap.
+      assert.deepEqual(
+        tasks.map((row) => [
+          row.task_id,
+          row.grant_json === null ? null : decodeGrant(row.grant_json),
+        ]),
+        [
+          ["monitoring:alerts", null],
+          ["monitoring:both", null],
+          ["monitoring:both:turn-end", { maxRunsPerHour: 120 }],
+          ["monitoring:context", { budget: { maxCostUsd: 0.05 } }],
+          ["monitoring:context:turn-end", { budget: { maxCostUsd: 0.05 }, maxRunsPerHour: 120 }],
+        ],
+      );
 
       const notifications = yield* sql<{
         id: string;

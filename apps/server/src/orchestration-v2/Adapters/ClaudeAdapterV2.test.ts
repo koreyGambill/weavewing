@@ -616,6 +616,18 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       permissionMode: "default",
       installPermissionCallback: true,
     });
+    // An automation's limits keep Claude's own subagent tool out of the session.
+    assert.deepEqual(
+      ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+        ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: "/workspace",
+          disableNativeSubagents: true,
+        }),
+      ).disallowedTools,
+      ["Agent", "Task"],
+    );
   });
 });
 
