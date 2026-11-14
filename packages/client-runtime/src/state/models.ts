@@ -165,6 +165,8 @@ export interface EnvironmentThreadShell {
   readonly linkOrigin: OrchestrationV2ThreadShell["linkOrigin"] | null;
   /** The thread in a linked environment that delegated this one, if one did. */
   readonly delegatedFrom: OrchestrationV2ThreadShell["delegatedFrom"] | null;
+  /** The automation whose run started this thread. */
+  readonly automationTaskId?: OrchestrationV2ThreadShell["automationTaskId"];
   readonly activeProviderThreadId: OrchestrationV2ThreadShell["activeProviderThreadId"];
   readonly latestRun: ThreadRunSummary | null;
   readonly latestRunReactionOnly?: boolean;
@@ -323,6 +325,7 @@ export function presentThreadShell(
     forkedFrom: thread.forkedFrom,
     linkOrigin: thread.linkOrigin ?? null,
     delegatedFrom: thread.delegatedFrom ?? null,
+    ...(thread.automationTaskId === undefined ? {} : { automationTaskId: thread.automationTaskId }),
     activeProviderThreadId: thread.activeProviderThreadId,
     latestRun,
     ...(thread.latestRunReactionOnly === undefined

@@ -166,7 +166,9 @@ import {
 } from "./threadActionMenu.logic";
 import {
   applySidebarThreadDrop,
+  filterSidebarAutomationThreads,
   filterSidebarV2VisibleThreads,
+  SidebarAutomationThreadFilter,
   groupSidebarThreadsByProject,
   groupSidebarThreadFamilies,
   sidebarFolderExpansionKeys,
@@ -241,6 +243,7 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { TooltipProvider } from "./ui/tooltip";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import {
   composerDraftHasUserContent,
   DraftId,
@@ -321,6 +324,12 @@ const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const AUTOMATION_THREAD_FILTER_KEY = "t3code:sidebar:automation-threads";
+const AUTOMATION_FILTER_SUFFIX: Record<SidebarAutomationThreadFilter, string> = {
+  show: "",
+  hide: " (automation threads hidden)",
+  only: " (automation threads only)",
+};
 
 type SidebarOptimisticDrop = {
   readonly key: string;
@@ -343,6 +352,8 @@ interface SidebarThreadPartitionInput {
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   // Snooze wakes need a second-precise tick as well as the minute clock.
   readonly clockKey: string;
+  readonly automationFilter: SidebarAutomationThreadFilter;
+  readonly routeRowThreadKey: string | null;
 }
 
 function scrollSidebarToTop(content: HTMLElement | null) {
@@ -403,6 +414,7 @@ function useSidebarThreads(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly delegatedUnderParent: ReadonlySet<string>;
   readonly routeRowThreadKey: string | null;
+  readonly automationFilter: SidebarAutomationThreadFilter;
   // Set in boring mode: the project groups to fold active threads into, in order.
   readonly folderGroups: readonly SidebarProjectSnapshot[] | null;
   // Keeps folders with no active threads, so a project the user filtered to or pinned can start one.
@@ -419,6 +431,7 @@ function useSidebarThreads(input: {
     routeRowThreadKey,
     folderGroups,
     keepEmptyFolders: keepEmpty,
+    automationFilter,
   } = input;
   const nowMinute = useNowMinute();
   // Minute-quantized clocks would delay second-precise snooze wakes by up to a minute.
@@ -454,6 +467,8 @@ function useSidebarThreads(input: {
     connectedEnvironmentIds,
     optimisticDrop,
     clockKey: `${nowMinute}:${snoozeWakeClock}`,
+    automationFilter,
+    routeRowThreadKey,
   });
 
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = partition;
@@ -580,7 +595,11 @@ function useSidebarThreads(input: {
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const { threads, scopedProjectKeys, delegatedUnderParent, serverConfigs, optimisticDrop } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
+  const visible = filterSidebarAutomationThreads(
+    filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent),
+    input.automationFilter,
+    input.routeRowThreadKey,
+  );
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const snoozed: EnvironmentThreadShell[] = [];
@@ -968,6 +987,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     { open: false, query: "" },
   );
   const projectScopeFilter = useComboboxFilter();
+  const [automationFilter, setAutomationFilter] = useLocalStorage(
+    AUTOMATION_THREAD_FILTER_KEY,
+    "show",
+    SidebarAutomationThreadFilter,
+  );
   const allProjectSnapshotsReady = useAllEnvironmentProjectSnapshotsReady();
   const allProjectConfigsReady = useAtomValue(environmentProjects.projectConfigsReadyAtom);
   // Safari may click after Ctrl+click opens settings; suppress that selection until the picker reopens.
@@ -1300,6 +1324,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     threads: listedThreads,
     delegatedUnderParent,
     routeRowThreadKey,
+    automationFilter,
     folderGroups: boringSidebarEnabled
       ? scopedProjectGroups.length === 0
         ? // An archived project keeps a folder for its active threads, below the rest.
@@ -2946,11 +2971,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   <ComboboxTrigger
                     render={
                       <SidebarHeaderIconButton
-                        label={
+                        label={`${
                           scopedProjectGroups.length > 0
                             ? `Filter threads by project: ${scopedProjectGroups.map((project) => project.displayName).join(", ")}`
                             : "Filter threads by project"
-                        }
+                        }${AUTOMATION_FILTER_SUFFIX[automationFilter]}`}
                       />
                     }
                   >
@@ -2975,6 +3000,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       </span>
                     ) : (
                       <ListFilterIcon className="size-4" />
+                    )}
+                    {automationFilter === "show" ? null : (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute top-1 right-1 size-1.5 rounded-full bg-primary"
+                      />
                     )}
                   </ComboboxTrigger>
                   {/* Refocusing the trigger after a pointer close shows its focus ring and opens its tooltip. */}
@@ -3104,6 +3135,29 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         );
                       }}
                     </ComboboxList>
+                    <div className="flex items-center justify-between gap-2 border-t px-2.5 py-2">
+                      <span
+                        id="sidebar-automation-filter-label"
+                        className="text-xs text-muted-foreground"
+                      >
+                        Automation threads
+                      </span>
+                      <ToggleGroup
+                        aria-labelledby="sidebar-automation-filter-label"
+                        size="segmented-compact"
+                        value={[automationFilter]}
+                        onValueChange={(value) => {
+                          const next = value[0];
+                          if (next === "show" || next === "hide" || next === "only") {
+                            setAutomationFilter(next);
+                          }
+                        }}
+                      >
+                        <Toggle value="show">Show</Toggle>
+                        <Toggle value="hide">Hide</Toggle>
+                        <Toggle value="only">Only</Toggle>
+                      </ToggleGroup>
+                    </div>
                   </ComboboxPopup>
                 </Combobox>
               }
