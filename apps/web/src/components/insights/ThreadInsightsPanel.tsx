@@ -13,8 +13,15 @@ import { threadInsightsGet } from "../../state/threadInsights";
 import { SidebarSearchField } from "../sidebar/SidebarSearchField";
 import { CheckedLabel, ToolFilterMenuTrigger } from "../ToolFilterMenuTrigger";
 import { Button } from "../ui/button";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem } from "../ui/menu";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+} from "../ui/menu";
 import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
 import { InspectControls, InspectRefreshButton } from "./InspectControls";
 import { filterLoadEvents, reportedUsageTotals } from "./insightDisplay";
@@ -105,34 +112,42 @@ export function ThreadInsightsPanel({
               />
               <Menu>
                 <ToolFilterMenuTrigger
-                  label="Activity type"
-                  tooltip="Activity type"
-                  active={kind !== ""}
+                  label="Activity filters"
+                  tooltip="Type and evidence"
+                  active={kind !== "" || evidence !== ""}
                 />
                 <MenuPopup align="end">
-                  <MenuRadioGroup value={kind} onValueChange={(next) => setKind(String(next))}>
-                    {["", "file", "skill", "instructions", "search", "resource"].map((type) => (
-                      <MenuRadioItem key={type} value={type}>
-                        <CheckedLabel>{type === "" ? "All types" : type}</CheckedLabel>
-                      </MenuRadioItem>
-                    ))}
-                  </MenuRadioGroup>
+                  <MenuGroup>
+                    <MenuGroupLabel>Type</MenuGroupLabel>
+                    <MenuRadioGroup value={kind} onValueChange={(next) => setKind(String(next))}>
+                      {["", "file", "skill", "instructions", "search", "resource"].map((type) => (
+                        <MenuRadioItem key={type} value={type}>
+                          <CheckedLabel>{type === "" ? "All types" : type}</CheckedLabel>
+                        </MenuRadioItem>
+                      ))}
+                    </MenuRadioGroup>
+                  </MenuGroup>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Evidence</MenuGroupLabel>
+                    <MenuRadioGroup
+                      value={evidence}
+                      onValueChange={(next) => setEvidence(String(next))}
+                    >
+                      {[
+                        ["", "All evidence"],
+                        ["reported", "Reported"],
+                        ["inferred", "Inferred"],
+                      ].map(([value, label]) => (
+                        <MenuRadioItem key={value} value={value}>
+                          <CheckedLabel>{label}</CheckedLabel>
+                        </MenuRadioItem>
+                      ))}
+                    </MenuRadioGroup>
+                  </MenuGroup>
                 </MenuPopup>
               </Menu>
             </div>
-            <ToggleGroup
-              aria-label="Activity evidence"
-              size="segmented-compact"
-              className="w-full"
-              value={[evidence || "all"]}
-              onValueChange={(value) => {
-                if (value[0]) setEvidence(value[0] === "all" ? "" : value[0]);
-              }}
-            >
-              <Toggle value="all">All</Toggle>
-              <Toggle value="reported">Reported</Toggle>
-              <Toggle value="inferred">Inferred</Toggle>
-            </ToggleGroup>
           </>
         )}
       </InspectControls>

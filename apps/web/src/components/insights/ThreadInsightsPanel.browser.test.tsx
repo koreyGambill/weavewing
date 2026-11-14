@@ -140,7 +140,8 @@ it("filters observed activity and distinguishes known instruction estimates from
   await page.getByText("review / SKILL.md", { exact: true }).click();
   await expect.element(page.getByText("/skills/review/SKILL.md", { exact: true })).toBeVisible();
   await expect.element(page.getByText("Unknown", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Reported" }).click();
+  await page.getByRole("button", { name: "Activity filters" }).click();
+  await page.getByRole("menuitemradio", { name: "Reported" }).click();
   await expect.element(page.getByText("No activity matches these filters.")).toBeVisible();
   await page.getByRole("combobox", { name: "Inspect run" }).selectOptions("run-old");
   expect(state.query).toHaveBeenLastCalledWith(

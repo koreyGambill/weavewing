@@ -149,7 +149,6 @@ export function XwingEnvironmentsPanel({
                 <ToggleGroup
                   aria-label="Environment scope"
                   size="segmented-compact"
-                  className="min-w-0 flex-1 *:flex-1"
                   value={[allEnvironments ? "all" : "linked"]}
                   onValueChange={(value) => {
                     if (value[0]) setAllEnvironments(value[0] === "all");
