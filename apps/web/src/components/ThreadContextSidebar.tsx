@@ -11,6 +11,7 @@ import {
   InfoIcon,
   LinkIcon,
   ListChecksIcon,
+  MessagesSquareIcon,
   NetworkIcon,
   ChartGanttIcon,
   PinIcon,
@@ -229,12 +230,10 @@ export function ThreadToolsBrand({ onBackdrop }: { onBackdrop: boolean }) {
         <TooltipTrigger
           render={
             <Button
-              variant={onBackdrop ? "media-navigation" : view === "threads" ? "secondary" : "ghost"}
+              variant={onBackdrop ? "media-navigation" : "ghost"}
               size="icon-sm"
               className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
-              data-pressed={onBackdrop && view === "threads" ? "" : undefined}
               aria-label="Thread list"
-              aria-pressed={view === "threads"}
               onClick={() => useThreadContextSidebarStore.getState().selectView("threads")}
             />
           }
@@ -384,7 +383,7 @@ function InboxStripButton({ active, tooltip }: { active: boolean; tooltip: strin
           .filter(Boolean)
           .join(", ") || undefined
       }
-      icon={<BellIcon />}
+      icon={BellIcon}
     >
       {statusAlert ? (
         <span className="pointer-events-none absolute right-0 bottom-0 flex rounded-full bg-sidebar p-px">
@@ -421,19 +420,27 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
   const hidden = useThreadContextSidebarStore((state) => state.hidden);
   const signals = useThreadToolSignals(threadRef);
   const tooltip = useShortcutTooltip();
+  const visibleTools = THREAD_TOOL_ORDER.filter((id) => !hidden.includes(id));
   return (
     <nav
       aria-label="Sidebar views"
       className="flex w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-sidebar-border py-2 [-webkit-app-region:no-drag] [scrollbar-width:none]"
     >
+      <StripButton
+        id="threads"
+        title="Threads"
+        active={view === "threads"}
+        tooltip={tooltip("threads", "Threads")}
+        icon={MessagesSquareIcon}
+      />
       {hidden.includes("inbox") ? null : (
-        <>
-          <InboxStripButton active={view === "inbox"} tooltip={tooltip("inbox", "Inbox")} />
-          <span aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-sidebar-border" />
-        </>
+        <InboxStripButton active={view === "inbox"} tooltip={tooltip("inbox", "Inbox")} />
       )}
-      {THREAD_TOOL_ORDER.filter((id) => !hidden.includes(id)).map((id) => {
-        const { title, icon: Icon } = tools[id];
+      {visibleTools.length ? (
+        <span aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-sidebar-border" />
+      ) : null}
+      {visibleTools.map((id) => {
+        const { title, icon } = tools[id];
         const count =
           id === "todos" ? signals.listCount : id === "artifacts" ? signals.questionCount : 0;
         const ticket = id === "links" ? signals.ticketState : null;
@@ -451,7 +458,7 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
                   ? `ticket ${ticket.replace("_", " ")}`
                   : undefined
             }
-            icon={<Icon />}
+            icon={icon}
           >
             {ticket ? (
               <span
@@ -515,10 +522,13 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
   );
 }
 
-function StripButton(props: {
+function StripButton({
+  icon: Icon,
+  ...props
+}: {
   id: SidebarView;
   title: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   active: boolean;
   tooltip: string;
   badge?: string | undefined;
@@ -529,7 +539,7 @@ function StripButton(props: {
       {props.active ? (
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-y-1 -left-2 w-0.5 rounded-full bg-primary"
+          className="pointer-events-none absolute inset-y-1 -left-2 w-0.5 rounded-full bg-success-foreground"
         />
       ) : null}
       <Tooltip>
@@ -544,7 +554,7 @@ function StripButton(props: {
             />
           }
         >
-          {props.icon}
+          <Icon className={props.active ? "text-success-foreground" : undefined} />
         </TooltipTrigger>
         <TooltipPopup side="right">{props.tooltip}</TooltipPopup>
       </Tooltip>
