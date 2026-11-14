@@ -131,6 +131,7 @@ export function ThreadListView({
   // Kept here so an item's editor stays open when indenting moves its row to a new parent.
   const [editing, setEditing] = useState<string | null>(null);
   const focusTextRef = useRef<string | null>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const remote = supplied ?? query.data?.[0];
   const entry = saved && (!remote || saved.revision > remote.revision) ? saved : remote;
@@ -240,6 +241,7 @@ export function ThreadListView({
       {!supplied ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <ToggleGroup
+            ref={filterRef}
             aria-label="Filter todos by who is responsible"
             size="segmented-compact"
             value={[filter]}
@@ -309,7 +311,10 @@ export function ThreadListView({
                 Nothing here for this filter.{" "}
                 <InlineButton
                   tone="muted"
-                  onClick={() => useThreadContextSidebarStore.getState().setTodoFilter("all")}
+                  onClick={() => {
+                    useThreadContextSidebarStore.getState().setTodoFilter("all");
+                    filterRef.current?.querySelector<HTMLElement>('[aria-label="All"]')?.focus();
+                  }}
                 >
                   Show all todos
                 </InlineButton>
@@ -459,6 +464,7 @@ function TodoRow({
   const { item, progress } = node;
   const focusNewItem = useRef(false);
   const rowRef = useRef<HTMLDivElement>(null);
+  const focusAfterMenu = useRef<HTMLElement | null>(null);
   // Tab already wrote the text with the move, so the blur that follows must not write it again.
   const skipBlurSave = useRef(false);
   const [textRef] = useState(() => (input: HTMLInputElement | null) => {
@@ -494,7 +500,7 @@ function TodoRow({
           disabled={disabled}
           onCheckedChange={() => {
             if (!terminal && hidesClosed && !node.children.length)
-              focusNeighborCheckbox(rowRef.current);
+              neighborCheckbox(rowRef.current)?.focus();
             onChange({ state: terminal ? "open" : openLink ? "handed_off" : "done" });
           }}
         />
@@ -579,6 +585,11 @@ function TodoRow({
           <MenuPopup
             align="end"
             finalFocus={() => {
+              if (focusAfterMenu.current) {
+                const next = focusAfterMenu.current;
+                focusAfterMenu.current = null;
+                return next;
+              }
               if (!focusNewItem.current) return true;
               focusNewItem.current = false;
               newItemRef.current?.scrollIntoView({ block: "nearest" });
@@ -638,7 +649,11 @@ function TodoRow({
             </MenuCheckboxItem>
             <MenuItem
               disabled={disabled}
-              onClick={() => onChange({ state: terminal ? "open" : "dropped" })}
+              onClick={() => {
+                if (!terminal && hidesClosed && !node.children.length)
+                  focusAfterMenu.current = neighborCheckbox(rowRef.current);
+                onChange({ state: terminal ? "open" : "dropped" });
+              }}
             >
               {terminal ? "Reopen" : "Drop"}
             </MenuItem>
@@ -686,13 +701,13 @@ function TodoRow({
   );
 }
 
-function focusNeighborCheckbox(row: HTMLElement | null) {
+function neighborCheckbox(row: HTMLElement | null) {
   const boxes = [
     ...(row?.closest('[aria-label="Todos"]')?.querySelectorAll<HTMLElement>('[role="checkbox"]') ??
       []),
   ];
   const at = boxes.findIndex((box) => row?.contains(box));
-  (boxes[at + 1] ?? boxes[at - 1])?.focus();
+  return boxes[at + 1] ?? boxes[at - 1] ?? null;
 }
 
 function OwnerIcon({ owner }: { owner: Owner }) {
