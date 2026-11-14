@@ -459,6 +459,39 @@ describe("ServerSettings project overrides across versions", () => {
   });
 });
 
+describe("ServerSettings tile layouts", () => {
+  it("seeds the built-in layout without turning on a default", () => {
+    const settings = decodeServerSettings({});
+    expect(settings.tileLayouts.map((layout) => layout.name)).toEqual(["Chat + Notes + Terminal"]);
+    expect(settings.defaultTileLayoutId).toBeNull();
+    expect(decodeServerSettings({ tileLayouts: [] }).tileLayouts).toEqual([]);
+  });
+
+  it("rejects out-of-range splits, empty tiles and oversized layouts", () => {
+    const group = { kind: "group", areas: ["chat"] };
+    const layout = (root: unknown) => ({ tileLayouts: [{ id: "x", name: "X", root }] });
+    expect(() =>
+      decodeServerSettingsPatch(
+        layout({ kind: "split", axis: "horizontal", ratio: 0.95, first: group, second: group }),
+      ),
+    ).toThrow();
+    expect(() => decodeServerSettingsPatch(layout({ kind: "group", areas: [] }))).toThrow();
+    expect(() =>
+      decodeServerSettingsPatch(layout({ kind: "group", areas: ["side-chat"] })),
+    ).toThrow();
+    const deep = Array.from({ length: 16 }).reduce<unknown>(
+      (node) => ({ kind: "split", axis: "vertical", ratio: 0.5, first: group, second: node }),
+      group,
+    );
+    expect(() => decodeServerSettingsPatch(layout(deep))).toThrow();
+    expect(
+      decodeServerSettingsPatch({
+        projectSettingsOverrides: { project: { defaultTileLayoutId: null } },
+      }).projectSettingsOverrides?.[ProjectId.make("project")],
+    ).toEqual({ defaultTileLayoutId: null });
+  });
+});
+
 describe("resolveProjectProviderInstanceEnabled", () => {
   const projectId = "project-a" as ProjectId;
   const instanceId = ProviderInstanceId.make("codex_work");

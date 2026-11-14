@@ -6,6 +6,7 @@ import {
 } from "../../shortcuts/dispatcher";
 import {
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   type CSSProperties,
@@ -25,7 +26,12 @@ import {
   GripVertical,
   X,
 } from "lucide-react";
-import type { KeybindingCommand, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  KeybindingCommand,
+  ProjectId,
+  SavedTileLayout,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import {
   useRightPanelStore,
   selectThreadTileLayout,
@@ -85,6 +91,13 @@ import { PanelTabCloseButton } from "../ui/panel-tab-close-button";
 import { cn, randomUUID } from "../../lib/utils";
 import { ThreadPaneAttention } from "../ThreadAttentionOverlay";
 import { TILE_AREAS, tileCloseConfirmation, type TileAreaLabel } from "./ThreadTileWorkspace.logic";
+import {
+  savedTileGroupCount,
+  TILE_LAYOUT_AREA_LABELS,
+  toSavedTileNode,
+} from "../../savedTileLayouts";
+import { SaveTileLayoutDialog, TileLayoutsSubmenu } from "./TileLayoutsMenu";
+import { useSavedTileLayouts } from "./useSavedTileLayouts";
 
 const TAB_DRAG_TYPE = "application/x-weavewing-tab";
 const GROUP_DRAG_TYPE = "application/x-weavewing-group";
@@ -188,6 +201,9 @@ const FLOAT_HANDLES: ReadonlyArray<{
 
 export function ThreadTileWorkspace(props: {
   threadRef: ScopedThreadRef;
+  projectId: ProjectId | null;
+  /** Started by the user on this client and still without messages; takes the default layout once. */
+  newThread: boolean;
   header: ReactNode;
   conversation: ReactNode;
   panels: PanelActions;
@@ -205,6 +221,14 @@ export function ThreadTileWorkspace(props: {
     selectThreadTileLayout(state.byThreadKey, props.threadRef),
   );
   const rootRef = useRef<HTMLDivElement>(null);
+  const tileLayouts = useSavedTileLayouts(props.threadRef.environmentId, props.projectId);
+  const [saveLayout, setSaveLayout] = useState<{ dropped: boolean; tiles: number } | null>(null);
+  const defaultLayout = props.newThread ? tileLayouts.effectiveDefault : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lays out a new draft once the environment's settings name a default layout
+  useEffect(() => {
+    if (defaultLayout)
+      useRightPanelStore.getState().applySavedTileLayout(props.threadRef, defaultLayout.root, true);
+  }, [defaultLayout, props.threadRef]);
   const [dragging, setDragging] = useState<TileDrag | null>(null);
   const [dropTarget, setDropTarget] = useState<TileDrop | null>(null);
   const headerDragBlocked = useRef(false);
@@ -449,25 +473,38 @@ export function ThreadTileWorkspace(props: {
       target.focus({ preventScroll: true });
     });
   };
+  const panel = props.panels;
+  const areaRuns: Record<TileAreaLabel, [boolean, (() => void) | undefined]> = {
+    Chat: [true, undefined],
+    Browser: [panel.browserAvailable, panel.onAddBrowser],
+    Terminal: [panel.terminalAvailable, panel.onAddTerminal],
+    Files: [panel.filesAvailable, panel.onAddFiles],
+    Notes: [Boolean(panel.onAddNotes), panel.onAddNotes],
+    Diff: [panel.diffAvailable, panel.onAddDiff],
+    "Pull request": [panel.pullRequestAvailable, panel.onAddPullRequest],
+    "Pull requests": [panel.pullRequestsAvailable, panel.onAddPullRequests],
+    Device: [panel.deviceAvailable, panel.onAddDevice],
+    "Side chat": [panel.sideChatAvailable === true, panel.onAddSideChat],
+  };
+  const openablePending = Object.entries(savedLayout.pendingAreas ?? {}).filter(
+    ([, area]) => areaRuns[TILE_LAYOUT_AREA_LABELS[area]][0],
+  );
+  const requestedPending = useRef(new Set<string>());
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens a fresh surface for each saved-layout placeholder once its area becomes available
+  useEffect(() => {
+    for (const [tabId, area] of openablePending) {
+      if (requestedPending.current.has(tabId)) continue;
+      requestedPending.current.add(tabId);
+      areaRuns[TILE_LAYOUT_AREA_LABELS[area]][1]?.();
+    }
+  });
   const areaChoices: ReadonlyArray<{
     label: TileAreaLabel;
     key: string;
     enabled: boolean;
     run: (groupId: string) => void;
   }> = (() => {
-    const panel = props.panels;
-    const runs: Record<TileAreaLabel, [boolean, (() => void) | undefined]> = {
-      Chat: [true, undefined],
-      Browser: [panel.browserAvailable, panel.onAddBrowser],
-      Terminal: [panel.terminalAvailable, panel.onAddTerminal],
-      Files: [panel.filesAvailable, panel.onAddFiles],
-      Notes: [Boolean(panel.onAddNotes), panel.onAddNotes],
-      Diff: [panel.diffAvailable, panel.onAddDiff],
-      "Pull request": [panel.pullRequestAvailable, panel.onAddPullRequest],
-      "Pull requests": [panel.pullRequestsAvailable, panel.onAddPullRequests],
-      Device: [panel.deviceAvailable, panel.onAddDevice],
-      "Side chat": [panel.sideChatAvailable === true, panel.onAddSideChat],
-    };
+    const runs = areaRuns;
     return TILE_AREAS.flatMap(({ label, key }) => {
       const [enabled, run] = runs[label];
       return enabled
@@ -492,6 +529,14 @@ export function ThreadTileWorkspace(props: {
     });
   })();
   const restoreZoom = () => apply({ type: "maximize", groupId: null });
+  const saveLayoutAs = () => {
+    const { root, dropped } = toSavedTileNode(currentLayout());
+    setSaveLayout({ dropped, tiles: root ? savedTileGroupCount(root) : 0 });
+  };
+  const applySavedLayout = (layout: SavedTileLayout) => {
+    useRightPanelStore.getState().applySavedTileLayout(props.threadRef, layout.root);
+    focus(currentLayout().focusedGroupId);
+  };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers workspace commands, window keys and native browser menu actions for this mounted thread
   useEffect(() => {
     const currentGroup = () => {
@@ -704,6 +749,31 @@ export function ThreadTileWorkspace(props: {
       for (const dispose of disposers) dispose();
     };
   });
+  const runLayoutAction = useEffectEvent((kind: string, layoutId: string) => {
+    const layout = tileLayouts.layouts.find((entry) => entry.id === layoutId);
+    if (!layout) return;
+    if (kind === "apply") applySavedLayout(layout);
+    else if (kind === "projectDefault") tileLayouts.setProjectDefault(layout.id);
+    else tileLayouts.setGlobalDefault(layout.id);
+  });
+  const saveLayoutFromMenu = useEffectEvent(() => saveLayoutAs());
+  const layoutIds = tileLayouts.layouts.map((layout) => layout.id).join("\n");
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the palette's saved-layout actions for this mounted thread
+  useEffect(() => {
+    const disposers = [
+      registerMenuAction("workspace.tile.layout.save", () => saveLayoutFromMenu()),
+      ...(layoutIds ? layoutIds.split("\n") : []).flatMap((layoutId) =>
+        ["apply", "projectDefault", "globalDefault"].map((kind) =>
+          registerMenuAction(`workspace.tile.layout.${kind}:${layoutId}`, () =>
+            runLayoutAction(kind, layoutId),
+          ),
+        ),
+      ),
+    ];
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, [layoutIds]);
 
   const resize = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -1227,6 +1297,14 @@ export function ThreadTileWorkspace(props: {
                         </MenuItem>
                       </MenuSubPopup>
                     </MenuSub>
+                    <MenuSeparator />
+                    <TileLayoutsSubmenu
+                      api={tileLayouts}
+                      hasProject={tileLayouts.projectId !== null}
+                      onSaveAs={saveLayoutAs}
+                      onApply={applySavedLayout}
+                    />
+                    <MenuSeparator />
                     <MenuItem
                       disabled={!group.tabs.length}
                       onClick={() => closeTab(group.activeTabId)}
@@ -1266,6 +1344,12 @@ export function ThreadTileWorkspace(props: {
                   }}
                 >
                   <p className="text-sm font-medium">Choose an area</p>
+                  {savedLayout.pendingAreas?.[group.activeTabId] && (
+                    <p className="-mt-2 text-xs text-muted-foreground">
+                      {TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} opens
+                      here once it is available.
+                    </p>
+                  )}
                   <div
                     className="flex max-w-md flex-wrap justify-center gap-2"
                     role="group"
@@ -1466,6 +1550,21 @@ export function ThreadTileWorkspace(props: {
           />
         )}
       </div>
+      {saveLayout && (
+        <SaveTileLayoutDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setSaveLayout(null);
+          }}
+          layouts={tileLayouts.layouts}
+          dropped={saveLayout.dropped}
+          tiles={saveLayout.tiles}
+          onSave={(name) => {
+            const { root } = toSavedTileNode(currentLayout());
+            if (root) tileLayouts.save(name, root);
+          }}
+        />
+      )}
       <AlertDialog
         open={closeConfirm !== null}
         onOpenChange={(open) => {

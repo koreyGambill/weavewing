@@ -1,7 +1,12 @@
 import { dispatchMenuAction } from "../../shortcuts/dispatcher";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import "../../index.css";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_TILE_LAYOUTS,
+  EnvironmentId,
+  ThreadId,
+  type SavedTileLayout,
+} from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import { render } from "../../../test/render";
@@ -18,8 +23,22 @@ vi.mock("../RightPanelTabs", () => ({
   surfaceTitle: (surface: { kind: string }) => surface.kind,
 }));
 vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
+const savedLayouts = vi.hoisted(() => ({ effectiveDefault: null as SavedTileLayout | null }));
+vi.mock("./useSavedTileLayouts", () => ({
+  useSavedTileLayouts: () => ({
+    layouts: [],
+    globalDefaultId: null,
+    projectId: null,
+    projectDefaultId: undefined,
+    effectiveDefault: savedLayouts.effectiveDefault,
+    save: () => {},
+    setGlobalDefault: () => {},
+    setProjectDefault: () => {},
+  }),
+}));
 
-async function setup(resizeScenario = false) {
+async function setup(resizeScenario = false, newThread = false) {
+  savedLayouts.effectiveDefault = newThread ? DEFAULT_TILE_LAYOUTS[0]! : null;
   await using resources = new AsyncDisposableStack();
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   await page.viewport(1100, 800);
@@ -31,8 +50,10 @@ async function setup(resizeScenario = false) {
   };
   useRightPanelStore.setState({ byThreadKey: {} });
   const store = useRightPanelStore.getState();
-  store.open(threadRef, "files");
-  store.open(threadRef, "diff");
+  if (!newThread) {
+    store.open(threadRef, "files");
+    store.open(threadRef, "diff");
+  }
   if (resizeScenario) {
     store.closeSurface(threadRef, "files");
     store.applyTileAction(threadRef, {
@@ -59,6 +80,8 @@ async function setup(resizeScenario = false) {
     return (
       <ThreadTileWorkspace
         threadRef={threadRef}
+        projectId={null}
+        newThread={newThread}
         header={<header style={{ height: 32 }}>Thread header</header>}
         runningTerminalIds={[]}
         onCloseTileSurfaces={(surfaces) => {
@@ -513,4 +536,26 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
       (surface) => surface.id,
     ),
   ).not.toContain("terminal:new-terminal");
+});
+
+it("lays out a new draft from the default layout, filling placeholders with fresh surfaces", async () => {
+  await using fixture = await setup(false, true);
+  const tabs = () => getTileGroups(fixture.layout()).map((group) => group.tabs);
+  await vi.waitFor(() =>
+    expect(tabs()).toEqual([
+      ["conversation"],
+      [expect.stringMatching(/^notes/)],
+      ["terminal:new-terminal"],
+    ]),
+  );
+  expect(fixture.layout().pendingAreas).toBeUndefined();
+  // A thread that already has panels keeps its arrangement.
+  fixture.store.applyTileAction(fixture.threadRef, {
+    type: "move",
+    tabId: "terminal:new-terminal",
+    targetGroupId: getTileGroups(fixture.layout())[0]!.id,
+  });
+  const arranged = tabs();
+  fixture.store.applySavedTileLayout(fixture.threadRef, DEFAULT_TILE_LAYOUTS[0]!.root, true);
+  expect(tabs()).toEqual(arranged);
 });
