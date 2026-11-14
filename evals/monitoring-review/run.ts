@@ -1,16 +1,7 @@
 #!/usr/bin/env node
 import * as NodeUtil from "node:util";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import {
-  ClaudeSettings,
-  MessageId,
-  MonitoringFindingId,
-  ProjectId,
-  ProviderInstanceId,
-  ScheduledTaskId,
-  ThreadId,
-  type MonitoringFinding,
-} from "@t3tools/contracts";
+import { ClaudeSettings, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -18,8 +9,8 @@ import * as Schema from "effect/Schema";
 import { monitoringReviewPrompt } from "../../apps/server/src/monitoring/MonitoringRunner.ts";
 import type { ReviewProfile } from "../../apps/server/src/monitoring/ReviewProfile.ts";
 import { makeClaudeTextGeneration } from "../../apps/server/src/textGeneration/ClaudeTextGeneration.ts";
-import { cases, type Case } from "./cases.ts";
-import { grade } from "./grade.ts";
+import { cases, filed, snapshotFor, thread, type Case } from "./cases.ts";
+import { grade, survivors } from "./grade.ts";
 
 const { values } = NodeUtil.parseArgs({
   options: {
@@ -31,10 +22,9 @@ const { values } = NodeUtil.parseArgs({
   },
 });
 const selected = values.case ? cases.filter((entry) => values.case!.includes(entry.id)) : cases;
-const thread = ThreadId.make("thread:lead");
 const modelSelection = { instanceId: ProviderInstanceId.make("claude"), model: values.model };
 const profile: ReviewProfile = {
-  id: ScheduledTaskId.make("scheduled:standards"),
+  id: filed.taskId,
   title: "Standards review",
   kind: "standards",
   enabled: true,
@@ -62,39 +52,7 @@ const profile: ReviewProfile = {
     },
   ],
 };
-const filed: MonitoringFinding = {
-  id: MonitoringFindingId.make("finding:bw-12"),
-  taskId: profile.id,
-  runId: "review:earlier",
-  threadId: thread,
-  ruleId: "review-before-landing",
-  summary: "BW-12 was merged to main without the review the user asked for.",
-  detail: "The lead merged BW-12 straight to main and skipped review.",
-  confidence: 0.9,
-  evidence: [
-    {
-      threadId: thread,
-      messageId: MessageId.make("m2"),
-      excerpt: "I merged it straight to main and skipped the review",
-    },
-  ],
-  createdAt: "2026-11-14T00:00:00.000Z",
-  updatedAt: "2026-11-14T00:00:00.000Z",
-  exchanges: [],
-  outcome: null,
-};
-const promptFor = (entry: Case) =>
-  monitoringReviewPrompt(
-    profile,
-    {
-      threads: [{ id: thread, title: "Lead", parentThreadId: null, messages: entry.messages }],
-      truncated: false,
-      coverage:
-        "Chat messages only. Only messages since this thread's last review; priorContext messages were reviewed before and are included for understanding.",
-    },
-    "",
-    [filed],
-  );
+const promptFor = (entry: Case) => monitoringReviewPrompt(profile, snapshotFor(entry), "", [filed]);
 const decodeClaudeSettings = Schema.decodeEffect(ClaudeSettings);
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -118,7 +76,8 @@ await Effect.runPromise(
       for (let sample = 0; sample < Number(values.samples); sample++) {
         const row = yield* review({ cwd, modelSelection, prompt: promptFor(entry) }).pipe(
           Effect.map(({ findings, costUsd }) => ({
-            ...grade(entry, { findings }),
+            ...grade(entry, survivors(entry, findings)),
+            rawPass: grade(entry, findings).pass,
             findings,
             costUsd,
           })),
@@ -131,11 +90,11 @@ await Effect.runPromise(
       path.join(values.out, "results.ndjson"),
       rows.map((row) => encode(row)).join("\n") + "\n",
     );
-    const lines = ["| case | kind | passed |", "|---|---|---|"];
+    const lines = ["| case | kind | filed (after dedupe) | model output |", "|---|---|---|---|"];
     for (const entry of selected) {
       const own = rows.filter((row) => row.case === entry.id);
       lines.push(
-        `| ${entry.id} | ${entry.kind} | ${own.filter((row) => row.pass).length}/${own.length} |`,
+        `| ${entry.id} | ${entry.kind} | ${own.filter((row) => row.pass).length}/${own.length} | ${own.filter((row) => "rawPass" in row && row.rawPass).length}/${own.length} |`,
       );
     }
     const cost = rows.reduce((sum, row) => sum + ("costUsd" in row ? (row.costUsd ?? 0) : 0), 0);

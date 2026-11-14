@@ -1,31 +1,34 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MessageId, ThreadId } from "@t3tools/contracts";
-import { cases } from "./cases.ts";
-import { grade } from "./grade.ts";
+import { MessageId } from "@t3tools/contracts";
+import { cases, thread } from "./cases.ts";
+import { grade, survivors } from "./grade.ts";
 
-const thread = ThreadId.make("thread:lead");
-const citing = (messageId: string) => ({
-  findings: [
-    {
+const citing = (...messageIds: ReadonlyArray<string>) => [
+  {
+    threadId: thread,
+    ruleId: "user-scope",
+    summary: "Landed without review",
+    detail: "d",
+    confidence: 0.8,
+    evidence: messageIds.map((id) => ({
       threadId: thread,
-      ruleId: "review-before-landing",
-      summary: "Landed without review",
-      detail: "d",
-      confidence: 0.8,
-      evidence: [{ threadId: thread, messageId: MessageId.make(messageId), excerpt: "x" }],
-    },
-  ],
-});
+      messageId: MessageId.make(id),
+      excerpt: "x",
+    })),
+  },
+];
 const repeat = cases.find((entry) => entry.kind === "repeat")!;
 const recurrence = cases.find((entry) => entry.kind === "new")!;
 
-describe("grade", () => {
+describe("grade what the runner would file", () => {
   it.each([
-    ["repeat, nothing filed", repeat, { findings: [] }, true],
-    ["repeat, refiled", repeat, citing("m2"), false],
+    ["repeat, nothing filed", repeat, [], true],
+    ["repeat, refiled on the filed message", repeat, citing("m2"), true],
+    ["repeat, filed on a new message", repeat, citing("m4"), false],
     ["new, cites the new message", recurrence, citing("m4"), true],
-    ["new, cites only reviewed context", recurrence, citing("m2"), false],
-  ] as const)("%s", (_name, entry, output, pass) => {
-    expect(grade(entry, output).pass).toBe(pass);
+    ["new, also cites the filed message", recurrence, citing("m2", "m4"), true],
+    ["new, cites only the filed message", recurrence, citing("m2"), false],
+  ] as const)("%s", (_name, entry, findings, pass) => {
+    expect(grade(entry, survivors(entry, findings)).pass).toBe(pass);
   });
 });
