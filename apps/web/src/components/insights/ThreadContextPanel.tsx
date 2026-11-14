@@ -1,5 +1,5 @@
 import { AuthOrchestrationReadScope, type ScopedThreadRef } from "@t3tools/contracts";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import { threadContextGet } from "../../state/threadInsights";
@@ -12,12 +12,10 @@ const number = (value: number | null) => (value === null ? "?" : value.toLocaleS
 export function ThreadContextPanel({
   threadRef,
   visible,
-  tabs,
   headerActions,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly visible: boolean;
-  readonly tabs: ReactNode;
   readonly headerActions?: HTMLElement | null;
 }) {
   const [beforeOrdinal, setBeforeOrdinal] = useState<number | undefined>();
@@ -56,8 +54,7 @@ export function ThreadContextPanel({
       {headerActions ? (
         createPortal(refreshAction, headerActions)
       ) : (
-        <header className="flex shrink-0 flex-wrap items-center justify-between">
-          {tabs}
+        <header className="flex shrink-0 flex-wrap items-center justify-end">
           {refreshAction}
         </header>
       )}

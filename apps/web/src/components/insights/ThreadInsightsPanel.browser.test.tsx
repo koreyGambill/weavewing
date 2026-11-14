@@ -15,7 +15,10 @@ import { render } from "../../../test/render";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 const state = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("../../state/threadInsights", () => ({ threadInsightsGet: state.query }));
-vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
+vi.mock("../../state/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/session")>()),
+  useEnvironmentScope: () => true,
+}));
 import { ThreadInsightsPanel } from "./ThreadInsightsPanel";
 
 it("filters observed activity and distinguishes known instruction estimates from reported provider totals", async () => {
@@ -129,7 +132,7 @@ it("filters observed activity and distinguishes known instruction estimates from
   await expect.element(page.getByText("/work/settings.json", { exact: true })).not.toBeVisible();
   await page.getByText("settings.json", { exact: true }).click();
   await expect.element(page.getByText("/work/settings.json", { exact: true })).toBeVisible();
-  await page.getByRole("textbox", { name: "Search file and skill activity" }).fill("SKILL.md");
+  await page.getByRole("searchbox", { name: "Search file and skill activity" }).fill("SKILL.md");
   await expect
     .element(page.getByText("/work/settings.json", { exact: true }))
     .not.toBeInTheDocument();

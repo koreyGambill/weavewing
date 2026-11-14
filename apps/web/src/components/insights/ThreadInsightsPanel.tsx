@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 import {
-  SlidersHorizontalIcon,
+  ListFilterIcon,
   RefreshCwIcon,
   FileTextIcon,
   BookOpenIcon,
@@ -43,12 +43,10 @@ export function ThreadInsightsPanel({
   threadRef,
   visible,
   mode,
-  tabs,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly visible: boolean;
   readonly mode: "loads" | "tokens";
-  readonly tabs?: ReactNode;
 }) {
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [search, setSearch] = useState("");
@@ -74,7 +72,41 @@ export function ThreadInsightsPanel({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
       <header className="flex min-h-7 shrink-0 flex-wrap items-center gap-1 border-b px-1 py-0.5">
-        {tabs}
+        <div className="flex w-full min-w-0 items-center gap-1">
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foreground">
+            <select
+              aria-label="Inspect run"
+              value={effectiveSelection}
+              onChange={(event) => setSelectedRun(event.target.value)}
+              className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-foreground"
+            >
+              <option value="">Latest run</option>
+              {mode === "tokens" && <option value="all">All runs</option>}
+              {data?.runs.toReversed().map((run) => (
+                <option key={run.id} value={run.id}>
+                  Run {run.ordinal}
+                  {run.startedAt ? ` · ${date(run.startedAt)}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Refresh activity"
+                  disabled={!canRead || query.isPending}
+                  onClick={() => query.refresh()}
+                >
+                  <RefreshCwIcon className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipPopup>Refresh activity</TooltipPopup>
+          </Tooltip>
+        </div>
         {mode === "loads" && (
           <>
             <SidebarSearchField
@@ -82,13 +114,13 @@ export function ThreadInsightsPanel({
               value={search}
               onValueChange={setSearch}
               onClear={() => setSearch("")}
-              className="min-w-32"
+              className="min-w-24"
             />
             <Popover>
               <PopoverTrigger
-                render={<Button variant="ghost" size="icon-micro" aria-label="Activity filters" />}
+                render={<Button variant="ghost" size="icon-sm" aria-label="Activity filters" />}
               >
-                <SlidersHorizontalIcon />
+                <ListFilterIcon />
               </PopoverTrigger>
               <PopoverPopup align="end" padding="compact">
                 <div className="flex gap-2">
@@ -120,41 +152,6 @@ export function ThreadInsightsPanel({
             </Popover>
           </>
         )}
-        <div className="ml-auto flex min-w-0 items-center gap-1">
-          <label className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-            <select
-              aria-label="Inspect run"
-              value={effectiveSelection}
-              onChange={(event) => setSelectedRun(event.target.value)}
-              className="h-5 min-w-0 max-w-44 rounded border bg-background px-1 text-foreground"
-            >
-              <option value="">Latest run</option>
-              {mode === "tokens" && <option value="all">All runs</option>}
-              {data?.runs.toReversed().map((run) => (
-                <option key={run.id} value={run.id}>
-                  Run {run.ordinal}
-                  {run.startedAt ? ` · ${date(run.startedAt)}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-micro"
-                  aria-label="Refresh activity"
-                  disabled={!canRead || query.isPending}
-                  onClick={() => query.refresh()}
-                >
-                  <RefreshCwIcon className="size-4" />
-                </Button>
-              }
-            />
-            <TooltipPopup>Refresh activity</TooltipPopup>
-          </Tooltip>
-        </div>
       </header>
       {!canRead ? (
         <p className="p-4 text-sm text-muted-foreground">

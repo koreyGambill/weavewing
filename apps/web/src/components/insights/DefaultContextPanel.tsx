@@ -8,7 +8,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { CheckIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
@@ -52,13 +52,11 @@ export function DefaultContextPanel({
   threadRef,
   request,
   visible,
-  tabs,
 }: {
   readonly threadRef: ScopedThreadRef;
   /** A draft thread passes its project and composer selection. */
   readonly request: DefaultContextGetInput;
   readonly visible: boolean;
-  readonly tabs: ReactNode;
 }) {
   const canRead = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
   const canReadFiles = useEnvironmentScope(threadRef.environmentId, AuthFilesystemReadScope);
@@ -80,8 +78,7 @@ export function DefaultContextPanel({
       : homeOf([...(preview.cwd ? [preview.cwd] : []), ...preview.items.map((item) => item.label)]);
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-      <header className="flex min-h-7 shrink-0 items-center justify-between gap-1 border-b px-1 py-0.5">
-        {tabs}
+      <header className="flex min-h-7 shrink-0 items-center justify-end gap-1 border-b px-1 py-0.5">
         <Tooltip>
           <TooltipTrigger
             render={
