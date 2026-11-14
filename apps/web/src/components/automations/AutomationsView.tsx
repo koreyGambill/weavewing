@@ -96,19 +96,20 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
           </Toggle>
           <Toggle value="server">Server</Toggle>
         </ToggleGroup>
-        <ToggleGroup
-          aria-label="Automation status"
-          size="segmented-compact"
-          className="w-full *:flex-1"
-          value={[showPaused ? "all" : "active"]}
-          onValueChange={(value) => {
-            if (value[0]) setShowPaused(value[0] === "all");
-          }}
-        >
-          <Toggle value="all">All</Toggle>
-          <Toggle value="active">Active</Toggle>
-        </ToggleGroup>
-        <ToolFilterInput label="Filter automations" value={filter} onChange={setFilter}>
+        <ToolFilterInput label="Filter automations" value={filter} onChange={setFilter} />
+        <div className="flex items-center gap-1">
+          <ToggleGroup
+            aria-label="Automation status"
+            size="segmented-compact"
+            className="min-w-0 flex-1 *:flex-1"
+            value={[showPaused ? "all" : "active"]}
+            onValueChange={(value) => {
+              if (value[0]) setShowPaused(value[0] === "all");
+            }}
+          >
+            <Toggle value="all">All</Toggle>
+            <Toggle value="active">Active</Toggle>
+          </ToggleGroup>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -153,7 +154,7 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
             </TooltipTrigger>
             <TooltipPopup>Automation settings</TooltipPopup>
           </Tooltip>
-        </ToolFilterInput>
+        </div>
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 pb-2.5 text-xs">
         {environmentIds.map((environmentId) => (

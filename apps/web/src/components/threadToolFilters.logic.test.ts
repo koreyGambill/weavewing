@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { markTimestamp, matchesToolFilter, visibleMarks } from "./threadToolFilters.logic";
+import {
+  linksCopyText,
+  markTimestamp,
+  matchesToolFilter,
+  visibleMarks,
+} from "./threadToolFilters.logic";
 
 const mark = (url: string, service: string, timestamp: string, description = "") => ({
   url,
@@ -50,5 +55,26 @@ describe("thread tool filters", () => {
     expect(sorted("oldest")).toEqual(["Slack", "Notion", "GitHub"]);
     expect(sorted("service")).toEqual(["GitHub", "Notion", "Slack"]);
     expect(sorted("link")).toEqual(["GitHub", "Notion", "Slack"]);
+  });
+
+  it("copies one line per shown ticket, pull request and link, skipping missing parts", () => {
+    expect(
+      linksCopyText({
+        tickets: [
+          { ticket: "BW-1", label: "Open", url: "https://bitwing.dev/BW-1" },
+          { ticket: "BW-2" },
+        ],
+        pullRequests: [{ url: "https://github.com/org/repo/pull/7", title: "Fix it" }],
+        marks: ["2026-11-07 04:15 GitHub https://github.com/org/repo/issues/3"],
+      }),
+    ).toBe(
+      [
+        "BW-1 Open https://bitwing.dev/BW-1",
+        "BW-2",
+        "https://github.com/org/repo/pull/7 Fix it",
+        "2026-11-07 04:15 GitHub https://github.com/org/repo/issues/3",
+      ].join("\n"),
+    );
+    expect(linksCopyText({ tickets: [], pullRequests: [], marks: [] })).toBe("");
   });
 });
