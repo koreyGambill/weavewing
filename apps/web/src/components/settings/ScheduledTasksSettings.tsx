@@ -105,6 +105,7 @@ import {
   LIMIT_DRAFT_DEFAULTS,
   WEBHOOK_SIGNATURE_DEFAULTS,
   grantFromDraft,
+  type LimitField,
   limitsDraftErrors,
   changeDraftProject,
   moveDraftToThread,
@@ -532,8 +533,9 @@ function LimitFields({
 }) {
   const update = (patch: Partial<DraftState>) => setDraft((current) => ({ ...current, ...patch }));
   const models = draft.savedGrant?.subagents?.models ?? [];
+  const errors = new Map(limitsDraftErrors(draft).map((error) => [error.field, error]));
   const field = (
-    key: "maxCostUsd" | "maxTokens" | "maxSubagents" | "maxRunsPerHour",
+    key: LimitField,
     label: string,
     hint: string,
     placeholder: string,
@@ -547,8 +549,15 @@ function LimitFields({
         {...limits}
         placeholder={placeholder}
         value={draft[key]}
+        aria-invalid={errors.has(key) || undefined}
+        aria-describedby={errors.has(key) ? `scheduled-task-limit-${key}-error` : undefined}
         onChange={(event) => update({ [key]: event.target.value })}
       />
+      {errors.has(key) ? (
+        <p id={`scheduled-task-limit-${key}-error`} className="text-xs text-destructive">
+          {errors.get(key)?.description}
+        </p>
+      ) : null}
     </Field>
   );
   return (
@@ -567,7 +576,7 @@ function LimitFields({
           step: "0.01",
         })}
         {field("maxTokens", "Tokens", "per run", "No limit", { min: 1 })}
-        {field("maxSubagents", "Subagents", "per run", "No limit", {
+        {field("maxSubagents", "Subagents", "per run · Claude, Codex", "No limit", {
           min: 0,
           max: MAX_GRANT_SUBAGENTS,
         })}

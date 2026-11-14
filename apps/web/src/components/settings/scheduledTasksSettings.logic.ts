@@ -478,19 +478,34 @@ function parseCost(value: string): number | null | undefined {
   return Number.isFinite(parsed) && parsed >= 0.01 && parsed <= 50 ? parsed : null;
 }
 
+export type LimitField = "maxCostUsd" | "maxTokens" | "maxSubagents" | "maxRunsPerHour";
+
 export function limitsDraftErrors(draft: DraftState) {
-  const errors: Array<{ title: string; description: string }> = [];
+  const errors: Array<{ field: LimitField; title: string; description: string }> = [];
   if (parseCost(draft.maxCostUsd) === null)
-    errors.push({ title: "Invalid cost limit", description: "Enter dollars from 0.01 to 50." });
+    errors.push({
+      field: "maxCostUsd",
+      title: "Invalid cost limit",
+      description: "Enter dollars from 0.01 to 50.",
+    });
   if (parseWhole(draft.maxTokens, 1, Number.MAX_SAFE_INTEGER) === null)
-    errors.push({ title: "Invalid token limit", description: "Enter a whole number of tokens." });
+    errors.push({
+      field: "maxTokens",
+      title: "Invalid token limit",
+      description: "Enter a whole number of tokens.",
+    });
   if (parseWhole(draft.maxSubagents, 0, MAX_GRANT_SUBAGENTS) === null)
     errors.push({
+      field: "maxSubagents",
       title: "Invalid subagent limit",
       description: `Enter whole subagents from 0 to ${MAX_GRANT_SUBAGENTS}.`,
     });
   if (parseWhole(draft.maxRunsPerHour, 1, 120) === null)
-    errors.push({ title: "Invalid run limit", description: "Enter whole runs from 1 to 120." });
+    errors.push({
+      field: "maxRunsPerHour",
+      title: "Invalid run limit",
+      description: "Enter whole runs from 1 to 120.",
+    });
   return errors;
 }
 

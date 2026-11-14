@@ -124,16 +124,21 @@ tasks run at most 12 times an hour unless **Limits** sets another number; events
 over it wait for the next hour. A task that runs when a turn ends waits 60 seconds
 per thread by default. Threads a task starts, and its own turns, never trigger it.
 
-Every run uses the task's model, even in a thread that was switched to another
-one. **Limits** caps each run of the task's thread, including turns you start
-there: its cost in dollars, its tokens, how many subagents it may start, and runs
-per hour. A run over its cost or token budget stops mid-turn and shows as stopped
-at its budget. Cost counts the agent's priced usage plus an estimate for its
-subagents and compaction, so a run can stop a little early. With a subagent or
-budget limit, the agent's own subagent tools are off and subagents go through T3
-Code, on the task's model unless the agent was given others. Over the hourly
-limit, scheduled runs and webhook requests are skipped and listed as over the
-cap; **Run now** is never limited.
+**Limits** caps each run of the task's thread, including turns you start there:
+its cost in dollars, its tokens, how many subagents it may start, and runs per
+hour. Follow-ups the agent queues for itself belong to the same run. A run over
+its cost or token budget stops mid-turn and shows as stopped at its budget; the
+agent can't continue it until the next scheduled run. Cost counts the agent's
+priced usage plus an estimate for its subagents and compaction, so a run can stop
+a little early. With a subagent or budget limit, the agent's own subagent tools
+are off and subagents go through T3 Code, on the task's model unless the agent
+was given others, and the agent can't start other threads or message threads
+outside the task. Subagent limits work with Claude and Codex models. An agent in a
+task with limits can't create tasks, change limits or run tasks now. A limited
+task's runs use its model in threads it
+started; a thread you started keeps the model you picked. Over the hourly limit,
+scheduled runs and webhook requests are skipped and listed as over the cap;
+**Run now** is never limited.
 
 Deleting a thread also deletes tasks that post into that thread. Tasks that start
 a new thread on each run survive deletion of their previous threads.
