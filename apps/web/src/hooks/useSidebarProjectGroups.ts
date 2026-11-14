@@ -3,9 +3,15 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
+import { scratchProjectFolderLabel } from "@t3tools/client-runtime/operations/projects";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
-import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
+import {
+  useDelegatedUnderParent,
+  useProjects,
+  useQuietThreadShells,
+  useServerConfigs,
+} from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
@@ -20,6 +26,7 @@ export function useSidebarProjectGroups() {
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const serverConfigs = useServerConfigs();
   const orderedProjects = orderItemsByPreferredIds({
     items: projects,
     preferredIds: projectOrder,
@@ -35,6 +42,8 @@ export function useSidebarProjectGroups() {
   const unsortedGroups = buildSidebarProjectSnapshots({
     projects: sortOrder === "manual" ? orderedProjects : projects,
     groupScratchProjects: true,
+    scratchLabel: (project) =>
+      scratchProjectFolderLabel(project, serverConfigs.get(project.environmentId)),
     settings: groupingSettings,
     primaryEnvironmentId,
     resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
 import { chooseLoadBalancedEnvironment } from "../load-balancing.ts";
+import { scratchProjectFolderLabel } from "../operations/projects.ts";
 import {
   buildProjectGroups,
   deriveLogicalProjectKeyFromSettings,
@@ -227,7 +228,29 @@ describe("buildProjectGroups", () => {
       });
       expect(groups).toHaveLength(3);
       const scratch = groups.find((group) => group.representative.isScratch)!;
-      expect(scratch.label).toBe("No project");
+      expect(scratch.label).toBe("/remote/scratch/");
+      const config = {
+        scratchWorkspaceRoot: "/remote/scratch/",
+        legacyScratchWorkspaceRoot: "/remote/.t3/scratch",
+        settings: { scratchStartDirectory: "~/scratch" },
+      };
+      const labelled = buildProjectGroups({
+        projects,
+        groupScratchProjects: true,
+        settings: settings(mode, { [derivePhysicalProjectKey(projects[0]!)]: "separate" }),
+        preferredEnvironmentId: remoteEnvironmentId,
+        scratchLabel: (project) => scratchProjectFolderLabel(project, config),
+      });
+      expect(labelled.find((group) => group.representative.isScratch)?.label).toBe("~/scratch");
+      const ungrouped = buildProjectGroups({
+        projects: [projects[0]!, { ...projects[1]!, title: "Notes" }],
+        settings: settings("separate"),
+      });
+      expect(ungrouped.map((group) => group.label)).toEqual(["/local/scratch", "Notes"]);
+      // An older default folder keeps its own path.
+      expect(scratchProjectFolderLabel({ workspaceRoot: "/old/scratch" }, config)).toBe(
+        "/old/scratch",
+      );
       expect(scratch.representative.id).toBe(projects[2]?.id);
       expect(scratch.members).toHaveLength(2);
       expect(scratch.memberProjectRefs).toEqual(

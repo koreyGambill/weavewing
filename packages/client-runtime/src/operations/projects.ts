@@ -66,6 +66,16 @@ export function scratchWorkspaceLabel(
   return usesSetting && typed.length > 0 ? typed : root;
 }
 
+/** A default-folder project's folder: the configured label for the current default, else its path. */
+export function scratchProjectFolderLabel(
+  project: { readonly workspaceRoot: string },
+  serverConfig: Parameters<typeof scratchWorkspaceLabel>[0],
+): string {
+  return project.workspaceRoot === serverConfig?.scratchWorkspaceRoot
+    ? (scratchWorkspaceLabel(serverConfig) ?? project.workspaceRoot)
+    : project.workspaceRoot;
+}
+
 export interface AddProjectRemoteSourceReadinessEntry {
   readonly ready: boolean;
   readonly hint: string | null;

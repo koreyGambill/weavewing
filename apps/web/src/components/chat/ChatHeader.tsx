@@ -1,7 +1,8 @@
 import { Button } from "../ui/button";
 import { ThreadGlyph } from "../ThreadGlyph";
 import { nextThreadGlyphSeed, resolveThreadGlyph } from "@t3tools/client-runtime/thread-glyphs";
-import { useThreadShell } from "../../state/entities";
+import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { scratchProjectFolderLabel } from "@t3tools/client-runtime/operations/projects";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -87,7 +88,10 @@ export const ChatHeader = memo(function ChatHeader({
   onOpenProjectSettings,
   onFindInThread,
 }: ChatHeaderProps) {
-  const activeProjectName = activeProject?.isScratch ? "No project" : activeProject?.title;
+  const activeProjectServerConfig = useServerConfigs().get(activeThreadEnvironmentId);
+  const activeProjectName = activeProject?.isScratch
+    ? scratchProjectFolderLabel(activeProject, activeProjectServerConfig)
+    : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);

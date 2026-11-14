@@ -7,7 +7,8 @@ import {
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useClientSettings } from "../hooks/useSettings";
 import { getProjectOrderKey } from "@t3tools/client-runtime/state/project-grouping";
-import { useProjects, useVisibleThreadShells } from "../state/entities";
+import { useProjects, useServerConfigs, useVisibleThreadShells } from "../state/entities";
+import { scratchProjectFolderLabel } from "@t3tools/client-runtime/operations/projects";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -59,6 +60,7 @@ export function useSortedProjectGroups(environmentLabelById: ReadonlyMap<Environ
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const serverConfigs = useServerConfigs();
   const projectGroupingSettings = {
     sidebarProjectGroupingMode: clientSettings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: clientSettings.sidebarProjectGroupingOverrides,
@@ -75,6 +77,8 @@ export function useSortedProjectGroups(environmentLabelById: ReadonlyMap<Environ
   const unsortedProjectGroups = buildSidebarProjectSnapshots({
     projects: clientSettings.sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
     settings: projectGroupingSettings,
+    scratchLabel: (project) =>
+      scratchProjectFolderLabel(project, serverConfigs.get(project.environmentId)),
     primaryEnvironmentId,
     resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
   });
