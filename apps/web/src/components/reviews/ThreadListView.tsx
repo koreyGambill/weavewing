@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import {
+  BookOpenTextIcon,
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -194,6 +195,7 @@ export function ThreadListView({
       <TodoRow
         crossThread={Boolean(supplied)}
         node={node}
+        hidesClosed={!showClosed}
         expanded={editing === node.item.id}
         onExpandedChange={(open) => setEditing(open ? node.item.id : null)}
         takeTextFocus={() => {
@@ -264,7 +266,7 @@ export function ThreadListView({
               render={
                 <Button
                   variant="outline"
-                  size="icon-xs"
+                  size="icon-sm"
                   aria-label={showClosed ? "Showing done and dropped" : "Hiding done and dropped"}
                 />
               }
@@ -300,7 +302,20 @@ export function ThreadListView({
       {!tree.length ? (
         entry.items.length ? (
           <p className="px-1 py-2 text-muted-foreground">
-            Nothing here. {filter === "all" ? "Show done and dropped to see the rest." : "Try All."}
+            {filter === "all" ? (
+              "Nothing here. Show done and dropped to see the rest."
+            ) : (
+              <>
+                Nothing here for this filter.{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => useThreadContextSidebarStore.getState().setTodoFilter("all")}
+                >
+                  Show all todos
+                </button>
+              </>
+            )}
           </p>
         ) : (
           <Empty size="compact">
@@ -402,6 +417,7 @@ export function ThreadListView({
 function TodoRow({
   crossThread,
   node,
+  hidesClosed,
   expanded,
   onExpandedChange,
   takeTextFocus,
@@ -421,6 +437,8 @@ function TodoRow({
 }: {
   crossThread: boolean;
   node: TodoNode;
+  /** Closing a childless row removes it, so focus has to move on first. */
+  hidesClosed: boolean;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   /** True once, for the row whose text keeps focus after Tab moved it. */
@@ -441,6 +459,7 @@ function TodoRow({
 }) {
   const { item, progress } = node;
   const focusNewItem = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
   // Tab already wrote the text with the move, so the blur that follows must not write it again.
   const skipBlurSave = useRef(false);
   const [textRef] = useState(() => (input: HTMLInputElement | null) => {
@@ -467,23 +486,24 @@ function TodoRow({
     }
   };
   return (
-    <div className={cn("rounded-md hover:bg-muted/40", node.context && "opacity-60")}>
+    <div ref={rowRef} className={cn("rounded-md hover:bg-muted/40", node.context && "opacity-60")}>
       <div className="flex min-w-0 items-start gap-1.5 py-1 pr-0.5">
         <Checkbox
           className="mt-0.5"
           aria-label={terminal ? `Reopen ${item.text}` : `Complete ${item.text}`}
           checked={terminal}
           disabled={disabled}
-          onCheckedChange={() =>
-            onChange({ state: terminal ? "open" : openLink ? "handed_off" : "done" })
-          }
+          onCheckedChange={() => {
+            if (!terminal && hidesClosed && !node.children.length)
+              focusNeighborCheckbox(rowRef.current);
+            onChange({ state: terminal ? "open" : openLink ? "handed_off" : "done" });
+          }}
         />
         {item.details ? (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Toggle
-                  variant="ghost"
                   size="micro"
                   aria-label={`Toggle note for ${item.text}`}
                   pressed={noteVisible}
@@ -494,16 +514,18 @@ function TodoRow({
                 />
               }
             >
-              <NotebookTextIcon />
+              {noteVisible ? <BookOpenTextIcon /> : <NotebookTextIcon />}
             </TooltipTrigger>
             <TooltipPopup>{noteVisible ? "Hide note" : "Show note"}</TooltipPopup>
           </Tooltip>
-        ) : null}
+        ) : (
+          <span aria-hidden className="size-5 shrink-0" />
+        )}
         <div className="min-w-0 flex-1 leading-5">
           <button
             type="button"
             className={cn(
-              "text-left break-words hover:underline",
+              "text-left wrap-anywhere hover:underline",
               terminal && "text-muted-foreground line-through",
             )}
             aria-expanded={expanded}
@@ -663,6 +685,15 @@ function TodoRow({
       ) : null}
     </div>
   );
+}
+
+function focusNeighborCheckbox(row: HTMLElement | null) {
+  const boxes = [
+    ...(row?.closest('[aria-label="Todos"]')?.querySelectorAll<HTMLElement>('[role="checkbox"]') ??
+      []),
+  ];
+  const at = boxes.findIndex((box) => row?.contains(box));
+  (boxes[at + 1] ?? boxes[at - 1])?.focus();
 }
 
 function OwnerIcon({ owner }: { owner: Owner }) {
