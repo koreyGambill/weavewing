@@ -15,6 +15,7 @@ import {
 import {
   CONVERSATION_TAB_ID,
   getTileGroups,
+  newTabId,
   parseTileLayout,
   syncTileLayout,
   type ThreadTileLayout,
@@ -163,6 +164,25 @@ describe("saved tile layouts", () => {
     expect(getTileGroups(built)[0]).toMatchObject({
       tabs: [CONVERSATION_TAB_ID, "files"],
       activeTabId: CONVERSATION_TAB_ID,
+    });
+  });
+
+  it("gives a tile whose areas are already taken a New tab", () => {
+    const built = buildTileLayoutFromSaved(
+      {
+        kind: "split",
+        axis: "horizontal",
+        ratio: 0.5,
+        first: { kind: "group", areas: ["chat"] },
+        second: { kind: "group", areas: ["chat"] },
+      },
+      [],
+      sequentialIds(),
+    );
+    const [, second] = getTileGroups(built);
+    expect(second).toMatchObject({
+      tabs: [newTabId(second!.id)],
+      activeTabId: newTabId(second!.id),
     });
   });
 

@@ -2,7 +2,7 @@ import type { RightPanelSurface } from "../../rightPanelStore";
 import { isNewTab } from "../../threadTileLayout";
 
 export const TILE_AREAS = [
-  { label: "Chat", key: "c" },
+  { label: "Main chat", key: "c" },
   { label: "Browser", key: "b" },
   { label: "Terminal", key: "t" },
   { label: "Files", key: "f" },

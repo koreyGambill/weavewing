@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyTileAction,
   CONVERSATION_TAB_ID,
+  firstFloatingTile,
   getTileGroups,
   newTabId,
   parseTileLayout,
@@ -62,6 +63,35 @@ describe("thread tile layout", () => {
     expect(resize(rect, { left: true, bottom: true }, { x: 0.5, y: -0.5 })).toEqual([
       0.4, 0.2, 0.2, 0.2,
     ]);
+    const firstFloat = (...args: Parameters<typeof firstFloatingTile>) =>
+      Object.fromEntries(
+        Object.entries(firstFloatingTile(...args)).map(([key, value]) => [
+          key,
+          Math.round(value * 100) / 100,
+        ]),
+      );
+    // Keeps the right edge, one title bar lower.
+    expect(firstFloat({ x: 0.5, y: 0, width: 0.5, height: 0.5 }, 0.05)).toEqual({
+      x: 0.35,
+      y: 0.05,
+      width: 0.65,
+      height: 0.7,
+    });
+    expect(firstFloat({ x: 0, y: 0.5, width: 0.3, height: 0.5 }, 0.05)).toEqual({
+      x: 0,
+      y: 0.55,
+      width: 0.3,
+      height: 0.45,
+    });
+    // Slivers and bottom-edge tiles take the minimum size inside the workspace.
+    expect(firstFloat({ x: 0, y: 0, width: 0.1, height: 1 }, 0.05)).toMatchObject({
+      x: 0,
+      width: 0.2,
+    });
+    expect(firstFloat({ x: 0.5, y: 0.95, width: 0.5, height: 0.05 }, 0.05)).toMatchObject({
+      y: 0.8,
+      height: 0.2,
+    });
     const single = syncTileLayout(undefined, [], [], null, false);
     expect(
       applyTileAction(single, { type: "float-group", groupId: "conversation-group", rect }),
@@ -100,7 +130,9 @@ describe("thread tile layout", () => {
     const stillNoChat = syncTileLayout(noChat, ["files"], ["files", "notes"], "notes", true);
     expect(getTileGroups(stillNoChat).map((group) => group.tabs)).toEqual([["files", "notes"]]);
     const chooser = syncTileLayout(noChat, ["files"], [], null, false);
-    expect(getTileGroups(chooser)).toMatchObject([{ tabs: [], activeTabId: "" }]);
+    const chooserTab = newTabId(chooser.focusedGroupId);
+    expect(getTileGroups(chooser)).toMatchObject([{ tabs: [chooserTab], activeTabId: chooserTab }]);
+    expect(applyTileAction(chooser, { type: "close-tab", tabId: chooserTab })).toBe(chooser);
     expect(applyTileAction(chooser, { type: "close-group", groupId: chooser.focusedGroupId })).toBe(
       chooser,
     );
@@ -113,7 +145,7 @@ describe("thread tile layout", () => {
       { tabs: [CONVERSATION_TAB_ID], activeTabId: CONVERSATION_TAB_ID },
     ]);
     const lastChat = applyTileAction(reopened, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
-    expect(getTileGroups(lastChat)).toMatchObject([{ tabs: [] }]);
+    expect(getTileGroups(lastChat)).toMatchObject([{ tabs: [newTabId(lastChat.focusedGroupId)] }]);
     const shared = applyTileAction(initial, {
       type: "move",
       tabId: "files",
@@ -129,8 +161,19 @@ describe("thread tile layout", () => {
       type: "close-group",
       groupId: "conversation-group",
     });
-    expect(getTileGroups(lastTile)).toMatchObject([{ id: "conversation-group", tabs: [] }]);
+    expect(getTileGroups(lastTile)).toMatchObject([
+      { id: "conversation-group", tabs: [newTabId("conversation-group")] },
+    ]);
     expect(parseTileLayout(JSON.parse(JSON.stringify(lastTile)))).toEqual(lastTile);
+    // Layouts persisted before empty tiles held a New tab still decode.
+    expect(
+      getTileGroups(
+        parseTileLayout({
+          root: { kind: "group", id: "old", tabs: [], activeTabId: "" },
+          focusedGroupId: "old",
+        })!,
+      ),
+    ).toMatchObject([{ tabs: [newTabId("old")], activeTabId: newTabId("old") }]);
   });
 
   it("replaces a new tab in place with the area chosen for it, and closes it on its own", () => {
@@ -391,7 +434,13 @@ describe("thread tile layout", () => {
     });
     expect(getTileGroups(empty)).toEqual([
       ...getTileGroups(initial),
-      { kind: "group", id: "chooser-group", tabs: [], activeTabId: "", colorIndex: 1 },
+      {
+        kind: "group",
+        id: "chooser-group",
+        tabs: [newTabId("chooser-group")],
+        activeTabId: newTabId("chooser-group"),
+        colorIndex: 1,
+      },
     ]);
     expect(empty.focusedGroupId).toBe("chooser-group");
     expect(applyTileAction(empty, { type: "close-group", groupId: "chooser-group" })).toEqual(

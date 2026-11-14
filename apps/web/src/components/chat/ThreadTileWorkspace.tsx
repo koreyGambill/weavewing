@@ -22,6 +22,7 @@ import {
   MessagesSquare,
   PictureInPicture2,
   Plus,
+  SquareDashed,
   CircleHelp,
   GripVertical,
   X,
@@ -41,6 +42,7 @@ import {
   applyTileAction as reduceTileAction,
   CONVERSATION_TAB_ID,
   DEFAULT_FLOATING_TILE,
+  firstFloatingTile,
   isNewTab,
   newTabId,
   getTileGroups,
@@ -331,7 +333,7 @@ export function ThreadTileWorkspace(props: {
     return keys ? `${label} · ${keys}` : label;
   };
   const title = (id: string) => {
-    if (id === CONVERSATION_TAB_ID) return "Chat";
+    if (id === CONVERSATION_TAB_ID) return "Main chat";
     if (isNewTab(id)) return "New tab";
     const surface = props.panels.surfaces.find((entry) => entry.id === id);
     return surface
@@ -379,6 +381,14 @@ export function ThreadTileWorkspace(props: {
   const canFloat = (group: TileGroup) =>
     Boolean(group.floating) ||
     getTileGroups(currentLayout()).filter((entry) => !entry.floating).length > 1;
+  const anchoredFloat = (groupId: string) => {
+    const root = tiled(currentLayout().root);
+    const docked = root && tileGeometry(root).groups.find((entry) => entry.id === groupId)?.rect;
+    const workspace = rootRef.current;
+    if (!docked || !workspace?.clientHeight) return DEFAULT_FLOATING_TILE;
+    const bar = parseFloat(getComputedStyle(workspace).getPropertyValue("--tile-titlebar-height"));
+    return firstFloatingTile(docked, (bar || 0) / workspace.clientHeight);
+  };
   const toggleFloat = (group: TileGroup) => {
     if (!canFloat(group)) return;
     apply(
@@ -387,7 +397,7 @@ export function ThreadTileWorkspace(props: {
         : {
             type: "float-group",
             groupId: group.id,
-            rect: group.lastFloating ?? DEFAULT_FLOATING_TILE,
+            rect: group.lastFloating ?? anchoredFloat(group.id),
           },
     );
   };
@@ -437,7 +447,7 @@ export function ThreadTileWorkspace(props: {
   };
   const openNewTab = (groupId: string) => {
     const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
-    if (group?.tabs.length && !isNewTab(group.activeTabId))
+    if (group && !isNewTab(group.activeTabId))
       apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
     else apply({ type: "focus", groupId });
     focusChooser(groupId);
@@ -451,7 +461,7 @@ export function ThreadTileWorkspace(props: {
   const focus = (groupId: string) => {
     const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
     if (!group) return;
-    if (group.tabs.length === 0) {
+    if (isNewTab(group.activeTabId)) {
       apply({ type: "focus", groupId });
       focusChooser(groupId);
       return;
@@ -475,7 +485,7 @@ export function ThreadTileWorkspace(props: {
   };
   const panel = props.panels;
   const areaRuns: Record<TileAreaLabel, [boolean, (() => void) | undefined]> = {
-    Chat: [true, undefined],
+    "Main chat": [true, undefined],
     Browser: [panel.browserAvailable, panel.onAddBrowser],
     Terminal: [panel.terminalAvailable, panel.onAddTerminal],
     Files: [panel.filesAvailable, panel.onAddFiles],
@@ -498,10 +508,13 @@ export function ThreadTileWorkspace(props: {
       areaRuns[TILE_LAYOUT_AREA_LABELS[area]][1]?.();
     }
   });
+  const chatGroup = groups.find((group) => group.tabs.includes(CONVERSATION_TAB_ID));
   const areaChoices: ReadonlyArray<{
     label: TileAreaLabel;
     key: string;
     enabled: boolean;
+    /** Why the area can't open here; choosing it shows where it already is. */
+    openElsewhere: string | null;
     run: (groupId: string) => void;
   }> = (() => {
     const runs = areaRuns;
@@ -513,9 +526,18 @@ export function ThreadTileWorkspace(props: {
               label,
               key,
               enabled,
+              openElsewhere:
+                label === "Main chat" && chatGroup
+                  ? `Main chat is open in tile ${groups.indexOf(chatGroup) + 1}`
+                  : null,
               run: (groupId: string) => {
+                if (label === "Main chat" && chatGroup) {
+                  activate(chatGroup, CONVERSATION_TAB_ID);
+                  focus(chatGroup.id);
+                  return;
+                }
                 parkFocus(groupId);
-                if (label === "Chat")
+                if (label === "Main chat")
                   apply({ type: "move", tabId: CONVERSATION_TAB_ID, targetGroupId: groupId });
                 else {
                   apply({ type: "focus", groupId });
@@ -528,6 +550,10 @@ export function ThreadTileWorkspace(props: {
         : [];
     });
   })();
+  const firstOpenable = Math.max(
+    0,
+    areaChoices.findIndex((choice) => !choice.openElsewhere),
+  );
   const restoreZoom = () => apply({ type: "maximize", groupId: null });
   const saveLayoutAs = () => {
     const { root, dropped } = toSavedTileNode(currentLayout());
@@ -575,7 +601,7 @@ export function ThreadTileWorkspace(props: {
     };
     const nextTab = (offset: number) => {
       const group = currentGroup();
-      if (!group || group.tabs.length === 0) return;
+      if (!group) return;
       // The hidden tab's content may hold focus; keep it in this tile, then move it to the new tab.
       parkFocus(group.id);
       activate(
@@ -605,9 +631,7 @@ export function ThreadTileWorkspace(props: {
       },
       "workspace.tile.closeTab": () => {
         const group = currentGroup();
-        if (!group) return;
-        if (group.tabs.length) closeTab(group.activeTabId);
-        else closeTile(group.id);
+        if (group) closeTab(group.activeTabId);
       },
       "workspace.tile.actions": () => {
         const group = currentGroup();
@@ -677,9 +701,9 @@ export function ThreadTileWorkspace(props: {
       const inChooser =
         onChooser ||
         target?.closest("[data-tile-chooser]")?.getAttribute("data-tile-chooser") === group?.id;
-      if (group && (!group.tabs.length || isNewTab(group.activeTabId)) && !editing && inChooser) {
+      if (group && isNewTab(group.activeTabId) && !editing && inChooser) {
         const choices = areaChoices;
-        const index = chooserIndex?.groupId === group.id ? chooserIndex.index : 0;
+        const index = chooserIndex?.groupId === group.id ? chooserIndex.index : firstOpenable;
         const key = event.key.toLowerCase();
         const byKey = choices.find((choice) => choice.key === key);
         const step =
@@ -690,18 +714,15 @@ export function ThreadTileWorkspace(props: {
               : 0;
         if (byKey || event.key === "Escape" || (onChooser && (step || event.key === "Enter"))) {
           event.preventDefault();
-          if (step)
-            setChooserIndex({
-              groupId: group.id,
-              index: (index + step + choices.length) % choices.length,
-            });
-          else if (event.key === "Escape") {
+          if (step) {
+            // Arrows pass over areas already open elsewhere; their letter still finds them.
+            let next = index;
+            do next = (next + step + choices.length) % choices.length;
+            while (choices[next]?.openElsewhere && next !== index);
+            setChooserIndex({ groupId: group.id, index: next });
+          } else if (event.key === "Escape") {
             parkFocus(group.id);
-            apply(
-              group.tabs.length
-                ? { type: "close-tab", tabId: group.activeTabId }
-                : { type: "close-group", groupId: group.id },
-            );
+            apply({ type: "close-tab", tabId: group.activeTabId });
             focus(currentLayout().focusedGroupId);
           } else (byKey ?? choices[index])?.run(group.id);
           return;
@@ -1020,8 +1041,12 @@ export function ThreadTileWorkspace(props: {
           const group = displayGroups.find((entry) => entry.id === id)!;
           const groupNumber = groups.findIndex((entry) => entry.id === id) + 1;
           const others = groups.filter((entry) => entry.id !== id);
-          const chooserSelection = chooserIndex?.groupId === id ? chooserIndex.index : 0;
+          const chooserSelection =
+            chooserIndex?.groupId === id ? chooserIndex.index : firstOpenable;
           const chooserActive = focusedGroupId === id || visibleGroups.length === 1;
+          const blank = group.tabs.every(isNewTab);
+          // The only tile's only New tab has nothing to close into.
+          const lastBlankTab = groups.length === 1 && group.tabs.length === 1 && blank;
           return (
             <section
               key={id}
@@ -1046,6 +1071,13 @@ export function ThreadTileWorkspace(props: {
                 role="toolbar"
                 aria-label={`Move tile: ${title(group.activeTabId)}`}
                 draggable={!maximized && !group.floating}
+                onClickCapture={(event) => {
+                  const button =
+                    event.target instanceof Element
+                      ? event.target.closest<HTMLElement>("button:not([role=tab])")
+                      : null;
+                  if (button) flashPress(button);
+                }}
                 onPointerDownCapture={(event) => {
                   headerDragBlocked.current =
                     event.target instanceof Element &&
@@ -1078,7 +1110,8 @@ export function ThreadTileWorkspace(props: {
                 </span>
                 <div className="flex min-w-0 flex-1 items-center overflow-hidden">
                   <div
-                    className="workspace-tile-tabs flex min-w-0 items-center overflow-x-auto px-1"
+                    // Filling the bar keeps New tab in one place as tabs open and close.
+                    className="workspace-tile-tabs flex min-w-0 flex-1 items-center overflow-x-auto px-1"
                     ref={observeTabStrip}
                     onScroll={(event) => markTabOverflow(event.currentTarget)}
                     role="tablist"
@@ -1142,41 +1175,39 @@ export function ThreadTileWorkspace(props: {
                                 pullRequestStatusSeed={undefined}
                               />
                             ) : isNewTab(tabId) ? (
-                              <Plus className="size-3 shrink-0" />
+                              <SquareDashed className="size-3 shrink-0" />
                             ) : (
                               <MessagesSquare className="size-3 shrink-0" />
                             )}
                             <span className="min-w-10 truncate">{title(tabId)}</span>
                           </button>
-                          <PanelTabCloseButton
-                            label={`Close ${title(tabId)}`}
-                            onClick={() => closeTab(tabId)}
-                          >
-                            <X className="size-3" />
-                          </PanelTabCloseButton>
+                          {!lastBlankTab && (
+                            <PanelTabCloseButton
+                              label={`Close ${title(tabId)}`}
+                              onClick={() => closeTab(tabId)}
+                            >
+                              <X className="size-3" />
+                            </PanelTabCloseButton>
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                  {group.tabs.length > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            size="icon-micro"
-                            variant="ghost"
-                            aria-label="New tab"
-                            onClick={() => openNewTab(id)}
-                          />
-                        }
-                      >
-                        <Plus className="size-3" />
-                      </TooltipTrigger>
-                      <TooltipPopup>
-                        {withShortcut("New tab", "workspace.tile.newTab")}
-                      </TooltipPopup>
-                    </Tooltip>
-                  )}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-micro"
+                          variant="ghost"
+                          aria-label="New tab"
+                          onClick={() => openNewTab(id)}
+                        />
+                      }
+                    >
+                      <Plus className="size-3" />
+                    </TooltipTrigger>
+                    <TooltipPopup>{withShortcut("New tab", "workspace.tile.newTab")}</TooltipPopup>
+                  </Tooltip>
                 </div>
                 <TileControl
                   label="New tile to the right"
@@ -1204,6 +1235,7 @@ export function ThreadTileWorkspace(props: {
                 <TileControl
                   label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
                   shortcut={shortcut("workspace.tile.maximize")}
+                  pressed={zoomedIds.has(id)}
                   onClick={() =>
                     apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
                   }
@@ -1305,30 +1337,24 @@ export function ThreadTileWorkspace(props: {
                       onApply={applySavedLayout}
                     />
                     <MenuSeparator />
-                    <MenuItem
-                      disabled={!group.tabs.length}
-                      onClick={() => closeTab(group.activeTabId)}
-                    >
+                    <MenuItem disabled={lastBlankTab} onClick={() => closeTab(group.activeTabId)}>
                       Close tab
                       <TileMenuShortcut keys={shortcut("workspace.tile.closeTab")} />
                     </MenuItem>
-                    <MenuItem
-                      disabled={groups.length === 1 && !group.tabs.length}
-                      onClick={() => closeTile(id)}
-                    >
+                    <MenuItem disabled={groups.length === 1 && blank} onClick={() => closeTile(id)}>
                       Close tile
                     </MenuItem>
                   </MenuPopup>
                 </Menu>
                 <TileControl
-                  label={group.tabs.length ? "Close tile" : "Close empty tile"}
-                  disabled={groups.length === 1 && !group.tabs.length}
+                  label={blank ? "Close empty tile" : "Close tile"}
+                  disabled={groups.length === 1 && blank}
                   onClick={() => closeTile(id)}
                 >
                   <X />
                 </TileControl>
               </div>
-              {(group.tabs.length === 0 || isNewTab(group.activeTabId)) && (
+              {isNewTab(group.activeTabId) && (
                 <div
                   className="flex h-full flex-col items-center justify-center gap-4 p-6 outline-none"
                   data-tile-chooser={id}
@@ -1355,35 +1381,51 @@ export function ThreadTileWorkspace(props: {
                     role="group"
                     aria-label="Areas"
                   >
-                    {areaChoices.map((choice, index) => (
-                      <Button
-                        key={choice.label}
-                        variant={
-                          chooserActive && index === chooserSelection ? "default" : "outline"
-                        }
-                        size="sm"
-                        aria-keyshortcuts={choice.key.toUpperCase()}
-                        onClick={() => choice.run(id)}
-                      >
-                        {choice.label}
-                        <Kbd
-                          aria-hidden
+                    {areaChoices.map((choice, index) => {
+                      const openNote =
+                        choice.openElsewhere && chatGroup?.id === id
+                          ? "Main chat is open in this tile"
+                          : choice.openElsewhere;
+                      const button = (
+                        <Button
+                          key={choice.label}
                           variant={
-                            chooserActive && index === chooserSelection ? "primary" : "default"
+                            chooserActive && index === chooserSelection ? "default" : "outline"
                           }
+                          size="sm"
+                          aria-keyshortcuts={choice.key.toUpperCase()}
+                          aria-disabled={choice.openElsewhere ? true : undefined}
+                          aria-description={openNote ?? undefined}
+                          onClick={() => choice.run(id)}
                         >
-                          {choice.key.toUpperCase()}
-                        </Kbd>
-                      </Button>
-                    ))}
+                          {choice.label}
+                          <Kbd
+                            aria-hidden
+                            variant={
+                              chooserActive && index === chooserSelection ? "primary" : "default"
+                            }
+                          >
+                            {choice.key.toUpperCase()}
+                          </Kbd>
+                        </Button>
+                      );
+                      return choice.openElsewhere ? (
+                        <Tooltip key={choice.label}>
+                          <TooltipTrigger render={button} />
+                          <TooltipPopup>{openNote}</TooltipPopup>
+                        </Tooltip>
+                      ) : (
+                        button
+                      );
+                    })}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Press a letter, or use the arrows and Enter.
-                    {group.tabs.length
-                      ? " Esc closes this tab."
-                      : groups.length > 1
-                        ? " Esc closes this tile."
-                        : ""}
+                    {lastBlankTab
+                      ? ""
+                      : group.tabs.length > 1
+                        ? " Esc closes this tab."
+                        : " Esc closes this tile."}
                   </p>
                 </div>
               )}
@@ -1688,6 +1730,18 @@ function TileMenuShortcut(props: { keys: string | null }) {
   return props.keys ? <MenuShortcut>{props.keys}</MenuShortcut> : null;
 }
 
+/** A brief green flash confirming a tile bar press; reduced motion skips it. */
+function flashPress(button: HTMLElement) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  button.classList.remove("tile-press-flash");
+  // Reading layout restarts the animation for a repeated press.
+  void button.offsetWidth;
+  button.classList.add("tile-press-flash");
+  button.addEventListener("animationend", () => button.classList.remove("tile-press-flash"), {
+    once: true,
+  });
+}
+
 function TileControl(props: {
   label: string;
   shortcut?: string | null;
@@ -1703,7 +1757,7 @@ function TileControl(props: {
           render={
             <Button
               size="icon-micro"
-              variant={props.pressed ? "secondary" : "ghost"}
+              variant="ghost-toggle"
               aria-label={props.label}
               aria-pressed={props.pressed}
               disabled={props.disabled}
