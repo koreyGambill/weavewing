@@ -3,8 +3,12 @@ import type { ScheduledTaskId } from "@t3tools/contracts";
 const TITLE_MAX = 120;
 const BODY_MAX = 4000;
 
-export const clip = (text: string, max: number) =>
-  text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+export const clip = (text: string, max: number) => {
+  if (text.length <= max) return text;
+  // Never end on the first half of a surrogate pair.
+  const cut = /[\uD800-\uDBFF]/.test(text[max - 2] ?? "") ? max - 2 : max - 1;
+  return `${text.slice(0, cut).trimEnd()}…`;
+};
 
 const OUTCOMES: Record<string, string> = {
   corrected: "Corrected",

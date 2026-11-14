@@ -7,6 +7,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { monitoringAdvisory, monitoringFollowup } from "./MonitoringDelivery.ts";
+import { clip } from "./reviewNotification.ts";
 
 const profile = {
   title: "Standards watcher",
@@ -52,4 +53,10 @@ it("posts an assessment back in at most 600 characters", () => {
   assert.isAtMost(text.length, 600);
   assert.include(text, "Assessment: unresolved\nReason: because");
   assert.include(text, "Full assessment in the inbox");
+});
+
+it("clips without splitting a character made of two code units", () => {
+  const clipped = clip(`ab${"😀".repeat(5)}`, 6);
+  assert.isTrue(clipped.isWellFormed());
+  assert.isAtMost(clipped.length, 6);
 });
