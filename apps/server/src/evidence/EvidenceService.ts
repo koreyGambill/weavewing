@@ -34,7 +34,7 @@ import * as NotificationService from "../notifications/NotificationService.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 
 /** Captures must live here, so a record can never point a client at an arbitrary host file. */
-export const EVIDENCE_ROOT_NAME = "evidence";
+const EVIDENCE_ROOT_NAME = "evidence";
 
 export interface RecordInput extends Omit<EvidenceRecordInput, "threadId" | "projectId"> {
   readonly threadId: ThreadId;
