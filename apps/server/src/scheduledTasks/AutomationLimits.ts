@@ -49,7 +49,7 @@ const decodeModel = Schema.decodeUnknownOption(
 const decodeUsage = Schema.decodeUnknownOption(TurnTokenUsage);
 
 /** Native subagents would bypass the subagent cap, and their spend only shows at turn end. */
-export const disablesNativeSubagents = (grant: ScheduledTaskGrant) =>
+const disablesNativeSubagents = (grant: ScheduledTaskGrant) =>
   grant.subagents !== undefined || grant.budget !== undefined;
 
 /**
