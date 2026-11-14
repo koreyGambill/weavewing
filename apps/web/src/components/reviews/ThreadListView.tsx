@@ -52,6 +52,7 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { Toggle } from "../ui/toggle";
 import {
   todoIndentMove,
   todoTabUpdate,
@@ -427,6 +428,8 @@ function TodoRow({
   });
   const [details, setDetails] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteVisible = noteOpen || expanded;
   const terminal = item.state === "done" || item.state === "dropped";
   const openLink = listItemNeedsHandoff(item);
   const saveText = () => {
@@ -455,6 +458,27 @@ function TodoRow({
             onChange({ state: terminal ? "open" : openLink ? "handed_off" : "done" })
           }
         />
+        {item.details ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  variant="ghost"
+                  size="micro"
+                  aria-label={`Toggle note for ${item.text}`}
+                  pressed={noteVisible}
+                  onPressedChange={(next) => {
+                    setNoteOpen(next);
+                    if (!next) onExpandedChange(false);
+                  }}
+                />
+              }
+            >
+              <NotebookTextIcon />
+            </TooltipTrigger>
+            <TooltipPopup>{noteVisible ? "Hide note" : "Show note"}</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <div className="min-w-0 flex-1 leading-5">
           <button
             type="button"
@@ -489,24 +513,6 @@ function TodoRow({
                 {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
               </Button>
             </>
-          ) : null}
-          {item.details && !expanded ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-tiny"
-                    className="ml-0.5 align-middle"
-                    aria-label={`Show note for ${item.text}`}
-                    onClick={() => onExpandedChange(true)}
-                  />
-                }
-              >
-                <NotebookTextIcon />
-              </TooltipTrigger>
-              <TooltipPopup>Has a note</TooltipPopup>
-            </Tooltip>
           ) : null}
           {item.links.map((link) => (
             <TodoLinkChip
@@ -598,6 +604,11 @@ function TodoRow({
           </MenuPopup>
         </Menu>
       </div>
+      {noteOpen && !expanded && item.details ? (
+        <p className="whitespace-pre-wrap break-words pb-2 pl-5.5 pr-1 text-xs text-muted-foreground">
+          {item.details}
+        </p>
+      ) : null}
       {expanded ? (
         <div className="space-y-1.5 pb-2 pl-5.5 pr-1">
           <Input
@@ -640,7 +651,10 @@ function OwnerIcon({ owner }: { owner: Owner }) {
       <TooltipTrigger
         render={
           <span
-            className="mr-1 inline-flex size-3.5 align-[-2px] text-muted-foreground [&_svg]:size-3.5"
+            className={cn(
+              "mr-1 inline-flex size-3.5 align-[-2px] [&_svg]:size-3.5",
+              owner === "agent" ? "text-(--weavewing-yellow)" : "text-success-foreground",
+            )}
             aria-label={ownerLabel(owner)}
             role="img"
           />
