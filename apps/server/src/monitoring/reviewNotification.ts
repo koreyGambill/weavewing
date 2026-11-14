@@ -3,7 +3,7 @@ import type { ScheduledTaskId } from "@t3tools/contracts";
 const TITLE_MAX = 120;
 const BODY_MAX = 4000;
 
-const clip = (text: string, max: number) =>
+export const clip = (text: string, max: number) =>
   text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 
 const OUTCOMES: Record<string, string> = {

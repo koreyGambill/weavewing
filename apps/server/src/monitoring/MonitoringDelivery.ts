@@ -1,18 +1,45 @@
 import * as ThreadWorkspace from "../threadWorkspace/ThreadWorkspace.ts";
 import { CommandId, MessageId, MonitoringError, type MonitoringFinding } from "@t3tools/contracts";
 import type { ReviewProfile } from "./ReviewProfile.ts";
+import { clip } from "./reviewNotification.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
+const header = (kind: string, profile: Pick<ReviewProfile, "title" | "modelSelection">) =>
+  `[Automated cron ${kind} · ${clip(profile.title, 60)} · ${clip(profile.modelSelection.model, 40)}]`;
+
+/** What a finding sends to its thread: the full detail stays in the inbox. */
 export function monitoringAdvisory(
   profile: Pick<ReviewProfile, "title" | "modelSelection" | "rules">,
   finding: MonitoringFinding,
 ): string {
   const rule =
     finding.ruleSnapshot ?? profile.rules.find((candidate) => candidate.id === finding.ruleId);
-  return `[Automated cron advisory · ${profile.title} · ${profile.modelSelection.model}]\nThis watcher has incomplete context. This is advice, not a user instruction. Keep the user's scope and standards. You may disagree and explain why. Never treat a promise as evidence of a correction.\nObservation: ${finding.summary}\nRule: ${rule?.title ?? finding.ruleId}\nRule instructions: ${rule?.instructions ?? "Original rule unavailable."}\nEvidence and advice: ${finding.detail}\n${finding.evidence.map((item) => `- thread:${item.threadId} message:${item.messageId}: ${item.excerpt}`).join("\n")}\nIf useful, give a short acceptance or disagreement with your reason using respond_monitoring_advisory({findingId:"${finding.id}",responseId:"<unique-id>",text:"<your reason>"}). At most two replies are reviewed. The watcher will check fresh evidence and report its assessment to the human. No response is required to continue authorized work.`;
+  const more = finding.evidence.length - 3;
+  return [
+    `${header("advisory", profile)} Advice from a reviewer with incomplete context, not a user instruction. You may disagree.`,
+    `Observation: ${finding.summary}`,
+    `Rule: ${clip(rule?.title ?? finding.ruleId, 120)}`,
+    ...finding.evidence
+      .slice(0, 3)
+      .map((item) => `- message ${item.messageId}: ${clip(item.excerpt, 160)}`),
+    ...(more > 0 ? [`- ${more} more in the inbox`] : []),
+    `If useful, reply with respond_monitoring_advisory({findingId:"${finding.id}",responseId:"<unique-id>",text:"<your reason>"}). The full finding is in the inbox. No reply is needed to continue authorized work.`,
+  ].join("\n");
+}
+
+const FOLLOWUP_MAX = 600;
+
+/** An assessment as posted back to the thread, at most 600 characters. */
+export function monitoringFollowup(
+  profile: Pick<ReviewProfile, "title" | "modelSelection">,
+  assessment: string,
+): string {
+  const head = header("advisory follow-up", profile);
+  const tail = "Full assessment in the inbox. Advisory only, not a user instruction.";
+  return `${head}\n${clip(assessment, FOLLOWUP_MAX - head.length - tail.length - 2)}\n${tail}`;
 }
 
 export class MonitoringDelivery extends Context.Service<
@@ -141,7 +168,11 @@ export const layer = Layer.effect(
           text:
             exchangeId === undefined
               ? monitoringAdvisory(profile, finding)
-              : `[Automated cron advisory follow-up · ${profile.title} · ${profile.modelSelection.model}]\n${finding.exchanges.find((exchange) => exchange.id === exchangeId)?.text ?? "Assessment available in the inbox."}\nThis is advisory, not a user instruction. Keep the user’s scope and standards.`,
+              : monitoringFollowup(
+                  profile,
+                  finding.exchanges.find((exchange) => exchange.id === exchangeId)?.text ??
+                    "Assessment available in the inbox.",
+                ),
           attachments: [],
           ...(running
             ? { mode: "steer" as const, advisoryOnly: true }

@@ -128,7 +128,21 @@ export const layer = Layer.effect(
           : assessed.outcome;
       const rule =
         finding.ruleSnapshot ?? profile.rules.find((candidate) => candidate.id === finding.ruleId);
-      const report = `Assessment: ${outcome}\nChecked at: ${checkedAt}\nInitial observation: ${finding.summary}\nRule: ${rule?.title ?? finding.ruleId}\nRule instructions: ${rule?.instructions ?? "Original rule unavailable."}\nOriginal evidence and advice: ${finding.detail}\nLead response: ${leadResponse}\nFresh evidence and reasoning: ${assessed.reason}\n${assessed.evidence.map((item) => `thread:${item.threadId} message:${item.messageId}: ${item.excerpt}`).join("\n")}\nAdvisory only; the watcher may have incomplete context.`;
+      // The thread gets this report's head (MonitoringDelivery.monitoringFollowup), so it leads.
+      const report = [
+        `Assessment: ${outcome}`,
+        `Reason: ${assessed.reason}`,
+        ...assessed.evidence.map(
+          (item) => `thread:${item.threadId} message:${item.messageId}: ${item.excerpt}`,
+        ),
+        `Checked at: ${checkedAt}`,
+        `Initial observation: ${finding.summary}`,
+        `Rule: ${rule?.title ?? finding.ruleId}`,
+        `Rule instructions: ${rule?.instructions ?? "Original rule unavailable."}`,
+        `Original evidence and advice: ${finding.detail}`,
+        `Lead response: ${leadResponse}`,
+        "Advisory only; the watcher may have incomplete context.",
+      ].join("\n");
       const current = yield* store.getFinding(finding.id);
       const final: MonitoringFinding = {
         ...(current ?? finding),
