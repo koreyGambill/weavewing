@@ -32,6 +32,9 @@ export function monitoringAdvisory(
 
 const FOLLOWUP_MAX = 600;
 
+/** Weaker findings stay in the inbox: a thread only hears from a reviewer that is at least this sure. */
+const THREAD_POST_MIN_CONFIDENCE = 0.5;
+
 /** An assessment as posted back to the thread, at most 600 characters. */
 export function monitoringFollowup(
   profile: Pick<ReviewProfile, "title" | "modelSelection">,
@@ -109,6 +112,7 @@ export const layer = Layer.effect(
       }
       if (
         !profile.enabled ||
+        finding.confidence < THREAD_POST_MIN_CONFIDENCE ||
         profile.id !== finding.taskId ||
         (profile.targets.threadIds.length > 0 &&
           !profile.targets.threadIds.includes(finding.threadId) &&

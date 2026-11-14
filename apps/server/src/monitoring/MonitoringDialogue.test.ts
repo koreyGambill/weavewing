@@ -269,6 +269,25 @@ it.effect("keeps an alert without waking idle or unsupported agents and steers a
         })).delivery,
         "alert_only",
       );
+      const sentBefore = (yield* Ref.get(sends)).length;
+      const unsure = { ...finding, id: `${finding.id}-unsure` as typeof finding.id };
+      assert.equal(
+        (yield* delivery.deliver({ profile, finding: { ...unsure, confidence: 0.49 } })).delivery,
+        "alert_only",
+      );
+      assert.equal(
+        (yield* delivery.deliver({
+          profile,
+          finding: { ...unsure, confidence: 0.49 },
+          exchangeId: "assessment:reply",
+        })).delivery,
+        "alert_only",
+      );
+      assert.equal((yield* Ref.get(sends)).length, sentBefore);
+      assert.equal(
+        (yield* delivery.deliver({ profile, finding: { ...unsure, confidence: 0.5 } })).delivery,
+        "steered",
+      );
       const turnEnd = { ...profile, turnEnd: true };
       const idleFinding = { ...finding, id: `${finding.id}-idle` as typeof finding.id };
       yield* Ref.set(status, "settled");
