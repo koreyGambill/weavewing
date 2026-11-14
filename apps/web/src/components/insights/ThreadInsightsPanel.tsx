@@ -16,6 +16,7 @@ import {
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import { threadInsightsGet } from "../../state/threadInsights";
+import { SidebarSearchField } from "../sidebar/SidebarSearchField";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
@@ -76,12 +77,12 @@ export function ThreadInsightsPanel({
         {tabs}
         {mode === "loads" && (
           <>
-            <input
+            <SidebarSearchField
               aria-label="Search file and skill activity"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search…"
-              className="h-5 min-w-24 flex-1 rounded border bg-background px-1 text-xs"
+              onValueChange={setSearch}
+              onClear={() => setSearch("")}
+              className="min-w-32"
             />
             <Popover>
               <PopoverTrigger

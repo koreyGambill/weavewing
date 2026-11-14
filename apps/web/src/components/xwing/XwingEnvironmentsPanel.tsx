@@ -13,7 +13,7 @@ import {
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import { ArrowLeftIcon, Boxes, PlusIcon, SearchIcon, TerminalSquareIcon } from "lucide-react";
+import { ArrowLeftIcon, Boxes, PlusIcon, TerminalSquareIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -33,6 +33,7 @@ import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { RelativeTime } from "../RelativeTime";
 import { Badge } from "../ui/badge";
 import { Empty, EmptyMedia, EmptyDescription } from "../ui/empty";
+import { SidebarSearchField } from "../sidebar/SidebarSearchField";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { RefreshIcon } from "../ui/refresh-icon";
@@ -105,7 +106,7 @@ export function XwingEnvironmentsPanel({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-xs">
-      <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border px-1">
+      <div className="flex min-h-7 shrink-0 flex-wrap items-center gap-1 border-b border-border px-1 py-0.5">
         {validSelection ? (
           <ToolbarButton label="All environments" onClick={() => select(null)}>
             <ArrowLeftIcon />
@@ -121,17 +122,13 @@ export function XwingEnvironmentsPanel({
                 : null}
           </span>
         ) : (
-          <label className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground">
-            <SearchIcon className="size-3 shrink-0" />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label="Filter environments"
-              placeholder="Filter"
-              className="h-6 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </label>
+          <SidebarSearchField
+            aria-label="Filter environments"
+            value={query}
+            onValueChange={setQuery}
+            onClear={() => setQuery("")}
+            className="min-w-32"
+          />
         )}
         {enabled && !validSelection ? (
           <Button size="micro" variant="ghost" onClick={() => setAllEnvironments((all) => !all)}>

@@ -1,13 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
+import { PlusIcon, SettingsIcon } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
 import { useConnectedEnvironmentIds } from "../../state/environments";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { ToolFilterInput } from "../ThreadToolViews";
 import { Button } from "../ui/button";
-import { Menu, MenuCheckboxItem, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AutomationDetail } from "./AutomationDetail";
@@ -97,6 +96,18 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
           </Toggle>
           <Toggle value="server">Server</Toggle>
         </ToggleGroup>
+        <ToggleGroup
+          aria-label="Automation status"
+          size="segmented-compact"
+          className="w-full *:flex-1"
+          value={[showPaused ? "all" : "active"]}
+          onValueChange={(value) => {
+            if (value[0]) setShowPaused(value[0] === "all");
+          }}
+        >
+          <Toggle value="all">All</Toggle>
+          <Toggle value="active">Active</Toggle>
+        </ToggleGroup>
         <ToolFilterInput label="Filter automations" value={filter} onChange={setFilter}>
           <Tooltip>
             <TooltipTrigger
@@ -122,37 +133,26 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
             </TooltipTrigger>
             <TooltipPopup>New automation</TooltipPopup>
           </Tooltip>
-          <Menu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <MenuTrigger
-                    render={
-                      <Button variant="ghost" size="icon-sm" aria-label="Automation options" />
-                    }
-                  />
-                }
-              >
-                <MoreHorizontalIcon />
-              </TooltipTrigger>
-              <TooltipPopup>Automation options</TooltipPopup>
-            </Tooltip>
-            <MenuPopup align="end">
-              <MenuCheckboxItem checked={showPaused} onCheckedChange={setShowPaused}>
-                Show paused
-              </MenuCheckboxItem>
-              <MenuItem
-                onClick={() =>
-                  void navigate({
-                    to: "/settings/scheduled-tasks",
-                    search: newEnvironmentId ? { environmentId: newEnvironmentId } : {},
-                  })
-                }
-              >
-                Open settings
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Automation settings"
+                  onClick={() =>
+                    void navigate({
+                      to: "/settings/scheduled-tasks",
+                      search: newEnvironmentId ? { environmentId: newEnvironmentId } : {},
+                    })
+                  }
+                />
+              }
+            >
+              <SettingsIcon />
+            </TooltipTrigger>
+            <TooltipPopup>Automation settings</TooltipPopup>
+          </Tooltip>
         </ToolFilterInput>
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 pb-2.5 text-xs">

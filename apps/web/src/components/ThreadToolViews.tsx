@@ -18,12 +18,13 @@ import {
   MoreHorizontalIcon,
   NetworkIcon,
   RefreshCwIcon,
-  SlidersHorizontalIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { configuredHostedAppUrl } from "../hostedPairing";
+import { SidebarSearchField } from "./sidebar/SidebarSearchField";
+import { ToolFilterMenuTrigger } from "./ToolFilterMenuTrigger";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -66,7 +67,6 @@ import { ArtifactsPanel } from "./reviews/ThreadWorkspacePanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyMedia } from "./ui/empty";
-import { Input } from "./ui/input";
 import {
   Menu,
   MenuCheckboxItem,
@@ -202,13 +202,11 @@ export function ToolFilterInput({
 }) {
   return (
     <div className="flex items-center gap-1">
-      <Input
-        size="compact"
-        type="search"
+      <SidebarSearchField
         aria-label={label}
-        placeholder={`${label}…`}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={onChange}
+        onClear={() => onChange("")}
         onKeyDown={(event) => {
           if (event.key === "Escape" && value) {
             event.stopPropagation();
@@ -336,6 +334,7 @@ function ThreadLinks({
   const services = [...new Set(allMarks.map((mark) => mark.service))].toSorted();
   const nothing = !tickets.length && !pullRequests.length && !rows.length;
   const filtered = filter.trim() !== "" || service !== "all";
+  const copyLabel = filtered ? "Copy shown links" : "Copy all links";
   const markLine = (mark: (typeof rows)[number]) =>
     [
       preferences.local ? markTimestamp(mark.timestamp, false, preferences.hour24) : "",
@@ -380,25 +379,28 @@ function ThreadLinks({
         <p className="text-muted-foreground">This connection cannot read links.</p>
       ) : (
         <ToolFilterInput label="Filter links" value={filter} onChange={setFilter}>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={copyLabel}
+                  disabled={nothing}
+                  onClick={copyAll}
+                />
+              }
+            >
+              {isCopied("all") ? <CheckIcon /> : <CopyIcon />}
+            </TooltipTrigger>
+            <TooltipPopup>{isCopied("all") ? "Copied" : copyLabel}</TooltipPopup>
+          </Tooltip>
           <Menu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <MenuTrigger
-                    render={
-                      <Button
-                        variant={service === "all" ? "ghost" : "secondary"}
-                        size="icon-sm"
-                        aria-label="Link options"
-                      />
-                    }
-                  />
-                }
-              >
-                <SlidersHorizontalIcon />
-              </TooltipTrigger>
-              <TooltipPopup>Service, sort, columns and copy</TooltipPopup>
-            </Tooltip>
+            <ToolFilterMenuTrigger
+              label="Link filters"
+              tooltip="Service, sort and columns"
+              active={service !== "all"}
+            />
             <MenuPopup align="end">
               <MenuGroup>
                 <MenuGroupLabel>Service</MenuGroupLabel>
@@ -460,10 +462,6 @@ function ThreadLinks({
                   </MenuCheckboxItem>
                 ))}
               </MenuGroup>
-              <MenuSeparator />
-              <MenuItem disabled={nothing} onClick={copyAll}>
-                {isCopied("all") ? "Copied" : filtered ? "Copy shown links" : "Copy all links"}
-              </MenuItem>
             </MenuPopup>
           </Menu>
         </ToolFilterInput>
