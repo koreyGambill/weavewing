@@ -18,6 +18,7 @@ import {
   OrchestrationV2CreationSource,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
 } from "./orchestrationV2.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import { StatusState } from "./statusSources.ts";
 
@@ -257,9 +258,6 @@ export const ScheduledTaskEventSchedule = Schema.Struct({
   ).annotate({
     description: "Wait this long after the first event, then run once with the latest.",
   }),
-  maxRunsPerHour: Schema.optional(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 120 })),
-  ).annotate({ description: "Runs over this wait for the next hour. Default 12." }),
 }).annotate({
   description:
     "Run on a server event; the prompt gets it appended. The task's own turns and threads never trigger it.",
@@ -324,6 +322,50 @@ export function scheduledTaskThreadMode(
   return task.threadMode ?? (task.threadId === null ? "new_thread" : "continue");
 }
 
+export const ScheduledTaskModelRef = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+});
+export type ScheduledTaskModelRef = typeof ScheduledTaskModelRef.Type;
+
+export const MAX_GRANT_SUBAGENTS = 10;
+
+/**
+ * What an automation's thread may do, including turns a user starts there. Absent: no limits.
+ * Each limit counts per run (one turn) of that thread, with its delegated tasks.
+ */
+export const ScheduledTaskGrant = Schema.Struct({
+  /** Default true: agents may call `t3_notify`. */
+  notify: Schema.optional(Schema.Boolean),
+  subagents: Schema.optional(
+    Schema.Struct({
+      max: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_GRANT_SUBAGENTS })),
+      /** Empty: only the automation's own model. */
+      models: Schema.Array(ScheduledTaskModelRef).check(Schema.isMaxLength(8)),
+    }),
+  ),
+  budget: Schema.optional(
+    Schema.Struct({
+      maxCostUsd: Schema.optional(
+        Schema.Number.check(Schema.isBetween({ minimum: 0.01, maximum: 50 })),
+      ),
+      maxTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+    }),
+  ),
+  /** Event tasks default to 12; others have no cap unless set. */
+  maxRunsPerHour: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 120 }))),
+});
+export type ScheduledTaskGrant = typeof ScheduledTaskGrant.Type;
+
+export function scheduledTaskMaxRunsPerHour(
+  task: Pick<ScheduledTask, "grant" | "schedule">,
+): number | null {
+  return (
+    task.grant?.maxRunsPerHour ??
+    (task.schedule.type === "event" ? DEFAULT_EVENT_MAX_RUNS_PER_HOUR : null)
+  );
+}
+
 export const ScheduledTask = Schema.Struct({
   id: ScheduledTaskId,
   title: TrimmedNonEmptyString,
@@ -352,6 +394,7 @@ export const ScheduledTask = Schema.Struct({
   disabledThreadIds: Schema.optional(
     Schema.Array(ThreadId).check(Schema.isMaxLength(MAX_DISABLED_THREADS)),
   ),
+  grant: Schema.optional(ScheduledTaskGrant),
   webhook: Schema.optional(ScheduledTaskWebhookEndpoint),
   /** Why the task cannot run regardless of `enabled`, such as a managed policy refusing webhooks. */
   blockedByPolicy: Schema.optionalKey(Schema.String),
@@ -386,6 +429,8 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  /** Omitted: keep the stored grant. Null: remove it. */
+  grant: Schema.optional(Schema.NullOr(ScheduledTaskGrant)),
   createdBy: Schema.optional(OrchestrationV2Actor),
   creationSource: Schema.optional(OrchestrationV2CreationSource),
 });

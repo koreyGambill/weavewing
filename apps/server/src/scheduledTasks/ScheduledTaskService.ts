@@ -16,6 +16,7 @@ import {
   type ProjectId,
   ScheduledTask,
   ScheduledTaskError,
+  ScheduledTaskGrant,
   ScheduledTaskId,
   ThreadId,
   ScheduledTaskWebhookDeliveryId,
@@ -45,6 +46,8 @@ import {
   managedPolicyDeniedMessage,
   scheduledTaskThreadMode,
   scheduledTaskEventLabel,
+  scheduledTaskMaxRunsPerHour,
+  DEFAULT_EVENT_MAX_RUNS_PER_HOUR,
   managedRuntimeModeDenial,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -219,6 +222,7 @@ const decodeWorkspaceStrategyJson = Schema.decodeUnknownEffect(
 const decodeModelSelectionJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ScheduledTask.fields.modelSelection),
 );
+const decodeGrantJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ScheduledTaskGrant));
 const DisabledThreadsJson = Schema.fromJsonString(Schema.Array(ThreadId));
 const decodeDisabledThreadsJson = Schema.decodeUnknownOption(DisabledThreadsJson);
 const encodeDisabledThreadsJson = Schema.encodeSync(DisabledThreadsJson);
@@ -266,6 +270,7 @@ interface ScheduledTaskRow {
   readonly run_count: number;
   readonly last_run_ended_at?: string | null;
   readonly disabled_thread_ids_json?: string;
+  readonly grant_json?: string | null;
   readonly webhook_token: string | null;
   readonly webhook_secret: string | null;
 }
@@ -351,6 +356,7 @@ function iso(value: DateTime.DateTime): string {
 }
 
 const RUN_OUTCOME_WAIT_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
 const UNSUCCESSFUL_RUN_ERRORS = {
   failed: "The run failed.",
   interrupted: "The run was stopped.",
@@ -439,6 +445,7 @@ const decodeRow = Effect.fnUntraced(
     const webhook = schedule.type === "webhook" ? webhookEndpoint(row, origin) : undefined;
     const workspaceStrategy = yield* decodeWorkspaceStrategyJson(row.workspace_strategy_json);
     const modelSelection = yield* decodeModelSelectionJson(row.model_selection_json);
+    const grant = row.grant_json == null ? undefined : yield* decodeGrantJson(row.grant_json);
     // A damaged list switches nothing off rather than hiding the whole task.
     const disabledThreadIds = Option.getOrElse(
       decodeDisabledThreadsJson(row.disabled_thread_ids_json ?? "[]"),
@@ -468,6 +475,7 @@ const decodeRow = Effect.fnUntraced(
       runCount: row.run_count,
       ...(row.last_run_ended_at == null ? {} : { lastRunEndedAt: row.last_run_ended_at }),
       ...(disabledThreadIds.length === 0 ? {} : { disabledThreadIds }),
+      ...(grant === undefined ? {} : { grant }),
       ...(webhook === undefined ? {} : { webhook }),
     });
   },
@@ -755,6 +763,7 @@ export const layer = Layer.effect(
         run_count,
         last_run_ended_at,
         disabled_thread_ids_json,
+        grant_json,
         webhook_token,
         webhook_secret
       FROM scheduled_tasks
@@ -799,6 +808,7 @@ export const layer = Layer.effect(
         run_count,
         last_run_ended_at,
         disabled_thread_ids_json,
+        grant_json,
         webhook_token,
         webhook_secret
       FROM scheduled_tasks
@@ -877,6 +887,7 @@ export const layer = Layer.effect(
           last_run_status,
           last_run_error,
           run_count,
+          grant_json,
           webhook_token,
           webhook_secret
         )
@@ -902,6 +913,7 @@ export const layer = Layer.effect(
           ${task.lastRunStatus},
           ${task.lastRunError},
           ${task.runCount},
+          ${task.grant === undefined ? null : JSON.stringify(task.grant)},
           ${webhook.token},
           ${webhook.secret}
         WHERE ${requireExisting ? 0 : 1} = 1
@@ -925,6 +937,7 @@ export const layer = Layer.effect(
           model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
+          grant_json = excluded.grant_json,
           creation_source = excluded.creation_source,
           updated_at = excluded.updated_at,
           -- Keep a next_run_at that a finishing run moved during this save, unless
@@ -1279,7 +1292,7 @@ export const layer = Layer.effect(
             ? null
             : yield* EventTriggers.peekDueEvent(
                 active.id,
-                eventSchedule,
+                scheduledTaskMaxRunsPerHour(active) ?? DEFAULT_EVENT_MAX_RUNS_PER_HOUR,
                 startedAtIso,
                 active.disabledThreadIds ?? [],
               ).pipe(
@@ -1447,6 +1460,41 @@ export const layer = Layer.effect(
           }
         }
 
+        // Events wait for the next hour instead (peekDueEvent); the user's Run now always runs.
+        const runCap = scheduledTaskMaxRunsPerHour(active);
+        const hourAgo = DateTime.formatIso(
+          DateTime.makeUnsafe(DateTime.toEpochMillis(startedAt) - HOUR_MS),
+        );
+        if (
+          runCap !== null &&
+          keepsHistory &&
+          active.schedule.type !== "event" &&
+          trigger !== "manual" &&
+          (yield* RunHistory.countRecentRuns(active.id, hourAgo).pipe(
+            withSql,
+            Effect.orElseSucceed(() => 0),
+          )) >= runCap
+        ) {
+          const cappedError = `This automation allows ${runCap} run${runCap === 1 ? "" : "s"} per hour.`;
+          const cappedId = yield* newRunId;
+          if (Option.isSome(cappedId)) {
+            yield* recordHistory(
+              RunHistory.recordCapped({
+                id: cappedId.value,
+                taskId: active.id,
+                at: startedAtIso,
+                trigger: runTrigger,
+                error: cappedError,
+              }),
+            );
+          }
+          if (webhook !== undefined)
+            return yield* new WebhookDeliverySkipped({ reason: cappedError });
+          if (trigger === "agent") return yield* taskError(cappedError, { taskId: active.id });
+          yield* rescheduleMissedRun(active, startedAt, "capped");
+          return { task: active, threadId: null, dispatchFailed: false };
+        }
+
         if (webhook === undefined) yield* markRunning(active.id, startedAtIso);
         else
           yield* sql
@@ -1526,6 +1574,8 @@ export const layer = Layer.effect(
               text: prompt,
               attachments: [],
               mode: "queue",
+              // Runs use the task's model, whatever the thread was switched to since.
+              ...(idleCheckin ? {} : { modelSelection: active.modelSelection }),
               ...(threadMode === "fresh_session" ? { freshContext: true } : {}),
               createdBy: idleCheckin ? "system" : active.createdBy,
               creationSource: idleCheckin ? "server" : active.creationSource,
@@ -1606,8 +1656,6 @@ export const layer = Layer.effect(
                   ),
               )
             : yield* Effect.exit(
-                // The stored selection only seeds fresh threads. A bound run
-                // follows the thread's current provider, so it passes none.
                 sendBound(ThreadId.make(active.threadId), active.projectId, 2).pipe(
                   Effect.as(ThreadId.make(active.threadId)),
                 ),
@@ -2166,6 +2214,7 @@ export const layer = Layer.effect(
           ? managedRuntimeModeDenial(managedPolicy.summary, input.runtimeMode)
           : undefined;
       if (modeDenial !== undefined) return yield* taskError(modeDenial, { taskId: id });
+      const grant = input.grant === undefined ? existingTask?.grant : (input.grant ?? undefined);
       // Keep the existing next_run_at when the schedule itself is untouched:
       // editing a title or prompt must not postpone (or resurrect) a due
       // run — only schedule/enabled changes restart the clock.
@@ -2294,6 +2343,7 @@ export const layer = Layer.effect(
         lastRunStatus: existingTask?.lastRunStatus ?? "never",
         lastRunError: existingTask?.lastRunError ?? null,
         runCount: existingTask?.runCount ?? 0,
+        ...(grant === undefined ? {} : { grant }),
       };
       yield* saveTask(
         task,

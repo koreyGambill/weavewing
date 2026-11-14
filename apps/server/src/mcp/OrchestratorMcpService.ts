@@ -4,6 +4,7 @@ import {
   isProviderAvailable,
   MessageId,
   type ModelSelection,
+  ProviderInstanceId,
   NodeId,
   idleCompactionOf,
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
@@ -34,6 +35,7 @@ import {
   type OrchestratorMcpDeleteScheduledTaskResult,
   type OrchestratorMcpListScheduledTasksResult,
   type OrchestratorMcpScheduledTask,
+  type OrchestratorMcpScheduleLimits,
   type OrchestratorMcpScheduleTarget,
   type OrchestratorMcpScheduleTaskInput,
   type OrchestratorMcpScheduleTaskResult,
@@ -63,6 +65,8 @@ import {
   ProviderRequestKind,
   type RuntimeMode,
   type ScheduledTask,
+  type ScheduledTaskGrant,
+  MAX_GRANT_SUBAGENTS,
   type ScheduledTaskUpsertInput,
   scheduledTaskThreadMode,
   type ServerProvider,
@@ -118,6 +122,7 @@ import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as AutomationLimits from "../scheduledTasks/AutomationLimits.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -337,6 +342,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function scheduleLimitsSummary(grant: ScheduledTaskGrant): OrchestratorMcpScheduleLimits {
+  return {
+    ...grant.budget,
+    ...(grant.subagents === undefined
+      ? {}
+      : {
+          maxSubagents: grant.subagents.max,
+          subagentModels: grant.subagents.models.map((ref) => `${ref.instanceId}/${ref.model}`),
+        }),
+    ...(grant.maxRunsPerHour === undefined ? {} : { maxRunsPerHour: grant.maxRunsPerHour }),
+  };
+}
+
 function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): OrchestratorMcpScheduledTask {
   return {
     scheduledTaskId: task.id,
@@ -351,6 +369,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
       providerInstanceId: task.modelSelection.instanceId,
       model: task.modelSelection.model,
     },
+    ...(task.grant === undefined ? {} : { limits: scheduleLimitsSummary(task.grant) }),
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
     ...(task.webhook?.url == null || !mayRun || task.blockedByPolicy !== undefined
@@ -1288,6 +1307,11 @@ const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+  const automationLimits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+  const admitSubagent = (callerThreadId: ThreadId, model: ModelSelection) =>
+    Option.isNone(automationLimits)
+      ? Effect.void
+      : automationLimits.value.admitSubagents({ callerThreadId, models: [model] });
   const projects = yield* ProjectService.ProjectService;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
@@ -2497,8 +2521,44 @@ const make = Effect.gen(function* () {
     return task;
   });
 
-  const targetNeedsNewThreads =
-    "target only applies to tasks that create threads; set bindToCurrentThread=false.";
+  /** `limits` as a grant, keeping the stored `notify`; null when nothing is limited. */
+  const grantFromLimits = Effect.fn("OrchestratorMcpService.grantFromLimits")(function* (
+    limits: OrchestratorMcpScheduleLimits,
+    stored: ScheduledTaskGrant | undefined,
+    projectId: ProjectId,
+    modelSelection: ScheduledTask["modelSelection"],
+  ): Effect.fn.Return<ScheduledTaskGrant | null, OrchestratorMcpFailure> {
+    const providers = limits.subagentModels === undefined ? [] : yield* loadProviders;
+    const models = yield* Effect.forEach(limits.subagentModels ?? [], (ref) => {
+      const slash = ref.indexOf("/");
+      const named = providers.find((provider) => provider.instanceId === ref.slice(0, slash));
+      return resolveTargetRechecking({
+        parent: { thread: { modelSelection, projectId } },
+        target:
+          named === undefined
+            ? { model: ref }
+            : { providerInstanceId: named.instanceId, model: ref.slice(slash + 1) },
+        providers,
+        runs: "subagents",
+      }).pipe(Effect.map(({ modelSelection: { instanceId, model } }) => ({ instanceId, model })));
+    });
+    const grant: ScheduledTaskGrant = {
+      ...(stored?.notify === undefined ? {} : { notify: stored.notify }),
+      ...(limits.maxSubagents === undefined && limits.subagentModels === undefined
+        ? {}
+        : { subagents: { max: limits.maxSubagents ?? MAX_GRANT_SUBAGENTS, models } }),
+      ...(limits.maxCostUsd === undefined && limits.maxTokens === undefined
+        ? {}
+        : {
+            budget: {
+              ...(limits.maxCostUsd === undefined ? {} : { maxCostUsd: limits.maxCostUsd }),
+              ...(limits.maxTokens === undefined ? {} : { maxTokens: limits.maxTokens }),
+            },
+          }),
+      ...(limits.maxRunsPerHour === undefined ? {} : { maxRunsPerHour: limits.maxRunsPerHour }),
+    };
+    return Object.keys(grant).length === 0 ? null : grant;
+  });
 
   /** The model a task's new threads start on: `target` applied over `inherited`, as a delegated child's is. */
   const resolveScheduledTaskModel = Effect.fn("OrchestratorMcpService.resolveScheduledTaskModel")(
@@ -2543,9 +2603,6 @@ const make = Effect.gen(function* () {
             ? "bindToCurrentThread needs an agent running inside a T3 thread."
             : "bindToCurrentThread binds to this thread, which belongs to a different project.",
         );
-      }
-      if (input.target !== undefined && bindToCurrentThread) {
-        return yield* failure("invalid_request", targetNeedsNewThreads);
       }
       const commandId =
         input.clientRequestId === undefined
@@ -2592,6 +2649,11 @@ const make = Effect.gen(function* () {
         modelSelection,
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
+        ...(input.limits === undefined
+          ? {}
+          : {
+              grant: yield* grantFromLimits(input.limits, undefined, projectId, modelSelection),
+            }),
         createdBy: "agent",
         creationSource: "mcp",
         // Scope the idempotency key by provider session so two callers
@@ -2660,9 +2722,11 @@ const make = Effect.gen(function* () {
             : input.bindToCurrentThread && parent !== undefined
               ? parent.thread.id
               : null;
-        if (input.target !== undefined && threadId !== null) {
-          return yield* failure("invalid_request", targetNeedsNewThreads);
-        }
+        const modelSelection = yield* resolveScheduledTaskModel(
+          existing.projectId,
+          existing.modelSelection,
+          input.target,
+        );
         // Reset the workspace only when the binding flips, so unbinding cannot leave runs in the shared checkout.
         const workspaceStrategy =
           (threadId === null) === (existing.threadId === null)
@@ -2689,13 +2753,19 @@ const make = Effect.gen(function* () {
                   ? "new_thread"
                   : "continue",
           workspaceStrategy,
-          modelSelection: yield* resolveScheduledTaskModel(
-            existing.projectId,
-            existing.modelSelection,
-            input.target,
-          ),
+          modelSelection,
           runtimeMode: existing.runtimeMode,
           interactionMode: existing.interactionMode,
+          ...(input.limits === undefined
+            ? {}
+            : {
+                grant: yield* grantFromLimits(
+                  input.limits,
+                  existing.grant,
+                  existing.projectId,
+                  modelSelection,
+                ),
+              }),
           createdBy: existing.createdBy,
           creationSource: existing.creationSource,
         };
@@ -2983,6 +3053,11 @@ const make = Effect.gen(function* () {
             "A task in a linked environment starts fresh: conversation context does not leave this environment. Omit context, or describe what the child needs in the task.",
           );
         }
+        // Counted here too; its model must be named and allowed, as no model resolves here.
+        yield* admitSubagent(scope.thread.threadId, {
+          instanceId: input.target.providerInstanceId ?? ProviderInstanceId.make("unspecified"),
+          model: input.target.model ?? "unspecified",
+        });
         // The task's child runs as an ordinary thread there; this thread keeps the task.
         const { taskId } = yield* remoteDelegation.delegate(scope, {
           ...input,
@@ -3039,6 +3114,9 @@ const make = Effect.gen(function* () {
         parent.thread.interactionMode,
         input.interactionMode,
       );
+      if (!isRetryOfAcceptedDelegation) {
+        yield* admitSubagent(scope.thread.threadId, target.modelSelection);
+      }
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);
@@ -3453,6 +3531,9 @@ const make = Effect.gen(function* () {
                 request.interactionMode,
               );
               yield* assertTargetEnabledForProject(parent, commandId, target);
+              if (!isRetryOfAcceptedCreation) {
+                yield* admitSubagent(scope.thread.threadId, target.modelSelection);
+              }
               const title = threadTitle({
                 parentTitle: parent.thread.title,
                 prompt: request.prompt,

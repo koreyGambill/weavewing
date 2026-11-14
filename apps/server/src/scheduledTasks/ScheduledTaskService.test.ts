@@ -949,7 +949,9 @@ it.effect("a bound run follows its thread when promotion moves it mid-send", () 
 it.effect("a fresh-session task launches one thread, then starts each later run fresh in it", () =>
   Effect.gen(function* () {
     const launches = yield* Ref.make(0);
-    const sends = yield* Ref.make<Array<{ threadId: ThreadId; freshContext?: boolean }>>([]);
+    const sends = yield* Ref.make<
+      Array<{ threadId: ThreadId; freshContext?: boolean; model?: string }>
+    >([]);
     const launched = ThreadId.make("thread:fresh-session-task");
     const layer = ScheduledTaskService.layer.pipe(
       Layer.provide(
@@ -972,6 +974,9 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
                 {
                   threadId: input.threadId,
                   ...(input.freshContext === undefined ? {} : { freshContext: input.freshContext }),
+                  ...(input.modelSelection === undefined
+                    ? {}
+                    : { model: input.modelSelection.model }),
                 },
               ]).pipe(Effect.as({} as never)),
           }),
@@ -1017,7 +1022,10 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       yield* service.runNow({ id: input.id });
 
       assert.equal(yield* Ref.get(launches), 1);
-      assert.deepEqual(yield* Ref.get(sends), [{ threadId: launched, freshContext: true }]);
+      // The run uses the task's model, not whatever the thread was switched to.
+      assert.deepEqual(yield* Ref.get(sends), [
+        { threadId: launched, freshContext: true, model: "gpt-5.4" },
+      ]);
       // Its thread stays in the old project, so moving the task leaves it for a new one.
       const moved = yield* service.upsert({
         ...input,
@@ -1028,6 +1036,76 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       assert.equal(moved.task.threadMode, "fresh_session");
       const unbound = yield* service.upsert({ ...input, threadMode: "new_thread" });
       assert.equal(unbound.task.threadId, null);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("caps runs per hour for every trigger but the user's Run now, and keeps the grant", () =>
+  Effect.gen(function* () {
+    const launches = yield* Ref.make(0);
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+            launch: () =>
+              Ref.updateAndGet(launches, (n) => n + 1).pipe(
+                Effect.map((n) => ({ threadId: ThreadId.make(`thread:capped-${n}`) }) as never),
+              ),
+          }),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            streamDomainEvents: Stream.empty,
+            streamDomainEventsFrom: () => Stream.empty,
+            latestDomainEventSequence: Effect.succeed(0),
+            getThreadShell: () => Effect.succeed(null),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const input = {
+        id: ScheduledTaskId.make("task:capped"),
+        title: "Capped",
+        prompt: "Check",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 3_600_000 },
+        projectId: ProjectId.make("project:test"),
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      } as const;
+      const grant = { maxRunsPerHour: 1, budget: { maxCostUsd: 0.5 } };
+      assert.deepEqual((yield* service.upsert({ ...input, grant })).task.grant, grant);
+      // A client that doesn't know grants saves without one; it stays.
+      assert.deepEqual((yield* service.upsert(input)).task.grant, grant);
+
+      yield* service.runNow({ id: input.id }, { byAgent: true });
+      const refused = yield* Effect.exit(service.runNow({ id: input.id }, { byAgent: true }));
+      assert.isTrue(Exit.isFailure(refused));
+      assert.include(String(refused), "This automation allows 1 run per hour.");
+      // The user's Run now is never capped.
+      yield* service.runNow({ id: input.id });
+      assert.equal(yield* Ref.get(launches), 2);
+      const { runs } = yield* service.listRuns({ id: input.id });
+      assert.deepEqual(
+        runs.map((run) => run.trigger.type),
+        ["manual", "agent", "agent"],
+      );
+      assert.equal(runs[1]?.status, "capped");
+      assert.equal(runs[1]?.error, "This automation allows 1 run per hour.");
+
+      assert.isUndefined((yield* service.upsert({ ...input, grant: null })).task.grant);
+      yield* service.runNow({ id: input.id }, { byAgent: true });
+      assert.equal(yield* Ref.get(launches), 3);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

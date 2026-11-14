@@ -79,8 +79,7 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
       a.statusSource === b.statusSource &&
       a.toState === b.toState &&
       (a.cooldownSeconds ?? 0) === (b.cooldownSeconds ?? 0) &&
-      (a.coalesceSeconds ?? 0) === (b.coalesceSeconds ?? 0) &&
-      a.maxRunsPerHour === b.maxRunsPerHour
+      (a.coalesceSeconds ?? 0) === (b.coalesceSeconds ?? 0)
     );
   }
   if (a.type === "once") return b.type === "once" && Date.parse(a.runAt) === Date.parse(b.runAt);

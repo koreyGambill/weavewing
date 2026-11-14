@@ -107,6 +107,7 @@ import Migration0095 from "./Migrations/095_ScheduledTaskEventSubjects.ts";
 import Migration0096 from "./Migrations/096_ScheduledTaskRuns.ts";
 import Migration0097 from "./Migrations/097_Notifications.ts";
 import Migration0098 from "./Migrations/098_ScheduledTaskDisabledThreads.ts";
+import Migration0099 from "./Migrations/099_ScheduledTaskGrants.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -208,6 +209,7 @@ const migrationEntries = [
   [96, "ScheduledTaskRuns", Migration0096],
   [97, "Notifications", Migration0097],
   [98, "ScheduledTaskDisabledThreads", Migration0098],
+  [99, "ScheduledTaskGrants", Migration0099],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

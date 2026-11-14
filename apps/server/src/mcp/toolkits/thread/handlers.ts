@@ -10,10 +10,12 @@ import {
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
 } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as AutomationLimits from "../../../scheduledTasks/AutomationLimits.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   dispatchFailure,
@@ -138,6 +140,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       );
       const threads = yield* ThreadManagement.ThreadManagementService;
       const callerId = scope.thread.threadId;
+      const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+      if (Option.isSome(limits) && !(yield* limits.value.allowsNotify(callerId)))
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "This automation's limits turn notifications off.",
+        });
       const targetId = threadId ?? callerId;
       const target = yield* threads.getThreadShell(targetId).pipe(Effect.mapError(unavailable));
       if (target === null || target.deletedAt !== null)

@@ -792,9 +792,25 @@ export const OrchestratorMcpScheduleTarget = Schema.Struct({
   model: OrchestratorMcpTarget.fields.model,
 }).annotate({
   description:
-    "Model for threads this task creates, from `orchestrator_capabilities`. Needs bindToCurrentThread=false: a bound thread keeps its own. Omitted: new tasks use yours, updates keep it.",
+    "Model for every run, from `orchestrator_capabilities`. Omitted: new tasks use yours, updates keep it.",
 });
 export type OrchestratorMcpScheduleTarget = typeof OrchestratorMcpScheduleTarget.Type;
+
+export const OrchestratorMcpScheduleLimits = Schema.Struct({
+  maxCostUsd: Schema.optional(
+    Schema.Number.check(Schema.isBetween({ minimum: 0.01, maximum: 50 })),
+  ),
+  maxTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  maxSubagents: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10 }))),
+  subagentModels: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(8)),
+  ).annotate({ description: "Model ids or instanceId/model. Default: the task's model." }),
+  maxRunsPerHour: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 120 }))),
+}).annotate({
+  description:
+    "Per run of the task's thread, user turns included; over budget stops it. Replaces stored limits; {} clears.",
+});
+export type OrchestratorMcpScheduleLimits = typeof OrchestratorMcpScheduleLimits.Type;
 
 export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
   environmentId: OrchestratorMcpEnvironmentTarget,
@@ -816,6 +832,7 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
     }),
   ),
   target: Schema.optional(OrchestratorMcpScheduleTarget),
+  limits: Schema.optional(OrchestratorMcpScheduleLimits),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
@@ -843,6 +860,7 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
     providerInstanceId: ProviderInstanceId,
     model: Schema.String,
   }),
+  limits: Schema.optional(OrchestratorMcpScheduleLimits),
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: ScheduledTaskRunStatus,
   webhookUrl: Schema.optional(Schema.String).annotate({
@@ -886,6 +904,7 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
   bindToCurrentThread: Schema.optional(Schema.Boolean),
   freshSession: Schema.optional(Schema.Boolean),
   target: Schema.optional(OrchestratorMcpScheduleTarget),
+  limits: Schema.optional(OrchestratorMcpScheduleLimits),
 });
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;
