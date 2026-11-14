@@ -134,6 +134,8 @@ export interface ThreadRightPanelState {
   dismissedDeviceSurfaceIds?: string[];
   maximized?: true;
   proactiveDiffTurnId?: RunId;
+  /** Set once a default layout laid this thread out; later defaults never touch it again. */
+  defaultLayoutApplied?: true;
 }
 
 export interface ThreadPanelVisibility {
@@ -143,12 +145,8 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   applyTileAction: (ref: ScopedThreadRef, action: TileAction) => void;
-  /** With onlyUntouched, applies only while the thread shows nothing but its chat. */
-  applySavedTileLayout: (
-    ref: ScopedThreadRef,
-    saved: SavedTileNode,
-    onlyUntouched?: boolean,
-  ) => void;
+  /** As a default, applies once per thread and only while it shows nothing but its chat. */
+  applySavedTileLayout: (ref: ScopedThreadRef, saved: SavedTileNode, asDefault?: boolean) => void;
   byThreadKey: Record<string, ThreadRightPanelState>;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
@@ -748,6 +746,9 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       }
                     : {}),
                   ...(validThreadState?.maximized === true ? { maximized: true as const } : {}),
+                  ...(validThreadState?.defaultLayoutApplied === true
+                    ? { defaultLayoutApplied: true as const }
+                    : {}),
                 },
               ];
             }),
@@ -798,7 +799,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           })),
         ),
-      applySavedTileLayout: (ref, saved, onlyUntouched = false) =>
+      applySavedTileLayout: (ref, saved, asDefault = false) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const untouched =
@@ -807,7 +808,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 getTileGroups(current.tileLayout)
                   .flatMap((group) => group.tabs)
                   .join() === CONVERSATION_TAB_ID);
-            if (onlyUntouched && !untouched) return current;
+            if (asDefault && (current.defaultLayoutApplied || !untouched)) return current;
             const surfaceIds = current.surfaces.map((surface) => surface.id);
             const laidOut = current.tileLayout
               ? getTileGroups(current.tileLayout)
@@ -816,6 +817,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               : [];
             return {
               ...current,
+              ...(asDefault ? { defaultLayoutApplied: true as const } : {}),
               tileLayout: buildTileLayoutFromSaved(
                 saved,
                 [...new Set([...laidOut, ...surfaceIds])],
