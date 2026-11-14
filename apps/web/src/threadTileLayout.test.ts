@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyTileAction,
   CONVERSATION_TAB_ID,
+  firstFloatingTile,
   getTileGroups,
   newTabId,
   parseTileLayout,
@@ -62,6 +63,35 @@ describe("thread tile layout", () => {
     expect(resize(rect, { left: true, bottom: true }, { x: 0.5, y: -0.5 })).toEqual([
       0.4, 0.2, 0.2, 0.2,
     ]);
+    const firstFloat = (...args: Parameters<typeof firstFloatingTile>) =>
+      Object.fromEntries(
+        Object.entries(firstFloatingTile(...args)).map(([key, value]) => [
+          key,
+          Math.round(value * 100) / 100,
+        ]),
+      );
+    // Keeps the right edge, one title bar lower.
+    expect(firstFloat({ x: 0.5, y: 0, width: 0.5, height: 0.5 }, 0.05)).toEqual({
+      x: 0.35,
+      y: 0.05,
+      width: 0.65,
+      height: 0.7,
+    });
+    expect(firstFloat({ x: 0, y: 0.5, width: 0.3, height: 0.5 }, 0.05)).toEqual({
+      x: 0,
+      y: 0.55,
+      width: 0.3,
+      height: 0.45,
+    });
+    // Slivers and bottom-edge tiles take the minimum size inside the workspace.
+    expect(firstFloat({ x: 0, y: 0, width: 0.1, height: 1 }, 0.05)).toMatchObject({
+      x: 0,
+      width: 0.2,
+    });
+    expect(firstFloat({ x: 0.5, y: 0.95, width: 0.5, height: 0.05 }, 0.05)).toMatchObject({
+      y: 0.8,
+      height: 0.2,
+    });
     const single = syncTileLayout(undefined, [], [], null, false);
     expect(
       applyTileAction(single, { type: "float-group", groupId: "conversation-group", rect }),

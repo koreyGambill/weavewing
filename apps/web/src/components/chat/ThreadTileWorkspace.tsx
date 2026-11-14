@@ -42,6 +42,7 @@ import {
   applyTileAction as reduceTileAction,
   CONVERSATION_TAB_ID,
   DEFAULT_FLOATING_TILE,
+  firstFloatingTile,
   isNewTab,
   newTabId,
   getTileGroups,
@@ -380,15 +381,13 @@ export function ThreadTileWorkspace(props: {
   const canFloat = (group: TileGroup) =>
     Boolean(group.floating) ||
     getTileGroups(currentLayout()).filter((entry) => !entry.floating).length > 1;
-  // A first float keeps the tile's top right corner, so Dock lands where Float was.
   const anchoredFloat = (groupId: string) => {
     const root = tiled(currentLayout().root);
     const docked = root && tileGeometry(root).groups.find((entry) => entry.id === groupId)?.rect;
-    if (!docked) return DEFAULT_FLOATING_TILE;
-    const right = docked.x + docked.width;
-    const width = Math.max(0.2, Math.min(DEFAULT_FLOATING_TILE.width, right));
-    const height = Math.max(0.2, Math.min(DEFAULT_FLOATING_TILE.height, 1 - docked.y));
-    return { width, height, x: right - width, y: docked.y };
+    const workspace = rootRef.current;
+    if (!docked || !workspace?.clientHeight) return DEFAULT_FLOATING_TILE;
+    const bar = parseFloat(getComputedStyle(workspace).getPropertyValue("--tile-titlebar-height"));
+    return firstFloatingTile(docked, (bar || 0) / workspace.clientHeight);
   };
   const toggleFloat = (group: TileGroup) => {
     if (!canFloat(group)) return;
@@ -448,7 +447,7 @@ export function ThreadTileWorkspace(props: {
   };
   const openNewTab = (groupId: string) => {
     const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
-    if (group?.tabs.length && !isNewTab(group.activeTabId))
+    if (group && !isNewTab(group.activeTabId))
       apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
     else apply({ type: "focus", groupId });
     focusChooser(groupId);
@@ -462,7 +461,7 @@ export function ThreadTileWorkspace(props: {
   const focus = (groupId: string) => {
     const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
     if (!group) return;
-    if (group.tabs.length === 0 || isNewTab(group.activeTabId)) {
+    if (isNewTab(group.activeTabId)) {
       apply({ type: "focus", groupId });
       focusChooser(groupId);
       return;
@@ -602,7 +601,7 @@ export function ThreadTileWorkspace(props: {
     };
     const nextTab = (offset: number) => {
       const group = currentGroup();
-      if (!group || group.tabs.length === 0) return;
+      if (!group) return;
       // The hidden tab's content may hold focus; keep it in this tile, then move it to the new tab.
       parkFocus(group.id);
       activate(
@@ -632,9 +631,7 @@ export function ThreadTileWorkspace(props: {
       },
       "workspace.tile.closeTab": () => {
         const group = currentGroup();
-        if (!group) return;
-        if (group.tabs.length) closeTab(group.activeTabId);
-        else closeTile(group.id);
+        if (group) closeTab(group.activeTabId);
       },
       "workspace.tile.actions": () => {
         const group = currentGroup();
@@ -704,7 +701,7 @@ export function ThreadTileWorkspace(props: {
       const inChooser =
         onChooser ||
         target?.closest("[data-tile-chooser]")?.getAttribute("data-tile-chooser") === group?.id;
-      if (group && (!group.tabs.length || isNewTab(group.activeTabId)) && !editing && inChooser) {
+      if (group && isNewTab(group.activeTabId) && !editing && inChooser) {
         const choices = areaChoices;
         const index = chooserIndex?.groupId === group.id ? chooserIndex.index : firstOpenable;
         const key = event.key.toLowerCase();
@@ -725,11 +722,7 @@ export function ThreadTileWorkspace(props: {
             setChooserIndex({ groupId: group.id, index: next });
           } else if (event.key === "Escape") {
             parkFocus(group.id);
-            apply(
-              group.tabs.length
-                ? { type: "close-tab", tabId: group.activeTabId }
-                : { type: "close-group", groupId: group.id },
-            );
+            apply({ type: "close-tab", tabId: group.activeTabId });
             focus(currentLayout().focusedGroupId);
           } else (byKey ?? choices[index])?.run(group.id);
           return;
@@ -1200,25 +1193,21 @@ export function ThreadTileWorkspace(props: {
                       );
                     })}
                   </div>
-                  {group.tabs.length > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            size="icon-micro"
-                            variant="ghost"
-                            aria-label="New tab"
-                            onClick={() => openNewTab(id)}
-                          />
-                        }
-                      >
-                        <Plus className="size-3" />
-                      </TooltipTrigger>
-                      <TooltipPopup>
-                        {withShortcut("New tab", "workspace.tile.newTab")}
-                      </TooltipPopup>
-                    </Tooltip>
-                  )}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-micro"
+                          variant="ghost"
+                          aria-label="New tab"
+                          onClick={() => openNewTab(id)}
+                        />
+                      }
+                    >
+                      <Plus className="size-3" />
+                    </TooltipTrigger>
+                    <TooltipPopup>{withShortcut("New tab", "workspace.tile.newTab")}</TooltipPopup>
+                  </Tooltip>
                 </div>
                 <TileControl
                   label="New tile to the right"
@@ -1365,7 +1354,7 @@ export function ThreadTileWorkspace(props: {
                   <X />
                 </TileControl>
               </div>
-              {(group.tabs.length === 0 || isNewTab(group.activeTabId)) && (
+              {isNewTab(group.activeTabId) && (
                 <div
                   className="flex h-full flex-col items-center justify-center gap-4 p-6 outline-none"
                   data-tile-chooser={id}
