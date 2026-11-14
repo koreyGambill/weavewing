@@ -8,6 +8,7 @@ import { AsyncResult } from "effect/reactivity";
 import {
   shouldCreateNewThreadInCurrentProject,
   deleteSelectedThreadEntries,
+  filterSidebarAutomationThreads,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
@@ -45,7 +46,14 @@ import {
 } from "@t3tools/client-runtime/state/thread-sort";
 import { resolveProjectExpanded } from "../uiStateStore";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ScheduledTaskId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -979,6 +987,35 @@ describe("resolveSidebarSweepKeys", () => {
   it("leaves out rows that cannot settle and rows that left the list", () => {
     expect(resolveSidebarSweepKeys(ordered, "c", "blocked", canSettle)).toEqual(["c", "d"]);
     expect(resolveSidebarSweepKeys(ordered, "gone", "a", canSettle)).toEqual([]);
+  });
+});
+
+describe("filterSidebarAutomationThreads", () => {
+  const environmentId = EnvironmentId.make("env");
+  const automation = {
+    environmentId,
+    id: ThreadId.make("automation"),
+    automationTaskId: ScheduledTaskId.make("task"),
+  };
+  const person = { environmentId, id: ThreadId.make("person") };
+  const openPerson = scopedThreadKey(scopeThreadRef(environmentId, person.id));
+  const ids = (threads: ReadonlyArray<{ id: string }>) => threads.map((thread) => thread.id);
+
+  it("hides or isolates automation threads but keeps the open thread", () => {
+    expect(ids(filterSidebarAutomationThreads([automation, person], "show", null))).toEqual([
+      "automation",
+      "person",
+    ]);
+    expect(ids(filterSidebarAutomationThreads([automation, person], "hide", null))).toEqual([
+      "person",
+    ]);
+    expect(ids(filterSidebarAutomationThreads([automation, person], "only", null))).toEqual([
+      "automation",
+    ]);
+    expect(ids(filterSidebarAutomationThreads([automation, person], "only", openPerson))).toEqual([
+      "automation",
+      "person",
+    ]);
   });
 });
 

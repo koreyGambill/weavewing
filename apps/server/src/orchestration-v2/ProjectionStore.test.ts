@@ -11,6 +11,7 @@ import {
   CheckpointScopeId,
   ContextHandoffId,
   MessageId,
+  ScheduledTaskId,
   type ModelSelection,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2TurnItem,
@@ -1418,6 +1419,68 @@ it.effect("shells flag a latest run triggered by a provider background wake", ()
         id,
       );
       yield* assertShellIndexCoversShells();
+    }
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("shells name the automation whose run started the thread", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const taskId = ScheduledTaskId.make("monitoring:daily-check");
+    const message = (
+      threadId: ThreadId,
+      id: string,
+      at: DateTime.Utc,
+      scheduledTaskId: ScheduledTaskId | undefined,
+    ) =>
+      store.apply({
+        id: EventId.make(`event:automation-shell:${id}`),
+        type: "message.updated",
+        threadId,
+        occurredAt: at,
+        payload: {
+          id: MessageId.make(`message:automation-shell:${id}`),
+          threadId,
+          runId: null,
+          nodeId: null,
+          createdBy: "user",
+          creationSource: "web",
+          role: "user",
+          text: id,
+          attachments: [],
+          streaming: false,
+          createdAt: at,
+          updatedAt: at,
+          ...(scheduledTaskId === undefined ? {} : { scheduledTaskId }),
+        },
+      });
+    const launched = yield* addRolledBackRecoveryCandidate("automation-launched");
+    const bound = yield* addRolledBackRecoveryCandidate("automation-bound");
+    const untouched = yield* addRolledBackRecoveryCandidate("automation-none");
+    const at = (yield* store.getThreadProjection(launched)).updatedAt;
+    const later = DateTime.add(at, { seconds: 1 });
+    yield* message(launched, "launched-first", at, taskId);
+    yield* message(launched, "launched-follow-up", later, undefined);
+    // A person's thread an automation was bound to later stays the person's.
+    yield* message(bound, "bound-first", at, undefined);
+    yield* message(bound, "bound-run", later, taskId);
+
+    const listed = (yield* store.getShellSnapshot()).threads;
+    for (const [threadId, expected] of [
+      [launched, taskId],
+      [bound, undefined],
+      [untouched, undefined],
+    ] as const) {
+      const shells = [
+        yield* store.getThreadShell(threadId),
+        listed.find((shell) => shell.id === threadId),
+        ProjectionStore.threadShellFromProjection(yield* store.getThreadProjection(threadId)),
+      ];
+      assert.deepEqual(
+        shells.map((shell) => shell?.automationTaskId),
+        [expected, expected, expected],
+        threadId,
+      );
     }
   }).pipe(Effect.provide(layerTest)),
 );

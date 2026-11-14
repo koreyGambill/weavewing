@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
+import * as Schema from "effect/Schema";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
@@ -628,6 +629,25 @@ export function filterSidebarV2VisibleThreads<
       ) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+  );
+}
+
+export const SidebarAutomationThreadFilter = Schema.Literals(["show", "hide", "only"]);
+export type SidebarAutomationThreadFilter = typeof SidebarAutomationThreadFilter.Type;
+
+/** Applies the viewer's automation-thread filter to listed rows; the open thread always stays. */
+export function filterSidebarAutomationThreads<
+  T extends Pick<SidebarThreadSummary, "environmentId" | "id" | "automationTaskId">,
+>(
+  threads: readonly T[],
+  filter: SidebarAutomationThreadFilter,
+  openThreadKey: string | null,
+): readonly T[] {
+  if (filter === "show") return threads;
+  return threads.filter(
+    (thread) =>
+      (thread.automationTaskId !== undefined) === (filter === "only") ||
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === openThreadKey,
   );
 }
 
