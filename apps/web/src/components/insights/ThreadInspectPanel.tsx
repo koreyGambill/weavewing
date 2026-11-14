@@ -1,6 +1,7 @@
 import type { DefaultContextGetInput, ScopedThreadRef } from "@t3tools/contracts";
 import { CoinsIcon, FileTextIcon, LayersIcon, ListStartIcon } from "lucide-react";
 
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { DefaultContextPanel } from "./DefaultContextPanel";
 import { ThreadContextPanel } from "./ThreadContextPanel";
@@ -32,59 +33,56 @@ export function ThreadInspectPanel({
   readonly onSectionChange: (section: ThreadInspectSection) => void;
 }) {
   const tabs = (
-    <div role="tablist" aria-label="Inspect sections" className="flex shrink-0 gap-0.5">
-      {sections.map(([id, label, Icon]) => (
-        <Tooltip key={id}>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                role="tab"
-                aria-label={label}
-                aria-selected={section === id}
-                className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted aria-selected:bg-muted aria-selected:text-foreground"
-                onClick={() => onSectionChange(id)}
-              />
-            }
-          >
-            <Icon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup>{label}</TooltipPopup>
-        </Tooltip>
-      ))}
+    <div className="shrink-0 border-b border-border px-2.5 pt-2.5 pb-2">
+      <ToggleGroup
+        aria-label="Inspect sections"
+        size="segmented-compact"
+        className="w-full *:flex-1"
+        value={[section]}
+        onValueChange={(value) => {
+          const next = sections.find(([id]) => id === value[0]);
+          if (next) onSectionChange(next[0]);
+        }}
+      >
+        {sections.map(([id, label, Icon]) => (
+          <Tooltip key={id}>
+            <TooltipTrigger render={<Toggle value={id} aria-label={label} />}>
+              <Icon />
+            </TooltipTrigger>
+            <TooltipPopup>{label}</TooltipPopup>
+          </Tooltip>
+        ))}
+      </ToggleGroup>
     </div>
   );
   const panelKey = `${threadRef.environmentId}:${threadRef.threadId}`;
   if (section === "defaults" && (startedThread || draft !== undefined))
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+        {tabs}
         <DefaultContextPanel
           key={panelKey}
           threadRef={threadRef}
           request={{ threadId: threadRef.threadId, ...(startedThread ? {} : draft) }}
           visible={visible}
-          tabs={tabs}
         />
       </div>
     );
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      {tabs}
       {startedThread ? (
         section === "context" ? (
-          <ThreadContextPanel key={panelKey} threadRef={threadRef} visible={visible} tabs={tabs} />
+          <ThreadContextPanel key={panelKey} threadRef={threadRef} visible={visible} />
         ) : (
           <ThreadInsightsPanel
             threadRef={threadRef}
             visible={visible}
             mode={section === "defaults" ? "loads" : section}
-            tabs={tabs}
           />
         )
       ) : (
         <>
-          <div className="flex min-h-7 shrink-0 items-center border-b border-border px-1">
-            {tabs}
-          </div>
           <p className="p-2 text-xs text-muted-foreground">
             Send a message to inspect activity. Default context shows what will load first.
           </p>

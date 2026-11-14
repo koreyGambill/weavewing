@@ -64,6 +64,18 @@ export const DEFAULT_FLOATING_TILE: FloatingTileRect = {
   height: 0.7,
 };
 
+/**
+ * Where a tile floats first: at its docked right edge, one title bar lower, so the tile that
+ * takes its place keeps its tab strip in view. `barHeight` is the title bar's share of the height.
+ */
+export function firstFloatingTile(docked: FloatingTileRect, barHeight: number): FloatingTileRect {
+  const right = docked.x + docked.width;
+  const y = docked.y + barHeight;
+  const width = Math.min(DEFAULT_FLOATING_TILE.width, right);
+  const height = Math.min(DEFAULT_FLOATING_TILE.height, 1 - y);
+  return boundFloatingTile({ width, height, x: right - width, y });
+}
+
 export type TileGroup = {
   kind: "group";
   id: string;
@@ -157,12 +169,7 @@ function removeGroup(node: TileNode, groupId: string): TileNode | null {
   return first && second ? { ...node, first, second } : (first ?? second);
 }
 
-function prune(
-  node: TileNode,
-  valid: Set<string>,
-  emptyGroupIds: Set<string>,
-  seen = new Set<string>(),
-): TileNode | null {
+function prune(node: TileNode, valid: Set<string>, seen = new Set<string>()): TileNode | null {
   if (node.kind === "group") {
     const tabs = node.tabs.filter((id) => {
       if ((!valid.has(id) && !isNewTab(id)) || seen.has(id)) return false;
@@ -170,7 +177,7 @@ function prune(
       return true;
     });
     const activeIndex = node.tabs.indexOf(node.activeTabId);
-    return tabs.length || emptyGroupIds.has(node.id)
+    return tabs.length
       ? {
           ...node,
           tabs,
@@ -182,8 +189,8 @@ function prune(
         }
       : null;
   }
-  const first = prune(node.first, valid, emptyGroupIds, seen);
-  const second = prune(node.second, valid, emptyGroupIds, seen);
+  const first = prune(node.first, valid, seen);
+  const second = prune(node.second, valid, seen);
   return first && second ? { ...node, first, second } : (first ?? second);
 }
 
@@ -199,12 +206,18 @@ function settle(input: ThreadTileLayout): ThreadTileLayout {
           ),
         }
       : input;
-  const groups = getTileGroups(layout);
+  // A tile always holds a tab; an empty one holds a New tab showing the area chooser.
+  const filled = mapNode(layout.root, (node) => {
+    if (node.kind !== "group" || node.tabs.length) return node;
+    const tabId = newTabId(node.id);
+    return { ...node, tabs: [tabId], activeTabId: tabId };
+  });
+  const groups = getTileGroups(filled);
   const occupiedColors = new Set(
     groups.flatMap((group) => (group.colorIndex !== undefined ? [group.colorIndex] : [])),
   );
   let recycledColor = 0;
-  const root = mapNode(layout.root, (node) => {
+  const root = mapNode(filled, (node) => {
     if (node.kind !== "group" || node.colorIndex !== undefined) return node;
     const colorIndex =
       Array.from({ length: 8 }, (_, index) => index).find((index) => !occupiedColors.has(index)) ??
@@ -282,12 +295,7 @@ export function syncTileLayout(
     };
   }
   const valid = new Set([CONVERSATION_TAB_ID, ...surfaceIds]);
-  const emptyGroupIds = new Set(
-    getTileGroups(layout)
-      .filter((group) => !group.tabs.length)
-      .map((group) => group.id),
-  );
-  const root = prune(layout.root, valid, emptyGroupIds) ?? {
+  const root = prune(layout.root, valid) ?? {
     kind: "group",
     id: "root-group",
     tabs: [],
@@ -298,7 +306,7 @@ export function syncTileLayout(
     settle({ ...layout, root }),
     surfaceIds.filter((id) => !placedIds.has(id)),
   );
-  const showsChooser = (group: TileGroup) => !group.tabs.length || isNewTab(group.activeTabId);
+  const showsChooser = (group: TileGroup) => isNewTab(group.activeTabId);
   if (
     fillChooser &&
     activate &&
@@ -466,7 +474,7 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
   }
   if (action.type === "close-group") {
     const group = groups.find((entry) => entry.id === action.groupId);
-    if (!group || (groups.length === 1 && !group.tabs.length)) return layout;
+    if (!group || (groups.length === 1 && group.tabs.every(isNewTab))) return layout;
     const root = removeGroup(layout.root, group.id);
     return settle({
       ...layout,
@@ -545,7 +553,7 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
   if (action.type === "merge-groups") {
     const source = groups.find((group) => group.id === action.groupId);
     const target = groups.find((group) => group.id === action.targetGroupId);
-    if (!source?.tabs.length || !target || source.id === target.id) return layout;
+    if (!source || source.tabs.every(isNewTab) || !target || source.id === target.id) return layout;
     return settle({
       ...layout,
       root: mapNode(removeGroup(layout.root, source.id)!, (node) =>
@@ -672,11 +680,7 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
       second: action.side === "before" ? group : added,
     };
   });
-  root = prune(
-    root,
-    new Set(groups.flatMap((group) => group.tabs)),
-    new Set(groups.filter((group) => !group.tabs.length).map((group) => group.id)),
-  )!;
+  root = prune(root, new Set(groups.flatMap((group) => group.tabs)))!;
   return settle({
     ...layout,
     root,

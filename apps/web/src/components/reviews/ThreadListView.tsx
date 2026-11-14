@@ -11,9 +11,13 @@ import {
 } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import {
+  BookOpenTextIcon,
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  ListIcon,
   ListChecksIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
@@ -21,7 +25,8 @@ import {
   PlusIcon,
   UserIcon,
 } from "lucide-react";
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
+import { CheckedLabel } from "../ToolFilterMenuTrigger";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -35,7 +40,6 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuRadioItemIndicator,
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
@@ -44,7 +48,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { threadArtifactList, threadListRead, threadListUpdate } from "../../state/threadWorkspace";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Empty, EmptyDescription, EmptyMedia } from "../ui/empty";
@@ -52,6 +56,8 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { Toggle } from "../ui/toggle";
+import { ToggleGroup, ToggleGroupItem as GroupToggle } from "../ui/toggle-group";
 import {
   todoIndentMove,
   todoTabUpdate,
@@ -65,16 +71,11 @@ type Owner = ListItem["owner"];
 type Change = ThreadListUpdateInput["changes"][number];
 
 const filterLabels: Record<TodoFilter, string> = { all: "All", mine: "Mine", agents: "Agents" };
-
-/** A radio item's label with its check on the right, which the menu's radio items omit. */
-export function CheckedLabel({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex items-center justify-between gap-4">
-      {children}
-      <MenuRadioItemIndicator />
-    </span>
-  );
-}
+const filterOptions = [
+  { value: "all", Icon: ListIcon, iconClass: undefined },
+  { value: "mine", Icon: UserIcon, iconClass: "text-success-foreground" },
+  { value: "agents", Icon: BotIcon, iconClass: "text-(--weavewing-yellow)" },
+] as const;
 
 const ownerLabel = (owner: Owner) =>
   owner === "agent" ? "Agent is responsible" : "You're responsible";
@@ -120,6 +121,7 @@ export function ThreadListView({
   // Kept here so an item's editor stays open when indenting moves its row to a new parent.
   const [editing, setEditing] = useState<string | null>(null);
   const focusTextRef = useRef<string | null>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const remote = supplied ?? query.data?.[0];
   const entry = saved && (!remote || saved.revision > remote.revision) ? saved : remote;
@@ -184,6 +186,7 @@ export function ThreadListView({
       <TodoRow
         crossThread={Boolean(supplied)}
         node={node}
+        hidesClosed={!showClosed}
         expanded={editing === node.item.id}
         onExpandedChange={(open) => setEditing(open ? node.item.id : null)}
         takeTextFocus={() => {
@@ -227,30 +230,42 @@ export function ThreadListView({
     <div className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
       {!supplied ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <ToggleGroup
+            ref={filterRef}
+            aria-label="Filter todos by who is responsible"
+            size="segmented-compact"
+            value={[filter]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "all" || next === "mine" || next === "agents")
+                useThreadContextSidebarStore.getState().setTodoFilter(next);
+            }}
+          >
+            {filterOptions.map(({ value, Icon, iconClass }) => (
+              <Tooltip key={value}>
+                <TooltipTrigger
+                  render={<GroupToggle value={value} aria-label={filterLabels[value]} />}
+                >
+                  <Icon className={iconClass} />
+                  <span className="hidden @min-[22rem]:inline">{filterLabels[value]}</span>
+                </TooltipTrigger>
+                <TooltipPopup>{filterLabels[value]}</TooltipPopup>
+              </Tooltip>
+            ))}
+          </ToggleGroup>
           <Menu>
-            <MenuTrigger render={<Button variant="outline" size="xs" aria-label="Filter todos" />}>
-              {filterLabels[filter]}
-              {showClosed ? " · with done" : ""}
-              <ChevronDownIcon />
+            <MenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={showClosed ? "Showing done and dropped" : "Hiding done and dropped"}
+                />
+              }
+            >
+              {showClosed ? <EyeIcon /> : <EyeOffIcon />}
             </MenuTrigger>
             <MenuPopup align="start">
-              <MenuGroup>
-                <MenuGroupLabel>Responsible</MenuGroupLabel>
-                <MenuRadioGroup
-                  value={filter}
-                  onValueChange={(next) => {
-                    if (next === "all" || next === "mine" || next === "agents")
-                      useThreadContextSidebarStore.getState().setTodoFilter(next);
-                  }}
-                >
-                  {(["all", "mine", "agents"] as const).map((value) => (
-                    <MenuRadioItem key={value} value={value}>
-                      <CheckedLabel>{filterLabels[value]}</CheckedLabel>
-                    </MenuRadioItem>
-                  ))}
-                </MenuRadioGroup>
-              </MenuGroup>
-              <MenuSeparator />
               <MenuCheckboxItem
                 variant="switch"
                 checked={showClosed}
@@ -279,7 +294,22 @@ export function ThreadListView({
       {!tree.length ? (
         entry.items.length ? (
           <p className="px-1 py-2 text-muted-foreground">
-            Nothing here. {filter === "all" ? "Show done and dropped to see the rest." : "Try All."}
+            {filter === "all" ? (
+              "Nothing here. Show done and dropped to see the rest."
+            ) : (
+              <>
+                Nothing here for this filter.{" "}
+                <InlineButton
+                  tone="muted"
+                  onClick={() => {
+                    useThreadContextSidebarStore.getState().setTodoFilter("all");
+                    filterRef.current?.querySelector<HTMLElement>('[aria-label="All"]')?.focus();
+                  }}
+                >
+                  Show all todos
+                </InlineButton>
+              </>
+            )}
           </p>
         ) : (
           <Empty size="compact">
@@ -381,6 +411,7 @@ export function ThreadListView({
 function TodoRow({
   crossThread,
   node,
+  hidesClosed,
   expanded,
   onExpandedChange,
   takeTextFocus,
@@ -400,6 +431,8 @@ function TodoRow({
 }: {
   crossThread: boolean;
   node: TodoNode;
+  /** Closing a childless row removes it, so focus has to move on first. */
+  hidesClosed: boolean;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   /** True once, for the row whose text keeps focus after Tab moved it. */
@@ -420,6 +453,8 @@ function TodoRow({
 }) {
   const { item, progress } = node;
   const focusNewItem = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const focusAfterMenu = useRef<HTMLElement | null>(null);
   // Tab already wrote the text with the move, so the blur that follows must not write it again.
   const skipBlurSave = useRef(false);
   const [textRef] = useState(() => (input: HTMLInputElement | null) => {
@@ -427,6 +462,8 @@ function TodoRow({
   });
   const [details, setDetails] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteVisible = noteOpen || expanded;
   const terminal = item.state === "done" || item.state === "dropped";
   const openLink = listItemNeedsHandoff(item);
   const saveText = () => {
@@ -444,22 +481,46 @@ function TodoRow({
     }
   };
   return (
-    <div className={cn("rounded-md hover:bg-muted/40", node.context && "opacity-60")}>
+    <div ref={rowRef} className={cn("rounded-md hover:bg-muted/40", node.context && "opacity-60")}>
       <div className="flex min-w-0 items-start gap-1.5 py-1 pr-0.5">
         <Checkbox
           className="mt-0.5"
           aria-label={terminal ? `Reopen ${item.text}` : `Complete ${item.text}`}
           checked={terminal}
           disabled={disabled}
-          onCheckedChange={() =>
-            onChange({ state: terminal ? "open" : openLink ? "handed_off" : "done" })
-          }
+          onCheckedChange={() => {
+            if (!terminal && hidesClosed && !node.children.length)
+              neighborCheckbox(rowRef.current)?.focus();
+            onChange({ state: terminal ? "open" : openLink ? "handed_off" : "done" });
+          }}
         />
+        {item.details ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  size="micro"
+                  aria-label={`Toggle note for ${item.text}`}
+                  pressed={noteVisible}
+                  onPressedChange={(next) => {
+                    setNoteOpen(next);
+                    if (!next) onExpandedChange(false);
+                  }}
+                />
+              }
+            >
+              {noteVisible ? <BookOpenTextIcon /> : <NotebookTextIcon />}
+            </TooltipTrigger>
+            <TooltipPopup>{noteVisible ? "Hide note" : "Show note"}</TooltipPopup>
+          </Tooltip>
+        ) : (
+          <span aria-hidden className="size-5 shrink-0" />
+        )}
         <div className="min-w-0 flex-1 leading-5">
           <button
             type="button"
             className={cn(
-              "text-left break-words hover:underline",
+              "text-left wrap-anywhere hover:underline",
               terminal && "text-muted-foreground line-through",
             )}
             aria-expanded={expanded}
@@ -490,24 +551,6 @@ function TodoRow({
               </Button>
             </>
           ) : null}
-          {item.details && !expanded ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-tiny"
-                    className="ml-0.5 align-middle"
-                    aria-label={`Show note for ${item.text}`}
-                    onClick={() => onExpandedChange(true)}
-                  />
-                }
-              >
-                <NotebookTextIcon />
-              </TooltipTrigger>
-              <TooltipPopup>Has a note</TooltipPopup>
-            </Tooltip>
-          ) : null}
           {item.links.map((link) => (
             <TodoLinkChip
               crossThread={crossThread}
@@ -532,6 +575,11 @@ function TodoRow({
           <MenuPopup
             align="end"
             finalFocus={() => {
+              if (focusAfterMenu.current) {
+                const next = focusAfterMenu.current;
+                focusAfterMenu.current = null;
+                return next;
+              }
               if (!focusNewItem.current) return true;
               focusNewItem.current = false;
               newItemRef.current?.scrollIntoView({ block: "nearest" });
@@ -591,13 +639,22 @@ function TodoRow({
             </MenuCheckboxItem>
             <MenuItem
               disabled={disabled}
-              onClick={() => onChange({ state: terminal ? "open" : "dropped" })}
+              onClick={() => {
+                if (!terminal && hidesClosed && !node.children.length)
+                  focusAfterMenu.current = neighborCheckbox(rowRef.current);
+                onChange({ state: terminal ? "open" : "dropped" });
+              }}
             >
               {terminal ? "Reopen" : "Drop"}
             </MenuItem>
           </MenuPopup>
         </Menu>
       </div>
+      {noteOpen && !expanded && item.details ? (
+        <p className="whitespace-pre-wrap break-words pb-2 pl-5.5 pr-1 text-xs text-muted-foreground">
+          {item.details}
+        </p>
+      ) : null}
       {expanded ? (
         <div className="space-y-1.5 pb-2 pl-5.5 pr-1">
           <Input
@@ -634,13 +691,25 @@ function TodoRow({
   );
 }
 
+function neighborCheckbox(row: HTMLElement | null) {
+  const boxes = [
+    ...(row?.closest('[aria-label="Todos"]')?.querySelectorAll<HTMLElement>('[role="checkbox"]') ??
+      []),
+  ];
+  const at = boxes.findIndex((box) => row?.contains(box));
+  return boxes[at + 1] ?? boxes[at - 1] ?? null;
+}
+
 function OwnerIcon({ owner }: { owner: Owner }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
-            className="mr-1 inline-flex size-3.5 align-[-2px] text-muted-foreground [&_svg]:size-3.5"
+            className={cn(
+              "mr-1 inline-flex size-3.5 align-[-2px] [&_svg]:size-3.5",
+              owner === "agent" ? "text-(--weavewing-yellow)" : "text-success-foreground",
+            )}
             aria-label={ownerLabel(owner)}
             role="img"
           />

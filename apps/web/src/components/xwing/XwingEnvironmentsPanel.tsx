@@ -13,7 +13,7 @@ import {
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import { ArrowLeftIcon, Boxes, PlusIcon, SearchIcon, TerminalSquareIcon } from "lucide-react";
+import { ArrowLeftIcon, Boxes, PlusIcon, TerminalSquareIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -33,6 +33,8 @@ import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { RelativeTime } from "../RelativeTime";
 import { Badge } from "../ui/badge";
 import { Empty, EmptyMedia, EmptyDescription } from "../ui/empty";
+import { SidebarSearchField } from "../sidebar/SidebarSearchField";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { RefreshIcon } from "../ui/refresh-icon";
@@ -103,55 +105,68 @@ export function XwingEnvironmentsPanel({
     if (inspecting) detail.refresh();
   };
 
+  const refreshButton = enabled ? (
+    <ToolbarButton
+      label={inspecting ? "Inspect again" : "Refresh"}
+      disabled={active.isPending}
+      onClick={refresh}
+    >
+      <RefreshIcon refreshing={active.isPending} />
+    </ToolbarButton>
+  ) : null;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-xs">
-      <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border px-1">
+      <div className="flex shrink-0 flex-col gap-1 border-b border-border px-2.5 py-1.5">
         {validSelection ? (
-          <ToolbarButton label="All environments" onClick={() => select(null)}>
-            <ArrowLeftIcon />
-          </ToolbarButton>
-        ) : null}
-        <MachineLabel environmentId={environmentId} />
-        {validSelection ? (
-          <span className="min-w-0 flex-1 truncate font-medium">
-            {archived
-              ? xwingEnvironmentLabel(archived)
-              : detail.data
-                ? xwingEnvironmentLabel(detail.data)
-                : null}
-          </span>
+          <div className="flex items-center gap-1">
+            <ToolbarButton label="All environments" onClick={() => select(null)}>
+              <ArrowLeftIcon />
+            </ToolbarButton>
+            <MachineLabel environmentId={environmentId} />
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {archived
+                ? xwingEnvironmentLabel(archived)
+                : detail.data
+                  ? xwingEnvironmentLabel(detail.data)
+                  : null}
+            </span>
+            {refreshButton}
+          </div>
         ) : (
-          <label className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground">
-            <SearchIcon className="size-3 shrink-0" />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label="Filter environments"
-              placeholder="Filter"
-              className="h-6 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </label>
+          <>
+            <div className="flex items-center gap-1">
+              <MachineLabel environmentId={environmentId} />
+              <SidebarSearchField
+                aria-label="Filter environments"
+                value={query}
+                onValueChange={setQuery}
+                onClear={() => setQuery("")}
+              />
+            </div>
+            {enabled ? (
+              <div className="flex items-center gap-1">
+                <ToggleGroup
+                  aria-label="Environment scope"
+                  size="segmented-compact"
+                  value={[allEnvironments ? "all" : "linked"]}
+                  onValueChange={(value) => {
+                    if (value[0]) setAllEnvironments(value[0] === "all");
+                  }}
+                >
+                  <Toggle value="linked">Linked</Toggle>
+                  <Toggle value="all">All</Toggle>
+                </ToggleGroup>
+                {projectId !== null ? (
+                  <ToolbarButton label="New environment" onClick={() => setCreating(true)}>
+                    <PlusIcon />
+                  </ToolbarButton>
+                ) : null}
+                {refreshButton}
+              </div>
+            ) : null}
+          </>
         )}
-        {enabled && !validSelection ? (
-          <Button size="micro" variant="ghost" onClick={() => setAllEnvironments((all) => !all)}>
-            {allEnvironments ? "Linked" : "All"}
-          </Button>
-        ) : null}
-        {enabled && !validSelection && projectId !== null ? (
-          <ToolbarButton label="New environment" onClick={() => setCreating(true)}>
-            <PlusIcon />
-          </ToolbarButton>
-        ) : null}
-        {enabled ? (
-          <ToolbarButton
-            label={inspecting ? "Inspect again" : "Refresh"}
-            disabled={active.isPending}
-            onClick={refresh}
-          >
-            <RefreshIcon refreshing={active.isPending} />
-          </ToolbarButton>
-        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!supported ? (

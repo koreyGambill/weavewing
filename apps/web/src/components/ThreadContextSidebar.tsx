@@ -213,9 +213,7 @@ function useShortcutTooltip() {
   // The shortcut flips to whichever view this names, so its tooltip carries the label.
   const shortcutTarget: SidebarView = view === "threads" ? lastTool : "threads";
   return (id: SidebarView, title: string) =>
-    `${view === id && id !== "threads" ? "Back to thread list" : title}${
-      shortcut && shortcutTarget === id ? ` · ${shortcut}` : ""
-    }`;
+    `${title}${shortcut && shortcutTarget === id ? ` · ${shortcut}` : ""}`;
 }
 
 /** A tool view's heading row: its title and about note, then its own buttons and the pin. */
