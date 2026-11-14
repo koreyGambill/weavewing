@@ -153,6 +153,7 @@ import {
   newReviewDraft,
   reviewAgentFromDraft,
   reviewDraftFromAgent,
+  reviewModelKey,
 } from "./reviewAgentDraft.logic";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -1786,6 +1787,7 @@ function ScheduledTaskEditorForm({
   const activeInstanceId =
     activeSelection?.instanceId ?? firstInstance?.instanceId ?? ("" as ProviderInstanceId);
   const activeModel = activeSelection?.model ?? "";
+  const haikuKey = reviewModelKey(instanceEntries);
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -1935,8 +1937,9 @@ function ScheduledTaskEditorForm({
       <DialogHeader>
         <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
         <DialogDescription>
-          Run a prompt automatically on an interval, at a fixed time, once at a set date, when a
-          webhook is called, or when something happens in your threads.
+          {draft.review === null
+            ? "Run a prompt automatically on an interval, at a fixed time, once at a set date, when a webhook is called, or when something happens in your threads."
+            : "Review threads against your rules on a schedule or when something happens in your threads. Findings arrive in the inbox."}
         </DialogDescription>
       </DialogHeader>
 
@@ -2041,6 +2044,15 @@ function ScheduledTaskEditorForm({
                   if (kind === "review")
                     setDraft((current) => ({
                       ...unbindDraftFromThread(current),
+                      // A new review starts paused on a cheap model, as watchers did.
+                      ...(task === null && current.review === null
+                        ? {
+                            enabled: false,
+                            ...(haikuKey === null
+                              ? {}
+                              : { modelKey: haikuKey, baseModelSelection: null }),
+                          }
+                        : {}),
                       threadMode: "new_thread",
                       workspaceMode: "root",
                       review:

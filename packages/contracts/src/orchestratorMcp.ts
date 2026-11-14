@@ -810,7 +810,7 @@ export const OrchestratorMcpScheduleReview = Schema.Struct({
   ),
 }).annotate({
   description:
-    "Review threads against these rules, tool-less, instead of a turn; findings go to the user's inbox. A run_ended event reviews each ended turn.",
+    "Review threads against these rules, tool-less, instead of a turn; findings go to the user's inbox. A run_ended event reviews each ended turn. Set `target` to a cheap model.",
 });
 export type OrchestratorMcpScheduleReview = typeof OrchestratorMcpScheduleReview.Type;
 

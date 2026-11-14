@@ -166,8 +166,10 @@ describe("ScheduledTasksSettings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reviews threads" }));
     await expect.element(screen.getByRole("textbox", { name: "Rule 1 title" })).toBeVisible();
     await expect.element(prompt).not.toBeInTheDocument();
+    // A new review starts paused.
+    await expect.element(screen.getByRole("switch", { name: "Enabled" })).not.toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
-    await expect.element(screen.getByRole("textbox", { name: "Rule 2 title" })).toBeVisible();
+    await expect.element(screen.getByRole("textbox", { name: "Rule 2 title" })).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: "Runs an agent" }));
     await expect.element(screen.getByRole("textbox", { name: "Prompt" })).toBeVisible();
   });

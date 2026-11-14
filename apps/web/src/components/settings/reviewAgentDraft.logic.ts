@@ -10,6 +10,8 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
+import type { ProviderInstanceEntry } from "../../providerInstances";
+
 /** A review agent as the automation editor edits it. */
 export interface ReviewDraft {
   readonly kind: ScheduledTaskReviewAgent["kind"];
@@ -89,4 +91,18 @@ export function reviewAgentFromDraft(
       delivery: draft.delivery,
     },
   };
+}
+
+/** Reviews read whole transcripts on every run, so a new one starts on Claude Haiku when it is ready. */
+export function reviewModelKey(
+  entries: ReadonlyArray<
+    Pick<ProviderInstanceEntry, "instanceId" | "driverKind" | "enabled" | "isAvailable" | "models">
+  >,
+): string | null {
+  for (const entry of entries) {
+    if (entry.driverKind !== "claudeAgent" || !entry.enabled || !entry.isAvailable) continue;
+    const haiku = entry.models.find((model) => /haiku/i.test(model.slug));
+    if (haiku) return `${entry.instanceId}:${haiku.slug}`;
+  }
+  return null;
 }

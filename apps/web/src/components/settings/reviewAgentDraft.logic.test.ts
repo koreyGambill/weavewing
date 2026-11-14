@@ -4,6 +4,7 @@ import {
   newReviewDraft,
   reviewAgentFromDraft,
   reviewDraftFromAgent,
+  reviewModelKey,
 } from "./reviewAgentDraft.logic";
 
 describe("review agent drafts", () => {
@@ -37,5 +38,24 @@ describe("review agent drafts", () => {
     expect(
       reviewAgentFromDraft({ ...draft, instructionFiles: "~/ok.md\ndocs/standards.md" }),
     ).toEqual({ error: "Use an absolute or ~/ path for instruction file docs/standards.md." });
+  });
+
+  it("starts a new review on a ready Claude Haiku", () => {
+    const entry = (instanceId: string, driverKind: string, slugs: string[], isAvailable = true) =>
+      ({
+        instanceId,
+        driverKind,
+        enabled: true,
+        isAvailable,
+        models: slugs.map((slug) => ({ slug })),
+      }) as never;
+    expect(
+      reviewModelKey([
+        entry("codex", "codex", ["gpt-6"]),
+        entry("claude-off", "claudeAgent", ["claude-haiku-4-5"], false),
+        entry("claude", "claudeAgent", ["claude-opus-5-5", "claude-haiku-4-5"]),
+      ]),
+    ).toBe("claude:claude-haiku-4-5");
+    expect(reviewModelKey([entry("claude", "claudeAgent", ["claude-opus-5-5"])])).toBeNull();
   });
 });

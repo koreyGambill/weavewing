@@ -1,5 +1,6 @@
 import { PlusIcon, Trash2Icon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 
 import { randomUUID } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -49,6 +50,7 @@ export function ReviewAgentFields({
   readonly draft: ReviewDraft;
   readonly onChange: (update: (draft: ReviewDraft) => ReviewDraft) => void;
 }) {
+  const rulesRef = useRef<HTMLFieldSetElement>(null);
   const setRule = (index: number, field: "title" | "instructions", value: string) =>
     onChange((current) => ({
       ...current,
@@ -97,13 +99,14 @@ export function ReviewAgentFields({
         </Row>
       </div>
 
-      <fieldset className="min-w-0 space-y-3">
+      <fieldset ref={rulesRef} className="min-w-0 space-y-3">
         <legend className="text-sm font-medium">Rules</legend>
         {draft.rules.map((rule, index) => (
           <div key={rule.id} className="space-y-2 rounded-md border border-border p-3">
             <div className="flex items-center gap-2">
               <Input
                 aria-label={`Rule ${index + 1} title`}
+                data-rule-id={rule.id}
                 className="min-w-0 flex-1"
                 placeholder="Rule title"
                 value={rule.title}
@@ -137,12 +140,17 @@ export function ReviewAgentFields({
           variant="outline"
           size="sm"
           disabled={draft.rules.length >= 32}
-          onClick={() =>
-            onChange((current) => ({
-              ...current,
-              rules: [...current.rules, { id: randomUUID(), title: "", instructions: "" }],
-            }))
-          }
+          onClick={() => {
+            const id = randomUUID();
+            // Render the new rule now, so its title can take focus from the button.
+            flushSync(() =>
+              onChange((current) => ({
+                ...current,
+                rules: [...current.rules, { id, title: "", instructions: "" }],
+              })),
+            );
+            rulesRef.current?.querySelector<HTMLInputElement>(`[data-rule-id="${id}"]`)?.focus();
+          }}
         >
           <PlusIcon />
           Add rule
