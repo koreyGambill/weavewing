@@ -21,6 +21,7 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
+import * as AutomationLimits from "../scheduledTasks/AutomationLimits.ts";
 import { assertNotLinked, assertSameLink, callerLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts";
@@ -139,11 +140,26 @@ const requireThreadCaller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((scope) => McpInvocationContext.requireThreadScope(scope, "This tool")),
 );
 
-export const reads = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
-  declare(
+/** Declarations that only read; a limited automation may still route these to a link. */
+const readOnlyDeclarations = new WeakSet<Declaration<unknown>>();
+
+export const reads = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) => {
+  const declaration = declare(
     (params: P) => handle(params),
     () => Effect.void,
   );
+  readOnlyDeclarations.add(declaration);
+  return declaration;
+};
+
+/** Work in a linked environment would escape the limits of the caller's automation. */
+const refuseLinkedFromLimitedAutomation = Effect.gen(function* () {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+  if (scope.thread !== undefined && Option.isSome(limits)) {
+    yield* limits.value.refuseOutside(scope.thread.threadId, "act in a linked environment");
+  }
+});
 
 export const readsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   declare((params: P) => requireThreadCaller.pipe(Effect.flatMap(() => handle(params))), undefined);
@@ -438,6 +454,7 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
         const target = PeerForwarding.remoteTarget(scope, environmentId);
         if (target === undefined) return yield* here(params);
         if (scope.linkedEnvironments === false) return yield* PeerForwarding.linkedEnvironmentsOff;
+        if (!readOnlyDeclarations.has(declaration)) yield* refuseLinkedFromLimitedAutomation;
         yield* (remote as RemoteCheck<typeof params>)(params);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
         const result = yield* forwarding.value.call(scope, tool, target, {

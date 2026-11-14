@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -15,6 +15,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import * as AutomationLimits from "./AutomationLimits.ts";
+import * as RunHistory from "./RunHistory.ts";
 
 const now = "2026-11-14T00:00:00.000Z";
 const haiku = { instanceId: "claudeAgent", model: "claude-haiku-5-5" };
@@ -244,12 +245,12 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
       // New threads would escape the budget, a budget-only one included.
       for (const id of ["thread:child", "thread:budget"]) {
         assert.include(
-          yield* failure(limits.refuseLaunch(ThreadId.make(id))),
-          "only through delegate_task",
+          yield* failure(limits.refuseOutside(ThreadId.make(id), "start new threads")),
+          "so it can't start new threads",
         );
       }
       assert.equal(
-        yield* failure(limits.refuseLaunch(ThreadId.make("thread:launched"))),
+        yield* failure(limits.refuseOutside(ThreadId.make("thread:launched"), "start new threads")),
         "allowed",
       );
 
@@ -260,14 +261,47 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
             targetThreadId: ThreadId.make(to),
           }),
         );
-      assert.include(yield* send("thread:child", "thread:unlimited"), "only to its own threads");
+      assert.include(yield* send("thread:child", "thread:unlimited"), "send to threads outside it");
       assert.equal(yield* send("thread:child", "thread:bound"), "allowed");
-      // Follow-ups into its own thread count toward its runs per hour.
+      // Answering or reordering turns elsewhere is refused too.
+      const elsewhere = (to: string) =>
+        failure(
+          limits.refuseOtherThread({
+            callerThreadId: child,
+            targetThreadId: ThreadId.make(to),
+            action: "answer requests in threads outside it",
+          }),
+        );
+      assert.include(yield* elsewhere("thread:unlimited"), "answer requests in threads outside it");
+      assert.equal(yield* elsewhere("thread:bound"), "allowed");
+
+      // Follow-ups its agents sent count toward its runs per hour, from history, so the
+      // scheduler sees them too: one scheduled run plus one follow-up reach a cap of 2.
+      yield* sql`INSERT INTO scheduled_task_runs ${sql.insert({
+        id: "run:launched",
+        task_id: "task:launching",
+        started_at: now,
+        status: "running",
+        trigger_json: '{"type":"schedule","summary":"On schedule"}',
+        thread_id: "thread:launched",
+      })}`;
       assert.equal(yield* send("thread:launched", "thread:launched"), "allowed");
-      assert.equal(yield* send("thread:launched", "thread:launched"), "allowed");
+      yield* insertRun(sql, {
+        id: "orun:launched-follow-up",
+        threadId: "thread:launched",
+        ordinal: 2,
+        message: { senderThreadId: "thread:launched" },
+      });
       assert.include(
         yield* send("thread:launched", "thread:launched"),
         "This automation allows 2 runs per hour.",
+      );
+      assert.equal(
+        yield* RunHistory.countRecentRuns(
+          ScheduledTaskId.make("task:launching"),
+          "2026-11-13T00:00:00.000Z",
+        ),
+        2,
       );
 
       const turnUpdate = (threadId: string, tokenUsage: object) =>

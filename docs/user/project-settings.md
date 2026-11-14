@@ -132,8 +132,8 @@ agent can't continue it until the next scheduled run. Cost counts the agent's
 priced usage plus an estimate for its subagents and compaction, so a run can stop
 a little early. With a subagent or budget limit, the agent's own subagent tools
 are off and subagents go through T3 Code, on the task's model unless the agent
-was given others, and the agent can't start other threads or message threads
-outside the task. Subagent limits work with Claude and Codex models. An agent in a
+was given others. The agent can't start, fork or message threads outside the
+task, answer or reorder their turns, or act in linked environments. Subagent limits work with Claude and Codex models. An agent in a
 task with limits can't create tasks, change limits or run tasks now. A limited
 task's runs use its model in threads it
 started; a thread you started keeps the model you picked. Over the hourly limit,

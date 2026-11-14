@@ -264,10 +264,17 @@ export class AutomationLimits extends Context.Service<
       readonly callerThreadId: ThreadId;
       readonly models: ReadonlyArray<{ readonly instanceId?: string; readonly model?: string }>;
     }) => Effect.Effect<void, OrchestratorMcpFailure>;
-    /** Threads outside the automation would spend outside its budget. */
-    readonly refuseLaunch: (
+    /** Work outside the automation's threads would escape its limits. */
+    readonly refuseOutside: (
       callerThreadId: ThreadId,
+      action: string,
     ) => Effect.Effect<void, OrchestratorMcpFailure>;
+    /** Refuses moving turns in a thread outside the automation, such as answering or queueing. */
+    readonly refuseOtherThread: (input: {
+      readonly callerThreadId: ThreadId;
+      readonly targetThreadId: ThreadId;
+      readonly action: string;
+    }) => Effect.Effect<void, OrchestratorMcpFailure>;
     /** Sends start turns: outside the automation they escape its limits, inside they count. */
     readonly admitSend: (input: {
       readonly callerThreadId: ThreadId;
@@ -295,9 +302,6 @@ export const layer = Layer.effect(
     const spends = yield* Ref.make<ReadonlyMap<RunId, ReadonlyMap<string, TurnSpend>>>(new Map());
     const stopped = yield* Ref.make<ReadonlyMap<RunId, string>>(new Map());
     const enforced = yield* Ref.make<ReadonlyMap<RunId, true>>(new Map());
-    const followUps = yield* Ref.make<ReadonlyMap<ScheduledTaskId, ReadonlyArray<number>>>(
-      new Map(),
-    );
 
     const forThread = Effect.fn("AutomationLimits.forThread")(function* (threadId: ThreadId) {
       const now = yield* Clock.currentTimeMillis;
@@ -368,14 +372,38 @@ export const layer = Layer.effect(
       );
     });
 
-    const refuseLaunch = Effect.fn("AutomationLimits.refuseLaunch")(function* (
+    const outsideMessage = (action: string) =>
+      `This automation's limits keep its work in its own threads, so it can't ${action}. Use delegate_task for subagents.`;
+
+    const refuseOutside = Effect.fn("AutomationLimits.refuseOutside")(function* (
       callerThreadId: ThreadId,
+      action: string,
     ) {
       const scope = yield* forThread(callerThreadId);
       if (scope !== null && disablesNativeSubagents(scope.grant)) {
-        return yield* refuse(
-          "This automation's limits allow new work only through delegate_task, which counts toward its budget.",
-        );
+        return yield* refuse(outsideMessage(action));
+      }
+    });
+
+    /** The caller's limited automation when `targetThreadId` is not one of its threads. */
+    const outsider = Effect.fn("AutomationLimits.outsider")(function* (
+      callerThreadId: ThreadId,
+      targetThreadId: ThreadId,
+    ) {
+      const caller = yield* forThread(callerThreadId);
+      if (caller === null) return { caller, outside: false };
+      const target = yield* forThread(targetThreadId);
+      return { caller, outside: target?.taskId !== caller.taskId };
+    });
+
+    const refuseOtherThread = Effect.fn("AutomationLimits.refuseOtherThread")(function* (input: {
+      readonly callerThreadId: ThreadId;
+      readonly targetThreadId: ThreadId;
+      readonly action: string;
+    }) {
+      const { caller, outside } = yield* outsider(input.callerThreadId, input.targetThreadId);
+      if (caller !== null && outside && disablesNativeSubagents(caller.grant)) {
+        return yield* refuse(outsideMessage(input.action));
       }
     });
 
@@ -383,14 +411,11 @@ export const layer = Layer.effect(
       readonly callerThreadId: ThreadId;
       readonly targetThreadId: ThreadId;
     }) {
-      const caller = yield* forThread(input.callerThreadId);
+      const { caller, outside } = yield* outsider(input.callerThreadId, input.targetThreadId);
       if (caller === null) return;
-      const target = yield* forThread(input.targetThreadId);
-      if (target?.taskId !== caller.taskId) {
+      if (outside) {
         if (disablesNativeSubagents(caller.grant)) {
-          return yield* refuse(
-            "This automation can send only to its own threads: a turn elsewhere would escape its limits.",
-          );
+          return yield* refuse(outsideMessage("send to threads outside it"));
         }
         return;
       }
@@ -405,17 +430,11 @@ export const layer = Layer.effect(
       if (cap === undefined) return;
       const now = yield* Clock.currentTimeMillis;
       const since = DateTime.formatIso(DateTime.makeUnsafe(now - HOUR_MS));
-      const scheduled = yield* RunHistory.countRecentRuns(caller.taskId, since).pipe(
+      const recent = yield* RunHistory.countRecentRuns(caller.taskId, since).pipe(
         withSql,
         Effect.orElseSucceed(() => 0),
       );
-      const admitted = yield* Ref.modify(followUps, (all) => {
-        const recent = (all.get(caller.taskId) ?? []).filter((at) => at > now - HOUR_MS);
-        return scheduled + recent.length >= cap
-          ? ([false, all] as const)
-          : ([true, remember(all, caller.taskId, [...recent, now])] as const);
-      });
-      if (!admitted) {
+      if (recent >= cap) {
         return yield* refuse(`This automation allows ${cap} run${cap === 1 ? "" : "s"} per hour.`);
       }
     });
@@ -568,7 +587,8 @@ export const layer = Layer.effect(
     return AutomationLimits.of({
       forThread,
       admitSubagents,
-      refuseLaunch,
+      refuseOutside,
+      refuseOtherThread,
       admitSend,
       refuseScheduling,
       allowsNotify: Effect.fn("AutomationLimits.allowsNotify")(function* (threadId: ThreadId) {

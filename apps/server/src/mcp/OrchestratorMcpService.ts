@@ -3493,7 +3493,9 @@ const make = Effect.gen(function* () {
     createThreads: Effect.fn("OrchestratorMcpService.createThreads")(
       function* (callerScope, input) {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "create_threads");
-        yield* checkLimits(scope.thread.threadId, (limits, id) => limits.refuseLaunch(id));
+        yield* checkLimits(scope.thread.threadId, (limits, id) =>
+          limits.refuseOutside(id, "start new threads"),
+        );
         const parentRun = ThreadManagementService.latestActiveRun(parent);
         if (
           parentRun === undefined ||

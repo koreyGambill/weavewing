@@ -193,16 +193,29 @@ export const markBudgetStopped = Effect.fn("ScheduledTaskRunHistory.markBudgetSt
   return rows.map((row) => ScheduledTaskId.make(row.task_id));
 });
 
-/** Runs that count toward the hourly cap: not skipped, capped or started by the user. */
+/**
+ * Runs that count toward the hourly cap: the task's runs that were not skipped, capped or started
+ * by the user, and the follow-up turns its agents sent into the task's threads.
+ */
 export const countRecentRuns = Effect.fn("ScheduledTaskRunHistory.countRecentRuns")(function* (
   taskId: ScheduledTaskId,
   since: string,
 ) {
   const sql = yield* SqlClient.SqlClient;
-  const [row] = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM scheduled_task_runs
-    WHERE task_id = ${taskId} AND started_at > ${since}
-      AND status NOT IN ('skipped', 'capped')
-      AND json_extract(trigger_json, '$.type') != 'manual'`;
+  const [row] = yield* sql<{ count: number }>`SELECT
+    (SELECT COUNT(*) FROM scheduled_task_runs
+      WHERE task_id = ${taskId} AND started_at > ${since}
+        AND status NOT IN ('skipped', 'capped')
+        AND json_extract(trigger_json, '$.type') != 'manual')
+    + (SELECT COUNT(*) FROM orchestration_v2_projection_runs r
+      JOIN orchestration_v2_projection_messages m
+        ON m.message_id = json_extract(r.payload_json, '$.userMessageId')
+      WHERE r.requested_at > ${since}
+        AND json_extract(m.payload_json, '$.senderThreadId') IS NOT NULL
+        AND r.thread_id IN (
+          SELECT thread_id FROM scheduled_tasks WHERE task_id = ${taskId} AND thread_id IS NOT NULL
+          UNION SELECT thread_id FROM scheduled_task_runs
+            WHERE task_id = ${taskId} AND thread_id IS NOT NULL)) AS count`;
   return row?.count ?? 0;
 });
 

@@ -97,6 +97,34 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
   handle: (params: P) => Effect.Effect<A, E, R>,
 ) => McpToolAccess.writesThreads((params: P) => [params.threadId], handle);
 
+/** Refuses a limited automation's agent changing turns in a thread outside the automation. */
+const limitedOutside = Effect.fn("ThreadToolkit.limitedOutside")(function* (
+  check: (
+    limits: AutomationLimits.AutomationLimits["Service"],
+    callerThreadId: ThreadId,
+  ) => Effect.Effect<void, OrchestratorMcpFailure>,
+) {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+  if (scope.thread !== undefined && Option.isSome(limits))
+    yield* check(limits.value, scope.thread.threadId);
+});
+
+/** `writesThread` for actions that start, resume or reorder turns there. */
+const movesTurns = <P extends { readonly threadId?: ThreadId | undefined }, A, E, R>(
+  action: string,
+  handle: (params: P) => Effect.Effect<A, E, R>,
+) =>
+  writesThread((params: P) =>
+    limitedOutside((limits, callerThreadId) =>
+      limits.refuseOtherThread({
+        callerThreadId,
+        targetThreadId: params.threadId ?? callerThreadId,
+        action,
+      }),
+    ).pipe(Effect.andThen(handle(params))),
+  );
+
 export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   t3_context_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
@@ -244,6 +272,9 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       (input) => [input.threadId, input.targetThreadId],
       (input) =>
         Effect.gen(function* () {
+          yield* limitedOutside((limits, callerThreadId) =>
+            limits.refuseOutside(callerThreadId, "fork or merge threads"),
+          );
           const sourcePoint = input.sourcePoint ?? { type: "latest_stable" as const };
           const { threads, projection } = yield* readThread(input.threadId);
           const commandId = yield* newCommandId();
@@ -328,7 +359,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         return { requestId, questions: item.questions };
       }),
     ),
-    writesThread((input) =>
+    movesTurns("answer requests in threads outside it", (input) =>
       Effect.gen(function* () {
         const requestId = yield* required(input.requestId, "requestId");
         const answers = yield* required(input.answers, "answers");
@@ -385,7 +416,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         );
       }),
     ),
-    writesThread((input) =>
+    movesTurns("change queued turns in threads outside it", (input) =>
       Effect.gen(function* () {
         const runId = yield* required(input.queuedRunId, "queuedRunId");
         switch (input.action) {
