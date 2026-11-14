@@ -1,4 +1,5 @@
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -53,6 +54,30 @@ beforeEach(() => {
 });
 
 describe("discardComposerDraft", () => {
+  it.each([
+    ["no composer entry", () => {}],
+    [
+      "only a model choice",
+      () =>
+        useComposerDraftStore
+          .getState()
+          .setModelSelection(
+            draftId,
+            createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+            { explicit: true },
+          ),
+    ],
+  ])("drops a new-thread draft with %s, with nothing to undo", (_, seed) => {
+    useComposerDraftStore.getState().setProjectDraftThreadId(projectRef, draftId);
+    seed();
+
+    discardComposerDraft(draftId);
+    const after = useComposerDraftStore.getState();
+    expect(after.getDraftSession(draftId)).toBeNull();
+    expect(after.logicalProjectDraftThreadKeyByLogicalProjectKey).toEqual({});
+    expect(showThreadUndoNotice).not.toHaveBeenCalled();
+  });
+
   it("restores a discarded new-thread draft with its project mapping and a usable preview", async () => {
     using preview = imagePreview();
     const store = useComposerDraftStore.getState();

@@ -5,6 +5,8 @@ import {
   managedRuntimeModeDenial,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import { resolvePastedPath } from "@t3tools/shared/path";
+import { scratchWorkspaceStatus } from "@t3tools/client-runtime/operations/projects";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -22,6 +24,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
@@ -105,6 +108,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+  const mixedDefaultFolder = useScopedSettingsMixed(["scratchStartDirectory"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
@@ -246,6 +250,68 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  const defaultFolderNotes = connectedEnvironments.flatMap((environment) => {
+    const config = environment.serverConfig;
+    const status = scratchWorkspaceStatus(config);
+    const where = connectedEnvironments.length > 1 ? `${environment.label}: ` : "";
+    if (status === "refused") {
+      return [`${where}This folder is refused, so new threads can't start outside a project.`];
+    }
+    if (status === "fallback") {
+      return [
+        `${where}This folder doesn't exist, so new threads use ${config?.scratchWorkspaceRoot}.`,
+      ];
+    }
+    return [];
+  });
+  const defaultFolderRow = !isProjectScope ? (
+    <SettingsRow
+      serverScoped
+      settingKeys={["scratchStartDirectory"]}
+      mixed={mixedDefaultFolder}
+      {...searchableSetting("default-folder")}
+      description={
+        <>
+          A folder on that machine for threads started outside a project. A missing folder falls
+          back to one in T3 Code's data directory; a Git checkout, your home folder or ~/.xwing is
+          refused.
+          {defaultFolderNotes.map((note) => (
+            <span key={note} role="status" className="mt-1 block text-warning-foreground">
+              {note}
+            </span>
+          ))}
+        </>
+      }
+      resetAction={
+        settings.scratchStartDirectory !== DEFAULT_SERVER_SETTINGS.scratchStartDirectory ? (
+          <SettingResetButton
+            label="default folder"
+            onClick={() =>
+              updateSettings({
+                scratchStartDirectory: DEFAULT_SERVER_SETTINGS.scratchStartDirectory,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <DraftInput
+          size="sm"
+          className="w-full sm:w-72"
+          value={mixedDefaultFolder ? "" : settings.scratchStartDirectory}
+          onCommit={(next) =>
+            updateSettings({
+              scratchStartDirectory: next || DEFAULT_SERVER_SETTINGS.scratchStartDirectory,
+            })
+          }
+          normalizeDraft={resolvePastedPath}
+          placeholder={mixedDefaultFolder ? "Mixed" : DEFAULT_SERVER_SETTINGS.scratchStartDirectory}
+          spellCheck={false}
+          aria-label="Default folder for new threads"
+        />
+      }
+    />
+  ) : null;
   const fallbackRow = !isProjectScope ? (
     <SettingsRow
       serverScoped
@@ -408,6 +474,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
           />
           {workspaceRow}
+          {defaultFolderRow}
           <TileLayoutDefaultRow />
         </>
       ) : (

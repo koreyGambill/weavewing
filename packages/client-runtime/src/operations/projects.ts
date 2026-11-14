@@ -27,6 +27,7 @@ import {
   resolveProjectPathForDispatch,
 } from "../state/projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
+import { SCRATCH_PROJECT_DEFAULT_TITLE } from "../state/projectGrouping.ts";
 import { sourceControlClients } from "../sourceControlClients.ts";
 import type { SourceControlDefinition } from "../sourceControlClients.ts";
 
@@ -45,6 +46,57 @@ export function availableScratchWorkspaceRoot(
   return canCreateProjectInEnvironment(connectionPhase)
     ? (serverConfig?.scratchWorkspaceRoot ?? null)
     : null;
+}
+
+type ScratchServerConfig =
+  | Pick<ServerConfig, "scratchWorkspaceRoot" | "legacyScratchWorkspaceRoot">
+  | null
+  | undefined;
+
+/** Null when the server predates the setting; "fallback" means the folder is missing. */
+export function scratchWorkspaceStatus(
+  serverConfig: ScratchServerConfig,
+): "in-use" | "fallback" | "refused" | null {
+  if (serverConfig?.legacyScratchWorkspaceRoot === undefined) return null;
+  if (serverConfig.scratchWorkspaceRoot === undefined) return "refused";
+  return serverConfig.scratchWorkspaceRoot === serverConfig.legacyScratchWorkspaceRoot
+    ? "fallback"
+    : "in-use";
+}
+
+/** How to name an environment's default folder: the folder as the user typed it, or its real path. */
+export function scratchWorkspaceLabel(
+  serverConfig:
+    | (NonNullable<ScratchServerConfig> & {
+        readonly settings: Pick<ServerSettings, "scratchStartDirectory">;
+      })
+    | null
+    | undefined,
+): string | null {
+  const root = serverConfig?.scratchWorkspaceRoot;
+  if (root === undefined) return null;
+  const typed = serverConfig?.settings.scratchStartDirectory.replace(/(.)[\\/]+$/, "$1") ?? "";
+  return scratchWorkspaceStatus(serverConfig) === "in-use" && typed.length > 0 ? typed : root;
+}
+
+/** A default-folder project's name: its own once renamed, else its folder. */
+export function scratchProjectLabel(
+  project: { readonly workspaceRoot: string; readonly title: string },
+  serverConfig: Parameters<typeof scratchWorkspaceLabel>[0],
+): string {
+  return project.title === SCRATCH_PROJECT_DEFAULT_TITLE
+    ? scratchProjectFolderLabel(project, serverConfig)
+    : project.title;
+}
+
+/** A default-folder project's folder: the configured label for the current default, else its path. */
+export function scratchProjectFolderLabel(
+  project: { readonly workspaceRoot: string },
+  serverConfig: Parameters<typeof scratchWorkspaceLabel>[0],
+): string {
+  return project.workspaceRoot === serverConfig?.scratchWorkspaceRoot
+    ? (scratchWorkspaceLabel(serverConfig) ?? project.workspaceRoot)
+    : project.workspaceRoot;
 }
 
 export interface AddProjectRemoteSourceReadinessEntry {

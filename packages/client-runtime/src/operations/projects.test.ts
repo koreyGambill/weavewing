@@ -12,11 +12,38 @@ import {
   getDefaultCloneUrl,
   githubIncompleteOwnerRepositoryMessage,
   normalizePastedCloneUrl,
+  scratchWorkspaceLabel,
+  scratchWorkspaceStatus,
   sortAddProjectProviderSources,
 } from "./projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
 
 describe("add project shared logic", () => {
+  it("names the default folder as typed only while the server uses the setting", () => {
+    const config = (scratchWorkspaceRoot: string | undefined, typed = "~/code/") => ({
+      ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
+      legacyScratchWorkspaceRoot: "/home/u/.t3/userdata/scratch",
+      settings: { scratchStartDirectory: typed },
+    });
+    expect(scratchWorkspaceLabel(config("/home/u/code"))).toBe("~/code");
+    expect(scratchWorkspaceLabel(config("/home/u/code", "/"))).toBe("/");
+    // A missing configured folder falls back to the managed one, which is shown by its path.
+    expect(scratchWorkspaceLabel(config("/home/u/.t3/userdata/scratch"))).toBe(
+      "/home/u/.t3/userdata/scratch",
+    );
+    expect(scratchWorkspaceLabel(config(undefined))).toBeNull();
+    expect(
+      scratchWorkspaceLabel({
+        scratchWorkspaceRoot: "/srv/scratch",
+        settings: { scratchStartDirectory: "~/code" },
+      }),
+    ).toBe("/srv/scratch");
+    expect(scratchWorkspaceStatus(config("/home/u/code"))).toBe("in-use");
+    expect(scratchWorkspaceStatus(config("/home/u/.t3/userdata/scratch"))).toBe("fallback");
+    expect(scratchWorkspaceStatus(config(undefined))).toBe("refused");
+    expect(scratchWorkspaceStatus({ scratchWorkspaceRoot: "/srv/scratch" })).toBeNull();
+  });
+
   it("offers only GitHub until other hosts are turned on", () => {
     const ready = () => ({ ready: true, hint: null });
     expect(sortAddProjectProviderSources(ready, {})).toEqual(["github"]);

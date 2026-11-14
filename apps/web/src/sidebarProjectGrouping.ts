@@ -141,6 +141,7 @@ export function buildSidebarProjectSnapshots(input: {
   projects: ReadonlyArray<Project>;
   settings: ProjectGroupingSettings;
   groupScratchProjects?: boolean;
+  scratchLabel?: (project: Project) => string | null;
   primaryEnvironmentId: EnvironmentId | null;
   resolveEnvironmentLabel: (environmentId: EnvironmentId) => string | null;
   isDesktopLocalEnvironment?: (environmentId: EnvironmentId) => boolean;
@@ -149,6 +150,7 @@ export function buildSidebarProjectSnapshots(input: {
   return buildProjectGroups({
     projects: input.projects,
     groupScratchProjects: input.groupScratchProjects ?? false,
+    ...(input.scratchLabel ? { scratchLabel: input.scratchLabel } : {}),
     settings: input.settings,
     preferredEnvironmentId: input.primaryEnvironmentId,
   }).map((group): SidebarProjectSnapshot => {

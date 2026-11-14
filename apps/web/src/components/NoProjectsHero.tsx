@@ -13,8 +13,10 @@ import { WorkspacePageHeader } from "./WorkspacePageHeader";
 export function NoProjectsHero() {
   const contentArea = workspaceAreaProps("home", 1, "Home");
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
+  const { scratchEnvironmentId, scratchWorkspaceLabelFor, startScratchThread } =
+    useScratchProject();
   const scratchTargetEnvironmentId = scratchEnvironmentId(primaryEnvironmentId);
+  const scratchLabel = scratchWorkspaceLabelFor(scratchTargetEnvironmentId);
 
   return (
     <SidebarInset
@@ -32,7 +34,7 @@ export function NoProjectsHero() {
               <EmptyDescription>
                 {scratchTargetEnvironmentId === null
                   ? "Add a project to start your first thread."
-                  : "Add a project, or start without one."}
+                  : `Add a project, or start in ${scratchLabel ?? "the default folder"}.`}
               </EmptyDescription>
               <div className="mt-6 flex justify-center gap-2">
                 <Button size="sm" onClick={() => openCommandPalette({ open: "add-project" })}>
@@ -46,7 +48,7 @@ export function NoProjectsHero() {
                     onClick={() => void startScratchThread(scratchTargetEnvironmentId)}
                   >
                     <MessageSquareDashedIcon className="size-4" />
-                    Start without a project
+                    Start in {scratchLabel ?? "the default folder"}
                   </Button>
                 )}
               </div>

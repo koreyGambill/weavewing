@@ -297,11 +297,16 @@ function selectProjectIdentitySource<TProject extends EnvironmentProject>(
   return freshestIdentifiedProject ?? winner;
 }
 
+/** The server's name for a default-folder project the user has not renamed. */
+export const SCRATCH_PROJECT_DEFAULT_TITLE = "No project";
+
 export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
   readonly projects: ReadonlyArray<TProject>;
   readonly settings: ProjectGroupingSettings;
   readonly preferredEnvironmentId?: EnvironmentId | null;
   readonly groupScratchProjects?: boolean;
+  /** Names the grouped default-folder projects; their folder path when absent. */
+  readonly scratchLabel?: (representative: TProject) => string | null;
 }): ReadonlyArray<ProjectGroup<TProject>> {
   const projectsByPhysicalKey = new Map<string, TProject[]>();
   for (const project of input.projects) {
@@ -365,14 +370,16 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
     return {
       key,
       label:
-        input.groupScratchProjects && representative.isScratch
-          ? "No project"
-          : members.length > 1
-            ? deriveProjectGroupLabel({
-                representative,
-                members: members.map((member) => member.project),
-              })
-            : representative.title,
+        representative.isScratch && representative.title === SCRATCH_PROJECT_DEFAULT_TITLE
+          ? (input.scratchLabel?.(representative) ?? representative.workspaceRoot)
+          : input.groupScratchProjects && representative.isScratch
+            ? representative.title
+            : members.length > 1
+              ? deriveProjectGroupLabel({
+                  representative,
+                  members: members.map((member) => member.project),
+                })
+              : representative.title,
       representative,
       members,
       memberProjectRefs: projectRefsByLogicalKey.get(key) ?? [],

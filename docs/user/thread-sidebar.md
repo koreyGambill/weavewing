@@ -27,18 +27,22 @@ machine, the thread starts on a connected one if any is connected.
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
-### Start without a project
+### Start in the default folder
 
-A thread does not need a project. To start one without a project, click **or
-start without a project** under a new thread's heading, pick **No project** from
-the project menu in that heading or from **New thread in...** in the command
-palette, or press `mod+alt+n`. On mobile, pick **No project** from the project
-list. It starts on your current machine; before sending, pick another machine
-from the machine menu to move it there. To move a draft into a project, pick the
-project in the heading.
+A thread does not need a project. To start one in the default folder (`~/code` unless
+you change it), click the second new-thread button at the top of the sidebar, click **or
+start in ~/code** under a new thread's heading, pick the folder from **New thread in...**
+in the command palette, or press `mod+alt+n`. On mobile, pick **No project** from the
+project list. The heading shows the folder, and the machine when more than one is
+connected. Before sending, click the folder in the heading to pick a project, **Open
+folder…** for any folder on that machine, or **Clone repository…**; the draft moves there
+with what you typed. Pick another machine from the machine menu to move it there.
 
-Threads without a project start in the server machine's `~/code` folder. Set
-`scratchStartDirectory` in that server's settings to use another existing folder.
+A new thread shows in the sidebar as soon as you open it. If you leave it without typing
+or attaching anything, its row goes away; once you type, it stays as a draft.
+
+Set the folder in **Settings → Threads → Default folder for new threads**. Each machine
+has its own, and the path is on that machine.
 If the folder does not exist, T3 Code uses the `scratch` folder in its data directory.
 The start folder must sit outside a Git repository and cannot be your home, `~/.xwing`, or a parent of T3 Code's data folder. Threads share it without
 creating a separate visible folder per thread. Sandboxed agents run from a private

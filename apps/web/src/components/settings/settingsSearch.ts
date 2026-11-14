@@ -839,6 +839,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new worktrees start remote origin latest fetched branch local"],
   },
   {
+    id: "default-folder",
+    title: "Default folder for new threads",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["scratch start directory no project without project code path home"],
+    environmentOnly: true,
+  },
+  {
     id: "add-project-starts-in",
     title: "Add project starts in",
     to: "/settings/threads",

@@ -78,6 +78,34 @@ describe("applyServerConfigProjection settingsUpdated", () => {
     } as ServerConfigStreamEvent);
     expect(Option.getOrThrow(next).config).toBe(Option.getOrThrow(current).config);
   });
+
+  it("moves the default folder with the setting and keeps it when the server omits it", () => {
+    const settings = decodeSettings(encodeSettings(DEFAULT_SERVER_SETTINGS));
+    const at = (scratchWorkspaceRoot?: string) =>
+      Option.some({
+        config: {
+          settings,
+          ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
+        } as unknown as ServerConfig,
+        latestEvent: {} as ServerConfigStreamEvent,
+        source: "live" as const,
+      });
+    const update = (scratchWorkspaceRoot?: string | null) =>
+      ({
+        type: "settingsUpdated",
+        payload: {
+          settings,
+          ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
+        },
+      }) as ServerConfigStreamEvent;
+    const root = (projection: ReturnType<typeof at>, event: ServerConfigStreamEvent) =>
+      Option.getOrThrow(applyServerConfigProjection(projection, event)).config.scratchWorkspaceRoot;
+
+    expect(root(at("/home/u/code"), update("/srv/notes"))).toBe("/srv/notes");
+    expect(root(at("/home/u/code"), update(null))).toBeUndefined();
+    expect(root(at(), update("/srv/notes"))).toBe("/srv/notes");
+    expect(root(at("/home/u/code"), update())).toBe("/home/u/code");
+  });
 });
 
 describe("applyServerConfigProjection provider catalogs", () => {

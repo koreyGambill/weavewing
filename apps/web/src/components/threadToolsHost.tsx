@@ -1,16 +1,11 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useRouterState } from "@tanstack/react-router";
 import { createContext, use, useState, type ReactNode } from "react";
-import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
 import { selectThreadTileLayout, useRightPanelStore } from "../rightPanelStore";
 import { selectContextThread } from "../threadContextSidebar";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
-import {
-  resolveSidebarStageBackdropVariant,
-  useEnvironmentStageLabel,
-} from "./SidebarStageBackdrop";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -38,7 +33,7 @@ const Slots = createContext<{
 }>({ details: null, setDetails: () => {}, actions: null, setActions: () => {} });
 
 /**
- * Holds the places the open tool renders into outside its own panel: the header's button slot,
+ * Holds the places the open tool renders into outside its own panel: its heading row's button slot,
  * and the Details view that the conversation's details card moves into.
  */
 export function ThreadToolsHost({ children }: { children: ReactNode }) {
@@ -61,14 +56,7 @@ export function useThreadToolsSlots() {
   return use(Slots);
 }
 
-/** Whether the sidebar header sits on the environment's stage backdrop. */
-export function useSidebarHeaderOnBackdrop(): boolean {
-  const stageLabel = useEnvironmentStageLabel();
-  const mode = useEnvironmentIdentificationMode();
-  return resolveSidebarStageBackdropVariant(stageLabel, mode) !== null;
-}
-
-/** A button an open tool adds to the sidebar header, styled like the header's own. */
+/** A button an open tool adds to its heading row. */
 export function ToolHeaderButton({
   label,
   onClick,
@@ -80,15 +68,13 @@ export function ToolHeaderButton({
   disabled?: boolean;
   children: ReactNode;
 }) {
-  const onBackdrop = useSidebarHeaderOnBackdrop();
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Button
-            variant={onBackdrop ? "media-navigation" : "ghost"}
+            variant="ghost"
             size="icon-sm"
-            className={onBackdrop ? "relative top-auto translate-y-0" : undefined}
             aria-label={label}
             disabled={disabled}
             onClick={onClick}

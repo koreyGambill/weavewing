@@ -54,6 +54,8 @@ import {
 import { startProviderAuthDelivery } from "./providerAuthDelivery";
 import { getRouter, type AppRouter } from "./router";
 import { appAtomRegistry } from "./rpc/atomRegistry";
+import { environmentPresentations } from "./state/presentation";
+import { scratchProjectLabel } from "@t3tools/client-runtime/operations/projects";
 import { environmentProjects } from "./state/projects";
 import { primaryServerConfigAtom } from "./state/server";
 import { environmentShell } from "./state/shell";
@@ -165,7 +167,14 @@ function startDocumentTitle(router: AppRouter): void {
         primaryServerVersion:
           appAtomRegistry.get(primaryServerConfigAtom)?.environment.serverVersion ?? null,
       }),
-      projectTitle: project?.title ?? null,
+      projectTitle: project?.isScratch
+        ? scratchProjectLabel(
+            project,
+            appAtomRegistry
+              .get(environmentPresentations.serverConfigsAtom)
+              .get(project.environmentId),
+          )
+        : (project?.title ?? null),
       threadTitle: thread?.title ?? null,
       ...(getClientSettings().screenReaderWindowTitle && {
         screenReader: {

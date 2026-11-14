@@ -242,6 +242,7 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { readScratchProjectActions, useDefaultFolderLabel } from "../hooks/useScratchProject";
 import { TooltipProvider } from "./ui/tooltip";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import {
@@ -1188,7 +1189,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       if (session.promotedTo != null) {
         continue;
       }
-      if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
+      if (
+        draftKey !== routeDraftIdForRows &&
+        !composerDraftHasUserContent(store.draftsByThreadKey[draftKey])
+      ) {
         continue;
       }
       if (
@@ -2922,6 +2926,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       ? shortcutLabelForCommand(keybindings, "chat.newLocal")
       : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const defaultFolderFallbackEnvironmentId =
+    newThreadContext.activeThread?.environmentId ??
+    newThreadContext.activeDraftThread?.environmentId ??
+    null;
+  const defaultFolderLabel = useDefaultFolderLabel(defaultFolderFallbackEnvironmentId);
   return (
     <>
       <SidebarContent
@@ -3161,11 +3170,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   </ComboboxPopup>
                 </Combobox>
               }
-              onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
+              defaultFolderLabel={defaultFolderLabel}
+              defaultFolderShortcutLabel={shortcutLabelForCommand(
+                keybindings,
+                "chat.newWithoutProject",
+              )}
+              onNewDefaultFolderThread={() => {
+                if (isMobile) setOpenMobile(false);
+                const scratch = readScratchProjectActions(appAtomRegistry, handleNewThread);
+                scratch.startScratchChoice(
+                  scratch.scratchEnvironmentChoice(defaultFolderFallbackEnvironmentId),
+                );
+              }}
               showNewThreadInProjectHint={
                 !shouldCreateNewThreadInCurrentProject(
                   false,
