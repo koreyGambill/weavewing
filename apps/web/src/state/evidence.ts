@@ -71,7 +71,7 @@ export const evidenceGet = createEnvironmentRpcQueryAtomFamily(connectionAtomRun
   idleTtlMs: 0,
   refreshTrigger,
 });
-export const evidenceCounts = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+const evidenceCounts = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "evidence:counts",
   tag: WS_METHODS.evidenceCounts,
   staleTimeMs: 0,
