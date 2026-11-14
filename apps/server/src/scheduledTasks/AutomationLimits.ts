@@ -37,6 +37,11 @@ export interface AutomationScope {
   readonly projectId: ProjectId;
   readonly grant: ScheduledTaskGrant;
   readonly modelSelection: Pick<ModelSelection, "instanceId" | "model">;
+  /**
+   * The run of that thread whose limits apply. A delegated thread keeps the run that spawned it,
+   * whatever the parent thread runs now.
+   */
+  readonly runId: RunId | null;
 }
 
 const MAX_LINEAGE_DEPTH = 16;
@@ -78,9 +83,11 @@ export const startedByTask = (taskId: string, threadId: string) =>
   threadId.startsWith(`${AUTOMATION_THREAD_PREFIX}${taskId}:`);
 
 interface Candidate {
-  readonly scope: AutomationScope;
+  readonly scope: Omit<AutomationScope, "runId">;
   /** The task started the thread, so every turn there is limited, a person's included. */
   readonly owned: boolean;
+  /** The delegated thread, directly under the automation's thread, that the lookup came through. */
+  readonly via: ThreadId | null;
 }
 
 /**
@@ -97,16 +104,19 @@ const candidateForThread = Effect.fn("AutomationLimits.candidateForThread")(func
     task_id: string;
     grant_json: string;
     model_selection_json: string;
-  }>`WITH RECURSIVE chain(thread_id, depth) AS (
-      SELECT ${threadId}, 0
+    via: string | null;
+  }>`WITH RECURSIVE chain(thread_id, depth, via) AS (
+      SELECT ${threadId}, 0, NULL
       UNION ALL
-      SELECT json_extract(t.payload_json, '$.lineage.parentThreadId'), chain.depth + 1
+      SELECT json_extract(t.payload_json, '$.lineage.parentThreadId'), chain.depth + 1,
+        chain.thread_id
       FROM orchestration_v2_projection_threads t JOIN chain ON t.thread_id = chain.thread_id
       WHERE chain.depth < ${MAX_LINEAGE_DEPTH}
         AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
         AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL
     )
-    SELECT chain.thread_id, s.project_id, s.task_id, s.grant_json, s.model_selection_json
+    SELECT chain.thread_id, chain.via, s.project_id, s.task_id, s.grant_json,
+      s.model_selection_json
     FROM chain JOIN scheduled_tasks s ON s.grant_json IS NOT NULL AND (
       s.thread_id = chain.thread_id
       OR substr(chain.thread_id, 1, length(${AUTOMATION_THREAD_PREFIX} || s.task_id || ':'))
@@ -125,6 +135,7 @@ const candidateForThread = Effect.fn("AutomationLimits.candidateForThread")(func
       modelSelection: model.value as AutomationScope["modelSelection"],
     },
     owned: startedByTask(row.task_id, row.thread_id),
+    via: row.via === null ? null : ThreadId.make(row.via),
   };
   return candidate;
 });
@@ -147,11 +158,39 @@ const ownerRun = Effect.fn("AutomationLimits.ownerRun")(function* (threadId: Thr
   return row === undefined ? null : { runId: RunId.make(row.run_id), taskId: row.task_id };
 });
 
-/** In a thread a person started, only the bound task's own runs are limited. */
+/**
+ * The governing run of `childThreadId`: recorded when delegate_task created it in `threadId`, as
+ * the run that spawned it, followed back to the run a schedule or person started.
+ */
+const spawningRun = Effect.fn("AutomationLimits.spawningRun")(function* (
+  threadId: ThreadId,
+  childThreadId: ThreadId,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const [row] = yield* sql<{ run_id: string; task_id: string | null }>`
+    SELECT owner.run_id, json_extract(m.payload_json, '$.scheduledTaskId') AS task_id
+    FROM orchestration_v2_projection_subagents task
+    JOIN orchestration_v2_projection_runs spawn ON spawn.run_id = task.run_id
+    JOIN orchestration_v2_projection_runs owner
+      ON owner.thread_id = spawn.thread_id AND owner.ordinal <= spawn.ordinal
+    LEFT JOIN orchestration_v2_projection_messages m
+      ON m.message_id = json_extract(owner.payload_json, '$.userMessageId')
+    WHERE task.thread_id = ${threadId} AND task.child_thread_id = ${childThreadId}
+      AND json_extract(m.payload_json, '$.senderThreadId') IS NULL
+      AND json_type(m.payload_json, '$.delegatedCompletion') IS NULL
+    ORDER BY spawn.ordinal, owner.ordinal DESC LIMIT 1`.pipe(NodeSqliteClient.readOnly);
+  return row === undefined ? null : { runId: RunId.make(row.run_id), taskId: row.task_id };
+});
+
+/** In a thread a person started, only the bound task's own runs, and their delegated work, are. */
 const scopeOf = Effect.fn("AutomationLimits.scopeOf")(function* (candidate: Candidate | null) {
-  if (candidate === null || candidate.owned) return candidate?.scope ?? null;
-  const owner = yield* ownerRun(candidate.scope.threadId);
-  return owner?.taskId === candidate.scope.taskId ? candidate.scope : null;
+  if (candidate === null) return null;
+  const spawned =
+    candidate.via === null ? null : yield* spawningRun(candidate.scope.threadId, candidate.via);
+  const run = spawned ?? (yield* ownerRun(candidate.scope.threadId));
+  if (!candidate.owned && run?.taskId !== candidate.scope.taskId) return null;
+  const scope: AutomationScope = { ...candidate.scope, runId: run?.runId ?? null };
+  return scope;
 });
 
 export const automationForThread = Effect.fn("AutomationLimits.automationForThread")(function* (
@@ -354,12 +393,7 @@ export const layer = Layer.effect(
       ),
     );
 
-    const runKey = (scope: AutomationScope) =>
-      ownerRun(scope.threadId).pipe(
-        withSql,
-        Effect.map((owner) => owner?.runId ?? null),
-        Effect.orElseSucceed(() => null),
-      );
+    const runKey = (scope: AutomationScope) => Effect.succeed(scope.runId);
 
     /** A run stopped at its budget; the run's history row keeps it across restarts. */
     const stopOf = Effect.fn("AutomationLimits.stopOf")(function* (key: RunId) {

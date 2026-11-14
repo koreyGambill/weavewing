@@ -182,6 +182,37 @@ it.effect("limits a task's own threads, and only its runs in a thread a person s
     });
     assert.equal(yield* scopeOf("thread:user"), null);
 
+    // A delegated thread keeps the run that spawned it: one from the task's run stays limited
+    // while the person's turn runs, and so does its own delegated thread; one from the person's
+    // turn is not limited.
+    const delegated = (child: string, runId: string) =>
+      Effect.gen(function* () {
+        yield* insertThread(sql, child, { id: "thread:user", relationship: "subagent" });
+        yield* sql`INSERT INTO orchestration_v2_projection_subagents ${sql.insert({
+          subagent_id: `subagent:${child}`,
+          thread_id: "thread:user",
+          run_id: runId,
+          parent_node_id: "node:root",
+          provider: "claudeAgent",
+          child_thread_id: child,
+          origin: "app_owned",
+          status: "running",
+          updated_at: now,
+          payload_json: "{}",
+        })}`;
+      });
+    yield* delegated("thread:task-child", "orun:user-task");
+    yield* delegated("thread:chat-child", "orun:user-chat");
+    yield* insertThread(sql, "thread:task-grandchild", {
+      id: "thread:task-child",
+      relationship: "subagent",
+    });
+    for (const id of ["thread:task-child", "thread:task-grandchild"]) {
+      const scope = yield* AutomationLimits.automationForThread(ThreadId.make(id));
+      assert.deepEqual([scope?.taskId, scope?.runId], ["task:user", "orun:user-task"]);
+    }
+    assert.equal(yield* scopeOf("thread:chat-child"), null);
+
     const base = Layer.succeed(RuntimePolicy.RuntimePolicyV2, {
       resolve: () =>
         Effect.succeed(
