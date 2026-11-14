@@ -215,9 +215,7 @@ function useShortcutTooltip() {
   // The shortcut flips to whichever view this names, so its tooltip carries the label.
   const shortcutTarget: SidebarView = view === "threads" ? lastTool : "threads";
   return (id: SidebarView, title: string) =>
-    `${view === id && id !== "threads" ? "Back to thread list" : title}${
-      shortcut && shortcutTarget === id ? ` · ${shortcut}` : ""
-    }`;
+    `${title}${shortcut && shortcutTarget === id ? ` · ${shortcut}` : ""}`;
 }
 
 /** The header's lockup: the mark opens the thread list, then the wordmark or the open tool's title. */

@@ -6,19 +6,24 @@ import {
   type ThreadLoadEvent,
 } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
-import {
-  SlidersHorizontalIcon,
-  RefreshCwIcon,
-  FileTextIcon,
-  BookOpenIcon,
-  CircleHelpIcon,
-} from "lucide-react";
+import { FileTextIcon, BookOpenIcon, CircleHelpIcon } from "lucide-react";
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import { threadInsightsGet } from "../../state/threadInsights";
+import { SidebarSearchField } from "../sidebar/SidebarSearchField";
+import { CheckedLabel, ToolFilterMenuTrigger } from "../ToolFilterMenuTrigger";
 import { Button } from "../ui/button";
-import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+} from "../ui/menu";
 import { Popover, PopoverTrigger, PopoverPopup } from "../ui/popover";
+import { InspectControls, InspectRefreshButton } from "./InspectControls";
 import { filterLoadEvents, reportedUsageTotals } from "./insightDisplay";
 import { UsageTimeline } from "./UsageTimeline";
 
@@ -42,12 +47,10 @@ export function ThreadInsightsPanel({
   threadRef,
   visible,
   mode,
-  tabs,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly visible: boolean;
   readonly mode: "loads" | "tokens";
-  readonly tabs?: ReactNode;
 }) {
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [search, setSearch] = useState("");
@@ -72,60 +75,14 @@ export function ThreadInsightsPanel({
   const data = query.data;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-      <header className="flex min-h-7 shrink-0 flex-wrap items-center gap-1 border-b px-1 py-0.5">
-        {tabs}
-        {mode === "loads" && (
-          <>
-            <input
-              aria-label="Search file and skill activity"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search…"
-              className="h-5 min-w-24 flex-1 rounded border bg-background px-1 text-xs"
-            />
-            <Popover>
-              <PopoverTrigger
-                render={<Button variant="ghost" size="icon-micro" aria-label="Activity filters" />}
-              >
-                <SlidersHorizontalIcon />
-              </PopoverTrigger>
-              <PopoverPopup align="end" padding="compact">
-                <div className="flex gap-2">
-                  <select
-                    aria-label="Activity type"
-                    value={kind}
-                    onChange={(event) => setKind(event.target.value)}
-                    className="rounded-md border bg-background px-2 py-1 text-xs"
-                  >
-                    <option value="">All types</option>
-                    {["file", "skill", "instructions", "search", "resource"].map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    aria-label="Activity evidence"
-                    value={evidence}
-                    onChange={(event) => setEvidence(event.target.value)}
-                    className="rounded-md border bg-background px-2 py-1 text-xs"
-                  >
-                    <option value="">All evidence</option>
-                    <option value="reported">Reported</option>
-                    <option value="inferred">Inferred</option>
-                  </select>
-                </div>
-              </PopoverPopup>
-            </Popover>
-          </>
-        )}
-        <div className="ml-auto flex min-w-0 items-center gap-1">
-          <label className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <InspectControls>
+        <div className="flex w-full min-w-0 items-center gap-1">
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foreground">
             <select
               aria-label="Inspect run"
               value={effectiveSelection}
               onChange={(event) => setSelectedRun(event.target.value)}
-              className="h-5 min-w-0 max-w-44 rounded border bg-background px-1 text-foreground"
+              className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-foreground"
             >
               <option value="">Latest run</option>
               {mode === "tokens" && <option value="all">All runs</option>}
@@ -137,24 +94,63 @@ export function ThreadInsightsPanel({
               ))}
             </select>
           </label>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-micro"
-                  aria-label="Refresh activity"
-                  disabled={!canRead || query.isPending}
-                  onClick={() => query.refresh()}
-                >
-                  <RefreshCwIcon className="size-4" />
-                </Button>
-              }
-            />
-            <TooltipPopup>Refresh activity</TooltipPopup>
-          </Tooltip>
+          <InspectRefreshButton
+            label="Refresh activity"
+            disabled={!canRead || query.isPending}
+            onClick={() => query.refresh()}
+          />
         </div>
-      </header>
+        {mode === "loads" && (
+          <>
+            <div className="flex w-full min-w-0 items-center gap-1">
+              <SidebarSearchField
+                aria-label="Search file and skill activity"
+                value={search}
+                onValueChange={setSearch}
+                onClear={() => setSearch("")}
+                className="min-w-24"
+              />
+              <Menu>
+                <ToolFilterMenuTrigger
+                  label="Activity filters"
+                  tooltip="Type and evidence"
+                  active={kind !== "" || evidence !== ""}
+                />
+                <MenuPopup align="end">
+                  <MenuGroup>
+                    <MenuGroupLabel>Type</MenuGroupLabel>
+                    <MenuRadioGroup value={kind} onValueChange={(next) => setKind(String(next))}>
+                      {["", "file", "skill", "instructions", "search", "resource"].map((type) => (
+                        <MenuRadioItem key={type} value={type}>
+                          <CheckedLabel>{type === "" ? "All types" : type}</CheckedLabel>
+                        </MenuRadioItem>
+                      ))}
+                    </MenuRadioGroup>
+                  </MenuGroup>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Evidence</MenuGroupLabel>
+                    <MenuRadioGroup
+                      value={evidence}
+                      onValueChange={(next) => setEvidence(String(next))}
+                    >
+                      {[
+                        ["", "All evidence"],
+                        ["reported", "Reported"],
+                        ["inferred", "Inferred"],
+                      ].map(([value, label]) => (
+                        <MenuRadioItem key={value} value={value}>
+                          <CheckedLabel>{label}</CheckedLabel>
+                        </MenuRadioItem>
+                      ))}
+                    </MenuRadioGroup>
+                  </MenuGroup>
+                </MenuPopup>
+              </Menu>
+            </div>
+          </>
+        )}
+      </InspectControls>
       {!canRead ? (
         <p className="p-4 text-sm text-muted-foreground">
           This connection cannot read thread activity.
@@ -227,8 +223,8 @@ function LoadTimeline({
                         className="mt-0.5 size-4 shrink-0 text-muted-foreground"
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="min-w-0 break-words text-sm font-medium">
+                        <span className="flex flex-wrap items-center justify-between gap-x-2">
+                          <span className="min-w-0 flex-1 basis-24 truncate text-sm font-medium">
                             {event.kind === "skill" && name === "SKILL.md"
                               ? `${parent?.split(/[\\/]/).at(-1)} / ${name}`
                               : name}

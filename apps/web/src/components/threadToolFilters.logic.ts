@@ -65,3 +65,18 @@ export function visibleMarks<
       }
     });
 }
+
+/** The text "Copy shown links" puts on the clipboard: one line per ticket, pull request and link, in view order. */
+export function linksCopyText(shown: {
+  readonly tickets: ReadonlyArray<{ ticket: string; label?: string; url?: string }>;
+  readonly pullRequests: ReadonlyArray<{ url: string; title?: string }>;
+  readonly marks: ReadonlyArray<string>;
+}): string {
+  return [
+    ...shown.tickets.map(({ ticket, label, url }) =>
+      [ticket, label, url].filter(Boolean).join(" "),
+    ),
+    ...shown.pullRequests.map(({ url, title }) => [url, title].filter(Boolean).join(" ")),
+    ...shown.marks,
+  ].join("\n");
+}

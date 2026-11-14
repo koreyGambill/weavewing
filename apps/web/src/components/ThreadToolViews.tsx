@@ -18,12 +18,13 @@ import {
   MoreHorizontalIcon,
   NetworkIcon,
   RefreshCwIcon,
-  SlidersHorizontalIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { configuredHostedAppUrl } from "../hostedPairing";
+import { SidebarSearchField } from "./sidebar/SidebarSearchField";
+import { CheckedLabel, ToolFilterMenuTrigger } from "./ToolFilterMenuTrigger";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -31,6 +32,7 @@ import { cn } from "../lib/utils";
 import { formatElapsedDurationLabel } from "../timestampFormat";
 import {
   markTimestamp,
+  linksCopyText,
   matchesToolFilter,
   visibleMarks,
   type LinkSort,
@@ -61,12 +63,11 @@ import {
 import { ThreadInspectPanel, type ThreadInspectSection } from "./insights/ThreadInspectPanel";
 import { ThreadTimelineView } from "./ThreadTimelineView";
 import { ToolHeaderButton } from "./threadToolsHost";
-import { CheckedLabel, ThreadListView } from "./reviews/ThreadListView";
+import { ThreadListView } from "./reviews/ThreadListView";
 import { ArtifactsPanel } from "./reviews/ThreadWorkspacePanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyMedia } from "./ui/empty";
-import { Input } from "./ui/input";
 import {
   Menu,
   MenuCheckboxItem,
@@ -193,31 +194,24 @@ export function ToolFilterInput({
   label,
   value,
   onChange,
-  children,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  children?: ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-1">
-      <Input
-        size="compact"
-        type="search"
-        aria-label={label}
-        placeholder={`${label}…`}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && value) {
-            event.stopPropagation();
-            onChange("");
-          }
-        }}
-      />
-      {children}
-    </div>
+    <SidebarSearchField
+      aria-label={label}
+      value={value}
+      onValueChange={onChange}
+      onClear={() => onChange("")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && value) {
+          event.stopPropagation();
+          onChange("");
+        }
+      }}
+    />
   );
 }
 
@@ -336,6 +330,7 @@ function ThreadLinks({
   const services = [...new Set(allMarks.map((mark) => mark.service))].toSorted();
   const nothing = !tickets.length && !pullRequests.length && !rows.length;
   const filtered = filter.trim() !== "" || service !== "all";
+  const copyLabel = filtered ? "Copy shown links" : "Copy all links";
   const markLine = (mark: (typeof rows)[number]) =>
     [
       preferences.local ? markTimestamp(mark.timestamp, false, preferences.hour24) : "",
@@ -348,15 +343,18 @@ function ThreadLinks({
       .join(" ");
   const copyAll = () =>
     copy(
-      [
-        ...tickets.map(({ ticket, state }) =>
-          [ticket, state?.label, state?.url].filter(Boolean).join(" "),
-        ),
-        ...pullRequests.map((pullRequest) =>
-          [pullRequest.url, pullRequest.snapshot?.title].filter(Boolean).join(" "),
-        ),
-        ...rows.map(markLine),
-      ].join("\n"),
+      linksCopyText({
+        tickets: tickets.map(({ ticket, state }) => ({
+          ticket,
+          ...(state?.label ? { label: state.label } : {}),
+          ...(state?.url ? { url: state.url } : {}),
+        })),
+        pullRequests: pullRequests.map((pullRequest) => ({
+          url: pullRequest.url,
+          ...(pullRequest.snapshot?.title ? { title: pullRequest.snapshot.title } : {}),
+        })),
+        marks: rows.map(markLine),
+      }),
       "all",
     );
   return (
@@ -379,94 +377,99 @@ function ThreadLinks({
       {!canRead ? (
         <p className="text-muted-foreground">This connection cannot read links.</p>
       ) : (
-        <ToolFilterInput label="Filter links" value={filter} onChange={setFilter}>
-          <Menu>
+        <div className="space-y-2">
+          <ToolFilterInput label="Filter links" value={filter} onChange={setFilter} />
+          <div className="flex items-center justify-end gap-1">
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <MenuTrigger
-                    render={
-                      <Button
-                        variant={service === "all" ? "ghost" : "secondary"}
-                        size="icon-sm"
-                        aria-label="Link options"
-                      />
-                    }
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={copyLabel}
+                    disabled={nothing}
+                    onClick={copyAll}
                   />
                 }
               >
-                <SlidersHorizontalIcon />
+                {isCopied("all") ? <CheckIcon /> : <CopyIcon />}
               </TooltipTrigger>
-              <TooltipPopup>Service, sort, columns and copy</TooltipPopup>
+              <TooltipPopup>{isCopied("all") ? "Copied" : copyLabel}</TooltipPopup>
             </Tooltip>
-            <MenuPopup align="end">
-              <MenuGroup>
-                <MenuGroupLabel>Service</MenuGroupLabel>
-                <MenuRadioGroup value={service} onValueChange={(next) => setService(String(next))}>
-                  {["all", "Ticket", "Pull request", ...services].map((name) => (
-                    <MenuRadioItem key={name} value={name}>
-                      <CheckedLabel>{name === "all" ? "All" : name}</CheckedLabel>
-                    </MenuRadioItem>
-                  ))}
-                </MenuRadioGroup>
-              </MenuGroup>
-              <MenuSeparator />
-              <MenuGroup>
-                <MenuGroupLabel>Sort links</MenuGroupLabel>
-                <MenuRadioGroup
-                  value={preferences.sort}
-                  onValueChange={(next) => {
-                    if (
-                      next === "newest" ||
-                      next === "oldest" ||
-                      next === "service" ||
-                      next === "link"
-                    )
-                      preferences.setSort(next);
-                  }}
-                >
-                  <MenuRadioItem value="newest">
-                    <CheckedLabel>Newest first</CheckedLabel>
-                  </MenuRadioItem>
-                  <MenuRadioItem value="oldest">
-                    <CheckedLabel>Oldest first</CheckedLabel>
-                  </MenuRadioItem>
-                  <MenuRadioItem value="service">
-                    <CheckedLabel>By service</CheckedLabel>
-                  </MenuRadioItem>
-                  <MenuRadioItem value="link">
-                    <CheckedLabel>By link</CheckedLabel>
-                  </MenuRadioItem>
-                </MenuRadioGroup>
-              </MenuGroup>
-              <MenuSeparator />
-              <MenuGroup>
-                <MenuGroupLabel>Show</MenuGroupLabel>
-                {(
-                  [
-                    ["local", "Local time"],
-                    ["utc", "UTC"],
-                    ["service", "Service"],
-                    ["description", "Description"],
-                    ["hour24", "24-hour clock"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <MenuCheckboxItem
-                    key={key}
-                    checked={preferences[key]}
-                    onCheckedChange={() => preferences.toggle(key)}
+            <Menu>
+              <ToolFilterMenuTrigger
+                label="Link filters"
+                tooltip="Service, sort and columns"
+                active={service !== "all"}
+              />
+              <MenuPopup align="end">
+                <MenuGroup>
+                  <MenuGroupLabel>Service</MenuGroupLabel>
+                  <MenuRadioGroup
+                    value={service}
+                    onValueChange={(next) => setService(String(next))}
                   >
-                    {label}
-                  </MenuCheckboxItem>
-                ))}
-              </MenuGroup>
-              <MenuSeparator />
-              <MenuItem disabled={nothing} onClick={copyAll}>
-                {isCopied("all") ? "Copied" : filtered ? "Copy shown links" : "Copy all links"}
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        </ToolFilterInput>
+                    {["all", "Ticket", "Pull request", ...services].map((name) => (
+                      <MenuRadioItem key={name} value={name}>
+                        <CheckedLabel>{name === "all" ? "All" : name}</CheckedLabel>
+                      </MenuRadioItem>
+                    ))}
+                  </MenuRadioGroup>
+                </MenuGroup>
+                <MenuSeparator />
+                <MenuGroup>
+                  <MenuGroupLabel>Sort links</MenuGroupLabel>
+                  <MenuRadioGroup
+                    value={preferences.sort}
+                    onValueChange={(next) => {
+                      if (
+                        next === "newest" ||
+                        next === "oldest" ||
+                        next === "service" ||
+                        next === "link"
+                      )
+                        preferences.setSort(next);
+                    }}
+                  >
+                    <MenuRadioItem value="newest">
+                      <CheckedLabel>Newest first</CheckedLabel>
+                    </MenuRadioItem>
+                    <MenuRadioItem value="oldest">
+                      <CheckedLabel>Oldest first</CheckedLabel>
+                    </MenuRadioItem>
+                    <MenuRadioItem value="service">
+                      <CheckedLabel>By service</CheckedLabel>
+                    </MenuRadioItem>
+                    <MenuRadioItem value="link">
+                      <CheckedLabel>By link</CheckedLabel>
+                    </MenuRadioItem>
+                  </MenuRadioGroup>
+                </MenuGroup>
+                <MenuSeparator />
+                <MenuGroup>
+                  <MenuGroupLabel>Show</MenuGroupLabel>
+                  {(
+                    [
+                      ["local", "Local time"],
+                      ["utc", "UTC"],
+                      ["service", "Service"],
+                      ["description", "Description"],
+                      ["hour24", "24-hour clock"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <MenuCheckboxItem
+                      key={key}
+                      checked={preferences[key]}
+                      onCheckedChange={() => preferences.toggle(key)}
+                    >
+                      {label}
+                    </MenuCheckboxItem>
+                  ))}
+                </MenuGroup>
+              </MenuPopup>
+            </Menu>
+          </div>
+        </div>
       )}
       {tickets.length ? (
         <section className="space-y-1">

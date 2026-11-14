@@ -684,6 +684,8 @@ export function InboxView({ actions }: { actions: HTMLDivElement | null }) {
           <div className="shrink-0 border-b border-border px-2 py-2">
             <ToggleGroup
               aria-label="Inbox filter"
+              size="segmented-compact"
+              className="w-full *:flex-1"
               value={[tab]}
               onValueChange={(next) => {
                 const value = next[0];
