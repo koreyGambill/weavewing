@@ -13,6 +13,7 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { ScheduledTaskReviewAgent } from "./monitoring.ts";
 import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
@@ -324,6 +325,16 @@ export function scheduledTaskThreadMode(
   return task.threadMode ?? (task.threadId === null ? "new_thread" : "continue");
 }
 
+/** What a run does. Absent means `turn`: send the prompt to an agent. */
+export const ScheduledTaskAgent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("turn") }),
+  ScheduledTaskReviewAgent,
+]);
+export type ScheduledTaskAgent = typeof ScheduledTaskAgent.Type;
+
+export const isReviewTask = (task: { readonly agent?: ScheduledTaskAgent | undefined }) =>
+  task.agent?.type === "review";
+
 export const ScheduledTask = Schema.Struct({
   id: ScheduledTaskId,
   title: TrimmedNonEmptyString,
@@ -335,6 +346,7 @@ export const ScheduledTask = Schema.Struct({
   threadMode: Schema.optional(ScheduledTaskThreadMode),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
+  agent: Schema.optional(ScheduledTaskAgent),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   createdBy: OrchestrationV2Actor,
@@ -384,6 +396,8 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   threadMode: Schema.optional(ScheduledTaskThreadMode),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
+  /** Omitted: keep the stored agent. */
+  agent: Schema.optional(ScheduledTaskAgent),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   createdBy: Schema.optional(OrchestrationV2Actor),

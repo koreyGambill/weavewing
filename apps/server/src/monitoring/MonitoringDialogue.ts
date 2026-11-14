@@ -2,9 +2,9 @@ import {
   MonitoringError,
   type MonitoringFinding,
   type MonitoringFindingId,
-  type MonitoringProfile,
   type ThreadId,
 } from "@t3tools/contracts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -12,6 +12,10 @@ import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import * as MonitoringDelivery from "./MonitoringDelivery.ts";
 import * as MonitoringStore from "./MonitoringStore.ts";
+import * as NotificationService from "../notifications/NotificationService.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import { reviewProfile } from "./ReviewProfile.ts";
+import { reviewNotificationBody } from "./reviewNotification.ts";
 
 export interface MonitoringAssessment {
   readonly outcome: "corrected" | "accepted_explanation" | "unresolved" | "unverified";
@@ -23,7 +27,7 @@ export class MonitoringFollowup extends Context.Service<
   MonitoringFollowup,
   {
     readonly reassess: (input: {
-      readonly profile: MonitoringProfile;
+      readonly profile: ReviewProfile;
       readonly finding: MonitoringFinding;
       readonly leadResponse: string;
     }) => Effect.Effect<MonitoringAssessment, MonitoringError>;
@@ -53,6 +57,8 @@ export const layer = Layer.effect(
     const store = yield* MonitoringStore.MonitoringStore;
     const reviewer = yield* MonitoringFollowup;
     const delivery = yield* MonitoringDelivery.MonitoringDelivery;
+    const notifications = yield* NotificationService.NotificationService;
+    const tasks = yield* ScheduledTaskService.ScheduledTaskService;
     const permit = yield* Semaphore.make(1);
     const respond: MonitoringDialogue["Service"]["respond"] = Effect.fn(
       "MonitoringDialogue.respond",
@@ -60,19 +66,16 @@ export const layer = Layer.effect(
       let finding = yield* store.getFinding(input.findingId);
       if (finding === null || (input.role === "agent" && input.callerThreadId !== finding.threadId))
         return yield* new MonitoringError({ operation: "response-scope" });
-      const currentProfile = yield* store.getProfile(finding.profileId);
-      if (currentProfile === null || !currentProfile.enabled)
+      const taskId = finding.taskId;
+      const task = (yield* tasks
+        .list()
+        .pipe(
+          Effect.mapError((cause) => new MonitoringError({ operation: "response-profile", cause })),
+        )).tasks.find((candidate) => candidate.id === taskId);
+      const profile = task === undefined ? null : reviewProfile(task);
+      if (profile === null || !profile.enabled)
         return yield* new MonitoringError({ operation: "response-profile" });
-      const run = yield* store.getRun(finding.runId);
-      if (run === null || run.profileId !== finding.profileId)
-        return yield* new MonitoringError({ operation: "response-run" });
-      const profile = run.profile;
-      const deliveryProfile = {
-        ...currentProfile,
-        title: profile.title,
-        modelSelection: profile.modelSelection,
-        rules: profile.rules,
-      };
+      const deliveryProfile = profile;
       const responseId = `reply:${input.responseId}`;
       if (finding.exchanges.some((exchange) => exchange.id === `assessment:${input.responseId}`)) {
         yield* delivery
@@ -131,7 +134,6 @@ export const layer = Layer.effect(
         ...(current ?? finding),
         updatedAt: checkedAt,
         outcome,
-        readAt: null,
         exchanges: [
           ...(current ?? finding).exchanges,
           {
@@ -143,6 +145,13 @@ export const layer = Layer.effect(
         ],
       };
       yield* store.saveFinding(final);
+      yield* notifications
+        .reviseFinding({ findingId: final.id, body: reviewNotificationBody(final) })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not update the finding's notification", { cause }),
+          ),
+        );
       yield* delivery
         .deliver({
           profile: deliveryProfile,

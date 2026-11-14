@@ -77,6 +77,11 @@ export class NotificationService extends Context.Service<
       input: NotificationUpdateInput,
     ) => Effect.Effect<NotificationUpdateResult, NotificationError>;
     readonly markAllRead: () => Effect.Effect<NotificationMarkAllReadResult, NotificationError>;
+    /** Rewrites a review finding's report after its discussion moves on, and marks it unread. */
+    readonly reviseFinding: (input: {
+      readonly findingId: string;
+      readonly body: string;
+    }) => Effect.Effect<void, NotificationError>;
     readonly subscribe: () => Stream.Stream<NotificationStreamEvent, NotificationError>;
   }
 >()("t3/notifications/NotificationService") {}
@@ -403,6 +408,17 @@ const make = Effect.gen(function* () {
     (effect) => serialized(effect).pipe(Effect.mapError(failed("mark all read"))),
   );
 
+  const reviseFinding = Effect.fn("NotificationService.reviseFinding")(
+    function* (input: { readonly findingId: string; readonly body: string }) {
+      const rows = yield* sql<Row>`UPDATE notifications SET body = ${input.body}, read_at = NULL
+        WHERE json_extract(source_json, '$.kind') = 'review'
+          AND json_extract(source_json, '$.findingId') = ${input.findingId}
+        RETURNING *`;
+      yield* publish(yield* toNotifications(rows), rows.length > 0);
+    },
+    (effect) => serialized(effect).pipe(Effect.mapError(failed("revise"))),
+  );
+
   const snapshot = Effect.fn("NotificationService.snapshot")(function* () {
     const items =
       yield* sql<Row>`SELECT * FROM notifications WHERE ${delivered} ORDER BY updated_at DESC, rowid DESC LIMIT ${SNAPSHOT_LIMIT}`.pipe(
@@ -415,6 +431,7 @@ const make = Effect.gen(function* () {
     raise,
     update,
     markAllRead,
+    reviseFinding,
     subscribe: () =>
       Stream.unwrap(
         Effect.gen(function* () {

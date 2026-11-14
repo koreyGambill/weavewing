@@ -23,6 +23,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as MonitoringRunner from "../monitoring/MonitoringRunner.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -72,6 +73,7 @@ const makeFixture = (options: FixtureOptions = {}) =>
     });
     const tick = yield* Ref.make<Effect.Effect<void>>(Effect.void);
     const launches = yield* Ref.make<ReadonlyArray<string>>([]);
+    const reviews = yield* Ref.make<ReadonlyArray<string | null>>([]);
     const scheduler: Scheduler.Scheduler["Service"] = {
       register: <E, R>(name: string, run: Effect.Effect<void, E, R>) =>
         Effect.gen(function* () {
@@ -132,6 +134,17 @@ const makeFixture = (options: FixtureOptions = {}) =>
           }),
           Layer.mock(SecretRequests.SecretRequests)({}),
           Layer.mock(StatusSources.StatusSources)({ transitions: Stream.fromPubSub(transitions) }),
+          Layer.mock(MonitoringRunner.MonitoringRunner)({
+            validateModel: () => Effect.void,
+            runTask: ({ threadId }) =>
+              Ref.update(reviews, (all) => [...all, threadId]).pipe(
+                Effect.as({
+                  status: "notified" as const,
+                  notificationIds: ["notification:found"],
+                  costUsd: 0.02,
+                }),
+              ),
+          }),
         ),
       ),
     );
@@ -140,6 +153,7 @@ const makeFixture = (options: FixtureOptions = {}) =>
       transitions,
       tick: Ref.get(tick).pipe(Effect.flatten),
       launches,
+      reviews,
       sends,
       layer,
     };
@@ -449,6 +463,74 @@ it.effect("a task's own turns and threads never retrigger it", () =>
         const launches = yield* Ref.get(f.launches);
         expect(launches).toHaveLength(2);
         expect(launches[1]).toContain("thread:c");
+      }),
+    );
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a review automation reviews the ended turn's thread and skips advisory turns", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    const sql = yield* SqlClient.SqlClient;
+    for (const id of ["thread:a", "thread:b", "thread:c"]) yield* insertThread(id);
+    yield* withService(f, (service, queued) =>
+      Effect.gen(function* () {
+        const agent = {
+          type: "review",
+          kind: "standards",
+          rules: [{ id: "rule", title: "Use Sparkwing", instructions: "Land through Sparkwing." }],
+          targets: {
+            state: "all",
+            threadIds: [],
+            includeChildren: false,
+            minAgeMs: 0,
+            updatedWithinMs: null,
+          },
+          delivery: "thread-or-alert",
+        };
+        const reviewInput = {
+          ...input,
+          schedule: { type: "event", event: "run_ended", projectId: "project:test" },
+        };
+        const { task } = yield* service.upsert(yield* decode({ ...reviewInput, agent }));
+        expect(task.agent).toEqual(agent);
+        // Omitted keeps the stored agent, so a client that predates it cannot erase it.
+        const kept = yield* service.upsert(yield* decode({ ...reviewInput, id: task.id }));
+        expect(kept.task.agent).toEqual(agent);
+        expect((yield* service.list()).tasks.map((listed) => listed.id)).toEqual([task.id]);
+        yield* sql`INSERT INTO orchestration_v2_projection_messages (message_id, thread_id, role,
+          streaming, created_at, updated_at, payload_json)
+          VALUES ('message:advisory', 'thread:b', 'user', 0, '1970-01-01T00:00:00.000Z',
+            '1970-01-01T00:00:00.000Z',
+            ${JSON.stringify({ origin: { kind: "system", event: "monitoring advisory" } })})`;
+
+        yield* f.publish(yield* runEnded("run:a", "thread:a"));
+        yield* queued("thread:a", "run:run:a");
+        yield* f.tick;
+        expect(yield* Ref.get(f.reviews)).toEqual(["thread:a"]);
+        expect(yield* Ref.get(f.launches)).toEqual([]);
+        const { runs } = yield* service.listRuns({ id: task.id });
+        expect(runs).toMatchObject([
+          {
+            status: "notified",
+            threadId: null,
+            notifications: ["notification:found"],
+            costUsd: 0.02,
+            trigger: { type: "event" },
+          },
+        ]);
+
+        // The turn that answers an advisory must not start another review.
+        yield* f.publish(yield* runEnded("run:advisory", "thread:b", "message:advisory"));
+        yield* f.publish(yield* runEnded("run:c", "thread:c"));
+        yield* queued("thread:c", "run:run:c");
+        yield* f.tick;
+        expect(yield* Ref.get(f.reviews)).toEqual(["thread:a", "thread:c"]);
+
+        const turned = yield* service.upsert(
+          yield* decode({ ...reviewInput, id: task.id, agent: { type: "turn" } }),
+        );
+        expect(turned.task.agent).toBeUndefined();
       }),
     );
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),

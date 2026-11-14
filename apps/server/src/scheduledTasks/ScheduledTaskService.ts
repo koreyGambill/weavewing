@@ -15,6 +15,7 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type ProjectId,
   ScheduledTask,
+  ScheduledTaskAgent,
   ScheduledTaskError,
   ScheduledTaskId,
   ThreadId,
@@ -219,6 +220,7 @@ const decodeWorkspaceStrategyJson = Schema.decodeUnknownEffect(
 const decodeModelSelectionJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ScheduledTask.fields.modelSelection),
 );
+const decodeAgentJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ScheduledTaskAgent));
 const DisabledThreadsJson = Schema.fromJsonString(Schema.Array(ThreadId));
 const decodeDisabledThreadsJson = Schema.decodeUnknownOption(DisabledThreadsJson);
 const encodeDisabledThreadsJson = Schema.encodeSync(DisabledThreadsJson);
@@ -266,6 +268,7 @@ interface ScheduledTaskRow {
   readonly run_count: number;
   readonly last_run_ended_at?: string | null;
   readonly disabled_thread_ids_json?: string;
+  readonly agent_json?: string | null;
   readonly webhook_token: string | null;
   readonly webhook_secret: string | null;
 }
@@ -439,6 +442,7 @@ const decodeRow = Effect.fnUntraced(
     const webhook = schedule.type === "webhook" ? webhookEndpoint(row, origin) : undefined;
     const workspaceStrategy = yield* decodeWorkspaceStrategyJson(row.workspace_strategy_json);
     const modelSelection = yield* decodeModelSelectionJson(row.model_selection_json);
+    const agent = row.agent_json == null ? undefined : yield* decodeAgentJson(row.agent_json);
     // A damaged list switches nothing off rather than hiding the whole task.
     const disabledThreadIds = Option.getOrElse(
       decodeDisabledThreadsJson(row.disabled_thread_ids_json ?? "[]"),
@@ -455,6 +459,7 @@ const decodeRow = Effect.fnUntraced(
       threadMode: row.thread_mode,
       workspaceStrategy,
       modelSelection,
+      ...(agent === undefined ? {} : { agent }),
       runtimeMode: row.runtime_mode,
       interactionMode: row.interaction_mode,
       createdBy: row.created_by,
@@ -646,6 +651,7 @@ export const layer = Layer.effect(
             id: decoded.success.id,
             schedule: decoded.success.schedule,
             disabledThreadIds: decoded.success.disabledThreadIds ?? [],
+            reviewsThreads: decoded.success.agent?.type === "review",
           });
         }
       }
@@ -755,6 +761,7 @@ export const layer = Layer.effect(
         run_count,
         last_run_ended_at,
         disabled_thread_ids_json,
+        agent_json,
         webhook_token,
         webhook_secret
       FROM scheduled_tasks
@@ -799,6 +806,7 @@ export const layer = Layer.effect(
         run_count,
         last_run_ended_at,
         disabled_thread_ids_json,
+        agent_json,
         webhook_token,
         webhook_secret
       FROM scheduled_tasks
@@ -877,6 +885,7 @@ export const layer = Layer.effect(
           last_run_status,
           last_run_error,
           run_count,
+          agent_json,
           webhook_token,
           webhook_secret
         )
@@ -902,6 +911,7 @@ export const layer = Layer.effect(
           ${task.lastRunStatus},
           ${task.lastRunError},
           ${task.runCount},
+          ${task.agent?.type === "review" ? JSON.stringify(task.agent) : null},
           ${webhook.token},
           ${webhook.secret}
         WHERE ${requireExisting ? 0 : 1} = 1
@@ -923,6 +933,7 @@ export const layer = Layer.effect(
           thread_mode = excluded.thread_mode,
           workspace_strategy_json = excluded.workspace_strategy_json,
           model_selection_json = excluded.model_selection_json,
+          agent_json = excluded.agent_json,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           creation_source = excluded.creation_source,
@@ -1383,8 +1394,6 @@ export const layer = Layer.effect(
             return { task: current ?? active, threadId: null, dispatchFailed: false };
           }
         }
-        // Watcher runs keep their own history until they fold into automations.
-        const keepsHistory = !active.id.startsWith("monitoring:");
         const runTrigger: RunHistory.RunTrigger =
           webhook !== undefined
             ? { type: "webhook", summary: webhook.deliveryId }
@@ -1429,9 +1438,7 @@ export const layer = Layer.effect(
                 taskError("Could not record skipped check-in.", { taskId: active.id, cause }),
               ),
             );
-            if (keepsHistory) {
-              yield* recordSkip(active.id, startedAtIso, runTrigger);
-            }
+            yield* recordSkip(active.id, startedAtIso, runTrigger);
             yield* notifyChanged;
             return {
               task: {
@@ -1463,7 +1470,7 @@ export const layer = Layer.effect(
               ),
             );
 
-        const historyId = keepsHistory ? Option.getOrNull(yield* newRunId) : null;
+        const historyId = Option.getOrNull(yield* newRunId);
         if (historyId !== null) {
           yield* Ref.set(historyRef, { id: historyId, sent: null });
           yield* recordHistory(
@@ -1497,9 +1504,7 @@ export const layer = Layer.effect(
         // Only a run that starts its own thread gets the preface: a bound thread is a conversation
         // the user is in. A prompt already at the send limit goes without it rather than failing.
         const preface =
-          active.threadId === null && keepsHistory
-            ? automationRunPreface(active.title, runTrigger)
-            : "";
+          active.threadId === null ? automationRunPreface(active.title, runTrigger) : "";
         const prompt = idleCheckin
           ? idleCheckinPrompt(active.id)
           : (preface + body).trim().length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS
@@ -1547,71 +1552,84 @@ export const layer = Layer.effect(
             );
 
         // Capture defects and interrupts too so dispatch failures still reach markCompleted.
-        const result = active.id.startsWith("monitoring:")
-          ? yield* Effect.exit(
-              (Option.isSome(monitor)
-                ? monitor.value
-                    .runTask(active.id)
+        const reviewRun: { outcome: MonitoringRunner.ReviewRunOutcome | null } = { outcome: null };
+        const result =
+          active.agent?.type === "review"
+            ? yield* Effect.exit(
+                (Option.isSome(monitor)
+                  ? monitor.value
+                      .runTask({
+                        task: active,
+                        runId: historyId,
+                        // Thread events review the event's thread; status and timed runs their targets.
+                        threadId:
+                          eventFire === null || eventFire.subject.startsWith("status:")
+                            ? null
+                            : ThreadId.make(eventFire.subject),
+                      })
+                      .pipe(
+                        Effect.flatMap((outcome) => {
+                          reviewRun.outcome = outcome;
+                          return outcome.status === "failed"
+                            ? Effect.fail(
+                                taskError(outcome.error ?? "The review failed.", {
+                                  taskId: active.id,
+                                }),
+                              )
+                            : Effect.void;
+                        }),
+                      )
+                  : Effect.fail(taskError("Reviews are unavailable.", { taskId: active.id }))
+                ).pipe(Effect.as(null)),
+              )
+            : active.threadId === null
+              ? yield* Effect.exit(
+                  threadLaunch
+                    .launch({
+                      commandId,
+                      projectId: active.projectId,
+                      title: active.title,
+                      modelSelection: active.modelSelection,
+                      runtimeMode: active.runtimeMode,
+                      interactionMode: active.interactionMode,
+                      workspaceStrategy: active.workspaceStrategy,
+                      initialMessage: {
+                        messageId,
+                        scheduledTaskId: active.id,
+                        origin: turnOrigin,
+                        text: prompt,
+                        attachments: [],
+                      },
+                      createdBy: active.createdBy,
+                      creationSource: active.creationSource,
+                    })
                     .pipe(
-                      Effect.flatMap((run) =>
-                        run.status === "failed"
-                          ? Effect.fail(
-                              taskError("Monitoring review failed.", { taskId: active.id }),
+                      Effect.map((launched) => launched.threadId),
+                      Effect.tap((threadId) =>
+                        active.schedule.type === "event"
+                          ? EventTriggers.markOwnedThread(active.id, threadId).pipe(
+                              withSql,
+                              Effect.mapError((cause) =>
+                                taskError("Could not record the launched thread.", {
+                                  taskId: active.id,
+                                  cause,
+                                }),
+                              ),
                             )
                           : Effect.void,
                       ),
-                    )
-                : Effect.fail(taskError("Monitoring executor unavailable.", { taskId: active.id }))
-              ).pipe(Effect.as(null)),
-            )
-          : active.threadId === null
-            ? yield* Effect.exit(
-                threadLaunch
-                  .launch({
-                    commandId,
-                    projectId: active.projectId,
-                    title: active.title,
-                    modelSelection: active.modelSelection,
-                    runtimeMode: active.runtimeMode,
-                    interactionMode: active.interactionMode,
-                    workspaceStrategy: active.workspaceStrategy,
-                    initialMessage: {
-                      messageId,
-                      scheduledTaskId: active.id,
-                      origin: turnOrigin,
-                      text: prompt,
-                      attachments: [],
-                    },
-                    createdBy: active.createdBy,
-                    creationSource: active.creationSource,
-                  })
-                  .pipe(
-                    Effect.map((launched) => launched.threadId),
-                    Effect.tap((threadId) =>
-                      active.schedule.type === "event"
-                        ? EventTriggers.markOwnedThread(active.id, threadId).pipe(
-                            withSql,
-                            Effect.mapError((cause) =>
-                              taskError("Could not record the launched thread.", {
-                                taskId: active.id,
-                                cause,
-                              }),
-                            ),
-                          )
-                        : Effect.void,
+                      Effect.tap((threadId) =>
+                        threadMode === "new_thread" ? Effect.void : bindThread(active, threadId),
+                      ),
                     ),
-                    Effect.tap((threadId) =>
-                      threadMode === "new_thread" ? Effect.void : bindThread(active, threadId),
-                    ),
+                )
+              : yield* Effect.exit(
+                  // The stored selection only seeds fresh threads. A bound run
+                  // follows the thread's current provider, so it passes none.
+                  sendBound(ThreadId.make(active.threadId), active.projectId, 2).pipe(
+                    Effect.as(ThreadId.make(active.threadId)),
                   ),
-              )
-            : yield* Effect.exit(
-                // The stored selection only seeds fresh threads. A bound run
-                // follows the thread's current provider, so it passes none.
-                sendBound(ThreadId.make(active.threadId), active.projectId, 2).pipe(
-                  Effect.as(ThreadId.make(active.threadId)),
-                ),
-              );
+                );
 
         if (
           idleCheckin &&
@@ -1673,17 +1691,24 @@ export const layer = Layer.effect(
           yield* recordHistory(
             threadId !== null
               ? RunHistory.bindDispatch(historyId, threadId, messageId)
-              : runSucceeded
-                ? RunHistory.finishRun(historyId, {
-                    status: "quiet",
-                    endedAt: iso(completedAt),
-                    error: null,
-                  })
-                : RunHistory.finishRun(historyId, {
-                    status: "failed",
-                    endedAt: iso(completedAt),
-                    error: lastRunError,
-                  }),
+              : RunHistory.finishRun(historyId, {
+                  status: runSucceeded ? (reviewRun.outcome?.status ?? "quiet") : "failed",
+                  endedAt: iso(completedAt),
+                  error: runSucceeded ? null : lastRunError,
+                  ...(reviewRun.outcome?.costUsd === undefined
+                    ? {}
+                    : {
+                        cost: {
+                          tokens: null,
+                          costUsd: reviewRun.outcome.costUsd,
+                          otherTokens: null,
+                          otherCostUsdEstimate: null,
+                        },
+                      }),
+                  ...(reviewRun.outcome === null
+                    ? {}
+                    : { notifications: reviewRun.outcome.notificationIds }),
+                }),
           );
           yield* recordHistory(RunHistory.prune(active.id));
         }
@@ -2046,7 +2071,7 @@ export const layer = Layer.effect(
     const list: ScheduledTaskService["Service"]["list"] = () =>
       listRows().pipe(
         Effect.map((tasks) => ({
-          tasks: tasks.filter((task) => !task.id.startsWith("monitoring:")),
+          tasks,
           timeZone: DateTime.zoneToString(DateTime.zoneMakeLocal()),
         })),
         Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
@@ -2118,7 +2143,14 @@ export const layer = Layer.effect(
       // keep their run history, and so real load failures propagate instead
       // of silently resetting an existing row.
       const existingTask = yield* findTask(id);
-      const threadMode = resolveThreadMode(input, existingTask);
+      // A review reads threads and starts none, so it is never bound to one.
+      const agent = input.agent ?? existingTask?.agent;
+      const review = agent?.type === "review" ? agent : null;
+      if (review !== null && Option.isSome(monitor))
+        yield* monitor.value
+          .validateModel(input.modelSelection, review.kind)
+          .pipe(Effect.mapError((cause) => taskError(cause.message, { taskId: id, cause })));
+      const threadMode = review !== null ? "new_thread" : resolveThreadMode(input, existingTask);
       const keptThreadId = input.threadId ?? existingTask?.threadId ?? null;
       // A bound thread belongs to its project, so moving the task leaves it for a new one.
       const movedOffThread =
@@ -2274,13 +2306,15 @@ export const layer = Layer.effect(
           schedule.type === "interval" && schedule.idleCheckin
             ? idleCheckinPrompt(id)
             : input.prompt,
-        enabled: input.enabled,
+        // A new context review starts paused, so its first run is a choice.
+        enabled: review?.kind === "context-review" && existingTask === null ? false : input.enabled,
         schedule,
         projectId: input.projectId,
         threadId,
         threadMode,
         workspaceStrategy,
         modelSelection: input.modelSelection,
+        ...(review === null ? {} : { agent: review }),
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
         createdBy: existingTask?.createdBy ?? input.createdBy ?? "user",

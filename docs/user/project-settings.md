@@ -132,27 +132,28 @@ Webhook tasks only run when their URL is called, so they can't be run
 immediately.
 Leaving an edited form asks before discarding unsaved changes.
 
-## Standards watchers
+## Review automations
 
-On web and desktop, open **Settings → Scheduled tasks → Watchers** to schedule
-read-only reviews of a project's conversations. Choose the model, schedule,
-thread targets and standards to check. A watcher uses the model you select and
-reports a failure if it is unavailable.
+A review automation reads a project's conversations against rules you write,
+without tools, and sends each finding to your inbox. On web and desktop, create
+a task in **Settings → Scheduled tasks** and choose **Reviews threads** under
+**Each run**. Add rules, instruction file paths on the server's machine (`~/`
+uses that server user's home) or the project's root `AGENTS.md`. Missing
+files limit the review, and instruction sources are truncated at 64 KiB. A
+review uses the model you select and reports a failure if it is unavailable.
 
-Open **Alerts** on the right to read findings and their quoted evidence. A watcher
-sees a bounded snapshot, so missing context can limit its conclusions. You can
-dismiss or snooze a finding, reopen it, or pause its watcher.
+To check every thread when its turn ends, give the automation an **Event**
+schedule on **A turn ends**; it reviews the thread that just finished. Other
+schedules review the threads the targets select. A review sees a bounded
+snapshot, so missing context can limit its conclusions. Read findings and their
+quoted evidence in the inbox, where you can snooze or dismiss them. Choose
+**Inbox only** to keep findings out of the reviewed thread. Watchers made before
+this change became review automations: one that also ran after each turn is now
+two automations, the second named "(scheduled)".
 
-Enable **Review after each completed turn** to check the thread that just finished,
-with a per-thread cooldown of at least one minute (ten minutes by default). The
-schedule continues independently. Choose **Alerts only** to keep all findings in
-the Alerts bell. Add instruction file paths on the server's machine (`~/` uses
-that server user's home), or include the project's root `AGENTS.md`. Missing files
-limit the review, and instruction sources are truncated at 64 KiB.
-
-With thread delivery, a watcher can offer advice to an active agent when its provider supports steering
+With thread delivery, a review can offer advice to an active agent when its provider supports steering
 without interrupting tools. The agent can agree or explain a disagreement. The
-watcher checks fresh evidence and records a short report: corrected, accepted
+reviewer checks fresh evidence and records a short report: corrected, accepted
 explanation, unresolved or unverified. Agreement alone does not count as a
 verified correction. The report stays available even if the thread is idle and
 cannot receive the advisory.
@@ -164,8 +165,8 @@ injected tools, file and knowledge reads, repeated reads and reported token usag
 Read counts from shell commands are inferred. Missing provider telemetry stays
 unknown. Use **Older turns** to page through the history.
 
-In **Settings → Scheduled tasks → Watchers**, choose **Context management** and
-select Claude Haiku. New context watchers start paused. Enable one to opt in, or
+In a review automation, choose **Context use** and select Claude Haiku. New
+context reviews start paused. Enable one to opt in, or
 run it once manually. Each run reviews recent context records with a 3,000-token
 output limit and a $0.05 budget. Suggestions appear as proposed Workspace
 decisions. Accept or reject them before asking an agent to change instructions,

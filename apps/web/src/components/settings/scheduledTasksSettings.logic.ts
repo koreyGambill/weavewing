@@ -40,6 +40,7 @@ import {
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
 import type { ResolvedSettingsScope } from "./settingsScope";
+import { reviewDraftFromAgent, type ReviewDraft } from "./reviewAgentDraft.logic";
 
 export const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -157,6 +158,8 @@ export interface DraftState {
   readonly eventCooldownSeconds: string;
   readonly eventCoalesceSeconds: string;
   readonly eventMaxRunsPerHour: string;
+  /** Set when the automation reviews threads instead of running a turn. */
+  readonly review: ReviewDraft | null;
 }
 
 export const EVENT_DRAFT_DEFAULTS = {
@@ -456,6 +459,7 @@ export function taskToDraft(task: ScheduledTask): DraftState {
             schedule.maxRunsPerHour === undefined ? "" : String(schedule.maxRunsPerHour),
         }
       : EVENT_DRAFT_DEFAULTS),
+    review: task.agent?.type === "review" ? reviewDraftFromAgent(task.agent) : null,
   };
 }
 

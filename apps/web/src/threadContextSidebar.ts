@@ -187,7 +187,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 /** What needs the user while the sidebar is hidden, most urgent first; null when nothing does. */
 export function threadToolsAttention(
   signals: ThreadToolSignals,
-  monitoring: { readonly state: StatusState | null; readonly unread: number },
+  status: StatusState | null,
   inbox: { readonly unread: number; readonly severity: NotificationSeverity | null },
 ): { readonly tone: ThreadToolsAttentionTone; readonly summary: string } | null {
   // Info notifications only badge the bell.
@@ -196,7 +196,7 @@ export function threadToolsAttention(
       ? [[tone, plural(inbox.unread, "unread notification", "unread notifications")] as const]
       : [];
   const items: Array<readonly [ThreadToolsAttentionTone, string]> = [
-    ...(monitoring.state === "fail" ? [["alert", "Status alert"] as const] : []),
+    ...(status === "fail" ? [["alert", "Status alert"] as const] : []),
     ...inboxItem("critical", "alert"),
     ...(signals.questionCount
       ? [
@@ -206,16 +206,8 @@ export function threadToolsAttention(
           ] as const,
         ]
       : []),
-    ...(monitoring.state === "warn" ? [["warn", "Status warning"] as const] : []),
+    ...(status === "warn" ? [["warn", "Status warning"] as const] : []),
     ...inboxItem("warning", "warn"),
-    ...(monitoring.unread
-      ? [
-          [
-            "warn",
-            plural(monitoring.unread, "unread watcher alert", "unread watcher alerts"),
-          ] as const,
-        ]
-      : []),
     ...(signals.ticketState === "needs_review" ? [["review", "Ticket needs review"] as const] : []),
     ...(signals.listCount
       ? [["todo", plural(signals.listCount, "open todo", "open todos")] as const]

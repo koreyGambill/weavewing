@@ -80,7 +80,7 @@ function environment() {
       ? {
           environment: {
             platform: "linux",
-            capabilities: { oneTimeSchedules: true, monitoring: true },
+            capabilities: { oneTimeSchedules: true, automations: true },
           },
         }
       : null,
@@ -136,7 +136,7 @@ vi.mock(import("../../state/query"), async (original) => ({
     data:
       request === null || request === threadFamilyRead
         ? request
-        : { tasks: state.tasksLoaded ? [task] : [], profiles: [], findings: [], runs: [] },
+        : { tasks: state.tasksLoaded ? [task] : [] },
     error: null,
     isPending: false,
     refresh: vi.fn(),
@@ -147,16 +147,6 @@ vi.mock(import("../../state/environments"), async (original) => ({
   useEnvironment: ((id: EnvironmentId) =>
     id === secondaryId ? secondaryEnvironment() : environment()) as never,
 }));
-vi.mock(import("../../state/monitoring"), async (original) => {
-  const actual = await original();
-  return {
-    ...actual,
-    monitoringUpsert: {
-      ...actual.monitoringUpsert,
-      permissionAtom: (id: string | null) => permissions.get(id ?? "")!,
-    },
-  };
-});
 vi.mock(import("../../state/entities"), async (original) => ({
   ...(await original()),
   useProjects: (() => [{ id: projectId, environmentId, title: "Project" }]) as never,
@@ -167,18 +157,19 @@ vi.mock(import("../../hooks/useSettings"), async (original) => ({
 }));
 
 describe("ScheduledTasksSettings", () => {
-  it("keeps an unsaved watcher across a disconnect in the all-environments view", async () => {
+  it("switches a new automation between running an agent and reviewing threads", async () => {
     setup();
-    state.allScope = true;
     await using screen = await render(<ScheduledTasksSettings />);
-    await userEvent.click(screen.getByRole("button", { name: "New watcher" }));
-    const name = screen.getByRole("textbox", { name: "Name", exact: true });
-    await userEvent.fill(name, "Keep this watcher draft");
-    state.connected = false;
-    await screen.rerender(<ScheduledTasksSettings />);
-    state.connected = true;
-    await screen.rerender(<ScheduledTasksSettings />);
-    await expect.element(name).toHaveValue("Keep this watcher draft");
+    await userEvent.click(screen.getByRole("button", { name: "New task" }));
+    const prompt = screen.getByRole("textbox", { name: "Prompt" });
+    await expect.element(prompt).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Reviews threads" }));
+    await expect.element(screen.getByRole("textbox", { name: "Rule 1 title" })).toBeVisible();
+    await expect.element(prompt).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    await expect.element(screen.getByRole("textbox", { name: "Rule 2 title" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Runs an agent" }));
+    await expect.element(screen.getByRole("textbox", { name: "Prompt" })).toBeVisible();
   });
   it("creates on a permitted secondary and reacts to permission changes", async () => {
     setup();

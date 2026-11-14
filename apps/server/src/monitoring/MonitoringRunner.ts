@@ -6,15 +6,19 @@ import {
   MonitoringError,
   MonitoringFindingId,
   MonitoringReviewOutput,
+  ProjectId,
   isProviderAvailable,
   type ModelSelection,
-  type MonitoringProfile,
-  type MonitoringRun,
+  type MonitoringFinding,
+  type ScheduledTask,
   type ScheduledTaskId,
-  type MonitoringProfileId,
   type ThreadId,
-  type ProjectId,
 } from "@t3tools/contracts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as NotificationService from "../notifications/NotificationService.ts";
+import { reviewProfile, type ReviewProfile } from "./ReviewProfile.ts";
+import { reviewNotificationBody, reviewNotificationTitle } from "./reviewNotification.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -30,7 +34,7 @@ import * as MonitoringSnapshot from "./MonitoringSnapshot.ts";
 const decodeReview = Schema.decodeEffect(MonitoringReviewOutput);
 
 function monitoringReviewPrompt(
-  profile: MonitoringProfile,
+  profile: ReviewProfile,
   snapshot: MonitoringSnapshot.MonitoringSnapshotData,
   instructionFiles: string,
 ): string {
@@ -59,21 +63,29 @@ function monitoringReviewPrompt(
   ].join("\n\n");
 }
 
+/** What one review run found, for its run history row. */
+export interface ReviewRunOutcome {
+  readonly status: "quiet" | "notified" | "failed";
+  readonly notificationIds: ReadonlyArray<string>;
+  readonly costUsd?: number | undefined;
+  readonly error?: string | undefined;
+}
+
 export class MonitoringRunner extends Context.Service<
   MonitoringRunner,
   {
     readonly validateModel: (
       selection: ModelSelection,
-      kind?: MonitoringProfile["kind"],
+      kind?: ReviewProfile["kind"],
     ) => Effect.Effect<void, MonitoringError>;
-    readonly runTask: (taskId: ScheduledTaskId) => Effect.Effect<MonitoringRun, MonitoringError>;
-    readonly run: (
-      id: MonitoringProfileId,
-      threadId?: ThreadId,
-      threadProjectId?: ProjectId,
-    ) => Effect.Effect<MonitoringRun, MonitoringError>;
+    /** Reviews the task's targets, or only `threadId` when an event names one. */
+    readonly runTask: (input: {
+      readonly task: ScheduledTask;
+      readonly runId: string | null;
+      readonly threadId: ThreadId | null;
+    }) => Effect.Effect<ReviewRunOutcome, MonitoringError>;
     readonly review: (
-      profile: MonitoringProfile,
+      profile: ReviewProfile,
       extra?: string,
     ) => Effect.Effect<
       {
@@ -94,10 +106,12 @@ const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const digest = yield* Digest.Digest;
   const delivery = yield* MonitoringDelivery.MonitoringDelivery;
+  const notifications = yield* NotificationService.NotificationService;
+  const sql = yield* SqlClient.SqlClient;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const instructions = Effect.fn("MonitoringRunner.instructions")(function* (
-    profile: MonitoringProfile,
+    profile: ReviewProfile,
     snapshot: MonitoringSnapshot.MonitoringSnapshotData,
   ) {
     const files = [...(profile.instructionFiles ?? [])];
@@ -153,7 +167,7 @@ const make = Effect.gen(function* () {
   });
   const instanceFor = Effect.fn("MonitoringRunner.instanceFor")(function* (
     selection: ModelSelection,
-    kind?: MonitoringProfile["kind"],
+    kind?: ReviewProfile["kind"],
   ) {
     const instance = yield* registry
       .getInstance(selection.instanceId)
@@ -187,20 +201,17 @@ const make = Effect.gen(function* () {
     return instance;
   });
   const review = Effect.fn("MonitoringRunner.review")(function* (
-    profile: MonitoringProfile,
+    profile: ReviewProfile,
     extra?: string,
     onCost?: (costUsd: number) => void,
     threadId?: ThreadId,
+    runId?: string | null,
   ) {
     const instance = yield* instanceFor(profile.modelSelection, profile.kind);
     const snapshot = yield* snapshots.capture(profile, threadId);
     if (!snapshot.threads.length) return { output: { findings: [] }, snapshot };
     if (profile.kind === "context-review" && snapshot.newestContextAt !== undefined) {
-      const lastReview = (yield* store.list()).runs
-        .flatMap((run) =>
-          run.profileId === profile.id && run.status === "succeeded" ? [run.startedAt] : [],
-        )
-        .toSorted((a, b) => Date.parse(b) - Date.parse(a))[0];
+      const lastReview = yield* store.lastReviewAt(profile.id, runId ?? null);
       // Activity during the model call must remain eligible for the next review.
       if (lastReview && Date.parse(snapshot.newestContextAt) <= Date.parse(lastReview))
         return { output: { findings: [] }, snapshot };
@@ -232,177 +243,171 @@ const make = Effect.gen(function* () {
       });
     return { output, snapshot, ...(raw.costUsd === undefined ? {} : { costUsd: raw.costUsd }) };
   });
-  const running = new Map<MonitoringProfileId, Set<ThreadId | null>>();
-  const run = Effect.fn("MonitoringRunner.run")(function* (
-    id: MonitoringProfileId,
-    threadId?: ThreadId,
-    threadProjectId?: ProjectId,
+  const raise = Effect.fn("MonitoringRunner.raise")(function* (
+    profile: ReviewProfile,
+    finding: MonitoringFinding,
   ) {
+    const raised = yield* notifications
+      .raise({
+        severity: "warning",
+        title: reviewNotificationTitle(finding),
+        body: reviewNotificationBody(finding),
+        source: {
+          kind: "review",
+          scheduledTaskId: profile.id,
+          runId: finding.runId,
+          findingId: finding.id,
+        },
+        threadId: finding.threadId,
+        projectId: profile.projectId,
+        dedupeKey: finding.id,
+      })
+      .pipe(
+        Effect.map((result) => result.notification.id),
+        Effect.catch((cause) =>
+          Effect.logWarning("Review finding was not sent to the inbox", { cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      );
+    return raised;
+  });
+  const threadProject = (threadId: ThreadId) =>
+    sql<{ project_id: string }>`SELECT project_id FROM orchestration_v2_projection_threads
+      WHERE thread_id = ${threadId}`.pipe(
+      NodeSqliteClient.readOnly,
+      Effect.map((rows) => (rows[0] === undefined ? null : ProjectId.make(rows[0].project_id))),
+      Effect.mapError((cause) => new MonitoringError({ operation: "read thread project", cause })),
+    );
+  const running = new Map<ScheduledTaskId, Set<ThreadId | null>>();
+  const runTask = Effect.fn("MonitoringRunner.runTask")(function* (input: {
+    readonly task: ScheduledTask;
+    readonly runId: string | null;
+    readonly threadId: ThreadId | null;
+  }) {
+    const stored = reviewProfile(input.task);
+    if (stored === null) return yield* new MonitoringError({ operation: "task is not a review" });
+    const id = stored.id;
+    const threadId = input.threadId ?? undefined;
     const active = running.get(id) ?? new Set<ThreadId | null>();
     const key = threadId ?? null;
     if (active.has(key) || active.has(null) || (threadId === undefined && active.size > 0))
-      return yield* new MonitoringError({ operation: "profile already running" });
+      return yield* new MonitoringError({ operation: "review already running" });
     active.add(key);
     running.set(id, active);
     return yield* Effect.gen(function* () {
-      const stored = yield* store.getProfile(id);
-      if (!stored) return yield* new MonitoringError({ operation: "profile not found" });
-      // An every-project turn-end review runs as if the watcher belonged to the reviewed thread's project.
-      const profile =
-        threadId !== undefined && threadProjectId !== undefined && stored.turnEnd?.allProjects
-          ? {
-              ...stored,
-              projectId: threadProjectId,
-              targets: { ...stored.targets, threadIds: [threadId] },
-            }
+      const schedule = input.task.schedule;
+      const everyProject = schedule.type === "event" && schedule.projectId === undefined;
+      const project =
+        threadId !== undefined && everyProject ? yield* threadProject(threadId) : null;
+      // An every-project turn-end review runs as if it belonged to the reviewed thread's project.
+      const profile: ReviewProfile =
+        threadId !== undefined && project !== null
+          ? { ...stored, projectId: project, targets: { ...stored.targets, threadIds: [threadId] } }
           : stored;
-      if (threadId !== undefined && !profile.enabled)
-        return yield* new MonitoringError({ operation: "profile disabled" });
-      const startedAt = DateTime.formatIso(yield* DateTime.now);
-      const runId = yield* random
-        .uuidV4()
-        .pipe(Effect.mapError((cause) => new MonitoringError({ operation: "create run", cause })));
-      const initial: MonitoringRun = {
-        id: runId,
-        profileId: id,
-        startedAt,
-        completedAt: null,
-        status: "running",
-        error: null,
-        targetThreadIds: [],
-        profile,
-        ...(profile.kind === "context-review" ? { budgetUsd: 0.05 } : {}),
-      };
+      const runId =
+        input.runId ??
+        `review:${yield* random.uuidV4().pipe(Effect.mapError((cause) => new MonitoringError({ operation: "create run", cause })))}`;
       let costUsd: number | undefined;
-      return yield* Effect.gen(function* () {
-        yield* store.saveRun(initial);
-        if (profile.kind === "context-review")
-          for (const finding of (yield* store.list()).findings)
-            if (finding.profileId === id && finding.disposition === "open")
-              yield* delivery.deliver({ profile, finding }).pipe(
-                Effect.catch((cause) =>
-                  Effect.logWarning("Monitoring proposal remains pending", {
-                    operation: cause.operation,
-                  }),
-                ),
-              );
-        const result = yield* Effect.result(
-          review(
-            profile,
-            undefined,
-            (cost) => {
-              costUsd = cost;
-            },
-            threadId,
-          ),
-        );
-        const completedAt = DateTime.formatIso(yield* DateTime.now);
-        if (result._tag === "Failure") {
-          const failed: MonitoringRun = {
-            ...initial,
-            completedAt,
-            status: "failed",
-            error: result.failure.message,
-            ...(costUsd === undefined ? {} : { costUsd }),
-          };
-          yield* store.saveRun(failed);
-          return failed;
-        }
-        const { output, snapshot } = result.success;
-        for (const content of output.findings) {
-          const fingerprint = yield* digest.digestHex(
-            Digest.sha256,
-            new TextEncoder().encode(
-              [
-                ...(profile.kind === "context-review" ? [] : [id]),
-                content.threadId,
-                content.ruleId,
-                ...(profile.kind === "context-review"
-                  ? [
-                      ...new Set(
-                        snapshot.threads
-                          .filter(
-                            (thread) =>
-                              thread.id === content.threadId ||
-                              thread.parentThreadId === content.threadId,
-                          )
-                          .flatMap((thread) =>
-                            thread.messages.map((message) => `${thread.id}\0${message.id}`),
-                          ),
-                      ),
-                    ].sort()
-                  : content.evidence
-                      .map((e) => [e.threadId, e.messageId, e.excerpt].join("\0"))
-                      .sort()),
-              ].join("\0"),
-            ),
-          );
-          const findingId = MonitoringFindingId.make(fingerprint);
-          if (yield* store.getFinding(findingId)) continue;
-          const finding = {
-            ...content,
-            ruleSnapshot: profile.rules.find((rule) => rule.id === content.ruleId),
-            id: findingId,
-            profileId: id,
-            runId,
-            createdAt: completedAt,
-            updatedAt: completedAt,
-            disposition: "open" as const,
-            readAt: null,
-            snoozedUntil: null,
-            exchanges: [],
-            outcome: null,
-          };
-          yield* store.saveFinding(finding);
-          const delivered = yield* delivery.deliver({ profile, finding }).pipe(
+      if (profile.kind === "context-review")
+        for (const finding of yield* store.listOpenFindings(id))
+          yield* delivery.deliver({ profile, finding }).pipe(
             Effect.catch((cause) =>
-              Effect.logWarning("Monitoring advisory delivery failed", {
+              Effect.logWarning("Monitoring proposal remains pending", {
                 operation: cause.operation,
-              }).pipe(Effect.as(null)),
+              }),
             ),
           );
-          if (delivered?.messageId)
-            yield* store.saveFinding({
-              ...finding,
-              sentToThread: {
-                messageId: delivered.messageId,
-                at: DateTime.formatIso(yield* DateTime.now),
-              },
-            });
-        }
-        const completed: MonitoringRun = {
-          ...initial,
-          completedAt,
-          status: "succeeded",
-          ...(costUsd === undefined ? {} : { costUsd }),
-          targetThreadIds: snapshot.threads
-            .filter((thread) => thread.parentThreadId === null)
-            .map((thread) => thread.id),
-        };
-        yield* store.saveRun(completed);
-        return completed;
-      }).pipe(
-        Effect.onExit((exit) =>
-          exit._tag === "Failure"
-            ? DateTime.now.pipe(
-                Effect.flatMap((now) =>
-                  store.saveRun({
-                    ...initial,
-                    completedAt: DateTime.formatIso(now),
-                    status: "failed",
-                    error: "Review interrupted or failed before completion.",
-                    ...(costUsd === undefined ? {} : { costUsd }),
-                  }),
-                ),
-                Effect.catch((cause) =>
-                  Effect.logWarning("Could not record monitoring failure", {
-                    operation: cause.operation,
-                  }),
-                ),
-              )
-            : Effect.void,
+      const result = yield* Effect.result(
+        review(
+          profile,
+          undefined,
+          (cost) => {
+            costUsd = cost;
+          },
+          threadId,
+          input.runId,
         ),
       );
+      if (result._tag === "Failure")
+        return {
+          status: "failed",
+          notificationIds: [],
+          costUsd,
+          error: result.failure.message,
+        } satisfies ReviewRunOutcome;
+      const { output, snapshot } = result.success;
+      const completedAt = DateTime.formatIso(yield* DateTime.now);
+      const notificationIds: string[] = [];
+      for (const content of output.findings) {
+        const fingerprint = yield* digest.digestHex(
+          Digest.sha256,
+          new TextEncoder().encode(
+            [
+              // A folded watcher hashes its old profile id, so its findings keep their ids and its
+              // turn-end and scheduled halves share them.
+              ...(profile.kind === "context-review"
+                ? []
+                : [id.replace(/^monitoring:/, "").replace(/:turn-end$/, "")]),
+              content.threadId,
+              content.ruleId,
+              ...(profile.kind === "context-review"
+                ? [
+                    ...new Set(
+                      snapshot.threads
+                        .filter(
+                          (thread) =>
+                            thread.id === content.threadId ||
+                            thread.parentThreadId === content.threadId,
+                        )
+                        .flatMap((thread) =>
+                          thread.messages.map((message) => `${thread.id}\0${message.id}`),
+                        ),
+                    ),
+                  ].sort()
+                : content.evidence
+                    .map((e) => [e.threadId, e.messageId, e.excerpt].join("\0"))
+                    .sort()),
+            ].join("\0"),
+          ),
+        );
+        const findingId = MonitoringFindingId.make(fingerprint);
+        if (yield* store.getFinding(findingId)) continue;
+        const finding: MonitoringFinding = {
+          ...content,
+          ruleSnapshot: profile.rules.find((rule) => rule.id === content.ruleId),
+          id: findingId,
+          taskId: id,
+          runId,
+          createdAt: completedAt,
+          updatedAt: completedAt,
+          exchanges: [],
+          outcome: null,
+        };
+        yield* store.saveFinding(finding);
+        const notificationId = yield* raise(profile, finding);
+        if (notificationId !== null) notificationIds.push(notificationId);
+        const delivered = yield* delivery.deliver({ profile, finding }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Monitoring advisory delivery failed", {
+              operation: cause.operation,
+            }).pipe(Effect.as(null)),
+          ),
+        );
+        if (delivered?.messageId)
+          yield* store.saveFinding({
+            ...finding,
+            sentToThread: {
+              messageId: delivered.messageId,
+              at: DateTime.formatIso(yield* DateTime.now),
+            },
+          });
+      }
+      return {
+        status: notificationIds.length > 0 ? "notified" : "quiet",
+        notificationIds,
+        costUsd,
+      } satisfies ReviewRunOutcome;
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
@@ -417,14 +422,7 @@ const make = Effect.gen(function* () {
       return instanceFor(selection, kind).pipe(Effect.asVoid);
     }),
     review,
-    run,
-    runTask: Effect.fn("MonitoringRunner.runTask")(function* (taskId) {
-      const profile = (yield* store.list()).profiles.find(
-        (profile) => profile.scheduledTaskId === taskId,
-      );
-      if (!profile) return yield* new MonitoringError({ operation: "task profile not found" });
-      return yield* run(profile.id);
-    }),
+    runTask,
   });
 });
 export const layer = Layer.effect(MonitoringRunner, make);

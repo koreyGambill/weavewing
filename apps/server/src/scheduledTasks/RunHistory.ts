@@ -50,9 +50,9 @@ const TriggerJson = Schema.fromJsonString(
 );
 const decodeTrigger = Schema.decodeUnknownOption(TriggerJson);
 const encodeTrigger = Schema.encodeSync(TriggerJson);
-const decodeNotificationIds = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Array(Schema.String)),
-);
+const NotificationIdsJson = Schema.fromJsonString(Schema.Array(Schema.String));
+const decodeNotificationIds = Schema.decodeUnknownOption(NotificationIdsJson);
+const encodeNotificationIds = Schema.encodeSync(NotificationIdsJson);
 const decodeUsage = Schema.decodeUnknownOption(Schema.fromJsonString(TurnTokenUsage));
 
 /** Inserts an open run. Callers prune once they decide to keep it. */
@@ -156,6 +156,7 @@ export const finishRun = Effect.fn("ScheduledTaskRunHistory.finishRun")(function
     readonly endedAt: string;
     readonly error: string | null;
     readonly cost?: RunCost | undefined;
+    readonly notifications?: ReadonlyArray<string> | undefined;
   },
 ) {
   const sql = yield* SqlClient.SqlClient;
@@ -165,7 +166,8 @@ export const finishRun = Effect.fn("ScheduledTaskRunHistory.finishRun")(function
         SET status = ${outcome.status}, ended_at = ${outcome.endedAt}, error = ${outcome.error},
           tokens = ${outcome.cost?.tokens ?? null}, cost_usd = ${outcome.cost?.costUsd ?? null},
           other_tokens = ${outcome.cost?.otherTokens ?? null},
-          other_cost_usd_estimate = ${outcome.cost?.otherCostUsdEstimate ?? null}
+          other_cost_usd_estimate = ${outcome.cost?.otherCostUsdEstimate ?? null},
+          notification_ids_json = coalesce(${outcome.notifications === undefined ? null : encodeNotificationIds(outcome.notifications)}, notification_ids_json)
         WHERE id = ${id} AND ended_at IS NULL
         RETURNING task_id`;
       const [row] = closed;

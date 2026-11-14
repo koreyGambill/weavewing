@@ -27,10 +27,21 @@ import { toastManager } from "../ui/toast";
 import { RelativeTime } from "../RelativeTime";
 import { StatusSourceDot, StatusSourceIcon } from "./StatusSourceIcon";
 import { createStatusSourceNotificationGate } from "./statusSourceNotifications.logic";
+import { summarizeStatusSources } from "./statusSourceSummary.logic";
 
 const sourcesAtom = environmentAtomList("web-status-sources", (environmentId) =>
   statusSources({ environmentId, input: {} }),
 );
+
+/** The worst status-source state across connected environments, and their sources. */
+export function useStatusSignal() {
+  const groups = useStatusSourceGroups();
+  const state = summarizeStatusSources(
+    groups.flatMap((group) => group.sources ?? []),
+    groups.some((group) => group.failed || group.sources === null),
+  );
+  return { state, groups };
+}
 
 export function useStatusSourceGroups() {
   const { environments } = useEnvironments();

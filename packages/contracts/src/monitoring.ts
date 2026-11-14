@@ -1,11 +1,12 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { ProjectId, ThreadId, MessageId, ScheduledTaskId } from "./baseSchemas.ts";
-import { ModelSelection } from "./modelSelection.ts";
-import { ScheduledTaskSchedule } from "./scheduledTask.ts";
+import {
+  IsoDateTime,
+  MessageId,
+  ScheduledTaskId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 
-export const MonitoringProfileId = TrimmedNonEmptyString.pipe(Schema.brand("MonitoringProfileId"));
-export type MonitoringProfileId = typeof MonitoringProfileId.Type;
 export const MonitoringFindingId = TrimmedNonEmptyString.pipe(Schema.brand("MonitoringFindingId"));
 export type MonitoringFindingId = typeof MonitoringFindingId.Type;
 export const MonitoringRule = Schema.Struct({
@@ -14,65 +15,57 @@ export const MonitoringRule = Schema.Struct({
   instructions: TrimmedNonEmptyString,
 });
 export type MonitoringRule = typeof MonitoringRule.Type;
-export const MonitoringTargets = Schema.Struct({
+
+export const MAX_REVIEW_RULES = 32;
+export const MAX_REVIEW_INSTRUCTION_FILES = 32;
+
+export const ReviewInstructionFile = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(4096),
+  Schema.makeFilter(
+    (path) =>
+      path.startsWith("/") ||
+      path.startsWith("~/") ||
+      /^[A-Za-z]:[\\/]/.test(path) ||
+      path.startsWith("\\\\"),
+  ),
+);
+
+/** Which threads a review looks at. An event-triggered review looks at the event's thread. */
+export const ReviewTargets = Schema.Struct({
   state: Schema.Literals(["active", "closed", "all"]),
   threadIds: Schema.Array(ThreadId),
   includeChildren: Schema.Boolean,
   minAgeMs: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
   updatedWithinMs: Schema.NullOr(Schema.Number.check(Schema.isGreaterThan(0))),
 });
-export const MonitoringProfileInput = Schema.Struct({
-  id: Schema.optional(MonitoringProfileId),
-  title: TrimmedNonEmptyString,
-  kind: Schema.optional(Schema.Literals(["standards", "context-review"])),
-  enabled: Schema.Boolean,
-  projectId: ProjectId,
-  modelSelection: ModelSelection,
-  schedule: ScheduledTaskSchedule.check(
-    Schema.makeFilter(
-      // Watchers react to turn ends through `turnEnd` until they fold into event-triggered tasks.
-      (schedule) =>
-        schedule.type !== "webhook" &&
-        schedule.type !== "event" &&
-        (schedule.type !== "interval" || !schedule.idleCheckin),
-    ),
+export type ReviewTargets = typeof ReviewTargets.Type;
+
+export const DEFAULT_REVIEW_TARGETS: ReviewTargets = {
+  state: "active",
+  threadIds: [],
+  includeChildren: true,
+  minAgeMs: 15 * 60_000,
+  updatedWithinMs: null,
+};
+
+/** A tool-less review of thread transcripts against rules; findings become notifications. */
+export const ScheduledTaskReviewAgent = Schema.Struct({
+  type: Schema.Literal("review"),
+  kind: Schema.Literals(["standards", "context-review"]),
+  rules: Schema.Array(MonitoringRule).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_REVIEW_RULES),
   ),
-  turnEnd: Schema.optional(
-    Schema.Struct({
-      cooldownMs: Schema.optional(
-        Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(60_000)),
-      ),
-      allProjects: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  delivery: Schema.optional(Schema.Literals(["thread-or-alert", "alerts"])),
   instructionFiles: Schema.optional(
-    Schema.Array(
-      TrimmedNonEmptyString.check(
-        Schema.isMaxLength(4096),
-        Schema.makeFilter(
-          (path) =>
-            path.startsWith("/") ||
-            path.startsWith("~/") ||
-            /^[A-Za-z]:[\\/]/.test(path) ||
-            path.startsWith("\\\\"),
-        ),
-      ),
-    ).check(Schema.isMaxLength(32)),
+    Schema.Array(ReviewInstructionFile).check(Schema.isMaxLength(MAX_REVIEW_INSTRUCTION_FILES)),
   ),
   includeProjectAgents: Schema.optional(Schema.Boolean),
-  targets: MonitoringTargets,
-  rules: Schema.Array(MonitoringRule).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
+  targets: ReviewTargets,
+  /** `thread-or-alert` also sends each finding to its thread as an advisory. */
+  delivery: Schema.Literals(["thread-or-alert", "alerts"]),
 });
-export type MonitoringProfileInput = typeof MonitoringProfileInput.Type;
-export const MonitoringProfile = Schema.Struct({
-  ...MonitoringProfileInput.fields,
-  id: MonitoringProfileId,
-  scheduledTaskId: ScheduledTaskId,
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-export type MonitoringProfile = typeof MonitoringProfile.Type;
+export type ScheduledTaskReviewAgent = typeof ScheduledTaskReviewAgent.Type;
+
 export const MonitoringEvidence = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
@@ -91,12 +84,6 @@ export const MonitoringReviewOutput = Schema.Struct({
   findings: Schema.Array(MonitoringFindingContent).check(Schema.isMaxLength(32)),
 });
 export type MonitoringReviewOutput = typeof MonitoringReviewOutput.Type;
-export const MonitoringDisposition = Schema.Literals([
-  "open",
-  "acknowledged",
-  "dismissed",
-  "resolved",
-]);
 export const MonitoringExchange = Schema.Struct({
   id: TrimmedNonEmptyString,
   at: IsoDateTime,
@@ -104,60 +91,20 @@ export const MonitoringExchange = Schema.Struct({
   text: TrimmedNonEmptyString,
 });
 export type MonitoringExchange = typeof MonitoringExchange.Type;
+/** Its inbox state (read, snoozed, dismissed) lives on the finding's notification. */
 export const MonitoringFinding = Schema.Struct({
   ...MonitoringFindingContent.fields,
   ruleSnapshot: Schema.optional(MonitoringRule),
   id: MonitoringFindingId,
-  profileId: MonitoringProfileId,
+  taskId: ScheduledTaskId,
   runId: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
-  disposition: MonitoringDisposition,
-  readAt: Schema.NullOr(IsoDateTime),
-  snoozedUntil: Schema.NullOr(IsoDateTime),
   exchanges: Schema.Array(MonitoringExchange),
   outcome: Schema.NullOr(Schema.String),
   sentToThread: Schema.optional(Schema.Struct({ messageId: MessageId, at: IsoDateTime })),
 });
 export type MonitoringFinding = typeof MonitoringFinding.Type;
-export const MonitoringRun = Schema.Struct({
-  id: TrimmedNonEmptyString,
-  profileId: MonitoringProfileId,
-  startedAt: IsoDateTime,
-  completedAt: Schema.NullOr(IsoDateTime),
-  status: Schema.Literals(["running", "succeeded", "failed"]),
-  error: Schema.NullOr(Schema.String),
-  targetThreadIds: Schema.Array(ThreadId),
-  costUsd: Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))),
-  budgetUsd: Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))),
-  profile: MonitoringProfile,
-});
-export type MonitoringRun = typeof MonitoringRun.Type;
-export const MonitoringListInput = Schema.Struct({});
-export const MonitoringListResult = Schema.Struct({
-  profiles: Schema.Array(MonitoringProfile),
-  findings: Schema.Array(MonitoringFinding),
-  runs: Schema.Array(MonitoringRun),
-});
-export type MonitoringListResult = typeof MonitoringListResult.Type;
-export const MonitoringUpsertInput = MonitoringProfileInput;
-export type MonitoringUpsertInput = typeof MonitoringUpsertInput.Type;
-export const MonitoringProfileResult = Schema.Struct({ profile: MonitoringProfile });
-export const MonitoringSetEnabledInput = Schema.Struct({
-  id: MonitoringProfileId,
-  enabled: Schema.Boolean,
-});
-export const MonitoringRunNowInput = Schema.Struct({ id: MonitoringProfileId });
-export const MonitoringRunResult = Schema.Struct({ run: MonitoringRun });
-export const MonitoringSetDispositionInput = Schema.Struct({
-  id: MonitoringFindingId,
-  disposition: MonitoringDisposition,
-  readAt: Schema.optional(Schema.NullOr(IsoDateTime)),
-  snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
-  outcome: Schema.optional(Schema.NullOr(Schema.String)),
-});
-export type MonitoringSetDispositionInput = typeof MonitoringSetDispositionInput.Type;
-export const MonitoringFindingResult = Schema.Struct({ finding: MonitoringFinding });
 export class MonitoringError extends Schema.TaggedError<MonitoringError>()("MonitoringError", {
   operation: Schema.String,
   cause: Schema.optional(Schema.Defect()),
@@ -167,20 +114,9 @@ export class MonitoringError extends Schema.TaggedError<MonitoringError>()("Moni
   }
 }
 
-export const MonitoringRespondInput = Schema.Struct({
-  findingId: MonitoringFindingId,
-  responseId: TrimmedNonEmptyString,
-  text: TrimmedNonEmptyString.check(Schema.isMaxLength(4000)),
-});
-export type MonitoringRespondInput = typeof MonitoringRespondInput.Type;
-export const MonitoringRespondResult = MonitoringFindingResult;
-
 export const MonitoringAssessment = Schema.Struct({
   outcome: Schema.Literals(["corrected", "accepted_explanation", "unresolved", "unverified"]),
   reason: TrimmedNonEmptyString.check(Schema.isMaxLength(4000)),
   evidence: Schema.Array(MonitoringEvidence).check(Schema.isMaxLength(8)),
 });
 export type MonitoringAssessment = typeof MonitoringAssessment.Type;
-
-export const MonitoringStatusResult = Schema.Struct({ unreadCount: Schema.Number });
-export type MonitoringStatusResult = typeof MonitoringStatusResult.Type;

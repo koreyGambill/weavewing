@@ -27,6 +27,8 @@ export const PEER_LINK_UNAUTHORIZED_STATUS_CAPABILITY = "peerLinkUnauthorizedSta
 export const TERMINAL_WORKSPACE_CHANGED_ERROR_CAPABILITY = "terminalWorkspaceChangedError";
 /** Scheduled tasks may have an `event` schedule; others never see or change such a task. */
 export const SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY = "scheduledTaskEventSchedule";
+/** Scheduled tasks may have a review `agent`; others never see or change such a task. */
+export const AUTOMATIONS_CLIENT_CAPABILITY = "automations";
 /** The client shows every assistant text part on its own; others get each one as a final answer. */
 export const ASSISTANT_TEXT_PARTS_CAPABILITY = "assistantTextParts";
 
@@ -206,7 +208,6 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   freshContext: Schema.optionalKey(Schema.Boolean),
   /** Server saves and runs scheduled task `threadMode`; older servers ignore it. */
   scheduledTaskThreadModes: Schema.optionalKey(Schema.Boolean),
-  monitoring: Schema.optionalKey(Schema.Boolean),
   /** Server answers notifications.* and agents can call `t3_notify`. */
   notifications: Schema.optionalKey(Schema.Boolean),
   idleWorkCheckins: Schema.optionalKey(Schema.Boolean),

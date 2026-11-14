@@ -1,5 +1,6 @@
 import {
   ASSISTANT_TEXT_PARTS_CAPABILITY,
+  AUTOMATIONS_CLIENT_CAPABILITY,
   ORCHESTRATION_V2_WS_METHODS,
   OrchestrationDispatchCommandError,
   PEER_LINK_UNAUTHORIZED_STATUS_CAPABILITY,
@@ -44,6 +45,7 @@ export interface ClientWireCapabilities {
   readonly terminalWorkspaceChangedError: boolean;
   readonly scheduledTaskEventSchedule: boolean;
   readonly assistantTextParts: boolean;
+  readonly automations: boolean;
 }
 
 export function readClientWireCapabilities(param: string | null): ClientWireCapabilities {
@@ -55,6 +57,7 @@ export function readClientWireCapabilities(param: string | null): ClientWireCapa
     terminalWorkspaceChangedError: declared.has(TERMINAL_WORKSPACE_CHANGED_ERROR_CAPABILITY),
     scheduledTaskEventSchedule: declared.has(SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY),
     assistantTextParts: declared.has(ASSISTANT_TEXT_PARTS_CAPABILITY),
+    automations: declared.has(AUTOMATIONS_CLIENT_CAPABILITY),
   };
 }
 
@@ -124,9 +127,10 @@ function scheduledTaskForClient(task: ScheduledTask, client: ClientWireCapabilit
     : task;
 }
 
-/** Upstream clients have no schedule to show an event-triggered task as. */
+/** Upstream clients have no schedule to show an event-triggered task as, nor a review agent. */
 export const hidesScheduledTask = (task: ScheduledTask, client: ClientWireCapabilities) =>
-  task.schedule.type === "event" && !client.scheduledTaskEventSchedule;
+  (task.schedule.type === "event" && !client.scheduledTaskEventSchedule) ||
+  (task.agent?.type === "review" && !client.automations);
 
 const scheduledTaskResultForClient = <Result extends { readonly task: ScheduledTask }>(
   result: Result,
@@ -151,7 +155,7 @@ export const responseForClient = {
     result: ScheduledTaskListResult,
     client: ClientWireCapabilities,
   ): ScheduledTaskListResult =>
-    client.scheduledTaskSkippedStatus && client.scheduledTaskEventSchedule
+    client.scheduledTaskSkippedStatus && client.scheduledTaskEventSchedule && client.automations
       ? result
       : {
           ...result,
@@ -228,7 +232,7 @@ export function scheduledTasksForClient(
   service: ScheduledTasks.ScheduledTaskService["Service"],
   client: ClientWireCapabilities,
 ): ScheduledTasks.ScheduledTaskService["Service"] {
-  if (client.scheduledTaskEventSchedule) return service;
+  if (client.scheduledTaskEventSchedule && client.automations) return service;
   const refuseHidden = (id: ScheduledTaskId) =>
     Effect.flatMap(service.list(), ({ tasks }) => {
       const task = tasks.find((candidate) => candidate.id === id);
@@ -236,7 +240,7 @@ export function scheduledTasksForClient(
         ? Effect.fail(
             new ScheduledTaskError({
               message:
-                "This automation runs on server events, which this app cannot show. Manage it in this server's T3 Code app.",
+                "This automation runs on server events or reviews threads, which this app cannot show. Manage it in this server's T3 Code app.",
               taskId: id,
             }),
           )

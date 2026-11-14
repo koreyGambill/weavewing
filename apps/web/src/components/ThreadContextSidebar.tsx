@@ -44,7 +44,7 @@ import {
   useThreadToolsSlots,
   useThreadToolsTarget,
 } from "./threadToolsHost";
-import { useMonitoringSignal } from "./monitoring/WatcherAlerts";
+import { useStatusSignal } from "./statusSources/StatusSources";
 import { InboxView } from "./inbox/InboxView";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { useInboxSignal } from "../state/inbox";
@@ -341,9 +341,9 @@ const attentionToneClass: Record<ThreadToolsAttentionTone, string> = {
 /** What the hidden sidebar would flag, for the sidebar toggle. */
 export function useThreadToolsAttention() {
   const signals = useThreadToolSignals(useThreadToolsTarget());
-  const monitoring = useMonitoringSignal();
+  const { state } = useStatusSignal();
   const inbox = useInboxSignal();
-  return threadToolsAttention(signals, monitoring, inbox);
+  return threadToolsAttention(signals, state, inbox);
 }
 
 export function ThreadToolsAttentionDot({ tone }: { tone: ThreadToolsAttentionTone }) {
@@ -367,7 +367,7 @@ const inboxBadgeClass = {
 
 function InboxStripButton({ active, tooltip }: { active: boolean; tooltip: string }) {
   const { unread, severity, failed } = useInboxSignal();
-  const { state } = useMonitoringSignal();
+  const { state } = useStatusSignal();
   const statusAlert = state === "fail" || state === "warn" ? state : null;
   return (
     <StripButton

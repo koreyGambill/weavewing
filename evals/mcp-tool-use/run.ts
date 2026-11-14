@@ -6,7 +6,7 @@
  * README.md for how to run it and add cases.
  */
 import { monitoringAdvisory } from "../../apps/server/src/monitoring/MonitoringDelivery.ts";
-import { MonitoringProfile, MonitoringFinding } from "@t3tools/contracts";
+import { ModelSelection, MonitoringFinding, MonitoringRule } from "@t3tools/contracts";
 import { idleCheckinPrompt } from "../../apps/server/src/scheduledTasks/IdleCheckin.ts";
 import { automationRunPreface } from "../../apps/server/src/scheduledTasks/AutomationPrompt.ts";
 import { ScheduledTaskId } from "@t3tools/contracts";
@@ -358,7 +358,14 @@ export const McpToolUseCase = Schema.Struct({
     }),
   ),
   monitoringAdvisory: Schema.optional(
-    Schema.Struct({ profile: MonitoringProfile, finding: MonitoringFinding }),
+    Schema.Struct({
+      profile: Schema.Struct({
+        title: Schema.String,
+        modelSelection: ModelSelection,
+        rules: Schema.Array(MonitoringRule),
+      }),
+      finding: MonitoringFinding,
+    }),
   ),
   /** Records for the context chips `prompt` links, projected as T3 sends them. */
   promptContext: Schema.optional(Schema.Struct({ records: Schema.Array(ComposerContextRecord) })),

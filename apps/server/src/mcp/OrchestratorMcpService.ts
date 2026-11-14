@@ -35,6 +35,7 @@ import {
   type OrchestratorMcpListScheduledTasksResult,
   type OrchestratorMcpScheduledTask,
   type OrchestratorMcpScheduleTarget,
+  type OrchestratorMcpScheduleReview,
   type OrchestratorMcpScheduleTaskInput,
   type OrchestratorMcpScheduleTaskResult,
   type OrchestratorMcpTarget,
@@ -63,6 +64,8 @@ import {
   ProviderRequestKind,
   type RuntimeMode,
   type ScheduledTask,
+  type ScheduledTaskReviewAgent,
+  DEFAULT_REVIEW_TARGETS,
   type ScheduledTaskUpsertInput,
   scheduledTaskThreadMode,
   type ServerProvider,
@@ -346,6 +349,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
     projectId: task.projectId,
     boundThreadId: task.threadId,
     freshSession: scheduledTaskThreadMode(task) === "fresh_session",
+    kind: task.agent?.type === "review" ? "review" : "turn",
     schedule: task.schedule,
     model: {
       providerInstanceId: task.modelSelection.instanceId,
@@ -2499,6 +2503,25 @@ const make = Effect.gen(function* () {
 
   const targetNeedsNewThreads =
     "target only applies to tasks that create threads; set bindToCurrentThread=false.";
+  const reviewNeedsNoThread =
+    "A review reads threads and posts nowhere; set bindToCurrentThread=false.";
+
+  /** A review keeps its stored targets and delivery when its rules change. */
+  const reviewAgent = (
+    review: OrchestratorMcpScheduleReview,
+    existing: ScheduledTask["agent"],
+  ): ScheduledTaskReviewAgent => ({
+    type: "review",
+    kind: existing?.type === "review" ? existing.kind : "standards",
+    rules: review.rules.map((rule, index) => ({ id: `rule-${index + 1}`, ...rule })),
+    ...(review.instructionFiles === undefined
+      ? existing?.type === "review" && existing.instructionFiles !== undefined
+        ? { instructionFiles: existing.instructionFiles }
+        : {}
+      : { instructionFiles: review.instructionFiles }),
+    targets: existing?.type === "review" ? existing.targets : DEFAULT_REVIEW_TARGETS,
+    delivery: existing?.type === "review" ? existing.delivery : "thread-or-alert",
+  });
 
   /** The model a task's new threads start on: `target` applied over `inherited`, as a delegated child's is. */
   const resolveScheduledTaskModel = Effect.fn("OrchestratorMcpService.resolveScheduledTaskModel")(
@@ -2535,7 +2558,12 @@ const make = Effect.gen(function* () {
       const project = yield* requireProject(projectId);
       const bindToCurrentThread =
         input.bindToCurrentThread ??
-        (parent !== undefined && parent.thread.projectId === projectId);
+        (input.review === undefined &&
+          parent !== undefined &&
+          parent.thread.projectId === projectId);
+      if (input.review !== undefined && bindToCurrentThread) {
+        return yield* failure("invalid_request", reviewNeedsNoThread);
+      }
       if (bindToCurrentThread && (parent === undefined || parent.thread.projectId !== projectId)) {
         return yield* failure(
           "invalid_request",
@@ -2590,6 +2618,7 @@ const make = Effect.gen(function* () {
             : "new_thread",
         workspaceStrategy: yield* scheduledTaskWorkspaceStrategy(bindToCurrentThread, projectId),
         modelSelection,
+        ...(input.review === undefined ? {} : { agent: reviewAgent(input.review, undefined) }),
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
         createdBy: "agent",
@@ -2663,6 +2692,9 @@ const make = Effect.gen(function* () {
         if (input.target !== undefined && threadId !== null) {
           return yield* failure("invalid_request", targetNeedsNewThreads);
         }
+        if (input.review !== undefined && threadId !== null) {
+          return yield* failure("invalid_request", reviewNeedsNoThread);
+        }
         // Reset the workspace only when the binding flips, so unbinding cannot leave runs in the shared checkout.
         const workspaceStrategy =
           (threadId === null) === (existing.threadId === null)
@@ -2694,6 +2726,9 @@ const make = Effect.gen(function* () {
             existing.modelSelection,
             input.target,
           ),
+          ...(input.review === undefined
+            ? {}
+            : { agent: reviewAgent(input.review, existing.agent) }),
           runtimeMode: existing.runtimeMode,
           interactionMode: existing.interactionMode,
           createdBy: existing.createdBy,

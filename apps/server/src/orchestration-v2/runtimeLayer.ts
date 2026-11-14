@@ -3,7 +3,6 @@ import * as ContextRecords from "../threadInsights/ContextRecords.ts";
 import * as MonitoringStore from "../monitoring/MonitoringStore.ts";
 import * as MonitoringSnapshot from "../monitoring/MonitoringSnapshot.ts";
 import * as MonitoringRunner from "../monitoring/MonitoringRunner.ts";
-import * as MonitoringService from "../monitoring/MonitoringService.ts";
 import * as MonitoringDialogue from "../monitoring/MonitoringDialogue.ts";
 import * as MonitoringDelivery from "../monitoring/MonitoringDelivery.ts";
 import * as MonitoringFollowup from "../monitoring/MonitoringFollowup.ts";
@@ -367,15 +366,6 @@ const layerMonitoringRunnerProvided = MonitoringRunner.layer.pipe(
 const layerMonitoringFollowupProvided = MonitoringFollowup.layer.pipe(
   Layer.provide(Layer.mergeAll(layerMonitoringRunnerProvided, layerMonitoringSnapshotProvided)),
 );
-const layerMonitoringDialogueProvided = MonitoringDialogue.layer.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      MonitoringStore.layer,
-      layerMonitoringFollowupProvided,
-      layerMonitoringDeliveryProvided,
-    ),
-  ),
-);
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
   Layer.provide(GitVcsDriver.layer),
   Layer.provide(layerMonitoringRunnerProvided),
@@ -385,6 +375,16 @@ const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
       layerThreadManagementProvided,
       layerManagedProjectFoldersProvided,
       layerSecretRequestsProvided,
+    ),
+  ),
+);
+const layerMonitoringDialogueProvided = MonitoringDialogue.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      MonitoringStore.layer,
+      layerMonitoringFollowupProvided,
+      layerMonitoringDeliveryProvided,
+      layerScheduledTaskProvided,
     ),
   ),
 );
@@ -461,16 +461,6 @@ export const layer = Layer.mergeAll(
 
 export const layerProduction = Layer.mergeAll(
   layerMonitoringDialogueProvided,
-  MonitoringService.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        MonitoringStore.layer,
-        layerMonitoringRunnerProvided,
-        layerScheduledTaskProvided,
-        layerThreadManagementProvided,
-      ),
-    ),
-  ),
   WorktreeBranchSync.layer.pipe(
     Layer.provide(Layer.merge(layerThreadManagementProvided, ProjectionStore.layer)),
   ),

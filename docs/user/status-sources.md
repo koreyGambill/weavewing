@@ -1,7 +1,7 @@
 # External tool status
 
-Status sources show the health of external tools beside watcher alerts in the web and desktop
-apps. Open a source to see its current summary, individual checks, and last state transition.
+Status sources show the health of external tools in the inbox's Status panel in the web and
+desktop apps. Open a source to see its current summary, individual checks, and last state transition.
 Follow its tool link for history.
 
 Open **Settings > Status sources**, select an environment, and choose **Add source**. Checks run

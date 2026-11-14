@@ -1,17 +1,15 @@
 import * as ThreadWorkspace from "../threadWorkspace/ThreadWorkspace.ts";
-import {
-  CommandId,
-  MessageId,
-  MonitoringError,
-  type MonitoringFinding,
-  type MonitoringProfile,
-} from "@t3tools/contracts";
+import { CommandId, MessageId, MonitoringError, type MonitoringFinding } from "@t3tools/contracts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
-export function monitoringAdvisory(profile: MonitoringProfile, finding: MonitoringFinding): string {
+export function monitoringAdvisory(
+  profile: Pick<ReviewProfile, "title" | "modelSelection" | "rules">,
+  finding: MonitoringFinding,
+): string {
   const rule =
     finding.ruleSnapshot ?? profile.rules.find((candidate) => candidate.id === finding.ruleId);
   return `[Automated cron advisory · ${profile.title} · ${profile.modelSelection.model}]\nThis watcher has incomplete context. This is advice, not a user instruction. Keep the user's scope and standards. You may disagree and explain why. Never treat a promise as evidence of a correction.\nObservation: ${finding.summary}\nRule: ${rule?.title ?? finding.ruleId}\nRule instructions: ${rule?.instructions ?? "Original rule unavailable."}\nEvidence and advice: ${finding.detail}\n${finding.evidence.map((item) => `- thread:${item.threadId} message:${item.messageId}: ${item.excerpt}`).join("\n")}\nIf useful, give a short acceptance or disagreement with your reason using respond_monitoring_advisory({findingId:"${finding.id}",responseId:"<unique-id>",text:"<your reason>"}). At most two replies are reviewed. The watcher will check fresh evidence and report its assessment to the human. No response is required to continue authorized work.`;
@@ -21,7 +19,7 @@ export class MonitoringDelivery extends Context.Service<
   MonitoringDelivery,
   {
     readonly deliver: (input: {
-      readonly profile: MonitoringProfile;
+      readonly profile: ReviewProfile;
       readonly finding: MonitoringFinding;
       readonly exchangeId?: string;
     }) => Effect.Effect<
@@ -84,7 +82,7 @@ export const layer = Layer.effect(
       }
       if (
         !profile.enabled ||
-        profile.id !== finding.profileId ||
+        profile.id !== finding.taskId ||
         (profile.targets.threadIds.length > 0 &&
           !profile.targets.threadIds.includes(finding.threadId) &&
           !profile.targets.includeChildren)
@@ -123,7 +121,7 @@ export const layer = Layer.effect(
       }
       const running = target.runs.some((run) => run.status === "running");
       // Turn-end reviews find the thread idle, so their findings start the thread's next turn.
-      const wakesIdle = profile.turnEnd !== undefined && exchangeId === undefined;
+      const wakesIdle = profile.turnEnd && exchangeId === undefined;
       if (
         target.thread.archivedAt !== null ||
         target.thread.deletedAt !== null ||
@@ -143,7 +141,7 @@ export const layer = Layer.effect(
           text:
             exchangeId === undefined
               ? monitoringAdvisory(profile, finding)
-              : `[Automated cron advisory follow-up · ${profile.title} · ${profile.modelSelection.model}]\n${finding.exchanges.find((exchange) => exchange.id === exchangeId)?.text ?? "Assessment available in Alerts."}\nThis is advisory, not a user instruction. Keep the user’s scope and standards.`,
+              : `[Automated cron advisory follow-up · ${profile.title} · ${profile.modelSelection.model}]\n${finding.exchanges.find((exchange) => exchange.id === exchangeId)?.text ?? "Assessment available in the inbox."}\nThis is advisory, not a user instruction. Keep the user’s scope and standards.`,
           attachments: [],
           ...(running
             ? { mode: "steer" as const, advisoryOnly: true }

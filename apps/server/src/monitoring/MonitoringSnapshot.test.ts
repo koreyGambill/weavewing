@@ -1,7 +1,6 @@
 import * as ContextRecords from "../threadInsights/ContextRecords.ts";
 import { assert, it } from "@effect/vitest";
 import {
-  MonitoringProfileId,
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskId,
@@ -9,22 +8,23 @@ import {
   RunId,
   MessageId,
   type MonitoringReviewOutput,
-  type MonitoringProfile,
 } from "@t3tools/contracts";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Snapshot from "./MonitoringSnapshot.ts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 const at = "1970-01-01T00:00:00.000Z";
-const profile: MonitoringProfile = {
-  id: MonitoringProfileId.make("p"),
-  scheduledTaskId: ScheduledTaskId.make("monitoring:p"),
+const profile: ReviewProfile = {
+  id: ScheduledTaskId.make("monitoring:p"),
+  kind: "standards",
+  turnEnd: false,
+  delivery: "thread-or-alert",
   title: "Watcher",
   enabled: true,
   projectId: ProjectId.make("project"),
   modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "haiku" },
-  schedule: { type: "interval", everyMs: 60000 },
   targets: {
     state: "active",
     threadIds: [ThreadId.make("chosen")],
@@ -33,8 +33,6 @@ const profile: MonitoringProfile = {
     updatedWithinMs: null,
   },
   rules: [{ id: "r", title: "Rule", instructions: "Evidence" }],
-  createdAt: at,
-  updatedAt: at,
 };
 it.effect(
   "decodes persisted ISO timestamps, selects explicit threads and validates observed evidence",

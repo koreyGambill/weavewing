@@ -11,14 +11,13 @@ import {
   MonitoringError,
   ThreadWorkspaceError,
   MonitoringFindingId,
-  MonitoringProfileId,
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskId,
   ThreadId,
   MessageId,
   type MonitoringFinding,
-  type MonitoringProfile,
+  type ScheduledTask,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -28,14 +27,19 @@ import * as MonitoringDialogue from "./MonitoringDialogue.ts";
 import * as MonitoringDelivery from "./MonitoringDelivery.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as Notifications from "../notifications/NotificationService.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 
-const profile: MonitoringProfile = {
-  id: MonitoringProfileId.make("profile:watcher"),
+const profile: ReviewProfile = {
+  id: ScheduledTaskId.make("scheduled:watcher"),
   title: "Quality watcher",
+  kind: "standards",
   enabled: true,
+  turnEnd: false,
+  delivery: "thread-or-alert",
   projectId: ProjectId.make("project:test"),
   modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "haiku" },
-  schedule: { type: "interval", everyMs: 1_800_000 },
   targets: {
     state: "active",
     threadIds: [ThreadId.make("thread:main")],
@@ -44,13 +48,50 @@ const profile: MonitoringProfile = {
     updatedWithinMs: null,
   },
   rules: [{ id: "rule:test", title: "Verify changes", instructions: "Check evidence." }],
-  scheduledTaskId: ScheduledTaskId.make("scheduled:watcher"),
+};
+const task: ScheduledTask = {
+  id: profile.id,
+  title: profile.title,
+  prompt: "Read-only review",
+  enabled: true,
+  schedule: { type: "interval", everyMs: 1_800_000 },
+  projectId: profile.projectId,
+  threadId: null,
+  workspaceStrategy: { type: "root" },
+  modelSelection: profile.modelSelection,
+  agent: {
+    type: "review",
+    kind: "standards",
+    rules: profile.rules,
+    targets: profile.targets,
+    delivery: "thread-or-alert",
+  },
+  runtimeMode: "approval-required",
+  interactionMode: "default",
+  createdBy: "system",
+  creationSource: "server",
   createdAt: "2026-11-07T00:00:00Z",
   updatedAt: "2026-11-07T00:00:00Z",
+  nextRunAt: null,
+  lastRunAt: null,
+  lastRunStatus: "never",
+  lastRunError: null,
+  runCount: 0,
 };
+/** The review task and the inbox, recording each finding report the dialogue rewrites. */
+const reviewTaskAndInbox = (revised?: Ref.Ref<ReadonlyArray<string>>) =>
+  Layer.mergeAll(
+    Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+      list: () => Effect.succeed({ tasks: [task] }),
+    }),
+    Layer.mock(Notifications.NotificationService)({
+      reviseFinding: ({ body }) =>
+        revised === undefined ? Effect.void : Ref.update(revised, (all) => [...all, body]),
+    }),
+  );
 const finding: MonitoringFinding = {
   id: MonitoringFindingId.make("finding:test"),
-  profileId: profile.id,
+  taskId: profile.id,
   runId: "monitor:run",
   threadId: ThreadId.make("thread:main"),
   ruleId: "rule:test",
@@ -67,9 +108,6 @@ const finding: MonitoringFinding = {
   ],
   createdAt: "2026-11-07T00:00:00Z",
   updatedAt: "2026-11-07T00:00:00Z",
-  disposition: "open",
-  readAt: null,
-  snoozedUntil: null,
   exchanges: [],
   outcome: null,
 };
@@ -80,31 +118,16 @@ it.effect(
     Effect.gen(function* () {
       const stored = yield* Ref.make(finding);
       const reviews = yield* Ref.make(0);
+      const revised = yield* Ref.make<ReadonlyArray<string>>([]);
       const layer = MonitoringDialogue.layer.pipe(
         Layer.provide(
           Layer.mergeAll(
             Layer.succeed(MonitoringDelivery.MonitoringDelivery, {
               deliver: () => Effect.succeed({ delivery: "alert_only", messageId: null }),
             }),
+            reviewTaskAndInbox(revised),
             Layer.mock(MonitoringStore.MonitoringStore)({
               getFinding: () => Ref.get(stored),
-              getProfile: () =>
-                Effect.succeed({
-                  ...profile,
-                  title: "Changed watcher",
-                  modelSelection: { ...profile.modelSelection, model: "changed-model" },
-                }),
-              getRun: () =>
-                Effect.succeed({
-                  id: finding.runId,
-                  profileId: profile.id,
-                  startedAt: finding.createdAt,
-                  completedAt: finding.createdAt,
-                  status: "succeeded",
-                  targetThreadIds: [finding.threadId],
-                  error: null,
-                  profile,
-                }),
               saveFinding: (next) => Ref.set(stored, next),
             }),
             Layer.succeed(MonitoringDialogue.MonitoringFollowup, {
@@ -160,6 +183,10 @@ it.effect(
           .pipe(Effect.result);
         assert.equal(capped._tag, "Failure");
         assert.equal(yield* Ref.get(reviews), 2);
+        const reports = yield* Ref.get(revised);
+        assert.equal(reports.length, 2);
+        assert.include(reports[1], "**Outcome:** Accepted explanation");
+        assert.include(reports[1], "This test was outside the explicitly authorized task.");
       }).pipe(Effect.provide(layer));
     }),
 );
@@ -242,7 +269,7 @@ it.effect("keeps an alert without waking idle or unsupported agents and steers a
         })).delivery,
         "alert_only",
       );
-      const turnEnd = { ...profile, turnEnd: {} };
+      const turnEnd = { ...profile, turnEnd: true };
       const idleFinding = { ...finding, id: `${finding.id}-idle` as typeof finding.id };
       yield* Ref.set(status, "settled");
       assert.equal(
@@ -264,31 +291,16 @@ it.effect("keeps an alert without waking idle or unsupported agents and steers a
 it.effect("keeps the lead response when a fresh evidence review fails", () =>
   Effect.gen(function* () {
     const stored = yield* Ref.make(finding);
+    const revised = undefined;
     const layer = MonitoringDialogue.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(MonitoringDelivery.MonitoringDelivery, {
             deliver: () => Effect.succeed({ delivery: "alert_only", messageId: null }),
           }),
+          reviewTaskAndInbox(revised),
           Layer.mock(MonitoringStore.MonitoringStore)({
             getFinding: () => Ref.get(stored),
-            getProfile: () =>
-              Effect.succeed({
-                ...profile,
-                title: "Changed watcher",
-                modelSelection: { ...profile.modelSelection, model: "changed-model" },
-              }),
-            getRun: () =>
-              Effect.succeed({
-                id: finding.runId,
-                profileId: profile.id,
-                startedAt: finding.createdAt,
-                completedAt: finding.createdAt,
-                status: "succeeded",
-                targetThreadIds: [finding.threadId],
-                error: null,
-                profile,
-              }),
             saveFinding: (next) => Ref.set(stored, next),
           }),
           Layer.succeed(MonitoringDialogue.MonitoringFollowup, {
@@ -319,9 +331,9 @@ it.effect(
   "recovers a persisted reply and keeps the original rule with fresh correction evidence",
   () =>
     Effect.gen(function* () {
+      const revised = yield* Ref.make<ReadonlyArray<string>>([]);
       const stored = yield* Ref.make<MonitoringFinding>({
         ...finding,
-        readAt: finding.createdAt,
         ruleSnapshot: {
           id: "rule:test",
           title: "Original rule",
@@ -339,25 +351,9 @@ it.effect(
       const layer = MonitoringDialogue.layer.pipe(
         Layer.provide(
           Layer.mergeAll(
+            reviewTaskAndInbox(revised),
             Layer.mock(MonitoringStore.MonitoringStore)({
               getFinding: () => Ref.get(stored),
-              getProfile: () =>
-                Effect.succeed({
-                  ...profile,
-                  title: "Changed watcher",
-                  modelSelection: { ...profile.modelSelection, model: "changed-model" },
-                }),
-              getRun: () =>
-                Effect.succeed({
-                  id: finding.runId,
-                  profileId: profile.id,
-                  startedAt: finding.createdAt,
-                  completedAt: finding.createdAt,
-                  status: "succeeded",
-                  targetThreadIds: [finding.threadId],
-                  error: null,
-                  profile,
-                }),
               saveFinding: (next) => Ref.set(stored, next),
             }),
             Layer.succeed(MonitoringDelivery.MonitoringDelivery, {
@@ -394,7 +390,7 @@ it.effect(
           callerThreadId: finding.threadId,
         });
         assert.equal(result.finding.outcome, "corrected");
-        assert.equal(result.finding.readAt, null);
+        assert.equal((yield* Ref.get(revised)).length, 1);
         assert.equal(result.finding.exchanges.length, 2);
         const report = result.finding.exchanges[1]?.text ?? "";
         assert.include(report, "Rule: Original rule");

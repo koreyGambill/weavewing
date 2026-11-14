@@ -190,14 +190,12 @@ describe("thread tool signals", () => {
 
 describe("thread tools attention", () => {
   const quiet = { listCount: 0, questionCount: 0, ticketState: null } as const;
-  const calm = { state: "ok", unread: 0 } as const;
+  const calm = "ok";
   const empty = { unread: 0, severity: null } as const;
 
   it("shows nothing when nothing needs the user", () => {
     expect(threadToolsAttention(quiet, calm, empty)).toBeNull();
-    expect(
-      threadToolsAttention({ ...quiet, ticketState: "open" }, { ...calm, state: "unknown" }, empty),
-    ).toBeNull();
+    expect(threadToolsAttention({ ...quiet, ticketState: "open" }, "unknown", empty)).toBeNull();
     expect(threadToolsAttention(quiet, calm, { unread: 4, severity: "info" })).toBeNull();
   });
 
@@ -218,20 +216,15 @@ describe("thread tools attention", () => {
     expect(
       threadToolsAttention(
         { listCount: 3, questionCount: 2, ticketState: "needs_review" },
-        { state: "fail", unread: 1 },
+        "fail",
         empty,
       ),
     ).toEqual({
       tone: "alert",
-      summary:
-        "Status alert · 2 unanswered questions · 1 unread watcher alert · Ticket needs review · 3 open todos",
+      summary: "Status alert · 2 unanswered questions · Ticket needs review · 3 open todos",
     });
     expect(
-      threadToolsAttention(
-        { ...quiet, questionCount: 1, listCount: 1 },
-        { ...calm, state: "warn" },
-        empty,
-      ),
+      threadToolsAttention({ ...quiet, questionCount: 1, listCount: 1 }, "warn", empty),
     ).toEqual({
       tone: "question",
       summary: "1 unanswered question · Status warning · 1 open todo",

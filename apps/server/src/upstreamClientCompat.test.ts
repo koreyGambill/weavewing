@@ -5,6 +5,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   ASSISTANT_TEXT_PARTS_CAPABILITY,
+  AUTOMATIONS_CLIENT_CAPABILITY,
   EnvironmentHttpApi,
   MessageId,
   ORCHESTRATION_V2_WS_METHODS,
@@ -76,6 +77,20 @@ const MAX_DISCARDS = 2_000;
 const FORCED_SAMPLES_PER_LITERAL = 3;
 
 const upstreamClient = readClientWireCapabilities(SETTINGS_SECRET_REFERENCES_CAPABILITY);
+const reviewAgent: NonNullable<ScheduledTask["agent"]> = {
+  type: "review",
+  kind: "standards",
+  rules: [{ id: "rule", title: "Rule", instructions: "Check." }],
+  targets: {
+    state: "all",
+    threadIds: [],
+    includeChildren: false,
+    minAgeMs: 0,
+    updatedWithinMs: null,
+  },
+  delivery: "alerts",
+};
+const withoutAgent = ({ agent: _agent, ...task }: ScheduledTask): ScheduledTask => task;
 type Mapper = (value: never, client: ClientWireCapabilities) => unknown;
 const responseMappers: Readonly<Record<string, Mapper>> = responseForClient;
 const errorMappers: Readonly<Record<string, Mapper>> = errorForClient;
@@ -631,9 +646,11 @@ describe("upstream client wire compatibility", () => {
           PEER_LINK_UNAUTHORIZED_STATUS_CAPABILITY,
           TERMINAL_WORKSPACE_CHANGED_ERROR_CAPABILITY,
           SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY,
+          AUTOMATIONS_CLIENT_CAPABILITY,
         ].join(","),
       );
-      const [task] = (yield* sampleValues(ScheduledTask)) as ReadonlyArray<ScheduledTask>;
+      const [sample] = (yield* sampleValues(ScheduledTask)) as ReadonlyArray<ScheduledTask>;
+      const task = sample === undefined ? undefined : withoutAgent(sample);
       const [link] = (yield* sampleValues(PeerLinkSummary)) as ReadonlyArray<PeerLinkSummary>;
       if (task === undefined || link === undefined) throw new Error("no samples");
       const skipped = { task: { ...task, lastRunStatus: "skipped" as const } };
@@ -651,9 +668,10 @@ describe("upstream client wire compatibility", () => {
         ...task,
         schedule: { type: "event" as const, event: "run_ended" as const },
       };
-      const list = { tasks: [onEvent, once] };
+      const reviewing = { ...once, agent: reviewAgent };
+      const list = { tasks: [onEvent, once, reviewing] };
       const listTasks = responseForClient[WS_METHODS.scheduledTasksSubscribe];
-      expect(listTasks(list, forkClient).tasks).toEqual([onEvent, once]);
+      expect(listTasks(list, forkClient).tasks).toEqual([onEvent, once, reviewing]);
       expect(listTasks(list, upstreamClient).tasks.map(({ schedule }) => schedule)).toEqual([
         once.schedule,
       ]);
@@ -785,13 +803,19 @@ describe("upstream client wire compatibility", () => {
     "refuses upstream clients' changes to a task they cannot show before running them",
     () =>
       Effect.gen(function* () {
-        const [task] = (yield* sampleValues(ScheduledTask)) as ReadonlyArray<ScheduledTask>;
-        if (task === undefined) throw new Error("no samples");
+        const [sample] = (yield* sampleValues(ScheduledTask)) as ReadonlyArray<ScheduledTask>;
+        if (sample === undefined) throw new Error("no samples");
+        const task = withoutAgent(sample);
         const shown = { ...task, schedule: { type: "once" as const, runAt: task.createdAt } };
         const onEvent = {
           ...task,
           id: `${task.id}-event` as ScheduledTask["id"],
           schedule: { type: "event" as const, event: "thread_created" as const },
+        };
+        const onReview = {
+          ...shown,
+          id: `${task.id}-review` as ScheduledTask["id"],
+          agent: reviewAgent,
         };
         const ran: Array<string> = [];
         const record =
@@ -801,7 +825,7 @@ describe("upstream client wire compatibility", () => {
               return { id: input.id ?? shown.id, task: shown, threadId: null };
             });
         const service = {
-          list: () => Effect.succeed({ tasks: [shown, onEvent] }),
+          list: () => Effect.succeed({ tasks: [shown, onEvent, onReview] }),
           upsert: record("upsert"),
           setEnabled: record("setEnabled"),
           setThreadEnabled: record("setThreadEnabled"),
@@ -832,10 +856,10 @@ describe("upstream client wire compatibility", () => {
 
         const runNowRpc = upstreamRpcs.get(WS_METHODS.scheduledTasksRunNow);
         if (runNowRpc === undefined) throw new Error("upstream has no runNow");
-        for (const call of calls(onEvent.id)) {
+        for (const call of [...calls(onEvent.id), ...calls(onReview.id)]) {
           const refusal = yield* Effect.flip(call);
           expect(refusal).toBeInstanceOf(ScheduledTaskError);
-          expect(refusal.taskId).toBe(onEvent.id);
+          expect([onEvent.id, onReview.id]).toContain(refusal.taskId);
           const wire = toWire(ScheduledTaskError, refusal);
           expect(Exit.isSuccess(fromWire(errorOf(runNowRpc), wire))).toBe(true);
         }
@@ -852,7 +876,17 @@ describe("upstream client wire compatibility", () => {
           `listRuns ${shown.id}`,
           "upsert new",
         ]);
-        const forFork = readClientWireCapabilities(SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY);
+        const forFork = readClientWireCapabilities(
+          `${SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY},${AUTOMATIONS_CLIENT_CAPABILITY}`,
+        );
+        expect(
+          yield* Effect.flip(
+            scheduledTasksForClient(
+              service,
+              readClientWireCapabilities(SCHEDULED_TASK_EVENT_SCHEDULE_CAPABILITY),
+            ).runNow({ id: onReview.id }),
+          ),
+        ).toBeInstanceOf(ScheduledTaskError);
         expect(scheduledTasksForClient(service, forFork)).toBe(service);
       }),
   );

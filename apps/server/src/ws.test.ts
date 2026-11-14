@@ -1,5 +1,4 @@
 import * as ContextRecords from "./threadInsights/ContextRecords.ts";
-import * as MonitoringService from "./monitoring/MonitoringService.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
 import * as MonitoringDialogue from "./monitoring/MonitoringDialogue.ts";
 import * as ThreadMarks from "./threadWorkspace/ThreadMarks.ts";
@@ -819,7 +818,6 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.
 const layerUnusedConfigRpcServices = Layer.mergeAll(
-  Layer.mock(MonitoringService.MonitoringService)({}),
   Layer.mock(NotificationService.NotificationService)({}),
   Layer.mock(MonitoringDialogue.MonitoringDialogue)({}),
   Layer.mock(DocumentText.DocumentText)({}),
@@ -1078,6 +1076,7 @@ it.effect.each([
               peerLinkUnauthorizedStatus: true,
               terminalWorkspaceChangedError: true,
               scheduledTaskEventSchedule: true,
+              automations: true,
               assistantTextParts: true,
             },
           ).pipe(Layer.provide(configRpcServices)),
@@ -1240,6 +1239,7 @@ it.effect("access changes made while the snapshot loads reach the client after i
             peerLinkUnauthorizedStatus: true,
             terminalWorkspaceChangedError: true,
             scheduledTaskEventSchedule: true,
+            automations: true,
             assistantTextParts: true,
           },
         ).pipe(
@@ -1577,6 +1577,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
             peerLinkUnauthorizedStatus: true,
             terminalWorkspaceChangedError: true,
             scheduledTaskEventSchedule: true,
+            automations: true,
             assistantTextParts: true,
           },
         ).pipe(Layer.provide(configRpcServices)),
@@ -1944,6 +1945,7 @@ it.effect("a missing thread worktree gets its project's skills in the cwd snapsh
             peerLinkUnauthorizedStatus: true,
             terminalWorkspaceChangedError: true,
             scheduledTaskEventSchedule: true,
+            automations: true,
             assistantTextParts: true,
           },
         ).pipe(Layer.provide(services)),
@@ -2029,6 +2031,7 @@ it.effect("a git action that fails partway still refreshes the repository status
             peerLinkUnauthorizedStatus: true,
             terminalWorkspaceChangedError: true,
             scheduledTaskEventSchedule: true,
+            automations: true,
             assistantTextParts: true,
           },
         ).pipe(
@@ -2115,6 +2118,7 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
             peerLinkUnauthorizedStatus: true,
             terminalWorkspaceChangedError: true,
             scheduledTaskEventSchedule: true,
+            automations: true,
             assistantTextParts: true,
           },
         ).pipe(
@@ -2613,6 +2617,7 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
             peerLinkUnauthorizedStatus: true,
             terminalWorkspaceChangedError: true,
             scheduledTaskEventSchedule: true,
+            automations: true,
             assistantTextParts: true,
           },
         ).pipe(

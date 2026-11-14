@@ -2,7 +2,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
-  MonitoringProfileId,
   MonitoringError,
   ThreadId,
   MessageId,
@@ -11,9 +10,9 @@ import {
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskId,
-  type MonitoringProfile,
-  type MonitoringRun,
+  type ScheduledTask,
 } from "@t3tools/contracts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Deferred from "effect/Deferred";
@@ -27,15 +26,18 @@ import * as Delivery from "./MonitoringDelivery.ts";
 import * as Runner from "./MonitoringRunner.ts";
 import * as Snapshot from "./MonitoringSnapshot.ts";
 import * as Store from "./MonitoringStore.ts";
+import * as Notifications from "../notifications/NotificationService.ts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 
-const profile: MonitoringProfile = {
-  id: MonitoringProfileId.make("watcher"),
-  scheduledTaskId: ScheduledTaskId.make("monitoring:watcher"),
+const profile: ReviewProfile = {
+  id: ScheduledTaskId.make("monitoring:watcher"),
   title: "Standards",
+  kind: "standards",
   enabled: true,
+  turnEnd: false,
+  delivery: "thread-or-alert",
   projectId: ProjectId.make("project:test"),
   modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "haiku" },
-  schedule: { type: "interval", everyMs: 60000 },
   targets: {
     state: "active",
     threadIds: [],
@@ -44,77 +46,119 @@ const profile: MonitoringProfile = {
     updatedWithinMs: null,
   },
   rules: [{ id: "verify", title: "Verify", instructions: "Require observed evidence." }],
-  createdAt: "2026-11-07T00:00:00Z",
-  updatedAt: "2026-11-07T00:00:00Z",
 };
+
+function taskFor(review: ReviewProfile): ScheduledTask {
+  return {
+    id: review.id,
+    title: review.title,
+    prompt: "Read-only review",
+    enabled: review.enabled,
+    schedule: { type: "interval", everyMs: 60000 },
+    projectId: review.projectId,
+    threadId: null,
+    workspaceStrategy: { type: "root" },
+    modelSelection: review.modelSelection,
+    agent: {
+      type: "review",
+      kind: review.kind,
+      rules: review.rules,
+      targets: review.targets,
+      delivery: review.delivery,
+      ...(review.instructionFiles === undefined
+        ? {}
+        : { instructionFiles: review.instructionFiles }),
+    },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    createdBy: "system",
+    creationSource: "server",
+    createdAt: "2026-11-07T00:00:00Z",
+    updatedAt: "2026-11-07T00:00:00Z",
+    nextRunAt: null,
+    lastRunAt: null,
+    lastRunStatus: "never",
+    lastRunError: null,
+    runCount: 0,
+  };
+}
+const run = (review: ReviewProfile) =>
+  Effect.flatMap(Runner.MonitoringRunner, (runner) =>
+    runner.runTask({ task: taskFor(review), runId: null, threadId: null }),
+  );
+const notificationsLayer = (raised?: Ref.Ref<ReadonlyArray<Notifications.RaiseInput>>) =>
+  Layer.mock(Notifications.NotificationService)({
+    raise: (input) =>
+      (raised === undefined ? Effect.void : Ref.update(raised, (all) => [...all, input])).pipe(
+        Effect.as({
+          status: "delivered" as const,
+          notification: { id: `notification:${input.title}` } as never,
+        }),
+      ),
+  });
+const baseLayers = Layer.mergeAll(
+  NodeCrypto.layer,
+  NodeServices.layer,
+  NodeSqliteClient.layer({ filename: ":memory:" }),
+);
 
 it.effect(
   "records failed runs for an unavailable explicit model without choosing another provider",
   () =>
     Effect.gen(function* () {
-      const saved = yield* Ref.make<ReadonlyArray<MonitoringRun>>([]);
       const layer = Runner.layer.pipe(
         Layer.provide(
           Layer.mergeAll(
-            Layer.mock(Store.MonitoringStore)({
-              getProfile: () => Effect.succeed(profile),
-              saveRun: (run) => Ref.update(saved, (runs) => [...runs, run]),
-            }),
+            Layer.mock(Store.MonitoringStore)({}),
             Layer.mock(Snapshot.MonitoringSnapshot)({}),
             Layer.mock(Delivery.MonitoringDelivery)({}),
             Layer.mock(Registry.ProviderInstanceRegistry)({ getInstance: () => Effect.undefined }),
+            notificationsLayer(),
             ServerConfig.layerTest("/workspace", { prefix: "t3-monitor-runner-" }),
           ),
         ),
-        Layer.provide(Layer.merge(NodeCrypto.layer, NodeServices.layer)),
+        Layer.provide(baseLayers),
       );
-      const result = yield* Effect.flatMap(Runner.MonitoringRunner, (runner) =>
-        runner.run(profile.id),
-      ).pipe(Effect.provide(layer));
+      const result = yield* run(profile).pipe(Effect.provide(layer));
       assert.equal(result.status, "failed");
-      assert.equal(result.profile.modelSelection.model, "haiku");
-      assert.equal(result.completedAt !== null, true);
-      assert.deepEqual(
-        (yield* Ref.get(saved)).map((run) => run.status),
-        ["running", "failed"],
-      );
+      assert.include(result.error, "selected provider does not support monitoring");
+      assert.deepEqual(result.notificationIds, []);
     }).pipe(Effect.scoped),
 );
 
-it.effect("claims a profile before asynchronous lookup and releases it when interrupted", () =>
+it.effect("claims a review before its asynchronous work and releases it when interrupted", () =>
   Effect.gen(function* () {
     const entered = yield* Deferred.make<void>();
     const release = yield* Deferred.make<void>();
     const layer = Runner.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.mock(Store.MonitoringStore)({
-            getProfile: () =>
-              Deferred.succeed(entered, undefined).pipe(
-                Effect.andThen(Deferred.await(release)),
-                Effect.as(profile),
-              ),
-            saveRun: () => Effect.void,
-          }),
+          Layer.mock(Store.MonitoringStore)({}),
           Layer.mock(Snapshot.MonitoringSnapshot)({}),
           Layer.mock(Delivery.MonitoringDelivery)({}),
-          Layer.mock(Registry.ProviderInstanceRegistry)({ getInstance: () => Effect.undefined }),
+          Layer.mock(Registry.ProviderInstanceRegistry)({
+            getInstance: () =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.as(undefined),
+              ),
+          }),
+          notificationsLayer(),
           ServerConfig.layerTest("/workspace", { prefix: "t3-monitor-runner-" }),
         ),
       ),
-      Layer.provide(Layer.merge(NodeCrypto.layer, NodeServices.layer)),
+      Layer.provide(baseLayers),
     );
     yield* Effect.gen(function* () {
-      const runner = yield* Runner.MonitoringRunner;
-      const first = yield* runner.run(profile.id).pipe(Effect.forkChild);
+      const first = yield* run(profile).pipe(Effect.forkChild);
       yield* Deferred.await(entered);
-      const duplicate = yield* Effect.result(runner.run(profile.id));
+      const duplicate = yield* Effect.result(run(profile));
       assert.equal(duplicate._tag, "Failure");
       if (duplicate._tag === "Failure")
-        assert.equal(duplicate.failure.operation, "profile already running");
+        assert.equal(duplicate.failure.operation, "review already running");
       yield* Fiber.interrupt(first);
       yield* Deferred.succeed(release, undefined);
-      assert.equal((yield* runner.run(profile.id)).status, "failed");
+      assert.equal((yield* run(profile)).status, "failed");
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -123,15 +167,11 @@ it.effect("skips unchanged context after a successful review and reviews fresh r
   Effect.gen(function* () {
     const calls = yield* Ref.make(0);
     const newest = yield* Ref.make("1970-01-01T00:00:00.000Z");
-    const runs = yield* Ref.make<ReadonlyArray<MonitoringRun>>([]);
+    const lastReview = yield* Ref.make<string | null>(null);
     const selected = { ...profile, kind: "context-review" as const };
     const layer = runnerLayer(
-      selected,
       {
-        list: () =>
-          Ref.get(runs).pipe(Effect.map((runs) => ({ profiles: [selected], findings: [], runs }))),
-        saveRun: (run) =>
-          Ref.update(runs, (all) => [...all.filter((item) => item.id !== run.id), run]),
+        lastReviewAt: () => Ref.get(lastReview),
       },
       {
         capture: () =>
@@ -154,12 +194,13 @@ it.effect("skips unchanged context after a successful review and reviews fresh r
       () => Ref.update(calls, (n) => n + 1).pipe(Effect.as({ findings: [] })),
     );
     yield* Effect.gen(function* () {
-      const runner = yield* Runner.MonitoringRunner;
-      yield* runner.run(profile.id);
-      yield* runner.run(profile.id);
+      yield* run(selected);
+      // The service records each finished run; here the first one.
+      yield* Ref.set(lastReview, "1970-01-01T00:00:00.500Z");
+      yield* run(selected);
       assert.equal(yield* Ref.get(calls), 1);
       yield* Ref.set(newest, "1970-01-01T00:00:01.000Z");
-      yield* runner.run(profile.id);
+      yield* run(selected);
       assert.equal(yield* Ref.get(calls), 2);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
@@ -172,9 +213,7 @@ it.effect("deduplicates context proposals by the reviewed run set instead of exc
     const secondRun = yield* Ref.make("context:second");
     const selected = { ...profile, kind: "context-review" as const };
     const layer = runnerLayer(
-      selected,
       {
-        list: () => Effect.succeed({ profiles: [selected], findings: [], runs: [] }),
         getFinding: (id) =>
           Ref.get(findings).pipe(Effect.map((all) => all.find((item) => item.id === id) ?? null)),
         saveFinding: (finding) => Ref.update(findings, (all) => [...all, finding]),
@@ -222,13 +261,12 @@ it.effect("deduplicates context proposals by the reviewed run set instead of exc
         ),
     );
     yield* Effect.gen(function* () {
-      const runner = yield* Runner.MonitoringRunner;
-      yield* runner.run(profile.id);
+      yield* run(selected);
       yield* Ref.set(excerpt, "reads");
-      yield* runner.run(profile.id);
+      yield* run(selected);
       assert.equal((yield* Ref.get(findings)).length, 1);
       yield* Ref.set(secondRun, "context:third");
-      yield* runner.run(profile.id);
+      yield* run(selected);
       assert.equal((yield* Ref.get(findings)).length, 2);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
@@ -237,7 +275,6 @@ it.effect("deduplicates context proposals by the reviewed run set instead of exc
 it.effect("records reported model cost when a review fails", () =>
   Effect.gen(function* () {
     const layer = runnerLayer(
-      profile,
       {},
       {
         capture: () =>
@@ -266,16 +303,13 @@ it.effect("records reported model cost when a review fails", () =>
           ),
         ),
     );
-    const run = yield* Effect.flatMap(Runner.MonitoringRunner, (runner) =>
-      runner.run(profile.id),
-    ).pipe(Effect.provide(layer));
-    assert.equal(run.status, "failed");
-    assert.equal(run.costUsd, 0.012);
+    const outcome = yield* run(profile).pipe(Effect.provide(layer));
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.costUsd, 0.012);
   }).pipe(Effect.scoped),
 );
 
 function runnerLayer(
-  selected: MonitoringProfile,
   store: Partial<Store.MonitoringStore["Service"]>,
   snapshot: Snapshot.MonitoringSnapshot["Service"],
   generate: NonNullable<
@@ -283,15 +317,19 @@ function runnerLayer(
   >,
   deliver: Delivery.MonitoringDelivery["Service"]["deliver"] = () =>
     Effect.succeed({ delivery: "workspace", messageId: null }),
+  raised?: Ref.Ref<ReadonlyArray<Notifications.RaiseInput>>,
 ) {
   return Runner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(Store.MonitoringStore)({
-          getProfile: () => Effect.succeed(selected),
-          saveRun: () => Effect.void,
+          listOpenFindings: () => Effect.succeed([]),
+          lastReviewAt: () => Effect.succeed(null),
+          getFinding: () => Effect.succeed(null),
+          saveFinding: () => Effect.void,
           ...store,
         }),
+        notificationsLayer(raised),
         Layer.succeed(Snapshot.MonitoringSnapshot, snapshot),
         Layer.mock(Delivery.MonitoringDelivery)({ deliver }),
         Layer.mock(Registry.ProviderInstanceRegistry)({
@@ -314,7 +352,7 @@ function runnerLayer(
         ServerConfig.layerTest("/workspace", { prefix: "t3-monitor-runner-" }),
       ),
     ),
-    Layer.provide(Layer.merge(NodeCrypto.layer, NodeServices.layer)),
+    Layer.provide(baseLayers),
   );
 }
 
@@ -324,19 +362,12 @@ it.effect(
     Effect.gen(function* () {
       const proposals = yield* Ref.make<ReadonlyArray<MonitoringFinding>>([]);
       const attempts = yield* Ref.make(0);
-      const runs = yield* Ref.make<ReadonlyArray<MonitoringRun>>([]);
+      const lastReview = yield* Ref.make<string | null>(null);
       const selected = { ...profile, kind: "context-review" as const };
       const layer = runnerLayer(
-        selected,
         {
-          list: () =>
-            Effect.all({
-              profiles: Effect.succeed([selected]),
-              findings: Ref.get(proposals),
-              runs: Ref.get(runs),
-            }),
-          saveRun: (run) =>
-            Ref.update(runs, (all) => [...all.filter((item) => item.id !== run.id), run]),
+          listOpenFindings: () => Ref.get(proposals),
+          lastReviewAt: () => Ref.get(lastReview),
           getFinding: (id) =>
             Ref.get(proposals).pipe(
               Effect.map((all) => all.find((item) => item.id === id) ?? null),
@@ -388,10 +419,10 @@ it.effect(
           ),
       );
       yield* Effect.gen(function* () {
-        const runner = yield* Runner.MonitoringRunner;
-        yield* runner.run(profile.id);
+        yield* run(selected);
         assert.equal((yield* Ref.get(proposals)).length, 1);
-        yield* runner.run(profile.id);
+        yield* Ref.set(lastReview, "1970-01-01T00:00:00.500Z");
+        yield* run(selected);
         assert.equal(yield* Ref.get(attempts), 2);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
@@ -401,22 +432,15 @@ it.effect(
   "deduplicates context proposals across profiles reviewing the same thread and run set",
   () =>
     Effect.gen(function* () {
-      const first: MonitoringProfile = { ...profile, kind: "context-review" };
-      const second: MonitoringProfile = {
+      const first: ReviewProfile = { ...profile, kind: "context-review" };
+      const second: ReviewProfile = {
         ...first,
-        id: MonitoringProfileId.make("other-watcher"),
-        scheduledTaskId: ScheduledTaskId.make("monitoring:other-watcher"),
+        id: ScheduledTaskId.make("monitoring:other-watcher"),
       };
       const findings = yield* Ref.make<ReadonlyArray<MonitoringFinding>>([]);
       const deliveries = yield* Ref.make(0);
       const layer = runnerLayer(
-        first,
         {
-          getProfile: (id) => Effect.succeed(id === first.id ? first : second),
-          list: () =>
-            Ref.get(findings).pipe(
-              Effect.map((findings) => ({ profiles: [first, second], findings, runs: [] })),
-            ),
           getFinding: (id) =>
             Ref.get(findings).pipe(Effect.map((all) => all.find((item) => item.id === id) ?? null)),
           saveFinding: (finding) => Ref.update(findings, (all) => [...all, finding]),
@@ -461,9 +485,8 @@ it.effect(
           ),
       );
       yield* Effect.gen(function* () {
-        const runner = yield* Runner.MonitoringRunner;
-        yield* runner.run(first.id);
-        yield* runner.run(second.id);
+        yield* run(first);
+        yield* run(second);
         assert.equal((yield* Ref.get(findings)).length, 1);
         assert.equal(yield* Ref.get(deliveries), 1);
       }).pipe(Effect.provide(layer));
@@ -502,15 +525,10 @@ it.effect(
         instructionFiles: [instructions, path.join(dir, "missing.md"), large],
         includeProjectAgents: true,
       };
-      const layer = runnerLayer(
-        selected,
-        {},
-        { capture: () => Effect.succeed(snapshot) },
-        (input) => {
-          prompt = input.prompt;
-          return Effect.succeed({ findings: [] });
-        },
-      );
+      const layer = runnerLayer({}, { capture: () => Effect.succeed(snapshot) }, (input) => {
+        prompt = input.prompt;
+        return Effect.succeed({ findings: [] });
+      });
       yield* Effect.gen(function* () {
         const runner = yield* Runner.MonitoringRunner;
         yield* runner.review({
@@ -530,13 +548,12 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-it.effect("records the thread message a finding was sent as", () =>
+it.effect("raises each new finding in the inbox and records the message it was sent as", () =>
   Effect.gen(function* () {
     const findings = yield* Ref.make<ReadonlyArray<MonitoringFinding>>([]);
+    const raised = yield* Ref.make<ReadonlyArray<Notifications.RaiseInput>>([]);
     const layer = runnerLayer(
-      profile,
       {
-        list: () => Effect.succeed({ profiles: [profile], findings: [], runs: [] }),
         getFinding: () => Effect.succeed(null),
         saveFinding: (finding) => Ref.update(findings, (all) => [...all, finding]),
       },
@@ -575,10 +592,40 @@ it.effect("records the thread message a finding was sent as", () =>
           ],
         }),
       () => Effect.succeed({ delivery: "steered", messageId: MessageId.make("monitoring:sent") }),
+      raised,
     );
-    yield* Effect.flatMap(Runner.MonitoringRunner, (runner) => runner.run(profile.id)).pipe(
-      Effect.provide(layer),
+    const outcome = yield* Effect.flatMap(Runner.MonitoringRunner, (runner) =>
+      runner.runTask({ task: taskFor(profile), runId: "run:1", threadId: null }),
+    ).pipe(Effect.provide(layer));
+    const saved = yield* Ref.get(findings);
+    assert.equal(saved.at(-1)?.sentToThread?.messageId, "monitoring:sent");
+    assert.deepEqual(outcome, {
+      status: "notified",
+      notificationIds: ["notification:Landed without review"],
+      costUsd: undefined,
+    });
+    const [notification] = yield* Ref.get(raised);
+    assert.deepEqual(
+      {
+        severity: notification?.severity,
+        title: notification?.title,
+        source: notification?.source,
+        threadId: notification?.threadId,
+        projectId: notification?.projectId,
+      },
+      {
+        severity: "warning",
+        title: "Landed without review",
+        source: {
+          kind: "review",
+          scheduledTaskId: profile.id,
+          runId: "run:1",
+          findingId: saved[0]!.id,
+        },
+        threadId: ThreadId.make("thread"),
+        projectId: profile.projectId,
+      },
     );
-    assert.equal((yield* Ref.get(findings)).at(-1)?.sentToThread?.messageId, "monitoring:sent");
+    assert.include(notification?.body, "Pushed straight to main");
   }).pipe(Effect.scoped),
 );

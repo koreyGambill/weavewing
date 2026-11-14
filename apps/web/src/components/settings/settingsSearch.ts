@@ -239,13 +239,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["external tools stormwing health checks webhook command alerts snooze favicon"],
   },
   {
-    id: "watchers",
-    title: "Watchers and alerts",
-    to: "/settings/scheduled-tasks",
-    scope: "environment-defaults",
-    searchTerms: ["monitoring cron standards Haiku findings rules alerts snooze schedule advisory"],
-  },
-  {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
     title: "Keep worktrees with local changes",
@@ -1025,6 +1018,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "scheduled-tasks",
     title: "Scheduled tasks",
     to: "/settings/scheduled-tasks",
+    searchTerms: ["automations review watcher standards rules findings inbox advisory Haiku"],
   },
   {
     id: "agent-browser-access",

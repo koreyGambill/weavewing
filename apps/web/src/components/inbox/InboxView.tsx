@@ -37,10 +37,9 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { type InboxTab, useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import ChatMarkdown from "../ChatMarkdown";
 import { useScheduledTaskTitle } from "../chat/TimelineUserMessageRow";
-import { WatcherAlerts, useMonitoringSignal } from "../monitoring/WatcherAlerts";
 import { RelativeTime } from "../RelativeTime";
 import { StatusSourceDot } from "../statusSources/StatusSourceIcon";
-import { StatusSourcesList } from "../statusSources/StatusSources";
+import { StatusSourcesList, useStatusSignal } from "../statusSources/StatusSources";
 import { ToolHeaderButton } from "../threadToolsHost";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -513,18 +512,16 @@ function InboxDetail({ item, now, onBack }: { item: InboxItem; now: number; onBa
 }
 
 function StatusRow({ onOpen }: { onOpen: () => void }) {
-  const { state, groups, unread } = useMonitoringSignal();
-  const watchers = useWatchersSupported();
-  if (groups.length === 0 && !watchers) return null;
+  const { state, groups } = useStatusSignal();
+  if (groups.length === 0) return null;
   const sources = groups.flatMap((group) => group.sources ?? []);
   const failing = sources.filter((source) => source.latest.state === "fail").length;
   const warning = sources.filter((source) => source.latest.state === "warn").length;
-  const summary = [
-    failing ? `${failing} failing` : warning ? `${warning} warning${warning === 1 ? "" : "s"}` : "",
-    unread ? `${unread} watcher alert${unread === 1 ? "" : "s"}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const summary = failing
+    ? `${failing} failing`
+    : warning
+      ? `${warning} warning${warning === 1 ? "" : "s"}`
+      : "";
   return (
     <button
       type="button"
@@ -542,17 +539,10 @@ function StatusRow({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function useWatchersSupported() {
-  return useInboxEnvironments().some(
-    ({ environment }) => environment.serverConfig?.environment.capabilities.monitoring === true,
-  );
-}
-
-/** Status sources, watcher alerts until S6 folds them in, and the notification settings. */
+/** Status sources and the notification settings. */
 function StatusPanel() {
   const navigate = useNavigate();
-  const { groups } = useMonitoringSignal();
-  const watchers = useWatchersSupported();
+  const { groups } = useStatusSignal();
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <StatusSourcesList
@@ -561,7 +551,6 @@ function StatusPanel() {
           void navigate({ to: "/settings/status-sources", search: { machine } })
         }
       />
-      {watchers ? <WatcherAlerts /> : null}
       <div className="border-t border-border p-3">
         <Button
           variant="ghost"

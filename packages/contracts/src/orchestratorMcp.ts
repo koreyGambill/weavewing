@@ -28,6 +28,11 @@ import {
   ScheduledTaskUpsertSchedule,
 } from "./scheduledTask.ts";
 import { ProviderInteractionMode, ProviderRequestKind, RuntimeMode } from "./providerPolicy.ts";
+import {
+  MAX_REVIEW_INSTRUCTION_FILES,
+  MAX_REVIEW_RULES,
+  ReviewInstructionFile,
+} from "./monitoring.ts";
 import { PullRequestState } from "./pullRequest.ts";
 import {
   ThreadLinkedPullRequest,
@@ -796,6 +801,19 @@ export const OrchestratorMcpScheduleTarget = Schema.Struct({
 });
 export type OrchestratorMcpScheduleTarget = typeof OrchestratorMcpScheduleTarget.Type;
 
+export const OrchestratorMcpScheduleReview = Schema.Struct({
+  rules: Schema.Array(
+    Schema.Struct({ title: TrimmedNonEmptyString, instructions: TrimmedNonEmptyString }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_REVIEW_RULES)),
+  instructionFiles: Schema.optional(
+    Schema.Array(ReviewInstructionFile).check(Schema.isMaxLength(MAX_REVIEW_INSTRUCTION_FILES)),
+  ),
+}).annotate({
+  description:
+    "Review threads against these rules, tool-less, instead of a turn; findings go to the user's inbox. A run_ended event reviews each ended turn.",
+});
+export type OrchestratorMcpScheduleReview = typeof OrchestratorMcpScheduleReview.Type;
+
 export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
   environmentId: OrchestratorMcpEnvironmentTarget,
   projectId: OrchestratorMcpProjectTarget,
@@ -816,6 +834,7 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
     }),
   ),
   target: Schema.optional(OrchestratorMcpScheduleTarget),
+  review: Schema.optional(OrchestratorMcpScheduleReview),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
@@ -838,6 +857,7 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   projectId: ProjectId,
   boundThreadId: Schema.NullOr(ThreadId),
   freshSession: Schema.Boolean,
+  kind: Schema.Literals(["turn", "review"]),
   schedule: ScheduledTaskSchedule,
   model: Schema.Struct({
     providerInstanceId: ProviderInstanceId,
@@ -886,6 +906,7 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
   bindToCurrentThread: Schema.optional(Schema.Boolean),
   freshSession: Schema.optional(Schema.Boolean),
   target: Schema.optional(OrchestratorMcpScheduleTarget),
+  review: Schema.optional(OrchestratorMcpScheduleReview),
 });
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;

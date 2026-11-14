@@ -177,6 +177,8 @@ export interface CandidateTask {
   readonly id: ScheduledTaskId;
   readonly schedule: ScheduledTaskEventSchedule;
   readonly disabledThreadIds: ReadonlyArray<ThreadId>;
+  /** A review sends findings to the thread; the turn that answers one must not start another review. */
+  readonly reviewsThreads?: boolean;
 }
 
 /**
@@ -211,14 +213,16 @@ export const recordEventFact = Effect.fn("ScheduledTaskEventTriggers.recordEvent
   const [origin] =
     fact.runUserMessageId === undefined
       ? []
-      : yield* sql<{ task_id: string | null }>`
-          SELECT json_extract(payload_json, '$.scheduledTaskId') AS task_id
+      : yield* sql<{ task_id: string | null; advisory: number }>`
+          SELECT json_extract(payload_json, '$.scheduledTaskId') AS task_id,
+            coalesce(json_extract(payload_json, '$.origin.event'), '') LIKE 'monitoring%' AS advisory
           FROM orchestration_v2_projection_messages WHERE message_id = ${fact.runUserMessageId}`;
   const lineage = thread?.lineage ?? [];
   const moved: ScheduledTaskId[] = [];
   for (const task of matching) {
     // A task's own turns and the threads it started never retrigger it.
-    if (origin?.task_id === task.id) continue;
+    if (origin?.task_id === task.id || (task.reviewsThreads === true && origin?.advisory === 1))
+      continue;
     const queued = yield* sql.withTransaction(
       Effect.gen(function* () {
         if (lineage.length > 0) {

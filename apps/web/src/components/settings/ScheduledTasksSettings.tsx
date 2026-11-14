@@ -125,7 +125,6 @@ import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/men
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "../ui/empty";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { MonitoringSettings } from "../monitoring/MonitoringSettings";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -148,6 +147,13 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { randomUUID } from "../../lib/utils";
+import { ReviewAgentFields } from "./ReviewAgentFields";
+import {
+  newReviewDraft,
+  reviewAgentFromDraft,
+  reviewDraftFromAgent,
+} from "./reviewAgentDraft.logic";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
@@ -205,6 +211,7 @@ const EMPTY_DRAFT: DraftState = {
   filters: [],
   savedFilters: [],
   ...EVENT_DRAFT_DEFAULTS,
+  review: null,
 };
 
 const EVENT_KIND_LABELS: Record<DraftState["eventKind"], string> = {
@@ -717,8 +724,6 @@ export function ScheduledTasksSettings(target: {
   };
   const defaultEnvironment = environment ?? connectedEnvironments[0];
   const linkedEnvironmentId = target.environmentId ?? defaultEnvironment?.environmentId;
-  const watcherEnvironmentId =
-    target.environmentId ?? environment?.environmentId ?? environments[0]?.environmentId;
   const linkedEnvironmentConnected = environments.some(
     (entry) =>
       entry.environmentId === linkedEnvironmentId &&
@@ -831,9 +836,6 @@ export function ScheduledTasksSettings(target: {
           </div>
         )}
       </SettingsSection>
-      {watcherEnvironmentId !== undefined && (
-        <MonitoringSettings key={watcherEnvironmentId} environmentId={watcherEnvironmentId} />
-      )}
       {editor ? (
         <ScheduledTaskEditorDialog
           key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
@@ -1710,6 +1712,9 @@ function ScheduledTaskEditorForm({
     environment?.serverConfig?.environment.capabilities.scheduledTaskThreadModes === true;
   const eventTriggersSupported =
     environment?.serverConfig?.environment.capabilities.eventTriggers === true;
+  const offersReview =
+    environment?.serverConfig?.environment.capabilities.automations === true ||
+    task?.agent?.type === "review";
   const connected =
     environment?.connection.phase === "connected" && environment.serverConfig !== null;
   const tasksQuery = useEnvironmentQuery(
@@ -1803,9 +1808,14 @@ function ScheduledTaskEditorForm({
     )
       return;
     const selection = activeSelection;
+    const review = draft.review === null ? null : reviewAgentFromDraft(draft.review);
+    if (review !== null && "error" in review) {
+      reportFailure("Review is incomplete", review.error);
+      return;
+    }
     if (
       !draft.title.trim() ||
-      !draft.prompt.trim() ||
+      (review === null && !draft.prompt.trim()) ||
       !projects.some((project) => project.id === selectedProjectId) ||
       selection === null
     ) {
@@ -1879,7 +1889,7 @@ function ScheduledTaskEditorForm({
     const input: ScheduledTaskUpsertInput = {
       ...(draft.editingId ? { id: draft.editingId as ScheduledTaskId, requireExisting: true } : {}),
       title: draft.title.trim(),
-      prompt: draft.prompt.trim(),
+      prompt: draft.prompt.trim() || "Read-only review",
       enabled: draft.enabled,
       schedule,
       projectId: selectedProjectId as ProjectId,
@@ -1887,6 +1897,11 @@ function ScheduledTaskEditorForm({
       ...(offersThreadModes ? { threadMode: draft.threadMode } : {}),
       workspaceStrategy,
       modelSelection,
+      ...(review !== null
+        ? { agent: review.agent }
+        : liveTask?.agent?.type === "review"
+          ? { agent: { type: "turn" as const } }
+          : {}),
       // Tasks have no mode picker; a mode above the administrator's ceiling would fail every run.
       runtimeMode:
         clampManagedRuntimeMode(environment?.serverConfig?.managedPolicy, draft.runtimeMode) ??
@@ -2008,29 +2023,59 @@ function ScheduledTaskEditorForm({
             />
           </Field>
 
-          <ScheduledTaskDestination
-            environmentId={environmentId}
-            projectId={selectedProjectId}
-            threadId={draft.threadId ? (draft.threadId as ThreadId) : null}
-            threadMode={draft.threadMode}
-            disabled={saving || !connected}
-            onSelect={(thread) =>
-              setDraft((current) =>
-                thread === null
-                  ? { ...unbindDraftFromThread(current), threadMode: "new_thread" }
-                  : moveDraftToThread(current, thread),
-              )
-            }
-            onThreadModeChange={
-              offersThreadModes
-                ? (threadMode) =>
+          {offersReview ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label>Each run</Label>
+              <ToggleGroup
+                aria-label="What each run does"
+                value={[draft.review === null ? "turn" : "review"]}
+                onValueChange={(values) => {
+                  const kind = values[0];
+                  if (kind === "turn") setDraft((current) => ({ ...current, review: null }));
+                  if (kind === "review")
                     setDraft((current) => ({
-                      ...(threadMode === "new_thread" ? unbindDraftFromThread(current) : current),
-                      threadMode,
-                    }))
-                : undefined
-            }
-          />
+                      ...unbindDraftFromThread(current),
+                      threadMode: "new_thread",
+                      workspaceMode: "root",
+                      review:
+                        current.review ??
+                        (liveTask?.agent?.type === "review"
+                          ? reviewDraftFromAgent(liveTask.agent)
+                          : newReviewDraft(randomUUID())),
+                    }));
+                }}
+              >
+                <Toggle value="turn">Runs an agent</Toggle>
+                <Toggle value="review">Reviews threads</Toggle>
+              </ToggleGroup>
+            </div>
+          ) : null}
+
+          {draft.review === null ? (
+            <ScheduledTaskDestination
+              environmentId={environmentId}
+              projectId={selectedProjectId}
+              threadId={draft.threadId ? (draft.threadId as ThreadId) : null}
+              threadMode={draft.threadMode}
+              disabled={saving || !connected}
+              onSelect={(thread) =>
+                setDraft((current) =>
+                  thread === null
+                    ? { ...unbindDraftFromThread(current), threadMode: "new_thread" }
+                    : moveDraftToThread(current, thread),
+                )
+              }
+              onThreadModeChange={
+                offersThreadModes
+                  ? (threadMode) =>
+                      setDraft((current) => ({
+                        ...(threadMode === "new_thread" ? unbindDraftFromThread(current) : current),
+                        threadMode,
+                      }))
+                  : undefined
+              }
+            />
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Project" htmlFor="scheduled-task-project">
@@ -2063,26 +2108,28 @@ function ScheduledTaskEditorForm({
               </Select>
             </Field>
 
-            <Field label="Workspace" htmlFor="scheduled-task-workspace">
-              <Select
-                value={draft.workspaceMode}
-                onValueChange={(value) =>
-                  setDraft((current) => ({ ...current, workspaceMode: value as WorkspaceMode }))
-                }
-              >
-                <SelectTrigger size="sm" id="scheduled-task-workspace">
-                  <SelectValue>{WORKSPACE_MODE_LABELS[draft.workspaceMode]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="worktree">Create a new worktree</SelectItem>
-                  <SelectItem value="root">Use the project checkout</SelectItem>
-                  <SelectItem value="existing_worktree">Use a specific checkout</SelectItem>
-                </SelectPopup>
-              </Select>
-            </Field>
+            {draft.review === null ? (
+              <Field label="Workspace" htmlFor="scheduled-task-workspace">
+                <Select
+                  value={draft.workspaceMode}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, workspaceMode: value as WorkspaceMode }))
+                  }
+                >
+                  <SelectTrigger size="sm" id="scheduled-task-workspace">
+                    <SelectValue>{WORKSPACE_MODE_LABELS[draft.workspaceMode]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="worktree">Create a new worktree</SelectItem>
+                    <SelectItem value="root">Use the project checkout</SelectItem>
+                    <SelectItem value="existing_worktree">Use a specific checkout</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </Field>
+            ) : null}
           </div>
 
-          {draft.workspaceMode === "worktree" ? (
+          {draft.review === null && draft.workspaceMode === "worktree" ? (
             <Field label="Base branch" htmlFor="scheduled-task-base-ref">
               <WorktreeBaseBranchPicker
                 key={`${environmentId}:${selectedProjectId}`}
@@ -2099,7 +2146,7 @@ function ScheduledTaskEditorForm({
               />
             </Field>
           ) : null}
-          {draft.workspaceMode === "existing_worktree" ? (
+          {draft.review === null && draft.workspaceMode === "existing_worktree" ? (
             <Field label="Checkout path" htmlFor="scheduled-task-checkout">
               <Input
                 id="scheduled-task-checkout"
@@ -2118,18 +2165,31 @@ function ScheduledTaskEditorForm({
             </Field>
           ) : null}
 
-          <Field label="Prompt" htmlFor="scheduled-task-prompt">
-            <Textarea
-              id="scheduled-task-prompt"
-              className="max-h-64 overflow-y-auto"
-              placeholder="What should the agent do each time this runs?"
-              value={draft.prompt}
-              readOnly={draft.scheduleMode === "idle_checkin"}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, prompt: event.target.value }))
+          {draft.review !== null ? (
+            <ReviewAgentFields
+              draft={draft.review}
+              onChange={(update) =>
+                setDraft((current) =>
+                  current.review === null
+                    ? current
+                    : { ...current, review: update(current.review) },
+                )
               }
             />
-          </Field>
+          ) : (
+            <Field label="Prompt" htmlFor="scheduled-task-prompt">
+              <Textarea
+                id="scheduled-task-prompt"
+                className="max-h-64 overflow-y-auto"
+                placeholder="What should the agent do each time this runs?"
+                value={draft.prompt}
+                readOnly={draft.scheduleMode === "idle_checkin"}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, prompt: event.target.value }))
+                }
+              />
+            </Field>
+          )}
 
           <Field label="Model">
             <div>

@@ -4,10 +4,10 @@ import {
   OrchestrationV2AppThreadJson,
   OrchestrationV2ConversationMessageJson,
   type OrchestrationV2AppThread,
-  type MonitoringProfile,
   type MonitoringReviewOutput,
   ThreadId,
 } from "@t3tools/contracts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -41,7 +41,7 @@ export interface MonitoringSnapshotData {
 }
 
 function monitoringTargetMatches(
-  profile: MonitoringProfile,
+  profile: ReviewProfile,
   thread: OrchestrationV2AppThread,
   now: number,
 ): boolean {
@@ -63,7 +63,7 @@ function monitoringTargetMatches(
 
 export function validateMonitoringEvidence(
   output: MonitoringReviewOutput,
-  profile: MonitoringProfile,
+  profile: ReviewProfile,
   snapshot: MonitoringSnapshotData,
 ): boolean {
   return output.findings.every(
@@ -90,7 +90,7 @@ export class MonitoringSnapshot extends Context.Service<
   MonitoringSnapshot,
   {
     readonly capture: (
-      profile: MonitoringProfile,
+      profile: ReviewProfile,
       threadId?: ThreadId,
     ) => Effect.Effect<MonitoringSnapshotData, MonitoringError>;
   }

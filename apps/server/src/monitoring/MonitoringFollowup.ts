@@ -1,9 +1,5 @@
-import {
-  MonitoringAssessment,
-  MonitoringError,
-  type MonitoringProfile,
-  type MonitoringFinding,
-} from "@t3tools/contracts";
+import { MonitoringAssessment, MonitoringError, type MonitoringFinding } from "@t3tools/contracts";
+import type { ReviewProfile } from "./ReviewProfile.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -16,7 +12,7 @@ import * as MonitoringDialogue from "./MonitoringDialogue.ts";
 const decodeAssessment = Schema.decodeEffect(MonitoringAssessment);
 
 function reassessmentPrompt(
-  profile: MonitoringProfile,
+  profile: ReviewProfile,
   finding: MonitoringFinding,
   leadResponse: string,
   snapshot: MonitoringSnapshot.MonitoringSnapshotData,
