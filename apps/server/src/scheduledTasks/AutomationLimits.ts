@@ -142,7 +142,8 @@ const candidateForThread = Effect.fn("AutomationLimits.candidateForThread")(func
 
 /**
  * The run whose limits the thread's latest run shares: the newest one a schedule or a person
- * started. Turns an agent sent (follow-ups, delegated results) belong to the run before them.
+ * started. Turns an agent sent (follow-ups, delegated results) belong to the run before them, and
+ * a queued turn owns nothing until it starts.
  */
 const ownerRun = Effect.fn("AutomationLimits.ownerRun")(function* (threadId: ThreadId) {
   const sql = yield* SqlClient.SqlClient;
@@ -151,7 +152,7 @@ const ownerRun = Effect.fn("AutomationLimits.ownerRun")(function* (threadId: Thr
     FROM orchestration_v2_projection_runs r
     LEFT JOIN orchestration_v2_projection_messages m
       ON m.message_id = json_extract(r.payload_json, '$.userMessageId')
-    WHERE r.thread_id = ${threadId}
+    WHERE r.thread_id = ${threadId} AND r.status <> 'queued'
       AND json_extract(m.payload_json, '$.senderThreadId') IS NULL
       AND json_type(m.payload_json, '$.delegatedCompletion') IS NULL
     ORDER BY r.ordinal DESC LIMIT 1`.pipe(NodeSqliteClient.readOnly);
@@ -173,6 +174,7 @@ const spawningRun = Effect.fn("AutomationLimits.spawningRun")(function* (
     JOIN orchestration_v2_projection_runs spawn ON spawn.run_id = task.run_id
     JOIN orchestration_v2_projection_runs owner
       ON owner.thread_id = spawn.thread_id AND owner.ordinal <= spawn.ordinal
+        AND owner.status <> 'queued'
     LEFT JOIN orchestration_v2_projection_messages m
       ON m.message_id = json_extract(owner.payload_json, '$.userMessageId')
     WHERE task.thread_id = ${threadId} AND task.child_thread_id = ${childThreadId}
@@ -427,8 +429,13 @@ export const layer = Layer.effect(
       readonly models: ReadonlyArray<{ readonly instanceId: string; readonly model: string }>;
     }) {
       const scope = yield* forThread(input.callerThreadId);
-      const limit = scope?.grant.subagents;
-      if (scope === null || limit === undefined || input.models.length === 0) return;
+      if (scope === null || input.models.length === 0) return;
+      const limit = scope.grant.subagents;
+      if (limit === undefined) {
+        // A budget-only run takes no new subagents once stopped.
+        if (scope.grant.budget !== undefined) yield* openRun(scope);
+        return;
+      }
       const allowed = limit.models.length === 0 ? [scope.modelSelection] : limit.models;
       const allowedText = allowed.map((model) => `${model.instanceId}/${model.model}`).join(", ");
       for (const { instanceId, model } of input.models) {

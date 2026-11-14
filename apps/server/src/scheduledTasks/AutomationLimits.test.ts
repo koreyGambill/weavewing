@@ -166,12 +166,19 @@ it.effect("limits a task's own threads, and only its runs in a thread a person s
       message: { scheduledTaskId: "task:user" },
     });
     assert.equal(yield* scopeOf("thread:user"), "task:user");
+    const setStatus = (runId: string, status: string) =>
+      sql`UPDATE orchestration_v2_projection_runs SET status = ${status} WHERE run_id = ${runId}`;
+    // A turn the person queues during the task's run owns nothing until it starts.
     yield* insertRun(sql, {
       id: "orun:user-chat",
       threadId: "thread:user",
       ordinal: 2,
+      status: "queued",
       message: {},
     });
+    assert.equal(yield* scopeOf("thread:user"), "task:user");
+    yield* setStatus("orun:user-task", "completed");
+    yield* setStatus("orun:user-chat", "running");
     assert.equal(yield* scopeOf("thread:user"), null);
     // An agent's follow-up keeps the run it follows: still the person's.
     yield* insertRun(sql, {
@@ -181,6 +188,30 @@ it.effect("limits a task's own threads, and only its runs in a thread a person s
       message: { senderThreadId: "thread:user" },
     });
     assert.equal(yield* scopeOf("thread:user"), null);
+    // The task's next run, queued behind the person's turn, doesn't limit that turn.
+    yield* insertRun(sql, {
+      id: "orun:user-task-next",
+      threadId: "thread:user",
+      ordinal: 4,
+      status: "queued",
+      message: { scheduledTaskId: "task:user" },
+    });
+    assert.equal(yield* scopeOf("thread:user"), null);
+
+    // In a thread the task started, a turn the person queues doesn't take over the running one.
+    const ownedRun = () =>
+      AutomationLimits.automationForThread(ThreadId.make(owned)).pipe(
+        Effect.map((scope) => scope?.runId),
+      );
+    assert.equal(yield* ownedRun(), "orun:owned");
+    yield* insertRun(sql, {
+      id: "orun:owned-queued",
+      threadId: owned,
+      ordinal: 2,
+      status: "queued",
+      message: {},
+    });
+    assert.equal(yield* ownedRun(), "orun:owned");
 
     // A delegated thread keeps the run that spawned it: one from the task's run stays limited
     // while the person's turn runs, and so does its own delegated thread; one from the person's
@@ -409,6 +440,13 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
       } as never);
       yield* Deferred.await(barrier);
       assert.deepEqual(yield* Ref.get(interrupts), [owned]);
+      // A stopped run takes no new subagents, a budget-only one included.
+      assert.include(
+        yield* failure(
+          limits.admitSubagents({ callerThreadId: ThreadId.make(owned), models: [haiku] }),
+        ),
+        "It continues at its next scheduled run.",
+      );
 
       // However many follow-ups came before, the agent's turns share the run's budget.
       for (let ordinal = 2; ordinal < 62; ordinal++) {
