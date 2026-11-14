@@ -1124,7 +1124,13 @@ function ScheduledTaskRow({
   return (
     <SettingsRow
       title={task.title}
-      description={<span className="line-clamp-2">{task.prompt}</span>}
+      description={
+        <span className="line-clamp-2">
+          {task.agent?.type === "review"
+            ? `Reviews threads against ${task.agent.rules.length === 1 ? "1 rule" : `${task.agent.rules.length} rules`}: ${task.agent.rules.map((rule) => rule.title).join(", ")}`
+            : task.prompt}
+        </span>
+      }
       status={
         <div className="flex flex-wrap items-center gap-2">
           <span>
