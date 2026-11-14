@@ -234,3 +234,105 @@ it.effect(
       ),
     ),
 );
+
+it.effect("windows a turn-end snapshot to messages after each thread's watermark", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const time = (second: number) => `1970-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+    for (const id of ["root", "busy"]) {
+      const payload = JSON.stringify({
+        id,
+        projectId: "project",
+        title: id,
+        providerInstanceId: "claude",
+        modelSelection: { instanceId: "claude", model: "haiku" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+        forkedFrom: null,
+        createdBy: "user",
+        creationSource: "web",
+        createdAt: at,
+        updatedAt: at,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+      });
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},'project',${id},'claude','full-access','default',${at},${at},${payload})`;
+    }
+    const message = (threadId: string, id: string, second: number, streaming = false) => {
+      const payload = JSON.stringify({
+        id,
+        threadId,
+        runId: null,
+        nodeId: null,
+        role: "assistant",
+        text: `text ${id}`,
+        attachments: [],
+        streaming,
+        createdAt: time(second),
+        updatedAt: time(second),
+        createdBy: "agent",
+        creationSource: "server",
+      });
+      return sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES (${id},${threadId},'assistant',${streaming ? 1 : 0},${time(second)},${time(second)},${payload})`;
+    };
+    for (const [id, second] of [
+      ["root:1", 1],
+      ["root:2", 2],
+      ["root:3a", 3],
+      ["root:3b", 3],
+      ["root:4", 4],
+      ["root:6", 6],
+    ] as const)
+      yield* message("root", id, second);
+    yield* message("root", "root:5", 5, true);
+    for (let second = 1; second <= 45; second++)
+      yield* message("busy", `busy:${String(second).padStart(2, "0")}`, second);
+    const snapshots = yield* Snapshot.MonitoringSnapshot;
+    const turnEnd = { ...profile, targets: { ...profile.targets, threadIds: [] } };
+    const mark = (id: string, second: number) => ({ createdAt: time(second), messageId: id });
+    const labels = (snapshot: Snapshot.MonitoringSnapshotData) =>
+      snapshot.threads.map((thread) =>
+        thread.messages.map((m) => `${m.id}${m.priorContext ? " (context)" : ""}`),
+      );
+    // A message sharing the mark's timestamp is new; one still streaming holds back what follows it.
+    const windowed = yield* snapshots.capture(turnEnd, ThreadId.make("root"), {
+      root: mark("root:3a", 3),
+    });
+    assert.deepEqual(labels(windowed), [
+      ["root:2 (context)", "root:3a (context)", "root:3b", "root:4"],
+    ]);
+    assert.deepEqual(windowed.reviewedThrough, { root: mark("root:4", 4) });
+    const caughtUp = yield* snapshots.capture(turnEnd, ThreadId.make("root"), {
+      root: mark("root:4", 4),
+    });
+    assert.isTrue(caughtUp.threads[0]?.messages.every((m) => m.priorContext));
+    assert.deepEqual(caughtUp.reviewedThrough, { root: mark("root:4", 4) });
+    // Past 40 new messages, the oldest 40 are reviewed and the rest wait for the next window.
+    const backlog = yield* snapshots.capture(turnEnd, ThreadId.make("busy"), {
+      busy: mark("busy:01", 1),
+    });
+    assert.equal(backlog.threads[0]?.messages.filter((m) => !m.priorContext)[0]?.id, "busy:02");
+    assert.deepEqual(backlog.reviewedThrough, { busy: mark("busy:41", 41) });
+    assert.isTrue(backlog.truncated);
+    const full = yield* snapshots.capture(turnEnd, ThreadId.make("root"));
+    assert.equal(full.reviewedThrough, undefined);
+    assert.deepEqual(
+      full.threads.map((thread) => thread.messages.length),
+      [6],
+    );
+  }).pipe(
+    Effect.provide(
+      Snapshot.layer.pipe(
+        Layer.provide(Layer.mock(ContextRecords.ContextRecords)({})),
+        Layer.provideMerge(Sqlite.layerMemory),
+      ),
+    ),
+  ),
+);
