@@ -4041,6 +4041,11 @@ export default function ChatView(props: ChatViewProps) {
           <ThreadTileWorkspace
             key={activeThreadKey}
             threadRef={activeThreadRef}
+            projectId={activeProject?.id ?? null}
+            newThread={
+              draftThread !== null &&
+              (!isServerThread || (serverProjection !== null && activeMessageCount === 0))
+            }
             header={conversationHeader}
             conversation={conversationColumn}
             panels={tiledPanels}

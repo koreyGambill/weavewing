@@ -1,8 +1,22 @@
+import type { TileLayoutArea } from "@t3tools/contracts";
+
 export const CONVERSATION_TAB_ID = "conversation";
 const NEW_TAB_PREFIX = "new-tab:";
 /** An empty tab that shows the area chooser until an area replaces it. */
 export const newTabId = (id: string) => `${NEW_TAB_PREFIX}${id}`;
 export const isNewTab = (tabId: string) => tabId.startsWith(NEW_TAB_PREFIX);
+
+const SURFACE_AREAS: Record<string, TileLayoutArea> = {
+  browser: "browser",
+  terminal: "terminal",
+  files: "files",
+  notes: "notes",
+  diff: "diff",
+  "pull-requests": "pull-requests",
+};
+/** The saved-layout area a surface id belongs to; surfaces that need a target have none. */
+export const surfaceTileArea = (surfaceId: string): TileLayoutArea | null =>
+  SURFACE_AREAS[surfaceId.split(":")[0]!] ?? null;
 
 /** Puts tabs where a chosen new tab sat, or after the group's other tabs. */
 function placeTabs(group: TileGroup, tabIds: string[]): TileGroup {
@@ -76,6 +90,8 @@ export type ThreadTileLayout = {
   /** Shown to the right of the maximized tile; only meaningful while one is maximized. */
   besideGroupId?: string | null;
   focusPairRatio?: number;
+  /** Placeholder tabs from a saved layout, keyed by tab id, waiting for their area to open. */
+  pendingAreas?: Record<string, TileLayoutArea>;
 };
 export type TileAction =
   | { type: "float-group"; groupId: string; rect: FloatingTileRect }
@@ -277,7 +293,11 @@ export function syncTileLayout(
     tabs: [],
     activeTabId: "",
   };
-  let next = settle({ ...layout, root });
+  const placedIds = new Set(getTileGroups(root).flatMap((group) => group.tabs));
+  let next = fillPendingAreas(
+    settle({ ...layout, root }),
+    surfaceIds.filter((id) => !placedIds.has(id)),
+  );
   const showsChooser = (group: TileGroup) => !group.tabs.length || isNewTab(group.activeTabId);
   if (
     fillChooser &&
@@ -325,6 +345,35 @@ export function syncTileLayout(
       next = applyTileAction(next, { type: "activate", groupId: owner.id, tabId: activeSurfaceId });
   }
   return next;
+}
+
+/** Puts new surfaces in the placeholders waiting for their area and forgets closed placeholders. */
+function fillPendingAreas(layout: ThreadTileLayout, newSurfaceIds: string[]): ThreadTileLayout {
+  if (!layout.pendingAreas) return layout;
+  const { pendingAreas: _pending, ...rest } = layout;
+  const placed = new Map<string, string>();
+  for (const surfaceId of newSurfaceIds) {
+    const placeholder = Object.keys(layout.pendingAreas).find(
+      (tabId) => !placed.has(tabId) && layout.pendingAreas![tabId] === surfaceTileArea(surfaceId),
+    );
+    if (placeholder) placed.set(placeholder, surfaceId);
+  }
+  const root = placed.size
+    ? mapNode(layout.root, (node) =>
+        node.kind === "group" && node.tabs.some((id) => placed.has(id))
+          ? {
+              ...node,
+              tabs: node.tabs.map((id) => placed.get(id) ?? id),
+              activeTabId: placed.get(node.activeTabId) ?? node.activeTabId,
+            }
+          : node,
+      )
+    : layout.root;
+  const present = new Set(getTileGroups(root).flatMap((group) => group.tabs));
+  const pending = Object.fromEntries(
+    Object.entries(layout.pendingAreas).filter(([tabId]) => present.has(tabId)),
+  );
+  return { ...rest, root, ...(Object.keys(pending).length ? { pendingAreas: pending } : {}) };
 }
 
 export function applyTileAction(layout: ThreadTileLayout, action: TileAction): ThreadTileLayout {
@@ -743,6 +792,18 @@ export function parseTileLayout(value: unknown): ThreadTileLayout | undefined {
         typeof value.focusPairRatio === "number" &&
         Number.isFinite(value.focusPairRatio)
           ? { focusPairRatio: Math.min(0.9, Math.max(0.1, value.focusPairRatio)) }
+          : {}),
+        ...("pendingAreas" in value && value.pendingAreas && typeof value.pendingAreas === "object"
+          ? {
+              pendingAreas: Object.fromEntries(
+                Object.entries(value.pendingAreas).filter(
+                  ([tabId, area]) =>
+                    isNewTab(tabId) &&
+                    typeof area === "string" &&
+                    Object.values(SURFACE_AREAS).includes(area as TileLayoutArea),
+                ),
+              ) as Record<string, TileLayoutArea>,
+            }
           : {}),
         focusedGroupId: value.focusedGroupId,
         maximizedGroupId:

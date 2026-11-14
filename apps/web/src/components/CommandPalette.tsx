@@ -119,7 +119,7 @@ import {
   copyPromptLink,
   promptLinkRepositoryOf,
 } from "./promptLinks/copyPromptLink";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, usePrimarySettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { readLocalApi } from "../localApi";
 import { configuredHostedAppUrl } from "../hostedPairing";
@@ -273,7 +273,8 @@ import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog"
 import { settingsForThisPlatform, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
-import { tilePaletteItems } from "./chat/tilePaletteItems";
+import { tileLayoutPaletteItems, tilePaletteItems } from "./chat/tilePaletteItems";
+import { TILE_LAYOUTS_SETTINGS_TARGET } from "./chat/TileLayoutsMenu";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -495,6 +496,7 @@ function OpenCommandPaletteDialog(props: {
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
+  const tileLayouts = usePrimarySettings((settings) => settings.tileLayouts);
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
   const referenceThreadRef =
@@ -1757,6 +1759,18 @@ function OpenCommandPaletteDialog(props: {
   });
 
   if (activeThread) actionItems.push(...tilePaletteItems(ITEM_ICON_CLASS));
+  if (activeThread || activeDraftThread)
+    actionItems.push(...tileLayoutPaletteItems(ITEM_ICON_CLASS, tileLayouts));
+  actionItems.push({
+    kind: "action",
+    value: "action:manage-tile-layouts",
+    title: "Manage Tile Layouts",
+    searchTerms: ["tile", "layout", "rename", "delete", "settings"],
+    icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate(TILE_LAYOUTS_SETTINGS_TARGET);
+    },
+  });
 
   for (const direction of [1, -1] as const) {
     const title = direction === 1 ? "Focus Next Workspace Area" : "Focus Previous Workspace Area";

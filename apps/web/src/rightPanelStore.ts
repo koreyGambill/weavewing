@@ -3,12 +3,22 @@ import {
   scopedThreadKey,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, RunId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  RunId,
+  ThreadId,
+  type SavedTileNode,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import { buildTileLayoutFromSaved } from "./savedTileLayouts";
 import {
   applyTileAction as reduceTileAction,
+  CONVERSATION_TAB_ID,
+  getTileGroups,
+  isNewTab,
   parseTileLayout,
   syncTileLayout,
   tileCloseFallback,
@@ -133,6 +143,12 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   applyTileAction: (ref: ScopedThreadRef, action: TileAction) => void;
+  /** With onlyUntouched, applies only while the thread shows nothing but its chat. */
+  applySavedTileLayout: (
+    ref: ScopedThreadRef,
+    saved: SavedTileNode,
+    onlyUntouched?: boolean,
+  ) => void;
   byThreadKey: Record<string, ThreadRightPanelState>;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
@@ -781,6 +797,32 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               action,
             ),
           })),
+        ),
+      applySavedTileLayout: (ref, saved, onlyUntouched = false) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const untouched =
+              current.surfaces.length === 0 &&
+              (!current.tileLayout ||
+                getTileGroups(current.tileLayout)
+                  .flatMap((group) => group.tabs)
+                  .join() === CONVERSATION_TAB_ID);
+            if (onlyUntouched && !untouched) return current;
+            const surfaceIds = current.surfaces.map((surface) => surface.id);
+            const laidOut = current.tileLayout
+              ? getTileGroups(current.tileLayout)
+                  .flatMap((group) => group.tabs)
+                  .filter((id) => !isNewTab(id))
+              : [];
+            return {
+              ...current,
+              tileLayout: buildTileLayoutFromSaved(
+                saved,
+                [...new Set([...laidOut, ...surfaceIds])],
+                randomUUID,
+              ),
+            };
+          }),
         ),
       threadPanelVisibilityByThreadKey: {},
       userActionRevisionByThreadKey: {},

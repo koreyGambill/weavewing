@@ -457,6 +457,21 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["sort projects sidebar manual created recent"],
   },
   {
+    id: "default-tile-layout",
+    title: "Tile layout",
+    to: "/settings/threads",
+    scope: "project-defaults",
+    searchTerms: ["default tile layout workspace panes tiles split new thread notes terminal"],
+  },
+  {
+    id: "tile-layouts",
+    title: "Saved tile layouts",
+    to: "/settings/threads",
+    searchTerms: ["tile layouts manage rename delete saved workspace panes"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
     id: "snooze-options",
     title: "Snooze options",
     to: "/settings/threads",

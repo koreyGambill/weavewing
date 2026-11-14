@@ -59,6 +59,7 @@ import {
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { TileLayoutsRow } from "./TileLayoutsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -1774,6 +1775,12 @@ export function ThreadsSettingsPanel() {
       {!isProjectScope ? (
         <SettingsSection id="snooze" title="Snooze">
           <SnoozePresetsRow />
+        </SettingsSection>
+      ) : null}
+
+      {!isProjectScope ? (
+        <SettingsSection id="tile-layouts-section" title="Tile layouts">
+          <TileLayoutsRow />
         </SettingsSection>
       ) : null}
 
