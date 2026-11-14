@@ -47,10 +47,26 @@ export function availableScratchWorkspaceRoot(
     : null;
 }
 
+type ScratchServerConfig =
+  | Pick<ServerConfig, "scratchWorkspaceRoot" | "legacyScratchWorkspaceRoot">
+  | null
+  | undefined;
+
+/** Null when the server predates the setting; "fallback" means the folder is missing. */
+export function scratchWorkspaceStatus(
+  serverConfig: ScratchServerConfig,
+): "in-use" | "fallback" | "refused" | null {
+  if (serverConfig?.legacyScratchWorkspaceRoot === undefined) return null;
+  if (serverConfig.scratchWorkspaceRoot === undefined) return "refused";
+  return serverConfig.scratchWorkspaceRoot === serverConfig.legacyScratchWorkspaceRoot
+    ? "fallback"
+    : "in-use";
+}
+
 /** How to name an environment's default folder: the folder as the user typed it, or its real path. */
 export function scratchWorkspaceLabel(
   serverConfig:
-    | (Pick<ServerConfig, "scratchWorkspaceRoot" | "legacyScratchWorkspaceRoot"> & {
+    | (NonNullable<ScratchServerConfig> & {
         readonly settings: Pick<ServerSettings, "scratchStartDirectory">;
       })
     | null
@@ -59,11 +75,7 @@ export function scratchWorkspaceLabel(
   const root = serverConfig?.scratchWorkspaceRoot;
   if (root === undefined) return null;
   const typed = serverConfig?.settings.scratchStartDirectory.replace(/(.)[\\/]+$/, "$1") ?? "";
-  // Without the legacy root to compare, an older server may not honor the setting.
-  const usesSetting =
-    serverConfig?.legacyScratchWorkspaceRoot !== undefined &&
-    root !== serverConfig.legacyScratchWorkspaceRoot;
-  return usesSetting && typed.length > 0 ? typed : root;
+  return scratchWorkspaceStatus(serverConfig) === "in-use" && typed.length > 0 ? typed : root;
 }
 
 export interface AddProjectRemoteSourceReadinessEntry {

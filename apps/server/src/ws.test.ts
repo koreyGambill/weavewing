@@ -954,6 +954,7 @@ it.effect.each([
         Effect.tap(() => Deferred.succeed(settingsSubscribed, undefined)),
       );
       const initialKeybindings = (yield* keybindings.getSnapshot).keybindings;
+      let scratchRoot = Option.none<string>();
       const discoveryStarted = yield* Deferred.make<void>();
       const finishDiscovery = yield* Deferred.make<void>();
       const remoteDiscoveryStarted = yield* Deferred.make<void>();
@@ -1013,7 +1014,7 @@ it.effect.each([
               : Effect.succeed(bound),
         }),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          scratchRoot: Effect.succeedNone,
+          scratchRoot: Effect.sync(() => scratchRoot),
           namedProjectsRoot: process.cwd(),
         }),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
@@ -1118,6 +1119,8 @@ it.effect.each([
       yield* Deferred.await(settingsSubscribed);
 
       // Later updates expose a dropped buffered event as a value mismatch, not a timeout.
+      // The default folder moves with this change, so the update must carry the new folder.
+      scratchRoot = Option.some("/srv/next-default-folder");
       const latestSettings = yield* settings.updateSettings({ enableProviderUpdateChecks: false });
       const latestKeybindings = yield* keybindings.upsertKeybindingRule({
         key: "mod+alt+z",
@@ -1128,12 +1131,12 @@ it.effect.each([
       );
       const expectedKeybindings = [duringAck.keybindings, latestKeybindings.keybindings];
       // The two sources can interleave, but each must retain its own publication order.
+      let lastScratchWorkspaceRoot: string | null | undefined;
       for (let i = 0; i < 4; i++) {
         const event = yield* Queue.take(responses);
         if (event.type === "settingsUpdated") {
           assert.deepEqual(event.payload.settings, expectedSettings.shift());
-          // The default folder is re-resolved with each settings change.
-          assert.isNull(event.payload.scratchWorkspaceRoot);
+          lastScratchWorkspaceRoot = event.payload.scratchWorkspaceRoot;
         } else {
           assert.equal(event.type, "keybindingsUpdated");
           if (event.type !== "keybindingsUpdated")
@@ -1145,6 +1148,7 @@ it.effect.each([
       }
       assert.isEmpty(expectedSettings);
       assert.isEmpty(expectedKeybindings);
+      assert.equal(lastScratchWorkspaceRoot, "/srv/next-default-folder");
       if (discovery === "pending") {
         yield* Deferred.await(remoteDiscoveryStarted);
         yield* Deferred.succeed(finishRemoteDiscovery, undefined);

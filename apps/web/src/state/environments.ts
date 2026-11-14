@@ -7,6 +7,7 @@ import {
 import { Discovery } from "@t3tools/client-runtime/relay";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import { Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -76,6 +77,13 @@ export function readEnvironment(environmentId: EnvironmentId): EnvironmentPresen
     .get(environmentId);
   return presentation ? projectEnvironmentPresentation(environmentId, presentation) : null;
 }
+
+/** Every environment, for derived atoms that narrow it to what a component shows. */
+export const environmentsAtom = Atom.map(environmentPresentations.presentationsAtom, (byId) =>
+  [...byId.entries()].map(([environmentId, presentation]) =>
+    projectEnvironmentPresentation(environmentId, presentation),
+  ),
+);
 
 /** Every environment now, for handlers that should not re-render on every change. */
 export function readEnvironments(): EnvironmentPresentation[] {
