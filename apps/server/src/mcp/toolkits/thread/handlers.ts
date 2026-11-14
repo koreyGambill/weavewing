@@ -172,6 +172,10 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   run_scheduled_task_now: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
+      const caller = (yield* readCaller()).scope.thread;
+      const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
+      if (Option.isSome(limits) && caller !== undefined)
+        yield* limits.value.refuseScheduling(caller.threadId);
       const scheduler = yield* ScheduledTasks.ScheduledTaskService;
       const { tasks } = yield* scheduler.list().pipe(Effect.mapError(unavailable));
       if (!tasks.some((task) => task.id === input.taskId))

@@ -38,6 +38,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as UsageService from "../usage/UsageService.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 
 const isScheduledTaskError = Schema.is(ScheduledTaskError);
 
@@ -1022,10 +1023,8 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       yield* service.runNow({ id: input.id });
 
       assert.equal(yield* Ref.get(launches), 1);
-      // The run uses the task's model, not whatever the thread was switched to.
-      assert.deepEqual(yield* Ref.get(sends), [
-        { threadId: launched, freshContext: true, model: "gpt-5.4" },
-      ]);
+      // Without a grant, a run never switches its thread's model.
+      assert.deepEqual(yield* Ref.get(sends), [{ threadId: launched, freshContext: true }]);
       // Its thread stays in the old project, so moving the task leaves it for a new one.
       const moved = yield* service.upsert({
         ...input,
@@ -1066,6 +1065,12 @@ it.effect("caps runs per hour for every trigger but the user's Run now, and keep
           }),
           NodeCrypto.layer,
           Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+          Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+            getInstance: (instanceId) =>
+              Effect.succeed({
+                driverKind: instanceId === "codex" ? "codex" : "opencode",
+              } as never),
+          }),
         ),
       ),
     );
@@ -1104,8 +1109,108 @@ it.effect("caps runs per hour for every trigger but the user's Run now, and keep
       assert.equal(runs[1]?.error, "This automation allows 1 run per hour.");
 
       assert.isUndefined((yield* service.upsert({ ...input, grant: null })).task.grant);
+      // A subagent cap holds only where the provider's own subagents can be turned off.
+      const subagents = { subagents: { max: 2, models: [] } };
+      yield* service.upsert({ ...input, grant: subagents });
+      const opencode = yield* Effect.exit(
+        service.upsert({
+          ...input,
+          modelSelection: { instanceId: ProviderInstanceId.make("opencode"), model: "big" },
+          grant: subagents,
+        }),
+      );
+      assert.include(String(opencode), "Subagent limits work with Claude and Codex models only");
+      yield* service.upsert({ ...input, grant: null });
       yield* service.runNow({ id: input.id }, { byAgent: true });
       assert.equal(yield* Ref.get(launches), 3);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a limited automation's runs use its model only in threads it started", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const projectId = ProjectId.make("project:test");
+    const sends = yield* Ref.make<Array<{ threadId: ThreadId; model?: string }>>([]);
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            streamDomainEvents: Stream.empty,
+            streamDomainEventsFrom: () => Stream.empty,
+            latestDomainEventSequence: Effect.succeed(0),
+            getThreadShell: () => Effect.succeed(threadShell(projectId)),
+            sendToThread: (input) =>
+              Ref.update(sends, (all) => [
+                ...all,
+                {
+                  threadId: input.threadId,
+                  ...(input.modelSelection === undefined
+                    ? {}
+                    : { model: input.modelSelection.model }),
+                },
+              ]).pipe(Effect.as({} as never)),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+        ),
+      ),
+    );
+    // Each thread's first message says who started it.
+    const firstMessage = (threadId: string, payload: object) =>
+      sql`INSERT INTO orchestration_v2_projection_messages ${sql.insert({
+        message_id: `message:${threadId}`,
+        thread_id: threadId,
+        role: "user",
+        streaming: 0,
+        created_at: "1970-01-01T00:00:00.000Z",
+        updated_at: "1970-01-01T00:00:00.000Z",
+        payload_json: JSON.stringify(payload),
+      })}`;
+    yield* firstMessage("thread:owned", { scheduledTaskId: "task:owned" });
+    yield* firstMessage("thread:user", {});
+    yield* firstMessage("thread:no-grant", { scheduledTaskId: "task:no-grant" });
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const run = (
+        id: string,
+        threadId: string,
+        grant: { budget: { maxCostUsd: number } } | null,
+      ) =>
+        Effect.gen(function* () {
+          yield* service.upsert({
+            id: ScheduledTaskId.make(id),
+            title: id,
+            prompt: "Check",
+            enabled: true,
+            schedule: { type: "interval", everyMs: 3_600_000 },
+            projectId,
+            threadId: ThreadId.make(threadId),
+            threadMode: "continue",
+            workspaceStrategy: { type: "root" },
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            ...(grant === null ? {} : { grant }),
+          });
+          yield* service.runNow({ id: ScheduledTaskId.make(id) });
+        });
+      const grant = { budget: { maxCostUsd: 0.5 } };
+      yield* run("task:owned", "thread:owned", grant);
+      yield* run("task:user", "thread:user", grant);
+      yield* run("task:no-grant", "thread:no-grant", null);
+      assert.deepEqual(yield* Ref.get(sends), [
+        { threadId: ThreadId.make("thread:owned"), model: "gpt-5.4" },
+        { threadId: ThreadId.make("thread:user") },
+        { threadId: ThreadId.make("thread:no-grant") },
+      ]);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

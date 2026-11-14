@@ -256,11 +256,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         }
         if (!replaying && caller !== undefined) {
           const limits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
-          if (Option.isSome(limits))
-            yield* limits.value.admitSubagents({
-              callerThreadId: caller.id,
-              models: [modelSelection],
-            });
+          if (Option.isSome(limits)) yield* limits.value.refuseLaunch(caller.id);
         }
         const result = yield* ThreadMessageIntake.launchThread({
           commandId,

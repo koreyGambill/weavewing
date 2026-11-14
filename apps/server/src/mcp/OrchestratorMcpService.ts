@@ -4,7 +4,6 @@ import {
   isProviderAvailable,
   MessageId,
   type ModelSelection,
-  ProviderInstanceId,
   NodeId,
   idleCompactionOf,
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
@@ -1308,10 +1307,24 @@ const make = Effect.gen(function* () {
   const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
   const automationLimits = yield* Effect.serviceOption(AutomationLimits.AutomationLimits);
-  const admitSubagent = (callerThreadId: ThreadId, model: ModelSelection) =>
-    Option.isNone(automationLimits)
+  /** Runs a check of the caller's automation limits; none apply outside a thread. */
+  const checkLimits = (
+    callerThreadId: ThreadId | undefined,
+    check: (
+      limits: AutomationLimits.AutomationLimits["Service"],
+      callerThreadId: ThreadId,
+    ) => Effect.Effect<void, OrchestratorMcpFailure>,
+  ) =>
+    Option.isNone(automationLimits) || callerThreadId === undefined
       ? Effect.void
-      : automationLimits.value.admitSubagents({ callerThreadId, models: [model] });
+      : check(automationLimits.value, callerThreadId);
+  const admitSubagent = (
+    callerThreadId: ThreadId,
+    model: { readonly instanceId?: string; readonly model?: string },
+  ) =>
+    checkLimits(callerThreadId, (limits, id) =>
+      limits.admitSubagents({ callerThreadId: id, models: [model] }),
+    );
   const projects = yield* ProjectService.ProjectService;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
@@ -2589,6 +2602,7 @@ const make = Effect.gen(function* () {
 
   return OrchestratorMcpService.of({
     scheduleTask: Effect.fn("OrchestratorMcpService.scheduleTask")(function* (scope, input) {
+      yield* checkLimits(scope.thread?.threadId, (limits, id) => limits.refuseScheduling(id));
       const { parent, limits } = yield* loadCaller(scope, ["runs"]);
       const projectId = yield* resolveProjectTarget(parent, input.projectId);
       yield* assertLiveCallerForOtherProject(scope, parent, projectId);
@@ -2690,6 +2704,9 @@ const make = Effect.gen(function* () {
     ),
     updateScheduledTask: Effect.fn("OrchestratorMcpService.updateScheduledTask")(
       function* (scope, input) {
+        if (input.limits !== undefined) {
+          yield* checkLimits(scope.thread?.threadId, (limits, id) => limits.refuseScheduling(id));
+        }
         const { parent, limits } = yield* loadCaller(scope, ["runs"]);
         const existing = yield* loadScheduledTask(input.scheduledTaskId, limits);
         yield* assertLiveCallerForOtherProject(scope, parent, existing.projectId);
@@ -3055,8 +3072,10 @@ const make = Effect.gen(function* () {
         }
         // Counted here too; its model must be named and allowed, as no model resolves here.
         yield* admitSubagent(scope.thread.threadId, {
-          instanceId: input.target.providerInstanceId ?? ProviderInstanceId.make("unspecified"),
-          model: input.target.model ?? "unspecified",
+          ...(input.target.providerInstanceId === undefined
+            ? {}
+            : { instanceId: input.target.providerInstanceId }),
+          ...(input.target.model === undefined ? {} : { model: input.target.model }),
         });
         // The task's child runs as an ordinary thread there; this thread keeps the task.
         const { taskId } = yield* remoteDelegation.delegate(scope, {
@@ -3474,6 +3493,7 @@ const make = Effect.gen(function* () {
     createThreads: Effect.fn("OrchestratorMcpService.createThreads")(
       function* (callerScope, input) {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "create_threads");
+        yield* checkLimits(scope.thread.threadId, (limits, id) => limits.refuseLaunch(id));
         const parentRun = ThreadManagementService.latestActiveRun(parent);
         if (
           parentRun === undefined ||
@@ -3531,9 +3551,6 @@ const make = Effect.gen(function* () {
                 request.interactionMode,
               );
               yield* assertTargetEnabledForProject(parent, commandId, target);
-              if (!isRetryOfAcceptedCreation) {
-                yield* admitSubagent(scope.thread.threadId, target.modelSelection);
-              }
               const title = threadTitle({
                 parentTitle: parent.thread.title,
                 prompt: request.prompt,
@@ -3904,6 +3921,9 @@ const make = Effect.gen(function* () {
     sendToThread: Effect.fn("OrchestratorMcpService.sendToThread")(function* (scope, input) {
       const { parent, limits, target } = yield* loadScopedThread(scope, input.threadId, ["runs"]);
       yield* assertLiveCallerForOtherThread(scope, parent, target);
+      yield* checkLimits(parent?.thread.id, (automation, id) =>
+        automation.admitSend({ callerThreadId: id, targetThreadId: input.threadId }),
+      );
       yield* resolveRuntimeMode(limits.runtimeMode, target.thread.runtimeMode);
       yield* resolveInteractionMode(limits.interactionMode, target.thread.interactionMode);
       const replyToMessageId =

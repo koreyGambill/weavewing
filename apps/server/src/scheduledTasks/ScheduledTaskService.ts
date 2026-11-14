@@ -4,6 +4,8 @@ import * as EventTriggers from "./EventTriggers.ts";
 import * as StatusSources from "../statusSources/StatusSources.ts";
 import * as MonitoringRunner from "../monitoring/MonitoringRunner.ts";
 import * as RunHistory from "./RunHistory.ts";
+import * as AutomationLimits from "./AutomationLimits.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import type { PricedRecord } from "../usage/usagePricing.ts";
 import { idleCheckinPrompt } from "./IdleCheckin.ts";
@@ -357,6 +359,8 @@ function iso(value: DateTime.DateTime): string {
 
 const RUN_OUTCOME_WAIT_MS = 24 * 60 * 60 * 1_000;
 const HOUR_MS = 60 * 60 * 1_000;
+/** Drivers whose sessions can turn their own subagents off, so a subagent cap holds. */
+const NATIVE_SUBAGENT_SWITCH_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
 const UNSUCCESSFUL_RUN_ERRORS = {
   failed: "The run failed.",
   interrupted: "The run was stopped.",
@@ -546,6 +550,9 @@ export const layer = Layer.effect(
     const scheduler = yield* Scheduler.Scheduler;
     const readWebhookOrigin = yield* ScheduledTaskWebhookOrigin;
     const managedPolicy = yield* ManagedPolicy.ManagedPolicy;
+    const providerInstances = yield* Effect.serviceOption(
+      ProviderInstanceRegistry.ProviderInstanceRegistry,
+    );
     const webhookPolicyOrganization = ManagedPolicy.deniedBy(managedPolicy, "webhookTasks");
     // Existing webhook tasks stay stored but report why they do not run.
     const webhookPolicyBlock =
@@ -1554,6 +1561,17 @@ export const layer = Layer.effect(
             ? body
             : preface + body;
         const threadMode = scheduledTaskThreadMode(active);
+        // A limited automation's runs use its model in a thread it started; a thread the user
+        // started keeps the model the user picked.
+        const runModel =
+          active.grant === undefined || active.threadId === null
+            ? undefined
+            : (yield* AutomationLimits.launchingTask(ThreadId.make(active.threadId)).pipe(
+                  withSql,
+                  Effect.orElseSucceed(() => null),
+                )) === active.id
+              ? active.modelSelection
+              : undefined;
 
         // A bound thread can move to another project (No project to a project) while
         // this fires. Follow it; one move needs at most two retries. Same ids replay safely.
@@ -1574,8 +1592,7 @@ export const layer = Layer.effect(
               text: prompt,
               attachments: [],
               mode: "queue",
-              // Runs use the task's model, whatever the thread was switched to since.
-              ...(idleCheckin ? {} : { modelSelection: active.modelSelection }),
+              ...(runModel === undefined ? {} : { modelSelection: runModel }),
               ...(threadMode === "fresh_session" ? { freshContext: true } : {}),
               createdBy: idleCheckin ? "system" : active.createdBy,
               creationSource: idleCheckin ? "server" : active.creationSource,
@@ -2215,6 +2232,17 @@ export const layer = Layer.effect(
           : undefined;
       if (modeDenial !== undefined) return yield* taskError(modeDenial, { taskId: id });
       const grant = input.grant === undefined ? existingTask?.grant : (input.grant ?? undefined);
+      if (grant?.subagents !== undefined && Option.isSome(providerInstances)) {
+        const instance = yield* providerInstances.value.getInstance(
+          input.modelSelection.instanceId,
+        );
+        if (!NATIVE_SUBAGENT_SWITCH_DRIVERS.has(instance?.driverKind ?? "")) {
+          return yield* taskError(
+            "Subagent limits work with Claude and Codex models only: other providers can't turn off their own subagents.",
+            { taskId: id },
+          );
+        }
+      }
       // Keep the existing next_run_at when the schedule itself is untouched:
       // editing a title or prompt must not postpone (or resurrect) a due
       // run — only schedule/enabled changes restart the clock.

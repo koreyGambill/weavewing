@@ -1,6 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  OrchestratorMcpFailure,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -205,6 +210,16 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
     expect((yield* notify({ title: "x" }, false)).isError).toBe(true);
     const muted = yield* notify({ title: "x" }, true, ThreadId.make("notify-muted"));
     expect(JSON.stringify(muted.content)).toContain("turn notifications off");
+    const runNow = yield* server
+      .callTool({ name: "run_scheduled_task_now", arguments: { taskId: "task:any" } })
+      .pipe(
+        Effect.provideService(
+          Invocation.McpInvocationContext,
+          scope(true, ThreadId.make("notify-muted")),
+        ),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(JSON.stringify(runNow.content)).toContain("can't create tasks");
     const tooLong = yield* Effect.flip(notify({ title: "x".repeat(121) }));
     expect(tooLong.message).toContain("at most 120");
     expect(
@@ -223,6 +238,15 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
         Layer.provide(
           Layer.mock(AutomationLimits.AutomationLimits)({
             allowsNotify: (threadId) => Effect.succeed(threadId !== "notify-muted"),
+            refuseScheduling: (threadId) =>
+              threadId === "notify-muted"
+                ? Effect.fail(
+                    new OrchestratorMcpFailure({
+                      code: "capability_denied",
+                      message: "An agent in a limited automation can't create tasks.",
+                    }),
+                  )
+                : Effect.void,
           }),
         ),
         Layer.provide(NodeCrypto.layer),

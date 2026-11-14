@@ -801,10 +801,14 @@ export const OrchestratorMcpScheduleLimits = Schema.Struct({
     Schema.Number.check(Schema.isBetween({ minimum: 0.01, maximum: 50 })),
   ),
   maxTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
-  maxSubagents: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10 }))),
+  maxSubagents: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10 })),
+  ).annotate({ description: "Claude or Codex tasks only." }),
   subagentModels: Schema.optional(
     Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(8)),
-  ).annotate({ description: "Model ids or instanceId/model. Default: the task's model." }),
+  ).annotate({
+    description: "Model ids or instanceId/model. Default: the task's model. Alone: max 10.",
+  }),
   maxRunsPerHour: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 120 }))),
 }).annotate({
   description:

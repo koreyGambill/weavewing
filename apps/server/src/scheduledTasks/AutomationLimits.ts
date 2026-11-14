@@ -13,6 +13,7 @@ import {
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -41,6 +42,7 @@ export interface AutomationScope {
 const MAX_LINEAGE_DEPTH = 16;
 const SCOPE_CACHE_MS = 10_000;
 const TRACKED_RUNS = 500;
+const HOUR_MS = 3_600_000;
 
 const decodeGrant = Schema.decodeUnknownOption(Schema.fromJsonString(ScheduledTaskGrant));
 const decodeModel = Schema.decodeUnknownOption(
@@ -51,6 +53,31 @@ const decodeUsage = Schema.decodeUnknownOption(TurnTokenUsage);
 /** Native subagents would bypass the subagent cap, and their spend only shows at turn end. */
 const disablesNativeSubagents = (grant: ScheduledTaskGrant) =>
   grant.subagents !== undefined || grant.budget !== undefined;
+
+const refuse = (message: string) =>
+  new OrchestratorMcpFailure({ code: "capability_denied", message });
+
+/** Keeps the newest `TRACKED_RUNS` keys. */
+const remember = <K, V>(map: ReadonlyMap<K, V>, key: K, value: V): ReadonlyMap<K, V> => {
+  const next = new Map(map);
+  if (!next.has(key) && next.size >= TRACKED_RUNS) {
+    const oldest = next.keys().next();
+    if (!oldest.done) next.delete(oldest.value);
+  }
+  return next.set(key, value);
+};
+
+/** The task whose run started `threadId`: its first message came from that task. */
+export const launchingTask = Effect.fn("AutomationLimits.launchingTask")(function* (
+  threadId: ThreadId,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const [row] = yield* sql<{ task_id: string | null }>`
+    SELECT json_extract(payload_json, '$.scheduledTaskId') AS task_id
+    FROM orchestration_v2_projection_messages WHERE thread_id = ${threadId}
+    ORDER BY created_at, message_id LIMIT 1`.pipe(NodeSqliteClient.readOnly);
+  return row?.task_id ?? null;
+});
 
 /**
  * Walks delegated-task lineage (not forks) up from `threadId` to the nearest thread that belongs
@@ -77,8 +104,10 @@ export const automationForThread = Effect.fn("AutomationLimits.automationForThre
     )
     SELECT chain.thread_id, s.project_id, s.task_id, s.grant_json, s.model_selection_json
     FROM chain JOIN scheduled_tasks s ON s.grant_json IS NOT NULL AND (
-      s.thread_id = chain.thread_id OR EXISTS (SELECT 1 FROM scheduled_task_runs r
-        WHERE r.thread_id = chain.thread_id AND r.task_id = s.task_id))
+      s.thread_id = chain.thread_id
+      OR s.task_id = (SELECT json_extract(m.payload_json, '$.scheduledTaskId')
+        FROM orchestration_v2_projection_messages m WHERE m.thread_id = chain.thread_id
+        ORDER BY m.created_at, m.message_id LIMIT 1))
     ORDER BY chain.depth LIMIT 1`.pipe(NodeSqliteClient.readOnly);
   if (row === undefined) return null;
   const grant = decodeGrant(row.grant_json);
@@ -99,6 +128,25 @@ const latestRunId = Effect.fn("AutomationLimits.latestRunId")(function* (threadI
   const [row] = yield* sql<{ run_id: string }>`SELECT run_id FROM orchestration_v2_projection_runs
     WHERE thread_id = ${threadId} ORDER BY ordinal DESC LIMIT 1`.pipe(NodeSqliteClient.readOnly);
   return row === undefined ? null : RunId.make(row.run_id);
+});
+
+/**
+ * The run whose limits the thread's latest run shares. Turns an agent sent (follow-ups, delegated
+ * results) belong to the run before them; a scheduled run or a user's message starts a new one.
+ */
+const budgetRunId = Effect.fn("AutomationLimits.budgetRunId")(function* (threadId: ThreadId) {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ run_id: string; follow_up: number }>`
+    SELECT r.run_id, (json_extract(m.payload_json, '$.senderThreadId') IS NOT NULL
+      OR json_type(m.payload_json, '$.delegatedCompletion') IS NOT NULL) AS follow_up
+    FROM orchestration_v2_projection_runs r
+    LEFT JOIN orchestration_v2_projection_messages m
+      ON m.message_id = json_extract(r.payload_json, '$.userMessageId')
+    WHERE r.thread_id = ${threadId} ORDER BY r.ordinal DESC LIMIT 50`.pipe(
+    NodeSqliteClient.readOnly,
+  );
+  const owner = rows.find((row) => row.follow_up !== 1) ?? rows.at(-1);
+  return owner === undefined ? null : RunId.make(owner.run_id);
 });
 
 /** The thread and its delegated descendants that have a run in progress. */
@@ -126,8 +174,8 @@ const activeThreads = Effect.fn("AutomationLimits.activeThreads")(function* (thr
 });
 
 const sameModel = (
-  left: Pick<ModelSelection, "instanceId" | "model">,
-  right: Pick<ModelSelection, "instanceId" | "model">,
+  left: { readonly instanceId: string; readonly model: string },
+  right: { readonly instanceId: string; readonly model: string },
 ) => left.instanceId === right.instanceId && left.model === right.model;
 
 interface RequestUsage {
@@ -182,9 +230,10 @@ const nextTurnSpend = (
     return { model, requests, final };
   }
   const snapshot = turn.tokenUsage;
-  if (snapshot === undefined) return previous ?? { model, requests, final: null };
+  // A context-size update without per-request counts is not a request.
+  if (snapshot?.inputTokens === undefined) return previous ?? { model, requests, final: null };
   const request: RequestUsage = {
-    input: snapshot.inputTokens ?? snapshot.usedTokens,
+    input: snapshot.inputTokens,
     cached: snapshot.cachedInputTokens ?? 0,
     output: snapshot.outputTokens ?? 0,
   };
@@ -200,15 +249,34 @@ const nextTurnSpend = (
   };
 };
 
+const SCHEDULING_REFUSED =
+  "An agent in a limited automation can't create tasks, change limits or run tasks now. Ask the user to do it in Settings → Scheduled tasks.";
+
 export class AutomationLimits extends Context.Service<
   AutomationLimits,
   {
     readonly forThread: (threadId: ThreadId) => Effect.Effect<AutomationScope | null>;
-    /** Counts `models.length` new subagents against the caller's automation, or refuses them. */
+    /**
+     * Counts new subagents against the caller's automation run, or refuses them. A model without
+     * `model` is one the caller left to a linked environment to pick.
+     */
     readonly admitSubagents: (input: {
       readonly callerThreadId: ThreadId;
-      readonly models: ReadonlyArray<Pick<ModelSelection, "instanceId" | "model">>;
+      readonly models: ReadonlyArray<{ readonly instanceId?: string; readonly model?: string }>;
     }) => Effect.Effect<void, OrchestratorMcpFailure>;
+    /** Threads outside the automation would spend outside its budget. */
+    readonly refuseLaunch: (
+      callerThreadId: ThreadId,
+    ) => Effect.Effect<void, OrchestratorMcpFailure>;
+    /** Sends start turns: outside the automation they escape its limits, inside they count. */
+    readonly admitSend: (input: {
+      readonly callerThreadId: ThreadId;
+      readonly targetThreadId: ThreadId;
+    }) => Effect.Effect<void, OrchestratorMcpFailure>;
+    /** Creating tasks, changing limits and running tasks now are the user's to do. */
+    readonly refuseScheduling: (
+      callerThreadId: ThreadId,
+    ) => Effect.Effect<void, OrchestratorMcpFailure>;
     readonly allowsNotify: (threadId: ThreadId) => Effect.Effect<boolean>;
   }
 >()("t3/scheduledTasks/AutomationLimits") {}
@@ -220,12 +288,16 @@ export const layer = Layer.effect(
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const usage = yield* Effect.serviceOption(UsageService.UsageService);
     const withSql = Effect.provideService(SqlClient.SqlClient, sql);
-    const scopes = yield* Ref.make(
-      new Map<ThreadId, { readonly at: number; readonly scope: AutomationScope | null }>(),
+    const scopes = yield* Ref.make<
+      ReadonlyMap<ThreadId, { readonly at: number; readonly scope: AutomationScope | null }>
+    >(new Map());
+    const subagentCounts = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+    const spends = yield* Ref.make<ReadonlyMap<RunId, ReadonlyMap<string, TurnSpend>>>(new Map());
+    const stopped = yield* Ref.make<ReadonlyMap<RunId, string>>(new Map());
+    const enforced = yield* Ref.make<ReadonlyMap<RunId, true>>(new Map());
+    const followUps = yield* Ref.make<ReadonlyMap<ScheduledTaskId, ReadonlyArray<number>>>(
+      new Map(),
     );
-    const subagentCounts = yield* Ref.make(new Map<string, number>());
-    const spends = yield* Ref.make(new Map<RunId, ReadonlyMap<string, TurnSpend>>());
-    const stopped = yield* Ref.make(new Set<RunId>());
 
     const forThread = Effect.fn("AutomationLimits.forThread")(function* (threadId: ThreadId) {
       const now = yield* Clock.currentTimeMillis;
@@ -239,51 +311,54 @@ export const layer = Layer.effect(
           ),
         ),
       );
-      yield* Ref.update(scopes, (map) => {
-        const next = new Map(map);
-        if (next.size >= TRACKED_RUNS) next.clear();
-        return next.set(threadId, { at: now, scope });
-      });
+      yield* Ref.update(scopes, (map) => remember(map, threadId, { at: now, scope }));
       return scope;
     });
 
     const runKey = (scope: AutomationScope) =>
-      latestRunId(scope.threadId).pipe(
+      budgetRunId(scope.threadId).pipe(
         withSql,
         Effect.orElseSucceed(() => null),
       );
 
     const admitSubagents = Effect.fn("AutomationLimits.admitSubagents")(function* (input: {
       readonly callerThreadId: ThreadId;
-      readonly models: ReadonlyArray<Pick<ModelSelection, "instanceId" | "model">>;
+      readonly models: ReadonlyArray<{ readonly instanceId?: string; readonly model?: string }>;
     }) {
       const scope = yield* forThread(input.callerThreadId);
       const limit = scope?.grant.subagents;
       if (scope === null || limit === undefined || input.models.length === 0) return;
       const allowed = limit.models.length === 0 ? [scope.modelSelection] : limit.models;
-      const refused = input.models.find((model) => !allowed.some((ok) => sameModel(ok, model)));
-      if (refused !== undefined) {
-        return yield* new OrchestratorMcpFailure({
-          code: "capability_denied",
-          message: `This automation allows subagents only on ${allowed.map((model) => `${model.instanceId}/${model.model}`).join(", ")}, not ${refused.instanceId}/${refused.model}.`,
-        });
+      const allowedText = allowed.map((model) => `${model.instanceId}/${model.model}`).join(", ");
+      for (const { instanceId, model } of input.models) {
+        if (instanceId === undefined || model === undefined) {
+          return yield* refuse(
+            `Name target.providerInstanceId and target.model: this automation allows subagents only on ${allowedText}.`,
+          );
+        }
+        if (!allowed.some((ok) => sameModel(ok, { instanceId, model }))) {
+          return yield* refuse(
+            `This automation allows subagents only on ${allowedText}, not ${instanceId}/${model}.`,
+          );
+        }
       }
       const key = (yield* runKey(scope)) ?? scope.threadId;
+      // After a restart the count comes back from the run's history row.
+      const stored = (yield* Ref.get(subagentCounts)).has(key)
+        ? 0
+        : ((yield* sql<{ subagent_count: number }>`SELECT subagent_count FROM scheduled_task_runs
+              WHERE orchestration_run_id = ${key}`.pipe(Effect.orElseSucceed(() => [])))[0]
+            ?.subagent_count ?? 0);
       const admitted = yield* Ref.modify(subagentCounts, (counts) => {
-        const used = counts.get(key) ?? 0;
-        if (used + input.models.length > limit.max) return [false, counts] as const;
-        const next = new Map(counts);
-        if (!next.has(key) && next.size >= TRACKED_RUNS) {
-          const oldest = next.keys().next();
-          if (!oldest.done) next.delete(oldest.value);
-        }
-        return [true, next.set(key, used + input.models.length)] as const;
+        const used = counts.get(key) ?? stored;
+        return used + input.models.length > limit.max
+          ? ([false, remember(counts, key, used)] as const)
+          : ([true, remember(counts, key, used + input.models.length)] as const);
       });
       if (!admitted) {
-        return yield* new OrchestratorMcpFailure({
-          code: "capability_denied",
-          message: `This automation allows ${limit.max} subagent${limit.max === 1 ? "" : "s"} per run.`,
-        });
+        return yield* refuse(
+          `This automation allows ${limit.max} subagent${limit.max === 1 ? "" : "s"} per run.`,
+        );
       }
       yield* sql`UPDATE scheduled_task_runs SET subagent_count = subagent_count + ${input.models.length}
         WHERE thread_id = ${scope.threadId} AND ended_at IS NULL`.pipe(
@@ -293,35 +368,83 @@ export const layer = Layer.effect(
       );
     });
 
+    const refuseLaunch = Effect.fn("AutomationLimits.refuseLaunch")(function* (
+      callerThreadId: ThreadId,
+    ) {
+      const scope = yield* forThread(callerThreadId);
+      if (scope !== null && disablesNativeSubagents(scope.grant)) {
+        return yield* refuse(
+          "This automation's limits allow new work only through delegate_task, which counts toward its budget.",
+        );
+      }
+    });
+
+    const admitSend = Effect.fn("AutomationLimits.admitSend")(function* (input: {
+      readonly callerThreadId: ThreadId;
+      readonly targetThreadId: ThreadId;
+    }) {
+      const caller = yield* forThread(input.callerThreadId);
+      if (caller === null) return;
+      const target = yield* forThread(input.targetThreadId);
+      if (target?.taskId !== caller.taskId) {
+        if (disablesNativeSubagents(caller.grant)) {
+          return yield* refuse(
+            "This automation can send only to its own threads: a turn elsewhere would escape its limits.",
+          );
+        }
+        return;
+      }
+      // Its delegated threads spend inside the run already; only the main thread starts runs.
+      if (input.targetThreadId !== caller.threadId) return;
+      const key = yield* runKey(caller);
+      const stop = key === null ? undefined : (yield* Ref.get(stopped)).get(key);
+      if (stop !== undefined) {
+        return yield* refuse(`${stop} It continues at its next scheduled run.`);
+      }
+      const cap = caller.grant.maxRunsPerHour;
+      if (cap === undefined) return;
+      const now = yield* Clock.currentTimeMillis;
+      const since = DateTime.formatIso(DateTime.makeUnsafe(now - HOUR_MS));
+      const scheduled = yield* RunHistory.countRecentRuns(caller.taskId, since).pipe(
+        withSql,
+        Effect.orElseSucceed(() => 0),
+      );
+      const admitted = yield* Ref.modify(followUps, (all) => {
+        const recent = (all.get(caller.taskId) ?? []).filter((at) => at > now - HOUR_MS);
+        return scheduled + recent.length >= cap
+          ? ([false, all] as const)
+          : ([true, remember(all, caller.taskId, [...recent, now])] as const);
+      });
+      if (!admitted) {
+        return yield* refuse(`This automation allows ${cap} run${cap === 1 ? "" : "s"} per hour.`);
+      }
+    });
+
+    const refuseScheduling = Effect.fn("AutomationLimits.refuseScheduling")(function* (
+      callerThreadId: ThreadId,
+    ) {
+      if ((yield* forThread(callerThreadId)) !== null) return yield* refuse(SCHEDULING_REFUSED);
+    });
+
     const price = (records: ReadonlyArray<PricedRecord>) =>
       Option.isSome(usage) && records.length > 0
         ? usage.value.priceRecords(records)
         : Effect.succeed(records.length === 0 ? 0 : null);
 
-    const stopRun = Effect.fn("AutomationLimits.stopRun")(function* (
+    /** Interrupts the automation thread's active work, once per run of its main thread. */
+    const interruptActive = Effect.fn("AutomationLimits.interruptActive")(function* (
       scope: AutomationScope,
-      key: RunId,
       reason: string,
     ) {
-      const first = yield* Ref.modify(stopped, (set) =>
-        set.has(key) ? ([false, set] as const) : ([true, new Set(set).add(key)] as const),
+      const latest = yield* latestRunId(scope.threadId).pipe(
+        withSql,
+        Effect.orElseSucceed(() => null),
+      );
+      if (latest === null) return;
+      const first = yield* Ref.modify(enforced, (map) =>
+        map.has(latest) ? ([false, map] as const) : ([true, remember(map, latest, true)] as const),
       );
       if (!first) return;
-      yield* RunHistory.markBudgetStopped(scope.threadId, reason).pipe(
-        withSql,
-        Effect.flatMap((taskIds) =>
-          Effect.forEach(
-            taskIds,
-            (taskId) =>
-              sql`UPDATE scheduled_tasks SET last_run_status = 'failed', last_run_error = ${reason}
-                WHERE task_id = ${taskId} AND last_run_status IN ('running', 'succeeded')`,
-            { discard: true },
-          ),
-        ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Could not record an automation budget stop", { cause }),
-        ),
-      );
       const targets = yield* activeThreads(scope.threadId).pipe(
         withSql,
         Effect.orElseSucceed(() => [{ threadId: scope.threadId, projectId: scope.projectId }]),
@@ -332,7 +455,7 @@ export const layer = Layer.effect(
           threads
             .interruptThread({
               ...target,
-              commandId: CommandId.make(`automation-budget:${key}:${target.threadId}`),
+              commandId: CommandId.make(`automation-budget:${latest}:${target.threadId}`),
               reason,
             })
             .pipe(
@@ -347,6 +470,34 @@ export const layer = Layer.effect(
       );
     });
 
+    const stopRun = Effect.fn("AutomationLimits.stopRun")(function* (
+      scope: AutomationScope,
+      key: RunId,
+      reason: string,
+    ) {
+      const first = yield* Ref.modify(stopped, (map) =>
+        map.has(key) ? ([false, map] as const) : ([true, remember(map, key, reason)] as const),
+      );
+      if (first) {
+        yield* RunHistory.markBudgetStopped(scope.threadId, reason).pipe(
+          withSql,
+          Effect.flatMap((taskIds) =>
+            Effect.forEach(
+              taskIds,
+              (taskId) =>
+                sql`UPDATE scheduled_tasks SET last_run_status = 'failed', last_run_error = ${reason}
+                  WHERE task_id = ${taskId} AND last_run_status IN ('running', 'succeeded')`,
+              { discard: true },
+            ),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Could not record an automation budget stop", { cause }),
+          ),
+        );
+      }
+      yield* interruptActive(scope, reason);
+    });
+
     const trackSpend = Effect.fnUntraced(function* (
       event: Extract<OrchestrationV2DomainEvent, { readonly type: "provider-turn.updated" }>,
     ) {
@@ -354,7 +505,10 @@ export const layer = Layer.effect(
       const budget = scope?.grant.budget;
       if (scope === null || budget === undefined) return;
       const key = yield* runKey(scope);
-      if (key === null || (yield* Ref.get(stopped)).has(key)) return;
+      if (key === null) return;
+      // A follow-up of a stopped run, such as a delegated result arriving, stops too.
+      const stop = (yield* Ref.get(stopped)).get(key);
+      if (stop !== undefined) return yield* interruptActive(scope, stop);
       const turnKey = `${event.threadId}:${event.payload.id}`;
       const turns = yield* Ref.modify(spends, (all) => {
         const previous = all.get(key) ?? new Map<string, TurnSpend>();
@@ -362,12 +516,7 @@ export const layer = Layer.effect(
           turnKey,
           nextTurnSpend(previous.get(turnKey), event.payload, scope.modelSelection.model),
         );
-        const updated = new Map(all);
-        if (!updated.has(key) && updated.size >= TRACKED_RUNS) {
-          const oldest = updated.keys().next();
-          if (!oldest.done) updated.delete(oldest.value);
-        }
-        return [next, updated.set(key, next)] as const;
+        return [next, remember(all, key, next)] as const;
       });
       const parts = [...turns.values()].map(turnSpendParts);
       const tokens = parts.reduce((total, part) => total + part.tokens, 0);
@@ -419,6 +568,9 @@ export const layer = Layer.effect(
     return AutomationLimits.of({
       forThread,
       admitSubagents,
+      refuseLaunch,
+      admitSend,
+      refuseScheduling,
       allowsNotify: Effect.fn("AutomationLimits.allowsNotify")(function* (threadId: ThreadId) {
         return (yield* forThread(threadId))?.grant.notify !== false;
       }),
