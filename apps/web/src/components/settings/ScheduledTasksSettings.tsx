@@ -565,7 +565,7 @@ function LimitFields({
       <div className="space-y-1">
         <Label>Limits</Label>
         <p className="text-xs text-muted-foreground">
-          Per run of this automation&apos;s thread, including turns you start there. A run over
+          Per run. In threads this automation starts, your own turns count as runs too. A run over
           budget stops mid-turn. Blank means no limit.
         </p>
       </div>

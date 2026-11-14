@@ -1564,14 +1564,11 @@ export const layer = Layer.effect(
         // A limited automation's runs use its model in a thread it started; a thread the user
         // started keeps the model the user picked.
         const runModel =
-          active.grant === undefined || active.threadId === null
-            ? undefined
-            : (yield* AutomationLimits.launchingTask(ThreadId.make(active.threadId)).pipe(
-                  withSql,
-                  Effect.orElseSucceed(() => null),
-                )) === active.id
-              ? active.modelSelection
-              : undefined;
+          active.grant !== undefined &&
+          active.threadId !== null &&
+          AutomationLimits.startedByTask(active.id, active.threadId)
+            ? active.modelSelection
+            : undefined;
 
         // A bound thread can move to another project (No project to a project) while
         // this fires. Follow it; one move needs at most two retries. Same ids replay safely.
@@ -1636,6 +1633,7 @@ export const layer = Layer.effect(
                 threadLaunch
                   .launch({
                     commandId,
+                    threadId: AutomationLimits.automationThreadId(fireKey),
                     projectId: active.projectId,
                     title: active.title,
                     modelSelection: active.modelSelection,

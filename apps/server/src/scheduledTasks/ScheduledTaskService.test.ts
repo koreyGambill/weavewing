@@ -1042,13 +1042,15 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
 it.effect("caps runs per hour for every trigger but the user's Run now, and keeps the grant", () =>
   Effect.gen(function* () {
     const launches = yield* Ref.make(0);
+    const launchedIds = yield* Ref.make<Array<string | undefined>>([]);
     const layer = ScheduledTaskService.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
-            launch: () =>
-              Ref.updateAndGet(launches, (n) => n + 1).pipe(
+            launch: (input) =>
+              Ref.update(launchedIds, (all) => [...all, input.threadId]).pipe(
+                Effect.andThen(Ref.updateAndGet(launches, (n) => n + 1)),
                 Effect.map((n) => ({ threadId: ThreadId.make(`thread:capped-${n}`) }) as never),
               ),
           }),
@@ -1123,13 +1125,16 @@ it.effect("caps runs per hour for every trigger but the user's Run now, and keep
       yield* service.upsert({ ...input, grant: null });
       yield* service.runNow({ id: input.id }, { byAgent: true });
       assert.equal(yield* Ref.get(launches), 3);
+      // Its threads' ids name the task, so its limits are known before any message.
+      for (const threadId of yield* Ref.get(launchedIds)) {
+        assert.isTrue(threadId?.startsWith("automation-thread:task:capped:"));
+      }
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
 it.effect("a limited automation's runs use its model only in threads it started", () =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
     const projectId = ProjectId.make("project:test");
     const sends = yield* Ref.make<Array<{ threadId: ThreadId; model?: string }>>([]);
     const layer = ScheduledTaskService.layer.pipe(
@@ -1163,20 +1168,9 @@ it.effect("a limited automation's runs use its model only in threads it started"
         ),
       ),
     );
-    // Each thread's first message says who started it.
-    const firstMessage = (threadId: string, payload: object) =>
-      sql`INSERT INTO orchestration_v2_projection_messages ${sql.insert({
-        message_id: `message:${threadId}`,
-        thread_id: threadId,
-        role: "user",
-        streaming: 0,
-        created_at: "1970-01-01T00:00:00.000Z",
-        updated_at: "1970-01-01T00:00:00.000Z",
-        payload_json: JSON.stringify(payload),
-      })}`;
-    yield* firstMessage("thread:owned", { scheduledTaskId: "task:owned" });
-    yield* firstMessage("thread:user", {});
-    yield* firstMessage("thread:no-grant", { scheduledTaskId: "task:no-grant" });
+    // A thread a task's run launched has an id naming the task.
+    const owned = "automation-thread:task:owned:1";
+    const ownedNoGrant = "automation-thread:task:no-grant:1";
     yield* Effect.gen(function* () {
       const service = yield* ScheduledTaskService.ScheduledTaskService;
       const run = (
@@ -1203,13 +1197,13 @@ it.effect("a limited automation's runs use its model only in threads it started"
           yield* service.runNow({ id: ScheduledTaskId.make(id) });
         });
       const grant = { budget: { maxCostUsd: 0.5 } };
-      yield* run("task:owned", "thread:owned", grant);
+      yield* run("task:owned", owned, grant);
       yield* run("task:user", "thread:user", grant);
-      yield* run("task:no-grant", "thread:no-grant", null);
+      yield* run("task:no-grant", ownedNoGrant, null);
       assert.deepEqual(yield* Ref.get(sends), [
-        { threadId: ThreadId.make("thread:owned"), model: "gpt-5.4" },
+        { threadId: ThreadId.make(owned), model: "gpt-5.4" },
         { threadId: ThreadId.make("thread:user") },
-        { threadId: ThreadId.make("thread:no-grant") },
+        { threadId: ThreadId.make(ownedNoGrant) },
       ]);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),

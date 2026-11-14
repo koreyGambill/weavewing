@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ProviderInstanceId, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
+import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -101,14 +101,21 @@ const insertRun = (
     })}`;
   });
 
+// Threads a task started have ids that name it; every turn there is limited, a person's too.
+const launched = "automation-thread:task:launching:1";
+const ownedEarlier = "automation-thread:task:owned:1";
+const owned = "automation-thread:task:owned:2";
+
 const seed = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // A thread a person started, bound to a limited task: only the task's runs are limited.
   yield* insertTask(sql, "task:bound", "thread:bound", {
     subagents: { max: 2, models: [] },
     budget: { maxCostUsd: 0.5 },
   });
   yield* insertTask(sql, "task:launching", null, { maxRunsPerHour: 2 });
-  yield* insertTask(sql, "task:budget", "thread:budget", { budget: { maxTokens: 1_000_000 } });
+  yield* insertTask(sql, "task:owned", null, { budget: { maxTokens: 1_000_000 } });
+  yield* insertTask(sql, "task:user", "thread:user", { budget: { maxTokens: 1_000_000 } });
   yield* insertTask(sql, "task:unlimited", "thread:unlimited", null);
   yield* sql`INSERT INTO scheduled_task_runs ${sql.insert({
     id: "run:bound",
@@ -119,33 +126,61 @@ const seed = Effect.gen(function* () {
     thread_id: "thread:bound",
     orchestration_run_id: "orun:bound",
   })}`;
-  for (const id of ["thread:bound", "thread:launched", "thread:budget", "thread:unlimited"]) {
+  for (const id of ["thread:bound", launched, ownedEarlier, owned, "thread:unlimited"]) {
     yield* insertThread(sql, id);
   }
-  // A launched thread is found by its first message alone, without a run history row.
-  yield* insertMessage(sql, "message:launch", "thread:launched", {
-    scheduledTaskId: "task:launching",
-  });
   yield* insertThread(sql, "thread:child", { id: "thread:bound", relationship: "subagent" });
   yield* insertThread(sql, "thread:grandchild", { id: "thread:child", relationship: "subagent" });
   yield* insertThread(sql, "thread:fork", { id: "thread:bound", relationship: "fork" });
-  yield* insertRun(sql, { id: "orun:bound", threadId: "thread:bound", message: {} });
+  // A person's fork of a task's thread, bound to a task before anyone wrote in it.
+  yield* insertThread(sql, "thread:user", { id: ownedEarlier, relationship: "fork" });
+  yield* insertRun(sql, {
+    id: "orun:bound",
+    threadId: "thread:bound",
+    message: { scheduledTaskId: "task:bound" },
+  });
   yield* insertRun(sql, { id: "orun:child", threadId: "thread:child" });
-  yield* insertRun(sql, { id: "orun:budget", threadId: "thread:budget" });
+  // The user chatting in a thread the task started.
+  yield* insertRun(sql, { id: "orun:owned", threadId: owned, message: {} });
 });
 
-it.effect("finds the automation a thread runs under through delegated tasks, not forks", () =>
+it.effect("limits a task's own threads, and only its runs in a thread a person started", () =>
   Effect.gen(function* () {
     yield* seed;
+    const sql = yield* SqlClient.SqlClient;
     const scopeOf = (id: string) =>
       AutomationLimits.automationForThread(ThreadId.make(id)).pipe(
         Effect.map((scope) => scope?.taskId ?? null),
       );
     assert.equal(yield* scopeOf("thread:bound"), "task:bound");
     assert.equal(yield* scopeOf("thread:grandchild"), "task:bound");
-    assert.equal(yield* scopeOf("thread:launched"), "task:launching");
+    assert.equal(yield* scopeOf(launched), "task:launching");
+    assert.equal(yield* scopeOf(owned), "task:owned");
     assert.equal(yield* scopeOf("thread:fork"), null);
     assert.equal(yield* scopeOf("thread:unlimited"), null);
+
+    // The fork's first message comes from the task, yet a person started the thread.
+    yield* insertRun(sql, {
+      id: "orun:user-task",
+      threadId: "thread:user",
+      message: { scheduledTaskId: "task:user" },
+    });
+    assert.equal(yield* scopeOf("thread:user"), "task:user");
+    yield* insertRun(sql, {
+      id: "orun:user-chat",
+      threadId: "thread:user",
+      ordinal: 2,
+      message: {},
+    });
+    assert.equal(yield* scopeOf("thread:user"), null);
+    // An agent's follow-up keeps the run it follows: still the person's.
+    yield* insertRun(sql, {
+      id: "orun:user-follow-up",
+      threadId: "thread:user",
+      ordinal: 3,
+      message: { senderThreadId: "thread:user" },
+    });
+    assert.equal(yield* scopeOf("thread:user"), null);
 
     const base = Layer.succeed(RuntimePolicy.RuntimePolicyV2, {
       resolve: () =>
@@ -166,8 +201,10 @@ it.effect("finds the automation a thread runs under through delegated tasks, not
         Effect.provide(AutomationLimits.runtimePolicyLayer.pipe(Layer.provide(base))),
       );
     assert.isTrue(yield* resolve("thread:child"));
+    assert.isTrue(yield* resolve(owned));
+    assert.isFalse(yield* resolve("thread:user"));
     // Only a run cap: native subagents stay.
-    assert.isFalse(yield* resolve("thread:launched"));
+    assert.isFalse(yield* resolve(launched));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
@@ -182,17 +219,28 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
     const sql = yield* SqlClient.SqlClient;
     const events = yield* Queue.unbounded<never>();
     const interrupts = yield* Ref.make<Array<string>>([]);
+    const cancelled = yield* Ref.make<Array<string>>([]);
     const barrier = yield* Deferred.make<void>();
     const interrupted = yield* Deferred.make<void>();
+    const childAgain = yield* Deferred.make<void>();
+    const count = (all: ReadonlyArray<string>, id: string) =>
+      all.filter((entry) => entry === id).length;
     const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
       streamDomainEvents: Stream.fromQueue(events),
+      dispatch: (command) =>
+        Ref.update(cancelled, (all) => [...all, (command as { runId: string }).runId]).pipe(
+          Effect.as({} as never),
+        ),
       interruptThread: (input) =>
         Ref.updateAndGet(interrupts, (all) => [...all, input.threadId]).pipe(
           Effect.tap((all) =>
             Effect.all([
-              all.includes("thread:budget") ? Deferred.succeed(barrier, undefined) : Effect.void,
+              all.includes(owned) ? Deferred.succeed(barrier, undefined) : Effect.void,
               all.includes("thread:bound") && all.includes("thread:child")
                 ? Deferred.succeed(interrupted, undefined)
+                : Effect.void,
+              count(all, "thread:child") === 2
+                ? Deferred.succeed(childAgain, undefined)
                 : Effect.void,
             ]),
           ),
@@ -215,24 +263,18 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
     yield* Effect.gen(function* () {
       const limits = yield* AutomationLimits.AutomationLimits;
       const child = ThreadId.make("thread:child");
-      const admit = (models: ReadonlyArray<{ instanceId?: string; model?: string }>) =>
+      const admit = (models: ReadonlyArray<{ instanceId: string; model: string }>) =>
         failure(limits.admitSubagents({ callerThreadId: child, models }));
       const opus = { instanceId: "claudeAgent", model: "claude-opus-5-5" };
       assert.include(yield* admit([opus]), "only on claudeAgent/claude-haiku-5-5");
-      assert.include(yield* admit([{}]), "Name target.providerInstanceId and target.model");
       assert.equal(yield* admit([haiku, haiku]), "allowed");
       assert.include(yield* admit([haiku]), "This automation allows 2 subagents per run.");
       const [row] = yield* sql<{ subagent_count: number }>`
         SELECT subagent_count FROM scheduled_task_runs WHERE id = 'run:bound'`;
       assert.equal(row?.subagent_count, 2);
-      // Another automation's run is counted on its own.
-      yield* limits.admitSubagents({
-        callerThreadId: ThreadId.make("thread:launched"),
-        models: [{ instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" }],
-      });
 
       // Creating tasks, changing limits and running tasks now are refused in any limited thread.
-      for (const id of ["thread:child", "thread:launched"]) {
+      for (const id of ["thread:child", launched, owned]) {
         assert.include(
           yield* failure(limits.refuseScheduling(ThreadId.make(id))),
           "can't create tasks, change limits or run tasks now",
@@ -243,14 +285,14 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
         "allowed",
       );
       // New threads would escape the budget, a budget-only one included.
-      for (const id of ["thread:child", "thread:budget"]) {
+      for (const id of ["thread:child", owned]) {
         assert.include(
           yield* failure(limits.refuseOutside(ThreadId.make(id), "start new threads")),
           "so it can't start new threads",
         );
       }
       assert.equal(
-        yield* failure(limits.refuseOutside(ThreadId.make("thread:launched"), "start new threads")),
+        yield* failure(limits.refuseOutside(ThreadId.make(launched), "start new threads")),
         "allowed",
       );
 
@@ -263,7 +305,11 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
         );
       assert.include(yield* send("thread:child", "thread:unlimited"), "send to threads outside it");
       assert.equal(yield* send("thread:child", "thread:bound"), "allowed");
-      // Answering or reordering turns elsewhere is refused too.
+      // A thread an earlier run of the same task started has a budget of its own.
+      assert.include(yield* send(owned, ownedEarlier), "send to threads outside it");
+      assert.equal(yield* send(owned, owned), "allowed");
+      // A thread with no run of its own to count toward is refused.
+      assert.include(yield* send(ownedEarlier, ownedEarlier), "could not be found");
       const elsewhere = (to: string) =>
         failure(
           limits.refuseOtherThread({
@@ -283,19 +329,21 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
         started_at: now,
         status: "running",
         trigger_json: '{"type":"schedule","summary":"On schedule"}',
-        thread_id: "thread:launched",
+        thread_id: launched,
       })}`;
-      assert.equal(yield* send("thread:launched", "thread:launched"), "allowed");
+      yield* insertRun(sql, {
+        id: "orun:launched",
+        threadId: launched,
+        message: { scheduledTaskId: "task:launching" },
+      });
+      assert.equal(yield* send(launched, launched), "allowed");
       yield* insertRun(sql, {
         id: "orun:launched-follow-up",
-        threadId: "thread:launched",
+        threadId: launched,
         ordinal: 2,
-        message: { senderThreadId: "thread:launched" },
+        message: { senderThreadId: launched },
       });
-      assert.include(
-        yield* send("thread:launched", "thread:launched"),
-        "This automation allows 2 runs per hour.",
-      );
+      assert.include(yield* send(launched, launched), "This automation allows 2 runs per hour.");
       assert.equal(
         yield* RunHistory.countRecentRuns(
           ScheduledTaskId.make("task:launching"),
@@ -304,45 +352,67 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
         2,
       );
 
-      const turnUpdate = (threadId: string, tokenUsage: object) =>
+      const turnUpdate = (threadId: string, turnId: string, tokenUsage: object) =>
         ({
           type: "provider-turn.updated",
           threadId: ThreadId.make(threadId),
-          payload: {
-            id: `provider-turn:${threadId}`,
-            tokenUsage: { ...tokenUsage, updatedAt: now },
-          },
+          payload: { id: turnId, tokenUsage: { ...tokenUsage, updatedAt: now } },
         }) as never;
       // A context-size update without request counts is not a request: it would be $0.90.
-      yield* Queue.offer(events, turnUpdate("thread:child", { usedTokens: 900_000 }));
+      yield* Queue.offer(events, turnUpdate("thread:child", "turn:1", { usedTokens: 900_000 }));
       // 200k in + 10k out = $0.30.
       const first = { usedTokens: 200_000, inputTokens: 200_000 };
-      yield* Queue.offer(events, turnUpdate("thread:child", { ...first, outputTokens: 1_000 }));
-      yield* Queue.offer(events, turnUpdate("thread:child", { ...first, outputTokens: 10_000 }));
+      yield* Queue.offer(
+        events,
+        turnUpdate("thread:child", "turn:1", { ...first, outputTokens: 1_000 }),
+      );
+      yield* Queue.offer(
+        events,
+        turnUpdate("thread:child", "turn:1", { ...first, outputTokens: 10_000 }),
+      );
       // A native subagent in a limited thread stops its run; once seen, the events above are in.
       yield* Queue.offer(events, {
         type: "subagent.updated",
-        threadId: ThreadId.make("thread:budget"),
+        threadId: ThreadId.make(owned),
         payload: { origin: "provider_native" },
       } as never);
       yield* Deferred.await(barrier);
-      assert.deepEqual(yield* Ref.get(interrupts), ["thread:budget"]);
+      assert.deepEqual(yield* Ref.get(interrupts), [owned]);
 
-      // The agent's follow-up turn shares the run's budget: $0.35 more crosses $0.50.
+      // However many follow-ups came before, the agent's turns share the run's budget.
+      for (let ordinal = 2; ordinal < 62; ordinal++) {
+        yield* insertRun(sql, {
+          id: `orun:earlier-follow-up-${ordinal}`,
+          threadId: "thread:bound",
+          ordinal,
+          status: "completed",
+          message: { senderThreadId: "thread:bound" },
+        });
+      }
+      // A turn the agent queued in its delegated thread is cancelled with the stop.
+      yield* insertRun(sql, {
+        id: "orun:child-queued",
+        threadId: "thread:child",
+        ordinal: 2,
+        status: "queued",
+        message: { senderThreadId: "thread:bound" },
+      });
       yield* insertRun(sql, {
         id: "orun:follow-up",
         threadId: "thread:bound",
-        ordinal: 2,
+        ordinal: 100,
         message: { senderThreadId: "thread:bound" },
       });
+      // $0.35 more crosses $0.50 only together with the earlier spend.
       const followUp = { usedTokens: 300_000, inputTokens: 300_000, outputTokens: 5_000 };
-      yield* Queue.offer(events, turnUpdate("thread:bound", followUp));
+      yield* Queue.offer(events, turnUpdate("thread:bound", "turn:2", followUp));
       yield* Deferred.await(interrupted);
       assert.deepEqual((yield* Ref.get(interrupts)).toSorted(), [
+        owned,
         "thread:bound",
-        "thread:budget",
         "thread:child",
       ]);
+      assert.include(yield* Ref.get(cancelled), "orun:child-queued");
       const [stopped] = yield* sql<{ status: string; error: string }>`
         SELECT status, error FROM scheduled_task_runs WHERE id = 'run:bound'`;
       assert.deepEqual(stopped, {
@@ -355,12 +425,17 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
         last_run_status: "failed",
         last_run_error: "Stopped at the $0.50 run budget.",
       });
-      // No more follow-ups until the next scheduled run.
+      // No more follow-ups or subagents until the next scheduled run.
       assert.include(
         yield* send("thread:child", "thread:bound"),
         "Stopped at the $0.50 run budget.",
       );
-      // After a restart, the run's subagents come back from its history row.
+      assert.include(yield* admit([haiku]), "Stopped at the $0.50 run budget.");
+      // Work of the stopped run that starts later stops where it runs.
+      yield* Queue.offer(events, turnUpdate("thread:child", "turn:3", first));
+      yield* Deferred.await(childAgain);
+
+      // After a restart the stop and the subagent count come back from the run's history row.
       const restarted = AutomationLimits.layer.pipe(
         Layer.provide(
           Layer.mock(ThreadManagementService.ThreadManagementService)({
@@ -368,19 +443,26 @@ it.effect("keeps a limited automation's agents inside its limits", () =>
           }),
         ),
       );
-      assert.include(
-        yield* AutomationLimits.AutomationLimits.pipe(
-          Effect.flatMap((fresh) =>
+      const afterRestart = yield* AutomationLimits.AutomationLimits.pipe(
+        Effect.flatMap((fresh) =>
+          Effect.all([
             failure(fresh.admitSubagents({ callerThreadId: child, models: [haiku] })),
-          ),
-          Effect.provide(restarted),
+            failure(
+              fresh.admitSend({
+                callerThreadId: child,
+                targetThreadId: ThreadId.make("thread:bound"),
+              }),
+            ),
+          ]),
         ),
-        "This automation allows 2 subagents per run.",
+        Effect.provide(restarted),
       );
+      for (const outcome of afterRestart)
+        assert.include(outcome, "Stopped at the $0.50 run budget.");
       yield* insertRun(sql, {
         id: "orun:next",
         threadId: "thread:bound",
-        ordinal: 3,
+        ordinal: 101,
         message: { scheduledTaskId: "task:bound" },
       });
       assert.equal(yield* send("thread:child", "thread:bound"), "allowed");

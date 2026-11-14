@@ -1318,10 +1318,7 @@ const make = Effect.gen(function* () {
     Option.isNone(automationLimits) || callerThreadId === undefined
       ? Effect.void
       : check(automationLimits.value, callerThreadId);
-  const admitSubagent = (
-    callerThreadId: ThreadId,
-    model: { readonly instanceId?: string; readonly model?: string },
-  ) =>
+  const admitSubagent = (callerThreadId: ThreadId, model: ModelSelection) =>
     checkLimits(callerThreadId, (limits, id) =>
       limits.admitSubagents({ callerThreadId: id, models: [model] }),
     );
@@ -3070,13 +3067,10 @@ const make = Effect.gen(function* () {
             "A task in a linked environment starts fresh: conversation context does not leave this environment. Omit context, or describe what the child needs in the task.",
           );
         }
-        // Counted here too; its model must be named and allowed, as no model resolves here.
-        yield* admitSubagent(scope.thread.threadId, {
-          ...(input.target.providerInstanceId === undefined
-            ? {}
-            : { instanceId: input.target.providerInstanceId }),
-          ...(input.target.model === undefined ? {} : { model: input.target.model }),
-        });
+        // Its spend there would not count toward a limited automation's budget.
+        yield* checkLimits(scope.thread.threadId, (limits, id) =>
+          limits.refuseOutside(id, "delegate to a linked environment"),
+        );
         // The task's child runs as an ordinary thread there; this thread keeps the task.
         const { taskId } = yield* remoteDelegation.delegate(scope, {
           ...input,
