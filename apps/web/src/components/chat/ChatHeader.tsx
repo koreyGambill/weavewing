@@ -2,7 +2,7 @@ import { Button } from "../ui/button";
 import { ThreadGlyph } from "../ThreadGlyph";
 import { nextThreadGlyphSeed, resolveThreadGlyph } from "@t3tools/client-runtime/thread-glyphs";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
-import { scratchProjectFolderLabel } from "@t3tools/client-runtime/operations/projects";
+import { scratchProjectLabel } from "@t3tools/client-runtime/operations/projects";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -90,7 +90,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const activeProjectServerConfig = useServerConfigs().get(activeThreadEnvironmentId);
   const activeProjectName = activeProject?.isScratch
-    ? scratchProjectFolderLabel(activeProject, activeProjectServerConfig)
+    ? scratchProjectLabel(activeProject, activeProjectServerConfig)
     : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);

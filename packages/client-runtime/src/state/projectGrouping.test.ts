@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
 import { chooseLoadBalancedEnvironment } from "../load-balancing.ts";
-import { scratchProjectFolderLabel } from "../operations/projects.ts";
+import { scratchProjectFolderLabel, scratchProjectLabel } from "../operations/projects.ts";
 import {
   buildProjectGroups,
   deriveLogicalProjectKeyFromSettings,
@@ -247,6 +247,23 @@ describe("buildProjectGroups", () => {
         settings: settings("separate"),
       });
       expect(ungrouped.map((group) => group.label)).toEqual(["/local/scratch", "Notes"]);
+      // A renamed default folder keeps its name everywhere, grouped or not.
+      const renamed = buildProjectGroups({
+        projects: projects.map((project) =>
+          project.isScratch ? { ...project, title: "Notes" } : project,
+        ),
+        groupScratchProjects: true,
+        settings: settings(mode, { [derivePhysicalProjectKey(projects[0]!)]: "separate" }),
+        preferredEnvironmentId: remoteEnvironmentId,
+        scratchLabel: (project) => scratchProjectFolderLabel(project, config),
+      });
+      expect(renamed.find((group) => group.representative.isScratch)?.label).toBe("Notes");
+      expect(
+        scratchProjectLabel({ workspaceRoot: "/remote/scratch/", title: "Notes" }, config),
+      ).toBe("Notes");
+      expect(
+        scratchProjectLabel({ workspaceRoot: "/remote/scratch/", title: "No project" }, config),
+      ).toBe("~/scratch");
       // An older default folder keeps its own path.
       expect(scratchProjectFolderLabel({ workspaceRoot: "/old/scratch" }, config)).toBe(
         "/old/scratch",

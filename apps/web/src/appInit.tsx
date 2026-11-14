@@ -55,7 +55,7 @@ import { startProviderAuthDelivery } from "./providerAuthDelivery";
 import { getRouter, type AppRouter } from "./router";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 import { environmentPresentations } from "./state/presentation";
-import { scratchProjectFolderLabel } from "@t3tools/client-runtime/operations/projects";
+import { scratchProjectLabel } from "@t3tools/client-runtime/operations/projects";
 import { environmentProjects } from "./state/projects";
 import { primaryServerConfigAtom } from "./state/server";
 import { environmentShell } from "./state/shell";
@@ -168,7 +168,7 @@ function startDocumentTitle(router: AppRouter): void {
           appAtomRegistry.get(primaryServerConfigAtom)?.environment.serverVersion ?? null,
       }),
       projectTitle: project?.isScratch
-        ? scratchProjectFolderLabel(
+        ? scratchProjectLabel(
             project,
             appAtomRegistry
               .get(environmentPresentations.serverConfigsAtom)

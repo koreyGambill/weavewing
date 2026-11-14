@@ -27,6 +27,7 @@ import {
   resolveProjectPathForDispatch,
 } from "../state/projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
+import { SCRATCH_PROJECT_DEFAULT_TITLE } from "../state/projectGrouping.ts";
 import { sourceControlClients } from "../sourceControlClients.ts";
 import type { SourceControlDefinition } from "../sourceControlClients.ts";
 
@@ -76,6 +77,16 @@ export function scratchWorkspaceLabel(
   if (root === undefined) return null;
   const typed = serverConfig?.settings.scratchStartDirectory.replace(/(.)[\\/]+$/, "$1") ?? "";
   return scratchWorkspaceStatus(serverConfig) === "in-use" && typed.length > 0 ? typed : root;
+}
+
+/** A default-folder project's name: its own once renamed, else its folder. */
+export function scratchProjectLabel(
+  project: { readonly workspaceRoot: string; readonly title: string },
+  serverConfig: Parameters<typeof scratchWorkspaceLabel>[0],
+): string {
+  return project.title === SCRATCH_PROJECT_DEFAULT_TITLE
+    ? scratchProjectFolderLabel(project, serverConfig)
+    : project.title;
 }
 
 /** A default-folder project's folder: the configured label for the current default, else its path. */

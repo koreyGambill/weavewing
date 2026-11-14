@@ -499,6 +499,8 @@ export function AppSidebarLayout({
           storageKey="chat_thread_sidebar_open"
           style={sidebarProviderStyle}
         >
+          {/* Fixed in place; first in the DOM so Tab starts at the title bar. */}
+          <SidebarControl showSidebar={showSidebar} />
           {showSidebar ? (
             <>
               <TitlebarWidthProbe onWidthChange={setTitlebarWidth} />
@@ -533,7 +535,6 @@ export function AppSidebarLayout({
           ) : null}
           {children}
           <BackgroundThreadAnnouncer />
-          <SidebarControl showSidebar={showSidebar} />
           {isElectron ? <HistorySwipeNavigation /> : null}
         </SidebarProvider>
       </ThreadToolsHost>
