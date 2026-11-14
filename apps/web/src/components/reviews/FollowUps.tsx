@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { FlagIcon, MoreHorizontalIcon } from "lucide-react";
+import { AsyncResult } from "effect/reactivity";
 import { useRef } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -19,7 +20,7 @@ import {
   messageFollowUpsUpdate,
   useMessageFollowUpUpdate,
 } from "../../state/messageFollowUps";
-import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -27,27 +28,39 @@ import { Checkbox } from "../ui/checkbox";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-function useFollowUps(environmentId: EnvironmentId | null, threadId?: ThreadId) {
+function useFollowUpsAtom(environmentId: EnvironmentId | null, threadId?: ThreadId) {
   const readable = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
-  return useEnvironmentQuery(
-    environmentId && readable
-      ? messageFollowUpsList({
-          environmentId,
-          input: threadId === undefined ? {} : { threadId },
-        })
-      : null,
+  return environmentId && readable
+    ? messageFollowUpsList({
+        environmentId,
+        input: threadId === undefined ? {} : { threadId },
+      })
+    : null;
+}
+
+function useFollowUps(environmentId: EnvironmentId | null, threadId?: ThreadId) {
+  return useEnvironmentQuery(useFollowUpsAtom(environmentId, threadId));
+}
+
+const NO_FOLLOW_UPS: ReadonlyArray<MessageFollowUp> = [];
+const followUpsOf = (result: AsyncResult.AsyncResult<ReadonlyArray<MessageFollowUp>, unknown>) =>
+  AsyncResult.getOrElse(result, () => NO_FOLLOW_UPS);
+
+/** One thread's follow-ups, for per-message lookups that render on every timeline row. */
+function useThreadFollowUpList(threadRef: ScopedThreadRef | null) {
+  return useEnvironmentQuerySelector(
+    useFollowUpsAtom(threadRef?.environmentId ?? null, threadRef?.threadId),
+    followUpsOf,
   );
 }
 
 /** Open follow-ups of one thread, for the Todos strip badge. */
 export function useOpenFollowUpCount(threadRef: ScopedThreadRef | null) {
-  const query = useFollowUps(threadRef?.environmentId ?? null, threadRef?.threadId);
-  return query.data?.filter((item) => item.doneAt === null).length ?? 0;
+  return useThreadFollowUpList(threadRef).filter((item) => item.doneAt === null).length;
 }
 
 export function useMessageFollowUp(threadRef: ScopedThreadRef | null, messageId: MessageId) {
-  const query = useFollowUps(threadRef?.environmentId ?? null, threadRef?.threadId);
-  return query.data?.find((item) => item.messageId === messageId) ?? null;
+  return useThreadFollowUpList(threadRef).find((item) => item.messageId === messageId) ?? null;
 }
 
 /** Message action row toggle; the user's own reminder, never shown to agents. */

@@ -30,7 +30,7 @@ export class MessageFollowUpService extends Context.Service<
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(MessageFollowUp));
 
-export const followUpExcerpt = (text: string) => {
+const followUpExcerpt = (text: string) => {
   const line = text
     .split("\n")
     .map((part) => part.trim())
