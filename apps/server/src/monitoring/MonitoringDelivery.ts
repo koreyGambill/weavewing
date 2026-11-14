@@ -33,7 +33,7 @@ export function monitoringAdvisory(
 const FOLLOWUP_MAX = 600;
 
 /** Weaker findings stay in the inbox: a thread only hears from a reviewer that is at least this sure. */
-export const THREAD_POST_MIN_CONFIDENCE = 0.5;
+const THREAD_POST_MIN_CONFIDENCE = 0.5;
 
 /** An assessment as posted back to the thread, at most 600 characters. */
 export function monitoringFollowup(
