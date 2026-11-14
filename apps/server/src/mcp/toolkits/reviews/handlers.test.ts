@@ -379,6 +379,11 @@ it.effect("records evidence on the calling thread and reads summaries or one lan
         },
       ],
     };
+    // The project always comes from the thread; an agent cannot name another.
+    const refused = yield* Effect.flip(
+      call("evidence_record", { ...landing, projectId: "elsewhere" }),
+    );
+    expect(refused.message).toContain('Unknown argument "projectId"');
     const recorded = yield* call("evidence_record", landing);
     const shell = liveThreadShell(threadId);
     expect(recorded.structuredContent).toEqual({

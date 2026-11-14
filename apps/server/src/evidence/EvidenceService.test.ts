@@ -132,6 +132,27 @@ it.effect(
           ],
         );
         assert.deepStrictEqual(yield* evidence.counts(), { pending: 1, failed: 1 });
+
+        // Another thread reusing the id is refused, so it can neither take the landing nor reset QA.
+        const other = ThreadId.make("other");
+        for (const changes of [[change("x")], [change("a"), change("c")]]) {
+          const error = yield* Effect.flip(
+            evidence.record(
+              recordInput("batch-1", changes, { threadId: other, recordedBy: other }),
+            ),
+          );
+          assert.strictEqual(error.code, "invalid");
+          assert.strictEqual(
+            error.message,
+            "Landing id batch-1 is already used by thread lead; pick another id.",
+          );
+        }
+        const kept = yield* evidence.get({ landingId: "batch-1" });
+        assert.strictEqual(kept.threadId, lead);
+        assert.deepStrictEqual(
+          kept.changes.map((item) => item.qa.state),
+          ["failed", "pending"],
+        );
       }),
     ).pipe(Effect.provide(testLayer)),
 );
@@ -228,6 +249,16 @@ it.effect("lists compact summaries newest first, pages, and filters by thread an
         (yield* evidence.list({ needsQa: true })).items.map((item) => item.id),
         ["batch-22b", "batch-22"],
       );
+      // A cursor written without milliseconds still pages after batch-22, not into it.
+      const handWritten = yield* evidence.list({
+        before: { landedAt: "2026-11-14T22:00:00Z", id: "batch-22" },
+      });
+      assert.strictEqual(handWritten.items[0]!.id, "batch-21");
+      assert.strictEqual(
+        (yield* Effect.flip(evidence.list({ before: { landedAt: "soon", id: "x" } }))).message,
+        "Invalid cursor landedAt: soon",
+      );
+
       const other = yield* evidence.list({ threadId: ThreadId.make("other") });
       assert.strictEqual(other.items.length, 11);
       assert.isTrue(other.items.every((item) => item.threadId === "other"));

@@ -64,7 +64,6 @@ export type EvidenceRecord = typeof EvidenceRecord.Type;
 export const EvidenceRecordInput = Schema.Struct({
   ...EvidenceRecord.fields,
   threadId: Schema.optional(ThreadId),
-  projectId: Schema.optional(ProjectId),
   landedAt: Schema.optional(IsoDateTime),
 });
 export type EvidenceRecordInput = typeof EvidenceRecordInput.Type;

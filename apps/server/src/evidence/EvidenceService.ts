@@ -33,10 +33,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as NotificationService from "../notifications/NotificationService.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 
-/** Captures must live here, so a record can never point a client at an arbitrary host file. */
+/** Captures must resolve under ~/evidence. This catches wrong paths; minting a URL needs `filesystem:read`, which is the real boundary. */
 const EVIDENCE_ROOT_NAME = "evidence";
 
-export interface RecordInput extends Omit<EvidenceRecordInput, "threadId" | "projectId"> {
+export interface RecordInput extends Omit<EvidenceRecordInput, "threadId"> {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId | null;
   /** The agent's thread, named as the Inbox notification's source. */
@@ -81,6 +81,7 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
     ...EvidenceLandingSummary.fields,
     target: Schema.fromJsonString(EvidenceLandingSummary.fields.target),
     verifications: Schema.fromJsonString(EvidenceLandingSummary.fields.verifications),
+    qa: Schema.fromJsonString(EvidenceLandingSummary.fields.qa),
   }),
 );
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
@@ -127,7 +128,10 @@ const make = Effect.gen(function* () {
   const readQa = (landingId: string) =>
     sql<QaRow>`SELECT change_id, state, note, updated_at FROM evidence_qa WHERE landing_id = ${landingId}`;
 
-  const notify = Effect.fnUntraced(function* (input: RecordInput, pending: number) {
+  const notify = Effect.fn("EvidenceService.notify")(function* (
+    input: RecordInput,
+    pending: number,
+  ) {
     const count = input.changes.length;
     const asks = input.changes.map(
       (change) => `- ${change.ticket?.key ?? change.id}: ${firstLine(change.ask, 160)}`,
@@ -179,9 +183,16 @@ const make = Effect.gen(function* () {
     const { qa, added } = yield* sql
       .withTransaction(
         Effect.gen(function* () {
+          const [owner] = yield* sql<{
+            readonly thread_id: string;
+          }>`SELECT thread_id FROM evidence_landings WHERE landing_id = ${input.id}`;
+          if (owner !== undefined && owner.thread_id !== input.threadId)
+            return yield* invalid(
+              `Landing id ${input.id} is already used by thread ${owner.thread_id}; pick another id.`,
+            );
           yield* sql`INSERT INTO evidence_landings (landing_id, thread_id, project_id, landed_at, record_json, updated_at)
               VALUES (${input.id}, ${input.threadId}, ${input.projectId}, ${landedAt ?? now}, ${recordJson}, ${now})
-              ON CONFLICT (landing_id) DO UPDATE SET thread_id = excluded.thread_id, project_id = excluded.project_id,
+              ON CONFLICT (landing_id) DO UPDATE SET project_id = excluded.project_id,
               landed_at = coalesce(${landedAt ?? null}, landed_at), record_json = excluded.record_json, updated_at = excluded.updated_at`;
           yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
           let added = 0;
@@ -194,7 +205,7 @@ const make = Effect.gen(function* () {
           return { qa: yield* readQa(input.id), added };
         }),
       )
-      .pipe(Effect.mapError(storage));
+      .pipe(Effect.mapError(passStorage));
     const states = new Map(qa.map((row) => [row.change_id, row.state]));
     const pending = qa.filter((row) => row.state === "pending").length;
     // Only new changes ask for QA again, so a re-record that adds a check stays quiet.
@@ -212,7 +223,14 @@ const make = Effect.gen(function* () {
   }, Effect.mapError(passStorage));
 
   const list = Effect.fn("EvidenceService.list")(function* (input: EvidenceListInput) {
-    const before = input.before;
+    let before: { readonly landedAt: string; readonly id: string } | undefined;
+    if (input.before !== undefined) {
+      const parsed = DateTime.make(input.before.landedAt);
+      if (Option.isNone(parsed))
+        return yield* invalid(`Invalid cursor landedAt: ${input.before.landedAt}`);
+      before = { landedAt: DateTime.formatIso(parsed.value), id: input.before.id };
+    }
+    // Pick the page through the landed_at indexes first, so JSON and QA tallies run for 21 rows only.
     const rows = yield* sql<{
       readonly id: string;
       readonly title: string;
@@ -222,26 +240,25 @@ const make = Effect.gen(function* () {
       readonly target: string;
       readonly verifications: string;
       readonly change_count: number;
-      readonly pending: number;
-      readonly confirmed: number;
-      readonly failed: number;
-      readonly waived: number;
-    }>`SELECT l.landing_id AS id, json_extract(l.record_json, '$.title') AS title, l.thread_id, l.project_id, l.landed_at,
-          json_extract(l.record_json, '$.target') AS target,
+      readonly qa: string;
+    }>`WITH page AS (
+          SELECT landing_id, thread_id, project_id, landed_at, record_json FROM evidence_landings l
+          WHERE ${input.threadId === undefined ? sql`1 = 1` : sql`l.thread_id = ${input.threadId}`}
+            AND ${before === undefined ? sql`1 = 1` : sql`(l.landed_at < ${before.landedAt} OR (l.landed_at = ${before.landedAt} AND l.landing_id < ${before.id}))`}
+            AND ${input.needsQa === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q WHERE q.landing_id = l.landing_id AND q.state IN ('pending', 'failed'))` : sql`1 = 1`}
+          ORDER BY l.landed_at DESC, l.landing_id DESC
+          LIMIT ${EVIDENCE_LIST_PAGE_SIZE + 1})
+        SELECT p.landing_id AS id, json_extract(p.record_json, '$.title') AS title, p.thread_id, p.project_id, p.landed_at,
+          json_extract(p.record_json, '$.target') AS target,
           (SELECT json_group_array(json_object('label', json_extract(v.value, '$.label'), 'result', json_extract(v.value, '$.result')))
-            FROM json_each(l.record_json, '$.verifications') v) AS verifications,
-          json_array_length(l.record_json, '$.changes') AS change_count,
-          count(q.change_id) FILTER (WHERE q.state = 'pending') AS pending,
-          count(q.change_id) FILTER (WHERE q.state = 'confirmed') AS confirmed,
-          count(q.change_id) FILTER (WHERE q.state = 'failed') AS failed,
-          count(q.change_id) FILTER (WHERE q.state = 'waived') AS waived
-        FROM evidence_landings l LEFT JOIN evidence_qa q ON q.landing_id = l.landing_id
-        WHERE ${input.threadId === undefined ? sql`1 = 1` : sql`l.thread_id = ${input.threadId}`}
-          AND ${before === undefined ? sql`1 = 1` : sql`(l.landed_at < ${before.landedAt} OR (l.landed_at = ${before.landedAt} AND l.landing_id < ${before.id}))`}
-        GROUP BY l.landing_id
-        HAVING ${input.needsQa === true ? sql`pending + failed > 0` : sql`1 = 1`}
-        ORDER BY l.landed_at DESC, l.landing_id DESC
-        LIMIT ${EVIDENCE_LIST_PAGE_SIZE + 1}`;
+            FROM json_each(p.record_json, '$.verifications') v) AS verifications,
+          json_array_length(p.record_json, '$.changes') AS change_count,
+          (SELECT json_object('pending', count(*) FILTER (WHERE state = 'pending'),
+              'confirmed', count(*) FILTER (WHERE state = 'confirmed'),
+              'failed', count(*) FILTER (WHERE state = 'failed'), 'waived', count(*) FILTER (WHERE state = 'waived'))
+            FROM evidence_qa q WHERE q.landing_id = p.landing_id) AS qa
+        FROM page p
+        ORDER BY p.landed_at DESC, p.landing_id DESC`;
     const items = yield* Effect.forEach(rows.slice(0, EVIDENCE_LIST_PAGE_SIZE), (row) =>
       decodeSummaryRow({
         id: row.id,
@@ -252,12 +269,7 @@ const make = Effect.gen(function* () {
         target: row.target,
         verifications: row.verifications,
         changeCount: row.change_count,
-        qa: {
-          pending: row.pending,
-          confirmed: row.confirmed,
-          failed: row.failed,
-          waived: row.waived,
-        },
+        qa: row.qa,
       }),
     );
     const last = items.at(-1);
@@ -268,7 +280,7 @@ const make = Effect.gen(function* () {
           ? { landedAt: last.landedAt, id: last.id }
           : null,
     };
-  }, Effect.mapError(storage));
+  }, Effect.mapError(passStorage));
 
   const get = Effect.fn("EvidenceService.get")(function* (input: EvidenceGetInput) {
     const [row] =
