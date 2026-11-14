@@ -59,9 +59,24 @@ const splitList = (value: string, separator: RegExp) =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+/** Switching the review kind drops rules left blank; the first stays so the list is never empty. */
+export const withKind = (draft: ReviewDraft, kind: ReviewDraft["kind"]): ReviewDraft => {
+  const filled = draft.rules.filter((rule) => rule.title.trim() || rule.instructions.trim());
+  return { ...draft, kind, rules: filled.length > 0 ? filled : draft.rules.slice(0, 1) };
+};
+
+/** `data-review-field` value of the control to focus for a failed review draft. */
+export const reviewFieldKey = {
+  ruleTitle: (id: string) => `rule-title:${id}`,
+  ruleInstructions: (id: string) => `rule-instructions:${id}`,
+  instructionFiles: "instruction-files",
+} as const;
+
 export function reviewAgentFromDraft(
   draft: ReviewDraft,
-): { readonly agent: ScheduledTaskReviewAgent } | { readonly error: string } {
+):
+  | { readonly agent: ScheduledTaskReviewAgent }
+  | { readonly error: string; readonly field?: string } {
   const rules = draft.rules.map((rule) => ({
     id: rule.id,
     title: rule.title.trim(),
@@ -69,14 +84,30 @@ export function reviewAgentFromDraft(
   }));
   if (rules.length === 0 || rules.length > MAX_REVIEW_RULES)
     return { error: `Add between 1 and ${MAX_REVIEW_RULES} rules.` };
-  if (rules.some((rule) => !rule.title || !rule.instructions))
-    return { error: "Give every rule a title and instructions." };
+  for (const [index, rule] of rules.entries()) {
+    if (!rule.title)
+      return {
+        error: `Rule ${index + 1} needs a title.`,
+        field: reviewFieldKey.ruleTitle(rule.id),
+      };
+    if (!rule.instructions)
+      return {
+        error: `Rule ${index + 1} needs instructions.`,
+        field: reviewFieldKey.ruleInstructions(rule.id),
+      };
+  }
   const files = splitList(draft.instructionFiles, /\n/);
   if (files.length > MAX_REVIEW_INSTRUCTION_FILES)
-    return { error: `Use at most ${MAX_REVIEW_INSTRUCTION_FILES} instruction files.` };
+    return {
+      error: `Use at most ${MAX_REVIEW_INSTRUCTION_FILES} instruction files.`,
+      field: reviewFieldKey.instructionFiles,
+    };
   const relative = files.find((file) => !isInstructionFile(file));
   if (relative !== undefined)
-    return { error: `Use an absolute or ~/ path for instruction file ${relative}.` };
+    return {
+      error: `Use an absolute or ~/ path for instruction file ${relative}.`,
+      field: reviewFieldKey.instructionFiles,
+    };
   return {
     agent: {
       type: "review",

@@ -5,6 +5,7 @@ import {
   reviewAgentFromDraft,
   reviewDraftFromAgent,
   reviewModelKey,
+  withKind,
 } from "./reviewAgentDraft.logic";
 
 describe("review agent drafts", () => {
@@ -34,10 +35,35 @@ describe("review agent drafts", () => {
     });
     expect(
       reviewAgentFromDraft({ ...draft, rules: [{ id: "r1", title: " ", instructions: "x" }] }),
-    ).toEqual({ error: "Give every rule a title and instructions." });
+    ).toEqual({ error: "Rule 1 needs a title.", field: "rule-title:r1" });
     expect(
       reviewAgentFromDraft({ ...draft, instructionFiles: "~/ok.md\ndocs/standards.md" }),
-    ).toEqual({ error: "Use an absolute or ~/ path for instruction file docs/standards.md." });
+    ).toEqual({
+      error: "Use an absolute or ~/ path for instruction file docs/standards.md.",
+      field: "instruction-files",
+    });
+  });
+
+  it("names the first incomplete rule field for focus", () => {
+    const draft = newReviewDraft("r1");
+    const second = { id: "r2", title: "", instructions: "" };
+    expect(reviewAgentFromDraft({ ...draft, rules: [...draft.rules, second] })).toEqual({
+      error: "Rule 2 needs a title.",
+      field: "rule-title:r2",
+    });
+    expect(
+      reviewAgentFromDraft({ ...draft, rules: [...draft.rules, { ...second, title: "T" }] }),
+    ).toEqual({ error: "Rule 2 needs instructions.", field: "rule-instructions:r2" });
+  });
+
+  it("drops blank rules when the kind changes, keeping at least one", () => {
+    const draft = newReviewDraft("r1");
+    const blank = { id: "r2", title: " ", instructions: "" };
+    expect(withKind({ ...draft, rules: [...draft.rules, blank] }, "context-review")).toEqual({
+      ...draft,
+      kind: "context-review",
+    });
+    expect(withKind({ ...draft, rules: [blank] }, "context-review").rules).toEqual([blank]);
   });
 
   it("starts a new review on a ready Claude Haiku", () => {

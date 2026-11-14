@@ -576,7 +576,9 @@ function LimitFields({
         <p className="text-xs text-muted-foreground">
           {review === null
             ? "Per run. In threads this automation starts, your own turns count as runs too. A run over budget stops mid-turn. Blank means no limit."
-            : "Per review. Cost caps the reviewer's model call on Claude. Blank means no limit."}
+            : review.kind === "context-review"
+              ? "Per review. Cost caps the reviewer's model call on Claude. A blank cost still caps each review at $0.05. Other blanks mean no limit."
+              : "Per review. Cost caps the reviewer's model call on Claude. Blank means no limit."}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -1602,7 +1604,14 @@ function ScheduledTaskEditorDialog({
       }}
     >
       {/* The form owns the draft so a keystroke re-renders it, not the dialog chrome. */}
-      <DialogPopup className="max-w-xl">
+      <DialogPopup
+        className="max-w-xl"
+        initialFocus={() => {
+          const name = document.getElementById("scheduled-task-title");
+          name?.focus();
+          return name === null;
+        }}
+      >
         <ScheduledTaskEditorForm
           initialEnvironmentId={initialEnvironmentId}
           task={task}
@@ -1885,6 +1894,9 @@ function ScheduledTaskEditorForm({
     );
   };
 
+  const focusField = (selector: string) =>
+    document.querySelector<HTMLElement>(`[data-scheduled-task-form] ${selector}`)?.focus();
+
   const submit = async () => {
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
@@ -1899,15 +1911,27 @@ function ScheduledTaskEditorForm({
     const review = draft.review === null ? null : reviewAgentFromDraft(draft.review);
     if (review !== null && "error" in review) {
       reportFailure("Review is incomplete", review.error);
+      if (review.field !== undefined) focusField(`[data-review-field="${review.field}"]`);
       return;
     }
-    if (
-      !draft.title.trim() ||
-      (review === null && !draft.prompt.trim()) ||
-      !projects.some((project) => project.id === selectedProjectId) ||
-      selection === null
-    ) {
-      reportFailure("Scheduled task is incomplete", "Add a title, prompt, project, and model.");
+    const missing = [
+      ...(draft.title.trim() ? [] : [{ name: "a name", selector: "#scheduled-task-title" }]),
+      ...(review === null && !draft.prompt.trim()
+        ? [{ name: "a prompt", selector: "#scheduled-task-prompt" }]
+        : []),
+      ...(projects.some((project) => project.id === selectedProjectId)
+        ? []
+        : [{ name: "a project", selector: "#scheduled-task-project" }]),
+      ...(selection === null
+        ? [{ name: "a model", selector: "[data-scheduled-task-model] button" }]
+        : []),
+    ];
+    if (missing.length > 0 || selection === null) {
+      reportFailure(
+        "Scheduled task is incomplete",
+        `Add ${new Intl.ListFormat("en").format(missing.map((entry) => entry.name))}.`,
+      );
+      focusField(missing[0]!.selector);
       return;
     }
     const parsedFilters = parseWebhookFilterDrafts(draft.filters);
@@ -1933,6 +1957,7 @@ function ScheduledTaskEditorForm({
     const limitErrors = offersLimits ? limitsDraftErrors(draft) : [];
     if (limitErrors.length > 0) {
       for (const error of limitErrors) reportFailure(error.title, error.description);
+      focusField(`#scheduled-task-limit-${limitErrors[0]!.field}`);
       return;
     }
     if (
@@ -2031,7 +2056,7 @@ function ScheduledTaskEditorForm({
 
       <DialogPanel>
         {/* Fieldsets default to min-width: min-content, which lets one wide control widen the form past the dialog. */}
-        <fieldset disabled={saving} className="min-w-0 space-y-5">
+        <fieldset disabled={saving} data-scheduled-task-form className="min-w-0 space-y-5">
           {!connected ? (
             <p className="text-sm text-destructive">Reconnect this environment before saving.</p>
           ) : null}
@@ -2296,7 +2321,7 @@ function ScheduledTaskEditorForm({
           )}
 
           <Field label="Model">
-            <div>
+            <div data-scheduled-task-model>
               <ProviderModelPicker
                 environmentId={environmentId}
                 disabled={saving || !connected}
@@ -2603,7 +2628,7 @@ function ScheduledTaskEditorForm({
                       runAtZone === undefined ? undefined : "scheduled-task-time-zone"
                     }
                     nativeInput
-                    className="w-32"
+                    className="w-40 sm:w-32"
                     value={draft.timeOfDay}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, timeOfDay: event.target.value }))

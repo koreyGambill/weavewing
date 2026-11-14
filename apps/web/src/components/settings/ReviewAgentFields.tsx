@@ -9,7 +9,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import type { ReviewDraft } from "./reviewAgentDraft.logic";
+import { reviewFieldKey, withKind, type ReviewDraft } from "./reviewAgentDraft.logic";
 
 const KIND_LABELS: Record<ReviewDraft["kind"], string> = {
   standards: "Standards",
@@ -68,7 +68,7 @@ export function ReviewAgentFields({
             value={draft.kind}
             onValueChange={(kind) => {
               if (kind === "standards" || kind === "context-review")
-                onChange((current) => ({ ...current, kind }));
+                onChange((current) => withKind(current, kind));
             }}
           >
             <SelectTrigger size="sm" id="review-kind">
@@ -107,6 +107,7 @@ export function ReviewAgentFields({
               <Input
                 aria-label={`Rule ${index + 1} title`}
                 data-rule-id={rule.id}
+                data-review-field={reviewFieldKey.ruleTitle(rule.id)}
                 className="min-w-0 flex-1"
                 placeholder="Rule title"
                 value={rule.title}
@@ -129,6 +130,7 @@ export function ReviewAgentFields({
             </div>
             <Textarea
               aria-label={`Rule ${index + 1} instructions`}
+              data-review-field={reviewFieldKey.ruleInstructions(rule.id)}
               className="max-h-48 overflow-y-auto"
               placeholder="What the reviewer checks, and what counts as evidence"
               value={rule.instructions}
@@ -160,6 +162,7 @@ export function ReviewAgentFields({
       <Row label="Instruction files" htmlFor="review-instruction-files">
         <Textarea
           id="review-instruction-files"
+          data-review-field={reviewFieldKey.instructionFiles}
           placeholder="~/standards.md"
           value={draft.instructionFiles}
           onChange={(event) =>
