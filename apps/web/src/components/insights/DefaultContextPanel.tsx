@@ -1,3 +1,4 @@
+import { InspectControls, InspectRefreshButton } from "./InspectControls";
 import {
   AuthFilesystemReadScope,
   AuthOrchestrationReadScope,
@@ -7,7 +8,7 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { CheckIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -19,7 +20,6 @@ import { useEnvironmentScope } from "../../state/session";
 import { threadDefaultContextGet, threadDefaultContextItem } from "../../state/threadInsights";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   defaultContextSummary,
   DELIVERY_LABELS,
@@ -78,23 +78,11 @@ export function DefaultContextPanel({
       : homeOf([...(preview.cwd ? [preview.cwd] : []), ...preview.items.map((item) => item.label)]);
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-      <header className="flex min-h-7 shrink-0 items-center justify-end gap-1 border-b px-1 py-0.5">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label="Refresh default context"
-                onClick={() => query.refresh()}
-              />
-            }
-          >
-            <RefreshCwIcon />
-          </TooltipTrigger>
-          <TooltipPopup>Refresh default context</TooltipPopup>
-        </Tooltip>
-      </header>
+      <InspectControls>
+        <div className="flex w-full items-center justify-end">
+          <InspectRefreshButton label="Refresh default context" onClick={() => query.refresh()} />
+        </div>
+      </InspectControls>
       <div className="min-w-0 space-y-3 p-2 text-xs">
         {!canRead ? (
           <p>Context access is unavailable.</p>

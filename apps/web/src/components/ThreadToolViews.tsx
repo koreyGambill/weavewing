@@ -24,7 +24,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { configuredHostedAppUrl } from "../hostedPairing";
 import { SidebarSearchField } from "./sidebar/SidebarSearchField";
-import { ToolFilterMenuTrigger } from "./ToolFilterMenuTrigger";
+import { CheckedLabel, ToolFilterMenuTrigger } from "./ToolFilterMenuTrigger";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -63,7 +63,7 @@ import {
 import { ThreadInspectPanel, type ThreadInspectSection } from "./insights/ThreadInspectPanel";
 import { ThreadTimelineView } from "./ThreadTimelineView";
 import { ToolHeaderButton } from "./threadToolsHost";
-import { CheckedLabel, ThreadListView } from "./reviews/ThreadListView";
+import { ThreadListView } from "./reviews/ThreadListView";
 import { ArtifactsPanel } from "./reviews/ThreadWorkspacePanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -200,20 +200,18 @@ export function ToolFilterInput({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1">
-      <SidebarSearchField
-        aria-label={label}
-        value={value}
-        onValueChange={onChange}
-        onClear={() => onChange("")}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && value) {
-            event.stopPropagation();
-            onChange("");
-          }
-        }}
-      />
-    </div>
+    <SidebarSearchField
+      aria-label={label}
+      value={value}
+      onValueChange={onChange}
+      onClear={() => onChange("")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && value) {
+          event.stopPropagation();
+          onChange("");
+        }
+      }}
+    />
   );
 }
 
