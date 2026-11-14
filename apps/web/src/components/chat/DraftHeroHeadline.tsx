@@ -3,7 +3,7 @@ import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDr
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderGit2Icon, FolderOpenIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 
@@ -28,6 +28,7 @@ import {
   projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
 import { useProjects, useVisibleThreadShells, waitForProject } from "~/state/entities";
+import { getAddProjectInitialQuery } from "@t3tools/client-runtime/operations/projects";
 import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
 import {
   useEnvironments,
@@ -57,7 +58,8 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 
-const ADD_PROJECT_VALUE = "add-project";
+const OPEN_FOLDER_VALUE = "open-folder";
+const CLONE_VALUE = "clone-repository";
 
 interface PickerItem {
   readonly value: string;
@@ -186,7 +188,8 @@ export function DraftHeroHeadline({
   const pickerItems: readonly PickerItem[] = useOrderWhileOpen(
     [
       ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-      { value: ADD_PROJECT_VALUE, label: "Other folder or repository…" },
+      { value: OPEN_FOLDER_VALUE, label: "Open folder…" },
+      { value: CLONE_VALUE, label: "Clone repository…" },
     ],
     (item) => item.value,
     pickerOpen,
@@ -197,7 +200,8 @@ export function DraftHeroHeadline({
       ? pickerItems
       : pickerItems.filter(
           (item) =>
-            item.value !== ADD_PROJECT_VALUE &&
+            item.value !== OPEN_FOLDER_VALUE &&
+            item.value !== CLONE_VALUE &&
             pickerFilter.contains(item, pickerSearch, (candidate) => candidate.label),
         );
   const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
@@ -266,9 +270,24 @@ export function DraftHeroHeadline({
     }
   };
   // The folder becomes a project; this draft, typed content included, moves into it.
-  const openAddProject = () =>
+  const openAddProject = (step?: "folder" | "clone") => {
+    const environmentId = activeProjectRef?.environmentId ?? scratchTargetEnvironmentId;
+    const settings = environments.find((environment) => environment.environmentId === environmentId)
+      ?.serverConfig?.settings;
     openCommandPalette({
       open: "add-project",
+      ...(step && environmentId
+        ? {
+            addProjectStart:
+              step === "folder"
+                ? {
+                    step,
+                    environmentId,
+                    query: getAddProjectInitialQuery(settings?.addProjectBaseDirectory),
+                  }
+                : { step, environmentId },
+          }
+        : {}),
       onProjectReady: async (projectRef) => {
         pendingScratchRef.current = null;
         if (!draftId) {
@@ -282,6 +301,7 @@ export function DraftHeroHeadline({
         );
       },
     });
+  };
   const startScratch = async (): Promise<boolean> => {
     if (scratchTargetEnvironmentId === null || isScratchDraft) {
       return false;
@@ -317,8 +337,8 @@ export function DraftHeroHeadline({
       onValueChange={(item) => {
         if (!item) return;
         setPickerOpen(false);
-        if (item.value === ADD_PROJECT_VALUE) {
-          openAddProject();
+        if (item.value === OPEN_FOLDER_VALUE || item.value === CLONE_VALUE) {
+          openAddProject(item.value === OPEN_FOLDER_VALUE ? "folder" : "clone");
           return;
         }
         const entry = projectEntryByKey.get(item.value);
@@ -365,8 +385,10 @@ export function DraftHeroHeadline({
             const entry = projectEntryByKey.get(item.value);
             return (
               <ComboboxItem key={item.value} hideIndicator value={item}>
-                {item.value === ADD_PROJECT_VALUE ? (
-                  <FolderPlusIcon className="size-4 shrink-0" />
+                {item.value === OPEN_FOLDER_VALUE ? (
+                  <FolderOpenIcon className="size-4 shrink-0" />
+                ) : item.value === CLONE_VALUE ? (
+                  <FolderGit2Icon className="size-4 shrink-0" />
                 ) : entry ? (
                   <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
                 ) : null}
@@ -400,7 +422,7 @@ export function DraftHeroHeadline({
   ) : (
     <button
       type="button"
-      onClick={openAddProject}
+      onClick={() => openAddProject()}
       className="pointer-events-auto inline min-w-0 max-w-full cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
       <DraftProjectName value={activeProjectTitle ?? "Add a project"} singleLine />

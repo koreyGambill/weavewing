@@ -34,8 +34,9 @@ you change it), click the second new-thread button at the top of the sidebar, cl
 start in ~/code** under a new thread's heading, pick the folder from **New thread in...**
 in the command palette, or press `mod+alt+n`. On mobile, pick **No project** from the
 project list. The heading shows the folder, and the machine when more than one is
-connected. Before sending, pick a project or **Add project** from the heading to work
-somewhere else, or pick another machine from the machine menu to move it there.
+connected. Before sending, click the folder in the heading to pick a project, **Open
+folder…** for any folder on that machine, or **Clone repository…**; the draft moves there
+with what you typed. Pick another machine from the machine menu to move it there.
 
 A new thread shows in the sidebar as soon as you open it. If you leave it without typing
 or attaching anything, its row goes away; once you type, it stays as a draft.

@@ -299,7 +299,15 @@ function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPalette
     case "add-project":
       return {
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
-        groups: [{ value: ADD_PROJECT_ENTRY_GROUP, label: "", items: [] }],
+        groups:
+          intent.start?.step === "folder"
+            ? []
+            : [
+                intent.start?.step === "clone"
+                  ? { value: `sources:${intent.start.environmentId}`, label: "Sources", items: [] }
+                  : { value: ADD_PROJECT_ENTRY_GROUP, label: "", items: [] },
+              ],
+        ...(intent.start?.step === "folder" ? { initialQuery: intent.start.query } : {}),
       };
     case "new-thread-in":
       return {
@@ -444,7 +452,7 @@ function OpenCommandPaletteDialog(props: {
   const [searchState, dispatchSearch] = useReducer(reduceCommandPaletteSearchState, null, () => {
     const view = props.initialContext ? null : openIntentView(props.openIntent);
     return view
-      ? { query: "", views: [{ view, parentQuery: "" }] }
+      ? { query: view.initialQuery ?? "", views: [{ view, parentQuery: "" }] }
       : createCommandPaletteSearchState(initialSearch.query);
   });
   const { query, views: viewStack } = searchState;
@@ -549,8 +557,12 @@ function OpenCommandPaletteDialog(props: {
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const [browseNavigation] = useState(createBrowseNavigationCoordinator);
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
-    null,
+    () =>
+      (props.openIntent?.kind === "add-project" ? props.openIntent.start?.environmentId : null) ??
+      null,
   );
+  const cloneSourcesOnly =
+    props.openIntent?.kind === "add-project" && props.openIntent.start?.step === "clone";
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [newProjectFlow, setNewProjectFlow] = useState<{
@@ -1084,22 +1096,25 @@ function OpenCommandPaletteDialog(props: {
     environmentId: EnvironmentId,
     readinessBySource: AddProjectRemoteSourceReadiness,
   ): CommandPaletteView["groups"] => {
-    const sourceItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
-      {
-        kind: "action",
-        value: `action:add-project:${environmentId}:local`,
-        searchTerms: ["local", "folder", "directory", "browse"],
-        title: "Local folder",
-        description: "Browse a folder on disk",
-        icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
-        keepOpen: true,
-        run: async () => {
-          await startAddProjectBrowse(environmentId);
-        },
-      },
-    ];
+    const sourceItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> =
+      cloneSourcesOnly
+        ? []
+        : [
+            {
+              kind: "action",
+              value: `action:add-project:${environmentId}:local`,
+              searchTerms: ["local", "folder", "directory", "browse"],
+              title: "Local folder",
+              description: "Browse a folder on disk",
+              icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+              keepOpen: true,
+              run: async () => {
+                await startAddProjectBrowse(environmentId);
+              },
+            },
+          ];
 
-    if (newProjectsRootFor(environmentId) !== null) {
+    if (!cloneSourcesOnly && newProjectsRootFor(environmentId) !== null) {
       sourceItems.unshift({
         kind: "action",
         value: `action:add-project:${environmentId}:new`,

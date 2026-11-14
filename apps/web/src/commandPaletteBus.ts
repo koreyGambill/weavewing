@@ -17,7 +17,13 @@ export interface CommandPaletteOpenDetail {
   readonly linkedThreads?: CommandPaletteLinkedThreads;
   /** Add project hands the chosen folder's project here instead of opening a new thread in it. */
   readonly onProjectReady?: (projectRef: ScopedProjectRef) => Promise<unknown>;
+  /** Skips Add project's source list: browse for a folder, or pick where to clone from. */
+  readonly addProjectStart?: AddProjectStart;
 }
+
+export type AddProjectStart =
+  | { readonly step: "folder"; readonly environmentId: EnvironmentId; readonly query: string }
+  | { readonly step: "clone"; readonly environmentId: EnvironmentId };
 
 export function openCommandPalette(detail: CommandPaletteOpenDetail = {}): void {
   // With no palette on screen (e.g. /pair) the request is dropped; kept in the
@@ -29,6 +35,7 @@ export function openCommandPalette(detail: CommandPaletteOpenDetail = {}): void 
     dispatchCommandPalette({
       _tag: "OpenAddProject",
       ...(detail.onProjectReady ? { onProjectReady: detail.onProjectReady } : {}),
+      ...(detail.addProjectStart ? { start: detail.addProjectStart } : {}),
     });
   } else if (detail.query !== undefined) {
     dispatchCommandPalette({
