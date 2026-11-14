@@ -6,7 +6,6 @@ export default Effect.gen(function* () {
   yield* sql`CREATE TABLE message_follow_ups (
     thread_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
-    role TEXT NOT NULL,
     excerpt TEXT NOT NULL,
     flagged_at TEXT NOT NULL,
     done_at TEXT,

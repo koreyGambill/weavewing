@@ -51,7 +51,6 @@ it.effect("flags with a server-side excerpt and walks every reverse state", () =
   Effect.gen(function* () {
     yield* seed;
     const flagged = yield* update("t1", "m1", "flag");
-    assert.strictEqual(flagged?.role, "user");
     assert.strictEqual(flagged?.threadTitle, "Building Weavewing");
     assert.strictEqual(flagged?.excerpt.length, 200);
     assert.isTrue(flagged?.excerpt.startsWith("can we pin chats"));
@@ -79,27 +78,28 @@ it.effect("flags with a server-side excerpt and walks every reverse state", () =
 it.effect("lists open follow-ups across live threads, newest first", () =>
   Effect.gen(function* () {
     yield* seed;
-    yield* update("t1", "m2", "flag");
+    yield* update("t1", "m1", "flag");
     yield* TestClock.adjust("1 minute");
     yield* update("t2", "m3", "flag");
     yield* update("gone", "m4", "flag");
     assert.deepStrictEqual(
-      (yield* list()).map((item) => [item.threadTitle, item.excerpt, item.role]),
+      (yield* list()).map((item) => [item.threadTitle, item.messageId]),
       [
-        ["Lead runbook", "check the land queue", "user"],
-        ["Building Weavewing", "Yes.", "assistant"],
+        ["Lead runbook", "m3"],
+        ["Building Weavewing", "m1"],
       ],
     );
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("refuses messages outside the thread and unflagged rows", () =>
+it.effect("refuses messages outside the thread, other authors' messages and unflagged rows", () =>
   Effect.gen(function* () {
     yield* seed;
     for (const [threadId, messageId, action] of [
       ["t2", "m1", "flag"],
       ["t1", "missing", "flag"],
       ["t1", "s1", "flag"],
+      ["t1", "m2", "flag"],
       ["t1", "m1", "done"],
       ["t1", "m1", "reopen"],
     ] as const) {

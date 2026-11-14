@@ -49,7 +49,7 @@ const make = Effect.gen(function* () {
 
   const select = (where: Statement.Fragment) =>
     sql`SELECT f.thread_id AS "threadId", t.title AS "threadTitle", f.message_id AS "messageId",
-      f.role, f.excerpt, f.flagged_at AS "flaggedAt", f.done_at AS "doneAt"
+      f.excerpt, f.flagged_at AS "flaggedAt", f.done_at AS "doneAt"
       FROM message_follow_ups f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
       WHERE t.deleted_at IS NULL AND ${where}
@@ -68,7 +68,7 @@ const make = Effect.gen(function* () {
       code: "not_found",
       message:
         input.action === "flag"
-          ? `Message ${input.messageId} is not in thread ${input.threadId}.`
+          ? `Message ${input.messageId} is not a user message in thread ${input.threadId}.`
           : `Message ${input.messageId} is not flagged.`,
     });
 
@@ -78,13 +78,12 @@ const make = Effect.gen(function* () {
       const now = DateTime.formatIso(yield* DateTime.now);
       switch (input.action) {
         case "flag": {
-          const [message] = yield* sql<{ readonly role: string; readonly text: string | null }>`
-          SELECT role, ${messageSearchText(sql)} AS text FROM orchestration_v2_projection_messages messages
-          WHERE message_id = ${input.messageId} AND thread_id = ${input.threadId}`;
-          if (message === undefined || (message.role !== "user" && message.role !== "assistant"))
-            return yield* notFound(input);
-          yield* sql`INSERT INTO message_follow_ups (thread_id, message_id, role, excerpt, flagged_at)
-          VALUES (${input.threadId}, ${input.messageId}, ${message.role}, ${followUpExcerpt(message.text ?? "")}, ${now})
+          const [message] = yield* sql<{ readonly text: string | null }>`
+          SELECT ${messageSearchText(sql)} AS text FROM orchestration_v2_projection_messages messages
+          WHERE message_id = ${input.messageId} AND thread_id = ${input.threadId} AND role = 'user'`;
+          if (message === undefined) return yield* notFound(input);
+          yield* sql`INSERT INTO message_follow_ups (thread_id, message_id, excerpt, flagged_at)
+          VALUES (${input.threadId}, ${input.messageId}, ${followUpExcerpt(message.text ?? "")}, ${now})
           ON CONFLICT (thread_id, message_id) DO NOTHING`;
           break;
         }

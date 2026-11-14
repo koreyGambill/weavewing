@@ -3,12 +3,11 @@ import { IsoDateTime, MessageId, ThreadId } from "./baseSchemas.ts";
 
 export const MESSAGE_FOLLOW_UP_EXCERPT_MAX_LENGTH = 200;
 
-/** A message the user flagged to come back to. Personal: never shown to agents. */
+/** A message the user sent and flagged to come back to. Personal: never shown to agents. */
 export const MessageFollowUp = Schema.Struct({
   threadId: ThreadId,
   threadTitle: Schema.String,
   messageId: MessageId,
-  role: Schema.Literals(["user", "assistant"]),
   excerpt: Schema.String,
   flaggedAt: IsoDateTime,
   doneAt: Schema.NullOr(IsoDateTime),
