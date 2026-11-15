@@ -22,6 +22,7 @@ import {
   SendIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import * as Option from "effect/Option";
 import { useRef, useState } from "react";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
@@ -30,6 +31,12 @@ import { useClientSettings } from "../../hooks/useSettings";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { useThreadShell } from "../../state/entities";
+import { useEnvironmentShellStatus } from "../../state/shell";
+import { useEnvironmentThread } from "../../state/threads";
+import {
+  isThreadRouteSnapshotAuthoritative,
+  resolveThreadRouteRenderState,
+} from "../../threadRoutes";
 import {
   evidenceGet,
   evidenceList,
@@ -68,6 +75,26 @@ import {
 } from "./evidence.logic";
 
 type Change = EvidenceChange & { readonly qa: EvidenceChangeQa };
+
+/** The landing's thread as the route sees it; the shell list omits idle delegates, so read those directly. */
+function useLandingThread(environmentId: EnvironmentId | null, threadId: ThreadId) {
+  const shell = useThreadShell(
+    environmentId === null ? null : scopeThreadRef(environmentId, threadId),
+  );
+  const unlisted = environmentId !== null && shell === null;
+  const shellStatus = useEnvironmentShellStatus(environmentId);
+  const detail = useEnvironmentThread(unlisted ? environmentId : null, unlisted ? threadId : null);
+  const state = resolveThreadRouteRenderState({
+    bootstrapComplete: isThreadRouteSnapshotAuthoritative(shellStatus),
+    serverThreadExists: shell !== null,
+    serverThreadDeleted: shell?.deletedAt != null,
+    unlistedThreadDetail: detail,
+    draftThreadExists: false,
+  });
+  const title =
+    shell?.title ?? Option.getOrNull(Option.map(detail.data, ({ thread }) => thread.title));
+  return { missing: state === "missing", title };
+}
 const setEvidenceView = (next: { scope?: "thread" | "all"; needsQa?: boolean }) =>
   useThreadContextSidebarStore.getState().setEvidenceView(next);
 
@@ -230,9 +257,7 @@ function LandingCard({
 }) {
   const [open, setOpen] = useState(false);
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
-  const thread = useThreadShell(
-    showThread ? scopeThreadRef(environmentId, landing.threadId) : null,
-  );
+  const thread = useLandingThread(showThread ? environmentId : null, landing.threadId);
   const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
     <section className="min-w-0 rounded-md border border-border bg-card">
@@ -280,7 +305,7 @@ function LandingCard({
           </span>
           {showThread ? (
             <span className="block truncate text-muted-foreground">
-              in {thread?.title ?? "another thread"}
+              in {thread.missing ? "a deleted thread" : (thread.title ?? "another thread")}
             </span>
           ) : null}
         </span>
@@ -374,7 +399,7 @@ function ChangeRow({
           change={change}
           label={key}
           leaves={leaves}
-          onFailed={() => setFocusNote(true)}
+          onFocusNote={setFocusNote}
         />
       </div>
       {change.qa.state === "failed" ? (
@@ -485,14 +510,14 @@ function QaMenu({
   change,
   label,
   leaves,
-  onFailed,
+  onFocusNote,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
   change: Change;
   label: string;
   leaves: (next: EvidenceChangeQa["state"]) => boolean;
-  onFailed: () => void;
+  onFocusNote: (focus: boolean) => void;
 }) {
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
@@ -500,9 +525,11 @@ function QaMenu({
   const current = QA_STATES.find((entry) => entry.state === change.qa.state)!;
   const choose = async (next: EvidenceChangeQa["state"]) => {
     if (next === change.qa.state) return;
-    if (next === "failed") onFailed();
-    if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } })))
+    if (next === "failed") onFocusNote(true);
+    if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } }))) {
+      onFocusNote(false);
       return;
+    }
     if (leaves(next)) focusAfterCardLeaves(trigger.current);
     reloadEvidence();
   };
@@ -566,7 +593,7 @@ function FailedNote({
   const setQa = useSetQa();
   const navigate = useNavigate();
   const target = scopeThreadRef(environmentId, threadId);
-  const thread = useThreadShell(target);
+  const thread = useLandingThread(environmentId, threadId);
   const save = async () => {
     if (note === saved) return true;
     setSaved(note);
@@ -578,7 +605,7 @@ function FailedNote({
     return ok;
   };
   const send = async () => {
-    if (thread === null) {
+    if (thread.missing) {
       toastManager.add({
         type: "error",
         title: "Can't send the QA note",
