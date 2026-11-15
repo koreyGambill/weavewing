@@ -82,6 +82,7 @@ describe("V2 preview upgrade", () => {
         [100, "FoldWatchersIntoAutomations"],
         [101, "MonitoringReviewWatermarks"],
         [102, "EvidenceLandings"],
+        [103, "MessageFollowUps"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -207,6 +208,7 @@ describe("V2 preview upgrade", () => {
         [100, "FoldWatchersIntoAutomations"],
         [101, "MonitoringReviewWatermarks"],
         [102, "EvidenceLandings"],
+        [103, "MessageFollowUps"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

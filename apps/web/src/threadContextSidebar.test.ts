@@ -376,6 +376,6 @@ describe("thread tools store", () => {
       .show("environments", { thread: child, environmentId: "e" });
     expect(
       Object.keys(partialize!(useThreadContextSidebarStore.getState()) as object).toSorted(),
-    ).toEqual(["hidden", "lastTool", "todoFilter", "todoShowClosed", "view"]);
+    ).toEqual(["hidden", "lastTool", "todoFilter", "todoScope", "todoShowClosed", "view"]);
   });
 });
