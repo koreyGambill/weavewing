@@ -591,7 +591,7 @@ function ThreadToolView({
       ) : view === "automations" ? (
         <AutomationsView threadRef={threadRef} />
       ) : view === "evidence" ? (
-        <EvidenceView threadRef={threadRef} actions={actions} />
+        <EvidenceView threadRef={threadRef} />
       ) : threadRef ? (
         <ThreadToolSection
           section={view}

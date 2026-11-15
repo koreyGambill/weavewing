@@ -6,7 +6,6 @@ import type {
   EvidenceChangeQa,
   EvidenceLandingSummary,
   EvidenceListInput,
-  EvidenceQaState,
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
@@ -20,12 +19,10 @@ import {
   ClipboardCheckIcon,
   FileIcon,
   PlayIcon,
-  RefreshCwIcon,
   SendIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useState } from "react";
-import { createPortal } from "react-dom";
+import { useRef, useState } from "react";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -38,7 +35,6 @@ import {
   evidenceList,
   evidenceSetQa,
   reloadEvidence,
-  useEvidenceCounts,
   useEvidenceEnvironment,
 } from "../../state/evidence";
 import { useEnvironmentQuery } from "../../state/query";
@@ -46,8 +42,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { formatDayAwareTimestamp } from "../../timestampFormat";
 import { ExpandedImageDialog } from "../chat/ExpandedImageDialog";
-import type { ExpandedImagePreview } from "../chat/ExpandedImagePreview";
-import { ToolHeaderButton } from "../threadToolsHost";
 import { CheckedLabel, ToolFilterMenuTrigger } from "../ToolFilterMenuTrigger";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -64,27 +58,24 @@ import {
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { captureKind, failedQaDraft, QA_STATES } from "./evidence.logic";
+import {
+  captureKind,
+  CHECKS,
+  failedQaDraft,
+  leavesNeedsQa,
+  QA_STATES,
+  VERDICTS,
+} from "./evidence.logic";
 
-type Expand = (preview: ExpandedImagePreview) => void;
+type Change = EvidenceChange & { readonly qa: EvidenceChangeQa };
+const setEvidenceView = (next: { scope?: "thread" | "all"; needsQa?: boolean }) =>
+  useThreadContextSidebarStore.getState().setEvidenceView(next);
 
-export function EvidenceView({
-  threadRef,
-  actions,
-}: {
-  threadRef: ScopedThreadRef | null;
-  actions: HTMLDivElement | null;
-}) {
+export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null }) {
   const environmentId = useEvidenceEnvironment(threadRef);
   const storedScope = useThreadContextSidebarStore((state) => state.evidenceScope);
   const needsQa = useThreadContextSidebarStore((state) => state.evidenceNeedsQa);
-  const counts = useEvidenceCounts(environmentId);
-  const [preview, setPreview] = useState<ExpandedImagePreview | null>(null);
   const scope = threadRef === null ? "all" : (storedScope ?? "thread");
-  const waiting = (counts.data?.pending ?? 0) + (counts.data?.failed ?? 0);
-  const setView = (next: { scope?: "thread" | "all"; needsQa?: boolean }) =>
-    useThreadContextSidebarStore.getState().setEvidenceView(next);
-
   if (environmentId === null) {
     return (
       <Empty size="compact">
@@ -98,14 +89,6 @@ export function EvidenceView({
   };
   return (
     <div className="@container/evidence flex min-w-0 flex-col gap-2 text-xs">
-      {actions
-        ? createPortal(
-            <ToolHeaderButton label="Refresh evidence" onClick={reloadEvidence}>
-              <RefreshCwIcon />
-            </ToolHeaderButton>,
-            actions,
-          )
-        : null}
       <div className="flex items-center gap-1">
         <ToggleGroup
           aria-label="Evidence scope"
@@ -113,7 +96,7 @@ export function EvidenceView({
           className="min-w-0 flex-1 *:flex-1"
           value={[scope]}
           onValueChange={(value) => {
-            if (value[0] === "thread" || value[0] === "all") setView({ scope: value[0] });
+            if (value[0] === "thread" || value[0] === "all") setEvidenceView({ scope: value[0] });
           }}
         >
           <Toggle value="thread" disabled={threadRef === null}>
@@ -132,7 +115,7 @@ export function EvidenceView({
               <MenuGroupLabel>Show</MenuGroupLabel>
               <MenuRadioGroup
                 value={needsQa ? "needs-qa" : "all"}
-                onValueChange={(next) => setView({ needsQa: next === "needs-qa" })}
+                onValueChange={(next) => setEvidenceView({ needsQa: next === "needs-qa" })}
               >
                 <MenuRadioItem value="all">
                   <CheckedLabel>All landings</CheckedLabel>
@@ -144,56 +127,31 @@ export function EvidenceView({
             </MenuGroup>
           </MenuPopup>
         </Menu>
-        <span className="min-w-6 shrink-0 text-right text-muted-foreground tabular-nums">
-          {waiting}
-          <span className="sr-only @min-[15rem]/evidence:not-sr-only"> to QA</span>
-        </span>
       </div>
-      <LandingPages
+      <LandingPage
         key={JSON.stringify(filter)}
         environmentId={environmentId}
         input={filter}
         showThread={scope === "all"}
-        onExpand={setPreview}
+        first
       />
-      {preview ? <ExpandedImageDialog preview={preview} onClose={() => setPreview(null)} /> : null}
     </div>
   );
 }
 
-function LandingPages(props: {
-  environmentId: EnvironmentId;
-  input: EvidenceListInput;
-  showThread: boolean;
-  onExpand: Expand;
-}) {
-  const [cursors, setCursors] = useState<ReadonlyArray<EvidenceListInput["before"]>>([undefined]);
-  return cursors.map((before, index) => (
-    <LandingPage
-      key={before ? `${before.landedAt}:${before.id}` : "first"}
-      {...props}
-      input={{ ...props.input, ...(before ? { before } : {}) }}
-      first={index === 0}
-      onMore={index === cursors.length - 1 ? (next) => setCursors([...cursors, next]) : undefined}
-    />
-  ));
-}
-
+/** One page of landings; "Load older" chains the next page from this page's live cursor. */
 function LandingPage({
   environmentId,
   input,
   showThread,
-  onExpand,
   first,
-  onMore,
 }: {
   environmentId: EnvironmentId;
   input: EvidenceListInput;
   showThread: boolean;
-  onExpand: Expand;
   first: boolean;
-  onMore: ((next: NonNullable<EvidenceListInput["before"]>) => void) | undefined;
 }) {
+  const [more, setMore] = useState(false);
   const page = useEnvironmentQuery(evidenceList({ environmentId, input }));
   if (page.data === null) {
     return page.error ? (
@@ -208,31 +166,26 @@ function LandingPage({
     );
   }
   if (first && page.data.items.length === 0) {
-    return input.needsQa ? (
+    return (
       <Empty size="compact">
         <EmptyMedia variant="icon">
-          <CheckIcon />
-        </EmptyMedia>
-        <EmptyDescription>Nothing waiting for your QA.</EmptyDescription>
-        <Button
-          variant="link"
-          size="micro"
-          onClick={() =>
-            useThreadContextSidebarStore.getState().setEvidenceView({ needsQa: false })
-          }
-        >
-          Show all landings
-        </Button>
-      </Empty>
-    ) : (
-      <Empty size="compact">
-        <EmptyMedia variant="icon">
-          <ClipboardCheckIcon />
+          {input.needsQa ? <CheckIcon /> : <ClipboardCheckIcon />}
         </EmptyMedia>
         <EmptyDescription>
-          No landings recorded {input.threadId ? "for this thread " : ""}yet. The lead records one
-          with <code>evidence_record</code> after each land.
+          {input.needsQa ? (
+            "Nothing waiting for your QA."
+          ) : (
+            <>
+              No landings recorded {input.threadId ? "for this thread " : ""}yet. The lead records
+              one with <code>evidence_record</code> after each land.
+            </>
+          )}
         </EmptyDescription>
+        {input.needsQa ? (
+          <Button variant="link" size="micro" onClick={() => setEvidenceView({ needsQa: false })}>
+            Show all landings
+          </Button>
+        ) : null}
       </Empty>
     );
   }
@@ -245,14 +198,21 @@ function LandingPage({
           environmentId={environmentId}
           landing={landing}
           showThread={showThread}
-          onExpand={onExpand}
+          needsQa={input.needsQa === true}
         />
       ))}
-      {next && onMore ? (
-        <Button variant="ghost" size="micro" onClick={() => onMore(next)}>
+      {next === null ? null : more ? (
+        <LandingPage
+          environmentId={environmentId}
+          input={{ ...input, before: next }}
+          showThread={showThread}
+          first={false}
+        />
+      ) : (
+        <Button variant="ghost" size="micro" onClick={() => setMore(true)}>
           Load older landings
         </Button>
-      ) : null}
+      )}
     </>
   );
 }
@@ -261,12 +221,12 @@ function LandingCard({
   environmentId,
   landing,
   showThread,
-  onExpand,
+  needsQa,
 }: {
   environmentId: EnvironmentId;
   landing: EvidenceLandingSummary;
   showThread: boolean;
-  onExpand: Expand;
+  needsQa: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
@@ -279,6 +239,7 @@ function LandingCard({
       <button
         type="button"
         aria-expanded={open}
+        data-evidence-card
         className="flex w-full min-w-0 items-start gap-1.5 rounded-md p-2 text-left outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset"
         onClick={() => setOpen(!open)}
       >
@@ -288,34 +249,31 @@ function LandingCard({
           <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-muted-foreground">
             <span>{formatDayAwareTimestamp(landing.landedAt, timestampFormat)}</span>
             <span className="font-mono">{landing.target.sha.slice(0, 7)}</span>
-            {landing.verifications.map((check) => (
+            {landing.verifications.map((check, index) => (
               <Badge
-                key={`${check.label}:${check.result}`}
+                // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a check label.
+                key={index}
                 className="max-w-full"
-                variant={
-                  check.result === "pass"
-                    ? "success"
-                    : check.result === "fail"
-                      ? "error"
-                      : "outline"
-                }
+                variant={CHECKS[check.result].variant}
               >
                 {check.result === "pass" ? <CheckIcon /> : null}
                 <span className="truncate">
                   {check.label}
-                  {check.result === "skipped" ? " skipped" : null}
+                  {CHECKS[check.result].suffix}
                 </span>
               </Badge>
             ))}
           </span>
           <span className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
-            {QA_STATES.filter(({ state }) => landing.qa[state] > 0).map(({ state, label, dot }) => (
-              <span key={state} className="inline-flex items-center gap-1">
-                <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
-                <span className="sr-only">{label}</span>
-                {landing.qa[state]}
-              </span>
-            ))}
+            {QA_STATES.filter(({ state }) => landing.qa[state] > 0).map(
+              ({ state, label, icon: Icon, tone }) => (
+                <span key={state} className="inline-flex items-center gap-0.5">
+                  <Icon aria-hidden className={cn("size-3", tone)} />
+                  <span className="sr-only">{label}</span>
+                  {landing.qa[state]}
+                </span>
+              ),
+            )}
             <span>
               {landing.changeCount} change{landing.changeCount === 1 ? "" : "s"}
             </span>
@@ -328,7 +286,7 @@ function LandingCard({
         </span>
       </button>
       {open ? (
-        <LandingChanges environmentId={environmentId} landingId={landing.id} onExpand={onExpand} />
+        <LandingChanges environmentId={environmentId} landingId={landing.id} needsQa={needsQa} />
       ) : null}
     </section>
   );
@@ -337,29 +295,36 @@ function LandingCard({
 function LandingChanges({
   environmentId,
   landingId,
-  onExpand,
+  needsQa,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
-  onExpand: Expand;
+  needsQa: boolean;
 }) {
   const landing = useEnvironmentQuery(evidenceGet({ environmentId, input: { landingId } }));
   if (landing.data === null) {
     return (
-      <p className="border-t border-border p-2 text-muted-foreground">
-        {landing.error ? `Couldn't load this landing: ${landing.error}` : "Loading changes…"}
-      </p>
+      <div className="flex items-center gap-2 border-t border-border p-2 text-muted-foreground">
+        <span className="min-w-0 flex-1">
+          {landing.error ? `Couldn't load this landing: ${landing.error}` : "Loading changes…"}
+        </span>
+        {landing.error ? (
+          <Button variant="outline" size="micro" onClick={landing.refresh}>
+            Retry
+          </Button>
+        ) : null}
+      </div>
     );
   }
-  const threadId = landing.data.threadId;
-  return landing.data.changes.map((change) => (
+  const { threadId, changes } = landing.data;
+  return changes.map((change) => (
     <ChangeRow
       key={change.id}
       environmentId={environmentId}
       landingId={landingId}
       threadId={threadId}
       change={change}
-      onExpand={onExpand}
+      leaves={(next) => needsQa && leavesNeedsQa(changes, change.id, next)}
     />
   ));
 }
@@ -369,15 +334,16 @@ function ChangeRow({
   landingId,
   threadId,
   change,
-  onExpand,
+  leaves,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
   threadId: ThreadId;
-  change: EvidenceChange & { readonly qa: EvidenceChangeQa };
-  onExpand: Expand;
+  change: Change;
+  leaves: (next: EvidenceChangeQa["state"]) => boolean;
 }) {
   const [full, setFull] = useState(false);
+  const [focusNote, setFocusNote] = useState(false);
   const navigate = useNavigate();
   const [copied, setCopied] = useState<string | null>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard<string>({
@@ -386,7 +352,7 @@ function ChangeRow({
   });
   const long = change.ask.length > 90 || change.ask.includes("\n") || change.summary.length > 0;
   const key = change.ticket?.key ?? change.id;
-  const verdict = change.review.verdict;
+  const verdict = VERDICTS[change.review.verdict];
   return (
     <div className="min-w-0 space-y-1.5 border-t border-border p-2">
       <div className="flex items-center gap-1">
@@ -405,11 +371,21 @@ function ChangeRow({
         <QaMenu
           environmentId={environmentId}
           landingId={landingId}
-          changeId={change.id}
+          change={change}
           label={key}
-          state={change.qa.state}
+          leaves={leaves}
+          onFailed={() => setFocusNote(true)}
         />
       </div>
+      {change.qa.state === "failed" ? (
+        <FailedNote
+          environmentId={environmentId}
+          landingId={landingId}
+          threadId={threadId}
+          change={change}
+          autoFocus={focusNote}
+        />
+      ) : null}
       <p className={cn("whitespace-pre-wrap break-words", !full && "line-clamp-2")}>
         “{change.ask}”
       </p>
@@ -432,22 +408,17 @@ function ChangeRow({
             Ask
           </Button>
         ) : null}
-        <Badge
-          variant={
-            verdict === "approved" ? "success" : verdict === "waived" ? "outline" : "warning"
-          }
-        >
-          {verdict === "approved" ? <CheckIcon /> : null}
-          {verdict === "changes_requested"
-            ? "changes requested"
-            : verdict === "waived"
-              ? "review waived"
-              : "approved"}
-          {change.review.by ? ` · ${change.review.by}` : null}
+        <Badge variant={verdict.variant} className="max-w-full">
+          {change.review.verdict === "approved" ? <CheckIcon /> : null}
+          <span className="truncate">
+            {verdict.label}
+            {change.review.by ? ` · ${change.review.by}` : null}
+          </span>
         </Badge>
-        {change.commits.map((sha) => (
+        {change.commits.map((sha, index) => (
           <Button
-            key={sha}
+            // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a commit.
+            key={`${index}:${sha}`}
             variant="ghost"
             size="micro"
             aria-label={`Copy commit ${sha}`}
@@ -465,99 +436,108 @@ function ChangeRow({
       ) : null}
       {change.captures.length ? (
         <div className="grid grid-cols-2 gap-1.5 @min-[17rem]/evidence:grid-cols-3">
-          {change.captures.map((capture) => (
+          {change.captures.map((capture, index) => (
             <CaptureTile
-              key={capture.path}
+              // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a capture path.
+              key={`${index}:${capture.path}`}
               environmentId={environmentId}
               threadId={threadId}
               path={capture.path}
               caption={capture.caption}
-              onExpand={onExpand}
             />
           ))}
         </div>
       ) : null}
-      {change.gaps.map((gap) => (
+      {change.gaps.map((gap, index) => (
         <p
-          key={gap}
+          // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a gap.
+          key={`${index}:${gap}`}
           className="flex items-start gap-1.5 rounded-md bg-warning/8 px-2 py-1 text-warning-foreground dark:bg-warning/16"
         >
           <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
           <span className="min-w-0 break-words">{gap}</span>
         </p>
       ))}
-      {change.qa.state === "failed" ? (
-        <FailedNote
-          environmentId={environmentId}
-          landingId={landingId}
-          threadId={threadId}
-          change={change}
-        />
-      ) : null}
     </div>
   );
 }
 
 function useSetQa() {
   const setQa = useAtomCommand(evidenceSetQa, { label: "QA state" });
-  return async (input: Parameters<typeof setQa>[0]) => {
-    const result = await setQa(input);
-    if (result._tag === "Success") reloadEvidence();
-    return result._tag === "Success";
-  };
+  return async (input: Parameters<typeof setQa>[0]) => (await setQa(input))._tag === "Success";
+}
+
+/** The card after this one, else the one before, else the filter: where focus goes when a card leaves. */
+function focusAfterCardLeaves(trigger: HTMLElement | null) {
+  const card = trigger?.closest("section");
+  const header = (sibling: Element | null | undefined) =>
+    sibling?.matches("section") ? sibling.querySelector<HTMLElement>("[data-evidence-card]") : null;
+  const target =
+    header(card?.nextElementSibling) ??
+    header(card?.previousElementSibling) ??
+    document.querySelector<HTMLElement>('[aria-label="Evidence filter"]');
+  target?.focus();
 }
 
 function QaMenu({
   environmentId,
   landingId,
-  changeId,
+  change,
   label,
-  state,
+  leaves,
+  onFailed,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
-  changeId: string;
+  change: Change;
   label: string;
-  state: EvidenceQaState;
+  leaves: (next: EvidenceChangeQa["state"]) => boolean;
+  onFailed: () => void;
 }) {
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
-  const current = QA_STATES.find((entry) => entry.state === state)!;
+  const trigger = useRef<HTMLButtonElement>(null);
+  const current = QA_STATES.find((entry) => entry.state === change.qa.state)!;
+  const choose = async (next: EvidenceChangeQa["state"]) => {
+    if (next === change.qa.state) return;
+    if (next === "failed") onFailed();
+    if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } })))
+      return;
+    if (leaves(next)) focusAfterCardLeaves(trigger.current);
+    reloadEvidence();
+  };
   return (
     <Menu>
       <MenuTrigger
         render={
           <Button
+            ref={trigger}
             variant="outline"
             size="micro"
-            className="ml-auto shrink-0 justify-between @min-[15rem]/evidence:min-w-23"
+            className="ml-auto shrink-0 justify-between @min-[11rem]/evidence:min-w-23"
             aria-label={`QA for ${label}: ${current.label}`}
             disabled={!canSet}
           />
         }
       >
-        <span aria-hidden className={cn("size-2 rounded-full", current.dot)} />
-        <span className="hidden @min-[15rem]/evidence:inline">{current.label}</span>
+        <current.icon aria-hidden className={current.tone} />
+        <span className="hidden @min-[11rem]/evidence:inline">{current.label}</span>
         <ChevronDownIcon />
       </MenuTrigger>
       <MenuPopup align="end">
         <MenuRadioGroup
-          value={state}
+          value={change.qa.state}
           onValueChange={(next) => {
             const chosen = QA_STATES.find((entry) => entry.state === next);
-            if (chosen && chosen.state !== state)
-              void setQa({
-                environmentId,
-                input: { landingId, changeId, state: chosen.state },
-              });
+            if (chosen) void choose(chosen.state);
           }}
         >
-          {QA_STATES.map((entry) => (
-            <MenuRadioItem key={entry.state} value={entry.state} closeOnClick>
+          {QA_STATES.map(({ state, label: name, icon: Icon, tone }) => (
+            <MenuRadioItem key={state} value={state} closeOnClick>
               <CheckedLabel>
                 <span className="flex items-center gap-2">
-                  <span aria-hidden className={cn("size-2 rounded-full", entry.dot)} />
-                  {entry.state === "failed" ? "Failed…" : entry.label}
+                  <Icon aria-hidden className={tone} />
+                  {state === "failed" ? "Failed…" : name}
                 </span>
               </CheckedLabel>
             </MenuRadioItem>
@@ -573,37 +553,46 @@ function FailedNote({
   landingId,
   threadId,
   change,
+  autoFocus,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
   threadId: ThreadId;
-  change: EvidenceChange & { readonly qa: EvidenceChangeQa };
+  change: Change;
+  autoFocus: boolean;
 }) {
   const [note, setNote] = useState(change.qa.note);
+  const [saved, setSaved] = useState(change.qa.note);
   const setQa = useSetQa();
   const navigate = useNavigate();
-  const thread = useThreadShell(scopeThreadRef(environmentId, threadId));
-  const save = () =>
-    note === change.qa.note
-      ? Promise.resolve(true)
-      : setQa({
-          environmentId,
-          input: { landingId, changeId: change.id, state: "failed", note },
-        });
+  const target = scopeThreadRef(environmentId, threadId);
+  const thread = useThreadShell(target);
+  const save = async () => {
+    if (note === saved) return true;
+    setSaved(note);
+    const ok = await setQa({
+      environmentId,
+      input: { landingId, changeId: change.id, state: "failed", note },
+    });
+    if (!ok) setSaved(saved);
+    return ok;
+  };
   const send = async () => {
+    if (thread === null) {
+      toastManager.add({
+        type: "error",
+        title: "Can't send the QA note",
+        description: "This landing's thread no longer exists.",
+      });
+      return;
+    }
     if (!(await save())) return;
-    const target = scopeThreadRef(environmentId, threadId);
     const store = useComposerDraftStore.getState();
     store.setPrompt(
       target,
       failedQaDraft(store.getComposerDraft(target)?.prompt ?? "", change, note),
     );
     await navigate({ to: "/$environmentId/$threadId", params: { environmentId, threadId } });
-    toastManager.add({
-      type: "info",
-      title: "QA note drafted",
-      description: `Added to the composer in ${thread?.title ?? "the landing's thread"}. Read it, then send.`,
-    });
   };
   return (
     <div className="space-y-1.5 rounded-md border border-destructive/30 p-1.5">
@@ -613,6 +602,7 @@ function FailedNote({
         placeholder="What failed?"
         value={note}
         maxLength={2000}
+        autoFocus={autoFocus}
         onChange={(event) => setNote(event.target.value)}
         onBlur={() => void save()}
       />
@@ -629,17 +619,16 @@ function CaptureTile({
   threadId,
   path,
   caption,
-  onExpand,
 }: {
   environmentId: EnvironmentId;
   threadId: ThreadId;
   path: string;
   caption: string;
-  onExpand: Expand;
 }) {
   const kind = captureKind(path);
   const asset = useAssetUrlState(environmentId, { _tag: "media-file", threadId, path });
   const [broken, setBroken] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const url = asset._tag === "Success" ? asset.url : null;
   const missing = broken || asset._tag === "Failure";
   const name = path.split(/[\\/]/).at(-1) ?? path;
@@ -651,13 +640,8 @@ function CaptureTile({
         disabled={url === null || missing}
         className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40 text-muted-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-default"
         onClick={() => {
-          if (url === null) return;
-          if (kind === "file") window.open(url, "_blank", "noopener,noreferrer");
-          else
-            onExpand({
-              images: [{ src: url, name: caption, ...(kind === "video" ? { type: "video" } : {}) }],
-              index: 0,
-            });
+          if (url !== null && kind === "file") window.open(url, "_blank", "noopener,noreferrer");
+          else setExpanded(true);
         }}
       >
         {missing ? (
@@ -681,6 +665,15 @@ function CaptureTile({
         ) : null}
       </button>
       <figcaption className="truncate text-2xs text-muted-foreground">{caption}</figcaption>
+      {expanded && url ? (
+        <ExpandedImageDialog
+          preview={{
+            images: [{ src: url, name: caption, ...(kind === "video" ? { type: "video" } : {}) }],
+            index: 0,
+          }}
+          onClose={() => setExpanded(false)}
+        />
+      ) : null}
     </figure>
   );
 }
