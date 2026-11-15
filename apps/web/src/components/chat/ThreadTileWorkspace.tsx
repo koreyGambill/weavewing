@@ -1110,8 +1110,8 @@ export function ThreadTileWorkspace(props: {
                 </span>
                 <div className="flex min-w-0 flex-1 items-center overflow-hidden">
                   <div
-                    // Filling the bar keeps New tab in one place as tabs open and close.
-                    className="workspace-tile-tabs flex min-w-0 flex-1 items-center overflow-x-auto px-1"
+                    // Sized to its tabs so New tab follows the last one, and pinned at the strip's end once they overflow.
+                    className="workspace-tile-tabs flex min-w-0 flex-initial items-center overflow-x-auto px-1"
                     ref={observeTabStrip}
                     onScroll={(event) => markTabOverflow(event.currentTarget)}
                     role="tablist"
