@@ -8,6 +8,16 @@ import {
   NotificationUpdateResult,
 } from "./notification.ts";
 import {
+  EvidenceChangeQa,
+  EvidenceCounts,
+  EvidenceError,
+  EvidenceGetInput,
+  EvidenceLanding,
+  EvidenceListInput,
+  EvidenceListResult,
+  EvidenceSetQaInput,
+} from "./evidence.ts";
+import {
   ThreadMark,
   ThreadMarksGetInput,
   ThreadMarksAnnotateInput,
@@ -723,6 +733,10 @@ export const WS_METHODS = {
   notificationsSubscribe: "notifications.subscribe",
   notificationsUpdate: "notifications.update",
   notificationsMarkAllRead: "notifications.markAllRead",
+  evidenceList: "evidence.list",
+  evidenceGet: "evidence.get",
+  evidenceSetQa: "evidence.setQa",
+  evidenceCounts: "evidence.counts",
 
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
@@ -2462,6 +2476,28 @@ const WsNotificationsMarkAllReadRpc = Rpc.make(WS_METHODS.notificationsMarkAllRe
   error: Schema.Union([NotificationError, EnvironmentAuthorizationError]),
 });
 
+const evidenceErrors = Schema.Union([EvidenceError, EnvironmentAuthorizationError]);
+const WsEvidenceListRpc = Rpc.make(WS_METHODS.evidenceList, {
+  payload: EvidenceListInput,
+  success: EvidenceListResult,
+  error: evidenceErrors,
+});
+const WsEvidenceGetRpc = Rpc.make(WS_METHODS.evidenceGet, {
+  payload: EvidenceGetInput,
+  success: EvidenceLanding,
+  error: evidenceErrors,
+});
+const WsEvidenceSetQaRpc = Rpc.make(WS_METHODS.evidenceSetQa, {
+  payload: EvidenceSetQaInput,
+  success: EvidenceChangeQa,
+  error: evidenceErrors,
+});
+const WsEvidenceCountsRpc = Rpc.make(WS_METHODS.evidenceCounts, {
+  payload: Schema.Struct({}),
+  success: EvidenceCounts,
+  error: evidenceErrors,
+});
+
 const WsStatusSourcesSubscribeRpc = Rpc.make(WS_METHODS.statusSourcesSubscribe, {
   payload: Schema.Struct({}),
   success: StatusSourceList,
@@ -2656,6 +2692,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsNotificationsSubscribeRpc,
   WsNotificationsUpdateRpc,
   WsNotificationsMarkAllReadRpc,
+  WsEvidenceListRpc,
+  WsEvidenceGetRpc,
+  WsEvidenceSetQaRpc,
+  WsEvidenceCountsRpc,
   WsScheduledTasksSubscribeRpc,
   WsStatusSourcesSubscribeRpc,
   WsStatusSourcesUpsertRpc,

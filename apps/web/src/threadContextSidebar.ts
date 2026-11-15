@@ -92,6 +92,7 @@ export function summarizeThreadTools(workspace: ThreadWorkspace | null): ThreadT
 
 export const THREAD_TOOL_ORDER: ReadonlyArray<ThreadContextSection> = [
   "todos",
+  "evidence",
   "artifacts",
   "links",
   "related",

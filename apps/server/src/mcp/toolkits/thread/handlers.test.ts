@@ -15,6 +15,7 @@ import { McpSchema, McpServer } from "effect/ai";
 
 import * as MonitoringDialogue from "../../../monitoring/MonitoringDialogue.ts";
 import * as NotificationService from "../../../notifications/NotificationService.ts";
+import * as EvidenceService from "../../../evidence/EvidenceService.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as Sqlite from "../../../persistence/Sqlite.ts";
@@ -105,6 +106,7 @@ it.effect("defaults to compact context pages and lets callers request full tool 
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(MonitoringDialogue.MonitoringDialogue)({})),
         Layer.provide(Layer.mock(NotificationService.NotificationService)({})),
+        Layer.provide(Layer.mock(EvidenceService.EvidenceService)({})),
         Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
         Layer.provide(Layer.mock(ScheduledTasks.ScheduledTaskService)({})),
         Layer.provide(

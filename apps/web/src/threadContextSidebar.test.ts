@@ -245,7 +245,7 @@ describe("thread tool views", () => {
     expect(migrateThreadToolsView("environments")).toBe("environments");
     expect(migrateThreadToolsView("timeline")).toBe("timeline");
     expect(migrateThreadToolsView(undefined)).toBe("todos");
-    expect(firstVisibleThreadTool(["todos", "artifacts"])).toBe("links");
+    expect(firstVisibleThreadTool(["todos", "evidence", "artifacts"])).toBe("links");
   });
 
   it("lists threads this one talked with, not siblings", () => {
@@ -313,10 +313,11 @@ describe("thread tools store", () => {
     store.setHidden("todos", true);
     expect(useThreadContextSidebarStore.getState()).toMatchObject({
       view: "threads",
-      lastTool: "artifacts",
+      lastTool: "evidence",
       hidden: ["todos"],
     });
     for (const tool of [
+      "evidence",
       "artifacts",
       "links",
       "related",

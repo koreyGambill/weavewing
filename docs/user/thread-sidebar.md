@@ -59,7 +59,7 @@ Pick a recent folder, a project, or a linked Xwing environment, or enter a path.
 The thread keeps its history. Its next turn starts a new agent session in that
 folder with the conversation carried over. Finish or stop any work before moving.
 
-The left sidebar also holds tools for the current thread: Todos, Artifacts,
+The left sidebar also holds tools for the current thread: Todos, Evidence, Artifacts,
 Links, Related, Timeline, Details, Environments and Inspect, plus the Inbox. Pick a tool from the strip beside the thread list; pick it again, or
 **Threads** at the top of the strip, to return to your threads. `Cmd+Alt+I` on macOS or `Ctrl+Alt+I`
 on Windows and Linux switches between your threads and the last tool, and opens
@@ -88,6 +88,17 @@ the item's menu. Items nest up to three levels: indent and outdent from the item
 menu, or press Tab and Shift+Tab while editing its text. Select an item's text to
 edit it and its note. Filter the list to your items or the agent's, and show done
 and dropped items when you need them. These choices stay on this device.
+
+**Evidence** is the proof behind each land: what you asked for, the commits,
+the checks that ran, the reviewer's verdict, captures and anything left unproven.
+Agents record a landing with `evidence_record` after they merge work; you decide
+whether each change passed. Pick **Thread** for this thread's landings or **All**
+for every thread on this server, and filter to the ones that still need QA. Open a
+landing to see its changes and load their captures; click a capture to view it
+full size. Each change has one QA button: Pending, Confirmed, Failed or Waived, and
+you can change it at any time. Choosing **Failed** asks what went wrong; **Send to
+thread** drafts that note into the landing's thread for you to read and send. The
+strip badge counts changes waiting for QA and turns red when any failed.
 
 **Timeline** shows when the thread and everything it delegated ran: one row per
 thread, with its delegates and side chats indented beneath it, on a shared clock.

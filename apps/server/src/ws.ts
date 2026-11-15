@@ -133,6 +133,7 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as UpstreamClientCompat from "./upstreamClientCompat.ts";
 import * as StatusSources from "./statusSources/StatusSources.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
+import * as EvidenceService from "./evidence/EvidenceService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
 import {
@@ -1482,6 +1483,7 @@ export const layerWsRpc = (
       );
       const statusSources = yield* StatusSources.StatusSources;
       const notifications = yield* NotificationService.NotificationService;
+      const evidence = yield* EvidenceService.EvidenceService;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
       const pullRequests = yield* PullRequestService.PullRequestService;
@@ -2342,6 +2344,10 @@ export const layerWsRpc = (
         [WS_METHODS.notificationsSubscribe]: () => notifications.subscribe(),
         [WS_METHODS.notificationsUpdate]: (input) => notifications.update(input),
         [WS_METHODS.notificationsMarkAllRead]: () => notifications.markAllRead(),
+        [WS_METHODS.evidenceList]: (input) => evidence.list(input),
+        [WS_METHODS.evidenceGet]: (input) => evidence.get(input),
+        [WS_METHODS.evidenceSetQa]: (input) => evidence.setQa(input),
+        [WS_METHODS.evidenceCounts]: () => evidence.counts(),
         [WS_METHODS.statusSourcesSubscribe]: () => statusSources.subscribe(),
         [WS_METHODS.statusSourcesUpsert]: (input) => statusSources.upsert(input),
         [WS_METHODS.statusSourcesDelete]: (input) => statusSources.remove(input),

@@ -210,6 +210,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   scheduledTaskThreadModes: Schema.optionalKey(Schema.Boolean),
   /** Server answers notifications.* and agents can call `t3_notify`. */
   notifications: Schema.optionalKey(Schema.Boolean),
+  /** Server answers evidence.* and agents can call `evidence_record`. */
+  evidence: Schema.optionalKey(Schema.Boolean),
   idleWorkCheckins: Schema.optionalKey(Schema.Boolean),
   /** Server records automation runs and answers scheduledTasks.listRuns. */
   automations: Schema.optionalKey(Schema.Boolean),

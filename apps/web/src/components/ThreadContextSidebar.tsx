@@ -14,6 +14,7 @@ import {
   MessagesSquareIcon,
   NetworkIcon,
   ChartGanttIcon,
+  ClipboardCheckIcon,
   PinIcon,
   PinOffIcon,
   ScanSearchIcon,
@@ -43,6 +44,12 @@ import {
 import { useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
 import { useStatusSignal } from "./statusSources/StatusSources";
 import { InboxView } from "./inbox/InboxView";
+import { EvidenceView } from "./evidence/EvidenceView";
+import {
+  useEvidenceCounts,
+  useEvidenceEnvironment,
+  useReloadEvidenceOnReturn,
+} from "../state/evidence";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { useInboxSignal } from "../state/inbox";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
@@ -73,6 +80,12 @@ const tools: Record<ThreadContextSection, { title: string; icon: LucideIcon; abo
     icon: ListChecksIcon,
     about:
       "Commitments agents and you track for this thread. Agents update it with list_update; you can add and check items here.",
+  },
+  evidence: {
+    title: "Evidence",
+    icon: ClipboardCheckIcon,
+    about:
+      "Proof for each land: what was asked, its commits, checks, review verdict and captures. Agents record it with evidence_record; you set each change's QA state here.",
   },
   artifacts: {
     title: "Artifacts",
@@ -159,7 +172,7 @@ export function ThreadToolsFrame({ children }: { children: ReactNode }) {
           <ThreadToolHeading view={view} />
           <ThreadToolView
             key={
-              threadRef && view !== "inbox"
+              threadRef && view !== "inbox" && view !== "evidence"
                 ? `${threadRef.environmentId}:${threadRef.threadId}:${view}`
                 : view
             }
@@ -351,6 +364,45 @@ function InboxStripButton({ active, tooltip }: { active: boolean; tooltip: strin
   );
 }
 
+function EvidenceStripButton({
+  threadRef,
+  active,
+  tooltip,
+}: {
+  threadRef: ScopedThreadRef | null;
+  active: boolean;
+  tooltip: string;
+}) {
+  const environmentId = useEvidenceEnvironment(threadRef);
+  useReloadEvidenceOnReturn(environmentId !== null);
+  const counts = useEvidenceCounts(environmentId).data;
+  const waiting = (counts?.pending ?? 0) + (counts?.failed ?? 0);
+  const failed = counts?.failed ?? 0;
+  return (
+    <StripButton
+      id="evidence"
+      title="Evidence"
+      active={active}
+      tooltip={tooltip}
+      badge={waiting ? `${waiting} waiting for QA${failed ? `, ${failed} failed` : ""}` : undefined}
+      icon={ClipboardCheckIcon}
+    >
+      {waiting ? (
+        <span
+          aria-hidden
+          data-failed={failed > 0}
+          className={cn(
+            "pointer-events-none absolute -right-1 -top-1 min-w-3.5 rounded-full px-1 text-center text-3xs leading-3.5 font-medium ring-2 ring-sidebar",
+            failed ? "bg-destructive text-white" : "bg-muted-foreground text-sidebar",
+          )}
+        >
+          {waiting > 99 ? "99+" : waiting}
+        </span>
+      ) : null}
+    </StripButton>
+  );
+}
+
 const STRIP_ITEMS: ReadonlyArray<StripItem> = ["inbox", ...THREAD_TOOL_ORDER];
 
 function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) {
@@ -378,6 +430,15 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
         <span aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-sidebar-border" />
       ) : null}
       {visibleTools.map((id) => {
+        if (id === "evidence")
+          return (
+            <EvidenceStripButton
+              key={id}
+              threadRef={threadRef}
+              active={view === id}
+              tooltip={tooltip(id, tools[id].title)}
+            />
+          );
         const { title, icon } = tools[id];
         const count =
           id === "todos" ? signals.listCount : id === "artifacts" ? signals.questionCount : 0;
@@ -529,6 +590,8 @@ function ThreadToolView({
         <InboxView actions={actions} />
       ) : view === "automations" ? (
         <AutomationsView threadRef={threadRef} />
+      ) : view === "evidence" ? (
+        <EvidenceView threadRef={threadRef} />
       ) : threadRef ? (
         <ThreadToolSection
           section={view}

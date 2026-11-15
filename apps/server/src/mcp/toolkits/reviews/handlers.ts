@@ -1,15 +1,23 @@
 import {
   OrchestratorMcpFailure,
+  type EvidenceError,
   type ThreadWorkspaceError,
   type ThreadWorkspace as WorkspaceDocument,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { ThreadWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
+import * as EvidenceService from "../../../evidence/EvidenceService.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller, readThread } from "../../threadAccess.ts";
 import { ReviewToolkit } from "./tools.ts";
 
 const failure = (error: ThreadWorkspaceError) =>
+  new OrchestratorMcpFailure({
+    code: error.code === "storage" ? "orchestration_error" : "invalid_request",
+    message: error.message,
+  });
+
+const evidenceFailure = (error: EvidenceError) =>
   new OrchestratorMcpFailure({
     code: error.code === "storage" ? "orchestration_error" : "invalid_request",
     message: error.message,
@@ -125,6 +133,32 @@ export const layer = McpToolAccess.toLayer(ReviewToolkit, {
       return yield* workspace
         .artifactList({ threadId: projection.thread.id })
         .pipe(Effect.mapError(failure));
+    }),
+  ),
+  evidence_record: McpToolAccess.writesThreads(
+    (input) => [input.threadId],
+    (input) =>
+      Effect.gen(function* () {
+        const { projection, caller } = yield* readThread(input.threadId);
+        const thread = projection.thread;
+        const evidence = yield* EvidenceService.EvidenceService;
+        return yield* evidence
+          .record({
+            ...input,
+            threadId: thread.id,
+            projectId: thread.projectId,
+            recordedBy: caller?.id ?? thread.id,
+          })
+          .pipe(Effect.mapError(evidenceFailure));
+      }),
+  ),
+  evidence_read: McpToolAccess.reads(({ landingId, ...input }) =>
+    Effect.gen(function* () {
+      yield* readCaller();
+      const evidence = yield* EvidenceService.EvidenceService;
+      if (landingId !== undefined)
+        return yield* evidence.get({ landingId }).pipe(Effect.mapError(evidenceFailure));
+      return yield* evidence.list(input).pipe(Effect.mapError(evidenceFailure));
     }),
   ),
 });

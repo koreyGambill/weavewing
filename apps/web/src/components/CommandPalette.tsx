@@ -88,6 +88,7 @@ import {
   TextSearchIcon,
   UserPlusIcon,
   CalendarClockIcon,
+  ClipboardCheckIcon,
 } from "lucide-react";
 import { openThreadFind } from "./chat/threadFindStore";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
@@ -1940,6 +1941,17 @@ function OpenCommandPaletteDialog(props: {
     icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       useThreadContextSidebarStore.getState().show("automations");
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:evidence",
+    title: "Open evidence",
+    searchTerms: ["evidence", "qa", "landings", "landed", "captures", "verify"],
+    icon: <ClipboardCheckIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      useThreadContextSidebarStore.getState().show("evidence");
     },
   });
 

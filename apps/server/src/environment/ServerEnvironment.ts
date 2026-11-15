@@ -285,6 +285,7 @@ export const make = Effect.gen(function* () {
       idleWorkCheckins: true,
       eventTriggers: true,
       notifications: true,
+      evidence: true,
       xwingEnvironments: true,
       npmReleaseLookup: true,
       voiceTranscription: isSpeechPlatformSupported(hostPlatform, hostArchitecture, hostLibc),
