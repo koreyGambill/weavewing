@@ -63,7 +63,7 @@ import {
 import { ThreadInspectPanel, type ThreadInspectSection } from "./insights/ThreadInspectPanel";
 import { ThreadTimelineView } from "./ThreadTimelineView";
 import { ToolHeaderButton } from "./threadToolsHost";
-import { ThreadListView } from "./reviews/ThreadListView";
+import { ThreadTodosView } from "./reviews/ThreadListView";
 import { ArtifactsPanel } from "./reviews/ThreadWorkspacePanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -113,7 +113,7 @@ export function ThreadToolSection({
   switch (section) {
     case "todos":
       return (
-        <ThreadListView
+        <ThreadTodosView
           key={`${threadRef.environmentId}:${threadRef.threadId}`}
           threadRef={threadRef}
         />

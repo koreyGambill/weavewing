@@ -57,6 +57,8 @@ import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Toggle } from "../ui/toggle";
+import { FollowUpSection } from "./FollowUps";
+import { useConnectedEnvironmentIds, useEnvironments } from "../../state/environments";
 import { ToggleGroup, ToggleGroupItem as GroupToggle } from "../ui/toggle-group";
 import {
   todoIndentMove,
@@ -287,6 +289,13 @@ export function ThreadListView({
             </span>
           ) : null}
         </div>
+      ) : null}
+      {!supplied ? (
+        <FollowUpSection
+          environmentId={threadRef.environmentId}
+          threadId={threadRef.threadId}
+          showDone={showClosed}
+        />
       ) : null}
       <div role="list" aria-label="Todos">
         {tree.map((node) => renderBranch(node, 0))}
@@ -876,6 +885,40 @@ export function YourQaView({ threadRef }: { threadRef: ScopedThreadRef }) {
       {query.data?.every((entry) => entry.items.length === 0) ? (
         <p className="py-3 text-xs text-muted-foreground">Nothing needs your QA.</p>
       ) : null}
+    </div>
+  );
+}
+
+/** Todos with a Thread | All switch; All lists the environment's open follow-ups. */
+export function ThreadTodosView({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const scope = useThreadContextSidebarStore((state) => state.todoScope);
+  const connected = useConnectedEnvironmentIds();
+  const { presentationById } = useEnvironments();
+  const environmentLabel = presentationById.get(threadRef.environmentId)?.entry.target.label;
+  return (
+    <div data-todos-view className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
+      <ToggleGroup
+        aria-label="Todos scope"
+        size="segmented-compact"
+        className="w-full *:flex-1"
+        value={[scope]}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next === "thread" || next === "all")
+            useThreadContextSidebarStore.getState().setTodoScope(next);
+        }}
+      >
+        <GroupToggle value="thread">Thread</GroupToggle>
+        <GroupToggle value="all">All</GroupToggle>
+      </ToggleGroup>
+      {scope === "all" && connected.length > 1 && environmentLabel ? (
+        <p className="truncate px-0.5 text-muted-foreground">On {environmentLabel}</p>
+      ) : null}
+      {scope === "thread" ? (
+        <ThreadListView threadRef={threadRef} />
+      ) : (
+        <FollowUpSection environmentId={threadRef.environmentId} showDone={false} />
+      )}
     </div>
   );
 }

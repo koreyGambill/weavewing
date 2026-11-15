@@ -131,6 +131,7 @@ import { WorkspaceMutationIdContext } from "./chat/ChatMarkdownMedia";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   assistantCitationFromLocation,
+  messageRevealFromLocation,
   useSideChatCitationReveal,
 } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
@@ -587,12 +588,18 @@ export default function ChatView(props: ChatViewProps) {
   const citationLocation = { href: citationHref, key: citationKey };
   const locationCitation = assistantCitationFromLocation(citationLocation.href);
   const citationActivation = citationLocation.key ?? citationLocation.href;
+  const locationReveal = messageRevealFromLocation(citationLocation.href);
   const citationRequest = (
     locationCitation &&
     locationCitation.environmentId === environmentId &&
     locationCitation.threadId === threadId
       ? { citation: locationCitation, key: citationActivation }
-      : null
+      : locationReveal?.threadId === threadId
+        ? {
+            citation: { environmentId, threadId, messageId: locationReveal.messageId },
+            key: citationActivation,
+          }
+        : null
   ) as AssistantCitationRequest | null;
   useSideChatCitationReveal(embedded ? null : routeThreadRef, locationCitation, citationActivation);
   const citationHistory = useCitedHistory(citationRequest);

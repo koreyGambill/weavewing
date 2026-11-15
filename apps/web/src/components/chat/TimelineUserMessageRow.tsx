@@ -62,6 +62,12 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { GuestMessageName, guestBubbleClassName } from "./guestMessageStyle";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { AssistantCitationSource } from "./AssistantCitationSource";
+import {
+  MessageFollowUpButton,
+  MessageFollowUpGlyph,
+  useMessageFollowUp,
+} from "../reviews/FollowUps";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { formatBytes } from "../../lib/formatBytes";
@@ -261,7 +267,15 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
       {modelSwitch ? (
         <ModelSwitchRow environmentId={ctx.activeThreadEnvironmentId} modelSwitch={modelSwitch} />
       ) : null}
-      <UserMessageContent row={row} />
+      <AssistantCitationSource
+        messageId={row.message.id}
+        itemKey={row.id}
+        request={ctx.citationRequest}
+        listRef={ctx.listRef}
+        citable={false}
+      >
+        <UserMessageContent row={row} />
+      </AssistantCitationSource>
     </>
   );
 }
@@ -375,6 +389,7 @@ function UserTimelineRow({
   const { onImageExpand, onFileOpen } = ctx;
   const coarsePointer = useMediaQuery({ pointer: "coarse" });
   const userMessage = resolveUserMessagePresentation(row.message);
+  const followUp = useMessageFollowUp(ctx.threadRef ?? null, row.message.id);
   const sender = userMessage.sender;
   const resources = selectMessageImageResources(row.message.attachments);
   const previewUrls = useAssetUrls(ctx.activeThreadEnvironmentId, resources);
@@ -778,6 +793,13 @@ function UserTimelineRow({
             variant="ghost"
           />
         )}
+        {ctx.threadRef && userMessage.attribution === null ? (
+          <MessageFollowUpButton
+            threadRef={ctx.threadRef}
+            messageId={row.message.id}
+            followUp={followUp}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -853,6 +875,7 @@ function UserTimelineRow({
           folded && expanded && "w-full",
         )}
       >
+        {followUp && !cardBody ? <MessageFollowUpGlyph followUp={followUp} /> : null}
         {/* Outside the fold so a collapsed message still has a heading to navigate to. */}
         {mediaAboveText || cardBody ? null : (
           <MessageAuthorHeading>

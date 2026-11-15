@@ -100,6 +100,15 @@ you can change it at any time. Choosing **Failed** asks what went wrong; **Send 
 thread** drafts that note into the landing's thread for you to read and send. The
 strip badge counts changes waiting for QA and turns red when any failed.
 
+To come back to something you asked for, hover a message you sent and click the
+flag (**Follow up later**). The message keeps a flag beside it, and it shows in a
+**Follow up** section at the top of Todos; the Todos badge counts it until it's
+done. Click a follow-up to jump to its message, tick it once you've followed up,
+or remove the flag from its menu. **All** at the top of Todos lists open
+follow-ups across every thread on that thread's environment. Follow-ups are yours
+only: agents never see them. This is unrelated to **Follow-up behavior** in
+Settings, which decides what a message sent while an agent is busy does.
+
 **Timeline** shows when the thread and everything it delegated ran: one row per
 thread, with its delegates and side chats indented beneath it, on a shared clock.
 Use it to see where a long task spent its time and which work ran in parallel.

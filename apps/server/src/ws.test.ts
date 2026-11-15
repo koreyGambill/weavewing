@@ -1,6 +1,7 @@
 import * as ContextRecords from "./threadInsights/ContextRecords.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
 import * as EvidenceService from "./evidence/EvidenceService.ts";
+import * as MessageFollowUpService from "./followUps/MessageFollowUpService.ts";
 import * as MonitoringDialogue from "./monitoring/MonitoringDialogue.ts";
 import * as ThreadMarks from "./threadWorkspace/ThreadMarks.ts";
 import * as ThreadInsights from "./threadInsights/ThreadInsights.ts";
@@ -821,6 +822,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(NotificationService.NotificationService)({}),
   Layer.mock(EvidenceService.EvidenceService)({}),
+  Layer.mock(MessageFollowUpService.MessageFollowUpService)({}),
   Layer.mock(MonitoringDialogue.MonitoringDialogue)({}),
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),

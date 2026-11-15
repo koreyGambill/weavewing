@@ -1,3 +1,4 @@
+import { useOpenFollowUpCount } from "./reviews/FollowUps";
 import { useAtomValue } from "@effect/atom-react";
 import { useParams } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -409,6 +410,7 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
   const view = useThreadContextSidebarStore((state) => state.view);
   const hidden = useThreadContextSidebarStore((state) => state.hidden);
   const signals = useThreadToolSignals(threadRef);
+  const openFollowUps = useOpenFollowUpCount(threadRef);
   const tooltip = useShortcutTooltip();
   const visibleTools = THREAD_TOOL_ORDER.filter((id) => !hidden.includes(id));
   return (
@@ -441,7 +443,11 @@ function ThreadToolsStrip({ threadRef }: { threadRef: ScopedThreadRef | null }) 
           );
         const { title, icon } = tools[id];
         const count =
-          id === "todos" ? signals.listCount : id === "artifacts" ? signals.questionCount : 0;
+          id === "todos"
+            ? signals.listCount + openFollowUps
+            : id === "artifacts"
+              ? signals.questionCount
+              : 0;
         const ticket = id === "links" ? signals.ticketState : null;
         return (
           <StripButton

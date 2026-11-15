@@ -48,6 +48,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.reviewsGet,
       WS_METHODS.reviewsList,
       WS_METHODS.reviewsDue,
+      WS_METHODS.messageFollowUpsList,
     ])
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
     expect(requiredScopeForRpcMethod(WS_METHODS.threadDefaultContextItem)).toBe(
@@ -63,6 +64,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.reviewsCreate,
       WS_METHODS.reviewsSave,
       WS_METHODS.reviewsSubmit,
+      WS_METHODS.messageFollowUpsUpdate,
     ])
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
   });

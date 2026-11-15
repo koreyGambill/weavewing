@@ -18,6 +18,12 @@ import {
   EvidenceSetQaInput,
 } from "./evidence.ts";
 import {
+  MessageFollowUp,
+  MessageFollowUpError,
+  MessageFollowUpListInput,
+  MessageFollowUpUpdateInput,
+} from "./messageFollowUp.ts";
+import {
   ThreadMark,
   ThreadMarksGetInput,
   ThreadMarksAnnotateInput,
@@ -737,6 +743,8 @@ export const WS_METHODS = {
   evidenceGet: "evidence.get",
   evidenceSetQa: "evidence.setQa",
   evidenceCounts: "evidence.counts",
+  messageFollowUpsList: "messageFollowUps.list",
+  messageFollowUpsUpdate: "messageFollowUps.update",
 
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
@@ -2497,6 +2505,16 @@ const WsEvidenceCountsRpc = Rpc.make(WS_METHODS.evidenceCounts, {
   success: EvidenceCounts,
   error: evidenceErrors,
 });
+const WsMessageFollowUpsListRpc = Rpc.make(WS_METHODS.messageFollowUpsList, {
+  payload: MessageFollowUpListInput,
+  success: Schema.Array(MessageFollowUp),
+  error: Schema.Union([MessageFollowUpError, EnvironmentAuthorizationError]),
+});
+const WsMessageFollowUpsUpdateRpc = Rpc.make(WS_METHODS.messageFollowUpsUpdate, {
+  payload: MessageFollowUpUpdateInput,
+  success: Schema.NullOr(MessageFollowUp),
+  error: Schema.Union([MessageFollowUpError, EnvironmentAuthorizationError]),
+});
 
 const WsStatusSourcesSubscribeRpc = Rpc.make(WS_METHODS.statusSourcesSubscribe, {
   payload: Schema.Struct({}),
@@ -2696,6 +2714,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsEvidenceGetRpc,
   WsEvidenceSetQaRpc,
   WsEvidenceCountsRpc,
+  WsMessageFollowUpsListRpc,
+  WsMessageFollowUpsUpdateRpc,
   WsScheduledTasksSubscribeRpc,
   WsStatusSourcesSubscribeRpc,
   WsStatusSourcesUpsertRpc,

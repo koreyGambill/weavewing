@@ -58,6 +58,8 @@ interface ThreadContextSidebarState {
   hidden: ReadonlyArray<StripItem>;
   todoFilter: TodoFilter;
   todoShowClosed: boolean;
+  /** All lists open follow-ups and your todos across the environment's threads. */
+  todoScope: "thread" | "all";
   environmentSelection: { thread: ScopedThreadRef; id: string } | null;
   /** Set when a tool view was requested while the sidebar may be hidden; the sidebar clears it. */
   revealPending: boolean;
@@ -84,6 +86,7 @@ interface ThreadContextSidebarState {
   setHidden: (item: StripItem, hidden: boolean) => void;
   setTodoFilter: (filter: TodoFilter) => void;
   setTodoShowClosed: (show: boolean) => void;
+  setTodoScope: (scope: "thread" | "all") => void;
   selectEnvironment: (thread: ScopedThreadRef, id: string | null) => void;
   setInboxTab: (tab: InboxTab) => void;
   selectInbox: (selection: InboxSelection | null) => void;
@@ -98,6 +101,7 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       hidden: [],
       todoFilter: "all",
       todoShowClosed: false,
+      todoScope: "thread",
       environmentSelection: null,
       revealPending: false,
       artifactSelection: null,
@@ -170,6 +174,7 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
         })),
       setTodoFilter: (todoFilter) => set({ todoFilter }),
       setTodoShowClosed: (todoShowClosed) => set({ todoShowClosed }),
+      setTodoScope: (todoScope) => set({ todoScope }),
       selectEnvironment: (thread, id) => set({ environmentSelection: id ? { thread, id } : null }),
       setInboxTab: (inboxTab) => set({ inboxTab, inboxSelection: null }),
       selectInbox: (inboxSelection) => set({ inboxSelection }),
@@ -180,12 +185,13 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       storage: createJSONStorage(() =>
         resolveStorage(typeof window === "undefined" ? undefined : window.localStorage),
       ),
-      partialize: ({ view, lastTool, hidden, todoFilter, todoShowClosed }) => ({
+      partialize: ({ view, lastTool, hidden, todoFilter, todoShowClosed, todoScope }) => ({
         view,
         lastTool,
         hidden,
         todoFilter,
         todoShowClosed,
+        todoScope,
       }),
       // v0 stored the right panel's { open, view }; its view becomes the last tool.
       // v1 named the inbox's strip slot "status".

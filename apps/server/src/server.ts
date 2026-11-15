@@ -164,6 +164,7 @@ import * as WebhookRoute from "./scheduledTasks/webhookRoute.ts";
 import * as StatusSources from "./statusSources/StatusSources.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
 import * as EvidenceService from "./evidence/EvidenceService.ts";
+import * as MessageFollowUpService from "./followUps/MessageFollowUpService.ts";
 import * as StatusSourceProbe from "./statusSources/StatusSourceProbe.ts";
 import * as StatusSourcesHttp from "./statusSources/http.ts";
 import * as RelayDeliveryProof from "./scheduledTasks/RelayDeliveryProof.ts";
@@ -829,6 +830,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(TriageService.layer.pipe(Layer.provide(GitVcsDriver.layer))),
   Layer.provideMerge(EvidenceService.layer.pipe(Layer.provide(layerPersistence))),
   Layer.provideMerge(NotificationService.layer.pipe(Layer.provide(layerPersistence))),
+  Layer.provideMerge(MessageFollowUpService.layer.pipe(Layer.provide(layerPersistence))),
   // Worktree removers read this while they are built, so it sits beneath every one of them.
   Layer.provideMerge(
     DevelopmentEnvironmentCheckouts.layerRemovalOwnership.pipe(Layer.provide(layerPersistence)),

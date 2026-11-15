@@ -73,7 +73,7 @@ import {
 } from "./timelineScrollAnchoring";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import { type AssistantCitationRequest } from "./AssistantCitationSource";
+import { isMessageReveal, type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget } from "./useAssistantCitationTarget";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { resolveCitationPhase, type CitedHistory } from "./citationProcedure";
@@ -678,7 +678,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ? timelineEntries.find(
           (entry) =>
             entry.kind === "message" &&
-            entry.message.role === "assistant" &&
+            (entry.message.role === "assistant" || isMessageReveal(citationRequest.citation)) &&
             entry.message.id === citationRequest.citation.messageId,
         )
       : undefined;
@@ -839,6 +839,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ? resolveCitationPhase({
           history: citationHistory,
           messageId: citationRequest.citation.messageId,
+          revealsUser: isMessageReveal(citationRequest.citation),
           entries: timelineEntries,
           rows,
         })
