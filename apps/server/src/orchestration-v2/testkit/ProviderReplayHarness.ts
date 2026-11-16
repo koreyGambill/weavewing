@@ -573,6 +573,7 @@ export function layerWithRegistry<Error>(
         Layer.mock(MessageSummaryService.MessageSummaryService)({ execute: () => Effect.void }),
         layerServerSettings,
         layerThreadManagementProvided,
+        layerStores,
       ),
     ),
   );

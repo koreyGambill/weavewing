@@ -30,7 +30,11 @@ import {
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import {
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+  sentMessageFromToolItem,
+} from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -130,6 +134,13 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: RunId | null;
       readonly htmlRender: HtmlRenderReference;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "sent-message";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly text: string;
     }
   | {
       readonly id: string;
@@ -391,7 +402,9 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
           (item.changes !== undefined && item.changes.length > 1
             ? `Changed ${item.changes.length} files`
             : `Changed ${item.fileName}`),
-        changedFiles: item.changes?.map((change) => change.path) ?? [item.fileName],
+        changedFiles: item.changes?.length
+          ? item.changes.map((change) => change.path)
+          : [item.fileName],
         toolTitle: title ?? "File change",
         toolData: item,
       };
@@ -423,7 +436,7 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
       return {
         ...common,
         label: item.message,
-        sourceActivityKind: "runtime.warning",
+        ...(item.level === "info" ? {} : { sourceActivityKind: "runtime.warning" }),
       };
     case "error": {
       const presentation = providerErrorPresentation(item);
@@ -662,6 +675,22 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         createdAt,
         runId: item.runId,
         htmlRender,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const sentMessage =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? sentMessageFromToolItem(item)
+        : undefined;
+    if (sentMessage !== undefined) {
+      entries.push({
+        id: item.id,
+        kind: "sent-message",
+        createdAt,
+        runId: item.runId,
+        text: sentMessage,
         ...attemptMetadata,
       });
       continue;

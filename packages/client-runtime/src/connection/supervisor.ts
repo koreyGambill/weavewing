@@ -43,6 +43,12 @@ import {
 const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 5_000;
 const SESSION_LOSS_RETRY_DELAY_MS = 250;
+// Someone is approving this device on the host; check back soon rather than climbing the ladder.
+const APPROVAL_PENDING_RETRY_DELAY_MS = 4_000;
+// A request lives 10 minutes; past that nobody is approving, so a forgotten device backs off.
+const APPROVAL_PENDING_FAST_RETRIES = 150;
+// A forgotten device has no restart to recover from quickly, so it climbs past the 5 s ceiling.
+const APPROVAL_EXPIRED_MAX_DELAY_MS = 300_000;
 // A cold server with a large database can take longer than 15 seconds to
 // answer, and that is not a reason to drop a working connection.
 const CONNECTION_ESTABLISHMENT_TIMEOUT = "15 seconds";
@@ -148,8 +154,12 @@ export interface EnvironmentSupervisorOptions {
   }) => Effect.Effect<Option.Option<ConnectionCatalogEntry>>;
 }
 
-function retryDelayMs(failureCount: number, random: number): number {
-  const ceiling = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** (failureCount + 1));
+function retryDelayMs(
+  failureCount: number,
+  random: number,
+  maxDelayMs: number = RETRY_MAX_DELAY_MS,
+): number {
+  const ceiling = Math.min(maxDelayMs, RETRY_BASE_DELAY_MS * 2 ** (failureCount + 1));
   return Math.round(ceiling / 2 + (ceiling / 2) * random);
 }
 
@@ -524,8 +534,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     let attemptSpan = Option.none<Tracer.Span>();
     const traced = Effect.gen(function* () {
       attemptSpan = Option.some(yield* Effect.currentSpan.pipe(Effect.orDie));
-      yield* annotateTarget(target);
       yield* Effect.annotateCurrentSpan({
+        "environment.id": target.environmentId,
+        "environment.target.kind": target._tag,
         "connection.attempt": attempt,
         "connection.generation": generation,
         "connection.retry.failure_count": Option.match(pendingRetry, {
@@ -579,7 +590,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
   });
 
-  const waitForEstablishmentInterrupt = Effect.fnUntraced(function* () {
+  const waitForEstablishmentInterrupt = Effect.fnUntraced(function* (ignoreOffline: boolean) {
     // A primary attempt keeps running through an offline report, so the
     // network returning restarts it in case it stalled meanwhile.
     let deviceOffline = (yield* connectivity.status) === "offline";
@@ -587,11 +598,17 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       const next = yield* Queue.take(signals);
       switch (next._tag) {
         case "DisconnectRequested":
-        case "RetryRequested":
           return false;
+        case "RetryRequested":
+          // Once the loop has taken this retry's flag, the running attempt is
+          // the one the retry asked for.
+          if (yield* Ref.get(resetRetryState)) {
+            return false;
+          }
+          break;
         case "NetworkChanged":
           if (target._tag !== "PrimaryConnectionTarget") {
-            if (next.network === "offline") {
+            if (next.network === "offline" && !ignoreOffline) {
               return false;
             }
           } else if (next.network === "offline") {
@@ -916,7 +933,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           exit,
         })),
       ),
-      waitForEstablishmentInterrupt().pipe(
+      waitForEstablishmentInterrupt(ignoreOffline).pipe(
         Effect.map((resetRetry): EstablishmentEvent => ({
           _tag: "Interrupted",
           resetRetry,
@@ -1118,18 +1135,26 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
   const run = Effect.fnUntraced(function* () {
     let failureCount = 0;
+    // Approval waits count as attempts but not toward backoff, so a later outage starts low.
+    let backoffFailures = 0;
+    let approvalWaits = 0;
     let generation = 0;
     let latestFailure: ConnectionAttemptError | null = null;
     let pendingRetry = Option.none<PendingRetryTrace>();
     const resetRetryLadder = () => {
       failureCount = 0;
+      backoffFailures = 0;
+      approvalWaits = 0;
       pendingRetry = Option.none();
     };
     let replacing = false;
 
     for (;;) {
-      if (yield* Ref.getAndSet(resetRetryState, false)) {
+      const retryRequested = yield* Ref.getAndSet(resetRetryState, false);
+      if (retryRequested) {
         failureCount = 0;
+        backoffFailures = 0;
+        approvalWaits = 0;
         latestFailure = null;
         pendingRetry = Option.none();
       }
@@ -1142,7 +1167,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         yield* waitForSignal;
         continue;
       }
-      if (currentIntent.network === "offline" && !replacing) {
+      // The platform's offline report can stay wrong after the network is back,
+      // so an explicit retry still tries instead of waiting for it to change.
+      const ignoreOffline = replacing || retryRequested;
+      if (currentIntent.network === "offline" && !ignoreOffline) {
         yield* clearLease;
         yield* setState(offlineState(currentIntent, generation, failureCount + 1, latestFailure));
         const applicationActivated = yield* waitForSignal;
@@ -1155,7 +1183,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       const attempt = failureCount + 1;
       const nextGeneration = generation + 1;
       const outcome: AttemptOutcome = yield* Effect.scoped(
-        runAttempt(attempt, nextGeneration, latestFailure, pendingRetry, replacing),
+        runAttempt(attempt, nextGeneration, latestFailure, pendingRetry, ignoreOffline),
       );
       replacing = false;
       const failedProbe = yield* Ref.getAndSet(probeUnanswered, false);
@@ -1212,9 +1240,24 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       // still counts it, so a host that keeps dropping sessions backs off.
       const firstLoss = outcome.established && failureCount === 0;
       failureCount += 1;
-      const delayMs = firstLoss
-        ? Math.round(SESSION_LOSS_RETRY_DELAY_MS * (0.5 + (yield* Random.next) / 2))
-        : retryDelayMs(failureCount - 1, yield* Random.next);
+      if (error.reason === "approval-pending") approvalWaits += 1;
+      const awaitingApproval =
+        error.reason === "approval-pending" && approvalWaits <= APPROVAL_PENDING_FAST_RETRIES;
+      if (!awaitingApproval) backoffFailures += 1;
+      const delayMs = awaitingApproval
+        ? APPROVAL_PENDING_RETRY_DELAY_MS
+        : firstLoss
+          ? Math.round(SESSION_LOSS_RETRY_DELAY_MS * (0.5 + (yield* Random.next) / 2))
+          : error.reason === "approval-pending"
+            ? Math.max(
+                APPROVAL_PENDING_RETRY_DELAY_MS,
+                retryDelayMs(
+                  backoffFailures - 1,
+                  yield* Random.next,
+                  APPROVAL_EXPIRED_MAX_DELAY_MS,
+                ),
+              )
+            : retryDelayMs(backoffFailures - 1, yield* Random.next);
       pendingRetry = Option.map(attemptSpan, (previousAttempt) => ({
         previousAttempt,
         failureCount,
@@ -1259,6 +1302,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     Effect.forkScoped,
   );
   yield* wakeups.changes.pipe(
+    Stream.filter(ConnectionWakeups.reachesConnectionSupervisor),
     Stream.runForEach((reason) =>
       // A long suspension can hide a network change the platform never reported.
       (reason === "network-changed" || reason === "application-active-long"

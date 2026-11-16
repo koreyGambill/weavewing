@@ -33,13 +33,22 @@ const putEnv = (name: string, value: string | undefined) => {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 };
-const alive = (pid: number) => {
+// A killed orphan stays a zombie until its reaper (a subreaper under Xwing or Sparkwing) collects it.
+const zombie = (pid: number) => {
   try {
-    process.kill(pid, 0);
-    return true;
+    return NodeFS.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.startsWith("Z");
   } catch {
     return false;
   }
+};
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  return !zombie(pid);
 };
 
 const tools = [
