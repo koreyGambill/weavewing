@@ -15549,16 +15549,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
 
       const parentThreadId = childControls.thread.lineage.parentThreadId;
-      const runReported = options.resultTransfers.some(
-        (transfer) =>
-          transfer.type === "subagent_result" &&
-          transfer.sourceThreadId === childThreadId &&
-          transfer.targetThreadId === parentThreadId &&
-          (transfer.sourcePoint.runId === childRun.id ||
-            (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
-      );
+      const reportsRun = (transfer: OrchestrationV2ContextTransfer) =>
+        transfer.type === "subagent_result" &&
+        transfer.sourceThreadId === childThreadId &&
+        transfer.targetThreadId === parentThreadId &&
+        (transfer.sourcePoint.runId === childRun.id ||
+          (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined));
       // A run that absorbed other tasks' queued runs reports once, so only a task without a result settles from it.
-      if (runReported && options.task.result !== null) return;
+      if (options.resultTransfers.some(reportsRun) && options.task.result !== null) return;
 
       const childResult = yield* projectionStore.getThreadRecords(
         childThreadId,
@@ -15597,6 +15595,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       // A cancelled task's completed run ends it interrupted.
       const cancelled = task.cancelledRunId === childRun.id;
+      // Every result the child sent is among its own transfers, far fewer than the parent's.
+      const childTransfers = yield* projectionStore.getThreadRecords(childThreadId, [
+        "contextTransfers",
+      ]);
+      const runReported = childTransfers.contextTransfers.some(reportsRun);
+      if (runReported && task.result !== null) return;
       const reporterId = childRun.delegatedTaskId ?? forkedFrom.nodeId;
       const reporter = runReported
         ? (yield* projectionStore.getThreadRecords(parentThreadId, ["subagents"], {
@@ -15609,22 +15613,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         reporter.runId === task.runId &&
         ["claimed", "delivered", "acknowledged"].includes(reporter.completionDelivery?.state ?? "");
       if (cancelled && terminalStatus === "completed") outcome = terminalStatus = "interrupted";
-      // Every result the child sent is among its own transfers, far fewer than the parent's.
-      const childTransfers = yield* projectionStore.getThreadRecords(childThreadId, [
-        "contextTransfers",
-      ]);
-      const existingResultTransfer = childTransfers.contextTransfers.find(
-        (transfer) =>
-          transfer.type === "subagent_result" &&
-          transfer.sourceThreadId === childThreadId &&
-          transfer.targetThreadId === parentThreadId &&
-          (transfer.sourcePoint.runId === childRun.id ||
-            (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
-      );
-      if (existingResultTransfer !== undefined) {
-        return;
-      }
-
       const now = yield* DateTime.now;
       const result =
         terminalStatus === "completed"
