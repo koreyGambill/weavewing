@@ -15,6 +15,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Queue from "effect/Queue";
 import * as Tracer from "effect/Tracer";
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServerResponse } from "effect/http";
+import { OFFLINE_HTML_CSP } from "@t3tools/shared/weavewingOutbound";
 import { ASSET_ROUTE_PREFIX } from "./assets/AssetAccess.ts";
 import { ATTACHMENT_UPLOAD_ROUTE_PREFIX } from "./assets/AttachmentUpload.ts";
 import { openMediaFile } from "./assets/MediaFile.ts";
@@ -63,7 +64,7 @@ describe("MCP app asset responses", () => {
           expect(response.headers.get("etag")).toBeNull();
           expect(response.headers.get("last-modified")).toBeNull();
           expect(response.headers.get("content-security-policy")).toBe(
-            "sandbox allow-scripts allow-forms allow-popups allow-downloads",
+            `${OFFLINE_HTML_CSP}; sandbox allow-scripts allow-forms allow-downloads`,
           );
           expect(yield* Effect.promise(() => response.text())).toBe(
             method === "HEAD" ? "" : expected,
@@ -789,7 +790,7 @@ describe("assetResponseHeaders", () => {
       assetResponseHeaders("/attachments/upload.bin", { mimeType: "text/html" }),
     ).toMatchObject({
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads",
+      "Content-Security-Policy": `${OFFLINE_HTML_CSP}; sandbox allow-scripts allow-forms allow-downloads`,
     });
   });
 

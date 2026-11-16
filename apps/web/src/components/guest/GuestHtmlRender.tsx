@@ -13,6 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { observeResize } from "~/lib/observeResize";
+import { AGENT_HTML_SANDBOX } from "@t3tools/shared/weavewingOutbound";
 
 /**
  * A visual the agent published, as the guest sees it. The server sends it with a sandbox CSP and
@@ -88,7 +89,7 @@ export function GuestHtmlRender({
         ref={frameRef}
         src={src}
         title={reference.title}
-        sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+        sandbox={AGENT_HTML_SANDBOX}
         className="block size-full rounded-lg border border-border"
       />
     </div>

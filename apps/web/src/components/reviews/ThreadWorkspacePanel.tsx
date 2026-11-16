@@ -424,7 +424,7 @@ function ArtifactDocument({
           <iframe
             title={version.title}
             sandbox=""
-            srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; font-src data:"><style>body{font:14px system-ui;color-scheme:light dark;margin:16px}</style>${version.content}`}
+            srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:"><style>body{font:14px system-ui;color-scheme:light dark;margin:16px}</style>${version.content}`}
             className="h-96 w-full rounded border border-border"
           />
         ) : (

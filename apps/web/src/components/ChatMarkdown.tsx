@@ -214,6 +214,7 @@ import {
   markdownImageCopy,
 } from "./chat/ChatMarkdownMedia";
 import { MarkdownExternalLinkContent } from "./chat/MarkdownExternalLink";
+import { RemoteMediaGate } from "./chat/RemoteMediaGate";
 import { MarkdownFileLink } from "./chat/MarkdownFileLink";
 import { canUseMarkdownFileShellActions } from "./chat/MarkdownFileLink.logic";
 import { rehypeChipPunctuation } from "./chat/markdownChipPunctuation";
@@ -1517,24 +1518,31 @@ const CHAT_MARKDOWN_COMPONENTS = {
         return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind="audio" />;
       }
       return (
-        <InlineAudioPreview
-          key={classifiedSrc}
-          name={name}
+        <RemoteMediaGate
+          uri={imageSource._tag === "Direct" ? imageSource.uri : null}
+          kind="audio"
+          alt={altText}
           copyMarkdown={copyMarkdown}
-          {...(filePath && threadRef
-            ? {
-                environmentId: threadRef.environmentId,
-                resource: {
-                  _tag: "media-file" as const,
-                  threadId: threadRef.threadId,
-                  path: filePath,
-                },
-                onOpen: () => useRightPanelStore.getState().openFile(threadRef, filePath),
-              }
-            : imageSource._tag === "Direct"
-              ? { src: resolveProtocolRelativeMediaUrl(imageSource.uri) }
-              : {})}
-        />
+        >
+          <InlineAudioPreview
+            key={classifiedSrc}
+            name={name}
+            copyMarkdown={copyMarkdown}
+            {...(filePath && threadRef
+              ? {
+                  environmentId: threadRef.environmentId,
+                  resource: {
+                    _tag: "media-file" as const,
+                    threadId: threadRef.threadId,
+                    path: filePath,
+                  },
+                  onOpen: () => useRightPanelStore.getState().openFile(threadRef, filePath),
+                }
+              : imageSource._tag === "Direct"
+                ? { src: resolveProtocolRelativeMediaUrl(imageSource.uri) }
+                : {})}
+          />
+        </RemoteMediaGate>
       );
     }
     if (mediaKind === null && imageSource._tag === "WorkspaceFile") {
@@ -1590,32 +1598,37 @@ const CHAT_MARKDOWN_COMPONENTS = {
         src: mediaSrc,
         ...(reference ? { reference } : {}),
       };
+      const gate = { uri: imageSource.uri, kind, alt: altText, copyMarkdown };
       if (kind === "video") {
         return (
-          <ChatMarkdownVideo
-            src={mediaSrc}
-            alt={altText}
-            copyMarkdown={copyMarkdown}
-            originalUrl={originalUrl}
-            style={authoredSizeStyle}
-            actionsSource={actionsSource}
-          />
+          <RemoteMediaGate {...gate}>
+            <ChatMarkdownVideo
+              src={mediaSrc}
+              alt={altText}
+              copyMarkdown={copyMarkdown}
+              originalUrl={originalUrl}
+              style={authoredSizeStyle}
+              actionsSource={actionsSource}
+            />
+          </RemoteMediaGate>
         );
       }
       return (
-        <ChatMarkdownImage
-          key={mediaSrc}
-          src={mediaSrc}
-          alt={altText}
-          copyMarkdown={copyMarkdown}
-          standalone={standalone}
-          className={className}
-          style={authoredSizeStyle}
-          imageProps={imageProps}
-          actionsSource={actionsSource}
-          originalUrl={originalUrl}
-          onImageExpand={imageExpand}
-        />
+        <RemoteMediaGate {...gate}>
+          <ChatMarkdownImage
+            key={mediaSrc}
+            src={mediaSrc}
+            alt={altText}
+            copyMarkdown={copyMarkdown}
+            standalone={standalone}
+            className={className}
+            style={authoredSizeStyle}
+            imageProps={imageProps}
+            actionsSource={actionsSource}
+            originalUrl={originalUrl}
+            onImageExpand={imageExpand}
+          />
+        </RemoteMediaGate>
       );
     }
     const hostImageUrl = use(HostImageUrlContext);

@@ -71,8 +71,6 @@ const LITELLM_RATES_URL =
 const LITELLM_RATES_API_URL =
   "https://api.github.com/repos/BerriAI/litellm/contents/model_prices_and_context_window.json?ref=main";
 
-const RATES_TTL_MS = 24 * 60 * 60 * 1000;
-
 const RATES_REFRESH_FLOOR_MS = 60 * 1000;
 
 // mtime slack includes writes just before local midnight on the window's first day.
@@ -299,9 +297,10 @@ export const make = Effect.gen(function* () {
 
   const loadRates = Effect.fn("UsageService.loadRates")(function* (force: boolean) {
     const now = yield* Clock.currentTimeMillis;
-    const maxAgeMs = force ? RATES_REFRESH_FLOOR_MS : RATES_TTL_MS;
     yield* loadSavedRates;
-    if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < maxAgeMs) return;
+    // Weavewing: only the user's Refresh fetches the price list.
+    if (!force) return;
+    if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < RATES_REFRESH_FLOOR_MS) return;
     if (ratesLastFailedAtMs !== null && now - ratesLastFailedAtMs < RATES_REFRESH_FLOOR_MS) return;
 
     let fetched = yield* fetchRates(LITELLM_RATES_URL);

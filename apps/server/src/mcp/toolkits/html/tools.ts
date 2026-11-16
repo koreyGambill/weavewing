@@ -25,7 +25,7 @@ const HtmlPath = Schema.String.annotate({
 });
 
 const PAGE_RULES =
-  "Self-contained: inline <style> and <script>. Local images as absolute paths are inlined. Remote URLs load as-is.";
+  "Self-contained: inline <style> and <script>. Local images as absolute paths are inlined. Remote URLs are blocked.";
 
 export const HtmlPreviewTool = Tool.make("html_preview", {
   description: `Check an HTML page before html_render. Returns PNG, contentHeight, and console output. ${PAGE_RULES} Theme and layout rules are in html_render.`,

@@ -4,6 +4,8 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 
+import { UNBAKED_TELEMETRY_ENV_KEYS } from "@t3tools/shared/weavewingOutbound";
+
 export interface T3CodePublicConfig {
   readonly clerkPublishableKey: string | undefined;
   readonly clerkJwtTemplate: string | undefined;
@@ -32,7 +34,7 @@ export function loadRepoEnv({
   const localEnv = readEnvFile(NodePath.join(repoRoot, ".env.local"));
   const config = resolvePublicConfig(baseEnv, localEnv, rootEnv);
 
-  return {
+  const env: Record<string, string | undefined> = {
     ...rootEnv,
     ...localEnv,
     ...baseEnv,
@@ -99,6 +101,8 @@ export function loadRepoEnv({
         }
       : {}),
   };
+  for (const key of UNBAKED_TELEMETRY_ENV_KEYS) delete env[key];
+  return env;
 }
 
 function resolvePublicConfig(...sources: readonly Environment[]): T3CodePublicConfig {

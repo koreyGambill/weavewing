@@ -1,45 +1,27 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { faviconUrlForOrigin, toolActivityFaviconUrl } from "./favicon.ts";
-
-describe("faviconUrlForOrigin", () => {
-  it("sends only the public hostname and requested size, never the port", () => {
-    expect(faviconUrlForOrigin("https://github.com:8443/pingdotgg/t3code?private=query", 64)).toBe(
-      "https://www.google.com/s2/favicons?domain=github.com&sz=64",
-    );
-  });
-
-  // regression: #5838 no favicon request for missing or non-http origins
-  it.each([null, "invalid URL", "file:///tmp/private"])(
-    "rejects an invalid or unsupported origin %s",
-    (origin) => {
-      expect(faviconUrlForOrigin(origin)).toBeNull();
-    },
-  );
-});
+import { toolActivityFaviconUrl } from "./favicon.ts";
 
 describe("toolActivityFaviconUrl", () => {
-  it("uses the page origin instead of a third-party favicon service", () => {
-    expect(toolActivityFaviconUrl({ pageUrl: "https://example.com/docs/page?q=1" }, "light")).toBe(
-      "https://example.com/favicon.ico",
+  const dataIcon = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("never derives a URL that contacts the visited site", () => {
+    expect(toolActivityFaviconUrl({}, "light")).toBeNull();
+    expect(toolActivityFaviconUrl({ faviconUrl: "https://example.com/icon.png" }, "light")).toBe(
+      null,
     );
-    expect(toolActivityFaviconUrl({ pageUrl: "http://localhost:5173/app" }, "light")).toBe(
-      "http://localhost:5173/favicon.ico",
-    );
+    expect(
+      toolActivityFaviconUrl({ faviconUrl: "chrome-extension://example/_favicon/" }, "dark"),
+    ).toBeNull();
   });
 
-  it("accepts provider-supplied image URLs but rejects extension URLs", () => {
+  it("keeps an inline favicon a provider already sent", () => {
+    expect(toolActivityFaviconUrl({ faviconUrl: dataIcon }, "light")).toBe(dataIcon);
     expect(
       toolActivityFaviconUrl(
-        { pageUrl: "https://example.com/docs", faviconUrl: "https://example.com/icon.png" },
-        "light",
+        { faviconUrl: dataIcon, faviconUrlDark: "https://example.com/dark.png" },
+        "dark",
       ),
-    ).toBe("https://example.com/icon.png");
-    expect(
-      toolActivityFaviconUrl(
-        { pageUrl: "https://example.com/docs", faviconUrl: "chrome-extension://example/_favicon/" },
-        "light",
-      ),
-    ).toBe("https://example.com/favicon.ico");
+    ).toBe(dataIcon);
   });
 });
