@@ -15130,7 +15130,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (transfer.sourcePoint.runId === childRun.id ||
             (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
       );
-      // A run merging several tasks' queued runs reports once; the tasks it absorbed settle without another wake.
+      // A run that absorbed other tasks' queued runs reports once, so only a task without a result settles from it.
       if (runReported && options.task.result !== null) return;
 
       const childResult = yield* projectionStore.getThreadRecords(
@@ -15186,6 +15186,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       // A cancelled task's completed run ends it interrupted.
       const cancelled = task.cancelledRunId === childRun.id;
+      const reporterId = childRun.delegatedTaskId ?? forkedFrom.nodeId;
+      const reporter = runReported
+        ? (yield* projectionStore.getThreadRecords(parentThreadId, ["subagents"], {
+            subagentIds: [reporterId],
+          })).subagents[0]
+        : undefined;
+      // The parent run already holds a wake carrying this run's report.
+      const cohortWoken =
+        reporter !== undefined &&
+        reporter.runId === task.runId &&
+        ["claimed", "delivered", "acknowledged"].includes(reporter.completionDelivery?.state ?? "");
       if (cancelled && terminalStatus === "completed") outcome = terminalStatus = "interrupted";
       const now = yield* DateTime.now;
       const result =
@@ -15213,7 +15224,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               cancelledRunId: childRun.id,
               completionDelivery: { state: "disposed" as const, observedByRunId: null },
             }
-          : runReported
+          : cohortWoken
             ? { completionDelivery: { state: "disposed" as const, observedByRunId: null } }
             : {}),
       };

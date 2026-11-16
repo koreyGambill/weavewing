@@ -4060,25 +4060,88 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
       }),
     );
 
-    it.effect("settles a follow-up whose queued run was merged into another's", () =>
+    // A run that absorbed another task's queued run reports once; each task keeps its own parent's wake.
+    it.effect.each([
+      "same parent run",
+      "disposed survivor",
+      "new parent run",
+      "stopped parent run",
+    ] as const)("settles a follow-up whose queued run was merged into another's (%s)", (mode) =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const eventSink = yield* EventSink.EventSinkV2;
         const now = yield* DateTime.now;
         const requests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-        const name = "merged-followup";
+        const name = `merged-followup-${mode.replaceAll(" ", "-")}`;
         const { parentThreadId, parentRunId, child, firstWake } =
           yield* seedFinishedChildWithIdleParent(name);
         const childThreadId = child.childThreadId;
-        const target = yield* parentSend({ name: `${name}-target`, parentThreadId, childThreadId });
+        // Equal start times order tasks by id, so the surviving task finalizes first.
+        const target = yield* parentSend({
+          name: `${name}-a-survivor`,
+          parentThreadId,
+          childThreadId,
+        });
+        let absorbedParentRunId = parentRunId;
+        if (mode === "stopped parent run") {
+          yield* orchestrator.dispatch({
+            type: "thread.stop",
+            commandId: CommandId.make(`command:${name}-stop-parent`),
+            threadId: parentThreadId,
+            stopDelegatedTasks: false,
+          });
+        }
+        if (mode === "new parent run" || mode === "stopped parent run") {
+          const messageId = MessageId.make(`message:${name}-new-parent`);
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            origin: { kind: "user" as const },
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:${name}-new-parent`),
+            threadId: parentThreadId,
+            messageId,
+            text: "Keep going.",
+            attachments: [],
+            dispatchMode: { type: "start_immediately" },
+          });
+          const next = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.find(
+            (row) => row.userMessageId === messageId,
+          )!;
+          absorbedParentRunId = next.id;
+          yield* eventSink.write({
+            commandId: reconcileCommandId(`${name}-new-parent-finished`),
+            events: [
+              {
+                id: EventId.make(`event:${name}-new-parent-finished`),
+                type: "run.updated",
+                threadId: parentThreadId,
+                runId: next.id,
+                occurredAt: now,
+                payload: { ...next, status: "completed", startedAt: now, completedAt: now },
+              },
+            ],
+          });
+        }
         const absorbed = yield* parentSend({
-          name: `${name}-absorbed`,
+          name: `${name}-b-absorbed`,
           parentThreadId,
           childThreadId,
           queue: true,
         });
         const taskIds = [target.delegatedTaskId!, absorbed.delegatedTaskId!];
-        assert.notEqual(taskIds[0], taskIds[1]);
+        const order = (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.map(
+          (task) => task.id,
+        );
+        assert.isBelow(order.indexOf(taskIds[0]!), order.indexOf(taskIds[1]!));
+        if (mode === "disposed survivor") {
+          yield* orchestrator.dispatch({
+            type: "delegated_task.completion-delivery.dispose",
+            commandId: CommandId.make(`command:${name}-dispose-survivor`),
+            parentThreadId,
+            taskId: taskIds[0]!,
+          });
+        }
         yield* eventSink.write({
           commandId: reconcileCommandId(`${name}-finished`),
           events: [
@@ -4143,19 +4206,26 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           assert.equal(task.status, "completed", `${task.id} stayed open`);
           assert.equal(task.result, "BOTH");
         }
-        // The parent hears the shared run once: only one task claims a wake.
-        assert.deepEqual(tasks.map((task) => task.completionDelivery?.state).toSorted(), [
-          "claimed",
-          "disposed",
-        ]);
+        assert.lengthOf(
+          parent.contextTransfers.filter(
+            (transfer) =>
+              transfer.type === "subagent_result" && transfer.sourcePoint.runId === target.id,
+          ),
+          1,
+        );
+        // Only a parent run whose wake already carries the shared run skips its own.
+        assert.equal(
+          tasks[1]!.completionDelivery?.state,
+          mode === "same parent run" ? "disposed" : "claimed",
+        );
         let wake = yield* requests.take;
         while (
           wake.threadId !== parentThreadId ||
-          wake.delegatedCompletion?.messageId === firstWake.delegatedCompletion?.messageId
+          wake.delegatedCompletion?.messageId === firstWake.delegatedCompletion?.messageId ||
+          wake.delegatedCompletion?.parentRunId !== absorbedParentRunId
         ) {
           wake = yield* requests.take;
         }
-        assert.equal(wake.delegatedCompletion?.parentRunId, parentRunId);
       }),
     );
 
