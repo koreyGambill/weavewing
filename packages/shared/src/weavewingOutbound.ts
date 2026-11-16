@@ -29,11 +29,7 @@ export const AGENT_HTML_SANDBOX = "allow-scripts allow-forms allow-downloads";
 
 const ASSET_ROUTE = "/api/assets/";
 
-/**
- * Whether an asset-route page (agent HTML) may not navigate its frame to `target`.
- * Only the desktop shell can enforce this; a web browser lets a scripted frame
- * navigate itself, so on web agent HTML can still send one request by navigating.
- */
+/** Whether an asset-route page (agent HTML) may not navigate its frame to `target`; desktop enforces it. */
 export function agentHtmlNavigationBlocked(frameUrl: string, target: string): boolean {
   let frame: URL;
   try {
@@ -49,6 +45,13 @@ export function agentHtmlNavigationBlocked(frameUrl: string, target: string): bo
     return true;
   }
 }
+
+/**
+ * The web app document's own frame-src: the browser checks every navigation of a child
+ * frame against it, so agent HTML cannot navigate its frame to another origin. Frames
+ * from a remote environment on another origin are blocked too.
+ */
+export const WEB_APP_FRAME_CSP = "frame-src 'self'";
 
 /** Build-time telemetry exporters a Weavewing build never bakes in; runtime env still enables them. */
 export const UNBAKED_TELEMETRY_ENV_KEYS = [

@@ -153,6 +153,21 @@ describe("Weavewing outbound guard", () => {
     ).toEqual([]);
   });
 
+  // CSP cannot stop agent HTML navigating its own frame; the app page's frame-src can.
+  it("installs the web app's frame-src before anything renders", () => {
+    const sources = new Map(bundledSources.map((entry) => [entry.file, entry.source]));
+    const sourceOf = (file = "") => sources.get(file) ?? "";
+    expect(sourceOf("packages/shared/src/weavewingOutbound.ts")).toContain(
+      `export const WEB_APP_FRAME_CSP = "frame-src 'self'";`,
+    );
+    expect(sourceOf("apps/web/src/weavewingFramePolicy.ts")).toContain(
+      "meta.content = WEB_APP_FRAME_CSP;",
+    );
+    expect(sourceOf("apps/web/src/main.tsx")).toContain(
+      "if (!isElectron) installWebFramePolicy();\nconst router = startAppServices();",
+    );
+  });
+
   it.each([
     ["https://cdn.example.com/a.png?q=1", "cdn.example.com"],
     ["//cdn.example.com/a.png", "cdn.example.com"],
