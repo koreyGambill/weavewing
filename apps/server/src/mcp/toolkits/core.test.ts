@@ -90,6 +90,9 @@ const declaredFailure = (result: McpSchema.CallToolResult) => {
 import { htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
 
 const decodeMcpAttachmentInput = Schema.decodeUnknownEffect(McpAttachmentInput);
+const decodeEnvironmentPreferencesUpdate = Schema.decodeUnknownSync(
+  EnvironmentToolkit.tools.t3_environment_preferences_update.parametersSchema,
+);
 const decodeThreadReadResult = Schema.decodeUnknownEffect(OrchestratorMcpThreadReadResult);
 const decodeThreadSearchResult = Schema.decodeUnknownEffect(
   ThreadToolkit.tools.t3_thread_search.successSchema,
@@ -718,11 +721,9 @@ it("keeps MCP preference output allowlisted and Unicode-bounded", () => {
   expect(
     EnvironmentHandlers.preferences({ ...settings, autoLoadRemoteMedia: true }),
   ).toHaveProperty("autoLoadRemoteMedia", true);
-  expect(
-    Schema.decodeUnknownSync(
-      EnvironmentToolkit.tools.t3_environment_preferences_update.parametersSchema,
-    )({ autoLoadRemoteMedia: true }),
-  ).not.toHaveProperty("autoLoadRemoteMedia");
+  expect(decodeEnvironmentPreferencesUpdate({ autoLoadRemoteMedia: true })).not.toHaveProperty(
+    "autoLoadRemoteMedia",
+  );
   expect(result).not.toHaveProperty("privateCredential");
   expect(result).not.toHaveProperty("providers");
   expect(result.sourceControlWritingStyle).toMatchObject({
