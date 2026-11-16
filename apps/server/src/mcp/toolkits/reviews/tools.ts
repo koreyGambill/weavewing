@@ -105,7 +105,7 @@ export const ReviewToolkit = Toolkit.make(
   Tool.make("evidence_read", {
     ...common,
     description:
-      "Read recorded landings: summaries newest first (filter needsQa or threadId; pass `next` as `before` for the next page), or one landing by landingId with each change's QA state and the user's note. Only the user sets QA.",
+      "The user's QA queue for landed work, across threads. Lists landings newest first (needsQa: changes awaiting or failing QA; threadId; pass `next` as `before`), or reads one by landingId with each change's QA state and the user's note. Only the user sets QA.",
     parameters: Schema.Struct({
       ...EvidenceListInput.fields,
       landingId: Schema.optional(EvidenceSlug),

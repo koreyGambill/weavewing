@@ -17,7 +17,7 @@ Write or run an eval when a change affects what a model sees or does: agent inst
 ## Run an eval
 
 1. Run `vp i` at the repo root.
-2. Put the API keys the eval needs in the repo root `.env`. It is gitignored, and the eval scripts load it. Never print or commit a key.
+2. Put the API keys the eval needs in the repo root `.env`. It is gitignored, and the eval scripts load it. Never print or commit a key. To run Claude models on a Claude subscription instead, log in to the `claude` CLI: `monitoring-review` and `message-summaries` use it by default, and `mcp-tool-use` with `--transport claude-cli`.
 3. From `evals/`, run `pnpm <eval> --out runs/<name>`. `runs/` is gitignored.
 
 Each eval's README lists its models, flags, and cost. Start with one case and one sample to check the setup.

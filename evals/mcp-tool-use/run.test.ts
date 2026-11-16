@@ -1,9 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
 import { assert, expect, it } from "@effect/vitest";
@@ -41,6 +44,7 @@ import {
   t3SubagentContext,
   withBackgroundWait,
   withDevices,
+  runSampleCli,
 } from "./run.ts";
 import { briefRoute, gradeDevice, shellInvocations } from "./device-grading.ts";
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
@@ -4713,3 +4717,70 @@ it.each([
     [],
   );
 });
+
+const putEnv = (name: string, value: string | undefined) => {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+};
+
+it.live(
+  "errors a claude-cli sample whose shell simulator failed, even if the agent finished",
+  () => {
+    // A stand-in `claude`: as the simulator it fails; as the agent it runs Bash, then finishes.
+    const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fake-claude-"));
+    const agent = `(async () => {
+  const config = JSON.parse(args[args.indexOf("--mcp-config") + 1]);
+  const params = { name: "Bash", arguments: { command: "ls" }, _meta: { "claudecode/toolUseId": "toolu_1" } };
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params });
+  await fetch(config.mcpServers.harness.url, { method: "POST", body });
+  console.log(JSON.stringify({ type: "result", subtype: "success", result: "Done.", total_cost_usd: 0 }));
+})();`;
+    NodeFS.writeFileSync(
+      NodePath.join(bin, "claude"),
+      `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.includes("--json-schema")) {
+  console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true }));
+  process.exit(1);
+}
+${agent}
+`,
+      { mode: 0o755 },
+    );
+    const path = process.env.PATH;
+    putEnv("PATH", `${bin}:${path}`);
+    const testCase: McpToolUseCase = {
+      id: "simulator-down",
+      area: "evidence",
+      kind: "control",
+      pattern: "fixture",
+      experience: "A simulator outage must not grade the sample.",
+      setup: { role: "top" },
+      prompt: "List the files.",
+      expect: {},
+    };
+    const base = buildBase(template, { model: "claude-sonnet-5-5", keepUserInstructions: false });
+    const config = {
+      apiKey: "",
+      transport: "claude-cli",
+      model: "claude-sonnet-5-5",
+      effort: "high",
+      maxSteps: 6,
+      shellModel: "claude-haiku-5-5",
+    } as const;
+    const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+    const spent = { usage, shellUsage: { ...usage }, cliCost: { usd: 0, unreported: 0 } };
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runSampleCli(testCase, config, base, spent));
+      assert.isTrue(Exit.isFailure(exit));
+    }).pipe(
+      Effect.provide(Layer.mergeAll(FetchHttpClient.layer, NodeServices.layer, NodeCrypto.layer)),
+      Effect.ensuring(
+        Effect.sync(() => {
+          putEnv("PATH", path);
+          NodeFS.rmSync(bin, { recursive: true });
+        }),
+      ),
+    );
+  },
+);
