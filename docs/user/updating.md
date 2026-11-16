@@ -191,8 +191,8 @@ provider at the same CLI.
 
 After a successful provider CLI update, T3 Code refreshes model discovery for
 every enabled instance of that provider using its own configuration. Connected
-clients receive the refreshed catalogs automatically. Provider update checks
-must be enabled to download the latest T3 Code model catalog.
+clients receive the refreshed catalogs automatically. Manual refreshes can download
+the latest model catalog even when automatic checks are off.
 
 Provider updates do not restart running chats. An existing session can keep
 using the previous CLI until it ends. If discovery fails, check the provider
@@ -208,11 +208,13 @@ the machine instead.
 
 The same page lets you refresh provider status and update supported providers.
 These controls require a connected environment and permission to operate it.
-Provider update checks and restart continuation preferences are in
-**Settings → Maintenance**. If provider update checks are disabled, enable them
-there before refreshing to find newer versions. The same setting controls whether
-T3 Code downloads model catalog updates, so with it off new models may not appear
-until you enable it and refresh provider status.
+In Weavewing's web and desktop clients, **Settings → Privacy → Check for updates
+automatically** controls background provider version checks, model catalogs and
+the desktop app's startup and periodic checks. It starts off, including for installs
+that never saved a preference. Explicitly saved choices are kept. Manual checks and
+provider refreshes still contact GitHub, npm or provider sites when you ask.
+The desktop app follows its local environment's preference even while you view a
+remote environment. Restart continuation stays in **Settings → Maintenance**.
 
 Install App Store or Google Play releases as usual. The mobile app can also
 download updates in the background and apply them when you next leave the app.

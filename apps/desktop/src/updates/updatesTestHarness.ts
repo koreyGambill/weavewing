@@ -15,12 +15,16 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopManagedPolicy from "../app/DesktopManagedPolicy.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
 export const flushCallbacks = Effect.yieldNow;
 
 export interface UpdatesHarnessOptions {
+  readonly automaticUpdates?: boolean;
+  readonly rawServerSettings?: string | null;
+  readonly updateCheckPolicy?: Parameters<typeof DesktopManagedPolicy.layerTest>[0];
   readonly checkForUpdates?: Effect.Effect<
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
@@ -48,6 +52,7 @@ export interface UpdatesHarnessOptions {
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
+  let automaticUpdates = options.automaticUpdates ?? true;
   let quitAndInstallCount = 0;
   let downloadCount = 0;
   let allowDowngrade = false;
@@ -251,6 +256,14 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     path.endsWith(DesktopUpdates.DESKTOP_UPDATE_INSTALL_RECORD_FILE);
   const layerFileSystem = FileSystem.layerNoop({
     readFileString: (path) => {
+      if (path.endsWith("/settings.json")) {
+        if (options.rawServerSettings !== null) {
+          return Effect.succeed(
+            options.rawServerSettings ??
+              JSON.stringify({ enableProviderUpdateChecks: automaticUpdates }),
+          );
+        }
+      }
       const installRecord = isInstallRecord(path)
         ? (installRecords.get(path) ?? previousInstallRecord)
         : undefined;
@@ -292,6 +305,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
 
   const layer = DesktopUpdates.layer.pipe(
     Layer.provide(layerFileSystem),
+    Layer.provide(DesktopManagedPolicy.layerTest(options.updateCheckPolicy)),
     Layer.provide(DesktopUpdatePolicy.layerTest(options.policy)),
     Layer.provideMerge(layerUpdater),
     Layer.provideMerge(layerWindow),
@@ -314,6 +328,9 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    setAutomaticUpdates: (value: boolean) => {
+      automaticUpdates = value;
+    },
     quitAndInstalls: () => quitAndInstallCount,
     installSteps,
     updateRestartMarkers,

@@ -259,7 +259,7 @@ function SidebarUpdateControl() {
         : "Update available"
       : showCheckIcon
         ? "Checking for updates…"
-        : (idleTooltip?.title ?? "Check for updates");
+        : `${idleTooltip?.title ?? "Check for updates"}. Contacts GitHub, npm and provider sites.`;
   const disabled = showCheckIcon
     ? true
     : runsEverything
@@ -550,7 +550,7 @@ function SidebarUpdateControl() {
             >
               {idleTooltip?.detail ? (
                 <div className="text-left">
-                  <div className="font-medium">{idleTooltip.title}</div>
+                  <div className="font-medium">{tooltip}</div>
                   <div className="text-muted-foreground">{idleTooltip.detail}</div>
                 </div>
               ) : (

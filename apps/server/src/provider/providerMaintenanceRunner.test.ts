@@ -221,6 +221,7 @@ function makeRegistry(
         );
       },
       refreshWorkspaceSnapshot: () => Ref.get(providersRef),
+      checkUpdates: () => Effect.succeed([]),
       invalidateModelCaches: () => Effect.void,
       refreshModelCatalog: Effect.void,
       getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>

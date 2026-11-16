@@ -2253,6 +2253,15 @@ it.layer(
           assert.strictEqual(yield* readCachedVersion("codex_first-package"), "1.0.0");
           yield* first.takeMaintenanceReads;
 
+          const checked = yield* registry.checkUpdates(first.instance.instanceId);
+          assert.deepStrictEqual(yield* first.takeMaintenanceReads, [true]);
+          assert.equal(
+            checked.find((provider) => provider.instanceId === first.instance.instanceId)
+              ?.versionAdvisory?.latestVersion,
+            "1.0.0",
+          );
+          yield* first.takeMaintenanceReads;
+
           yield* registry.invalidateModelCaches({ instanceId: first.instance.instanceId });
           // The instance refresh that follows resolves installer metadata fresh itself.
           assert.deepStrictEqual(yield* first.takeMaintenanceReads, [false]);

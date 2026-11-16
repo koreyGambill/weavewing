@@ -8,6 +8,7 @@ import {
   type ServerProvider,
   type ServerProviderUpdateState,
 } from "@t3tools/contracts";
+import { HttpClient } from "effect/http";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -45,6 +46,7 @@ import type {
   ProviderWorkspaceSnapshot,
 } from "@t3tools/provider-core/server/driver";
 import {
+  enrichProviderSnapshotWithVersionAdvisory,
   makeManualOnlyProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
   latestProviderVersionCacheKeys,
@@ -57,6 +59,11 @@ export class ProviderRegistry extends Context.Service<
   ProviderRegistry,
   {
     readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+    /** User-requested version checks may contact registries even when automatic checks are off. */
+    readonly checkUpdates: (
+      instanceId?: ProviderInstanceId,
+    ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
     readonly refresh: (
       provider?: ProviderDriverKind,
@@ -399,6 +406,7 @@ export const layer = Layer.effect(
       yield* ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutator;
     const manifestService = yield* ModelManifest.ModelManifest;
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+    const httpClient = yield* HttpClient.HttpClient;
     const serviceScope = yield* Effect.scope;
     const config = yield* ServerConfig.ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -1222,6 +1230,28 @@ export const layer = Layer.effect(
       ),
     ).pipe(Effect.forkScoped);
 
+    const checkUpdates = Effect.fn("ProviderRegistry.checkUpdates")(function* (
+      instanceId?: ProviderInstanceId,
+    ) {
+      const instances = yield* instanceRegistry.listInstances;
+      for (const instance of instances) {
+        if (instanceId !== undefined && instance.instanceId !== instanceId) continue;
+        const provider = (yield* Ref.get(providersRef)).find(
+          (entry) => entry.instanceId === instance.instanceId,
+        );
+        if (!provider?.enabled || !provider.installed) continue;
+        const maintenance = yield* instance.snapshot.resolveMaintenance({ fresh: true });
+        const enriched = yield* enrichProviderSnapshotWithVersionAdvisory(provider, maintenance, {
+          enableProviderUpdateChecks: true,
+        }).pipe(
+          Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+        );
+        yield* upsertProviders([enriched]);
+      }
+      return yield* Ref.get(providersRef);
+    });
+
     const invalidateModelCaches = Effect.fn("ProviderRegistry.invalidateModelCaches")(function* (
       input: Parameters<ProviderRegistry["Service"]["invalidateModelCaches"]>[0],
     ) {
@@ -1275,6 +1305,8 @@ export const layer = Layer.effect(
         refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshAfterUpdate,
       invalidateModelCaches,
+      checkUpdates: (instanceId) =>
+        checkUpdates(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshModelCatalog: refreshModelCatalog().pipe(
         Effect.catchCause(recoverRefreshFailure),
         Effect.asVoid,

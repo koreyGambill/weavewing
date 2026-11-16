@@ -261,7 +261,9 @@ const layerService = (input: {
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(ServerSettings.layerTest(input.settings ?? {})),
+    Layer.provideMerge(
+      ServerSettings.layerTest(input.settings ?? { enableProviderUpdateChecks: true }),
+    ),
     Layer.provideMerge(layerHttpClient(input.response)),
   );
 
@@ -403,6 +405,38 @@ describe("ModelManifest service", () => {
     ),
   );
 
+  it.effect("does not fetch automatically when settings cannot be read", () =>
+    Effect.gen(function* () {
+      let requests = 0;
+      const service = yield* ModelManifest.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ServerSettings.ServerSettingsService, {
+              getSettings: Effect.die("settings unavailable"),
+            }),
+            layerHttpClient(() => {
+              requests++;
+              return Response.json(REMOTE_MANIFEST);
+            }),
+          ),
+        ),
+      );
+      yield* service.refresh;
+      yield* service.refreshOnDemand;
+      assert.equal(requests, 0);
+      yield* service.forceRefresh;
+      assert.equal(requests, 1);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layerService({
+          prefix: "model-manifest-settings-error-test",
+          response: () => Response.json(REMOTE_MANIFEST),
+        }),
+      ),
+    ),
+  );
+
   it.effect("does not fetch when provider update checks are disabled", () =>
     Effect.gen(function* () {
       let fetchCount = 0;
@@ -415,8 +449,12 @@ describe("ModelManifest service", () => {
         ),
       );
       assert.deepStrictEqual(yield* service.refresh, ModelManifest.BUNDLED_MODEL_MANIFEST);
-      assert.deepStrictEqual(yield* service.forceRefresh, ModelManifest.BUNDLED_MODEL_MANIFEST);
+      assert.deepStrictEqual(yield* service.refreshOnDemand, ModelManifest.BUNDLED_MODEL_MANIFEST);
+      yield* TestClock.adjust("2 hours");
+      assert.deepStrictEqual(yield* service.refresh, ModelManifest.BUNDLED_MODEL_MANIFEST);
       assert.strictEqual(fetchCount, 0);
+      assert.deepStrictEqual(yield* service.forceRefresh, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 1);
     }).pipe(
       Effect.scoped,
       Effect.provide(

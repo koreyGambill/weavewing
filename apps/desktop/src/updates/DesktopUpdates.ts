@@ -3,6 +3,7 @@ import {
   DESKTOP_UPDATE_IN_PROGRESS_MARKER_FILE,
   DESKTOP_UPDATE_IN_PROGRESS_TTL_MS,
   DesktopUpdateChannelSchema,
+  ServerSettings,
   type DesktopRuntimeInfo,
   type DesktopUpdateActionResult,
   type DesktopUpdateChannel,
@@ -36,6 +37,7 @@ import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
+import * as DesktopManagedPolicy from "../app/DesktopManagedPolicy.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
@@ -63,6 +65,13 @@ const CHANNEL_CHANGE_RETRY_DELAY = Duration.seconds(1);
 const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
+const USER_UPDATE_CHECK_REASONS = new Set([
+  "menu",
+  "web-ui",
+  "remote-update",
+  "channel-change",
+  "install",
+]);
 const UPDATE_CHECK_WAIT = Duration.seconds(90);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
@@ -92,6 +101,10 @@ const DesktopUpdateInstallRecord = Schema.fromJsonString(
 const decodeInstallRecord = Schema.decodeUnknownEffect(DesktopUpdateInstallRecord);
 const encodeInstallRecord = Schema.encodeEffect(DesktopUpdateInstallRecord);
 
+const decodeStoredUpdateSettings = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
+);
+const decodeUpdateSettings = Schema.decodeUnknownEffect(ServerSettings);
 const decodeAppUpdateYmlConfig = Schema.decodeUnknownEffect(AppUpdateYmlConfig);
 const decodeUpdateInfo = Schema.decodeUnknownEffect(UpdateInfo);
 const decodeDownloadProgressInfo = Schema.decodeUnknownEffect(DownloadProgressInfo);
@@ -384,6 +397,25 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const policy = yield* DesktopUpdatePolicy.DesktopUpdatePolicy;
+  const managedPolicy = yield* DesktopManagedPolicy.DesktopManagedPolicy;
+  // Weavewing: the desktop owns its local install even when its window views a remote server.
+  const automaticChecksAllowed = Effect.gen(function* () {
+    const found = yield* managedPolicy.read;
+    const entry = found?.document.settings?.enableProviderUpdateChecks;
+    const stored = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(
+      Effect.flatMap(decodeStoredUpdateSettings),
+      Effect.catchTags({
+        PlatformError: (error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed({}) : Effect.fail(error),
+      }),
+    );
+    const settings = yield* decodeUpdateSettings({
+      ...(entry ? { enableProviderUpdateChecks: entry.value } : {}),
+      ...(typeof stored === "object" && stored !== null ? stored : {}),
+      ...(entry?.locked ? { enableProviderUpdateChecks: entry.value } : {}),
+    });
+    return settings.enableProviderUpdateChecks;
+  }).pipe(Effect.catchCause(() => Effect.succeed(false)));
   // Any user can set the mock flag, so it never replaces an administrator's update source.
   const mockUpdates = config.mockUpdates && policy.message === null;
 
@@ -574,6 +606,7 @@ export const make = Effect.gen(function* () {
     allowDowngrade = false,
   ) {
     yield* Effect.annotateCurrentSpan({ reason });
+    if (!USER_UPDATE_CHECK_REASONS.has(reason) && !(yield* automaticChecksAllowed)) return false;
     if (yield* Ref.get(desktopState.quitting)) return false;
     if (!(yield* Ref.get(updaterConfiguredRef))) return false;
 

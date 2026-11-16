@@ -1,11 +1,20 @@
 import { Link } from "@tanstack/react-router";
-import type { EnvironmentId } from "@t3tools/contracts";
+import {
+  AuthSettingsWriteScope,
+  isManagedSettingPath,
+  type EnvironmentId,
+} from "@t3tools/contracts";
 import { InfoIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkState } from "~/cloud/cloudLinkState";
 import { useEnvironment } from "~/state/environments";
+import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
+import { useManagedPolicy } from "~/state/managedPolicy";
+import { useEnvironmentScope } from "~/state/session";
+import { ManagedNotice } from "../ManagedPolicy";
+import { Switch } from "../ui/switch";
 import { Button } from "../ui/button";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
 import { RemoteMediaSettingsRow } from "./RemoteMediaSettingsRow";
@@ -68,6 +77,13 @@ export function PrivacySettings({
 }) {
   const environment = useEnvironment(environmentId);
   const relay = useCloudLinkState(environmentId);
+  const policy = useManagedPolicy(environmentId);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const automaticUpdates = environment?.serverConfig?.settings.enableProviderUpdateChecks === true;
+  const managedUpdates = isManagedSettingPath(policy, "enableProviderUpdateChecks")
+    ? `Managed by ${policy?.organization}.`
+    : undefined;
   const remote =
     networkAccessible || environment?.serverConfig?.settings.tailnetConnect.enabled === true;
   const remoteMedia = environment?.serverConfig?.settings.autoLoadRemoteMedia === true;
@@ -85,6 +101,24 @@ export function PrivacySettings({
       {children}
       <SettingsSection id="chat-content" title="Chat content">
         <RemoteMediaSettingsRow />
+      </SettingsSection>
+      <SettingsSection title="Updates">
+        <SettingsRow
+          {...searchableSetting("provider-update-checks")}
+          description="Checks GitHub, npm and provider sites for app, CLI and model updates, sharing your IP and versions. Off: use Refresh provider status on Providers or Check for Updates in desktop About."
+          managed={managedUpdates}
+          status={managedUpdates ? <ManagedNotice>{managedUpdates}</ManagedNotice> : null}
+          control={
+            <Switch
+              checked={automaticUpdates}
+              disabled={!canWrite || environment?.connection.phase !== "connected"}
+              onCheckedChange={(checked) =>
+                updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
+              }
+              aria-label="Check for updates automatically"
+            />
+          }
+        />
       </SettingsSection>
       <SettingsSection {...searchableSetting("what-weavewing-sends")}>
         <SettingsRow
@@ -107,15 +141,21 @@ export function PrivacySettings({
         />
         <SettingsRow
           title="Update checks"
-          description="Weavewing and your provider CLIs check for new versions. These requests disclose version numbers and your IP address."
+          description={`Automatic update checks: ${automaticUpdates ? "On" : "Off"}. Version and model catalog checks contact GitHub, npm or vendor sites with your IP address and version numbers. Manual checks contact them when you ask.`}
           control={
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                render={<Link to="/settings/maintenance" hash="provider-update-checks" />}
+                render={
+                  <Link
+                    to="/settings/privacy"
+                    search={{ machine: environmentId }}
+                    hash="provider-update-checks"
+                  />
+                }
               >
-                Provider checks
+                Update checks
               </Button>
               <Button variant="outline" size="sm" render={<Link to="/settings/about" />}>
                 About

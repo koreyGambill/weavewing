@@ -2564,6 +2564,7 @@ export const layerWsRpc = (
               yield* providerRegistry.refreshModelCatalog;
               return { providers: [] };
             }
+            // Weavewing: only user-initiated callers may set refreshModels; it bypasses automatic-check consent.
             if (input.refreshModels) {
               yield* providerRegistry.invalidateModelCaches({
                 instanceId: input.instanceId,
@@ -2617,6 +2618,8 @@ export const layerWsRpc = (
                 providers = yield* providerRegistry.refreshInstance(instance.instanceId);
               }
             }
+            if (input.refreshModels)
+              providers = yield* providerRegistry.checkUpdates(input.instanceId);
             const { instanceId, cwd } = input;
             if (input.omitProviders === true && (instanceId === undefined || cwd === undefined)) {
               return { providers: [] };

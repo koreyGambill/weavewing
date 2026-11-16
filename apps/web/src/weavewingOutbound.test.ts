@@ -2,6 +2,8 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { DEFAULT_SERVER_SETTINGS, ServerSettings } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { remoteMediaHost } from "@t3tools/shared/weavewingOutbound";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -64,6 +66,14 @@ const REVIEWED_MEDIA_SINKS = {
 };
 
 describe("Weavewing outbound guard", () => {
+  it("requires opt-in for automatic update and model checks", () => {
+    expect(DEFAULT_SERVER_SETTINGS.enableProviderUpdateChecks).toBe(false);
+    const decode = Schema.decodeUnknownSync(ServerSettings);
+    expect(decode({}).enableProviderUpdateChecks).toBe(false);
+    expect(decode({ enableProviderUpdateChecks: true }).enableProviderUpdateChecks).toBe(true);
+    expect(decode({ enableProviderUpdateChecks: false }).enableProviderUpdateChecks).toBe(false);
+  });
+
   it("renders images and media only from reviewed sinks", () => {
     const sinks = bundledSources
       .filter(({ file, source }) => file.startsWith("apps/") && MEDIA_SINK.test(source))

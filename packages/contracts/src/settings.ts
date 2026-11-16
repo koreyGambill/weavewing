@@ -1472,7 +1472,9 @@ export const ServerSettings = Schema.Struct({
   responseStreamingMode: ResponseStreamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
   ),
-  enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  enableProviderUpdateChecks: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   // Weavewing: external chat media stays behind consent unless the user opts in.
   autoLoadRemoteMedia: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   continueThreadsAfterServerUpdate: Schema.Boolean.pipe(

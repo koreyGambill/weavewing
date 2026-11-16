@@ -795,10 +795,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "provider-update-checks",
-    title: "Provider update checks",
-    to: "/settings/maintenance",
+    title: "Check for updates automatically",
+    to: "/settings/privacy",
     searchTerms: [
-      "installed cli versions newer available codex claude cursor grok fx kiro opencode",
+      "automatic updates desktop github npm vendor model catalog installed cli versions newer available codex claude cursor grok fx kiro opencode",
     ],
     scope: "environment-defaults",
   },
