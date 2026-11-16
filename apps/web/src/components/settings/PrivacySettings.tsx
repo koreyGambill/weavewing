@@ -80,7 +80,6 @@ export function PrivacySettings({
         : "Off";
   return (
     <>
-      {/* The Chat content row from the remote-media slice belongs before the summary. */}
       {children}
       <SettingsSection {...searchableSetting("what-weavewing-sends")}>
         <SettingsRow

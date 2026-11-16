@@ -82,7 +82,7 @@ export class TailnetConnectRefusedError extends Schema.TaggedError<TailnetConnec
   override get message(): string {
     switch (this.reason) {
       case "disabled":
-        return `Tailnet pairing is off on this server. Turn it on in Settings → Sharing & access for ${this.detail ?? "this environment"}.`;
+        return `Tailnet pairing is off on this server. Turn it on in Settings → Privacy for ${this.detail ?? "this environment"}.`;
       case "not_tailnet":
         return "Open this page over the tailnet, at this machine's Tailscale address.";
       case "own_machine":
@@ -100,7 +100,7 @@ export class TailnetConnectRefusedError extends Schema.TaggedError<TailnetConnec
       case "login_not_allowed":
         return "Your Tailscale login is not allowed to pair with this server.";
       case "server_tagged":
-        return "This server is a tagged Tailscale node, which belongs to no person. List the logins that may pair under Allowed Tailscale logins in its Sharing & access settings.";
+        return "This server is a tagged Tailscale node, which belongs to no person. List the logins that may pair under Allowed Tailscale logins in its Privacy settings.";
       case "rate_limited":
         return "Too many requests from this device. Wait a few minutes and try again.";
       case "tailscale_unavailable":

@@ -35,9 +35,9 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   },
   {
     id: "network-access",
-    title: "Network access",
-    to: "/settings/access",
-    searchTerms: ["remote pairing backend"],
+    title: "Allow remote devices",
+    to: "/settings/privacy",
+    searchTerms: ["network remote pairing backend"],
   },
   {
     id: "providers",
@@ -61,7 +61,7 @@ describe("searchSettings", () => {
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("sharing", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
+    expect(searchSettings("privacy", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
     expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
     expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     const spanish = (message: string) => (message === "Word wrap" ? "Ajuste de línea" : message);

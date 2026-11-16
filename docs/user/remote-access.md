@@ -94,7 +94,7 @@ Use direct pairing when the other device can reach the host's network address.
 
 On a desktop host, open **Settings → Privacy**, enable **Allow remote devices**,
 then create a pairing link using an address the other device can reach. Changing
-network access restarts the desktop app. You can turn it off in the same place.
+**Allow remote devices** restarts the desktop app. You can turn it off in the same place.
 
 For a command-line host, choose the local network in `t3 up`, or run:
 

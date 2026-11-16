@@ -1586,8 +1586,13 @@ function WebhookDeliveryMode({ environmentId }: { readonly environmentId: Enviro
       {cloudLink.data.holdWebhooksWhileOffline
         ? "Held for up to 24 hours while this environment is offline. "
         : "Forwarded live. Requests fail while this environment is offline. "}
-      <Link to="/settings/access" className="underline underline-offset-2">
-        Change in Sharing & access
+      <Link
+        to="/settings/privacy"
+        search={{ machine: environmentId }}
+        hash="hold-webhooks-while-offline"
+        className="underline underline-offset-2"
+      >
+        Change in Privacy
       </Link>
     </p>
   );

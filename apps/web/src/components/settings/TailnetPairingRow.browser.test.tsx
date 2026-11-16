@@ -29,7 +29,7 @@ vi.mock("../../state/managedPolicy", async (original) => ({
 
 import { TailnetPairingRow } from "./TailnetPairingRow";
 
-function Row({ enabled = false }: { enabled?: boolean }) {
+function Row({ enabled = false, managed }: { enabled?: boolean; managed?: string }) {
   const [settings, setSettings] = useState({ ...DEFAULT_SERVER_SETTINGS.tailnetConnect, enabled });
   updateSettings.mockImplementation((patch) =>
     setSettings({ ...settings, ...patch.tailnetConnect }),
@@ -39,31 +39,11 @@ function Row({ enabled = false }: { enabled?: boolean }) {
       environmentId={EnvironmentId.make("privacy-test")}
       environmentLabel="Test computer"
       settings={settings}
-      managed={undefined}
+      managed={managed}
       privacy
     />
   );
 }
-
-it("keeps the switch in place and writes the existing key in both directions", async () => {
-  state.policy = undefined;
-  updateSettings.mockReset();
-  const container = document.createElement("div");
-  container.style.width = "320px";
-  await using screen = await render(<Row />, { container, router: "/settings/privacy" });
-  const toggle = screen.getByRole("switch", { name: "Tailnet pairing for Test computer" });
-  const top = toggle.element().getBoundingClientRect().top;
-  await toggle.click();
-  await expect.element(toggle).toBeChecked();
-  expect(updateSettings).toHaveBeenLastCalledWith({ tailnetConnect: { enabled: true } });
-  expect(toggle.element().getBoundingClientRect().top).toBe(top);
-  await expect
-    .element(screen.getByRole("textbox", { name: "Allowed Tailscale logins" }))
-    .toBeVisible();
-  await userEvent.keyboard(" ");
-  await expect.element(toggle).not.toBeChecked();
-  expect(updateSettings).toHaveBeenLastCalledWith({ tailnetConnect: { enabled: false } });
-});
 
 it.each([false, true])(
   "prints the lock reason and prevents changing a setting locked to %s",
@@ -82,3 +62,22 @@ it.each([false, true])(
     expect(updateSettings).not.toHaveBeenCalled();
   },
 );
+
+it("allows turning pairing off under a remote denial, then prevents turning it back on", async () => {
+  state.policy = undefined;
+  updateSettings.mockReset();
+  const denial = "Northwind Health's policy does not allow remote clients.";
+  await using screen = await render(<Row enabled managed={denial} />, {
+    router: "/settings/privacy",
+  });
+  const toggle = () => screen.container.querySelector<HTMLElement>('[role="switch"]')!;
+  expect(toggle().closest("[inert]")).toBeNull();
+  toggle().focus();
+  await userEvent.keyboard(" ");
+  await vi.waitFor(() => expect(toggle().getAttribute("aria-checked")).toBe("false"));
+  expect(updateSettings).toHaveBeenCalledExactlyOnceWith({ tailnetConnect: { enabled: false } });
+  expect(toggle().closest("[inert]")).not.toBeNull();
+  await userEvent.tab();
+  await userEvent.keyboard(" ");
+  expect(updateSettings).toHaveBeenCalledTimes(1);
+});

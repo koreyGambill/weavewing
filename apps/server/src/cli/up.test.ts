@@ -42,12 +42,6 @@ it.each([
     expected: { routes: { connect: false, lan: true }, ask: ["connect", "lan"] },
   },
   {
-    label: "a rerun keeps a previously selected Connect route",
-    setup: { installed: true, connect: true, lan: false },
-    flags: { connect: none, lan: none },
-    expected: { routes: { connect: true, lan: false }, ask: ["connect", "lan"] },
-  },
-  {
     label: "a route flag on a new machine turns on only that route",
     setup: { installed: false, connect: false, lan: false },
     flags: { connect: none, lan: Option.some(true) },

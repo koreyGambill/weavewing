@@ -1179,7 +1179,7 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
   return (
     <>
       <p className="text-sm text-foreground">
-        Turn on Allow remote devices in Settings → Privacy, then pair your phone.
+        Open Settings → Privacy to choose how your phone connects, then pair it.
       </p>
       <p className="text-xs text-muted-foreground">
         The T3 Code app sends crash reports to T3 by default. Turn them off before pairing: Settings

@@ -36,9 +36,10 @@ export function TailnetPairingRow({
   readonly canWrite?: boolean;
 }) {
   const policy = useManagedPolicy(environmentId);
-  const policyReason = isManagedSettingPath(policy, "tailnetConnect.enabled")
+  const settingLockReason = isManagedSettingPath(policy, "tailnetConnect.enabled")
     ? `Managed by ${policy?.organization}.`
-    : managed;
+    : undefined;
+  const policyReason = settingLockReason ?? managed;
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const loginsEdited = useRef(false);
   const savedLogins = settings.allowedLogins.join(", ");
@@ -53,7 +54,12 @@ export function TailnetPairingRow({
         </>
       }
       managed={
-        policyReason ?? (!canWrite ? "This connection cannot change access settings." : undefined)
+        settingLockReason ??
+        (!canWrite
+          ? "This connection cannot change access settings."
+          : settings.enabled
+            ? undefined
+            : managed)
       }
       status={privacy && policyReason ? <ManagedNotice>{policyReason}</ManagedNotice> : null}
       control={

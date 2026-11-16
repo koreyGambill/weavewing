@@ -62,13 +62,14 @@ without one. Checked projects are still imported.
 ## Phone
 
 Select **Set up** and scan the code with your phone. It opens the App Store on an
-iPhone and Google Play on Android. Then select **Sign in to T3 Connect** and allow
-this computer when T3 Code asks, so the app can reach it. Sign in to the app with
-the same account. If you are signed in but this computer is not shared yet, select
-**Set up T3 Connect**. If T3 Connect is on but the app cannot reach this computer,
-select **Check T3 Connect** to see why. The page leaves the phone out on builds
-without T3 Connect, or when your organization turns it off. You can still pair the
-app with a code from **Settings → Sharing & access**.
+iPhone and Google Play on Android. Open **Settings → Privacy** to choose a remote
+connection route. On a desktop host, turn on **Allow remote devices**. For a server
+started with `t3 serve`, restart it with `--lan`. Then use **Open pairing** to create
+a one-time pairing link or QR code.
+
+The T3 Code app sends crash reports to T3 by default. Turn them off before pairing
+in the app's **Settings → About → Diagnostics**. Connect over Tailscale or a VPN
+because Weavewing serves plain HTTP.
 
 ## Projects
 

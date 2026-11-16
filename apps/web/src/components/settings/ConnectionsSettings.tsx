@@ -459,12 +459,13 @@ function ConnectionsSettingsContent({
       ),
     );
   })();
-  const isLocalBackendNetworkAccessible = desktopBridge
-    ? desktopServerExposureState?.mode === "network-accessible"
-    : isServerNetworkAccessible({
-        authPolicy: currentAuthPolicy,
-        directEndpoints: accessEnvironment?.serverConfig?.directEndpoints,
-      });
+  const isLocalBackendNetworkAccessible =
+    desktopBridge && isPrimaryAccess
+      ? desktopServerExposureState?.mode === "network-accessible"
+      : isServerNetworkAccessible({
+          authPolicy: currentAuthPolicy,
+          directEndpoints: accessEnvironment?.serverConfig?.directEndpoints,
+        });
   const trimmedTailscaleServePortInput = tailscaleServePortInput.trim();
   const parsedTailscaleServePort = Number(trimmedTailscaleServePortInput);
   const isTailscaleServePortValid =
@@ -500,7 +501,7 @@ function ConnectionsSettingsContent({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not update network access",
+          title: "Could not change remote device access",
           description: message,
         }),
       );
@@ -1296,7 +1297,7 @@ function ConnectionsSettingsContent({
                 </>
               ) : (
                 <>
-                  {renderDisabledNetworkAccessRow()}
+                  {!desktopBridge || isPrimaryAccess ? renderDisabledNetworkAccessRow() : null}
                   <SettingsRow
                     {...searchableSetting("tailscale-https")}
                     description="Publishes an HTTPS address for devices on your tailnet. Configure Tailscale Serve on the host computer."
@@ -1446,8 +1447,8 @@ function ConnectionsSettingsContent({
               <AlertDialogHeader>
                 <AlertDialogTitle>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? "Enable network access?"
-                    : "Disable network access?"}
+                    ? "Allow remote devices?"
+                    : "Stop allowing remote devices?"}
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
