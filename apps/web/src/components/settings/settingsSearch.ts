@@ -34,6 +34,7 @@ export type SettingsPath =
   | "/settings/source-control"
   | "/settings/worktrees"
   | "/settings/connections"
+  | "/settings/privacy"
   | "/settings/access"
   | "/settings/secrets"
   | "/settings/status-sources"
@@ -110,6 +111,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/source-control": msg("Source control"),
   "/settings/worktrees": msg("Worktrees"),
   "/settings/connections": msg("Environments"),
+  "/settings/privacy": msg("Privacy"),
   "/settings/access": msg("Sharing & access"),
   "/settings/secrets": msg("Secrets"),
   "/settings/status-sources": msg("Status sources"),
@@ -156,6 +158,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   {
     heading: msg("Connections"),
     paths: [
+      "/settings/privacy",
       "/settings/connections",
       "/settings/access",
       "/settings/status-sources",
@@ -929,7 +932,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "mobile-app",
     title: "Mobile app",
-    to: "/settings/about",
+    to: "/settings/privacy",
     searchTerms: ["phone tablet iPhone iPad iOS Android App Store Google Play QR"],
   },
   {
@@ -1283,19 +1286,31 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["turn off on disable enable local server agents remote only restart"],
     desktopOnly: true,
   },
+  // Weavewing: keep existing search ids as the controls move to Privacy.
+  {
+    id: "privacy",
+    title: "Privacy",
+    to: "/settings/privacy",
+    targetId: "connections-environment",
+    searchTerms: ["outbound data remote devices relay sharing"],
+  },
+  {
+    id: "what-weavewing-sends",
+    title: "What Weavewing sends",
+    to: "/settings/privacy",
+    searchTerms: ["data providers git github update checks analytics crash reports"],
+  },
   {
     id: "network-access",
-    title: "Network access",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    title: "Allow remote devices",
+    to: "/settings/privacy",
     searchTerms: ["expose backend remote pairing local machine interfaces host restart"],
     localBackendManagementOnly: true,
   },
   {
     id: "tailscale-https",
     title: "Tailscale HTTPS",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/privacy",
     searchTerms: ["serve magicdns endpoint remote secure network"],
     desktopOnly: true,
     localBackendManagementOnly: true,
@@ -1303,8 +1318,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "tailnet-pairing",
     title: "Tailnet pairing",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/privacy",
     searchTerms: ["tailscale phone pair devices whois login connect page"],
   },
   {
@@ -1323,8 +1337,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "t3-connect",
     localEnvironmentOnly: true,
     title: "T3 Connect",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/privacy",
     searchTerms: ["managed tunnel cloud other devices remote tunnels limit t3 chat"],
     desktopOnly: true,
     cloudOnly: true,
@@ -1332,8 +1345,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "connect-device-approval",
     title: "Require approval for new devices",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/privacy",
     searchTerms: ["t3 connect devices approve deny trust revoke pairing code security account"],
     cloudOnly: true,
     managedTunnelOnly: true,
@@ -1342,8 +1354,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "hold-webhooks-while-offline",
     localEnvironmentOnly: true,
     title: "Hold webhooks while offline",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/privacy",
     searchTerms: ["webhook automations offline queue mailbox t3 connect"],
     cloudOnly: true,
     managedTunnelOnly: true,
@@ -1352,8 +1363,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "publish-agent-activity",
     localEnvironmentOnly: true,
     title: "Publish agent activity",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/privacy",
     searchTerms: ["mobile push notifications live activities cloud tunnel"],
     cloudOnly: true,
   },
@@ -1448,6 +1458,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/worktrees": "project-defaults",
   "/settings/connections": "connections",
   "/settings/access": "connections",
+  "/settings/privacy": "connections",
   "/settings/secrets": null,
   "/settings/status-sources": "environment",
   "/settings/scheduled-tasks": null,
@@ -1467,6 +1478,8 @@ const SPLIT_SETTINGS_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
   "/settings/source-control",
   "/settings/connections",
+  "/settings/access",
+  "/settings/about",
   ...Object.keys(RENAMED_SETTINGS_PATHS),
 ]);
 // Section anchors that moved but are not search results themselves.

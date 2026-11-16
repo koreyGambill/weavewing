@@ -4,6 +4,9 @@ import type { EnvironmentId, TailnetConnectSettings } from "@t3tools/contracts";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { ManagedNotice } from "../ManagedPolicy";
+import { useManagedPolicy } from "~/state/managedPolicy";
+import { isManagedSettingPath } from "@t3tools/contracts";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
@@ -22,12 +25,20 @@ export function TailnetPairingRow({
   environmentLabel,
   settings,
   managed,
+  privacy = false,
+  canWrite = true,
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly settings: TailnetConnectSettings;
   readonly managed: string | undefined;
+  readonly privacy?: boolean;
+  readonly canWrite?: boolean;
 }) {
+  const policy = useManagedPolicy(environmentId);
+  const policyReason = isManagedSettingPath(policy, "tailnetConnect.enabled")
+    ? `Managed by ${policy?.organization}.`
+    : managed;
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const loginsEdited = useRef(false);
   const savedLogins = settings.allowedLogins.join(", ");
@@ -41,7 +52,10 @@ export function TailnetPairingRow({
           to pair with all your T3 Code servers, without copying a code.
         </>
       }
-      managed={settings.enabled ? undefined : managed}
+      managed={
+        policyReason ?? (!canWrite ? "This connection cannot change access settings." : undefined)
+      }
+      status={privacy && policyReason ? <ManagedNotice>{policyReason}</ManagedNotice> : null}
       control={
         <>
           <span className="min-w-0 max-w-48 truncate text-xs text-muted-foreground" aria-hidden>
@@ -58,7 +72,10 @@ export function TailnetPairingRow({
       }
     >
       {settings.enabled ? (
-        <div className="mt-2 mb-3 flex max-w-xl flex-col gap-1.5 border-l-2 border-border/60 ps-3">
+        <div
+          inert={!canWrite || isManagedSettingPath(policy, "tailnetConnect.allowedLogins")}
+          className="mt-2 mb-3 flex max-w-xl flex-col gap-1.5 border-l-2 border-border/60 ps-3"
+        >
           <label htmlFor="tailnet-allowed-logins" className="text-xs font-medium">
             Allowed Tailscale logins
           </label>

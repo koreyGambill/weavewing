@@ -40,7 +40,8 @@ import {
 import { settingsScopeEnvironmentLabel } from "./settingsScopeAxis";
 import { useAccessEnvironment } from "./useAccessEnvironment";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { ManagedByOrganization } from "../ManagedPolicy";
+import { PrivacyDeviceRows, PrivacySettings } from "./PrivacySettings";
+import { ManagedNotice, ManagedByOrganization } from "../ManagedPolicy";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
@@ -171,16 +172,20 @@ function LocalVersionStatusLabel() {
   );
 }
 
-/** Environments lists the machines this app connects to; access covers who may reach one of them. */
-export function ConnectionsSettings({ view }: { readonly view: "environments" | "access" }) {
-  return view === "access" ? (
-    <AccessSettings />
+// Weavewing: privacy reuses the existing environment-scoped remote controls.
+export function ConnectionsSettings({
+  view,
+}: {
+  readonly view: "environments" | "access" | "privacy";
+}) {
+  return view !== "environments" ? (
+    <AccessSettings view={view} />
   ) : (
     <ConnectionsSettingsContent view="environments" accessEnvironmentId={null} />
   );
 }
 
-function AccessSettings() {
+function AccessSettings({ view }: { readonly view: "access" | "privacy" }) {
   // A link that names an environment, such as the MCP wizard's, opens the page on it. The
   // settings layout remounts this page when the link changes.
   const linkedEnvironmentId = useSearch({
@@ -195,7 +200,7 @@ function AccessSettings() {
   const picker =
     candidates.length > 1 && accessEnvironmentId !== null ? (
       <div className="flex min-w-0 items-center gap-1.5 px-3 text-sm text-muted-foreground sm:px-4">
-        <span className="shrink-0">Showing access for</span>
+        <span className="shrink-0">Showing {view === "privacy" ? "privacy" : "access"} for</span>
         <Select
           value={accessEnvironmentId}
           onValueChange={(next) => {
@@ -242,7 +247,7 @@ function AccessSettings() {
   return (
     <ConnectionsSettingsContent
       key={accessEnvironmentId ?? "none"}
-      view="access"
+      view={view}
       accessEnvironmentId={accessEnvironmentId}
       accessEnvironmentPicker={picker}
     />
@@ -254,7 +259,7 @@ function ConnectionsSettingsContent({
   accessEnvironmentId,
   accessEnvironmentPicker = null,
 }: {
-  readonly view: "environments" | "access";
+  readonly view: "environments" | "access" | "privacy";
   readonly accessEnvironmentId: EnvironmentId | null;
   readonly accessEnvironmentPicker?: ReactNode;
 }) {
@@ -401,7 +406,8 @@ function ConnectionsSettingsContent({
   const canMaintain = useEnvironmentScope(accessEnvironmentId, AuthEnvironmentMaintainScope);
   const canManageRelay = useEnvironmentScope(accessEnvironmentId, AuthRelayWriteScope);
   const canManageLocalBackend = isPrimaryAccess && !isLocalEnvironmentDisabled() && canMaintain;
-  const showsAccess = view === "access";
+  const showsPrivacy = view === "privacy";
+  const showsAccess = view !== "environments";
   const authAccessChanges = useEnvironmentQuery(
     showsAccess && canReadAccess && accessEnvironmentId !== null
       ? authEnvironment.accessChanges({
@@ -810,7 +816,7 @@ function ConnectionsSettingsContent({
       onCheckedChange={(checked) => {
         setPendingDesktopServerExposureMode(checked ? "network-accessible" : "local-only");
       }}
-      aria-label="Enable network access"
+      aria-label="Allow remote devices"
     />
   );
   const renderEndpointRows = () =>
@@ -1074,14 +1080,9 @@ function ConnectionsSettingsContent({
 
   const renderTailscaleRow = () => (
     <SettingsRow
-      title={searchableSetting("tailscale-https").title}
-      description={
-        tailscaleHttpsEndpoint
-          ? tailscaleHttpsEndpoint.status === "available"
-            ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
-          : missingTailscaleEndpointDescription(desktopServerExposureState)
-      }
+      {...searchableSetting("tailscale-https")}
+      description="Publishes this computer at an HTTPS address that only devices on your tailnet can open."
+      status={remoteClientsDenial ? <ManagedNotice>{remoteClientsDenial}</ManagedNotice> : null}
       control={
         tailscaleHttpsEndpoint ? (
           <Switch
@@ -1099,7 +1100,13 @@ function ConnectionsSettingsContent({
         ) : null
       }
       managed={tailscaleHttpsEndpoint?.status === "available" ? undefined : remoteClientsDenial}
-    />
+    >
+      <p className="mt-2 mb-2 text-xs text-muted-foreground break-words">
+        {tailscaleHttpsEndpoint?.status === "available"
+          ? tailscaleHttpsEndpoint.httpBaseUrl
+          : missingTailscaleEndpointDescription(desktopServerExposureState)}
+      </p>
+    </SettingsRow>
   );
   const newestPairingLink = visibleDesktopPairingLinks.find(
     (pairingLink) => pairingLink.id === newestPairingLinkId,
@@ -1145,70 +1152,45 @@ function ConnectionsSettingsContent({
   );
   const renderNetworkAccessRow = () => (
     <SettingsRow
-      title={searchableSetting("network-access").title}
-      description={
-        isLocalBackendNetworkAccessible ? (
+      {...searchableSetting("network-access")}
+      description="Lets phones and computers on your network or tailnet reach this computer once you pair them. Off: only this computer can connect."
+      status={remoteClientsDenial ? <ManagedNotice>{remoteClientsDenial}</ManagedNotice> : null}
+      control={renderNetworkAccessToggle()}
+      managed={isLocalBackendNetworkAccessible ? undefined : remoteClientsDenial}
+    >
+      {desktopServerExposureError ? (
+        <p className="mt-2 mb-2 text-xs text-destructive">{desktopServerExposureError}</p>
+      ) : !desktopServerExposureState ? (
+        <p className="mt-2 mb-2 text-xs text-muted-foreground">Loading…</p>
+      ) : isLocalBackendNetworkAccessible ? (
+        <div className="mt-2 mb-2 text-xs text-muted-foreground">
           <NetworkAccessDescription
             endpoint={defaultDesktopNetworkAdvertisedEndpoint}
             hiddenEndpointCount={Math.max(visibleDesktopNetworkAdvertisedEndpoints.length - 1, 0)}
             expanded={isAdvertisedEndpointListExpanded}
             onToggleExpanded={() => setIsAdvertisedEndpointListExpanded((expanded) => !expanded)}
-            fallback={
-              desktopServerExposureState?.endpointUrl
-                ? `Reachable at ${desktopServerExposureState.endpointUrl}`
-                : desktopServerExposureState?.advertisedHost
-                  ? `Exposed on all interfaces. Pairing links use ${desktopServerExposureState.advertisedHost}.`
-                  : "Exposed on all interfaces."
-            }
+            fallback={`Reachable at ${desktopServerExposureState.endpointUrl ?? "this computer's network address"}`}
           />
-        ) : desktopServerExposureState ? (
-          "Limited to this machine."
-        ) : (
-          "Loading…"
-        )
-      }
-      status={
-        desktopServerExposureError ? (
-          <span className="block text-destructive">{desktopServerExposureError}</span>
-        ) : null
-      }
-      control={renderNetworkAccessToggle()}
-      managed={isLocalBackendNetworkAccessible ? undefined : remoteClientsDenial}
-    />
+          <p>Over plain HTTP. Use Tailscale or a VPN away from home.</p>
+        </div>
+      ) : null}
+    </SettingsRow>
   );
   const renderDisabledNetworkAccessRow = () => (
     <SettingsRow
-      title={searchableSetting("network-access").title}
+      {...searchableSetting("network-access")}
       description={
         desktopBridge
           ? "This connection cannot view or change network exposure."
-          : isLocalBackendNetworkAccessible
-            ? "Remote access is already configured. Change network exposure where the server starts."
-            : currentAuthPolicy === "loopback-browser"
-              ? "Only this machine can connect. Restart with a non-loopback host for remote pairing."
-              : "Network exposure information is unavailable."
+          : "Change this where the server starts: t3 serve --lan or T3CODE_LAN. Phones and computers can connect only after pairing."
       }
+      status={remoteClientsDenial ? <ManagedNotice>{remoteClientsDenial}</ManagedNotice> : null}
       control={
-        !desktopBridge &&
-        (currentAuthPolicy === "remote-reachable" || currentAuthPolicy === "loopback-browser") ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="inline-flex">
-                  <Switch
-                    checked={isLocalBackendNetworkAccessible}
-                    disabled
-                    aria-label="Enable network access"
-                  />
-                </span>
-              }
-            />
-            <TooltipPopup side="top">
-              Network exposure changes restart the backend and must be controlled where the server
-              process is launched.
-            </TooltipPopup>
-          </Tooltip>
-        ) : undefined
+        <Switch
+          checked={isLocalBackendNetworkAccessible}
+          disabled
+          aria-label="Allow remote devices"
+        />
       }
     />
   );
@@ -1223,7 +1205,7 @@ function ConnectionsSettingsContent({
         <>
           <SettingsSection
             {...searchableSetting("connections-environment")}
-            title={accessEnvironmentLabel}
+            title={showsPrivacy ? "Remote devices" : accessEnvironmentLabel}
             icon={
               <EnvironmentMachineIcon
                 aria-hidden
@@ -1263,7 +1245,7 @@ function ConnectionsSettingsContent({
                 <ManagedByOrganization policy={accessServerConfig.managedPolicy} />
               </div>
             ) : null}
-            {canManageLocalBackend ? (
+            {!showsPrivacy && canManageLocalBackend ? (
               <SettingsRow
                 title="Version"
                 description={
@@ -1306,40 +1288,44 @@ function ConnectionsSettingsContent({
                 }
               />
             ) : null}
-            {canManageLocalBackend && desktopBridge ? (
+            {showsPrivacy ? (
+              canManageLocalBackend && desktopBridge ? (
+                <>
+                  {renderNetworkAccessRow()}
+                  {renderTailscaleRow()}
+                </>
+              ) : (
+                <>
+                  {renderDisabledNetworkAccessRow()}
+                  <SettingsRow
+                    {...searchableSetting("tailscale-https")}
+                    description="Publishes an HTTPS address for devices on your tailnet. Configure Tailscale Serve on the host computer."
+                    status={
+                      remoteClientsDenial ? (
+                        <ManagedNotice>{remoteClientsDenial}</ManagedNotice>
+                      ) : null
+                    }
+                  />
+                </>
+              )
+            ) : canManageLocalBackend && desktopBridge ? (
               <>
-                {renderNetworkAccessRow()}
                 {renderEndpointRows()}
-                {renderTailscaleRow()}
                 {renderWslRow()}
               </>
-            ) : canManageLocalBackend ? (
-              renderDisabledNetworkAccessRow()
             ) : null}
-            {canWriteAccess && accessServerConfig ? (
+            {showsPrivacy && accessServerConfig ? (
               <TailnetPairingRow
                 environmentId={accessEnvironmentId}
                 environmentLabel={accessEnvironmentLabel}
                 settings={accessServerConfig.settings.tailnetConnect}
                 managed={managedCapabilityDenial(accessServerConfig.managedPolicy, "remoteClients")}
+                privacy
+                canWrite={canWriteAccess}
               />
             ) : null}
-            {canReadRelay || canManageRelay ? (
-              <CloudLinkRow
-                environmentId={accessEnvironmentId}
-                canReadRelay={canReadRelay}
-                canManageRelay={canManageRelay}
-                connectDeviceApproval={
-                  accessServerConfig?.settings.requireConnectDeviceApproval === undefined
-                    ? null
-                    : {
-                        required: accessServerConfig.settings.requireConnectDeviceApproval,
-                        canManage: canWriteAccess,
-                      }
-                }
-              />
-            ) : null}
-            {accessEnvironment ? (
+            {showsPrivacy ? <PrivacyDeviceRows environmentId={accessEnvironmentId} /> : null}
+            {!showsPrivacy && accessEnvironment ? (
               <details className="group px-3 sm:px-4">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                   Permissions
@@ -1356,7 +1342,35 @@ function ConnectionsSettingsContent({
             ) : null}
           </SettingsSection>
 
-          {canReadAccess || canWriteAccess ? (
+          {showsPrivacy ? (
+            <>
+              {hasCloudPublicConfig() ? (
+                <SettingsSection title="T3 Connect relay">
+                  <CloudLinkRow
+                    privacy
+                    environmentId={accessEnvironmentId}
+                    canReadRelay={canReadRelay}
+                    canManageRelay={canManageRelay}
+                    connectDeviceApproval={
+                      accessServerConfig?.settings.requireConnectDeviceApproval === undefined
+                        ? null
+                        : {
+                            required: accessServerConfig.settings.requireConnectDeviceApproval,
+                            canManage: canWriteAccess,
+                          }
+                    }
+                  />
+                </SettingsSection>
+              ) : null}
+              <PrivacySettings
+                environmentId={accessEnvironmentId}
+                networkAccessible={
+                  isLocalBackendNetworkAccessible || tailscaleHttpsEndpoint?.status === "available"
+                }
+              />
+            </>
+          ) : null}
+          {!showsPrivacy && (canReadAccess || canWriteAccess) ? (
             <FoldedSettingsSection
               id="authorized-clients"
               title="Authorized clients"
@@ -1404,7 +1418,8 @@ function ConnectionsSettingsContent({
               </ScrollArea>
             </FoldedSettingsSection>
           ) : null}
-          {canReadAccess &&
+          {!showsPrivacy &&
+          canReadAccess &&
           connectDevices !== null &&
           (connectDeviceRequests.length > 0 || connectDevices.length > 0) ? (
             <ConnectDeviceApprovalSettings

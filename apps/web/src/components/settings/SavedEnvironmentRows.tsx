@@ -13,6 +13,7 @@ import {
   connectReachabilityHelpUrl,
   formatConnectReachable,
   managedCapabilityDenial,
+  isManagedSettingPath,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import {
@@ -58,6 +59,7 @@ import { environmentCatalog } from "~/connection/catalog";
 import { readEnvironmentScope } from "~/state/session";
 import { type EnvironmentPresentation, useRelayEnvironmentDiscovery } from "~/state/environments";
 import { APP_VERSION } from "~/branding";
+import { ManagedNotice } from "../ManagedPolicy";
 import { useManagedPolicy } from "~/state/managedPolicy";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
@@ -520,10 +522,12 @@ function ConfiguredCloudLinkRow({
   environmentId,
   canManageRelay,
   connectDeviceApproval,
+  privacy = false,
 }: {
   readonly environmentId: EnvironmentId;
   readonly canManageRelay: boolean;
   readonly connectDeviceApproval: ConnectDeviceApprovalControl | null;
+  readonly privacy?: boolean;
 }) {
   const updateEnvironmentSettings = useUpdateEnvironmentSettings(environmentId);
   const {
@@ -540,7 +544,13 @@ function ConfiguredCloudLinkRow({
   } = useCloudLinkController(environmentId);
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
   // The server unlinks and refuses relay changes under such a policy; unlinking stays possible.
-  const connectDenial = managedCapabilityDenial(useManagedPolicy(environmentId), "connect");
+  const policy = useManagedPolicy(environmentId);
+  const connectDenial = managedCapabilityDenial(policy, "connect");
+  const approvalDenial =
+    connectDenial ??
+    (isManagedSettingPath(policy, "requireConnectDeviceApproval")
+      ? `Managed by ${policy?.organization}.`
+      : undefined);
   const turnOn = useT3ConnectTurnOn(environmentId);
   // Turning on links from this desktop's own backend only; turning off works from anywhere.
   const showSwitch = isElectron && (turnOn.kind !== "on-host" || managedTunnelActive);
@@ -655,25 +665,35 @@ function ConfiguredCloudLinkRow({
     <>
       {showSwitch ? (
         <SettingsRow
-          title={searchableSetting("t3-connect").title}
+          {...searchableSetting("t3-connect")}
           description={
-            connectDenial !== undefined && !managedTunnelActive
-              ? connectDenial
-              : signedOut
-                ? "Sign in to make this environment available to your other devices through T3 Connect."
-                : linkRevoked
-                  ? "This environment was removed from T3 Connect. Turn it on to link it again."
-                  : managedTunnelActive
-                    ? reachability?.status === "unreachable"
-                      ? "T3 Connect is on, but other devices cannot reach this environment."
-                      : reachability?.status === "reachable"
-                        ? "This environment is available to your other devices through T3 Connect."
-                        : "T3 Connect is on. Reachability has not been checked yet."
-                    : managedTunnelOutOfSync
-                      ? "T3 Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn T3 Connect on to repair it."
-                      : "Make this environment available to your other devices through T3 Connect."
+            privacy
+              ? "Lets your devices reach this computer from anywhere through T3's relay and a Cloudflare tunnel. Your sessions, including thread content, pass through both."
+              : connectDenial !== undefined && !managedTunnelActive
+                ? connectDenial
+                : signedOut
+                  ? "Sign in to make this environment available to your other devices through T3 Connect."
+                  : linkRevoked
+                    ? "This environment was removed from T3 Connect. Turn it on to link it again."
+                    : managedTunnelActive
+                      ? reachability?.status === "unreachable"
+                        ? "T3 Connect is on, but other devices cannot reach this environment."
+                        : reachability?.status === "reachable"
+                          ? "This environment is available to your other devices through T3 Connect."
+                          : "T3 Connect is on. Reachability has not been checked yet."
+                      : managedTunnelOutOfSync
+                        ? "T3 Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn T3 Connect on to repair it."
+                        : "Make this environment available to your other devices through T3 Connect."
           }
-          status={operationError ?? cloudLinkState.error ?? reachabilityStatus}
+          status={
+            privacy ? (
+              connectDenial ? (
+                <ManagedNotice>{connectDenial}</ManagedNotice>
+              ) : undefined
+            ) : (
+              (operationError ?? cloudLinkState.error ?? reachabilityStatus)
+            )
+          }
           managed={managedTunnelActive ? undefined : connectDenial}
           control={
             signedOut ? (
@@ -688,28 +708,50 @@ function ConfiguredCloudLinkRow({
             )
           }
         >
+          {privacy && (operationError ?? cloudLinkState.error ?? reachabilityStatus) ? (
+            <div className="mt-2 mb-2 text-xs text-muted-foreground">
+              {operationError ?? cloudLinkState.error ?? reachabilityStatus}
+            </div>
+          ) : null}
           {signedOut || connectDenial !== undefined ? null : (
             <T3ConnectTunnelUsage tunnelLimit={tunnelLimit} />
           )}
         </SettingsRow>
+      ) : privacy ? (
+        <SettingsRow
+          {...searchableSetting("t3-connect")}
+          description="Lets your devices reach this computer from anywhere through T3's relay and a Cloudflare tunnel. Your sessions, including thread content, pass through both."
+          status={
+            connectDenial ? (
+              <ManagedNotice>{connectDenial}</ManagedNotice>
+            ) : (
+              <span>Configure T3 Connect on the host computer.</span>
+            )
+          }
+        />
       ) : linkRevoked ? (
         <SettingsRow
-          title={searchableSetting("t3-connect").title}
+          {...searchableSetting("t3-connect")}
           description="This environment was removed from T3 Connect. Run `t3 connect link` on the host to link it again."
         />
       ) : isElectron ? (
         <SettingsRow
-          title={searchableSetting("t3-connect").title}
+          {...searchableSetting("t3-connect")}
           description="Run `t3 connect link` on the host, then restart T3 Code there."
         />
       ) : null}
       {signedOut && showSwitch ? null : (
         <SettingsRow
-          title={searchableSetting("publish-agent-activity").title}
+          {...searchableSetting("publish-agent-activity")}
           description={
-            signedOut
-              ? "Sign in to send activity to mobile notifications and Live Activities."
-              : "Send activity to mobile notifications and Live Activities without T3 Connect."
+            privacy
+              ? "Sends project and thread titles through T3 to Apple or Google push."
+              : signedOut
+                ? "Sign in to send activity to mobile notifications and Live Activities."
+                : "Send activity to mobile notifications and Live Activities without T3 Connect."
+          }
+          status={
+            privacy && connectDenial ? <ManagedNotice>{connectDenial}</ManagedNotice> : undefined
           }
           managed={connectDenial}
           control={
@@ -729,8 +771,11 @@ function ConfiguredCloudLinkRow({
       )}
       {managedTunnelActive && !signedOut ? (
         <SettingsRow
-          title={searchableSetting("hold-webhooks-while-offline").title}
+          {...searchableSetting("hold-webhooks-while-offline")}
           description="Keep webhook requests for up to 24 hours while this environment is offline, then deliver them. Off: T3 Connect only forwards requests and stores nothing."
+          status={
+            privacy && connectDenial ? <ManagedNotice>{connectDenial}</ManagedNotice> : undefined
+          }
           managed={connectDenial}
           control={
             <CloudLinkSwitch
@@ -745,9 +790,12 @@ function ConfiguredCloudLinkRow({
       ) : null}
       {managedTunnelActive && connectDeviceApproval ? (
         <SettingsRow
-          title={searchableSetting("connect-device-approval").title}
+          {...searchableSetting("connect-device-approval")}
           description="Devices that sign in to your T3 Connect account wait until someone already connected here approves them."
-          managed={connectDenial}
+          status={
+            privacy && approvalDenial ? <ManagedNotice>{approvalDenial}</ManagedNotice> : undefined
+          }
+          managed={approvalDenial}
           control={
             <CloudLinkSwitch
               ariaLabel="Require approval for new T3 Connect devices"
@@ -780,11 +828,13 @@ export function CloudLinkRow({
   canReadRelay,
   canManageRelay,
   connectDeviceApproval,
+  privacy = false,
 }: {
   readonly environmentId: EnvironmentId;
   readonly canReadRelay: boolean;
   readonly canManageRelay: boolean;
   readonly connectDeviceApproval: ConnectDeviceApprovalControl | null;
+  readonly privacy?: boolean;
 }) {
   if (!hasCloudPublicConfig()) return null;
   if (!canReadRelay) {
@@ -800,6 +850,7 @@ export function CloudLinkRow({
       environmentId={environmentId}
       canManageRelay={canManageRelay}
       connectDeviceApproval={connectDeviceApproval}
+      privacy={privacy}
     />
   );
 }

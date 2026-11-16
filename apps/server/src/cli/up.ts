@@ -102,7 +102,8 @@ export const planRoutes = (
 ) => {
   const ask = Option.isNone(flags.connect) && Option.isNone(flags.lan);
   const start = {
-    connect: setup.connect === true || (ask && !setup.installed && setup.connect !== null),
+    // Weavewing: offering a relay route does not select it for a new install.
+    connect: setup.connect === true,
     lan: setup.lan,
   };
   return {
