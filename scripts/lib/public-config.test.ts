@@ -51,6 +51,19 @@ describe("loadRepoEnv", () => {
       VITE_T3CODE_RELAY_URL: "https://ci.example.test",
     });
   });
+
+  it("never passes relay or mobile trace exporters to a build", () => {
+    const repoRoot = makeTemporaryDirectory();
+    NodeFS.writeFileSync(
+      NodePath.join(repoRoot, ".env"),
+      "T3CODE_RELAY_CLIENT_OTLP_TRACES_URL=https://traces.example.test\nT3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET=relay\nT3CODE_MOBILE_OTLP_TRACES_TOKEN=root-token\n",
+    );
+    const env = loadRepoEnv({
+      baseEnv: { VITE_RELAY_OTLP_TRACES_TOKEN: "ci-token", EXPO_PUBLIC_OTLP_TRACES_URL: "x" },
+      repoRoot,
+    });
+    expect(Object.keys(env).filter((key) => key.includes("OTLP"))).toEqual([]);
+  });
 });
 
 function makeTemporaryDirectory() {
