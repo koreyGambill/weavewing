@@ -78,6 +78,13 @@ const evidenceCounts = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime
   idleTtlMs: 60_000,
   refreshTrigger,
 });
+export const evidenceCoverage = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "evidence:coverage",
+  tag: WS_METHODS.evidenceCoverage,
+  staleTimeMs: 0,
+  idleTtlMs: 0,
+  refreshTrigger,
+});
 export const evidenceSetQa = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "evidence:setQa",
   tag: WS_METHODS.evidenceSetQa,

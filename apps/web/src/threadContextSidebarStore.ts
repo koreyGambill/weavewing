@@ -74,6 +74,9 @@ interface ThreadContextSidebarState {
   evidenceScope: "thread" | "all" | null;
   evidenceNeedsQa: boolean;
   setEvidenceView: (view: { scope?: "thread" | "all"; needsQa?: boolean }) => void;
+  /** `${environmentId}:${projectId}` → the branch head whose uncovered-merges banner was dismissed. */
+  evidenceCoverageDismissed: Record<string, string>;
+  dismissEvidenceCoverage: (key: string, head: string | null) => void;
   selectAutomation: (selection: AutomationSelection | null) => void;
   setAutomationScope: (scope: "thread" | "project" | "server") => void;
   selectView: (view: SidebarView) => void;
@@ -111,6 +114,12 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       automationScope: null,
       evidenceScope: null,
       evidenceNeedsQa: false,
+      evidenceCoverageDismissed: {},
+      dismissEvidenceCoverage: (key, head) =>
+        set((state) => {
+          const { [key]: _previous, ...rest } = state.evidenceCoverageDismissed;
+          return { evidenceCoverageDismissed: head === null ? rest : { ...rest, [key]: head } };
+        }),
       setEvidenceView: ({ scope, needsQa }) =>
         set((state) => ({
           evidenceScope: scope ?? state.evidenceScope,
@@ -185,13 +194,22 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       storage: createJSONStorage(() =>
         resolveStorage(typeof window === "undefined" ? undefined : window.localStorage),
       ),
-      partialize: ({ view, lastTool, hidden, todoFilter, todoShowClosed, todoScope }) => ({
+      partialize: ({
         view,
         lastTool,
         hidden,
         todoFilter,
         todoShowClosed,
         todoScope,
+        evidenceCoverageDismissed,
+      }) => ({
+        view,
+        lastTool,
+        hidden,
+        todoFilter,
+        todoShowClosed,
+        todoScope,
+        evidenceCoverageDismissed,
       }),
       // v0 stored the right panel's { open, view }; its view becomes the last tool.
       // v1 named the inbox's strip slot "status".

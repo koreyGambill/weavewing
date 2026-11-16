@@ -10,11 +10,13 @@ import {
 import {
   EvidenceChangeQa,
   EvidenceCounts,
+  EvidenceCoverageInput,
   EvidenceError,
   EvidenceGetInput,
   EvidenceLanding,
   EvidenceListInput,
   EvidenceListResult,
+  EvidenceProjectCoverage,
   EvidenceSetQaInput,
 } from "./evidence.ts";
 import {
@@ -743,6 +745,7 @@ export const WS_METHODS = {
   evidenceGet: "evidence.get",
   evidenceSetQa: "evidence.setQa",
   evidenceCounts: "evidence.counts",
+  evidenceCoverage: "evidence.coverage",
   messageFollowUpsList: "messageFollowUps.list",
   messageFollowUpsUpdate: "messageFollowUps.update",
 
@@ -2505,6 +2508,11 @@ const WsEvidenceCountsRpc = Rpc.make(WS_METHODS.evidenceCounts, {
   success: EvidenceCounts,
   error: evidenceErrors,
 });
+const WsEvidenceCoverageRpc = Rpc.make(WS_METHODS.evidenceCoverage, {
+  payload: EvidenceCoverageInput,
+  success: Schema.Array(EvidenceProjectCoverage),
+  error: evidenceErrors,
+});
 const WsMessageFollowUpsListRpc = Rpc.make(WS_METHODS.messageFollowUpsList, {
   payload: MessageFollowUpListInput,
   success: Schema.Array(MessageFollowUp),
@@ -2714,6 +2722,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsEvidenceGetRpc,
   WsEvidenceSetQaRpc,
   WsEvidenceCountsRpc,
+  WsEvidenceCoverageRpc,
   WsMessageFollowUpsListRpc,
   WsMessageFollowUpsUpdateRpc,
   WsScheduledTasksSubscribeRpc,

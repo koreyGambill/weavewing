@@ -828,7 +828,9 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(layerResourceDiagnostics),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(TriageService.layer.pipe(Layer.provide(GitVcsDriver.layer))),
-  Layer.provideMerge(EvidenceService.layer.pipe(Layer.provide(layerPersistence))),
+  Layer.provideMerge(
+    EvidenceService.layer.pipe(Layer.provide(layerPersistence), Layer.provide(GitVcsDriver.layer)),
+  ),
   Layer.provideMerge(NotificationService.layer.pipe(Layer.provide(layerPersistence))),
   Layer.provideMerge(MessageFollowUpService.layer.pipe(Layer.provide(layerPersistence))),
   // Worktree removers read this while they are built, so it sits beneath every one of them.

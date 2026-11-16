@@ -7,6 +7,8 @@ import {
   EvidenceLandingSummary,
   EvidenceRecord,
   type EvidenceCounts,
+  type EvidenceCoverageInput,
+  type EvidenceProjectCoverage,
   type EvidenceGetInput,
   type EvidenceListInput,
   type EvidenceListResult,
@@ -14,12 +16,13 @@ import {
   type EvidenceRecordInput,
   type EvidenceRecordResult,
   type EvidenceSetQaInput,
-  type ProjectId,
-  type ThreadId,
+  ProjectId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { hostPreviewMimeTypeFromExtension } from "@t3tools/shared/filePreview";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -28,9 +31,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NotificationService from "../notifications/NotificationService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 
 /** Captures must resolve under ~/evidence. This catches wrong paths; minting a URL needs `filesystem:read`, which is the real boundary. */
@@ -53,6 +58,10 @@ export class EvidenceService extends Context.Service<
     /** The user's QA verdict; agents have no path to it. */
     readonly setQa: (input: EvidenceSetQaInput) => Effect.Effect<EvidenceChangeQa, EvidenceError>;
     readonly counts: () => Effect.Effect<EvidenceCounts, EvidenceError>;
+    /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
+    readonly coverage: (
+      input: EvidenceCoverageInput,
+    ) => Effect.Effect<ReadonlyArray<EvidenceProjectCoverage>, EvidenceError>;
   }
 >()("t3/evidence/EvidenceService") {}
 
@@ -97,11 +106,70 @@ const firstLine = (text: string, max: number) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
+interface CoverageRow {
+  readonly project_id: string;
+  readonly workspace_root: string;
+  readonly thread_id: string;
+  readonly landed_at: string;
+  readonly branch: string;
+  readonly sha: string;
+  readonly commits: string;
+}
+const COVERAGE_TTL_MS = 30_000;
+
+/**
+ * First-parent merges (`log` lines: sha, parents, subject; newest first) whose sha, or a commit
+ * they brought in, is not in `recorded`. `revs` is `rev-list --parents` over
+ * `<oldest merge>^1..tip`; a merge brings in what its later parents reach that neither the
+ * first-parent chain nor an older merge already claimed.
+ */
+function uncoveredMerges(tip: string, log: string, revs: string, recorded: ReadonlySet<string>) {
+  const merges = log.split("\n").flatMap((line) => {
+    const [sha, parents, subject = ""] = line.split("\x1f");
+    return sha && parents ? [{ sha, parents: parents.split(" "), subject }] : [];
+  });
+  const graph = new Map(
+    revs.split("\n").map((line) => {
+      const [sha = "", ...parents] = line.trim().split(" ");
+      return [sha, parents] as const;
+    }),
+  );
+  const claimed = new Set<string>();
+  for (let sha = tip; graph.has(sha); sha = graph.get(sha)![0] ?? "") claimed.add(sha);
+  const uncovered = [];
+  for (const { parents, ...merge } of merges.toReversed()) {
+    let covered = recorded.has(merge.sha);
+    const queue = parents.slice(1);
+    for (let sha = queue.pop(); sha !== undefined; sha = queue.pop()) {
+      if (claimed.has(sha) || !graph.has(sha)) continue;
+      claimed.add(sha);
+      covered ||= recorded.has(sha);
+      queue.push(...graph.get(sha)!);
+    }
+    if (!covered) uncovered.unshift(merge);
+  }
+  return uncovered;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const notifications = yield* NotificationService.NotificationService;
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  // Cleared by record(); entries otherwise live for the TTL, then until the branch tip moves.
+  const coverageCache = new Map<
+    string,
+    { head: string; checkedAt: number; result: EvidenceProjectCoverage | null }
+  >();
+  // record() bumps this, so a check that read landings before the record never caches its answer.
+  let coverageGeneration = 0;
+  const coverageLocks = new Map<string, Semaphore.Semaphore>();
+  const coverageLock = (projectId: string) => {
+    const lock = coverageLocks.get(projectId) ?? Semaphore.makeUnsafe(1);
+    coverageLocks.set(projectId, lock);
+    return lock;
+  };
 
   const realPath = (target: string) => fileSystem.realPath(target).pipe(Effect.option);
 
@@ -206,6 +274,8 @@ const make = Effect.gen(function* () {
         }),
       )
       .pipe(Effect.mapError(passStorage));
+    coverageGeneration++;
+    coverageCache.clear();
     const states = new Map(qa.map((row) => [row.change_id, row.state]));
     const pending = qa.filter((row) => row.state === "pending").length;
     // Only new changes ask for QA again, so a re-record that adds a check stays quiet.
@@ -335,7 +405,117 @@ const make = Effect.gen(function* () {
     return { pending: of("pending"), failed: of("failed") };
   }, Effect.mapError(storage));
 
-  return EvidenceService.of({ record, list, get, setQa, counts });
+  const runGit = (cwd: string, args: ReadonlyArray<string>, stdin?: string) =>
+    git
+      .execute({
+        operation: "EvidenceService.coverage",
+        cwd,
+        args,
+        ...(stdin === undefined ? {} : { stdin }),
+        allowNonZeroExit: true,
+        timeoutMs: 10_000,
+        maxOutputBytes: 8 * 1024 * 1024,
+      })
+      .pipe(
+        Effect.map((result) =>
+          result.exitCode === 0 && !result.stdoutTruncated ? result.stdout : null,
+        ),
+        Effect.orElseSucceed(() => null),
+      );
+
+  // Rows are one project's landings, newest first; the newest names the branch and the lead's thread.
+  const projectCoverage = Effect.fn("EvidenceService.projectCoverage")(function* (
+    projectId: string,
+    rows: ReadonlyArray<CoverageRow>,
+    generation: number,
+  ) {
+    const newest = rows[0]!;
+    const cwd = newest.workspace_root;
+    const now = yield* Clock.currentTimeMillis;
+    const cached = coverageCache.get(projectId);
+    if (cached && now - cached.checkedAt < COVERAGE_TTL_MS) return cached.result;
+    const head = newest.branch.startsWith("-")
+      ? undefined
+      : (yield* runGit(cwd, [
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          `${newest.branch}^{commit}`,
+        ]))?.trim();
+    const same = cached !== undefined && cached.head === head;
+    let result = same ? cached.result : null;
+    // A failed git run caches no head, so the next check after the TTL runs it again.
+    let cachedHead = head ?? "";
+    if (head !== undefined && !same) {
+      const since = `--since=${rows.at(-1)!.landed_at}`;
+      const log = yield* runGit(cwd, [
+        "log",
+        "--first-parent",
+        "--merges",
+        since,
+        "--format=%H%x1f%P%x1f%s",
+        head,
+      ]);
+      // The oldest merge's first parent bounds the commits these merges can bring in.
+      const lastParent = log?.trim().split("\n").at(-1)?.split("\x1f")[1]?.split(" ")[0];
+      // Git resolves abbreviations; ambiguous or unknown ones print "missing" and cover nothing.
+      const recorded = lastParent
+        ? yield* runGit(
+            cwd,
+            ["cat-file", "--batch-check"],
+            rows
+              .flatMap((row) => [row.sha, ...(JSON.parse(row.commits) as string[])])
+              .filter((sha) => /^[0-9a-f]{4,64}$/i.test(sha))
+              .map((sha) => `${sha}^{commit}\n`)
+              .join(""),
+          )
+        : "";
+      const revs = lastParent
+        ? yield* runGit(cwd, ["rev-list", "--parents", head, `^${lastParent}`])
+        : "";
+      const failed = log === null || recorded === null || revs === null;
+      if (failed) cachedHead = "";
+      const resolved = new Set(
+        (recorded ?? "").split("\n").flatMap((line) => {
+          const [sha = "", type] = line.split(" ");
+          return type === "commit" ? [sha] : [];
+        }),
+      );
+      const uncovered = failed || !log ? [] : uncoveredMerges(head, log, revs, resolved);
+      result =
+        uncovered.length === 0
+          ? null
+          : {
+              projectId: ProjectId.make(projectId),
+              branch: newest.branch,
+              head,
+              leadThreadId: ThreadId.make(newest.thread_id),
+              uncoveredCount: uncovered.length,
+              uncovered: uncovered.slice(0, 20),
+            };
+    }
+    if (generation === coverageGeneration)
+      coverageCache.set(projectId, { head: cachedHead, checkedAt: now, result });
+    return result;
+  });
+
+  const coverage = Effect.fn("EvidenceService.coverage")(function* (input: EvidenceCoverageInput) {
+    const generation = coverageGeneration;
+    const rows =
+      yield* sql<CoverageRow>`SELECT l.project_id, p.workspace_root, l.thread_id, l.landed_at,
+          json_extract(l.record_json, '$.target.branch') AS branch, json_extract(l.record_json, '$.target.sha') AS sha,
+          (SELECT json_group_array(c.value) FROM json_each(l.record_json, '$.changes') ch, json_each(ch.value, '$.commits') c) AS commits
+        FROM evidence_landings l JOIN projection_projects p ON p.project_id = l.project_id AND p.deleted_at IS NULL
+        WHERE ${input.projectId === undefined ? sql`1 = 1` : sql`l.project_id = ${input.projectId}`}
+        ORDER BY l.landed_at DESC, l.landing_id DESC`;
+    const byProject = Map.groupBy(rows, (row) => row.project_id);
+    const results = yield* Effect.forEach(byProject, ([projectId, projectRows]) =>
+      coverageLock(projectId).withPermits(1)(projectCoverage(projectId, projectRows, generation)),
+    );
+    return results.filter((result) => result !== null);
+  }, Effect.mapError(storage));
+
+  return EvidenceService.of({ record, list, get, setQa, counts, coverage });
 });
 
 export const layer = Layer.effect(EvidenceService, make);

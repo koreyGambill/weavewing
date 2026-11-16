@@ -2350,6 +2350,7 @@ export const layerWsRpc = (
         [WS_METHODS.evidenceGet]: (input) => evidence.get(input),
         [WS_METHODS.evidenceSetQa]: (input) => evidence.setQa(input),
         [WS_METHODS.evidenceCounts]: () => evidence.counts(),
+        [WS_METHODS.evidenceCoverage]: (input) => evidence.coverage(input),
         [WS_METHODS.messageFollowUpsList]: (input) => followUps.list(input),
         [WS_METHODS.messageFollowUpsUpdate]: (input) => followUps.update(input),
         [WS_METHODS.statusSourcesSubscribe]: () => statusSources.subscribe(),
