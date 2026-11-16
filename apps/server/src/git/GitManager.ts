@@ -718,6 +718,8 @@ function toPullRequestHeadRemoteInfo(pr: {
   };
 }
 
+const isGitManagerError = Schema.is(GitManagerError);
+
 export const make = Effect.gen(function* () {
   const gitCore = yield* GitVcsDriver.GitVcsDriver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -3603,7 +3605,7 @@ export const make = Effect.gen(function* () {
                 ),
           ),
           Effect.mapError((cause) =>
-            Schema.is(GitManagerError)(cause)
+            isGitManagerError(cause)
               ? cause
               : new GitManagerError({
                   operation: "runStackedAction",
