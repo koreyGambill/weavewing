@@ -3088,7 +3088,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect("uses an explicit project's provider settings for generated commit text", () =>
+  it.effect("generates commit text on the default thread model when no thread is given", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3101,6 +3101,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         serverSettings: {
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          },
           projectSettingsOverrides: {
             [projectId]: {
               providerInstances: { [disabledInstanceId]: { enabled: false } },

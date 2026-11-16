@@ -1,10 +1,6 @@
 import type { ModelPreferences } from "@t3tools/contracts/settings";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_TEXT_GENERATION_MODEL_SELECTION,
-  DEFAULT_TEXT_GENERATION_MODEL,
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  defaultInstanceIdForDriver,
   globalIdleCompaction,
   type IdleCompactionMode,
   isProviderAvailable,
@@ -18,7 +14,6 @@ import {
   type ProjectId,
   type ProjectScopedServerSettingKey,
   ProjectSettingsOverrides,
-  ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
@@ -31,7 +26,7 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
-import { createModelSelection, readCustomModelEntries } from "./model.ts";
+import { createModelSelection } from "./model.ts";
 import {
   getBackgroundActivityBaseProfile,
   normalizeBackgroundActivitySettings,
