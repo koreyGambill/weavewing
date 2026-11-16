@@ -1,5 +1,6 @@
 import {
   THREAD_TIMELINE_RUN_LIMIT,
+  THREAD_USER_TURN_LIMIT,
   ThreadId,
   ThreadInsightsError,
   type OrchestrationV2RunStatus,
@@ -7,6 +8,8 @@ import {
   type ThreadTimelineGetInput,
   type ThreadTimelineLane,
   type ThreadTimelineRun,
+  type ThreadUserTurn,
+  type ThreadUserTurns,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
@@ -22,6 +25,9 @@ export class ThreadTimeline extends Context.Service<
   ThreadTimeline,
   {
     readonly get: (input: ThreadTimelineGetInput) => Effect.Effect<Timeline, ThreadInsightsError>;
+    readonly userTurns: (
+      input: ThreadTimelineGetInput,
+    ) => Effect.Effect<ThreadUserTurns, ThreadInsightsError>;
   }
 >()("t3/threadInsights/ThreadTimeline") {}
 
@@ -173,6 +179,54 @@ const make = Effect.gen(function* () {
         isInsightsError(cause)
           ? cause
           : new ThreadInsightsError({ message: "Could not load the thread timeline.", cause }),
+      ),
+      NodeSqliteClient.readOnly,
+    ),
+    userTurns: Effect.fn("ThreadTimeline.userTurns")(
+      function* ({ threadId }) {
+        // Mirrors deriveTimelineMinimapItems: messages without a creator or origin are the user's.
+        // The reply is the last assistant text before the next user-role message, as on the client.
+        const turns = yield* sql<ThreadUserTurn>`
+          WITH own AS (
+            SELECT ordinal, updated_at, payload_json FROM orchestration_v2_projection_turn_items
+              INDEXED BY orchestration_v2_projection_turn_items_user_message_idx
+            WHERE thread_id = ${threadId} AND type = 'user_message'
+              AND COALESCE(json_extract(payload_json, '$.createdBy'), 'user') = 'user'
+              AND CASE WHEN json_type(payload_json, '$.origin') IS NULL
+                THEN json_type(payload_json, '$.linkedSender') IS NULL
+                  AND json_type(payload_json, '$.scheduledTaskId') IS NULL
+                ELSE json_extract(payload_json, '$.origin.kind') = 'user' END
+            ORDER BY ordinal DESC LIMIT ${THREAD_USER_TURN_LIMIT}
+          ),
+          bounded AS (
+            SELECT own.*, COALESCE((
+              SELECT MIN(next.ordinal) FROM orchestration_v2_projection_turn_items AS next
+                INDEXED BY orchestration_v2_projection_turn_items_user_message_idx
+              WHERE next.thread_id = ${threadId} AND next.type = 'user_message'
+                AND next.ordinal > own.ordinal
+            ), 9223372036854775807) AS next_ordinal FROM own
+          )
+          SELECT json_extract(payload_json, '$.messageId') AS "messageId",
+            COALESCE(json_extract(payload_json, '$.startedAt'), updated_at) AS "createdAt",
+            substr(COALESCE(json_extract(payload_json, '$.text'), ''), 1, 200) AS "text",
+            (
+              SELECT substr(json_extract(reply.payload_json, '$.text'), 1, 300)
+              FROM orchestration_v2_projection_turn_items AS reply
+                INDEXED BY orchestration_v2_projection_turn_items_conversation_idx
+              WHERE reply.thread_id = ${threadId}
+                AND reply.ordinal > bounded.ordinal AND reply.ordinal < bounded.next_ordinal
+                AND reply.type = 'assistant_message'
+                AND reply.type NOT IN (
+                  'command_execution', 'reasoning', 'file_change', 'file_search', 'web_search', 'dynamic_tool'
+                )
+              ORDER BY reply.ordinal DESC LIMIT 1
+            ) AS "replyText"
+          FROM bounded ORDER BY ordinal`;
+        return { turns };
+      },
+      Effect.mapError(
+        (cause) =>
+          new ThreadInsightsError({ message: "Could not load the thread's turns.", cause }),
       ),
       NodeSqliteClient.readOnly,
     ),

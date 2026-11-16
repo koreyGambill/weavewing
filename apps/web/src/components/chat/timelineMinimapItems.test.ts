@@ -2,7 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, ThreadId, MessageId, type TurnOrigin } from "@t3tools/contracts";
 import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContextReferences";
 
-import { deriveTimelineMinimapItems, resolveTimelineMinimapPreview } from "./timelineMinimapItems";
+import {
+  deriveTimelineMinimapItems,
+  mergeUnloadedUserTurns,
+  resolveTimelineMinimapPreview,
+} from "./timelineMinimapItems";
 
 describe("deriveTimelineMinimapItems", () => {
   it("only marks human input, including explicit user origins", () => {
@@ -93,6 +97,40 @@ describe("deriveTimelineMinimapItems", () => {
       expect(resolveTimelineMinimapPreview(items[0]!)?.userText).toBeNull();
     },
   );
+});
+
+describe("mergeUnloadedUserTurns", () => {
+  const turn = (id: string, text = id) => ({
+    messageId: MessageId.make(id),
+    createdAt: "2026-10-01T00:00:00Z",
+    text,
+    replyText: `re ${id}`,
+  });
+  const loaded = (id: string, rowIndex: number) => ({
+    id,
+    rowIndex,
+    userText: id,
+    assistantText: null,
+  });
+
+  it("puts turns older than the loaded window above it, unloaded", () => {
+    expect(
+      mergeUnloadedUserTurns(
+        [loaded("c", 3), loaded("d", 9)],
+        [turn("a", ATTACHMENT_ONLY_BOOTSTRAP_PROMPT), turn("b"), turn("c"), turn("d"), turn("e")],
+      ),
+    ).toEqual([
+      { id: "a", rowIndex: -1, userText: "", assistantText: "re a" },
+      { id: "b", rowIndex: -1, userText: "b", assistantText: "re b" },
+      loaded("c", 3),
+      loaded("d", 9),
+    ]);
+  });
+
+  it("keeps every server turn when none is loaded, and only loaded ones without turns", () => {
+    expect(mergeUnloadedUserTurns([], [turn("a")]).map(({ id }) => id)).toEqual(["a"]);
+    expect(mergeUnloadedUserTurns([loaded("x", 0)], undefined)).toEqual([loaded("x", 0)]);
+  });
 });
 
 describe("resolveTimelineMinimapPreview", () => {

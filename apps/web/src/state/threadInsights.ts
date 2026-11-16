@@ -1,4 +1,4 @@
-import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
 import { Atom } from "effect/reactivity";
 import { subtreeRunSignal } from "../components/threadTimeline.logic";
@@ -47,4 +47,22 @@ export const threadTimelineGet = createEnvironmentRpcQueryAtomFamily(connectionA
   idleTtlMs: 0,
   refreshTrigger: ({ environmentId, input }) =>
     timelineSignalAtom(JSON.stringify([environmentId, input.threadId])),
+});
+
+const userTurnSignalAtom = Atom.family((key: string) => {
+  const [environmentId, threadId] = JSON.parse(key) as [EnvironmentId, ThreadId];
+  return Atom.make((get) => {
+    const shell = get(environmentThreadShells.threadShellAtom({ environmentId, threadId }));
+    return shell?.latestUserAuthoredMessageAt ?? shell?.latestUserMessageAt ?? null;
+  }).pipe(Atom.withLabel(`threadInsights:user-turn-signal:${key}`));
+});
+
+/** The turn rail's own turns beyond the loaded window; refetched only when the user sends one. */
+export const threadUserTurnsGet = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "threadInsights:userTurns",
+  tag: WS_METHODS.threadUserTurnsGet,
+  staleTimeMs: 0,
+  idleTtlMs: 0,
+  refreshTrigger: ({ environmentId, input }) =>
+    userTurnSignalAtom(JSON.stringify([environmentId, input.threadId])),
 });
