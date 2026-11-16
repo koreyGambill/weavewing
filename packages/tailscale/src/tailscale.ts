@@ -775,7 +775,7 @@ const reaches = (
   if (!literal) return "either";
   if (
     includeLoopback &&
-    !isLocalLoopbackHost(bindHost) &&
+    (!isLocalLoopbackHost(bindHost) || normalizeHostname(bindHost) === "localhost") &&
     (isLocalLoopbackHost(address) || address === "0.0.0.0" || address === "::")
   ) {
     const wildcard = bindHost === "" || isWildcardHost(bindHost);

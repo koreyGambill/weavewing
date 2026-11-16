@@ -258,8 +258,8 @@ describe("tailscale", () => {
         },
       },
     });
-    for (const host of ["0.0.0.0", "", "::", "192.168.1.5"]) {
-      const ambiguous = host === "192.168.1.5";
+    for (const host of ["0.0.0.0", "", "::", "192.168.1.5", "localhost"]) {
+      const ambiguous = host === "192.168.1.5" || host === "localhost";
       assert.deepEqual(
         parseTailscaleServeRoutesTo(loopbackRoutes, { host, port: 3773 }),
         [

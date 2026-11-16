@@ -350,14 +350,14 @@ it.effect(
       const recheck = yield* close({ recheckHangs: true }).pipe(Effect.flip, Effect.forkChild);
       yield* TestClock.adjust("10 seconds");
       assert.include((yield* Fiber.join(recheck)).message, "Tailscale did not answer");
-      for (const bindHost of ["127.0.0.1", "0.0.0.0", "", "::", "192.168.1.5"]) {
+      for (const bindHost of ["127.0.0.1", "0.0.0.0", "", "::", "192.168.1.5", "localhost"]) {
         const remoteWeb: Web = { "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" } };
         const closeRoutes = close(
           { web: remoteWeb, bindHost },
           [],
           policy({ clients: ["remote"], tailscaleServe: false }),
         );
-        if (bindHost === "192.168.1.5") {
+        if (bindHost === "192.168.1.5" || bindHost === "localhost") {
           const error = yield* closeRoutes.pipe(Effect.flip);
           assert.include(error.message, "might be another service");
           assert.equal(remoteWeb["box.tailnet.ts.net:443"]?.["/"], "http://127.0.0.1:3773");

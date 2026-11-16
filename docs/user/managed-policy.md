@@ -249,8 +249,9 @@ the error names the command that turns the route off. A route whose target is a 
 server; change the route or T3 Code's port.
 
 For a wildcard bind, the check includes routes to loopback addresses on the server's port. A
-loopback route on a specific LAN bind, or an IPv6 loopback route on an IPv4-only bind, may belong
-to another service; startup refuses without deleting that route. Change the route or T3 Code's port.
+loopback route on a specific LAN or `localhost` bind, or an IPv6 loopback route on an IPv4-only
+bind, may belong to another service; startup refuses without deleting that route. Change the
+route or T3 Code's port.
 
 If Tailscale is installed but does not answer, startup refuses until Tailscale can be checked;
 open Tailscale and finish setting it up, or remove it. This applies to both the initial check
