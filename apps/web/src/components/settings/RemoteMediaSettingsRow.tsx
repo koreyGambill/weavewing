@@ -20,7 +20,7 @@ export function RemoteMediaSettingsRow() {
       className="wrap-anywhere @max-[20rem]/settings-row:[&>div>div>div:first-child]:flex-wrap @max-[20rem]/settings-row:[&_h3]:w-full"
       serverScoped
       settingKeys={["autoLoadRemoteMedia"]}
-      description="Images from web addresses in chat load without a click; the site sees your IP and the full address."
+      description="Images, video and audio that agents link from other sites load without a click, and those sites see your address and the full link. Off: each one waits for a click."
       status={policy ? <ManagedNotice>Managed by {policy.organization}.</ManagedNotice> : undefined}
       control={
         <ScopedSwitch
