@@ -590,6 +590,7 @@ export function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  sideChatTitles?: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -612,7 +613,7 @@ export function surfaceTitle(
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "side-chat":
-      return "Side chat";
+      return sideChatTitles?.get(surface.threadId) || "Side chat";
     case "notes":
       return "Notes";
     case "preview": {

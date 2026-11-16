@@ -62,6 +62,7 @@ import {
 } from "../../threadTileGeometry";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { useTheme } from "../../hooks/useTheme";
+import { useThreadRelationshipShells } from "../../state/entities";
 import { observeResize } from "../../lib/observeResize";
 import { SurfaceIcon, surfaceTitle, type RightPanelTabsProps } from "../RightPanelTabs";
 import { Button } from "../ui/button";
@@ -332,12 +333,20 @@ export function ThreadTileWorkspace(props: {
     const keys = shortcut(command);
     return keys ? `${label} · ${keys}` : label;
   };
+  // Side chats are this thread's children, so its relationship shells name their tabs.
+  const relationshipShells = useThreadRelationshipShells(props.threadRef);
+  const sideChatTitles = new Map(relationshipShells.map((shell) => [shell.id, shell.title]));
   const title = (id: string) => {
     if (id === CONVERSATION_TAB_ID) return "Main chat";
     if (isNewTab(id)) return "New tab";
     const surface = props.panels.surfaces.find((entry) => entry.id === id);
     return surface
-      ? surfaceTitle(surface, props.panels.previewSessions, props.panels.terminalLabelsById)
+      ? surfaceTitle(
+          surface,
+          props.panels.previewSessions,
+          props.panels.terminalLabelsById,
+          sideChatTitles,
+        )
       : "Choose an area";
   };
   const activate = (group: TileGroup, tabId: string) => {

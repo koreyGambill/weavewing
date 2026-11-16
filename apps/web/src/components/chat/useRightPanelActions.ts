@@ -180,8 +180,9 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
       focusTerminal(activeThreadRef, surface.activeTerminalId);
     }
     if (surface.kind === "side-chat") {
+      // A side chat's tile sits in no workspace area, so the pane is found anywhere.
       requestWorkspaceFocus({
-        area: "panel",
+        area: "document",
         selector: `[data-side-chat-pane="${CSS.escape(surface.threadId)}"] [data-workspace-area="composer"] [contenteditable="true"]`,
       });
     }
