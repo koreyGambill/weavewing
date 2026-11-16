@@ -28,6 +28,7 @@ import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { resolvePastedPath } from "@t3tools/shared/path";
 import * as Equal from "effect/Equal";
+import { followsThreadTextGeneration } from "@t3tools/shared/serverSettings";
 import * as Schema from "effect/Schema";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
 import { AboutVersionTitle } from "./AboutVersionTitle";
@@ -1719,17 +1720,23 @@ export function ThreadsSettingsPanel() {
     textGenInstanceId,
     textGenModel,
   );
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
+  const followsThread = followsThreadTextGeneration(settings);
+  const isTextGenerationModelDirty =
+    !followsThread ||
+    !Equal.equals(
+      settings.textGenerationModelSelection ?? null,
+      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+    );
   const textGenerationModelDisabledReason = useScopedModelDisabledReason(
     settings,
     textGenerationModelInstanceEntries,
     true,
   );
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
-  const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
+  const mixedTextGenerationModel = useScopedSettingsMixed([
+    "textGenerationModelSelection",
+    "textGenerationFollowsThread",
+  ]);
 
   return (
     <SettingsPageContainer>
@@ -1944,9 +1951,9 @@ export function ThreadsSettingsPanel() {
       <SettingsSection id="text-generation" title="Text generation">
         <SettingsRow
           serverScoped
-          settingKeys={["textGenerationModelSelection"]}
+          settingKeys={["textGenerationModelSelection", "textGenerationFollowsThread"]}
           {...searchableSetting("text-generation-model")}
-          description="For thread titles and other generated text. Source control has its own setting. Text generators from Providers also appear here."
+          description="For thread titles and other generated text. By default each thread's own model writes its text. Source control has its own setting. Text generators from Providers also appear here."
           resetAction={
             hasServerTargets && isTextGenerationModelDirty ? (
               <SettingResetButton
@@ -1955,6 +1962,7 @@ export function ThreadsSettingsPanel() {
                   updateSettings({
                     textGenerationModelSelection:
                       DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                    textGenerationFollowsThread: true,
                   })
                 }
               />
@@ -1979,7 +1987,11 @@ export function ThreadsSettingsPanel() {
                   instanceEntries={textGenerationModelInstanceEntries}
                   modelOptionsByInstance={textGenerationModelOptionsByInstance}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
+                  {...(mixedTextGenerationModel
+                    ? { triggerLabel: "Mixed" }
+                    : followsThread
+                      ? { triggerLabel: "Same as the thread" }
+                      : {})}
                   getModelDisabledReason={textGenerationModelDisabledReason}
                   {...(environmentId
                     ? {
@@ -2002,6 +2014,7 @@ export function ThreadsSettingsPanel() {
                       return;
                     }
                     updateSettings({
+                      textGenerationFollowsThread: false,
                       textGenerationModelSelection: resolveAppModelSelectionState(
                         {
                           ...settings,
@@ -2016,7 +2029,7 @@ export function ThreadsSettingsPanel() {
                     });
                   }}
                 />
-                {textGenInstanceEntry ? (
+                {textGenInstanceEntry && !followsThread ? (
                   <TraitsPicker
                     provider={textGenProvider}
                     models={textGenInstanceEntry?.models ?? []}
@@ -2027,6 +2040,7 @@ export function ThreadsSettingsPanel() {
                     triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                     onModelOptionsChange={(nextOptions) => {
                       updateSettings({
+                        textGenerationFollowsThread: false,
                         textGenerationModelSelection: resolveAppModelSelectionState(
                           {
                             ...settings,
@@ -2050,7 +2064,7 @@ export function ThreadsSettingsPanel() {
           serverScoped
           settingKeys={["incomingCardSummaries"]}
           {...searchableSetting("incoming-card-summaries")}
-          description="Claude Haiku writes one line for long messages from other threads, delegated tasks and scheduled tasks, up to 100 a day. Off shows each message's first line."
+          description="The receiving thread's model writes one line for long messages from other threads, delegated tasks and scheduled tasks, up to 100 a day. Off shows each message's first line."
           resetAction={
             settings.incomingCardSummaries !== DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries ? (
               <SettingResetButton

@@ -5,8 +5,11 @@ descriptions, branch names, and voice transcript cleanup. Pick the model for thi
 **Settings → Threads → Text generation model**. **Settings → Source control** and
 **Settings → Voice** can each pick a different one.
 
-By default, a coding agent such as Codex or Claude writes this text, starting a session for each
-request. A **text generator** — a model API that only writes text — is usually faster and cheaper.
+By default, the model of the thread the text is about writes it, so a thread's text never goes to
+another provider. Voice cleanup and review guides use the thread they were started from, or your
+default thread model when there is none. Choosing a model in Settings overrides this, and a
+project can override it for itself. A coding agent starts a session for each request. A **text
+generator** — a model API that only writes text — is usually faster and cheaper.
 
 ## Add a text generator
 
@@ -31,12 +34,15 @@ and refreshes the list after the service adds some.
 Each request sends the API what the task needs, such as the staged diff for a commit message.
 
 Turning a generator off or removing it sends its work back to the environment's text generation
-model.
+model. If the model you chose is unavailable, the task fails and says so; it never runs on a
+different provider. Titles, commit and pull request text, review guides and voice cleanup report
+that failure. Incoming message summaries do not yet: a failed summary leaves the card on its
+first line and is only recorded in the server log.
 
 ## What text generators can't do
 
 Review guides read the checkout over many steps, so they always use a coding agent. If your source
-control writer model is a text generator, review guides use Codex or Claude instead, and fail if
-neither is set up. To choose which, pick one in **Settings → Source control → Review guide model**.
+control writer model is a text generator, review guides fail until you pick Codex or Claude in
+**Settings → Source control → Review guide model**.
 
 A [managed policy](./managed-policy.md) that limits providers also turns off text generators.

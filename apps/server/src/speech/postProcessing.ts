@@ -6,8 +6,13 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import { resolveSpeechPostProcessingModelSelection } from "@t3tools/shared/serverSettings";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveSpeechPostProcessingModelSelection,
+  settingsForThread,
+} from "@t3tools/shared/serverSettings";
 
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -29,11 +34,32 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+  const threads = yield* ProjectionStore.ProjectionStoreV2;
   return SpeechPostProcessing.of({
     process: Effect.fn("SpeechPostProcessing.process")(
       function* (input) {
         if (input.transcript.trim().length === 0) return { text: input.transcript };
-        const settings = yield* settingsService.getSettings;
+        const environmentSettings = yield* settingsService.getSettings;
+        // A supplied thread that cannot be read fails the cleanup: guessing a model could send the
+        // text to a different provider.
+        const thread =
+          input.threadId === undefined
+            ? null
+            : yield* threads.getThreadShell(input.threadId).pipe(
+                Effect.filterOrFail(
+                  (shell): shell is NonNullable<typeof shell> => shell !== null,
+                  () =>
+                    new SpeechOperationError({
+                      operation: "post-processing",
+                      cause: "The thread being dictated into no longer exists.",
+                    }),
+                ),
+              );
+        const settings = settingsForThread(
+          resolveProjectSettings(environmentSettings, thread?.projectId ?? input.projectId ?? null)
+            .settings,
+          thread?.modelSelection,
+        );
         const providers = yield* providerRegistry.getProviders;
         const { mode, customInstructions } = input.options.speechPostProcessingPrompt;
         const instructions =

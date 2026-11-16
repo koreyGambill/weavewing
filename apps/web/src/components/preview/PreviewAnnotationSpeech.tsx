@@ -58,6 +58,7 @@ export function PreviewAnnotationSpeech({
     environmentId: threadRef.environmentId,
     projectId,
     projectName: project?.title,
+    threadId: threadRef.threadId,
     ownerKey: JSON.stringify(["preview-annotation", threadRef, tabId, config.sessionId]),
     offerSetup: false,
     readDraft: () => ({

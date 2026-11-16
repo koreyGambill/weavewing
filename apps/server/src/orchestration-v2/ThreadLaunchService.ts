@@ -2,6 +2,7 @@ import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import {
   CommandId,
   type ChatAttachment,
@@ -123,7 +124,7 @@ export interface ThreadLaunchInput {
 
 type PreparationInput = Pick<
   ThreadLaunchInput,
-  "commandId" | "projectId" | "workspaceStrategy" | "developmentEnvironment"
+  "commandId" | "projectId" | "modelSelection" | "workspaceStrategy" | "developmentEnvironment"
 > & {
   readonly initialMessage?: Omit<ThreadLaunchInitialMessage, "origin">;
   readonly reusedWorktree?: { readonly baseRef: string };
@@ -554,10 +555,10 @@ const make = Effect.gen(function* () {
       const initialMessage = input.initialMessage;
       const generateBranchNameFor = Effect.fn("ThreadLaunchService.generateBranchNameFor")(
         function* (cwd: string, message: Omit<ThreadLaunchInitialMessage, "origin">) {
-          const settings = resolveProjectSettings(
-            yield* serverSettings.getSettings,
-            input.projectId,
-          ).settings;
+          const settings = settingsForThread(
+            resolveProjectSettings(yield* serverSettings.getSettings, input.projectId).settings,
+            input.modelSelection,
+          );
           const modelSelection =
             settings.sourceControlWriterModelSelection === null
               ? settings.textGenerationModelSelection
@@ -1551,6 +1552,7 @@ const make = Effect.gen(function* () {
       {
         commandId: input.commandId,
         projectId: thread.projectId,
+        modelSelection: thread.modelSelection,
         workspaceStrategy: reuse?.strategy ?? workspacePreparation,
         ...(reuse === null ? {} : { reusedWorktree: reuse.reusedWorktree }),
         ...(thread.developmentEnvironment == null

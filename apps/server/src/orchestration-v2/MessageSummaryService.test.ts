@@ -46,6 +46,7 @@ const longReport = `## Result\n\n${"All checks passed on the branch and the gate
 function makeHarness(options: {
   readonly summaries?: boolean;
   readonly dailyLimit?: number;
+  readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly generate?: NonNullable<
     TextGeneration.TextGeneration["Service"]["generateMessageSummary"]
   >;
@@ -58,6 +59,7 @@ function makeHarness(options: {
   );
   const layerSettings = ServerSettings.layerTest({
     incomingCardSummaries: options.summaries ?? true,
+    ...options.settings,
   });
   const layerThreads = ThreadManagement.layer.pipe(
     Layer.provide(layerOrchestrator),
@@ -174,11 +176,35 @@ it.effect("summarizes each long incoming card once and stores the summary on the
     const input = harness.generateMessageSummary.mock.calls[0]![0];
     assert.strictEqual(input.source, 'Report from delegated task "Build BW-1"');
     assert.strictEqual(input.message, longReport);
-    assert.strictEqual(input.modelSelection.model, "claude-haiku-5-5");
+    assert.strictEqual(input.modelSelection.model, modelSelection.model);
     assert.strictEqual(after.summary, "Done: BW-1 gate green");
     assert.strictEqual(after.itemSummary, "Done: BW-1 gate green");
     assert.strictEqual(after.text, longReport);
     assert.deepStrictEqual(after.updatedAt, before.updatedAt);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("summarizes on the receiving project's explicit model, not the environment's", () => {
+  const harness = makeHarness({
+    settings: {
+      projectSettingsOverrides: {
+        [projectId]: {
+          textGenerationModelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-project-choice",
+          },
+        },
+      },
+    },
+  });
+  return Effect.gen(function* () {
+    const summaries = yield* MessageSummary.MessageSummaryService;
+    const threadId = yield* createThread("project-override");
+    yield* send(threadId, "command:card", longReport, report);
+    yield* summaries.execute({ threadId, messageId: MessageId.make("command:card:message") });
+    const used = harness.generateMessageSummary.mock.calls[0]![0].modelSelection;
+    assert.strictEqual(used.instanceId, "claudeAgent");
+    assert.strictEqual(used.model, "claude-project-choice");
   }).pipe(Effect.provide(harness.layer));
 });
 

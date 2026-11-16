@@ -9,6 +9,7 @@ import {
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import {
+  followsThreadTextGeneration,
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
 } from "@t3tools/shared/serverSettings";
@@ -136,6 +137,7 @@ export function SourceControlWritingSettingsSection() {
     projectEffectiveTextGenerationProviders,
   );
   const usesDedicatedModel = settings.sourceControlWriterModelSelection !== null;
+  const followsThread = followsThreadTextGeneration(settings);
   const activeSelection = resolveAppModelSelectionState(
     {
       ...settings,
@@ -334,7 +336,7 @@ export function SourceControlWritingSettingsSection() {
             serverScoped
             settingKeys={["reviewGuideModelSelection"]}
             {...searchableSetting("review-guide-model")}
-            description="Must be a coding agent: it reads the pull request over many steps. Off uses the writer model, or Codex or Claude if that model is a text generator."
+            description="A coding agent that reads the pull request. Off uses the writer model, or the text model. If that is a text generator, pick Codex or Claude here."
             control={
               !hasServerTargets ? (
                 <span className="text-sm text-muted-foreground">
@@ -396,6 +398,11 @@ export function SourceControlWritingSettingsSection() {
                         })
                       }
                     />
+                  ) : null}
+                  {!usesReviewGuideModel && (usesDedicatedModel || followsThread) ? (
+                    <span className="text-sm text-muted-foreground">
+                      {usesDedicatedModel ? "Same as the writer model" : "Same as the thread"}
+                    </span>
                   ) : null}
                   <Switch
                     mixed={mixedReviewGuideModel}
@@ -522,7 +529,7 @@ export function SourceControlWritingSettingsSection() {
           serverScoped
           settingKeys={["sourceControlWriterModelSelection"]}
           {...searchableSetting("source-control-writer-model")}
-          description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model configured for this environment."
+          description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model, which is the thread's own model by default."
           control={
             !hasServerTargets ? (
               <span className="text-sm text-muted-foreground">
@@ -599,6 +606,9 @@ export function SourceControlWritingSettingsSection() {
                       })
                     }
                   />
+                ) : null}
+                {followsThread && !usesDedicatedModel ? (
+                  <span className="text-sm text-muted-foreground">Same as the thread</span>
                 ) : null}
                 <Switch
                   checked={usesDedicatedModel}

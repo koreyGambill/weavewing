@@ -1,4 +1,5 @@
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
 import {
   CommandId,
@@ -209,10 +210,11 @@ const make = Effect.gen(function* () {
           message: "This thread has no messages to title yet.",
         };
       }
-      const settings = resolveProjectSettings(
-        yield* serverSettings.getSettings,
-        projection.thread.projectId,
-      ).settings;
+      const settings = settingsForThread(
+        resolveProjectSettings(yield* serverSettings.getSettings, projection.thread.projectId)
+          .settings,
+        projection.thread.modelSelection,
+      );
       // Storage cleanup removes worktrees but keeps the path; CLIs cannot spawn in a missing cwd.
       const worktreePath = projection.thread.worktreePath;
       const worktreeExists =

@@ -9,6 +9,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   type CodexSettings,
+  DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   type ServerProviderModel,
   TextGenerationError,
@@ -268,11 +269,15 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           (entry) => entry.slug === requestedModel,
         )?.slug ??
         listed.find((candidate) => codexModelFamily(candidate.slug) === requestedFamily)?.slug;
+      // Only the built-in default is swapped for what the account can run; any other model runs as
+      // asked, so a thread's own model is never replaced and an unsupported one fails in Codex.
       const model =
         matchedModel ??
-        listed.find((candidate) => candidate.isDefault)?.slug ??
-        listed.find((candidate) => !candidate.isLegacy)?.slug ??
-        listed[0]?.slug ??
+        (requestedModel === DEFAULT_TEXT_GENERATION_MODEL
+          ? (listed.find((candidate) => candidate.isDefault)?.slug ??
+            listed.find((candidate) => !candidate.isLegacy)?.slug ??
+            listed[0]?.slug)
+          : undefined) ??
         requestedModel;
       // The selection's options were chosen for the requested model and may not fit a fallback.
       const fellBack = matchedModel === undefined && model !== requestedModel;

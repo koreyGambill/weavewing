@@ -1,9 +1,6 @@
 import type { ModelPreferences } from "@t3tools/contracts/settings";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_TEXT_GENERATION_MODEL,
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  defaultInstanceIdForDriver,
+  DEFAULT_TEXT_GENERATION_MODEL_SELECTION,
   globalIdleCompaction,
   type IdleCompactionMode,
   isProviderAvailable,
@@ -17,19 +14,19 @@ import {
   type ProjectId,
   type ProjectScopedServerSettingKey,
   ProjectSettingsOverrides,
-  ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
   withIdleCompaction,
 } from "@t3tools/contracts";
+import * as Equal from "effect/Equal";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
-import { createModelSelection, readCustomModelEntries } from "./model.ts";
+import { createModelSelection } from "./model.ts";
 import {
   getBackgroundActivityBaseProfile,
   normalizeBackgroundActivitySettings,
@@ -61,61 +58,6 @@ export function isModelSelectionProviderEnabled(
   return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
-const TEXT_GENERATION_FALLBACK_DRIVERS = [
-  "codex",
-  "claudeAgent",
-  "cursor",
-  "grok",
-  "muse",
-  "pi",
-  "opencode",
-  "antigravity",
-].map((driver) => ProviderDriverKind.make(driver));
-
-/** Configured instances come after every default instance, so they only win when no default qualifies. */
-export function fallbackTextGenerationModelSelection(
-  providerInstances: ServerSettings["providerInstances"],
-  isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind, model: string) => boolean,
-  options?: { readonly defaultModelSelection?: ModelSelection | null },
-): ModelSelection | null {
-  const threadDefault = options?.defaultModelSelection;
-  // The thread default's custom model wins on its instance; the driver default still serves when that model is unusable.
-  const selectionsFor = (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => {
-    const config = providerInstances[instanceId]?.config as { customModels?: unknown } | undefined;
-    const driverDefault = { instanceId, model: defaultTextGenerationModel(driver) };
-    return threadDefault?.instanceId === instanceId &&
-      readCustomModelEntries(config?.customModels).some(
-        (entry) => entry.slug === threadDefault.model,
-      )
-      ? [threadDefault, driverDefault]
-      : [driverDefault];
-  };
-  const candidates = [
-    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
-      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
-    ),
-    ...Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-      TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
-        ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
-        : [],
-    ),
-  ];
-  for (const [instanceId, driver] of candidates) {
-    for (const selection of selectionsFor(instanceId, driver)) {
-      if (isEnabled(instanceId, driver, selection.model)) return selection;
-    }
-  }
-  return null;
-}
-
-function defaultTextGenerationModel(driver: ProviderDriverKind): string {
-  return (
-    DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
-    DEFAULT_MODEL_BY_PROVIDER[driver] ??
-    DEFAULT_TEXT_GENERATION_MODEL
-  );
-}
-
 /** A text generator, or a provider whose snapshot can generate text; no snapshots trusts settings. */
 function isTextGenerationTargetUsable(
   settings: ServerSettings,
@@ -131,6 +73,22 @@ function isTextGenerationTargetUsable(
     isProviderAvailable(provider) &&
     isProviderTextGenerationCapable(provider)
   );
+}
+
+/** True until the user picks a text generation model: background text then follows the thread. */
+export const followsThreadTextGeneration = (settings: ServerSettings) =>
+  settings.textGenerationFollowsThread &&
+  Equal.equals(settings.textGenerationModelSelection, DEFAULT_TEXT_GENERATION_MODEL_SELECTION);
+
+/** Background text runs on the thread's own model so it never reaches a second vendor. */
+export function settingsForThread(
+  settings: ServerSettings,
+  thread: ModelSelection | null | undefined,
+): ServerSettings {
+  const source = thread ?? settings.defaultModelSelection;
+  return source && followsThreadTextGeneration(settings)
+    ? { ...settings, textGenerationModelSelection: source }
+    : settings;
 }
 
 export function resolveSourceControlWriterModelSelection(

@@ -18,7 +18,6 @@ import { createModelSelection } from "./model.ts";
 import { resolveProjectScripts } from "./projectScripts.ts";
 import {
   applyServerSettingsPatch,
-  fallbackTextGenerationModelSelection,
   modelPreferencesMigrationPatch,
   resolveModelPreferences,
   isModelSelectionProviderEnabled,
@@ -26,69 +25,13 @@ import {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
   resolveSpeechPostProcessingModelSelection,
+  settingsForThread,
 } from "./serverSettings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
-
-describe("fallbackTextGenerationModelSelection", () => {
-  it("uses Big Pickle when only OpenCode is enabled", () => {
-    expect(
-      fallbackTextGenerationModelSelection({}, (instanceId) => instanceId === "opencode"),
-    ).toEqual({ instanceId: "opencode", model: "opencode/big-pickle" });
-    const threadDefault = {
-      instanceId: ProviderInstanceId.make("opencode"),
-      model: "opencode-go/glm-5.3",
-    };
-    const providerInstances = {
-      [threadDefault.instanceId]: {
-        driver: ProviderDriverKind.make("opencode"),
-        config: { customModels: [threadDefault.model] },
-      },
-    };
-    // An exhausted Go quota leaves the custom model unusable but Big Pickle still works.
-    expect(
-      fallbackTextGenerationModelSelection(
-        providerInstances,
-        (instanceId, _driver, model) =>
-          instanceId === "opencode" && !model.startsWith("opencode-go/"),
-        { defaultModelSelection: threadDefault },
-      ),
-    ).toEqual({ instanceId: "opencode", model: "opencode/big-pickle" });
-  });
-
-  it("replaces and clears the fallback without carrying model options", () => {
-    const fallbackModelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "new" };
-    const settings = applyServerSettingsPatch(
-      {
-        ...DEFAULT_SERVER_SETTINGS,
-        fallbackModelSelection: {
-          ...fallbackModelSelection,
-          model: "old",
-          options: [{ id: "effort", value: "high" }],
-        },
-      },
-      { fallbackModelSelection },
-    );
-    expect(settings.fallbackModelSelection).toEqual(fallbackModelSelection);
-    expect(
-      applyServerSettingsPatch(settings, { fallbackModelSelection: null }).fallbackModelSelection,
-    ).toBeNull();
-  });
-  it("falls back to a configured non-default instance", () => {
-    const configured = ProviderInstanceId.make("codex_work");
-    const providerInstances = {
-      [configured]: { driver: ProviderDriverKind.make("codex"), config: {} },
-    };
-    const fallback = fallbackTextGenerationModelSelection(
-      providerInstances,
-      (instanceId) => instanceId === configured,
-    );
-    expect(fallback?.instanceId).toBe(configured);
-  });
-});
 
 describe("serverSettings helpers", () => {
   it("translates a shipped client's idle compaction switch into a mode", () => {
@@ -1093,5 +1036,42 @@ describe("resolveSpeechPostProcessingModelSelection", () => {
       applyServerSettingsPatch(pinned, { speechPostProcessingModelSelection: null })
         .speechPostProcessingModelSelection,
     ).toBeNull();
+  });
+});
+
+describe("settingsForThread", () => {
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const codex = ProviderInstanceId.make("codex");
+  const thread = createModelSelection(claude, "claude-opus-5-5", [{ id: "effort", value: "high" }]);
+  const textGenerationFor = (
+    selection: Parameters<typeof settingsForThread>[1],
+    settings: ServerSettings = DEFAULT_SERVER_SETTINGS,
+  ) => settingsForThread(settings, selection).textGenerationModelSelection;
+
+  it("runs background text on the thread's exact model by default", () => {
+    expect(textGenerationFor(thread)).toBe(thread);
+  });
+
+  it("lets an explicit choice win, however it was made", () => {
+    const chosen = createModelSelection(codex, "gpt-6-luna");
+    expect(
+      textGenerationFor(thread, { ...DEFAULT_SERVER_SETTINGS, textGenerationFollowsThread: false }),
+    ).toBe(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
+    expect(
+      textGenerationFor(thread, {
+        ...DEFAULT_SERVER_SETTINGS,
+        textGenerationModelSelection: chosen,
+      }),
+    ).toBe(chosen);
+  });
+
+  it("falls back to the default thread model for jobs without a thread", () => {
+    const settings = { ...DEFAULT_SERVER_SETTINGS, defaultModelSelection: thread };
+    expect(textGenerationFor(undefined, settings)).toBe(thread);
+    expect(textGenerationFor(undefined)).toBe(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
+  });
+
+  it("decodes settings that predate the flag as following the thread", () => {
+    expect(decodeServerSettings({}).textGenerationFollowsThread).toBe(true);
   });
 });

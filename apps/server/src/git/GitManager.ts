@@ -55,6 +55,7 @@ import {
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
 } from "@t3tools/shared/git";
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import { isSshRemoteUrl } from "@t3tools/shared/sourceControl";
 import {
   type ChangeRequestTerminology,
@@ -717,6 +718,8 @@ function toPullRequestHeadRemoteInfo(pr: {
   };
 }
 
+const isGitManagerError = Schema.is(GitManagerError);
+
 export const make = Effect.gen(function* () {
   const gitCore = yield* GitVcsDriver.GitVcsDriver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -754,24 +757,51 @@ export const make = Effect.gen(function* () {
     readonly threadId?: ThreadId | undefined;
     readonly projectId?: ProjectId | undefined;
   }) {
-    const settings = yield* serverSettingsService.getSettings;
-    if (!hasProjectSettingsOverrides(settings))
-      return { settings, projectId: null as ProjectId | null };
-    const threadProjectId =
+    // A supplied thread that cannot be read fails the action's text generation: guessing a model
+    // could send the diff to a different provider.
+    const thread =
       input.threadId === undefined
         ? null
         : yield* threads.getThreadShell(input.threadId).pipe(
-            Effect.map((thread) => thread?.projectId ?? null),
-            Effect.orElseSucceed(() => null),
+            Effect.mapError(
+              (cause) =>
+                new GitManagerError({
+                  operation: "resolveThreadModel",
+                  cwd: input.cwd,
+                  detail: "Could not read the thread this action was started from.",
+                  cause,
+                }),
+            ),
+            Effect.filterOrFail(
+              (shell): shell is NonNullable<typeof shell> => shell !== null,
+              () =>
+                new GitManagerError({
+                  operation: "resolveThreadModel",
+                  cwd: input.cwd,
+                  detail: "The thread this action was started from no longer exists.",
+                }),
+            ),
           );
+    const settings = yield* serverSettingsService.getSettings;
+    if (!hasProjectSettingsOverrides(settings))
+      return {
+        settings: settingsForThread(settings, thread?.modelSelection),
+        projectId: null as ProjectId | null,
+      };
     const projectId =
-      threadProjectId ??
+      thread?.projectId ??
       input.projectId ??
       (yield* projects.findActiveByWorkspaceRoot(input.cwd).pipe(
         Effect.map((project) => Option.getOrNull(project)?.projectId ?? null),
         Effect.orElseSucceed(() => null),
       ));
-    return { settings: resolveProjectSettings(settings, projectId).settings, projectId };
+    return {
+      settings: settingsForThread(
+        resolveProjectSettings(settings, projectId).settings,
+        thread?.modelSelection,
+      ),
+      projectId,
+    };
   });
   const readThreadContext = Effect.fnUntraced(
     function* (threadId: ThreadId | undefined) {
@@ -3574,14 +3604,15 @@ export const make = Effect.gen(function* () {
                   })),
                 ),
           ),
-          Effect.mapError(
-            (cause) =>
-              new GitManagerError({
-                operation: "runStackedAction",
-                cwd: input.cwd,
-                detail: "Failed to get server settings.",
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            isGitManagerError(cause)
+              ? cause
+              : new GitManagerError({
+                  operation: "runStackedAction",
+                  cwd: input.cwd,
+                  detail: "Failed to get server settings.",
+                  cause,
+                }),
           ),
         );
 

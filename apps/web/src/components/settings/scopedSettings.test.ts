@@ -954,4 +954,16 @@ describe("model selection patches at project scope", () => {
         ?.textGenerationModelSelection,
     ).toEqual({ ...saved, options });
   });
+
+  it("writes the follow-thread flag beside the model at project scope, and resets both", () => {
+    const chosen = planScopedSettingsPatch(checkout, [customized], {
+      textGenerationFollowsThread: false,
+      textGenerationModelSelection: { instanceId: claude, model: "claude-sonnet-4-6" },
+    });
+    expect(chosen.serverWrites[0]?.patch.projectSettingsOverrides?.[projectId]).toMatchObject({
+      textGenerationFollowsThread: false,
+      textGenerationModelSelection: { instanceId: claude, model: "claude-sonnet-4-6" },
+    });
+    expect(chosen.unavailableReason).toBeFalsy();
+  });
 });
