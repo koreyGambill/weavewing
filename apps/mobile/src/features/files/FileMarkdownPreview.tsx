@@ -17,7 +17,6 @@ import {
   ThreadMarkdownImageView,
   ThreadMarkdownImageUnavailable,
 } from "../threads/ThreadMarkdownImage";
-import { RemoteMediaGate } from "../threads/RemoteMediaGate";
 import { ThreadMarkdownVideo } from "../threads/ThreadMarkdownVideo";
 import { markdownFileEmbedLabel, resolveMarkdownMediaPreview } from "../../lib/markdownMedia";
 import {
@@ -136,32 +135,28 @@ export function FileMarkdownPreview(props: {
     if (media?.access === "direct") {
       if (media.kind === "video") {
         return (
-          <RemoteMediaGate uri={media.uri} kind="video">
-            <ThreadMarkdownVideo
-              source={{
-                type: "media",
-                name: media.name,
-                mimeType: media.mimeType,
-                uri: normalizeNativeMarkdownUrl(media.uri),
-                actionsSource: preview?.source.actionsSource,
-              }}
-              thumbnailVisible
-            />
-          </RemoteMediaGate>
+          <ThreadMarkdownVideo
+            source={{
+              type: "media",
+              name: media.name,
+              mimeType: media.mimeType,
+              uri: normalizeNativeMarkdownUrl(media.uri),
+              actionsSource: preview?.source.actionsSource,
+            }}
+            thumbnailVisible
+          />
         );
       }
       return (
-        <RemoteMediaGate uri={media.uri}>
-          <ThreadMarkdownImageView
-            uri={normalizeNativeMarkdownUrl(media.uri)}
-            sourceKey={media.uri}
-            unavailable={false}
-            alt={image.alt}
-            format={media.mimeType === "image/svg+xml" ? "svg" : undefined}
-            actionsSource={preview?.source.actionsSource}
-            onPressPreview={setExpandedFile}
-          />
-        </RemoteMediaGate>
+        <ThreadMarkdownImageView
+          uri={normalizeNativeMarkdownUrl(media.uri)}
+          sourceKey={media.uri}
+          unavailable={false}
+          alt={image.alt}
+          format={media.mimeType === "image/svg+xml" ? "svg" : undefined}
+          actionsSource={preview?.source.actionsSource}
+          onPressPreview={setExpandedFile}
+        />
       );
     }
     if (props.captured || media === null || media.access === "unavailable") {

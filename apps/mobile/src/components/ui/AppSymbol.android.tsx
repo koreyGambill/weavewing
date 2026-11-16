@@ -7,7 +7,6 @@ import IconAlertTriangle from "@tabler/icons-react-native/IconAlertTriangle";
 import IconApps from "@tabler/icons-react-native/IconApps";
 import IconArchive from "@tabler/icons-react-native/IconArchive";
 import IconCalendarClock from "@tabler/icons-react-native/IconCalendarClock";
-import IconThumbUp from "@tabler/icons-react-native/IconThumbUp";
 import IconArrowBackUp from "@tabler/icons-react-native/IconArrowBackUp";
 import IconArrowDown from "@tabler/icons-react-native/IconArrowDown";
 import IconArrowForwardUp from "@tabler/icons-react-native/IconArrowForwardUp";
@@ -88,7 +87,6 @@ import IconLayoutSidebarRight from "@tabler/icons-react-native/IconLayoutSidebar
 import IconLetterSpacing from "@tabler/icons-react-native/IconLetterSpacing";
 import IconMicrophone from "@tabler/icons-react-native/IconMicrophone";
 import IconLink from "@tabler/icons-react-native/IconLink";
-import IconListCheck from "@tabler/icons-react-native/IconListCheck";
 import IconListNumbers from "@tabler/icons-react-native/IconListNumbers";
 import IconMenu2 from "@tabler/icons-react-native/IconMenu2";
 import IconMessageCircleQuestion from "@tabler/icons-react-native/IconMessageCircleQuestion";
@@ -225,7 +223,6 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   hammer: IconHammer,
   headphones: IconHeadphones,
   house: IconHome,
-  "hand.thumbsup": IconThumbUp,
   "info.circle": IconInfoCircle,
   internaldrive: IconDatabase,
   iphone: IconDeviceMobile,
@@ -233,7 +230,6 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   laptopcomputer: IconDeviceLaptop,
   link: IconLink,
   "list.number": IconListNumbers,
-  checklist: IconListCheck,
   "line.3.horizontal": IconMenu2,
   "line.3.horizontal.decrease": IconFilter,
   "line.3.horizontal.decrease.circle": IconFilter,
