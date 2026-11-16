@@ -24,7 +24,8 @@ const decodeMessages = Schema.decodeEffect(
 );
 
 const PRIOR_CONTEXT_MESSAGES = 2;
-// A message still streaming this long after its last update belongs to a crashed turn.
+// A message still streaming this long after its last update is treated as a crashed turn;
+// if it finalizes later anyway, it sorts before the advanced mark and is never reviewed.
 const STALE_STREAMING_MS = 60 * 60 * 1000;
 const COVERAGE =
   "Chat messages and child-agent chat only; commands, tool activity and files were not inspected. Missing tracking or unobserved changes cannot be inferred from this snapshot.";
