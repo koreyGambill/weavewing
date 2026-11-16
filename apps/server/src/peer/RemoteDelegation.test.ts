@@ -1535,11 +1535,11 @@ it.effect.each(["report", "[react 1:ack]", "[quiet]"])(
         expect(task?.result).toBe(
           `Requested model gpt-5.4; the provider reported running gpt-5.4-mini.\n\n${answer === "report" ? long : "Child task completed without an assistant result."}`,
         );
-      const status = yield* a.call("task_status", { taskId });
-      expect(status.structuredContent).toMatchObject({
-        status: "completed",
-        executedModel: "gpt-5.4-mini",
-      });
+        const status = yield* a.call("task_status", { taskId });
+        expect(status.structuredContent).toMatchObject({
+          status: "completed",
+          executedModel: "gpt-5.4-mini",
+        });
         // Every wait was for the run the launch started.
         const waits = yield* Ref.get(thread.waitedFor);
         expect(waits.length).toBeGreaterThan(0);

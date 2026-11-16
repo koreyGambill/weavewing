@@ -64,7 +64,7 @@ export function normalizeProjectPathForComparison(value: string): string {
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
 
 /** Folds accented Latin letters to ASCII ("tìm" -> "tim"); other scripts pass through. */
-function foldLatinDiacritics(text: string): string {
+export function foldLatinDiacritics(text: string): string {
   return text
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")

@@ -504,7 +504,9 @@ it.effect("keeps shared scratch search shallow and skips dependency trees", () =
           useRegex: false,
         }),
       );
-      expect(failure.reason).toBe("Choose a repository folder to search file contents.");
+      expect(failure).toMatchObject({
+        reason: "Choose a repository folder to search file contents.",
+      });
     }),
   ).pipe(Effect.provide(testLayer)),
 );

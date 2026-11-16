@@ -72,21 +72,21 @@ describe("runMigrations", () => {
   it.effect.each([54, 85, 87])(
     "upgrades a database at exactly %s, then rechecks it without a write lock",
     (throughId) =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: throughId });
-      assert.deepStrictEqual(
-        yield* runMigrations(),
-        migrationManifest.filter(([id]) => id > throughId),
-      );
-      assert.deepStrictEqual(yield* history, migrationManifest);
-      assert.isAbove(yield* v2TableCount, 0);
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: throughId });
+        assert.deepStrictEqual(
+          yield* runMigrations(),
+          migrationManifest.filter(([id]) => id > throughId),
+        );
+        assert.deepStrictEqual(yield* history, migrationManifest);
+        assert.isAbove(yield* v2TableCount, 0);
 
-      // query_only rejects BEGIN IMMEDIATE, which CLI startup would otherwise take on the live database.
-      yield* sql`PRAGMA query_only = ON`;
-      assert.deepStrictEqual(yield* runMigrations(), []);
-      assert.deepStrictEqual(yield* history, migrationManifest);
-    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+        // query_only rejects BEGIN IMMEDIATE, which CLI startup would otherwise take on the live database.
+        yield* sql`PRAGMA query_only = ON`;
+        assert.deepStrictEqual(yield* runMigrations(), []);
+        assert.deepStrictEqual(yield* history, migrationManifest);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("drops the unused correlation index and keeps correlation values", () =>

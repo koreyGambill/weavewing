@@ -4,8 +4,8 @@ import * as NodeUtil from "node:util";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it, vi } from "@effect/vitest";
-  CommandId,
 import {
+  CommandId,
   MessageId,
   ProjectId,
   ProviderInstanceId,

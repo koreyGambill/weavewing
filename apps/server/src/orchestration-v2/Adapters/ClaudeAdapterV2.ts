@@ -6820,24 +6820,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             nativeThreadId: string,
             task: OrchestrationV2PendingBackgroundTask,
           ) {
-            const startedMonitor = yield* Ref.modify(
-              pendingBackgroundTasksByNativeThread,
-              (current) => {
-                const roster = new Map(rosterForNativeThread(current, nativeThreadId));
-                const startedMonitor =
-                  task.kind === "monitor" && roster.get(task.taskId)?.kind !== "monitor";
-                const awaited = roster.get(task.taskId)?.awaited;
-                roster.set(task.taskId, awaited === undefined ? task : { ...task, awaited });
-                return [startedMonitor, new Map(current).set(nativeThreadId, roster)] as const;
-              },
-            );
-            if (startedMonitor) {
-              yield* addTaskIdsToNativeThreadSet(
-                awaitedBackgroundTasksByNativeThread,
-                nativeThreadId,
-                [task.taskId],
-              );
-            }
+            yield* Ref.update(pendingBackgroundTasksByNativeThread, (current) => {
+              const roster = new Map(rosterForNativeThread(current, nativeThreadId));
+              const existing = roster.get(task.taskId);
+              // A monitor the agent just started is work it waits on, until it releases it.
+              const awaited =
+                task.kind === "monitor" && existing?.kind !== "monitor"
+                  ? (true as const)
+                  : existing?.awaited;
+              roster.set(task.taskId, awaited === undefined ? task : { ...task, awaited });
+              return new Map(current).set(nativeThreadId, roster);
+            });
             yield* rememberOpaqueTasks([task]);
             yield* markWakeEligibleOpaqueBackgroundTasks(nativeThreadId, [task.taskId]);
           });

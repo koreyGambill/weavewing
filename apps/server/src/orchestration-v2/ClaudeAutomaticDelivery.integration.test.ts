@@ -684,6 +684,7 @@ const renamedClaudeSessionTitles = (options: { readonly renameDuringStartup: boo
       });
       yield* orchestrator.dispatch({
         type: "message.dispatch",
+        origin: { kind: "user" as const },
         commandId: CommandId.make("first"),
         threadId,
         messageId: MessageId.make("first"),

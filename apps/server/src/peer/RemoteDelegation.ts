@@ -671,7 +671,8 @@ const make = Effect.gen(function* () {
     }
     const report = subagentReportText(text, run?.status);
     return {
-      text: run === undefined ? report : withExecutedModelNote(report, run.model, run.executedModel),
+      text:
+        run === undefined ? report : withExecutedModelNote(report, run.model, run.executedModel),
       executedModel,
     };
   });

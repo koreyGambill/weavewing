@@ -4120,7 +4120,7 @@ function captureRootRunTermination(input: {
                           ids,
                           providerInstanceId,
                           childThreadId: ids.childThreadId,
-        ...(input.afterTurn === undefined ? {} : { afterTurn: input.afterTurn }),
+                          ...(input.afterTurn === undefined ? {} : { afterTurn: input.afterTurn }),
                           driver,
                           status: "running",
                         }),

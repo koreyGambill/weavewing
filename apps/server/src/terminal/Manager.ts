@@ -3894,7 +3894,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         );
         const inspector = yield* Effect.fromResult(inspectorResult);
         for (const session of running) {
-          if ((yield* inspector(session.pid)).hasRunningSubprocess) return true;
+          if ((yield* inspector(session.pid, session.shell)).hasRunningSubprocess) return true;
         }
         return false;
       }),

@@ -478,7 +478,7 @@ export function useComposerSend(input: ComposerSendInput) {
           ? "Offline queue is available for existing threads after connecting once."
           : context.images.length > 0 || context.files.length > 0 || directAnnotation
             ? "Attachments cannot be queued offline. Your draft is saved; send it after reconnecting."
-            : activePendingProgress ||
+            : activePendingUserInput ||
                 pendingApprovalsRef.current.length > 0 ||
                 queuedRunEdit.isEditing ||
                 readFreshSessionArm(routeThreadKey) !== undefined ||

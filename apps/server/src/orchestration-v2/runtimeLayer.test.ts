@@ -2089,6 +2089,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         });
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           createdBy: "user",
           creationSource: "web",
           commandId: CommandId.make(`${threadId}:first`),
@@ -2134,6 +2135,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       const idleRun = yield* startRun(idleThreadId);
       yield* orchestrator.dispatch({
         type: "message.dispatch",
+        origin: { kind: "user" as const },
         createdBy: "user",
         creationSource: "web",
         commandId: CommandId.make(`${idleThreadId}:queue`),
@@ -2208,6 +2210,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         });
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           createdBy: "user",
           creationSource: "web",
           commandId: CommandId.make(`${parentThreadId}:first`),
@@ -10265,6 +10268,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         const dispatch = (key: string, start: boolean) =>
           orchestrator.dispatch({
             type: "message.dispatch",
+            origin: { kind: "user" as const },
             createdBy: "agent",
             creationSource: "server",
             commandId: CommandId.make(`${threadId}:message:${key}`),
@@ -10782,6 +10786,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           createdBy: "user",
           creationSource: "web",
           commandId: CommandId.make(`${parentThreadId}:message`),

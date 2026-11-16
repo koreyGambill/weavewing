@@ -192,7 +192,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       const targetId = threadId ?? callerId;
       const target = yield* threads.getThreadShell(targetId).pipe(Effect.mapError(unavailable));
       if (target === null || target.deletedAt !== null)
-        return yield* threadNotFound(threads, targetId, "The thread was not found.");
+        return yield* threadNotFound(threads, scope, targetId, "The thread was not found.");
       const notifications = yield* NotificationService.NotificationService;
       const { notification, status } = yield* notifications
         .raise({

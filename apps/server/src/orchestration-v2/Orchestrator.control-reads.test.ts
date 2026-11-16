@@ -3507,6 +3507,7 @@ it.effect(
       });
       yield* orchestrator.dispatch({
         type: "message.dispatch",
+        origin: { kind: "user" as const },
         commandId: CommandId.make("start-busy-coordinator"),
         threadId: parentThreadId,
         messageId: MessageId.make("message:busy-coordinator"),
