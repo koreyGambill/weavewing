@@ -24,6 +24,8 @@ const decodeMessages = Schema.decodeEffect(
 );
 
 const PRIOR_CONTEXT_MESSAGES = 2;
+// A message still streaming this long after its last update belongs to a crashed turn.
+const STALE_STREAMING_MS = 60 * 60 * 1000;
 const COVERAGE =
   "Chat messages and child-agent chat only; commands, tool activity and files were not inspected. Missing tracking or unobserved changes cannot be inferred from this snapshot.";
 
@@ -303,13 +305,14 @@ const make = Effect.gen(function* () {
           const after = (mark: ReviewMark) =>
             sql`(created_at > ${mark.createdAt} OR (created_at = ${mark.createdAt} AND message_id > ${mark.messageId}))`;
           // A finished message cannot land before one still streaming and be skipped by the mark.
+          const staleBefore = DateTime.formatIso(DateTime.makeUnsafe(now - STALE_STREAMING_MS));
           const [streaming] =
             watermark === undefined
               ? []
               : yield* sql<{
                   created_at: string;
                   message_id: string;
-                }>`SELECT created_at, message_id FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=1 AND ${since === undefined ? sql`1` : after(since)} ORDER BY created_at, message_id LIMIT 1`.pipe(
+                }>`SELECT created_at, message_id FROM orchestration_v2_projection_messages WHERE thread_id=${item.id} AND streaming=1 AND updated_at >= ${staleBefore} AND ${since === undefined ? sql`1` : after(since)} ORDER BY created_at, message_id LIMIT 1`.pipe(
                   NodeSqliteClient.readOnly,
                   Effect.mapError(
                     (cause) => new MonitoringError({ operation: "read messages", cause }),
@@ -366,16 +369,20 @@ const make = Effect.gen(function* () {
             ),
           );
           let newest: ReviewMark | undefined;
+          let skipped = false;
           const bounded = messages.flatMap((message, index) => {
             const { record, priorContext } = ordered[index]!;
             const cap = priorContext ? 1000 : 4000;
             const text = message.text.slice(0, Math.min(cap, remaining));
             remaining -= text.length;
-            if (!text) return [];
-            if (!priorContext) {
+            if (!priorContext && !skipped) {
               if (text.length < message.text.length) truncated = true;
-              newest = { createdAt: record.created_at, messageId: record.message_id };
+              // Empty messages move the mark too; one the budget dropped must stay for the next window.
+              if (text || !message.text)
+                newest = { createdAt: record.created_at, messageId: record.message_id };
+              else skipped = true;
             }
+            if (!text) return [];
             return [
               {
                 id: message.id,
