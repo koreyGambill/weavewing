@@ -11,7 +11,9 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -39,8 +41,12 @@ import * as Service from "./EvidenceService.ts";
 const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-evidence-test-",
 });
-/** Counts the coverage check's git runs and can mark their output truncated. */
-const gitProbe = { calls: 0, truncate: false };
+/** Counts the coverage check's git runs, can mark their output truncated, and can hold `log` in one repo. */
+const gitProbe: {
+  calls: number;
+  truncate: boolean;
+  holdLog: { cwd: string; until: Effect.Effect<void> } | null;
+} = { calls: 0, truncate: false, holdLog: null };
 const layerGitProbe = Layer.effect(
   GitVcsDriver.GitVcsDriver,
   Effect.gen(function* () {
@@ -51,6 +57,11 @@ const layerGitProbe = Layer.effect(
         input.operation !== "EvidenceService.coverage"
           ? real.execute(input)
           : Effect.sync(() => gitProbe.calls++).pipe(
+              Effect.andThen(
+                input.args[0] === "log" && gitProbe.holdLog?.cwd === input.cwd
+                  ? gitProbe.holdLog.until
+                  : Effect.void,
+              ),
               Effect.andThen(real.execute(input)),
               Effect.map((result) => ({ ...result, stdoutTruncated: gitProbe.truncate })),
             ),
@@ -460,53 +471,55 @@ it.effect("records even when the Inbox refuses, and says so", () =>
 );
 
 /** A scratch repository registered as `project`, with fixed dates so its commit ids never change. */
-const scratchRepo = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const driver = yield* GitVcsDriver.GitVcsDriver;
-  const sql = yield* SqlClient.SqlClient;
-  const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "t3-ev-repo-" }));
-  const git = (args: ReadonlyArray<string>, date = "2026-01-01T00:00:00Z", stdin?: string) =>
-    driver
-      .execute({
-        operation: "test",
-        cwd: repo,
-        args,
-        env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
-        ...(stdin === undefined ? {} : { stdin }),
-      })
-      .pipe(Effect.map((result) => result.stdout.trim()));
-  const commit = (message: string) =>
-    git(["commit", "--allow-empty", "-m", message]).pipe(
-      Effect.andThen(git(["rev-parse", "HEAD"])),
-    );
-  const merge = (branch: string, from: string, date?: string) =>
-    Effect.gen(function* () {
-      if (from !== branch) yield* git(["checkout", "-q", "-b", branch, from]);
-      const work = from === branch ? "" : yield* commit(`work on ${branch}`);
-      yield* git(["checkout", "-q", "main"]);
-      yield* git(["merge", "--no-ff", "-m", `Merge ${branch}`, branch], date);
-      return { work, merge: yield* git(["rev-parse", "HEAD"]) };
-    });
-  yield* git(["init", "-q", "-b", "main"]);
-  for (const [key, value] of [
-    ["user.name", "Test"],
-    ["user.email", "test@test.com"],
-    ["commit.gpgsign", "false"],
-    ["core.hooksPath", "/dev/null"],
-  ] as const)
-    yield* git(["config", key, value]);
-  yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
-    VALUES (${project}, 'Repo', ${repo}, '[]', '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z')`;
-  gitProbe.calls = 0;
-  gitProbe.truncate = false;
-  return { repo, git, commit, merge, base: yield* commit("base") };
-});
+const scratchRepo = (projectId: ProjectId = project) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    const sql = yield* SqlClient.SqlClient;
+    const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "t3-ev-repo-" }));
+    const git = (args: ReadonlyArray<string>, date = "2026-01-01T00:00:00Z", stdin?: string) =>
+      driver
+        .execute({
+          operation: "test",
+          cwd: repo,
+          args,
+          env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+          ...(stdin === undefined ? {} : { stdin }),
+        })
+        .pipe(Effect.map((result) => result.stdout.trim()));
+    const commit = (message: string) =>
+      git(["commit", "--allow-empty", "-m", message]).pipe(
+        Effect.andThen(git(["rev-parse", "HEAD"])),
+      );
+    const merge = (branch: string, from: string, date?: string) =>
+      Effect.gen(function* () {
+        if (from !== branch) yield* git(["checkout", "-q", "-b", branch, from]);
+        const work = from === branch ? "" : yield* commit(`work on ${branch}`);
+        yield* git(["checkout", "-q", "main"]);
+        yield* git(["merge", "--no-ff", "-m", `Merge ${branch}`, branch], date);
+        return { work, merge: yield* git(["rev-parse", "HEAD"]) };
+      });
+    yield* git(["init", "-q", "-b", "main"]);
+    for (const [key, value] of [
+      ["user.name", "Test"],
+      ["user.email", "test@test.com"],
+      ["commit.gpgsign", "false"],
+      ["core.hooksPath", "/dev/null"],
+    ] as const)
+      yield* git(["config", key, value]);
+    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
+    VALUES (${projectId}, 'Repo', ${repo}, '[]', '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z')`;
+    gitProbe.calls = 0;
+    gitProbe.truncate = false;
+    gitProbe.holdLog = null;
+    return { repo, git, commit, merge, base: yield* commit("base") };
+  });
 
 it.effect("flags merges on the target branch that no landing covers", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const evidence = yield* Service.EvidenceService;
-    const { repo, git, commit, merge, base } = yield* scratchRepo;
+    const { repo, git, commit, merge, base } = yield* scratchRepo();
     // Committed before the first landing, so it predates Evidence and never flags.
     yield* git(["checkout", "-q", "-b", "old"]);
     yield* commit("work on old");
@@ -575,7 +588,7 @@ it.effect("flags merges on the target branch that no landing covers", () =>
 it.effect("treats truncated git output as a failure and retries it after the TTL", () =>
   Effect.gen(function* () {
     const evidence = yield* Service.EvidenceService;
-    const { merge, base } = yield* scratchRepo;
+    const { merge, base } = yield* scratchRepo();
     yield* merge("first", "main");
     yield* merge("second", "main");
     yield* evidence.record(
@@ -595,7 +608,7 @@ it.effect("treats truncated git output as a failure and retries it after the TTL
 it.effect("an abbreviated sha that git finds ambiguous covers nothing", () =>
   Effect.gen(function* () {
     const evidence = yield* Service.EvidenceService;
-    const { git, merge, base } = yield* scratchRepo;
+    const { git, merge, base } = yield* scratchRepo();
     // Two branches of 400 commits each share at least one 4-character prefix across them.
     const branch = (name: string) =>
       git(
@@ -622,5 +635,69 @@ it.effect("an abbreviated sha that git finds ambiguous covers nothing", () =>
       (yield* evidence.coverage({}))[0]?.uncovered.map(({ sha }) => sha),
       [rightMerge.merge, leftMerge.merge],
     );
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a check in flight when evidence is recorded never caches its older answer", () =>
+  Effect.gen(function* () {
+    const evidence = yield* Service.EvidenceService;
+    const { repo, merge, base } = yield* scratchRepo();
+    const first = yield* merge("first", "main");
+    const second = yield* merge("second", "main");
+    const cutoff = (commits: ReadonlyArray<string>) =>
+      evidence.record(
+        recordInput("cutoff", [change("a", { commits })], {
+          target: { branch: "main", sha: base },
+          landedAt: "2000-01-01T00:00:00.000Z",
+        }),
+      );
+    yield* cutoff([first.work, second.work]);
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    gitProbe.holdLog = {
+      cwd: repo,
+      until: Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+    };
+    const stale = yield* Effect.forkChild(evidence.coverage({}));
+    yield* Deferred.await(started);
+    yield* cutoff([]);
+    gitProbe.holdLog = null;
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(stale);
+    assert.strictEqual((yield* evidence.coverage({}))[0]?.uncoveredCount, 2);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a slow repository doesn't hold up another project's cached answer", () =>
+  Effect.gen(function* () {
+    const evidence = yield* Service.EvidenceService;
+    const other = ProjectId.make("project-2");
+    const slow = yield* scratchRepo();
+    const fast = yield* scratchRepo(other);
+    yield* slow.merge("slow", "main");
+    yield* fast.merge("fast", "main");
+    for (const [id, projectId, base] of [
+      ["slow-cutoff", project, slow.base],
+      ["fast-cutoff", other, fast.base],
+    ] as const)
+      yield* evidence.record(
+        recordInput(id, [change("a", { commits: [] })], {
+          target: { branch: "main", sha: base },
+          landedAt: "2000-01-01T00:00:00.000Z",
+          projectId,
+        }),
+      );
+    assert.strictEqual((yield* evidence.coverage({ projectId: other }))[0]?.uncoveredCount, 1);
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    gitProbe.holdLog = {
+      cwd: slow.repo,
+      until: Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+    };
+    const held = yield* Effect.forkChild(evidence.coverage({ projectId: project }));
+    yield* Deferred.await(started);
+    assert.strictEqual((yield* evidence.coverage({ projectId: other }))[0]?.uncoveredCount, 1);
+    yield* Deferred.succeed(release, undefined);
+    assert.strictEqual((yield* Fiber.join(held))[0]?.uncoveredCount, 1);
   }).pipe(Effect.provide(testLayer)),
 );

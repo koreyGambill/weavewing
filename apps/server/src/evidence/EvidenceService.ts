@@ -162,7 +162,14 @@ const make = Effect.gen(function* () {
     string,
     { head: string; checkedAt: number; result: EvidenceProjectCoverage | null }
   >();
-  const coverageLock = yield* Semaphore.make(1);
+  // record() bumps this, so a check that read landings before the record never caches its answer.
+  let coverageGeneration = 0;
+  const coverageLocks = new Map<string, Semaphore.Semaphore>();
+  const coverageLock = (projectId: string) => {
+    const lock = coverageLocks.get(projectId) ?? Semaphore.makeUnsafe(1);
+    coverageLocks.set(projectId, lock);
+    return lock;
+  };
 
   const realPath = (target: string) => fileSystem.realPath(target).pipe(Effect.option);
 
@@ -267,6 +274,7 @@ const make = Effect.gen(function* () {
         }),
       )
       .pipe(Effect.mapError(passStorage));
+    coverageGeneration++;
     coverageCache.clear();
     const states = new Map(qa.map((row) => [row.change_id, row.state]));
     const pending = qa.filter((row) => row.state === "pending").length;
@@ -419,6 +427,7 @@ const make = Effect.gen(function* () {
   const projectCoverage = Effect.fn("EvidenceService.projectCoverage")(function* (
     projectId: string,
     rows: ReadonlyArray<CoverageRow>,
+    generation: number,
   ) {
     const newest = rows[0]!;
     const cwd = newest.workspace_root;
@@ -485,11 +494,13 @@ const make = Effect.gen(function* () {
               uncovered: uncovered.slice(0, 20),
             };
     }
-    coverageCache.set(projectId, { head: cachedHead, checkedAt: now, result });
+    if (generation === coverageGeneration)
+      coverageCache.set(projectId, { head: cachedHead, checkedAt: now, result });
     return result;
-  }, coverageLock.withPermits(1));
+  });
 
   const coverage = Effect.fn("EvidenceService.coverage")(function* (input: EvidenceCoverageInput) {
+    const generation = coverageGeneration;
     const rows =
       yield* sql<CoverageRow>`SELECT l.project_id, p.workspace_root, l.thread_id, l.landed_at,
           json_extract(l.record_json, '$.target.branch') AS branch, json_extract(l.record_json, '$.target.sha') AS sha,
@@ -499,7 +510,7 @@ const make = Effect.gen(function* () {
         ORDER BY l.landed_at DESC, l.landing_id DESC`;
     const byProject = Map.groupBy(rows, (row) => row.project_id);
     const results = yield* Effect.forEach(byProject, ([projectId, projectRows]) =>
-      projectCoverage(projectId, projectRows),
+      coverageLock(projectId).withPermits(1)(projectCoverage(projectId, projectRows, generation)),
     );
     return results.filter((result) => result !== null);
   }, Effect.mapError(storage));
