@@ -8451,13 +8451,53 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         });
       }
 
+      const sql = yield* SqlClient.SqlClient;
+      const shared = {
+        id: ProviderSessionId.make(
+          `provider-session:provider-instance:${providerInstanceId}:shared`,
+        ),
+        driver,
+        providerInstanceId,
+        status: "ready" as const,
+        cwd: "/workspace",
+        model: modelSelection.model,
+        capabilities: CodexProviderCapabilitiesV2,
+        createdAt: now,
+        updatedAt: now,
+        lastError: null,
+      };
+      for (const threadId of [settledThreadId, runningThreadId]) {
+        yield* projectionStore.apply({
+          id: EventId.make(`event:recovery-candidates:shared:${threadId}`),
+          type: "provider-session.attached",
+          threadId,
+          driver,
+          providerInstanceId,
+          occurredAt: now,
+          payload: shared,
+        });
+      }
+      // Session-only recovery still applies to a dedicated process.
+      yield* projectionStore.apply({
+        id: EventId.make("event:recovery-candidates:dedicated"),
+        type: "provider-session.attached",
+        threadId: rolledBackThreadId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: { ...shared, id: ProviderSessionId.make("session:dedicated") },
+      });
       const recoveryThreadIds = yield* projectionStore.getRecoveryThreadIds("runtime");
       assert.include(recoveryThreadIds, runningThreadId);
       assert.include(recoveryThreadIds, orphanedThreadId);
       assert.include(recoveryThreadIds, memberThreadId);
       assert.include(recoveryThreadIds, childThreadId);
       assert.notInclude(recoveryThreadIds, settledThreadId);
-      assert.notInclude(recoveryThreadIds, rolledBackThreadId);
+      assert.include(recoveryThreadIds, rolledBackThreadId);
+      yield* sql`UPDATE orchestration_v2_projection_provider_sessions
+        SET status = 'error', payload_json = json_set(payload_json, '$.extensionStatuses', json('[{"status":"running"}]'))
+        WHERE provider_session_id = ${shared.id}`;
+      assert.include(yield* projectionStore.getRecoveryThreadIds("runtime"), settledThreadId);
       const memberRecovery = yield* projectionStore.getRuntimeRecoveryProjection(memberThreadId);
       const childRecovery = yield* projectionStore.getRuntimeRecoveryProjection(childThreadId);
       assert.deepEqual(
@@ -11912,7 +11952,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           .pipe(Effect.withTracer(tracer))).runs.map((run) => run.id),
         [runId, newerRunId],
       );
-      assert.lengthOf(statements, 2);
+      assert.lengthOf(statements, 1);
       // Live-item filters must hit the active partial indexes, not walk the thread's history.
       const sql = yield* SqlClient.SqlClient;
       for (const statement of statements.filter((query) => query.includes("turn_items"))) {
