@@ -211,6 +211,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     ) {
       const workingDirectory =
         operation === "generateThreadTitle" ||
+        operation === "generateMessageSummary" ||
         // Context reviews must reflect only the supplied records, without automatic project loads.
         (operation === "generateMonitoringReview" && maxBudgetUsd !== undefined)
           ? yield* fileSystem

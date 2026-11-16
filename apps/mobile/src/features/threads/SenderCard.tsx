@@ -8,7 +8,11 @@ import { resolveThreadGlyph } from "@t3tools/client-runtime/thread-glyphs";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
-import { useQuietThreadShell, useThreadTitle } from "../../state/entities";
+import {
+  useEnvironmentServerConfig,
+  useQuietThreadShell,
+  useThreadTitle,
+} from "../../state/entities";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 
 export function SenderCard(props: {
@@ -16,6 +20,7 @@ export function SenderCard(props: {
   /** The thread that received the message; decides whether the sender is its child. */
   readonly threadRef: ScopedThreadRef | null;
   readonly text: string;
+  readonly summary?: string | undefined;
   readonly createdAt?: string;
   readonly queued?: boolean;
   readonly reaction?:
@@ -26,7 +31,16 @@ export function SenderCard(props: {
   const sender = "threadId" in props.origin ? props.origin : null;
   const shell = useQuietThreadShell(sender);
   const liveTitle = useThreadTitle(sender)?.trim();
-  const details = senderCardDetails(props.origin, props.text, props.threadRef, shell);
+  const summariesOn =
+    useEnvironmentServerConfig(props.threadRef?.environmentId ?? null)?.settings
+      .incomingCardSummaries !== false;
+  const details = senderCardDetails(
+    props.origin,
+    props.text,
+    props.threadRef,
+    shell,
+    summariesOn ? props.summary : undefined,
+  );
   const glyph = sender ? resolveThreadGlyph(sender.threadId, shell?.glyphSeed) : null;
   const { themeAppearance } = useAppearancePreferences();
   const color = glyph ? (themeAppearance === "dark" ? glyph.color : glyph.lightColor) : undefined;

@@ -126,3 +126,24 @@ export function normalizeCliError(
     cause: error,
   });
 }
+
+export const MAX_MESSAGE_SUMMARY_CHARS = 100;
+
+/** One clean line for an incoming card's collapsed row; empty when the model gave nothing usable. */
+export function sanitizeMessageSummary(raw: string): string {
+  const line = raw
+    .replace(/[*_`#>]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .trim();
+  if (line.length <= MAX_MESSAGE_SUMMARY_CHARS) return line;
+  let summary = "";
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+    line,
+  )) {
+    if (summary.length + segment.length > MAX_MESSAGE_SUMMARY_CHARS - 1) break;
+    summary += segment;
+  }
+  return `${summary.trimEnd()}…`;
+}

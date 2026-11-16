@@ -572,6 +572,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.ghqCloneLayout !== DEFAULT_UNIFIED_SETTINGS.ghqCloneLayout
       ? ["Clone into host folders"]
       : []),
+    ...(settings.incomingCardSummaries !== DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries
+      ? ["Summarize incoming messages"]
+      : []),
     ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
       ? ["Unpin confirmation"]
       : []),
@@ -691,6 +694,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       scratchStartDirectory: DEFAULT_UNIFIED_SETTINGS.scratchStartDirectory,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       ghqCloneLayout: DEFAULT_UNIFIED_SETTINGS.ghqCloneLayout,
+      incomingCardSummaries: DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
@@ -2021,6 +2025,34 @@ export function ThreadsSettingsPanel() {
                 ) : null}
               </div>
             )
+          }
+        />
+        <SettingsRow
+          serverScoped
+          settingKeys={["incomingCardSummaries"]}
+          {...searchableSetting("incoming-card-summaries")}
+          description="Claude Haiku writes one line for each long message from another thread, a task or T3 Code. Off shows the message's first line."
+          resetAction={
+            settings.incomingCardSummaries !== DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries ? (
+              <SettingResetButton
+                label="incoming message summaries"
+                onClick={() =>
+                  updateSettings({
+                    incomingCardSummaries: DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <ScopedSwitch
+              settingKeys={["incomingCardSummaries"]}
+              checked={settings.incomingCardSummaries}
+              onCheckedChange={(checked) =>
+                updateSettings({ incomingCardSummaries: Boolean(checked) })
+              }
+              aria-label="Summarize incoming messages"
+            />
           }
         />
         <AdvancedSettings

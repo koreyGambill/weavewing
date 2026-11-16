@@ -15,12 +15,14 @@ import type { ProviderTextGeneration } from "./textGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildMessageSummaryPrompt,
   buildPrContentPrompt,
   buildReviewGuidePrompt,
   buildThreadTitlePrompt,
 } from "./textGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
+  sanitizeMessageSummary,
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./textGenerationUtils.ts";
@@ -204,6 +206,16 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
   });
 
   return {
+    generateMessageSummary: Effect.fn(`${name}.generateMessageSummary`)(function* (input) {
+      const generated = yield* run({
+        operation: "generateMessageSummary",
+        cwd: input.cwd,
+        modelSelection: input.modelSelection,
+        maxOutputTokens: 200,
+        ...buildMessageSummaryPrompt(input),
+      });
+      return { summary: sanitizeMessageSummary(generated.summary) };
+    }),
     generateMonitoringAssessment: Effect.fn(`${name}.generateMonitoringAssessment`)(
       function (input) {
         return run({

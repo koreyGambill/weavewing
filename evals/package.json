@@ -11,6 +11,7 @@
     "voice-cleanup": "node --env-file-if-exists=../.env voice-cleanup/run.ts",
     "test-signal": "node --env-file-if-exists=../.env test-signal/run.ts",
     "monitoring-review": "node monitoring-review/run.ts",
+    "message-summaries": "node --env-file-if-exists=../.env message-summaries/run.ts",
     "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run --config ../vite.config.ts --dir ."
   },

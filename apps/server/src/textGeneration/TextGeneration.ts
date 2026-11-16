@@ -46,6 +46,7 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
+  | "generateMessageSummary"
   | "generateReviewGuide"
   | "generateTranscriptionPostProcessing";
 
@@ -160,6 +161,22 @@ export const make = Effect.gen(function* () {
     );
   });
   return TextGeneration.of({
+    generateMessageSummary: Effect.fn("TextGeneration.generateMessageSummary")(function (input) {
+      return generate(
+        "generateMessageSummary",
+        input.modelSelection,
+        null,
+        (service, modelSelection) =>
+          service.generateMessageSummary
+            ? service.generateMessageSummary({ ...input, modelSelection })
+            : Effect.fail(
+                new TextGenerationError({
+                  operation: "generateMessageSummary",
+                  detail: `${modelSelection.instanceId} cannot summarize messages.`,
+                }),
+              ),
+      );
+    }),
     generateCommitMessage: Effect.fn("TextGeneration.generateCommitMessage")(function (input) {
       return generate(
         "generateCommitMessage",

@@ -91,6 +91,7 @@ export interface ChatMessage {
   readonly delegatedCompletion?: import("@t3tools/contracts").OrchestrationV2ConversationMessage["delegatedCompletion"];
   readonly linkedSender?: OrchestrationV2LinkedSender;
   readonly idleCompaction?: import("@t3tools/contracts").OrchestrationV2IdleCompaction;
+  readonly summary?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly inputIntent?: OrchestrationV2UserMessageInputIntent | undefined;
