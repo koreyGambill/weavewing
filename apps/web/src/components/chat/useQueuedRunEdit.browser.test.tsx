@@ -81,6 +81,7 @@ vi.mock("../../state/threads", async () => {
               thread: { id: ref.threadId, activeProviderThreadId: null },
               runs,
               messages: [],
+              contextTransfers: [],
               providerThreads: [],
               providerSessions: [
                 {
@@ -112,7 +113,7 @@ const RUN = RunId.make("run-1");
 type HookResult = ReturnType<typeof useQueuedRunEdit>;
 
 function projection(runs: ReadonlyArray<RunStatus>, messages: ReadonlyArray<unknown>) {
-  return { runs, messages } as unknown as ThreadStructure;
+  return { runs, messages, contextTransfers: [] } as unknown as ThreadStructure;
 }
 
 function setRuns(ref: ScopedThreadRef, status: string) {

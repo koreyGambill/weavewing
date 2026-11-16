@@ -88,7 +88,8 @@ it("the new-thread project picker follows the manual sidebar project order", asy
       expect.stringMatching(/render$/),
       expect.stringMatching(/beta$/),
       expect.stringMatching(/alpha$/),
-      "Add project",
+      "Open folder…",
+      "Clone repository…",
     ]);
   });
 });
