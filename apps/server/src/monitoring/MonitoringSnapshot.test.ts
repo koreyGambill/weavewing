@@ -9,6 +9,7 @@ import {
   MessageId,
   type MonitoringReviewOutput,
 } from "@t3tools/contracts";
+import { TestClock } from "effect/testing";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -239,7 +240,7 @@ it.effect("windows a turn-end snapshot to messages after each thread's watermark
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const time = (second: number) => `1970-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
-    for (const id of ["root", "busy"]) {
+    for (const id of ["root", "busy", "blank"]) {
       const payload = JSON.stringify({
         id,
         projectId: "project",
@@ -265,14 +266,20 @@ it.effect("windows a turn-end snapshot to messages after each thread's watermark
       });
       yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},'project',${id},'claude','full-access','default',${at},${at},${payload})`;
     }
-    const message = (threadId: string, id: string, second: number, streaming = false) => {
+    const message = (
+      threadId: string,
+      id: string,
+      second: number,
+      streaming = false,
+      text = `text ${id}`,
+    ) => {
       const payload = JSON.stringify({
         id,
         threadId,
         runId: null,
         nodeId: null,
         role: "assistant",
-        text: `text ${id}`,
+        text,
         attachments: [],
         streaming,
         createdAt: time(second),
@@ -292,6 +299,8 @@ it.effect("windows a turn-end snapshot to messages after each thread's watermark
     ] as const)
       yield* message("root", id, second);
     yield* message("root", "root:5", 5, true);
+    yield* message("blank", "blank:1", 1, false, "");
+    yield* message("blank", "blank:2", 2, false, "");
     for (let second = 1; second <= 45; second++)
       yield* message("busy", `busy:${String(second).padStart(2, "0")}`, second);
     const snapshots = yield* Snapshot.MonitoringSnapshot;
@@ -309,11 +318,22 @@ it.effect("windows a turn-end snapshot to messages after each thread's watermark
       ["root:2 (context)", "root:3a (context)", "root:3b", "root:4"],
     ]);
     assert.deepEqual(windowed.reviewedThrough, { root: mark("root:4", 4) });
-    const caughtUp = yield* snapshots.capture(turnEnd, ThreadId.make("root"), {
+    // Empty finished messages still move the mark, so a run of them cannot stall the window.
+    const blank = yield* snapshots.capture(turnEnd, ThreadId.make("blank"), {
+      blank: mark("blank:0", 0),
+    });
+    assert.deepEqual(blank.reviewedThrough, { blank: mark("blank:2", 2) });
+    // A streaming row untouched for an hour is a crashed turn, and no longer holds the window back.
+    yield* TestClock.adjust("2 hours");
+    const unstuck = yield* snapshots.capture(turnEnd, ThreadId.make("root"), {
       root: mark("root:4", 4),
     });
+    assert.deepEqual(unstuck.reviewedThrough, { root: mark("root:6", 6) });
+    const caughtUp = yield* snapshots.capture(turnEnd, ThreadId.make("root"), {
+      root: mark("root:6", 6),
+    });
     assert.isTrue(caughtUp.threads[0]?.messages.every((m) => m.priorContext));
-    assert.deepEqual(caughtUp.reviewedThrough, { root: mark("root:4", 4) });
+    assert.deepEqual(caughtUp.reviewedThrough, { root: mark("root:6", 6) });
     // Past 40 new messages, the oldest 40 are reviewed and the rest wait for the next window.
     const backlog = yield* snapshots.capture(turnEnd, ThreadId.make("busy"), {
       busy: mark("busy:01", 1),
