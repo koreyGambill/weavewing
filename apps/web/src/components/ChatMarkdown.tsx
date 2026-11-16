@@ -434,6 +434,8 @@ type MarkdownServerConfigFields = ReturnType<typeof markdownServerConfigFields>;
 
 function markdownServerConfigFields(config: ServerConfig | null) {
   return {
+    // Weavewing: consent belongs to the content's environment.
+    autoLoadRemoteMedia: config?.settings.autoLoadRemoteMedia ?? false,
     pullRequestsEnabled: config !== null,
     isMacOS: config?.environment.platform.os === "darwin",
     availableEditors: config?.availableEditors ?? NO_MARKDOWN_EDITORS,
@@ -451,6 +453,7 @@ function markdownServerConfigFieldsEqual(
   next: MarkdownServerConfigFields,
 ): boolean {
   return (
+    previous.autoLoadRemoteMedia === next.autoLoadRemoteMedia &&
     previous.pullRequestsEnabled === next.pullRequestsEnabled &&
     previous.isMacOS === next.isMacOS &&
     previous.revealInFileManagerLabel === next.revealInFileManagerLabel &&
@@ -651,9 +654,13 @@ function useChatMarkdownState({
       },
     );
   };
-  const { pullRequestsEnabled, availableEditors, revealInFileManagerLabel, isMacOS } = useAtomValue(
-    markdownServerConfigFieldsAtom(environmentId),
-  );
+  const {
+    autoLoadRemoteMedia,
+    pullRequestsEnabled,
+    availableEditors,
+    revealInFileManagerLabel,
+    isMacOS,
+  } = useAtomValue(markdownServerConfigFieldsAtom(environmentId));
   const projects = useProjects();
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
@@ -971,6 +978,7 @@ function useChatMarkdownState({
   };
 
   const componentState = {
+    autoLoadRemoteMedia,
     canOperateHost,
     canOperatePreview,
     cwd,
@@ -1468,6 +1476,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   img: function MarkdownImage({ node, title, src, alt, ...props }) {
     const {
+      autoLoadRemoteMedia,
       expandMedia,
       cwd,
       environmentId,
@@ -1519,6 +1528,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       }
       return (
         <RemoteMediaGate
+          autoLoad={autoLoadRemoteMedia}
           uri={imageSource._tag === "Direct" ? imageSource.uri : null}
           kind="audio"
           alt={altText}
@@ -1598,7 +1608,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
         src: mediaSrc,
         ...(reference ? { reference } : {}),
       };
-      const gate = { uri: imageSource.uri, kind, alt: altText, copyMarkdown };
+      const gate = {
+        uri: imageSource.uri,
+        kind,
+        alt: altText,
+        copyMarkdown,
+        autoLoad: autoLoadRemoteMedia,
+      };
       if (kind === "video") {
         return (
           <RemoteMediaGate {...gate}>

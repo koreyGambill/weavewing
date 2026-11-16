@@ -5,18 +5,21 @@ import { useState, type ReactNode } from "react";
 // Rows remount as the timeline virtualizes; a loaded URL stays loaded for the session.
 const loadedRemoteMedia = new Set<string>();
 
-/** Remote media waits for a click, so an agent-written URL cannot send data on render. */
+/** Remote media waits for consent unless the environment allows automatic loading. */
 export function RemoteMediaGate(props: {
   readonly uri: string | null;
   readonly kind: "image" | "video" | "audio";
   readonly alt: string;
   readonly copyMarkdown?: string | undefined;
+  readonly autoLoad?: boolean | undefined;
   readonly children: ReactNode;
 }) {
   const [, setLoaded] = useState(false);
   const { uri } = props;
   const host = uri === null ? null : remoteMediaHost(uri);
-  if (uri === null || host === null || loadedRemoteMedia.has(uri)) return props.children;
+  if (uri === null || host === null || props.autoLoad === true || loadedRemoteMedia.has(uri)) {
+    return props.children;
+  }
   const label = `Load ${props.kind} from ${host}`;
   return (
     <button

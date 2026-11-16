@@ -43,14 +43,36 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
           settings: {
             "storageCleanup.logsAfterDays": { value: 30, locked: true },
             defaultRuntimeMode: { value: "approval-required", locked: false },
+            autoLoadRemoteMedia: { value: false, locked: true },
           },
         }),
       );
       assert.deepEqual(policy.summary, {
         organization: "Example Corp",
         supportUrl: "https://it.example/t3",
-        lockedSettings: ["storageCleanup.logsAfterDays"],
+        lockedSettings: ["storageCleanup.logsAfterDays", "autoLoadRemoteMedia"],
       });
+      for (const value of [false, true]) {
+        const locked = yield* loadFrom(
+          JSON.stringify({
+            schemaVersion: 1,
+            organization: "Example Corp",
+            settings: { autoLoadRemoteMedia: { value, locked: true } },
+          }),
+        );
+        assert.equal(
+          locked.settings.applyLocks(DEFAULT_SERVER_SETTINGS).autoLoadRemoteMedia,
+          value,
+        );
+        assert.deepEqual(
+          locked.settings.vetWrite(
+            DEFAULT_SERVER_SETTINGS,
+            { ...DEFAULT_SERVER_SETTINGS, autoLoadRemoteMedia: !value },
+            { autoLoadRemoteMedia: !value },
+          ),
+          { _tag: "Locked", path: "autoLoadRemoteMedia" },
+        );
+      }
     }),
   );
 

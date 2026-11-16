@@ -55,12 +55,21 @@ vi.mock(import("../state/server"), async (original) => {
       },
     ],
   });
+  const automaticMediaConfig = Atom.make({
+    environment: { platform: { os: "linux" } },
+    availableEditors: [],
+    settings: { providerInstances: {}, autoLoadRemoteMedia: true },
+  });
   return {
     ...actual,
     serverEnvironment: {
       ...actual.serverEnvironment,
       configValueAtom: ((environmentId: string) =>
-        environmentId === "models" ? modelsConfig : noConfig) as never,
+        environmentId === "models"
+          ? modelsConfig
+          : environmentId === "automatic-media"
+            ? automaticMediaConfig
+            : noConfig) as never,
     },
   };
 });
@@ -386,6 +395,29 @@ describe("ChatMarkdown remote media", () => {
     );
     await expect.element(second).toBeInTheDocument();
     expect(images().filter((src) => src.includes("other.example.org"))).toEqual([]);
+    await screen.rerender(
+      <ChatMarkdown
+        cwd="/tmp/project"
+        environmentId={EnvironmentId.make("automatic-media")}
+        text="![automatic](https://automatic.example/image.png)"
+      />,
+    );
+    await vi.waitFor(() =>
+      expect(
+        images().some((src) => src.includes("automatic.example")) ||
+          screen.container.textContent?.includes("Image unavailable · automatic"),
+      ).toBe(true),
+    );
+    await screen.rerender(
+      <ChatMarkdown
+        cwd="/tmp/project"
+        environmentId={EnvironmentId.make("manual-media")}
+        text="![automatic](https://automatic.example/image.png)"
+      />,
+    );
+    await expect
+      .element(screen.getByRole("button", { name: "Load image from automatic.example" }))
+      .toBeInTheDocument();
   });
 });
 

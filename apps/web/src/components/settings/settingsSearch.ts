@@ -772,6 +772,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["composer rich text tiptap bold italic markdown styled wysiwyg"],
   },
   {
+    id: "auto-load-remote-media",
+    title: "Load remote images automatically",
+    to: "/settings/chat",
+    environmentOnly: true,
+    searchTerms: ["privacy chat content external images video audio media click consent"],
+  },
+  {
     id: "send-shortcut",
     title: "Send shortcut",
     to: "/settings/chat",

@@ -43,6 +43,16 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+it("keeps remote media opt-in and accepts changes in both directions", () => {
+  expect(decodeServerSettings({}).autoLoadRemoteMedia).toBe(false);
+  for (const autoLoadRemoteMedia of [true, false]) {
+    expect(decodeServerSettingsPatch({ autoLoadRemoteMedia })).toEqual({ autoLoadRemoteMedia });
+    expect(decodeServerSettings({ autoLoadRemoteMedia }).autoLoadRemoteMedia).toBe(
+      autoLoadRemoteMedia,
+    );
+  }
+});
+
 it("drops theme defaults from a client's settings patch", () => {
   expect(
     decodeClientServerSettingsPatch({
