@@ -584,7 +584,7 @@ async function main() {
     console.log(`Usage: vp run desktop:update-local --install-dir 'C:\\...\\Weavewing' --output-dir /absolute/evidence/run
   --vp-home PATH               Vite Plus home (or VP_HOME), with current/bin/vp
   --patchelf-dir PATH          Directory containing patchelf (otherwise PATH)
-  --linux-monitor-dir PATH        Matching release's resource-monitor directory
+  --linux-monitor-dir PATH        Release resource-monitor directory, with a source-tag file naming that release tag
   --windows-monitor PATH      Matching release's Windows x64 monitor executable
   --wsl-distro NAME           WSL distribution (or WSL_DISTRO_NAME)
   --wsl-home PATH             Installed T3 home (default ~/.t3)
@@ -764,7 +764,11 @@ async function main() {
       () => git("show", `${installed.shellCommit}:apps/server/package.json`),
       version,
     );
-  await git("diff", "--exit-code", `v${version}`, "--", "native/resource-monitor");
+  const monitorTagFile = NodePath.join(values["linux-monitor-dir"]!, "source-tag");
+  const monitorTag = NodeFS.readFileSync(monitorTagFile, "utf8").trim();
+  if (!/^v\d[\w.+-]*$/.test(monitorTag))
+    throw new Error(`${monitorTagFile} must contain the release tag the monitors came from.`);
+  await git("diff", "--exit-code", monitorTag, "--", "native/resource-monitor");
   NodeFS.mkdirSync(output, { mode: 0o700, recursive: true });
   helperReceiptDirectory = NodePath.join(output, "helpers");
   recordHelper(process.pid, "driver");
