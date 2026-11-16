@@ -137,7 +137,7 @@ export function PrivacySettings({
         />
         <SettingsRow
           title="Update checks"
-          description={`Automatic update checks: ${automaticUpdates ? "On" : "Off"}. App and provider versions and model catalogs contact GitHub, npm or provider sites, disclosing version numbers and your IP address. Manual checks contact these sites when you ask.`}
+          description={`Automatic update checks: ${automaticUpdates ? "On" : "Off"}. Version and model catalog checks contact GitHub, npm or vendor sites with your IP address and version numbers. Manual checks contact them when you ask.`}
           control={
             <div className="flex flex-wrap gap-2">
               <Button

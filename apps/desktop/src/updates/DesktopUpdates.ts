@@ -94,6 +94,10 @@ const DesktopUpdateInstallRecord = Schema.fromJsonString(
 const decodeInstallRecord = Schema.decodeUnknownEffect(DesktopUpdateInstallRecord);
 const encodeInstallRecord = Schema.encodeEffect(DesktopUpdateInstallRecord);
 
+const decodeStoredUpdateSettings = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
+);
+const decodeUpdateSettings = Schema.decodeUnknownEffect(ServerSettings);
 const decodeAppUpdateYmlConfig = Schema.decodeUnknownEffect(AppUpdateYmlConfig);
 const decodeUpdateInfo = Schema.decodeUnknownEffect(UpdateInfo);
 const decodeDownloadProgressInfo = Schema.decodeUnknownEffect(DownloadProgressInfo);
@@ -392,13 +396,13 @@ export const make = Effect.gen(function* () {
     const found = yield* managedPolicy.read;
     const entry = found?.document.settings?.enableProviderUpdateChecks;
     const stored = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
+      Effect.flatMap(decodeStoredUpdateSettings),
       Effect.catchIf(
         (error) => error._tag === "SystemError" && error.reason === "NotFound",
         () => Effect.succeed({}),
       ),
     );
-    const settings = yield* Schema.decodeUnknownEffect(ServerSettings)({
+    const settings = yield* decodeUpdateSettings({
       ...(entry ? { enableProviderUpdateChecks: entry.value } : {}),
       ...(typeof stored === "object" && stored !== null ? stored : {}),
       ...(entry?.locked ? { enableProviderUpdateChecks: entry.value } : {}),
