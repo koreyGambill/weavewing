@@ -768,7 +768,8 @@ async function main() {
   const monitorTag = NodeFS.readFileSync(monitorTagFile, "utf8").trim();
   if (!/^v\d[\w.+-]*$/.test(monitorTag))
     throw new Error(`${monitorTagFile} must contain the release tag the monitors came from.`);
-  await git("diff", "--exit-code", monitorTag, "--", "native/resource-monitor");
+  await git("rev-parse", "--verify", "--quiet", `refs/tags/${monitorTag}^{commit}`);
+  await git("diff", "--exit-code", `refs/tags/${monitorTag}`, "--", "native/resource-monitor");
   NodeFS.mkdirSync(output, { mode: 0o700, recursive: true });
   helperReceiptDirectory = NodePath.join(output, "helpers");
   recordHelper(process.pid, "driver");
