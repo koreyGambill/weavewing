@@ -22,7 +22,7 @@ definePipeline({
   help:
     "Wraps scripts/update-local-desktop.ts (vp run desktop:update-local). plan reports the update path " +
     "from the installed receipt and changes nothing. Every other mode drains and backs up the WSL home " +
-    "(check) or replaces the install, so it needs --sw-allow-risk prod.",
+    "(check) or replaces the install, so it needs --allow-risk prod.",
   examples: [
     {
       command:
@@ -31,7 +31,7 @@ definePipeline({
     },
     {
       command:
-        "sparkwing run desktop-install --sw-detached --sw-allow-risk prod -- --worktree $PWD --install-dir 'C:\\Users\\you\\Apps\\Weavewing' --mode auto",
+        "sparkwing run desktop-install --detach --allow-risk prod -- --worktree $PWD --install-dir 'C:\\Users\\you\\Apps\\Weavewing' --mode auto",
       comment: "Install",
     },
   ],
