@@ -206,6 +206,10 @@ import {
   withLateConfigDiscovery,
 } from "./ws.ts";
 
+const decodeConfigEndpoints = Schema.decodeUnknownEffect(
+  Schema.Struct({ directEndpoints: Schema.Unknown }),
+);
+
 const snapshotConfig = (fields: Partial<ServerConfig>) =>
   ({ availableEditors: [], settings: {}, ...fields }) as unknown as ServerConfig;
 
@@ -1095,6 +1099,8 @@ it.effect.each([
       const finishDirect = yield* Deferred.make<void>();
       const directStopped = yield* Deferred.make<void>();
       const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
+      const unaryConfig = yield* Deferred.make<unknown>();
+      const unaryRequestId = RpcMessage.RequestId("config-unary");
       const configRpcServices = Layer.mergeAll(
         layerUnusedConfigRpcServices,
         Layer.mock(ExternalLauncher.ExternalLauncher)({
@@ -1173,8 +1179,10 @@ it.effect.each([
           subscribeChanges: settingsChanges,
         }),
       );
+      const getConfigRpc = WsRpcGroup.requests.get(WS_METHODS.serverGetConfig);
+      assert(getConfigRpc?._tag === WS_METHODS.serverGetConfig);
       const server = yield* RpcServer.makeNoSerialization(
-        RpcGroup.make(WsSubscribeServerConfigRpc),
+        RpcGroup.make(WsSubscribeServerConfigRpc, getConfigRpc),
         {
           ...WS_RPC_SERVER_OPTIONS,
           onFromServer: (response) =>
@@ -1182,7 +1190,11 @@ it.effect.each([
               ? Effect.forEach(response.values, (event) => Queue.offer(responses, event), {
                   discard: true,
                 })
-              : Effect.void,
+              : response._tag === "Exit" &&
+                  response.requestId === unaryRequestId &&
+                  response.exit._tag === "Success"
+                ? Deferred.succeed(unaryConfig, response.exit.value).pipe(Effect.asVoid)
+                : Effect.void,
         },
       ).pipe(
         Effect.provide(
@@ -1205,7 +1217,10 @@ it.effect.each([
               automations: true,
               assistantTextParts: true,
             },
-          ).pipe(Layer.provide(configRpcServices)),
+          ).pipe(
+            Layer.merge(RpcAuthorization.layer([AuthOrchestrationReadScope])),
+            Layer.provide(configRpcServices),
+          ),
         ),
       );
       const requestId = RpcMessage.RequestId("config");
@@ -1291,7 +1306,18 @@ it.effect.each([
       if (direct) {
         yield* Deferred.await(directStarted);
         if (discovery === "direct-pending") {
+          yield* server.write(0, {
+            _tag: "Request",
+            id: unaryRequestId,
+            tag: WS_METHODS.serverGetConfig,
+            payload: {},
+            headers: Headers.empty,
+          });
+          yield* TestClock.adjust("0 seconds");
+          assert.isFalse(yield* Deferred.isDone(unaryConfig));
           yield* Deferred.succeed(finishDirect, undefined);
+          const unary = yield* decodeConfigEndpoints(yield* Deferred.await(unaryConfig));
+          assert.deepEqual(unary.directEndpoints, endpoints);
           const resolved = yield* Queue.take(responses);
           assert.equal(resolved.type, "snapshot");
           if (resolved.type !== "snapshot") return yield* Effect.die("Missing direct endpoints");

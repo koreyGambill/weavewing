@@ -1880,7 +1880,9 @@ export const layerWsRpc = (
           remoteOpenTargets: options.deferNetworkDiscovery
             ? Effect.succeed([])
             : remoteOpenTargets.resolveTargets(),
-          directEndpoints: directEndpoints.resolveAvailable(),
+          directEndpoints: options.deferNetworkDiscovery
+            ? directEndpoints.resolveAvailable()
+            : directEndpoints.resolve(),
         });
 
         return {
