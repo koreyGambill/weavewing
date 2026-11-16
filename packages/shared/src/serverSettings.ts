@@ -139,7 +139,7 @@ export function unusableTextGenerationPurposes(
 ): ReadonlyArray<{ readonly purpose: TextGenerationPurpose; readonly selection: ModelSelection }> {
   const own = followsThreadTextGeneration(settings) ? null : settings.textGenerationModelSelection;
   const selections: ReadonlyArray<
-    readonly [TextGenerationPurpose, ModelSelection | null, ProjectId | null]
+    readonly [TextGenerationPurpose, ModelSelection | null | undefined, ProjectId | null]
   > = [
     ["titles", own, projectId],
     ["summaries", settings.incomingCardSummaries ? own : null, null],
@@ -148,7 +148,9 @@ export function unusableTextGenerationPurposes(
     ["transcripts", settings.speechPostProcessingModelSelection, null],
   ];
   return selections.flatMap(([purpose, selection, scope]) =>
-    selection !== null && isTextGenerationSelectionUnusable(settings, providers, scope, selection)
+    // Older servers omit settings they predate.
+    Predicate.isNotNullish(selection) &&
+    isTextGenerationSelectionUnusable(settings, providers, scope, selection)
       ? [{ purpose, selection }]
       : [],
   );
