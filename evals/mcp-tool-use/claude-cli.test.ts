@@ -171,6 +171,32 @@ it.live("kills the CLI and waits for it to exit when the run is interrupted", ()
   }),
 );
 
+it.live("kills descendants that hold the CLI's output open after it exits", () =>
+  Effect.gen(function* () {
+    const holder = `const fs = require("node:fs"); fs.writeFileSync("pid.tmp", String(process.pid)); fs.renameSync("pid.tmp", "pid"); setInterval(() => {}, 60_000);`;
+    using cli = fakeCli(
+      `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify("HOLDER")}], { stdio: ["ignore", "inherit", "inherit"] }); process.exit(0);`.replace(
+        JSON.stringify("HOLDER"),
+        JSON.stringify(holder),
+      ),
+    );
+    const started = new Promise<void>((resolve) => {
+      const watcher = NodeFS.watch(cli.dir, (_, name) => {
+        if (name !== "pid") return;
+        watcher.close();
+        resolve();
+      });
+    });
+    const fiber = yield* Effect.forkChild(
+      runClaude([], { cwd: cli.dir, stdin: "", command: cli.command }),
+    );
+    yield* Effect.promise(() => started);
+    const pid = Number(NodeFS.readFileSync(NodePath.join(cli.dir, "pid"), "utf8"));
+    yield* Fiber.interrupt(fiber);
+    assert.isFalse(alive(pid));
+  }),
+);
+
 it.live("fails a simulator call whose CLI run errored instead of answering with empty output", () =>
   Effect.gen(function* () {
     using cli = fakeCli(

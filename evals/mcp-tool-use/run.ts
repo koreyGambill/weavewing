@@ -2509,7 +2509,7 @@ export const cliInvocation = (
 };
 
 /** `runSample` on the Claude CLI: tools answer through stub MCP servers backed by this runner. */
-const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
+export const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
   testCase: McpToolUseCase,
   config: Config,
   base: Base,
@@ -2538,6 +2538,7 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
   const answered = new Map<string, Block>();
   const progress: Array<Call> = [];
   const abort = stopper();
+  let broken: { readonly error: unknown } | undefined;
   const answer =
     (harnessName: (name: string) => string): StubCall =>
     (name, args, id) => {
@@ -2549,13 +2550,21 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
       };
       // Calls are answered one at a time, as the API transport does.
       const answering = oneAtATime.withPermits(1)(answerToolCall(sample, config, use));
-      return runAnswer(answering).then((result) => {
-        answered.set(id, result);
-        progress.push(recordedCall(0, use));
-        const run = { calls: progress, text: "", stopReason: "" };
-        if (failedEarly(testCase.expect, run, pastedText(testCase))) abort.stop();
-        return { text: valueText(result.content), isError: result.is_error === true };
-      });
+      return runAnswer(answering).then(
+        (result) => {
+          answered.set(id, result);
+          progress.push(recordedCall(0, use));
+          const run = { calls: progress, text: "", stopReason: "" };
+          if (failedEarly(testCase.expect, run, pastedText(testCase))) abort.stop();
+          return { text: valueText(result.content), isError: result.is_error === true };
+        },
+        // The runner failed, not the agent: the sample cannot be graded.
+        (error: unknown) => {
+          broken ??= { error };
+          abort.stop();
+          throw error;
+        },
+      );
     };
   const upFront = new Set(base.nativeTools.map((tool) => tool.name));
   const stub = (tool: ApiTool) => ({
@@ -2590,6 +2599,7 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
   addUsage(spent.usage, reported.usage);
   if (reported.costUsd === undefined) spent.cliCost.unreported++;
   else spent.cliCost.usd += reported.costUsd;
+  if (broken !== undefined) return yield* Effect.die(broken.error);
   if (result === undefined && !run.stopped) {
     return yield* Effect.die(
       new Error(`claude exited ${run.code} without a result: ${run.stderr}`),

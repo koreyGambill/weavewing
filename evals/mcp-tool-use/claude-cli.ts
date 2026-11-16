@@ -203,10 +203,16 @@ export const runClaude = (
     let out = "";
     let err = "";
     let stopped = false;
+    let closed = false;
+    // Descendants can hold the pipes open after the CLI exits, so the group dies until close.
     const kill = () => {
-      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+      if (child.pid === undefined || closed) return;
       stopped = true;
-      process.kill(-child.pid, "SIGKILL");
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
     };
     options.stop?.addEventListener("abort", kill);
     child.stdout.on("data", (chunk) => (out += chunk));
@@ -216,6 +222,7 @@ export const runClaude = (
       resume(Effect.fail(new ClaudeCliError({ detail: error.message }))),
     );
     child.on("close", (code) => {
+      closed = true;
       options.stop?.removeEventListener("abort", kill);
       resume(Effect.succeed({ lines: jsonLines(out), code, stopped, stderr: err.slice(-2000) }));
     });
