@@ -210,7 +210,7 @@ export const resultUsage = (result: Json | undefined) => {
 
 // Claude Code always attaches the login's email as context; the simulated machine is not theirs.
 const NO_ACCOUNT =
-  "Ignore any account details or email address in the context. They are not part of the machine; use user@example.com wherever an identity is needed.";
+  "Ignore any account details or email address in the context. They are not part of the machine; wherever a name or email is needed, use 'Example User <user@example.com>'.";
 
 /** One structured-output call with no tools, as the shell simulator makes. */
 export const claudeStructured = async (body: {
