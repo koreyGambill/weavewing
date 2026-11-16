@@ -6,6 +6,8 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 type Block = { readonly type: string; readonly [key: string]: unknown };
 type Message = { readonly role: "user" | "assistant"; readonly content: ReadonlyArray<Block> };
@@ -87,41 +89,45 @@ export const serveStubs = async (
   return { mcpConfig: JSON.stringify({ mcpServers }), close: () => http.close() };
 };
 
-const projectsDir = (cwd: string) =>
-  NodePath.join(
-    process.env.CLAUDE_CONFIG_DIR ?? NodePath.join(NodeOS.homedir(), ".claude"),
-    "projects",
-    cwd.replace(/[^a-zA-Z0-9]/g, "-"),
-  );
+// Every run shares one empty cwd, so Claude Code keeps a single project folder for the eval.
+const cwdPath = () => NodePath.join(NodeOS.tmpdir(), "mcp-tool-use-cwd");
+export const cliCwd = () => {
+  NodeFS.mkdirSync(cwdPath(), { recursive: true });
+  return cwdPath();
+};
 
 /**
- * A scratch cwd and, when the case has earlier turns, a session file holding them so `--resume`
- * replays real tool blocks. `cleanup` removes both, plus the CLI's own folder for that cwd.
+ * `--resume` flags for a session holding the case's earlier turns, so they replay as real tool
+ * blocks. The file lives in a scratch directory the scope removes.
  */
-export const prepareSession = (history: ReadonlyArray<Message>, model: string) => {
-  const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcp-tool-use-"));
-  const dir = projectsDir(cwd);
-  const cleanup = () => {
-    NodeFS.rmSync(cwd, { recursive: true, force: true });
-    NodeFS.rmSync(dir, { recursive: true, force: true });
-  };
-  if (history.length === 0) return { cwd, cleanup };
+export const cliSession = Effect.fn("claudeCli.session")(function* (
+  history: ReadonlyArray<Message>,
+  model: string,
+) {
+  if (history.length === 0) return [];
+  const dir = yield* Effect.acquireRelease(
+    Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcp-tool-use-"))),
+    (scratch) => Effect.sync(() => NodeFS.rmSync(scratch, { recursive: true, force: true })),
+  );
   const sessionId = NodeCrypto.randomUUID();
-  let parentUuid: string | null = null;
-  const lines = history.map(({ role, content }) => {
-    const uuid = NodeCrypto.randomUUID();
-    const message =
-      role === "user"
-        ? { role, content }
-        : { role, content, id: `msg_${uuid}`, type: "message", model, stop_reason: "tool_use" };
-    const line = { type: role, message, uuid, parentUuid, sessionId, cwd, isSidechain: false };
-    parentUuid = uuid;
-    return JSON.stringify({ ...line, userType: "external", timestamp: "2026-01-01T00:00:00.000Z" });
+  const file = NodePath.join(dir, `${sessionId}.jsonl`);
+  yield* Effect.sync(() => {
+    let parentUuid: string | null = null;
+    const lines = history.map(({ role, content }) => {
+      const uuid = NodeCrypto.randomUUID();
+      const message =
+        role === "user"
+          ? { role, content }
+          : { role, content, id: `msg_${uuid}`, type: "message", model, stop_reason: "tool_use" };
+      const line = { type: role, message, uuid, parentUuid, sessionId, isSidechain: false };
+      parentUuid = uuid;
+      const timestamp = "2026-01-01T00:00:00.000Z";
+      return JSON.stringify({ ...line, cwd: cwdPath(), userType: "external", timestamp });
+    });
+    NodeFS.writeFileSync(file, `${lines.join("\n")}\n`);
   });
-  NodeFS.mkdirSync(dir, { recursive: true });
-  NodeFS.writeFileSync(NodePath.join(dir, `${sessionId}.jsonl`), `${lines.join("\n")}\n`);
-  return { cwd, cleanup, sessionId };
-};
+  return ["--resume", file, "--fork-session"];
+});
 
 // No CLAUDE.md, settings, hooks, skills, or saved session from this machine reach the run.
 export const ISOLATION = [
@@ -132,51 +138,118 @@ export const ISOLATION = [
   "--no-session-persistence",
 ];
 
-/** Stops a run early, by request or after `ms`. */
-export const stopper = (ms: number) => {
+// `claude -p` prefers an API key or endpoint in its environment over the login.
+const CREDENTIALS = /^(?:ANTHROPIC_|CLAUDE_CODE_USE_)|^AWS_BEARER_TOKEN_BEDROCK$/;
+const loginEnv = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([name]) => !CREDENTIALS.test(name)));
+
+export class ClaudeCliError extends Schema.TaggedError<ClaudeCliError>()("ClaudeCliError", {
+  detail: Schema.String,
+}) {
+  override get message(): string {
+    return `claude -p failed: ${this.detail}`;
+  }
+}
+
+/** Lets a caller end a run early, for a sample that already failed for good. */
+export const stopper = () => {
   const controller = new AbortController();
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(ms)]);
-  return { signal, stop: () => controller.abort(), requested: () => controller.signal.aborted };
+  return {
+    signal: controller.signal,
+    stop: () => controller.abort(),
+    requested: () => controller.signal.aborted,
+  };
 };
 
-/** Runs `claude -p` and returns its stdout JSON lines. An abort ends it early without failing. */
-export const runClaude = (
-  args: ReadonlyArray<string>,
-  options: { readonly cwd: string; readonly stdin: string; readonly signal?: AbortSignal },
-) =>
-  new Promise<Array<Json>>((resolve, reject) => {
-    const child = NodeChildProcess.spawn("claude", ["-p", ...args], {
-      cwd: options.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (chunk) => (out += chunk));
-    child.stderr.on("data", (chunk) => (err += chunk));
-    child.on("error", (error) => {
-      if (error.name !== "AbortError") reject(error);
-    });
-    child.on("close", (code) => {
-      const lines = out.split("\n").flatMap((line) => {
-        try {
-          const value: unknown = JSON.parse(line);
-          return isRecord(value) ? [value] : [];
-        } catch {
-          return [];
-        }
-      });
-      if (code === 0 || options.signal?.aborted || lines.some((line) => line.type === "result")) {
-        resolve(lines);
-      } else reject(new Error(`claude exited ${code}: ${err.slice(-2000)}`));
-    });
-    child.stdin.end(options.stdin);
+const jsonLines = (out: string) =>
+  out.split("\n").flatMap((line) => {
+    try {
+      const value: unknown = JSON.parse(line);
+      return isRecord(value) ? [value] : [];
+    } catch {
+      return [];
+    }
   });
 
-/** Assistant text and tool uses from stream-json events. A step is one assistant message. */
+/**
+ * Runs `claude -p` in its own process group. A stop, the 15-minute timeout, or interrupting the
+ * effect kills the group, and the effect ends only once the CLI has exited.
+ */
+export const runClaude = (
+  args: ReadonlyArray<string>,
+  options: {
+    readonly cwd: string;
+    readonly stdin: string;
+    readonly command?: string;
+    readonly stop?: AbortSignal;
+  },
+) =>
+  Effect.callback<
+    {
+      readonly lines: ReadonlyArray<Json>;
+      readonly code: number | null;
+      readonly stopped: boolean;
+      readonly stderr: string;
+    },
+    ClaudeCliError
+  >((resume) => {
+    const child = NodeChildProcess.spawn(options.command ?? "claude", ["-p", ...args], {
+      cwd: options.cwd,
+      env: loginEnv(),
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const exited = new Promise<void>((done) => child.once("close", () => done()));
+    let out = "";
+    let err = "";
+    let stopped = false;
+    const kill = () => {
+      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+      stopped = true;
+      process.kill(-child.pid, "SIGKILL");
+    };
+    options.stop?.addEventListener("abort", kill);
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.stderr.on("data", (chunk) => (err += chunk));
+    child.stdin.on("error", () => undefined);
+    child.on("error", (error) =>
+      resume(Effect.fail(new ClaudeCliError({ detail: error.message }))),
+    );
+    child.on("close", (code) => {
+      options.stop?.removeEventListener("abort", kill);
+      resume(Effect.succeed({ lines: jsonLines(out), code, stopped, stderr: err.slice(-2000) }));
+    });
+    child.stdin.end(options.stdin);
+    return Effect.promise(() => {
+      kill();
+      return exited;
+    });
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: "15 minutes",
+      orElse: () => Effect.fail(new ClaudeCliError({ detail: "timed out after 15 minutes" })),
+    }),
+  );
+
+const tokens = (usage: unknown) => {
+  const record = isRecord(usage) ? usage : {};
+  const count = (key: string) => (typeof record[key] === "number" ? record[key] : 0);
+  return {
+    input_tokens: count("input_tokens"),
+    output_tokens: count("output_tokens"),
+    cache_creation_input_tokens: count("cache_creation_input_tokens"),
+    cache_read_input_tokens: count("cache_read_input_tokens"),
+  };
+};
+
+/**
+ * Assistant text and tool uses from stream-json events. A step is one assistant message. `usage`
+ * sums each message's usage once; its output counts are a lower bound.
+ */
 export const streamTurns = (events: ReadonlyArray<Json>) => {
   const texts: Array<string> = [];
   const uses: Array<{ readonly step: number; readonly use: Block }> = [];
+  const perMessage = new Map<unknown, ReturnType<typeof tokens>>();
   let step = -1;
   let messageId: unknown;
   for (const event of events) {
@@ -184,64 +257,69 @@ export const streamTurns = (events: ReadonlyArray<Json>) => {
     if (!isRecord(message) || !Array.isArray(message.content)) continue;
     if (step === -1 || message.id !== messageId) step++;
     messageId = message.id;
+    if (message.usage !== undefined) perMessage.set(message.id, tokens(message.usage));
     for (const block of message.content as ReadonlyArray<Block>) {
       if (block.type === "text" && typeof block.text === "string") texts.push(block.text);
       if (block.type === "tool_use") uses.push({ step, use: block });
     }
   }
+  const usage = tokens({});
+  for (const counts of perMessage.values()) {
+    for (const key of Object.keys(usage) as Array<keyof typeof usage>) usage[key] += counts[key];
+  }
   const result = events.find((event) => event.type === "result");
-  return { texts, uses, result };
+  return { texts, uses, result, usage };
 };
 
-/** Token usage and CLI-reported cost from a `result` event. */
-export const resultUsage = (result: Json | undefined) => {
-  const usage = isRecord(result?.usage) ? result.usage : {};
-  const count = (key: string) => (typeof usage[key] === "number" ? usage[key] : 0);
-  return {
-    usage: {
-      input_tokens: count("input_tokens"),
-      output_tokens: count("output_tokens"),
-      cache_creation_input_tokens: count("cache_creation_input_tokens"),
-      cache_read_input_tokens: count("cache_read_input_tokens"),
-    },
-    costUsd: typeof result?.total_cost_usd === "number" ? result.total_cost_usd : 0,
-  };
-};
+/** Token usage and the cost the CLI reported in a `result` event, if it reported one. */
+export const resultUsage = (result: Json) => ({
+  usage: tokens(result.usage),
+  costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : undefined,
+});
 
 // Claude Code always attaches the login's email as context; the simulated machine is not theirs.
 const NO_ACCOUNT =
   "Ignore any account details or email address in the context. They are not part of the machine; wherever a name or email is needed, use 'Example User <user@example.com>'.";
 
-/** One structured-output call with no tools, as the shell simulator makes. */
-export const claudeStructured = async (body: {
-  readonly model: string;
-  readonly system: string;
-  readonly prompt: string;
-  readonly schema: unknown;
-}) => {
-  const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcp-tool-use-shell-"));
-  try {
-    const args = [
-      "--model",
-      body.model,
-      "--effort",
-      "low",
-      "--output-format",
-      "json",
-      "--tools",
-      "",
-      "--system-prompt",
-      `${body.system}\n\n${NO_ACCOUNT}`,
-      "--json-schema",
-      JSON.stringify(body.schema),
-      ...ISOLATION,
-    ];
-    const [result] = await runClaude(args, { cwd, stdin: body.prompt });
-    const output = result?.structured_output ?? result?.result ?? "";
-    const text = typeof output === "string" ? output : JSON.stringify(output);
-    return { content: [{ type: "text", text }], ...resultUsage(result) };
-  } finally {
-    NodeFS.rmSync(cwd, { recursive: true, force: true });
-    NodeFS.rmSync(projectsDir(cwd), { recursive: true, force: true });
+/** One structured-output call with no tools, as the shell simulator makes. Fails unless it answered. */
+export const claudeStructured = Effect.fn("claudeCli.structured")(function* (
+  body: {
+    readonly model: string;
+    readonly system: string;
+    readonly prompt: string;
+    readonly schema: unknown;
+  },
+  command?: string,
+) {
+  const run = yield* runClaude(structuredArgs(body.model, body.system, body.schema), {
+    cwd: cliCwd(),
+    stdin: body.prompt,
+    ...(command === undefined ? {} : { command }),
+  });
+  const result = run.lines.find((line) => line.type === "result");
+  if (run.code !== 0 || result?.subtype !== "success" || result.structured_output === undefined) {
+    const status = valueOf(result?.subtype) ?? `exit ${run.code}`;
+    return yield* new ClaudeCliError({ detail: `shell simulator ${status}: ${run.stderr}` });
   }
-};
+  const text = jsonText(result.structured_output);
+  return { content: [{ type: "text", text }], ...resultUsage(result) };
+});
+
+const jsonText = (value: unknown) => JSON.stringify(value);
+const structuredArgs = (model: string, system: string, schema: unknown) => [
+  "--model",
+  model,
+  "--effort",
+  "low",
+  "--output-format",
+  "json",
+  "--tools",
+  "",
+  "--system-prompt",
+  `${system}\n\n${NO_ACCOUNT}`,
+  "--json-schema",
+  jsonText(schema),
+  ...ISOLATION,
+];
+
+const valueOf = (value: unknown) => (typeof value === "string" ? value : undefined);

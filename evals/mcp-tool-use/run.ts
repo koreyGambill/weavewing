@@ -37,6 +37,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as FiberSet from "effect/FiberSet";
 import * as Semaphore from "effect/Semaphore";
 import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
@@ -81,8 +82,9 @@ import { changeRequestsCreatedBy } from "../../apps/server/src/orchestration-v2/
 import { type BackgroundWait, makeBackgroundWait } from "./backgroundWait.ts";
 import {
   claudeStructured,
+  cliCwd,
+  cliSession,
   ISOLATION,
-  prepareSession,
   resultUsage,
   stopper,
   runClaude,
@@ -917,8 +919,10 @@ type Sample = {
   /** Calls so far per mocked tool, for mocks that answer in sequence. */
   readonly mockCalls: Map<string, number>;
   /** USD the Claude CLI reported for this sample, on `--transport claude-cli`. */
-  readonly cliCost?: { usd: number };
+  readonly cliCost?: CliCost;
 };
+/** USD the Claude CLI reported, and runs that stopped before reporting any. */
+type CliCost = { usd: number; unreported: number };
 
 const SHELL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "WebFetch"]);
 
@@ -1687,20 +1691,18 @@ const simulate = Effect.fn("evaluateMcpToolUse.simulate")(function* (
     const prompt = body.messages.flatMap((message) => message.content.map((block) => block.text));
     const response =
       config.transport === "claude-cli" && isPricedModel(config.shellModel)
-        ? yield* Effect.tryPromise({
-            try: () =>
-              claudeStructured({
-                ...body,
-                prompt: prompt.join("\n\n"),
-                schema: SHELL_REPLY_SCHEMA,
-              }),
-            catch: (cause) => new EvalToolCallError({ tool: "shell simulator", cause }),
-          })
+        ? yield* claudeStructured({
+            ...body,
+            prompt: prompt.join("\n\n"),
+            schema: SHELL_REPLY_SCHEMA,
+          }).pipe(
+            Effect.mapError((cause) => new EvalToolCallError({ tool: "shell simulator", cause })),
+          )
         : isPricedModel(config.shellModel)
           ? yield* callModel(config.apiKey, body, config.apiKey ? undefined : config.proxy)
           : yield* callCodex(config, shellResponsesRequest(body));
     addUsage(sample.shellUsage, response.usage);
-    if ("costUsd" in response && sample.cliCost) sample.cliCost.usd += response.costUsd;
+    if ("costUsd" in response && sample.cliCost) sample.cliCost.usd += response.costUsd ?? 0;
     output = shellOutput(response.content);
   }
   if (call.tool === "Bash" && output === "") output = "(Bash completed with no output)";
@@ -2511,7 +2513,7 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
   testCase: McpToolUseCase,
   config: Config,
   base: Base,
-  spent: { readonly usage: Usage; readonly shellUsage: Usage; readonly cliCost: { usd: number } },
+  spent: { readonly usage: Usage; readonly shellUsage: Usage; readonly cliCost: CliCost },
 ) {
   const sample = {
     ...makeSample(testCase, base),
@@ -2520,22 +2522,22 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
   };
   yield* withDevices(sample);
   yield* withBackgroundWait(sample);
-  const runPromise = Effect.runPromiseWith(yield* Effect.context<HttpClient.HttpClient>());
   const { history, input, args } = cliInvocation(sample, config);
   // Claude Code enforces deferred loading itself, so every tool counts as loaded here.
   sample.tools.push(...base.deferred.filter((tool) => !hasTool(sample.tools, tool.name)));
-  const session = yield* Effect.acquireRelease(
-    Effect.sync(() => prepareSession(history, config.model)),
-    (prepared) => Effect.sync(prepared.cleanup),
-  );
-  // Claude Code reports the scratch cwd; the simulator and grader know the case's.
+  const resume = yield* cliSession(history, config.model);
+  // Answers run in this scope, so releasing it interrupts them and waits for them.
+  const runAnswer = yield* FiberSet.runtimePromise(
+    yield* FiberSet.make<Block, unknown>(),
+  )<HttpClient.HttpClient>();
+  const oneAtATime = yield* Semaphore.make(1);
+  // Claude Code reports its own cwd; the simulator and grader know the case's.
+  const cwd = cliCwd();
   const unscratch = <A>(value: A): A =>
-    JSON.parse(JSON.stringify(value).replaceAll(session.cwd, base.environment.cwd));
+    JSON.parse(JSON.stringify(value).replaceAll(cwd, base.environment.cwd));
   const answered = new Map<string, Block>();
   const progress: Array<Call> = [];
-  const abort = stopper(15 * 60_000);
-  let queue: Promise<unknown> = Promise.resolve();
-  // Calls are answered one at a time, as the API transport does.
+  const abort = stopper();
   const answer =
     (harnessName: (name: string) => string): StubCall =>
     (name, args, id) => {
@@ -2545,11 +2547,9 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
         name: harnessName(name),
         input: unscratch(args),
       };
-      const done = queue
-        .catch(() => undefined)
-        .then(() => runPromise(answerToolCall(sample, config, use)));
-      queue = done;
-      return done.then((result) => {
+      // Calls are answered one at a time, as the API transport does.
+      const answering = oneAtATime.withPermits(1)(answerToolCall(sample, config, use));
+      return runAnswer(answering).then((result) => {
         answered.set(id, result);
         progress.push(recordedCall(0, use));
         const run = { calls: progress, text: "", stopReason: "" };
@@ -2578,22 +2578,22 @@ const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
     ),
     (served) => Effect.sync(served.close),
   );
-  const resume = session.sessionId ? ["--resume", session.sessionId, "--fork-session"] : [];
-  const events = yield* Effect.tryPromise({
-    try: () =>
-      runClaude([...args, "--mcp-config", stubs.mcpConfig, ...resume], {
-        cwd: session.cwd,
-        stdin: input,
-        signal: abort.signal,
-      }),
-    catch: (cause) => new EvalToolCallError({ tool: "claude", cause }),
-  });
-  const { texts, uses, result } = streamTurns(events);
-  const reported = resultUsage(result);
+  const run = yield* runClaude([...args, "--mcp-config", stubs.mcpConfig, ...resume], {
+    cwd,
+    stdin: input,
+    stop: abort.signal,
+  }).pipe(Effect.mapError((cause) => new EvalToolCallError({ tool: "claude", cause })));
+  const events = run.lines;
+  const { texts, uses, result, usage } = streamTurns(events);
+  // A stopped run has no result, so its tokens come from its messages and its cost is unknown.
+  const reported = result === undefined ? { usage, costUsd: undefined } : resultUsage(result);
   addUsage(spent.usage, reported.usage);
-  spent.cliCost.usd += reported.costUsd;
-  if (result === undefined && !abort.requested()) {
-    return yield* Effect.die(new Error("claude ended without a result."));
+  if (reported.costUsd === undefined) spent.cliCost.unreported++;
+  else spent.cliCost.usd += reported.costUsd;
+  if (result === undefined && !run.stopped) {
+    return yield* Effect.die(
+      new Error(`claude exited ${run.code} without a result: ${run.stderr}`),
+    );
   }
   // Calls that ran: the ones the stubs answered, plus Claude Code's own ToolSearch.
   const calls = uses.flatMap(({ step, use }) => {
@@ -2632,7 +2632,7 @@ type ResultRow = Pick<McpToolUseCase, "id" | "kind" | "pattern"> & {
   readonly usage: Usage;
   readonly shellUsage: Usage;
   /** USD the Claude CLI reported, on `--transport claude-cli`. */
-  readonly cliCost?: { readonly usd: number };
+  readonly cliCost?: CliCost;
 };
 
 /** The share of samples that passed. Samples that errored are left out: NaN if all did. */
@@ -2678,6 +2678,7 @@ export const summarize = (
   );
   const cost = agent.cost + shell.cost;
   const cliCost = rows.reduce((sum, row) => sum + (row.cliCost?.usd ?? 0), 0);
+  const unreported = rows.reduce((sum, row) => sum + (row.cliCost?.unreported ?? 0), 0);
   const table = (title: string, key: (row: ResultRow) => string, compare = false) => [
     `## ${title}\n`,
     compare ? "| Group | Pass | Baseline | Delta |" : "| Group | Pass |",
@@ -2714,7 +2715,11 @@ export const summarize = (
       : `- Estimated cost $${cost.toFixed(2)}, $${(cost / rows.length).toFixed(3)} per sample.`,
     `- Agent tokens: ${agent.tokens}${codex ? "." : ` ($${agent.cost.toFixed(2)}).`}`,
     `- Shell simulator (${options.shellModel}) tokens: ${shell.tokens} (API-price estimate $${shell.cost.toFixed(2)}).`,
-    ...(cliCost > 0 ? [`- Claude CLI reported $${cliCost.toFixed(2)} (local login).`] : []),
+    ...(rows.some((row) => row.cliCost)
+      ? [
+          `- Claude CLI reported $${cliCost.toFixed(2)} on the local login${unreported > 0 ? `; ${unreported} stopped runs reported no cost, so the total is incomplete and their tokens are a lower bound` : ""}.`,
+        ]
+      : []),
     ...(codex
       ? [
           "- Code-mode tools use case mocks and a simulated machine. Native subagent prompts and asynchronous notifications are approximate.",
@@ -3014,7 +3019,11 @@ const main = Effect.gen(function* () {
   const runOne = (testCase: McpToolUseCase) => {
     const { id, kind, pattern } = testCase;
     const identity = { id, kind, pattern, role: testCase.setup.role };
-    const usage = { usage: emptyUsage(), shellUsage: emptyUsage(), cliCost: { usd: 0 } };
+    const usage = {
+      usage: emptyUsage(),
+      shellUsage: emptyUsage(),
+      cliCost: { usd: 0, unreported: 0 },
+    };
     const privateValues = [config.apiKey, ...Object.values(config.proxy?.headers ?? {})]
       .flatMap((value) => [value, value.replace(/^Bearer /i, "")])
       .filter(Boolean);

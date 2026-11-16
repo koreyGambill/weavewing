@@ -1,6 +1,46 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 
-import { mcpReply, type StubCall, streamTurns } from "./claude-cli.ts";
+import {
+  claudeStructured,
+  cliSession,
+  mcpReply,
+  runClaude,
+  type StubCall,
+  streamTurns,
+} from "./claude-cli.ts";
+
+/** A stand-in `claude` binary running `body`, in a fresh directory removed by `using`. */
+const fakeCli = (body: string) => {
+  const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fake-claude-"));
+  const command = NodePath.join(dir, "claude");
+  NodeFS.writeFileSync(
+    command,
+    `#!${process.execPath}\nconst fs = require("node:fs");\n${body}\n`,
+    {
+      mode: 0o755,
+    },
+  );
+  return { dir, command, [Symbol.dispose]: () => NodeFS.rmSync(dir, { recursive: true }) };
+};
+const putEnv = (name: string, value: string | undefined) => {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+};
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const tools = [
   { name: "Bash", description: "Runs a command.", input_schema: { type: "object" } },
@@ -77,4 +117,106 @@ it("numbers steps by assistant message, so parallel tool uses share one step", (
   );
   assert.deepStrictEqual(turns.texts, ["Checking.", "Done."]);
   assert.strictEqual(turns.result, result);
+});
+
+it.live("gives the CLI no API key or endpoint, so it bills the login", () => {
+  const inherited = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+  ];
+  return Effect.gen(function* () {
+    using cli = fakeCli(
+      `console.log(JSON.stringify({ type: "result", subtype: "success", env: Object.keys(process.env) }));`,
+    );
+    for (const name of inherited) putEnv(name, "synthetic");
+    const run = yield* runClaude([], { cwd: cli.dir, stdin: "", command: cli.command });
+    const env = run.lines[0]?.env as ReadonlyArray<string>;
+    assert.deepStrictEqual(
+      inherited.filter((name) => env.includes(name)),
+      [],
+    );
+    assert.include(env, "PATH");
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        for (const name of inherited) putEnv(name, undefined);
+      }),
+    ),
+  );
+});
+
+it.live("kills the CLI and waits for it to exit when the run is interrupted", () =>
+  Effect.gen(function* () {
+    using cli = fakeCli(
+      `fs.writeFileSync("pid.tmp", String(process.pid)); fs.renameSync("pid.tmp", "pid"); setInterval(() => {}, 60_000);`,
+    );
+    const started = new Promise<void>((resolve) => {
+      const watcher = NodeFS.watch(cli.dir, (_, name) => {
+        if (name !== "pid") return;
+        watcher.close();
+        resolve();
+      });
+    });
+    const fiber = yield* Effect.forkChild(
+      runClaude([], { cwd: cli.dir, stdin: "", command: cli.command }),
+    );
+    yield* Effect.promise(() => started);
+    const pid = Number(NodeFS.readFileSync(NodePath.join(cli.dir, "pid"), "utf8"));
+    assert.isTrue(alive(pid));
+    yield* Fiber.interrupt(fiber);
+    assert.isFalse(alive(pid));
+  }),
+);
+
+it.live("fails a simulator call whose CLI run errored instead of answering with empty output", () =>
+  Effect.gen(function* () {
+    using cli = fakeCli(
+      `console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true })); process.exit(1);`,
+    );
+    const body = { model: "claude-haiku-5-5", system: "Play a shell.", prompt: "ls", schema: {} };
+    const exit = yield* Effect.exit(claudeStructured(body, cli.command));
+    assert.isTrue(Exit.isFailure(exit));
+  }),
+);
+
+it.live("removes the scratch directory when writing the session fails", () => {
+  const tmp = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cli-session-"));
+  const previous = process.env.TMPDIR;
+  process.env.TMPDIR = tmp;
+  const history = [{ role: "user" as const, content: [{ type: "text", text: 1n }] }];
+  return Effect.gen(function* () {
+    const exit = yield* Effect.exit(Effect.scoped(cliSession(history, "claude-sonnet-5-5")));
+    assert.isTrue(Exit.isFailure(exit));
+    assert.deepStrictEqual(NodeFS.readdirSync(tmp), []);
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        putEnv("TMPDIR", previous);
+        NodeFS.rmSync(tmp, { recursive: true });
+      }),
+    ),
+  );
+});
+
+it("counts the tokens of a run that ended before its result, once per message", () => {
+  const usage = (output: number) => ({
+    input_tokens: 2,
+    output_tokens: output,
+    cache_creation_input_tokens: 100,
+    cache_read_input_tokens: 1000,
+  });
+  const turns = streamTurns([
+    { type: "assistant", message: { id: "msg_a", content: [], usage: usage(5) } },
+    { type: "assistant", message: { id: "msg_a", content: [], usage: usage(5) } },
+    { type: "assistant", message: { id: "msg_b", content: [], usage: usage(7) } },
+  ]);
+  assert.deepStrictEqual(turns.usage, {
+    input_tokens: 4,
+    output_tokens: 12,
+    cache_creation_input_tokens: 200,
+    cache_read_input_tokens: 2000,
+  });
 });
