@@ -144,3 +144,64 @@ it.effect("cleanup follows the thread it was dictated in, not the environment de
     assert.strictEqual((yield* clean())?.instanceId, "codex");
   }),
 );
+
+it.effect("threadless cleanup uses the draft's project; an unresolvable thread fails instead", () =>
+  Effect.gen(function* () {
+    const used = yield* Ref.make<ModelSelection | null>(null);
+    const projectId = ProjectId.make("project:draft");
+    const layer = SpeechPostProcessing.layer.pipe(
+      Layer.provide(
+        Layer.succeed(TextGeneration.TextGeneration, {
+          generateTranscriptionPostProcessing: (input: { modelSelection: ModelSelection }) =>
+            Ref.set(used, input.modelSelection).pipe(Effect.as({ transcription: "Hello." })),
+        } as unknown as TextGeneration.TextGeneration["Service"]),
+      ),
+      Layer.provide(
+        Layer.succeed(ProviderRegistry.ProviderRegistry, {
+          getProviders: Effect.succeed([]),
+        } as unknown as ProviderRegistry.ProviderRegistry["Service"]),
+      ),
+      Layer.provide(
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadShell: (requested) =>
+            requested === ThreadId.make("thread:broken")
+              ? Effect.die("storage unavailable")
+              : Effect.succeed(null),
+        }),
+      ),
+      Layer.provide(
+        ServerSettings.layerTest({
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-6-astra",
+          },
+          projectSettingsOverrides: { [projectId]: { defaultModelSelection: claudeThread } },
+        }),
+      ),
+      Layer.provide(NodeServices.layer),
+    );
+    const request = (extra: object) =>
+      Effect.gen(function* () {
+        yield* Ref.set(used, null);
+        const postProcessing = yield* SpeechPostProcessing.SpeechPostProcessing;
+        return yield* postProcessing
+          .process({
+            options: {
+              speechCustomWords: [],
+              speechPostProcessingPrompt: { mode: "default", customInstructions: "" },
+            },
+            transcript: "um hello",
+            draft: { text: "", selection: { start: 0, end: 0 } },
+            ...extra,
+          } as never)
+          .pipe(Effect.exit);
+      }).pipe(Effect.provide(layer));
+    assert.isTrue((yield* request({ projectId }))._tag === "Success");
+    assert.strictEqual((yield* Ref.get(used))?.instanceId, "claudeAgent");
+    for (const threadId of ["thread:gone", "thread:broken"]) {
+      const exit = yield* request({ threadId: ThreadId.make(threadId), projectId });
+      assert.isTrue(exit._tag === "Failure");
+      assert.isNull(yield* Ref.get(used));
+    }
+  }),
+);

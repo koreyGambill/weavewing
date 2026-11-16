@@ -3359,6 +3359,41 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect("refuses to generate commit text for a thread that cannot be found", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nproject\n");
+      let generated = 0;
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          },
+        },
+        textGeneration: {
+          generateCommitMessage: () => {
+            generated += 1;
+            return Effect.succeed({ subject: "Should not run", body: "" });
+          },
+        },
+      });
+
+      const failure = yield* Effect.flip(
+        manager.runStackedAction({
+          actionId: "test-missing-thread",
+          cwd: repoDir,
+          action: "commit",
+          threadId: ThreadId.make("thread:deleted"),
+        }),
+      );
+
+      expect(failure.message).toMatch(/thread/i);
+      expect(generated).toBe(0);
+    }),
+  );
+
   it.effect("prefers a V2-native thread's project settings over an explicit project", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

@@ -35,7 +35,9 @@ Each request sends the API what the task needs, such as the staged diff for a co
 
 Turning a generator off or removing it sends its work back to the environment's text generation
 model. If the model you chose is unavailable, the task fails and says so; it never runs on a
-different provider.
+different provider. Titles, commit and pull request text, review guides and voice cleanup report
+that failure. Incoming message summaries do not yet: a failed summary leaves the card on its
+first line and is only recorded in the server log.
 
 ## What text generators can't do
 

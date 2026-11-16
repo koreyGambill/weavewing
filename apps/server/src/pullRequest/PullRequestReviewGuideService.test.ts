@@ -503,6 +503,36 @@ it.layer(layerBase, { excludeTestServices: true })("PullRequestReviewGuideServic
     }),
   );
 
+  it.effect("refuses a guide requested from a thread that cannot be found", () =>
+    Effect.gen(function* () {
+      const repositories = yield* makeRepositories;
+      const generated = yield* Ref.make(0);
+      const context = yield* Layer.build(
+        makeLayer({
+          ...repositories,
+          stored: yield* Deferred.make<void>(),
+          serverSettings: {
+            defaultModelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-6-astra",
+            },
+          },
+          generate: () =>
+            Ref.update(generated, (count) => count + 1).pipe(Effect.as({ stops: [] })),
+        }),
+      );
+      const service = Context.get(
+        context,
+        PullRequestReviewGuideService.PullRequestReviewGuideService,
+      );
+      const failure = yield* Effect.flip(
+        service.generate({ ...reference, threadId: ThreadId.make("thread:deleted") }),
+      );
+      assert.match(failure.message, /thread/i);
+      assert.strictEqual(yield* Ref.get(generated), 0);
+    }),
+  );
+
   it.effect("measures only the PR change using the renamed verified remote's fetch URL", () =>
     Effect.gen(function* () {
       const repositories = yield* makeRepositories;

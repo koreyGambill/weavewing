@@ -310,6 +310,7 @@ export function useEnvironmentSpeechInput(input: HookInput) {
           preferences.cleanup,
           () => hasAudioConsent() && preferences.cleanupGrant === readCleanupGrant(),
           current.threadId,
+          current.projectId,
         ),
         options,
       ).then((result) => result.text);

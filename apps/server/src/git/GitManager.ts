@@ -755,10 +755,31 @@ export const make = Effect.gen(function* () {
     readonly threadId?: ThreadId | undefined;
     readonly projectId?: ProjectId | undefined;
   }) {
+    // A supplied thread that cannot be read fails the action's text generation: guessing a model
+    // could send the diff to a different provider.
     const thread =
       input.threadId === undefined
         ? null
-        : yield* threads.getThreadShell(input.threadId).pipe(Effect.orElseSucceed(() => null));
+        : yield* threads.getThreadShell(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GitManagerError({
+                  operation: "resolveThreadModel",
+                  cwd: input.cwd,
+                  detail: "Could not read the thread this action was started from.",
+                  cause,
+                }),
+            ),
+            Effect.filterOrFail(
+              (shell): shell is NonNullable<typeof shell> => shell !== null,
+              () =>
+                new GitManagerError({
+                  operation: "resolveThreadModel",
+                  cwd: input.cwd,
+                  detail: "The thread this action was started from no longer exists.",
+                }),
+            ),
+          );
     const settings = yield* serverSettingsService.getSettings;
     if (!hasProjectSettingsOverrides(settings))
       return {
@@ -3581,14 +3602,15 @@ export const make = Effect.gen(function* () {
                   })),
                 ),
           ),
-          Effect.mapError(
-            (cause) =>
-              new GitManagerError({
-                operation: "runStackedAction",
-                cwd: input.cwd,
-                detail: "Failed to get server settings.",
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            Schema.is(GitManagerError)(cause)
+              ? cause
+              : new GitManagerError({
+                  operation: "runStackedAction",
+                  cwd: input.cwd,
+                  detail: "Failed to get server settings.",
+                  cause,
+                }),
           ),
         );
 

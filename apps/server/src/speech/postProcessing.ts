@@ -40,14 +40,24 @@ const make = Effect.gen(function* () {
       function* (input) {
         if (input.transcript.trim().length === 0) return { text: input.transcript };
         const environmentSettings = yield* settingsService.getSettings;
+        // A supplied thread that cannot be read fails the cleanup: guessing a model could send the
+        // text to a different provider.
         const thread =
           input.threadId === undefined
             ? null
-            : yield* threads.getThreadShell(input.threadId).pipe(Effect.orElseSucceed(() => null));
+            : yield* threads.getThreadShell(input.threadId).pipe(
+                Effect.filterOrFail(
+                  (shell): shell is NonNullable<typeof shell> => shell !== null,
+                  () =>
+                    new SpeechOperationError({
+                      operation: "post-processing",
+                      cause: "The thread being dictated into no longer exists.",
+                    }),
+                ),
+              );
         const settings = settingsForThread(
-          thread === null
-            ? environmentSettings
-            : resolveProjectSettings(environmentSettings, thread.projectId).settings,
+          resolveProjectSettings(environmentSettings, thread?.projectId ?? input.projectId ?? null)
+            .settings,
           thread?.modelSelection,
         );
         const providers = yield* providerRegistry.getProviders;

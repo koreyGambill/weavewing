@@ -13,6 +13,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   PullRequestOperationError,
   type PullRequestDetail,
+  type ModelSelection,
   type PullRequestGenerateReviewGuideInput,
   type PullRequestRef,
   type PullRequestReviewGuide,
@@ -368,7 +369,8 @@ const make = Effect.gen(function* () {
   });
 
   const write = Effect.fn("PullRequestReviewGuideService.write")(function* (
-    input: PullRequestGenerateReviewGuideInput,
+    input: PullRequestRef,
+    threadModel: ModelSelection | undefined,
     key: ThreadPullRequestKey,
     workspaceRoot: string,
     locator: RepositoryIdentity["locator"],
@@ -386,13 +388,9 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    const thread =
-      input.threadId === undefined
-        ? null
-        : yield* threads.getThreadShell(input.threadId).pipe(Effect.orElseSucceed(() => null));
     const projectSettings = settingsForThread(
       resolveProjectSettings(settings, input.projectId).settings,
-      thread?.modelSelection,
+      threadModel,
     );
     const modelSelection = ServerSettings.resolveReviewGuideModelSelection(
       projectSettings,
@@ -465,6 +463,29 @@ const make = Effect.gen(function* () {
         detail: "Review guides are off. Turn them on in Settings → Source Control.",
       });
     }
+    // A supplied thread that cannot be read fails the request: guessing a model could send the
+    // pull request to a different provider.
+    const thread =
+      input.threadId === undefined
+        ? null
+        : yield* threads.getThreadShell(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PullRequestOperationError({
+                  operation: "generateReviewGuide",
+                  detail: "Could not read the thread this guide was requested from.",
+                  cause,
+                }),
+            ),
+            Effect.filterOrFail(
+              (shell): shell is NonNullable<typeof shell> => shell !== null,
+              () =>
+                new PullRequestOperationError({
+                  operation: "generateReviewGuide",
+                  detail: "The thread this guide was requested from no longer exists.",
+                }),
+            ),
+          );
     const { key, workspaceRoot, identity } = yield* keyFor(input);
     const locator = yield* requireOwnRepository(key, identity);
     const runKey = keyString(key);
@@ -517,7 +538,17 @@ const make = Effect.gen(function* () {
         return updated;
       });
     const runId = `${runCounter++}`;
-    yield* write(input, key, workspaceRoot, locator, detail, currentHeadSha, runId, owns).pipe(
+    yield* write(
+      input,
+      thread?.modelSelection,
+      key,
+      workspaceRoot,
+      locator,
+      detail,
+      currentHeadSha,
+      runId,
+      owns,
+    ).pipe(
       Effect.andThen(finish(null)),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
