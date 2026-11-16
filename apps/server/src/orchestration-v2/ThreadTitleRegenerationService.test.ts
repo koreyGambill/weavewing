@@ -507,7 +507,7 @@ describe("ThreadTitleRegenerationService", () => {
         if (followUp) {
           yield* threads.dispatch({
             type: "message.dispatch",
-          origin: { kind: "user" as const },
+            origin: { kind: "user" as const },
             commandId: requestId,
             threadId: forkThreadId,
             messageId,

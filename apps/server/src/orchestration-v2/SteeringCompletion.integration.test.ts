@@ -2466,6 +2466,7 @@ it.effect("steers a promoted scheduled delivery with the thread's current select
         // Bound scheduled tasks send like ScheduledTaskService: no model of their own.
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make("scheduled"),
           threadId,
           messageId: MessageId.make("message:scheduled"),
@@ -2534,6 +2535,7 @@ const scheduledDeliveryAfterClaudeSwitch = (name: string, text: string) =>
       const threadId = yield* harness.startFirstTurn;
       yield* orchestrator.dispatch({
         type: "message.dispatch",
+        origin: { kind: "user" as const },
         commandId: CommandId.make("scheduled"),
         threadId,
         messageId: MessageId.make("message:scheduled"),

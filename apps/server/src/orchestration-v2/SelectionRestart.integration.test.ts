@@ -534,7 +534,7 @@ it.live.each(["pooled", "exclusive"] as const)(
           );
         yield* orchestrator.dispatch({
           type: "message.dispatch",
-        origin: { kind: "user" as const },
+          origin: { kind: "user" as const },
           createdBy: "user",
           creationSource: "web",
           commandId: CommandId.make("command:workspace-handoff:first"),
@@ -570,7 +570,7 @@ it.live.each(["pooled", "exclusive"] as const)(
         const bound = yield* orchestrator.dispatch({
           type: "thread.metadata.update",
           commandId: CommandId.make("command:workspace-handoff:rebind"),
-        workspaceChange: "agent-handoff",
+          workspaceChange: "agent-handoff",
           threadId,
           branch: "repro-handoff",
           worktreePath: handoffCwd,

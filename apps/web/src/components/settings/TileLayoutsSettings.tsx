@@ -112,26 +112,27 @@ export function TileLayoutsRow() {
   const { connectedEnvironments } = useSettingsScope();
   const runPlan = useRunScopedPlan();
   // Each environment's own defaults and project overrides lose the id in the same write.
-  const deleteLayout = (layoutId: string) => {
-    const serverWrites = connectedEnvironments.flatMap((environment) =>
-      environment.serverConfig
-        ? [
-            {
-              environmentId: environment.environmentId,
-              label: environment.label,
-              previous: environment.serverConfig.settings,
-              patch: tileLayoutDeletePatch(environment.serverConfig.settings, layoutId),
-            },
-          ]
-        : [],
-    );
-    runPlan({
-      clientPatch: {},
-      hasClientWrite: false,
-      serverWrites,
-      unavailableReason: serverWrites.length ? null : "Connect an environment to delete layouts.",
+  const deleteLayout = (layoutId: string) =>
+    runPlan(connectedEnvironments, (current) => {
+      const serverWrites = current.flatMap((environment) =>
+        environment.serverConfig
+          ? [
+              {
+                environmentId: environment.environmentId,
+                label: environment.label,
+                previous: environment.serverConfig.settings,
+                patch: tileLayoutDeletePatch(environment.serverConfig.settings, layoutId),
+              },
+            ]
+          : [],
+      );
+      return {
+        clientPatch: {},
+        hasClientWrite: false,
+        serverWrites,
+        unavailableReason: serverWrites.length ? null : "Connect an environment to delete layouts.",
+      };
     });
-  };
   const finishRename = (save: boolean) => {
     if (!renaming) return;
     const name = renaming.name.trim();

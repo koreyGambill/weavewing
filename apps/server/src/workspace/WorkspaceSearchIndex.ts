@@ -39,7 +39,6 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
-import { scoreSubsequenceMatch } from "@t3tools/shared/searchRanking";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { type IgnoreDecision, type IgnoreFile, parseIgnoreFile } from "./IgnorePatterns.ts";

@@ -66,7 +66,6 @@ import {
   latestProviderTurnForAttempt,
   parseGoalCommand,
   orchestrationV2RunWorkStartedAt,
-  ProjectId,
   ProviderInstanceId,
   ProviderInteractionMode,
   isRuntimeModeAbove,
@@ -17293,7 +17292,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             { messageRoles: ["user"] },
           )
           .pipe(mapDispatchError(command));
-        const followUpRun = delegatedTaskResultRun(child.runs, input.taskId);
+        const followUpRun = delegatedTaskResultRun(delegatedTaskRuns(child, input.taskId));
         const unsettled =
           followUpRun === undefined
             ? child.thread.forkedFrom?.type === "node" &&
@@ -17317,7 +17316,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 { messageRoles: ["user"] },
               )
               .pipe(mapDispatchError(command));
-            const followUpRun = delegatedTaskResultRun(child.runs, input.taskId);
+            const followUpRun = delegatedTaskResultRun(delegatedTaskRuns(child, input.taskId));
             const monitorRunIds = new Set(
               child.messages
                 .filter((message) => message.notification?.source.kind === "monitor")

@@ -210,7 +210,7 @@ export function delegatedTaskRuns(
     projection.runs.filter((run) => run.delegatedTaskId === taskId).map((run) => run.id),
   );
   // A run merged into another continues as that run.
-  for (const id of [...owned]) {
+  for (const id of owned) {
     const target = byId.get(id)?.mergedIntoRunId;
     if (target !== undefined && byId.has(target)) owned.add(target);
   }

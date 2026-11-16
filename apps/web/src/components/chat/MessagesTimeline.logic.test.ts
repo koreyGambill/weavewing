@@ -39,7 +39,7 @@ import {
   type MessagesTimelineRow,
   workEntryDisplayLabel,
 } from "./MessagesTimeline.logic";
-import { workEntryIconName } from "./TimelineWorkEntryRow.logic";
+import { workEntryIconPresentation } from "@t3tools/client-runtime/work-log/presentation";
 
 describe("resolveAssistantMessageCopyState", () => {
   it("copies the rendered representation of Codex directives", () => {
@@ -557,7 +557,9 @@ describe("deriveMessagesTimelineRows", () => {
       expect(notice.entry.sourceActivityKind).toBe(
         level === "info" ? undefined : "runtime.warning",
       );
-      expect(workEntryIconName(notice.entry)).toBe(level === "info" ? "zap" : "circle-alert");
+      expect(workEntryIconPresentation(notice.entry).iconName).toBe(
+        level === "info" ? "zap" : "warning",
+      );
       expect(workEntryDisplayLabel(notice.entry, undefined)).toBe(message);
     },
   );

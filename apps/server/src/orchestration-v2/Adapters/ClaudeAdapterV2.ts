@@ -2122,7 +2122,6 @@ export function claudeSystemPromptAppend(input: {
   ].join("\n\n");
 }
 
-
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly modelCatalog?: ClaudeModelCatalog;

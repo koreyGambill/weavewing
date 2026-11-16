@@ -1359,13 +1359,13 @@ function TaskForm({
                 accessibilityLabel="Run even when unchanged"
                 value={draft.schedule.intervalOptions?.alwaysRun === true}
                 onValueChange={(alwaysRun) =>
-                  setDraft({
-                    ...draft,
+                  setDraft((current) => ({
+                    ...current,
                     schedule: {
-                      ...draft.schedule,
-                      intervalOptions: { ...draft.schedule.intervalOptions, alwaysRun },
+                      ...current.schedule,
+                      intervalOptions: { ...current.schedule.intervalOptions, alwaysRun },
                     },
-                  })
+                  }))
                 }
               />
             </View>

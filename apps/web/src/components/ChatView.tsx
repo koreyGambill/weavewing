@@ -3532,11 +3532,7 @@ export default function ChatView(props: ChatViewProps) {
           </div>
 
           <div
-            {...workspaceAreaProps(
-              "composer",
-              2,
-              showProviderSubagentBar ? "Subagent" : undefined,
-            )}
+            {...workspaceAreaProps("composer", 2, showProviderSubagentBar ? "Subagent" : undefined)}
             ref={(overlay: HTMLDivElement | null) => {
               setComposerOverlayElement(overlay);
               attachFollowComposerOverlay(overlay);

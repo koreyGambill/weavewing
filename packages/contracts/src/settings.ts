@@ -2,7 +2,6 @@ import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } 
 import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
-  AuthAccessWriteScope,
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   type AuthEnvironmentScope,

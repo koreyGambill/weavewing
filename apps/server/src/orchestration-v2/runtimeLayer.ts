@@ -479,7 +479,6 @@ export const layerProduction = Layer.mergeAll(
     Layer.provide(layerManagedProjectFoldersProvided),
     Layer.provide(layerDevelopmentEnvironmentDiscoveryProvided),
   ),
-  layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerScheduledTaskProvided,

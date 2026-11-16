@@ -166,7 +166,7 @@ const makeLaptopWith = (
       Layer.provideMerge(Layer.merge(layerOrchestrator, ServerSettings.layerTest())),
     );
     const layerHere = McpHttpServer.layerOrchestratorToolkit.pipe(
-    Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
+      Layer.provide(Layer.merge(ThreadWorkspace.layerTest, ThreadMarks.layerTest)),
 
       Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
       Layer.provideMerge(PeerLinkRequests.layer),

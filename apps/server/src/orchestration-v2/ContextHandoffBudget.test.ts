@@ -160,7 +160,8 @@ describe("handoff budget", () => {
       "File change: src/a.ts, src/b.ts, src/new.ts",
     );
     assert.equal(
-      historicalMessage({ ...base, type: "file_change", fileName: "src/a.ts", changes: [] })?.text,
+      historicalMessage({ ...base, type: "file_change", fileName: "src/a.ts", changes: [] }, null)
+        ?.text,
       "File change: src/a.ts",
     );
     assert.isNull(

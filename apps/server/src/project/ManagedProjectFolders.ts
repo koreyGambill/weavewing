@@ -260,51 +260,49 @@ const make = Effect.gen(function* () {
 
   const legacyScratchRoot = scratchFolderRoot(config.baseDir, path);
   // A shared start folder must not inherit a parent repository's status or checkpoints.
-  const resolveScratchRoot = Effect.fn("ManagedProjectFolders.resolveScratchRoot")(
-    function* (setting: string) {
-      const configured = path.resolve(expandHomePath(setting, home));
-      const root = (yield* fileSystem.exists(configured))
-        ? yield* fileSystem.realPath(configured)
-        : legacyScratchRoot;
-      const realHome = yield* fileSystem
-        .realPath(home)
-        .pipe(Effect.orElseSucceed(() => path.resolve(home)));
-      const realXwing = yield* fileSystem
-        .realPath(path.join(realHome, ".xwing"))
-        .pipe(Effect.orElseSucceed(() => path.join(realHome, ".xwing")));
-      const dataDirectory = yield* fileSystem
-        .realPath(config.baseDir)
-        .pipe(Effect.orElseSucceed(() => path.resolve(config.baseDir)));
-      const dataRelative = path.relative(root, dataDirectory);
-      if (
-        root === realHome ||
-        root === realXwing ||
-        dataRelative === "" ||
-        (!dataRelative.startsWith(`..${path.sep}`) &&
-          dataRelative !== ".." &&
-          !path.isAbsolute(dataRelative))
-      )
-        return Result.fail(new ScratchUnavailableError({ baseDir: config.baseDir }));
-      return yield* gitWorkflow
-        .repositoryRoot(root === legacyScratchRoot ? config.baseDir : root)
-        .pipe(
-          Effect.catchIf(isGitMissing, () => Effect.succeed(null)),
-          Effect.flatMap(
-            (repositoryRoot): Effect.Effect<Result.Result<string, ScratchUnavailableError>> => {
-              if (repositoryRoot === null) return Effect.succeed(Result.succeed(root));
-              const unavailable = new ScratchUnavailableError({
-                baseDir: config.baseDir,
-                repositoryRoot,
-                ...(root === legacyScratchRoot ? {} : { scratchRoot: root }),
-              });
-              return Effect.logWarning(unavailable.message).pipe(
-                Effect.as(Result.fail(unavailable)),
-              );
-            },
-          ),
-        );
-    },
-  );
+  const resolveScratchRoot = Effect.fn("ManagedProjectFolders.resolveScratchRoot")(function* (
+    setting: string,
+  ) {
+    const configured = path.resolve(expandHomePath(setting, home));
+    const root = (yield* fileSystem.exists(configured))
+      ? yield* fileSystem.realPath(configured)
+      : legacyScratchRoot;
+    const realHome = yield* fileSystem
+      .realPath(home)
+      .pipe(Effect.orElseSucceed(() => path.resolve(home)));
+    const realXwing = yield* fileSystem
+      .realPath(path.join(realHome, ".xwing"))
+      .pipe(Effect.orElseSucceed(() => path.join(realHome, ".xwing")));
+    const dataDirectory = yield* fileSystem
+      .realPath(config.baseDir)
+      .pipe(Effect.orElseSucceed(() => path.resolve(config.baseDir)));
+    const dataRelative = path.relative(root, dataDirectory);
+    if (
+      root === realHome ||
+      root === realXwing ||
+      dataRelative === "" ||
+      (!dataRelative.startsWith(`..${path.sep}`) &&
+        dataRelative !== ".." &&
+        !path.isAbsolute(dataRelative))
+    )
+      return Result.fail(new ScratchUnavailableError({ baseDir: config.baseDir }));
+    return yield* gitWorkflow
+      .repositoryRoot(root === legacyScratchRoot ? config.baseDir : root)
+      .pipe(
+        Effect.catchIf(isGitMissing, () => Effect.succeed(null)),
+        Effect.flatMap(
+          (repositoryRoot): Effect.Effect<Result.Result<string, ScratchUnavailableError>> => {
+            if (repositoryRoot === null) return Effect.succeed(Result.succeed(root));
+            const unavailable = new ScratchUnavailableError({
+              baseDir: config.baseDir,
+              repositoryRoot,
+              ...(root === legacyScratchRoot ? {} : { scratchRoot: root }),
+            });
+            return Effect.logWarning(unavailable.message).pipe(Effect.as(Result.fail(unavailable)));
+          },
+        ),
+      );
+  });
   const scratchRoots = yield* Cache.makeWith(resolveScratchRoot, {
     capacity: 1,
     // A failed check (say, a git timeout on a busy machine) is not an answer; ask again next time.

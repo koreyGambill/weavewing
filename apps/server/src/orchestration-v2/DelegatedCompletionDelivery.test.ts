@@ -4222,6 +4222,7 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
         const followupMessageId = MessageId.make("message:followup-grandchild-send");
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           createdBy: "agent",
           creationSource: "mcp",
           commandId: CommandId.make("command:followup-grandchild-send"),
@@ -4463,6 +4464,7 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           const followupMessageId = MessageId.make(`message:followup-command-send-${ending}`);
           yield* orchestrator.dispatch({
             type: "message.dispatch",
+            origin: { kind: "user" as const },
             createdBy: "agent",
             creationSource: "mcp",
             commandId: CommandId.make(`command:followup-command-send-${ending}`),
@@ -4585,6 +4587,7 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           const wakeMessageId = MessageId.make(`message:followup-command-wake-${ending}`);
           yield* orchestrator.dispatch({
             type: "message.dispatch",
+            origin: { kind: "user" as const },
             createdBy: "agent",
             creationSource: "server",
             commandId: CommandId.make(`command:followup-command-wake-${ending}`),

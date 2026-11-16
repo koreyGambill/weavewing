@@ -9145,6 +9145,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${threadId}:active`),
           threadId,
           messageId: MessageId.make(`${threadId}:active`),
@@ -9159,6 +9160,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         // Bound scheduled tasks send like ScheduledTaskService: no model of their own.
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${threadId}:scheduled`),
           threadId,
           messageId: scheduledMessageId,
@@ -9232,6 +9234,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${threadId}:active`),
           threadId,
           messageId: MessageId.make(`${threadId}:active`),
@@ -9246,6 +9249,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         // A task that pins a model names it on the delivery, as a fresh-thread launch seeds it.
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${threadId}:scheduled`),
           threadId,
           messageId: scheduledMessageId,
@@ -9323,6 +9327,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${threadId}:active`),
           threadId,
           messageId: MessageId.make(`${threadId}:active`),
@@ -9336,6 +9341,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         const active = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
         yield* orchestrator.dispatch({
           type: "message.dispatch",
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${threadId}:scheduled`),
           threadId,
           messageId: scheduledMessageId,

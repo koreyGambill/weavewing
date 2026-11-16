@@ -319,6 +319,7 @@ it.effect.each([
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const error = yield* Effect.flip(
       threads.sendToThread({
+        origin: { kind: "user" as const },
         projectId,
         threadId,
         commandId: CommandId.make("command:thread-management:worktree-gone"),
