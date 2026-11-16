@@ -17,7 +17,7 @@ export function RemoteMediaSettingsRow() {
   return (
     <SettingsRow
       {...searchableSetting("auto-load-remote-media")}
-      className="wrap-anywhere"
+      className="wrap-anywhere @max-[20rem]/settings-row:[&>div>div>div:first-child]:flex-wrap @max-[20rem]/settings-row:[&_h3]:w-full"
       serverScoped
       settingKeys={["autoLoadRemoteMedia"]}
       description="Images from web addresses in chat load without a click; the site sees your IP and the full address."
