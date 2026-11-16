@@ -1,4 +1,5 @@
 import { decodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+import { remoteMediaHost } from "@t3tools/shared/weavewingOutbound";
 import {
   collectComposerContextReferences,
   formatComposerContextHref,
@@ -11,7 +12,14 @@ import {
   markdownWithInlineFileLinks,
   markdownWithTableBreaks,
 } from "../lib/markdownDocument";
-import { isValidElement, useMemo, useState, type ReactElement, type ReactNode } from "react";
+import {
+  isValidElement,
+  useCallback,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { Platform, Share, StyleSheet, useWindowDimensions, View } from "react-native";
 import {
   EnrichedMarkdownText,
@@ -23,7 +31,10 @@ import {
 import { codeFenceRenderer } from "./codeBlockMarkdown";
 import { HighlightedCodeBlock } from "./HighlightedCodeBlock";
 import { MermaidCodeBlock } from "./MermaidCodeBlock";
-import type { SelectableMarkdownTextProps } from "./SelectableMarkdownText.types";
+import type {
+  MarkdownImageSourceResolver,
+  SelectableMarkdownTextProps,
+} from "./SelectableMarkdownText.types";
 
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { Menu } from "../components/ui/Menu";
@@ -377,7 +388,13 @@ export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
         themeAppearance,
       ),
   };
-  const resolveNativeImageSource = useRetryingImageSource(resolveImageSource);
+  // Weavewing: an empty uri keeps a remote image's placeholder and skips its request.
+  const resolveLocalImageSource = useCallback<MarkdownImageSourceResolver>(
+    (image) =>
+      remoteMediaHost(image.href) === null ? (resolveImageSource?.(image) ?? null) : { uri: "" },
+    [resolveImageSource],
+  );
+  const resolveNativeImageSource = useRetryingImageSource(resolveLocalImageSource);
   const renderMarkdown = (openAndroidMenu?: () => void) => {
     const onLinkLongPress =
       Platform.OS === "android" && props.fileContextMenu

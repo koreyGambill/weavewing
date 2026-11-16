@@ -1,5 +1,6 @@
 import { MessageReactionChip } from "./MessageReactionChip";
 import { SenderCard } from "./SenderCard";
+import { RemoteMediaGate } from "./RemoteMediaGate";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -3013,6 +3014,17 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     },
   };
   const renderMarkdownImage: MarkdownImageRenderer = (image) => {
+    const source = classifyMarkdownImageSource(image.href, props.workspaceRoot ?? null);
+    const content = renderMarkdownImageContent(image);
+    return source._tag === "Direct" ? (
+      <RemoteMediaGate key={image.href} uri={source.uri}>
+        {content}
+      </RemoteMediaGate>
+    ) : (
+      content
+    );
+  };
+  const renderMarkdownImageContent: MarkdownImageRenderer = (image) => {
     const media = resolveMarkdownMediaPreview(image.href, {
       environmentId: props.environmentId,
       threadId: props.threadId,
