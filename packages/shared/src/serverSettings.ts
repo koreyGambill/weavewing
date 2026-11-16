@@ -63,61 +63,6 @@ export function isModelSelectionProviderEnabled(
   return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
-const TEXT_GENERATION_FALLBACK_DRIVERS = [
-  "codex",
-  "claudeAgent",
-  "cursor",
-  "grok",
-  "muse",
-  "pi",
-  "opencode",
-  "antigravity",
-].map((driver) => ProviderDriverKind.make(driver));
-
-/** Configured instances come after every default instance, so they only win when no default qualifies. */
-export function fallbackTextGenerationModelSelection(
-  providerInstances: ServerSettings["providerInstances"],
-  isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind, model: string) => boolean,
-  options?: { readonly defaultModelSelection?: ModelSelection | null },
-): ModelSelection | null {
-  const threadDefault = options?.defaultModelSelection;
-  // The thread default's custom model wins on its instance; the driver default still serves when that model is unusable.
-  const selectionsFor = (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => {
-    const config = providerInstances[instanceId]?.config as { customModels?: unknown } | undefined;
-    const driverDefault = { instanceId, model: defaultTextGenerationModel(driver) };
-    return threadDefault?.instanceId === instanceId &&
-      readCustomModelEntries(config?.customModels).some(
-        (entry) => entry.slug === threadDefault.model,
-      )
-      ? [threadDefault, driverDefault]
-      : [driverDefault];
-  };
-  const candidates = [
-    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
-      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
-    ),
-    ...Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-      TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
-        ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
-        : [],
-    ),
-  ];
-  for (const [instanceId, driver] of candidates) {
-    for (const selection of selectionsFor(instanceId, driver)) {
-      if (isEnabled(instanceId, driver, selection.model)) return selection;
-    }
-  }
-  return null;
-}
-
-function defaultTextGenerationModel(driver: ProviderDriverKind): string {
-  return (
-    DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
-    DEFAULT_MODEL_BY_PROVIDER[driver] ??
-    DEFAULT_TEXT_GENERATION_MODEL
-  );
-}
-
 /** A text generator, or a provider whose snapshot can generate text; no snapshots trusts settings. */
 function isTextGenerationTargetUsable(
   settings: ServerSettings,
