@@ -43,6 +43,33 @@ describe("Weavewing outbound guard", () => {
     ).toEqual([]);
   });
 
+  // User messages, assistant turns, inbox cards, notes and files all render markdown
+  // through ChatMarkdown, the one place the gate sits.
+  it("renders every web markdown surface through the gated renderer", () => {
+    const renderers = bundledSources
+      .filter(({ source }) =>
+        /^import (?!type )[^;]*from "react-markdown"|createMarkdownRenderer\(/m.test(source),
+      )
+      .map(({ file }) => file);
+    expect(renderers.toSorted()).toEqual([
+      "apps/web/src/components/ChatMarkdown.tsx",
+      "apps/web/src/components/chat/markdownRenderer.ts",
+    ]);
+    const surfaces = [
+      "apps/web/src/components/chat/TimelineUserMessageRow.tsx",
+      "apps/web/src/components/chat/TimelineAssistantRows.tsx",
+      "apps/web/src/components/inbox/InboxView.tsx",
+      "apps/web/src/components/notes/NotesPanel.tsx",
+      "apps/web/src/components/files/FileMarkdownPreview.tsx",
+    ];
+    expect(
+      surfaces.filter(
+        (surface) =>
+          !bundledSources.find(({ file }) => file === surface)?.source.includes("<ChatMarkdown"),
+      ),
+    ).toEqual([]);
+  });
+
   it.each([
     ["https://cdn.example.com/a.png?q=1", "cdn.example.com"],
     ["//cdn.example.com/a.png", "cdn.example.com"],
