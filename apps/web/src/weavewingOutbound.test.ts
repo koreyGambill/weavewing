@@ -10,13 +10,8 @@ const repoRoot = NodePath.resolve(
   "../../..",
 );
 
-// Everything the web, desktop and mobile clients bundle from source.
-const bundledSources = [
-  "apps/web/src",
-  "apps/mobile/src",
-  "packages/client-runtime/src",
-  "packages/shared/src",
-]
+// Everything the web and desktop clients bundle from source. Mobile is the upstream app, unguarded here.
+const bundledSources = ["apps/web/src", "packages/client-runtime/src", "packages/shared/src"]
   .flatMap((directory) =>
     NodeFS.readdirSync(NodePath.join(repoRoot, directory), { recursive: true })
       .map(String)
@@ -66,28 +61,6 @@ const REVIEWED_MEDIA_SINKS = {
   "apps/web/src/components/settings/ThemeSearchSection.tsx": "results of a user's Open VSX search",
   "apps/web/src/components/statusSources/StatusSourceIcon.tsx": "server-fetched configured source",
   "apps/web/src/components/T3AppIcon.tsx": "bundled icon",
-  "apps/mobile/src/components/BrandMark.tsx": "bundled icon",
-  "apps/mobile/src/components/ComposerAttachmentStrip.tsx": "local composer files",
-  "apps/mobile/src/components/ComposerContextAttachment.tsx": "local or asset-route previews",
-  "apps/mobile/src/components/PierreEntryIcon.tsx": "bundled icons",
-  "apps/mobile/src/components/ProjectFavicon.tsx": "project favicons from the environment",
-  "apps/mobile/src/components/ProviderIcon.tsx": "bundled icons",
-  "apps/mobile/src/components/VideoThumbnailImage.tsx": "thumbnails of gated or local video",
-  "apps/mobile/src/features/files/WorkspaceFileImagePreview.tsx": "asset route",
-  "apps/mobile/src/features/pull-requests/PullRequestMedia.tsx": "forge media through the server",
-  "apps/mobile/src/features/pull-requests/PullRequestPresentation.tsx":
-    "forge avatars (GitHub allowed)",
-  "apps/mobile/src/features/threads/ComposerQueuedEdit.tsx": "asset route",
-  "apps/mobile/src/features/threads/QuestionAnswerHistory.tsx": "asset route",
-  "apps/mobile/src/features/threads/ThreadFeed.tsx": "local attachment previews",
-  "apps/mobile/src/features/threads/ThreadMarkdownImage.tsx":
-    "markdown media behind RemoteMediaGate",
-  "apps/mobile/src/features/threads/ThreadQueueControl.tsx": "asset route",
-  "apps/mobile/src/features/threads/thread-work-log.tsx": "inline data favicons only",
-  "apps/mobile/src/lib/markdownDocument.ts": "parses <img> into gated markdown images",
-  "apps/mobile/src/lib/markdownImageSources.ts": "detects <img> in markdown",
-  "apps/mobile/src/widgets/AgentActivity.tsx": "system and bundled symbols",
-  "apps/mobile/src/widgets/AgentActivityWidget.tsx": "bundled symbol",
 };
 
 describe("Weavewing outbound guard", () => {

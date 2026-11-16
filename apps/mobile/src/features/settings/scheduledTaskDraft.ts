@@ -60,10 +60,6 @@ export type ScheduleDraft = {
   readonly runAt: string;
   readonly weekdays: ReadonlyArray<number>;
   readonly intervalMinutes: string;
-  readonly intervalOptions?: Pick<
-    Extract<ScheduledTaskUpsertSchedule, { type: "interval" }>,
-    "wakeWhen" | "checkin" | "alwaysRun" | "idleCheckin"
-  >;
   readonly signature: ScheduledTaskWebhookSignature | null;
   readonly maxDeliveryAgeMinutes: string;
   readonly replayKey: string;
@@ -108,8 +104,9 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         ...DEFAULT_SCHEDULE,
         mode: "interval",
         intervalMinutes: String(Math.max(1, task.schedule.everyMs / 60_000)),
-        intervalOptions: task.schedule,
       };
+    case "event":
+      return { ...DEFAULT_SCHEDULE, mode: "event", event: task.schedule };
     case "webhook":
       return {
         ...DEFAULT_SCHEDULE,
@@ -128,8 +125,6 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         filters: webhookFilterDrafts(task.schedule.filters),
         savedFilters: webhookFilterDrafts(task.schedule.filters),
       };
-    case "event":
-      return { ...DEFAULT_SCHEDULE, mode: "event", event: task.schedule };
   }
 }
 
@@ -191,9 +186,7 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
   if (draft.mode === "interval") {
     const minutes = parseIntervalMinutes(draft.intervalMinutes);
     const everyMs = Math.round(minutes * 60_000);
-    return minutes >= 1 && Number.isSafeInteger(everyMs)
-      ? { ...draft.intervalOptions, type: "interval", everyMs }
-      : null;
+    return minutes >= 1 && Number.isSafeInteger(everyMs) ? { type: "interval", everyMs } : null;
   }
   const weekdays = [...new Set(draft.weekdays)].sort((a, b) => a - b);
   if (

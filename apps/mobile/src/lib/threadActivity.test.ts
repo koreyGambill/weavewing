@@ -26,7 +26,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildThreadFeed,
   workEntryRowLabel,
-  workRowAccessibilityLabel,
   threadFeedCompactionLabels,
   createThreadFeedCache,
   deriveThreadFeedPresentation,
@@ -52,7 +51,7 @@ it.each(["info", "warning", "error", undefined] as const)(
     const activity = buildThreadFeed([projected(item, 0)]).flatMap((entry) =>
       entry.type === "activity-group" ? entry.activities : [],
     )[0];
-    expect(activity?.icon.iconName).toBe(level === "info" ? "zap" : "warning");
+    expect(activity?.icon).toBe(level === "info" ? "zap" : "warning");
     expect(activity?.summary).toBe(item.message);
   },
 );
@@ -248,11 +247,6 @@ it("keeps the interrupted row for a compaction stopped before its provider start
         : [],
     ),
   ).toContain("run_interrupt_result");
-  expect(
-    rows
-      .flatMap((entry) => (entry.type === "activity-group" ? entry.activities : []))
-      .find((activity) => activity.projectedItem.item.type === "run_interrupt_result")?.icon,
-  ).toEqual({ iconName: "stop", label: "Stopped" });
 });
 
 it.each(["/compact", "Continue"])(
@@ -459,31 +453,6 @@ function assistantMessage(updatedAt = "2026-06-20T00:00:03.000Z") {
 }
 
 describe("buildThreadFeed", () => {
-  it("hides reaction-only assistant text when a cached feed changes", () => {
-    const cache = createThreadFeedCache();
-    const user = projected({ ...userMessage(), text: "[react 1:ack]" }, 0);
-    for (const [text, count] of [
-      ["Starting", 2],
-      ["[react 1:ack]", 1],
-      ["[quiet]", 1],
-      [" \n[quiet]\t", 1],
-      ["[react 0:ack]", 1],
-      ["Decision needed", 2],
-      ["A [react 1:ack] marker", 2],
-    ] as const) {
-      const rows = [user, projected({ ...assistantMessage(), text }, 1)];
-      const feed = buildThreadFeed(rows, { cache });
-      expect(feed).toHaveLength(count);
-      if (text.includes("Decision needed"))
-        expect(feed[1]).toMatchObject({ message: { text: "Decision needed" } });
-      expect(feed).toEqual(buildThreadFeed(rows));
-      expect(feed[0]).toMatchObject({
-        type: "message",
-        message: { role: "user", text: "[react 1:ack]" },
-      });
-    }
-  });
-
   it("keeps async answers in question history instead of user bubbles", () => {
     const requestId = RuntimeRequestId.make("question");
     const question: OrchestrationV2TurnItem = {
@@ -2268,15 +2237,4 @@ it("caps live thought previews while preserving reasoning detail", () => {
   expect(activity.detail).toBe(text);
   expect(JSON.parse(activity.getFullDetail()!).item).toMatchObject({ text });
   expect(activity.getCopyText()).toContain(text);
-});
-
-it.each([
-  ["Ran command", "Ran ls", "Ran ls"],
-  ["Read file", "Read config.ts", "Read config.ts"],
-  ["Searched code", "Searched for TODO", "Searched for TODO"],
-  ["Thinking", "Thinking", "Thinking"],
-  ["Warning", "Unexpected response", "Warning: Unexpected response"],
-  ["Subagent", "Finished investigating", "Subagent: Finished investigating"],
-])("announces %s activity without repeating its verb", (iconLabel, label, expected) => {
-  expect(workRowAccessibilityLabel(iconLabel, label)).toBe(expected);
 });

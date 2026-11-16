@@ -15,7 +15,6 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { environmentThreadShells } from "../../state/threads";
-import { usePendingDelegatedTaskGroups } from "../../state/use-thread-detail";
 
 const KIND_LABELS = {
   subagent: "Subagent",
@@ -33,22 +32,12 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
   const thread = useAtomValue(
     environmentThreadShells.threadShellAtom(scopeThreadRef(target.environmentId, target.threadId)),
   );
-  const groups = usePendingDelegatedTaskGroups(
-    scopeThreadRef(target.environmentId, target.threadId),
-  );
-  const presentation = presentPendingBackgroundWork(
-    thread?.pendingBackgroundTasks ?? [],
-    thread?.lineage,
-    groups,
-  );
-  const openThread = (threadId: ThreadId, environmentId?: EnvironmentId) => {
+  const presentation = presentPendingBackgroundWork(thread?.pendingBackgroundTasks ?? []);
+  const openThread = (threadId: ThreadId) => {
     void Haptics.selectionAsync();
     // A thread replaces the leaf sheet so workspace back navigation still works.
     navigation.dispatch(
-      StackActions.replace("Thread", {
-        environmentId: environmentId ?? target.environmentId,
-        threadId,
-      }),
+      StackActions.replace("Thread", { environmentId: target.environmentId, threadId }),
     );
   };
   const content = (
@@ -64,14 +53,9 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
           Nothing running in the background.
         </Text>
       ) : (
-        <>
-          {presentation.groups.length > 0 ? (
-            <Text className="pt-4 text-sm text-foreground-muted">{presentation.title}</Text>
-          ) : null}
-          {presentation.items.map((item) => (
-            <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
-          ))}
-        </>
+        presentation.items.map((item) => (
+          <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
+        ))
       )}
     </ScrollView>
   );
@@ -85,7 +69,7 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
 
 function BackgroundWorkRow(props: {
   readonly item: PendingBackgroundWorkItem;
-  readonly onOpen: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
+  readonly onOpen: (threadId: ThreadId) => void;
 }) {
   const { item } = props;
   const childThreadId = item.childThreadId;
@@ -114,7 +98,7 @@ function BackgroundWorkRow(props: {
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={`Open subagent ${item.label}`}
-      onPress={() => props.onOpen(childThreadId, item.environmentId)}
+      onPress={() => props.onOpen(childThreadId)}
       className="active:opacity-70"
     >
       {row}

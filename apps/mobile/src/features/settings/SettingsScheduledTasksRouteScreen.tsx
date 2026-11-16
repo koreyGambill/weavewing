@@ -1,4 +1,4 @@
-import { scheduledTaskEventLabel, scheduledWakeLabel } from "@t3tools/contracts";
+import { scheduledTaskEventLabel } from "@t3tools/contracts";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -123,8 +123,6 @@ const THREAD_MODE_LABELS: Record<ScheduledTaskThreadMode, string> = {
 };
 
 function describeSchedule(task: ScheduledTask, timeZone?: string): string {
-  const wake = scheduledWakeLabel(task.schedule);
-  if (wake !== null) return wake;
   if (task.schedule.type === "webhook") return "On webhook";
   if (task.schedule.type === "event") return scheduledTaskEventLabel(task.schedule);
   if (task.schedule.type === "once") {
@@ -1359,28 +1357,6 @@ function TaskForm({
               ) : null}
             </>
           )}
-          {draft.schedule.mode === "interval" &&
-          (draft.schedule.intervalOptions?.checkin ||
-            draft.schedule.intervalOptions?.idleCheckin) ? (
-            <View className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3">
-              <Text textRole="body" className="min-w-0 flex-1 text-foreground">
-                Run even when unchanged
-              </Text>
-              <ThemedSwitch
-                accessibilityLabel="Run even when unchanged"
-                value={draft.schedule.intervalOptions?.alwaysRun === true}
-                onValueChange={(alwaysRun) =>
-                  setDraft((current) => ({
-                    ...current,
-                    schedule: {
-                      ...current.schedule,
-                      intervalOptions: { ...current.schedule.intervalOptions, alwaysRun },
-                    },
-                  }))
-                }
-              />
-            </View>
-          ) : null}
           <View className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3">
             <Text textRole="body" className="min-w-0 flex-1 text-foreground">
               Enabled
@@ -1611,7 +1587,6 @@ function EnvironmentTasks({
                   {task.blockedByPolicy}
                 </Text>
               ) : null}
-              {task.lastRunStatus === "skipped" ? <Text>skipped: no change</Text> : null}
               {task.lastRunError ? (
                 <Text className="text-sm text-danger-foreground" numberOfLines={2}>
                   Last run failed: {task.lastRunError}

@@ -1,17 +1,9 @@
-import {
-  buildMessageRows,
-  reactionInputsUnchanged,
-} from "@t3tools/client-runtime/state/message-reactions";
-import { parseAssistantReactions } from "@t3tools/shared/messageReactions";
 import type {
   ThreadPendingApproval,
   ThreadPendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
 import { linkRequestTargetName } from "@t3tools/client-runtime/link-request";
-import {
-  turnItemIsReactionOnlyAssistantMessage,
-  turnItemIsWorkspacePreparation,
-} from "@t3tools/client-runtime/state/turn-item-presentation";
+import { turnItemIsWorkspacePreparation } from "@t3tools/client-runtime/state/turn-item-presentation";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
 import {
@@ -32,9 +24,6 @@ import {
   contextCompactionLabel,
   liveThoughtLine,
   toolItemForDisplay,
-  workEntryOutgoingMessage,
-  workEntryIconPresentation,
-  type WorkLogIconPresentation,
   workEntryDisplayIndicatesToolFailure,
   liveActivityToolStatus,
   toolGroupAction,
@@ -75,6 +64,7 @@ import {
   classifyToolActivity,
   collectToolFilePaths,
   dynamicToolTitle,
+  isJavaScriptReplTool,
   formatReadToolLabel,
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
@@ -109,7 +99,25 @@ export interface ThreadFeedActivity {
   readonly fetchesDetail: boolean;
   readonly getFullDetail: () => string | null;
   readonly getCopyText: () => string;
-  readonly icon: WorkLogIconPresentation;
+  readonly icon:
+    | "agent"
+    | "alert"
+    | "browser"
+    | "computer"
+    | "code"
+    | "check"
+    | "command"
+    | "edit"
+    | "eye"
+    | "globe"
+    | "search"
+    | "stop"
+    | "hammer"
+    | "lock"
+    | "message"
+    | "warning"
+    | "wrench"
+    | "zap";
   readonly logo: T3McpToolLogo | null;
   readonly toolLike: boolean;
   readonly prominent: boolean;
@@ -124,9 +132,6 @@ export interface ThreadFeedActivity {
 }
 
 export interface ThreadFeedMessage {
-  readonly reaction?:
-    | import("@t3tools/client-runtime/state/message-reactions").InputMessageReaction
-    | undefined;
   readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
   readonly id: MessageId;
   readonly role: "user" | "assistant";
@@ -135,15 +140,12 @@ export interface ThreadFeedMessage {
   readonly runId: RunId | null;
   readonly streaming: boolean;
   readonly inputIntent?: OrchestrationV2UserMessageInputIntent;
-  readonly origin?: import("@t3tools/contracts").TurnOrigin;
   readonly createdBy?: OrchestrationV2Actor;
   readonly creationSource?: OrchestrationV2CreationSource;
   readonly scheduledTaskId?: ScheduledTaskId;
   readonly senderThreadId?: ThreadId;
-  readonly delegatedCompletion?: import("@t3tools/contracts").OrchestrationV2ConversationMessage["delegatedCompletion"];
   readonly linkedSender?: import("@t3tools/contracts").OrchestrationV2LinkedSender;
   readonly idleCompaction?: import("@t3tools/contracts").OrchestrationV2IdleCompaction;
-  readonly summary?: string;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
   readonly sourceThreadId: ThreadId;
   readonly createdAt: string;
@@ -229,7 +231,6 @@ type ThreadFeedEntryContent =
       readonly summaryKind: ToolGroupSummaryKind;
       readonly toolSurface?: WorkLogPresentationEntry["toolSurface"];
       readonly toolIcon?: WorkLogPresentationEntry["toolIcon"];
-      readonly toolIconLabel?: string;
       readonly summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request";
       readonly hasFailure: boolean;
       readonly live: boolean;
@@ -277,11 +278,6 @@ const WORK_LOG_LABEL_MAX_LENGTH = 200;
 
 function compactWorkEntryText(value: string): string {
   return truncate(value.replace(/\s+/gu, " "), WORK_LOG_LABEL_MAX_LENGTH);
-}
-
-export function workRowAccessibilityLabel(iconLabel: string, label: string): string {
-  const firstWord = (value: string) => value.split(/[\s:]/u, 1)[0]?.toLowerCase();
-  return firstWord(label) === firstWord(iconLabel) ? label : `${iconLabel}: ${label}`;
 }
 
 export function workEntryRowLabel(entry: WorkLogPresentationEntry, expanded = false): string {
@@ -519,6 +515,85 @@ function itemWorkLogTone(item: OrchestrationV2TurnItem): WorkLogPresentationEntr
   }
 }
 
+function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
+  if (item.type === "notification") {
+    const source = item.source;
+    switch (source.kind) {
+      case "subagent":
+      case "delegated_task":
+        return "hammer";
+      case "command":
+        return "command";
+      case "monitor":
+        return "eye";
+      case "background_task":
+      case "system":
+        return "zap";
+      case "thread_reply":
+        return "message";
+      default:
+        source satisfies never;
+        return "zap";
+    }
+  }
+  if (item.type === "dynamic_tool") {
+    const classified = classifyToolActivity({
+      itemType: "dynamic_tool_call",
+      data: { toolName: item.toolName ?? undefined, input: item.input },
+    });
+    if (classified === "read") {
+      return "eye";
+    }
+    if (classified === "search") return "search";
+  }
+  switch (item.type) {
+    case "reasoning":
+      return "agent";
+    case "command_execution":
+      return "command";
+    case "file_change":
+      return "edit";
+    case "file_search":
+      return "search";
+    case "web_search":
+      return "globe";
+    case "approval_request":
+      return item.requestKind === "permission" ? "lock" : "message";
+    case "user_input_request":
+    case "user_message":
+    case "assistant_message":
+      return "message";
+    case "dynamic_tool":
+      return isJavaScriptReplTool(item.toolName) ? "code" : "wrench";
+    case "subagent":
+      return "hammer";
+    case "system_notice":
+      return item.level === "info" ? "zap" : "warning";
+    case "run_interrupt_request":
+    case "run_interrupt_result":
+      return "stop";
+    case "error":
+      return item.failure.class === "usage_limit"
+        ? item.status === "completed"
+          ? "check"
+          : "warning"
+        : "alert";
+    case "checkpoint":
+    case "proposed_plan":
+    case "todo_list":
+      return "check";
+    case "compaction":
+    case "handoff":
+    case "fork":
+    case "thread_created":
+      return "zap";
+    case "secret_request":
+      return "lock";
+    case "link_request":
+      return "globe";
+  }
+}
+
 function itemToolPresentation(item: OrchestrationV2TurnItem): T3McpToolPresentation | null {
   if (item.type !== "dynamic_tool") {
     return null;
@@ -638,9 +713,7 @@ function itemPreview(item: OrchestrationV2TurnItem): string | null {
     case "link_request":
       return item.reason || null;
     case "subagent":
-      return (
-        parseAssistantReactions(item.result ?? item.progress ?? item.prompt ?? "").body || null
-      );
+      return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":
       return null;
     case "notification":
@@ -794,13 +867,10 @@ function toFeedActivity(
     fetchesDetail: turnItemNeedsDetailFetch(item),
     getFullDetail,
     getCopyText,
-    icon: workEntryIconPresentation(workEntry),
+    icon: workEntry.toolSurface ?? itemIcon(item),
     logo: toolPresentation?.logo ?? null,
     toolLike: itemIsToolLike(item),
-    prominent:
-      itemIsProminent(item) ||
-      (item.type === "error" && item.status === "failed") ||
-      workEntryOutgoingMessage(workEntry) !== null,
+    prominent: itemIsProminent(item) || (item.type === "error" && item.status === "failed"),
     status:
       item.type === "error" && item.failure.class === "usage_limit"
         ? itemStatus(item)
@@ -2116,9 +2186,6 @@ function appendToolGroupRows(
     ),
     ...(groupToolSurface ? { toolSurface: groupToolSurface } : {}),
     ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
-    ...(primarySourceIcon && primarySourceActivity?.workEntry.toolSource
-      ? { toolIconLabel: primarySourceActivity.workEntry.toolSource.name }
-      : {}),
     ...(summaryToolIcon ? { summaryToolIcon } : {}),
     ...(thought ? { thought } : {}),
     hasFailure: (() => {
@@ -2179,10 +2246,6 @@ function liveToolActivitySummary(activity: ThreadFeedActivity, presentTense: boo
 }
 
 interface ThreadFeedBuild {
-  readonly runs: ReadonlyArray<import("@t3tools/contracts").OrchestrationV2Run> | undefined;
-  readonly messageRows: ReadonlyArray<
-    import("@t3tools/client-runtime/state/message-reactions").MessageRow
-  >;
   readonly rows: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
   readonly attempts: ReadonlyArray<OrchestrationV2RunAttempt> | undefined;
   readonly nodes: ReadonlyArray<OrchestrationV2ExecutionNode> | undefined;
@@ -2268,7 +2331,6 @@ function firstChangedIndex<T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T>
 export function buildThreadFeed(
   visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
   options?: {
-    readonly runs?: ReadonlyArray<import("@t3tools/contracts").OrchestrationV2Run>;
     readonly anchoredMessages?: ReadonlyArray<LocalThreadMessage>;
     readonly attempts?: ReadonlyArray<OrchestrationV2RunAttempt>;
     readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
@@ -2352,12 +2414,7 @@ export function buildThreadFeed(
     const row = visibleTurnItems[index]!;
     const item = row.item;
     if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
-    if (
-      item.type === "todo_list" ||
-      item.type === "checkpoint" ||
-      turnItemIsReactionOnlyAssistantMessage(item)
-    )
-      continue;
+    if (item.type === "todo_list" || item.type === "checkpoint") continue;
     if (
       item.type === "user_message" &&
       item.inputIntent === "queued_turn" &&
@@ -2431,8 +2488,7 @@ export function buildThreadFeed(
         message: {
           id: item.messageId,
           role: item.type === "user_message" ? "user" : "assistant",
-          text:
-            item.type === "assistant_message" ? parseAssistantReactions(item.text).body : item.text,
+          text: item.text,
           ...(item.type === "user_message" && item.context ? { context: item.context } : {}),
           attachments: item.attachments ?? [],
           runId: item.runId,
@@ -2440,17 +2496,12 @@ export function buildThreadFeed(
           ...(item.type === "user_message"
             ? {
                 inputIntent: item.inputIntent,
-                ...(item.origin ? { origin: item.origin } : {}),
                 createdBy: item.createdBy,
                 creationSource: item.creationSource,
                 ...(item.scheduledTaskId ? { scheduledTaskId: item.scheduledTaskId } : {}),
-                ...(item.delegatedCompletion
-                  ? { delegatedCompletion: item.delegatedCompletion }
-                  : {}),
                 ...(item.senderThreadId ? { senderThreadId: item.senderThreadId } : {}),
                 ...(item.linkedSender ? { linkedSender: item.linkedSender } : {}),
                 ...(item.idleCompaction ? { idleCompaction: item.idleCompaction } : {}),
-                ...(item.summary ? { summary: item.summary } : {}),
               }
             : {}),
           visibility: row.visibility,
@@ -2532,18 +2583,6 @@ export function buildThreadFeed(
       .filter((checkpoint) => checkpoint.status === "ready" && checkpoint.files.length > 0)
       .map((checkpoint) => [checkpoint.assistantMessageId, checkpoint]),
   );
-  const messageRows =
-    previous !== null &&
-    previous.runs === options?.runs &&
-    previous.nodes === options?.nodes &&
-    reactionInputsUnchanged(previous.rows, visibleTurnItems)
-      ? previous.messageRows
-      : buildMessageRows(
-          options?.runs ?? [],
-          visibleTurnItems.map(({ item }) => item),
-          options?.nodes,
-        );
-  const incoming = new Map(messageRows.map((row) => [row.message.messageId, row.reaction]));
   const grouped = groupAdjacentActivities(
     entries.map((entry) => {
       if (entry.type !== "message" || entry.message.role !== "assistant") return entry;
@@ -2561,20 +2600,13 @@ export function buildThreadFeed(
             feedLength: prefix.length + groupedLength,
           }),
   );
-  const feed = (prefix.length === 0 ? grouped : prefix.concat(grouped)).map((entry) => {
-    if (entry.type !== "message" || entry.message.role !== "user") return entry;
-    const reaction = incoming.get(entry.message.id);
-    if (entry.message.reaction?.tooltip === reaction?.tooltip) return entry;
-    return { ...entry, message: { ...entry.message, reaction } };
-  });
+  const feed = prefix.length === 0 ? grouped : prefix.concat(grouped);
   if (cache) {
     cache.feedBuild =
       anchoredMessages.length > 0
         ? null
         : {
             rows: visibleTurnItems,
-            runs: options?.runs,
-            messageRows,
             attempts: options?.attempts,
             nodes: options?.nodes,
             checkpointSummaries: options?.checkpointSummaries,
