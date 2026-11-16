@@ -37,6 +37,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as FiberSet from "effect/FiberSet";
 import * as Semaphore from "effect/Semaphore";
 import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
@@ -79,6 +80,18 @@ import {
 import { proxyConfig } from "../shared/proxy.ts";
 import { changeRequestsCreatedBy } from "../../apps/server/src/orchestration-v2/PullRequestSyncReactor.ts";
 import { type BackgroundWait, makeBackgroundWait } from "./backgroundWait.ts";
+import {
+  claudeStructured,
+  cliCwd,
+  cliSession,
+  ISOLATION,
+  resultUsage,
+  stopper,
+  runClaude,
+  serveStubs,
+  type StubCall,
+  streamTurns,
+} from "./claude-cli.ts";
 import { DeviceExpect, gradeDevice } from "./device-grading.ts";
 import { FileLinksExpect, gradeFileLinks } from "./file-link-grading.ts";
 import {
@@ -905,7 +918,11 @@ type Sample = {
   backgroundWait?: BackgroundWait;
   /** Calls so far per mocked tool, for mocks that answer in sequence. */
   readonly mockCalls: Map<string, number>;
+  /** USD the Claude CLI reported for this sample, on `--transport claude-cli`. */
+  readonly cliCost?: CliCost;
 };
+/** USD the Claude CLI reported, and runs that stopped before reporting any. */
+type CliCost = { usd: number; unreported: number };
 
 const SHELL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "WebFetch"]);
 
@@ -1643,6 +1660,8 @@ export const mockOutput = (sample: Sample, command: string) =>
 
 type Config = {
   readonly apiKey: string;
+  /** `claude-cli` runs the agent and a Claude shell simulator on the local Claude login. */
+  readonly transport?: "api" | "claude-cli";
   readonly model: Model;
   readonly proxy?: { readonly url: string; readonly headers: Readonly<Record<string, string>> };
   readonly effort: string;
@@ -1669,10 +1688,21 @@ const simulate = Effect.fn("evaluateMcpToolUse.simulate")(function* (
   let output = typeof command === "string" ? cannedOutput(sample, command) : undefined;
   if (output === undefined) {
     const body = shellRequest(sample, call, config.shellModel);
-    const response = isPricedModel(config.shellModel)
-      ? yield* callModel(config.apiKey, body, config.apiKey ? undefined : config.proxy)
-      : yield* callCodex(config, shellResponsesRequest(body));
+    const prompt = body.messages.flatMap((message) => message.content.map((block) => block.text));
+    const response =
+      config.transport === "claude-cli" && isPricedModel(config.shellModel)
+        ? yield* claudeStructured({
+            ...body,
+            prompt: prompt.join("\n\n"),
+            schema: SHELL_REPLY_SCHEMA,
+          }).pipe(
+            Effect.mapError((cause) => new EvalToolCallError({ tool: "shell simulator", cause })),
+          )
+        : isPricedModel(config.shellModel)
+          ? yield* callModel(config.apiKey, body, config.apiKey ? undefined : config.proxy)
+          : yield* callCodex(config, shellResponsesRequest(body));
     addUsage(sample.shellUsage, response.usage);
+    if ("costUsd" in response && sample.cliCost) sample.cliCost.usd += response.costUsd ?? 0;
     output = shellOutput(response.content);
   }
   if (call.tool === "Bash" && output === "") output = "(Bash completed with no output)";
@@ -2403,6 +2433,207 @@ const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
   };
 }, Effect.scoped);
 
+// Native tools reach the Claude CLI through a stub MCP server, so nothing runs on this machine.
+// The CLI keeps its own ToolSearch; the capture's placeholder has no use there.
+const cliName = (name: string) => {
+  if (isT3Name(name)) return name;
+  const bare = normalizeToolName(name);
+  return bare === "ToolSearch" ? bare : `mcp__harness__${bare}`;
+};
+const CLI_OWN_TOOLS = new Set(["ToolSearch", "DeferredToolPlaceholder"]);
+
+/**
+ * A sample as a `claude -p` run: earlier turns for a resumed session, the last user message as
+ * stream-json input, and flags. Claude Code brings its own system prompt and reminders.
+ */
+export const cliInvocation = (
+  sample: Sample,
+  config: Pick<Config, "model" | "effort" | "maxSteps">,
+) => {
+  const { testCase, base } = sample;
+  if (testCase.prompt === "") {
+    throw new Error(`${testCase.id}: an empty-prompt replay needs --transport api.`);
+  }
+  const messages = buildMessages({ ...sample, base: { ...base, reminders: [], gitStatusAt: 0 } });
+  const renamed = messages.map((message) => ({
+    ...message,
+    content: message.content.map((block) =>
+      block.type === "tool_use"
+        ? { ...block, name: cliName(valueText(block.name)) }
+        : Array.isArray(block.content)
+          ? {
+              ...block,
+              content: block.content.map((item: Block) =>
+                item.type === "tool_reference"
+                  ? { ...item, tool_name: cliName(valueText(item.tool_name)) }
+                  : item,
+              ),
+            }
+          : block,
+    ),
+  }));
+  const world = testCase.setup.world;
+  const append =
+    testCase.setup.role === "native-subagent"
+      ? []
+      : [
+          "--append-system-prompt",
+          t3SystemAppend(
+            config.model,
+            world?.deviceAgentAccess !== false,
+            world?.browserAgentAccess !== false,
+          ),
+        ];
+  const args = [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    config.model,
+    "--effort",
+    config.effort,
+    "--max-turns",
+    String(testCase.maxSteps ?? config.maxSteps),
+    "--tools",
+    "ToolSearch",
+    "--allowedTools",
+    "mcp__t3-code mcp__harness",
+    ...append,
+    ...ISOLATION,
+  ];
+  const message = renamed.at(-1);
+  const input = JSON.stringify({ type: "user", message, parent_tool_use_id: null, session_id: "" });
+  return { history: renamed.slice(0, -1), input, args };
+};
+
+/** `runSample` on the Claude CLI: tools answer through stub MCP servers backed by this runner. */
+export const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
+  testCase: McpToolUseCase,
+  config: Config,
+  base: Base,
+  spent: { readonly usage: Usage; readonly shellUsage: Usage; readonly cliCost: CliCost },
+) {
+  const sample = {
+    ...makeSample(testCase, base),
+    shellUsage: spent.shellUsage,
+    cliCost: spent.cliCost,
+  };
+  yield* withDevices(sample);
+  yield* withBackgroundWait(sample);
+  const { history, input, args } = cliInvocation(sample, config);
+  // Claude Code enforces deferred loading itself, so every tool counts as loaded here.
+  sample.tools.push(...base.deferred.filter((tool) => !hasTool(sample.tools, tool.name)));
+  const resume = yield* cliSession(history, config.model);
+  // Answers run in this scope, so releasing it interrupts them and waits for them.
+  const runAnswer = yield* FiberSet.runtimePromise(
+    yield* FiberSet.make<Block, unknown>(),
+  )<HttpClient.HttpClient>();
+  const oneAtATime = yield* Semaphore.make(1);
+  // Claude Code reports its own cwd; the simulator and grader know the case's.
+  const cwd = cliCwd();
+  const unscratch = <A>(value: A): A =>
+    JSON.parse(JSON.stringify(value).replaceAll(cwd, base.environment.cwd));
+  const answered = new Map<string, Block>();
+  const progress: Array<Call> = [];
+  const abort = stopper();
+  let broken: { readonly error: unknown } | undefined;
+  const answer =
+    (harnessName: (name: string) => string): StubCall =>
+    (name, args, id) => {
+      const use = {
+        type: "tool_use" as const,
+        id,
+        name: harnessName(name),
+        input: unscratch(args),
+      };
+      // Calls are answered one at a time, as the API transport does.
+      const answering = oneAtATime.withPermits(1)(answerToolCall(sample, config, use));
+      return runAnswer(answering).then(
+        (result) => {
+          answered.set(id, result);
+          progress.push(recordedCall(0, use));
+          const run = { calls: progress, text: "", stopReason: "" };
+          if (failedEarly(testCase.expect, run, pastedText(testCase))) abort.stop();
+          return { text: valueText(result.content), isError: result.is_error === true };
+        },
+        // The runner failed, not the agent: the sample cannot be graded.
+        (error: unknown) => {
+          broken ??= { error };
+          abort.stop();
+          throw error;
+        },
+      );
+    };
+  const upFront = new Set(base.nativeTools.map((tool) => tool.name));
+  const stub = (tool: ApiTool) => ({
+    ...tool,
+    name: normalizeToolName(tool.name),
+    alwaysLoad: upFront.has(tool.name),
+  });
+  const natives = new Map(
+    [...base.nativeTools, ...base.deferred]
+      .filter((tool) => !isT3Name(tool.name) && !CLI_OWN_TOOLS.has(normalizeToolName(tool.name)))
+      .map((tool) => [normalizeToolName(tool.name), tool]),
+  );
+  const nativeName = (name: string) => natives.get(name)?.name ?? name;
+  const stubs = yield* Effect.acquireRelease(
+    Effect.promise(() =>
+      serveStubs({
+        "t3-code": { tools: base.t3.map(stub), call: answer((name) => `${T3_PREFIX}${name}`) },
+        harness: { tools: [...natives.values()].map(stub), call: answer(nativeName) },
+      }),
+    ),
+    (served) => Effect.sync(served.close),
+  );
+  const run = yield* runClaude([...args, "--mcp-config", stubs.mcpConfig, ...resume], {
+    cwd,
+    stdin: input,
+    stop: abort.signal,
+  }).pipe(Effect.mapError((cause) => new EvalToolCallError({ tool: "claude", cause })));
+  const events = run.lines;
+  const { texts, uses, result, usage } = streamTurns(events);
+  // A stopped run has no result, so its tokens come from its messages and its cost is unknown.
+  const reported = result === undefined ? { usage, costUsd: undefined } : resultUsage(result);
+  addUsage(spent.usage, reported.usage);
+  if (reported.costUsd === undefined) spent.cliCost.unreported++;
+  else spent.cliCost.usd += reported.costUsd;
+  if (broken !== undefined) return yield* Effect.die(broken.error);
+  if (result === undefined && !run.stopped) {
+    return yield* Effect.die(
+      new Error(`claude exited ${run.code} without a result: ${run.stderr}`),
+    );
+  }
+  // Calls that ran: the ones the stubs answered, plus Claude Code's own ToolSearch.
+  const calls = uses.flatMap(({ step, use }) => {
+    const own = answered.get(valueText(use.id));
+    if (!isToolUse(use) || (own === undefined && normalizeToolName(use.name) !== "ToolSearch")) {
+      return [];
+    }
+    const call = recordedCall(step, unscratch(use));
+    if (own !== undefined) settle(call, own);
+    return [call];
+  });
+  const stopReason = abort.requested()
+    ? "failed_early"
+    : result?.subtype === "error_max_turns"
+      ? "max_steps"
+      : valueText(result?.stop_reason ?? result?.subtype);
+  return {
+    calls,
+    text: unscratch(texts.join("\n\n")),
+    stopReason,
+    finalText: result?.subtype === "success" ? unscratch(valueText(result.result ?? "")) : "",
+    cwd: base.environment.cwd,
+    linked: [...sample.linked],
+    ...(sample.devices ? { launchers: [...sample.devices.launchers] } : {}),
+    usage: spent.usage,
+    shellUsage: sample.shellUsage,
+    transcript: events.filter((event) => event.type === "assistant" || event.type === "user"),
+  };
+}, Effect.scoped);
+
 type ResultRow = Pick<McpToolUseCase, "id" | "kind" | "pattern"> & {
   readonly role: string;
   readonly pass: boolean;
@@ -2410,6 +2641,8 @@ type ResultRow = Pick<McpToolUseCase, "id" | "kind" | "pattern"> & {
   readonly error?: string;
   readonly usage: Usage;
   readonly shellUsage: Usage;
+  /** USD the Claude CLI reported, on `--transport claude-cli`. */
+  readonly cliCost?: CliCost;
 };
 
 /** The share of samples that passed. Samples that errored are left out: NaN if all did. */
@@ -2435,7 +2668,13 @@ const spend = (usages: ReadonlyArray<Usage>, model: ShellModel | undefined) => {
 /** Markdown report. With a baseline, each case shows its earlier pass rate and the change. */
 export const summarize = (
   rows: Array<ResultRow>,
-  options: { readonly header: string; readonly shellModel: ShellModel; readonly model: Model },
+  options: {
+    readonly header: string;
+    readonly shellModel: ShellModel;
+    readonly model: Model;
+    /** On the Claude CLI, Claude Code sends its own system prompt, not the capture's. */
+    readonly cli?: boolean;
+  },
   before?: Map<string, number>,
 ) => {
   const codex = isCodex(options.model);
@@ -2448,6 +2687,8 @@ export const summarize = (
     options.shellModel,
   );
   const cost = agent.cost + shell.cost;
+  const cliCost = rows.reduce((sum, row) => sum + (row.cliCost?.usd ?? 0), 0);
+  const unreported = rows.reduce((sum, row) => sum + (row.cliCost?.unreported ?? 0), 0);
   const table = (title: string, key: (row: ResultRow) => string, compare = false) => [
     `## ${title}\n`,
     compare ? "| Group | Pass | Baseline | Delta |" : "| Group | Pass |",
@@ -2484,11 +2725,18 @@ export const summarize = (
       : `- Estimated cost $${cost.toFixed(2)}, $${(cost / rows.length).toFixed(3)} per sample.`,
     `- Agent tokens: ${agent.tokens}${codex ? "." : ` ($${agent.cost.toFixed(2)}).`}`,
     `- Shell simulator (${options.shellModel}) tokens: ${shell.tokens} (API-price estimate $${shell.cost.toFixed(2)}).`,
+    ...(rows.some((row) => row.cliCost)
+      ? [
+          `- Claude CLI reported $${cliCost.toFixed(2)} on the local login${unreported > 0 ? `; ${unreported} stopped runs reported no cost, so the total is incomplete and their tokens are a lower bound` : ""}.`,
+        ]
+      : []),
     ...(codex
       ? [
           "- Code-mode tools use case mocks and a simulated machine. Native subagent prompts and asynchronous notifications are approximate.",
         ]
-      : [identityNote]),
+      : options.cli
+        ? []
+        : [identityNote]),
     ...(rows.some((row) => row.role === "native-subagent") ? [nativeNote] : []),
     "",
     ...table("Cases", (row) => row.id, before !== undefined),
@@ -2518,6 +2766,7 @@ const Flags = Schema.Struct({
     ...PROXY_SHELL_MODELS,
   ]),
   "user-instructions": Schema.Literals(["keep", "drop"]),
+  transport: Schema.Literals(["api", "claude-cli"]),
   "dry-run": Schema.Boolean,
   "stop-on-regression": Schema.Boolean,
   "regression-budget": Schema.optional(PositiveIntOrZero),
@@ -2558,6 +2807,8 @@ const main = Effect.gen(function* () {
       "shell-model": { ...string, default: "claude-haiku-5-5" },
       // T3's text must work for every user, so the captured CLAUDE.md is dropped by default.
       "user-instructions": { ...string, default: "drop" },
+      // claude-cli: Claude models on the local Claude login, no ANTHROPIC_API_KEY.
+      transport: { ...string, default: "api" },
       "dry-run": { type: "boolean", default: false },
       "stop-on-regression": { type: "boolean", default: false },
       "regression-budget": string,
@@ -2713,11 +2964,23 @@ const main = Effect.gen(function* () {
   }
   const baseFor = (testCase: McpToolUseCase) => bases.get(baseKey(testCase)) ?? base;
   const effort = flags.effort ?? base.codex?.reasoning.effort ?? "high";
+  const cli = flags.transport === "claude-cli";
+  if (cli && codex)
+    return yield* Effect.die(new Error("--transport claude-cli runs Claude models."));
+  const maxSteps = flags["max-steps"] ?? (codex ? 10 : 6);
   if (flags["dry-run"]) {
     // One JSON line per case. Without --case this also checks that every case builds.
     for (const testCase of selected) {
       const sample = makeSample(testCase, baseFor(testCase));
       yield* Effect.scoped(Effect.andThen(withDevices(sample), withBackgroundWait(sample)));
+      if (cli) {
+        const invocation =
+          testCase.prompt === ""
+            ? { id: testCase.id, skipped: "An empty-prompt replay needs --transport api." }
+            : cliInvocation(sample, { model: flags.model, effort, maxSteps });
+        process.stdout.write(`${yield* encodeJson(invocation)}\n`);
+        continue;
+      }
       const messages = buildMessages(sample);
       const body = sample.base.codex
         ? codexRequest(sample.base, codexMessages(messages))
@@ -2728,17 +2991,18 @@ const main = Effect.gen(function* () {
   }
   const apiKey = yield* Config.String("ANTHROPIC_API_KEY").pipe(Config.withDefault(""));
   const out = flags.out;
-  if ((!apiKey && !codex) || out === undefined) {
+  if ((!apiKey && !codex && !cli) || out === undefined) {
     const message =
-      "Set ANTHROPIC_API_KEY and pass --out <directory>. ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are never used.";
+      "Set ANTHROPIC_API_KEY or pass --transport claude-cli, and pass --out <directory>. ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are never used.";
     return yield* Effect.die(new Error(message));
   }
   const config: Config = {
     apiKey,
+    transport: flags.transport,
     model: flags.model,
     ...(codex || !isPricedModel(flags["shell-model"]) ? { proxy: proxyConfig() } : {}),
     effort,
-    maxSteps: flags["max-steps"] ?? (codex ? 10 : 6),
+    maxSteps,
     shellModel: flags["shell-model"],
   };
   const previous =
@@ -2765,11 +3029,15 @@ const main = Effect.gen(function* () {
   const runOne = (testCase: McpToolUseCase) => {
     const { id, kind, pattern } = testCase;
     const identity = { id, kind, pattern, role: testCase.setup.role };
-    const usage = { usage: emptyUsage(), shellUsage: emptyUsage() };
+    const usage = {
+      usage: emptyUsage(),
+      shellUsage: emptyUsage(),
+      cliCost: { usd: 0, unreported: 0 },
+    };
     const privateValues = [config.apiKey, ...Object.values(config.proxy?.headers ?? {})]
       .flatMap((value) => [value, value.replace(/^Bearer /i, "")])
       .filter(Boolean);
-    return runSample(testCase, config, baseFor(testCase), usage).pipe(
+    return (cli ? runSampleCli : runSample)(testCase, config, baseFor(testCase), usage).pipe(
       inFlight.withPermits(1),
       Effect.matchCause({
         // Not graded: a sample that errors is left out of pass rates, with its tokens so far.
@@ -2797,6 +3065,7 @@ const main = Effect.gen(function* () {
             // Not graded: how the agent handled a secret it needed, for a person reading the run.
             ...(secret ? { secret: secretDiagnostics(sample, secret) } : {}),
             ...sample,
+            cliCost: usage.cliCost,
           };
         },
       }),
@@ -2839,7 +3108,7 @@ const main = Effect.gen(function* () {
     { concurrency: flags.concurrency, discard: true },
   ).pipe(Effect.ignore);
   const samples = flags.samples === undefined ? "2-3 (adaptive)" : flags.samples;
-  const header = `Commit \`${commit}\`, ${flags.model} at ${effort} effort, user instructions ${flags["user-instructions"]}, ${samples} samples per case, template \`${path.basename(templatePath)}\``;
+  const header = `Commit \`${commit}\`, ${flags.model} at ${effort} effort via ${flags.transport}, user instructions ${flags["user-instructions"]}, ${samples} samples per case, template \`${path.basename(templatePath)}\``;
   const finished = new Set(rows.map((row) => row.id)).size;
   const stopped =
     regressions.length === 0
@@ -2853,6 +3122,7 @@ const main = Effect.gen(function* () {
       header: [header, t3ContextReport(flags.model), ...stopped].join("\n"),
       shellModel: config.shellModel,
       model: config.model,
+      cli,
     },
     flags.baseline === undefined ? undefined : baseline,
   );
