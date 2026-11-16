@@ -10,8 +10,13 @@ const repoRoot = NodePath.resolve(
   "../../..",
 );
 
-// Everything the web and desktop renderer bundles from source.
-const bundledSources = ["apps/web/src", "packages/client-runtime/src", "packages/shared/src"]
+// Everything the web, desktop and mobile clients bundle from source.
+const bundledSources = [
+  "apps/web/src",
+  "apps/mobile/src",
+  "packages/client-runtime/src",
+  "packages/shared/src",
+]
   .flatMap((directory) =>
     NodeFS.readdirSync(NodePath.join(repoRoot, directory), { recursive: true })
       .map(String)
@@ -23,7 +28,85 @@ const bundledSources = ["apps/web/src", "packages/client-runtime/src", "packages
 const FAVICON_SERVICES =
   /google\.com\/s2\/favicons|gstatic\.com\/faviconV2|icons\.duckduckgo\.com|icon\.horse|favicone\.com|faviconkit|besticon|githubassets\.com\/favicons|\/favicon\.ico/;
 
+const MEDIA_SINK = /<(?:img|video|audio|source|Image|ImageBackground|SvgUri)\b/;
+const LITERAL_REMOTE_SOURCE = /\b(?:src|poster|uri)\s*[=:]\s*\{?\s*["'`](?:https?:)?\/\//;
+
+// Every file that renders an image or media element, and why it loads nothing on its own.
+// A new sink fails the guard until someone checks where its source comes from.
+const REVIEWED_MEDIA_SINKS = {
+  "apps/web/src/components/chat/ChatMarkdownMedia.tsx": "markdown media behind RemoteMediaGate",
+  "apps/web/src/components/chat/ComposerAttachmentStrip.tsx": "local composer files",
+  "apps/web/src/components/chat/ComposerImageThumbnail.tsx": "local composer files",
+  "apps/web/src/components/chat/ComposerStashMenu.tsx": "stashed data URLs",
+  "apps/web/src/components/chat/MarkdownFileLink.tsx": "signed asset route",
+  "apps/web/src/components/chat/QueuedRunsControl.tsx": "attachment thumbnails",
+  "apps/web/src/components/chat/SnapShotAttachmentDetails.tsx": "captured data URLs",
+  "apps/web/src/components/chat/TimelineToolActivityIcon.tsx": "inline data favicons only",
+  "apps/web/src/components/chat/TimelineWorkEntryRow.tsx": "tool output images via asset route",
+  "apps/web/src/components/chat/UserMessageContextChips.tsx": "attachment previews",
+  "apps/web/src/components/composerContextPresentation.tsx": "captured screenshots",
+  "apps/web/src/components/contextChipParts.tsx": "attachment previews",
+  "apps/web/src/components/device/DeviceStreamView.tsx": "local device stream",
+  "apps/web/src/components/evidence/EvidenceView.tsx": "signed asset route",
+  "apps/web/src/components/files/AttachmentFilePreview.tsx": "signed asset route",
+  "apps/web/src/components/files/AudioPreview.tsx": "signed asset route",
+  "apps/web/src/components/files/extendedDocumentPreview.ts": "markup for sandboxed DocumentPages",
+  "apps/web/src/components/files/NotebookPreview.tsx": "notebook data URLs",
+  "apps/web/src/components/guest/GuestPage.tsx": "staged local files",
+  "apps/web/src/components/mcp/UseInAnotherAppDialog.tsx": "bundled logos",
+  "apps/web/src/components/media/AttachmentImage.tsx": "attachments",
+  "apps/web/src/components/media/mediaContent.ts": "comment only",
+  "apps/web/src/components/media/MediaVideoPlayer.tsx": "sources its callers gate",
+  "apps/web/src/components/preview/PreviewFaviconIcon.tsx": "desktop-captured data URLs",
+  "apps/web/src/components/ProjectFavicon.tsx": "project favicons from the environment",
+  "apps/web/src/components/pullRequest/pullRequestPresentation.tsx":
+    "forge avatars (GitHub allowed)",
+  "apps/web/src/components/settings/MicrophoneTest.tsx": "local recording",
+  "apps/web/src/components/settings/ProjectFaviconThumbnail.tsx": "project favicons",
+  "apps/web/src/components/settings/ThemeSearchSection.tsx": "results of a user's Open VSX search",
+  "apps/web/src/components/statusSources/StatusSourceIcon.tsx": "server-fetched configured source",
+  "apps/web/src/components/T3AppIcon.tsx": "bundled icon",
+  "apps/mobile/src/components/BrandMark.tsx": "bundled icon",
+  "apps/mobile/src/components/ComposerAttachmentStrip.tsx": "local composer files",
+  "apps/mobile/src/components/ComposerContextAttachment.tsx": "local or asset-route previews",
+  "apps/mobile/src/components/PierreEntryIcon.tsx": "bundled icons",
+  "apps/mobile/src/components/ProjectFavicon.tsx": "project favicons from the environment",
+  "apps/mobile/src/components/ProviderIcon.tsx": "bundled icons",
+  "apps/mobile/src/components/VideoThumbnailImage.tsx": "thumbnails of gated or local video",
+  "apps/mobile/src/features/files/WorkspaceFileImagePreview.tsx": "asset route",
+  "apps/mobile/src/features/pull-requests/PullRequestMedia.tsx": "forge media through the server",
+  "apps/mobile/src/features/pull-requests/PullRequestPresentation.tsx":
+    "forge avatars (GitHub allowed)",
+  "apps/mobile/src/features/threads/ComposerQueuedEdit.tsx": "asset route",
+  "apps/mobile/src/features/threads/QuestionAnswerHistory.tsx": "asset route",
+  "apps/mobile/src/features/threads/ThreadFeed.tsx": "local attachment previews",
+  "apps/mobile/src/features/threads/ThreadMarkdownImage.tsx":
+    "markdown media behind RemoteMediaGate",
+  "apps/mobile/src/features/threads/ThreadQueueControl.tsx": "asset route",
+  "apps/mobile/src/features/threads/thread-work-log.tsx": "inline data favicons only",
+  "apps/mobile/src/lib/markdownDocument.ts": "parses <img> into gated markdown images",
+  "apps/mobile/src/lib/markdownImageSources.ts": "detects <img> in markdown",
+  "apps/mobile/src/widgets/AgentActivity.tsx": "system and bundled symbols",
+  "apps/mobile/src/widgets/AgentActivityWidget.tsx": "bundled symbol",
+};
+
 describe("Weavewing outbound guard", () => {
+  it("renders images and media only from reviewed sinks", () => {
+    const sinks = bundledSources
+      .filter(({ file, source }) => file.startsWith("apps/") && MEDIA_SINK.test(source))
+      .map(({ file }) => file);
+    expect(sinks.filter((file) => !(file in REVIEWED_MEDIA_SINKS))).toEqual([]);
+    expect(Object.keys(REVIEWED_MEDIA_SINKS).filter((file) => !sinks.includes(file))).toEqual([]);
+  });
+
+  it("hard-codes no remote image or media source", () => {
+    expect(
+      bundledSources
+        .filter(({ source }) => LITERAL_REMOTE_SOURCE.test(source))
+        .map(({ file }) => file),
+    ).toEqual([]);
+  });
+
   it("bundles no third-party favicon lookup", () => {
     expect(
       bundledSources.filter(({ source }) => FAVICON_SERVICES.test(source)).map(({ file }) => file),
