@@ -23,7 +23,6 @@ const Row = Schema.Struct({
   changed: Schema.optional(Schema.String),
   checks: Schema.optional(Schema.String),
   qaSteps: Schema.optional(Schema.String),
-  userQa: Schema.optional(Schema.String),
   completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   ticket: Schema.optional(Schema.NullOr(Schema.String)),
   workId: Schema.optional(Schema.String),
@@ -148,7 +147,6 @@ export function migrateWorkspace(old: typeof LegacyWorkspace.Type, now: string):
       .join("\n\n"),
     parentId: null,
     links: row.ticket ? [{ type: "ticket", target: row.ticket }] : [],
-    needsQa: row.userQa === "pending",
   }));
   for (const row of old.actionItems ?? [])
     if (row.status !== "done")
@@ -162,7 +160,6 @@ export function migrateWorkspace(old: typeof LegacyWorkspace.Type, now: string):
         details: details(row),
         parentId: null,
         links: [],
-        needsQa: false,
       });
   const artifact = (id: string, title: string, content: string) => ({
     id,

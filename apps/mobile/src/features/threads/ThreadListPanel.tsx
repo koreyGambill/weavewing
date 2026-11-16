@@ -101,7 +101,6 @@ function ListContents(props: { environmentId: EnvironmentId; threadId: ThreadId 
               <Text>{item.text}</Text>
               <Text className="text-foreground-muted">
                 {item.state.replaceAll("_", " ")} · {item.owner}
-                {item.needsQa ? " · Needs QA" : ""}
               </Text>
               {item.details ? <Text>{item.details}</Text> : null}
               {item.links

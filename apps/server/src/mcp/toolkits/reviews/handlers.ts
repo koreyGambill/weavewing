@@ -34,13 +34,12 @@ const listResult = (
     revision: workspace.revision,
     items: workspace.items
       .filter((item) => requested.has(item.id) || (existing && !existing.has(item.id)))
-      .map(({ id, text, state, owner, links, needsQa, doneAt }) => ({
+      .map(({ id, text, state, owner, links, doneAt }) => ({
         id,
         text,
         state,
         owner,
         links,
-        needsQa,
         doneAt,
       })),
   };

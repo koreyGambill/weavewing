@@ -82,18 +82,10 @@ const filterOptions = [
 const ownerLabel = (owner: Owner) =>
   owner === "agent" ? "Agent is responsible" : "You're responsible";
 
-export function ThreadListView({
-  threadRef,
-  entry: supplied,
-  onRefresh,
-}: {
-  threadRef: ScopedThreadRef;
-  entry?: ThreadListEntry;
-  onRefresh?: () => void;
-}) {
+function ThreadListView({ threadRef }: { threadRef: ScopedThreadRef }) {
   const readable = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
   const query = useEnvironmentQuery(
-    !supplied && readable
+    readable
       ? threadListRead({
           environmentId: threadRef.environmentId,
           input: { threadId: threadRef.threadId, all: true },
@@ -125,7 +117,7 @@ export function ThreadListView({
   const focusTextRef = useRef<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
-  const remote = supplied ?? query.data?.[0];
+  const remote = query.data?.[0];
   const entry = saved && (!remote || saved.revision > remote.revision) ? saved : remote;
   const mutate = async (change: Pick<ThreadListUpdateInput, "changes" | "order">) => {
     if (!entry || busy || !canWrite) return;
@@ -138,14 +130,9 @@ export function ThreadListView({
     });
     if (result._tag === "Success") {
       ok = true;
-      setSaved({
-        ...entry,
-        ...result.value,
-        items: supplied ? result.value.items.filter((item) => item.needsQa) : result.value.items,
-      });
+      setSaved({ ...entry, ...result.value });
       query.refresh();
       artifacts.refresh();
-      onRefresh?.();
     } else {
       const cause = squashAtomCommandFailure(result);
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -158,9 +145,7 @@ export function ThreadListView({
     return <p className="text-xs text-muted-foreground">This connection cannot read todos.</p>;
   if (!entry)
     return <p className="text-xs text-muted-foreground">{query.error ?? "Loading todos…"}</p>;
-  const tree = supplied
-    ? todoTree(entry.items, { filter: "all", showClosed: true })
-    : todoTree(entry.items, { filter, showClosed });
+  const tree = todoTree(entry.items, { filter, showClosed });
   const done = entry.items.filter((item) => item.state === "done").length;
   const move = (id: string, direction: number) => {
     const order = entry.items.map((item) => item.id);
@@ -186,7 +171,6 @@ export function ThreadListView({
   const renderBranch = (node: TodoNode, depth: number) => (
     <div key={node.item.id} role="listitem">
       <TodoRow
-        crossThread={Boolean(supplied)}
         node={node}
         hidesClosed={!showClosed}
         expanded={editing === node.item.id}
@@ -209,13 +193,9 @@ export function ThreadListView({
         newItemRef={newItemRef}
         disabled={!canWrite || busy}
         onChange={(change) => void mutate({ changes: [{ id: node.item.id, ...change }] })}
-        onMove={supplied ? undefined : (direction) => move(node.item.id, direction)}
-        canIndent={
-          !supplied && todoIndentMove(entry.items, node.item.id, "in", visible) !== undefined
-        }
-        canOutdent={
-          !supplied && todoIndentMove(entry.items, node.item.id, "out", visible) !== undefined
-        }
+        onMove={(direction) => move(node.item.id, direction)}
+        canIndent={todoIndentMove(entry.items, node.item.id, "in", visible) !== undefined}
+        canOutdent={todoIndentMove(entry.items, node.item.id, "out", visible) !== undefined}
         onIndent={(direction, draftText) => indent(node.item.id, direction, draftText)}
         artifactCounts={artifactCounts}
         artifactTitles={artifactTitles}
@@ -230,73 +210,69 @@ export function ThreadListView({
   );
   return (
     <div className="@container mx-auto w-full max-w-4xl space-y-2 text-xs">
-      {!supplied ? (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <ToggleGroup
-            ref={filterRef}
-            aria-label="Filter todos by who is responsible"
-            size="segmented-compact"
-            value={[filter]}
-            onValueChange={(value) => {
-              const next = value[0];
-              if (next === "all" || next === "mine" || next === "agents")
-                useThreadContextSidebarStore.getState().setTodoFilter(next);
-            }}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <ToggleGroup
+          ref={filterRef}
+          aria-label="Filter todos by who is responsible"
+          size="segmented-compact"
+          value={[filter]}
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next === "all" || next === "mine" || next === "agents")
+              useThreadContextSidebarStore.getState().setTodoFilter(next);
+          }}
+        >
+          {filterOptions.map(({ value, Icon, iconClass }) => (
+            <Tooltip key={value}>
+              <TooltipTrigger
+                render={<GroupToggle value={value} aria-label={filterLabels[value]} />}
+              >
+                <Icon className={iconClass} />
+                <span className="hidden @min-[22rem]:inline">{filterLabels[value]}</span>
+              </TooltipTrigger>
+              <TooltipPopup>{filterLabels[value]}</TooltipPopup>
+            </Tooltip>
+          ))}
+        </ToggleGroup>
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label={showClosed ? "Showing done and dropped" : "Hiding done and dropped"}
+              />
+            }
           >
-            {filterOptions.map(({ value, Icon, iconClass }) => (
-              <Tooltip key={value}>
-                <TooltipTrigger
-                  render={<GroupToggle value={value} aria-label={filterLabels[value]} />}
-                >
-                  <Icon className={iconClass} />
-                  <span className="hidden @min-[22rem]:inline">{filterLabels[value]}</span>
-                </TooltipTrigger>
-                <TooltipPopup>{filterLabels[value]}</TooltipPopup>
-              </Tooltip>
-            ))}
-          </ToggleGroup>
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  aria-label={showClosed ? "Showing done and dropped" : "Hiding done and dropped"}
-                />
+            {showClosed ? <EyeIcon /> : <EyeOffIcon />}
+          </MenuTrigger>
+          <MenuPopup align="start">
+            <MenuCheckboxItem
+              variant="switch"
+              checked={showClosed}
+              onCheckedChange={(checked) =>
+                useThreadContextSidebarStore.getState().setTodoShowClosed(checked)
               }
             >
-              {showClosed ? <EyeIcon /> : <EyeOffIcon />}
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <MenuCheckboxItem
-                variant="switch"
-                checked={showClosed}
-                onCheckedChange={(checked) =>
-                  useThreadContextSidebarStore.getState().setTodoShowClosed(checked)
-                }
-              >
-                Show done and dropped
-              </MenuCheckboxItem>
-            </MenuPopup>
-          </Menu>
-          {entry.items.length ? (
-            <span
-              className="ml-auto shrink-0 tabular-nums text-muted-foreground"
-              aria-label={`${done} of ${entry.items.length} done`}
-            >
-              {done}/{entry.items.length}
-              <span className="hidden @min-[22rem]:inline"> done</span>
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {!supplied ? (
-        <FollowUpSection
-          environmentId={threadRef.environmentId}
-          threadId={threadRef.threadId}
-          showDone={showClosed}
-        />
-      ) : null}
+              Show done and dropped
+            </MenuCheckboxItem>
+          </MenuPopup>
+        </Menu>
+        {entry.items.length ? (
+          <span
+            className="ml-auto shrink-0 tabular-nums text-muted-foreground"
+            aria-label={`${done} of ${entry.items.length} done`}
+          >
+            {done}/{entry.items.length}
+            <span className="hidden @min-[22rem]:inline"> done</span>
+          </span>
+        ) : null}
+      </div>
+      <FollowUpSection
+        environmentId={threadRef.environmentId}
+        threadId={threadRef.threadId}
+        showDone={showClosed}
+      />
       <div role="list" aria-label="Todos">
         {tree.map((node) => renderBranch(node, 0))}
       </div>
@@ -336,71 +312,69 @@ export function ThreadListView({
           {error}
         </p>
       ) : null}
-      {!supplied ? (
-        <form
-          className="space-y-1.5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (text.trim())
-              void mutate({
-                changes: [{ text: text.trim(), owner, parentId: parent?.id ?? null }],
-              }).then((ok) => {
-                if (ok) {
-                  setText("");
-                  setParent(null);
-                }
-              });
-          }}
-        >
-          {parent ? (
-            <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-              <span className="min-w-0 flex-1 truncate">Under: {parent.text}</span>
-              <Button size="xs" variant="ghost" onClick={() => setParent(null)}>
-                Cancel
-              </Button>
-            </div>
-          ) : null}
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`New todo owner: ${owner === "you" ? "you" : "agent"}`}
-                    disabled={!canWrite || busy}
-                    onClick={() => setOwner(owner === "you" ? "agent" : "you")}
-                  />
-                }
-              >
-                {owner === "agent" ? <BotIcon /> : <UserIcon />}
-              </TooltipTrigger>
-              <TooltipPopup>
-                {owner === "agent" ? "For the agent" : "For you"} · click to switch
-              </TooltipPopup>
-            </Tooltip>
-            <Input
-              ref={newItemRef}
-              size="compact"
-              aria-label="New todo"
-              placeholder="Add a todo…"
-              value={text}
-              disabled={!canWrite || busy}
-              onChange={(event) => setText(event.target.value)}
-            />
-            <Button
-              type="submit"
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Add todo"
-              disabled={!canWrite || busy || !text.trim()}
-            >
-              <PlusIcon />
+      <form
+        className="space-y-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (text.trim())
+            void mutate({
+              changes: [{ text: text.trim(), owner, parentId: parent?.id ?? null }],
+            }).then((ok) => {
+              if (ok) {
+                setText("");
+                setParent(null);
+              }
+            });
+        }}
+      >
+        {parent ? (
+          <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate">Under: {parent.text}</span>
+            <Button size="xs" variant="ghost" onClick={() => setParent(null)}>
+              Cancel
             </Button>
           </div>
-        </form>
-      ) : null}
+        ) : null}
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={`New todo owner: ${owner === "you" ? "you" : "agent"}`}
+                  disabled={!canWrite || busy}
+                  onClick={() => setOwner(owner === "you" ? "agent" : "you")}
+                />
+              }
+            >
+              {owner === "agent" ? <BotIcon /> : <UserIcon />}
+            </TooltipTrigger>
+            <TooltipPopup>
+              {owner === "agent" ? "For the agent" : "For you"} · click to switch
+            </TooltipPopup>
+          </Tooltip>
+          <Input
+            ref={newItemRef}
+            size="compact"
+            aria-label="New todo"
+            placeholder="Add a todo…"
+            value={text}
+            disabled={!canWrite || busy}
+            onChange={(event) => setText(event.target.value)}
+          />
+          <Button
+            type="submit"
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Add todo"
+            disabled={!canWrite || busy || !text.trim()}
+          >
+            <PlusIcon />
+          </Button>
+        </div>
+      </form>
       {entry.summaryNotes ? (
         <section>
           <CollapsibleSectionHeader expanded={notesOpen} onClick={() => setNotesOpen(!notesOpen)}>
@@ -418,7 +392,6 @@ export function ThreadListView({
 }
 
 function TodoRow({
-  crossThread,
   node,
   hidesClosed,
   expanded,
@@ -438,7 +411,6 @@ function TodoRow({
   artifactTitles,
   threadRef,
 }: {
-  crossThread: boolean;
   node: TodoNode;
   /** Closing a childless row removes it, so focus has to move on first. */
   hidesClosed: boolean;
@@ -452,7 +424,7 @@ function TodoRow({
   newItemRef: React.RefObject<HTMLInputElement | null>;
   disabled: boolean;
   onChange: (change: Omit<Change, "id">) => void;
-  onMove?: ((direction: number) => void) | undefined;
+  onMove: (direction: number) => void;
   canIndent: boolean;
   canOutdent: boolean;
   onIndent: (direction: "in" | "out", draftText?: string | null) => boolean;
@@ -562,7 +534,6 @@ function TodoRow({
           ) : null}
           {item.links.map((link) => (
             <TodoLinkChip
-              crossThread={crossThread}
               key={`${link.type}:${link.target}`}
               link={link}
               item={item}
@@ -613,10 +584,10 @@ function TodoRow({
             <MenuItem disabled={disabled || !canOutdent} onClick={() => onIndent("out")}>
               Outdent
             </MenuItem>
-            <MenuItem disabled={disabled || !onMove} onClick={() => onMove?.(-1)}>
+            <MenuItem disabled={disabled} onClick={() => onMove(-1)}>
               Move up
             </MenuItem>
-            <MenuItem disabled={disabled || !onMove} onClick={() => onMove?.(1)}>
+            <MenuItem disabled={disabled} onClick={() => onMove(1)}>
               Move down
             </MenuItem>
             <MenuSeparator />
@@ -638,14 +609,6 @@ function TodoRow({
               </MenuRadioGroup>
             </MenuGroup>
             <MenuSeparator />
-            <MenuCheckboxItem
-              variant="switch"
-              checked={item.needsQa}
-              disabled={disabled}
-              onCheckedChange={(needsQa) => onChange({ needsQa })}
-            >
-              Needs QA
-            </MenuCheckboxItem>
             <MenuItem
               disabled={disabled}
               onClick={() => {
@@ -732,14 +695,12 @@ function OwnerIcon({ owner }: { owner: Owner }) {
 }
 
 function TodoLinkChip({
-  crossThread,
   link,
   item,
   artifactCounts,
   artifactTitles,
   threadRef,
 }: {
-  crossThread: boolean;
   link: ListItem["links"][number];
   item: ListItem;
   artifactCounts: Map<string, number>;
@@ -780,8 +741,7 @@ function TodoLinkChip({
             onClick={() =>
               useThreadContextSidebarStore.getState().show("artifacts", {
                 artifactId: link.target,
-                // The QA view lists other threads, so their artifacts pin the sidebar to them.
-                ...(crossThread ? { thread: threadRef } : { artifactThread: threadRef }),
+                artifactThread: threadRef,
               })
             }
           />
@@ -847,45 +807,6 @@ export function ThreadListSummary({ threadRef }: { threadRef: ScopedThreadRef })
       </span>
       <span className="truncate text-muted-foreground">· next: {next}</span>
     </button>
-  );
-}
-
-export function YourQaView({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const readable = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
-  const query = useEnvironmentQuery(
-    readable
-      ? threadListRead({
-          environmentId: threadRef.environmentId,
-          input: { allThreads: true, all: true, needsQa: true },
-        })
-      : null,
-  );
-  return (
-    <div className="overflow-y-auto p-3">
-      <h2 className="text-sm font-medium">Needs your QA</h2>
-      {query.error ? <p role="alert">{query.error}</p> : null}
-      {query.data
-        ?.filter((entry) => entry.items.length > 0)
-        .map((entry) => (
-          <section key={entry.threadId} className="border-b border-border py-2">
-            <Link
-              to="/$environmentId/$threadId"
-              params={{ environmentId: threadRef.environmentId, threadId: entry.threadId }}
-              className="text-xs text-primary hover:underline"
-            >
-              {entry.threadTitle}
-            </Link>
-            <ThreadListView
-              threadRef={{ ...threadRef, threadId: entry.threadId }}
-              entry={entry}
-              onRefresh={query.refresh}
-            />
-          </section>
-        ))}
-      {query.data?.every((entry) => entry.items.length === 0) ? (
-        <p className="py-3 text-xs text-muted-foreground">Nothing needs your QA.</p>
-      ) : null}
-    </div>
   );
 }
 

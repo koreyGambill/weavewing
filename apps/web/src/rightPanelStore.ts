@@ -42,7 +42,6 @@ const RIGHT_PANEL_KINDS = [
   "pull-request",
   "pull-requests",
   "side-chat",
-  "reviews",
   "notes",
 ] as const;
 
@@ -111,8 +110,6 @@ export type RightPanelSurface =
       detailTab?: PullRequestDetailTab;
     }
   | { id: "pull-requests" | `pull-requests:${string}`; kind: "pull-requests" }
-  /** Items that need your QA across threads; a thread's artifacts live in the sidebar. */
-  | { id: "reviews" | `reviews:${string}`; kind: "reviews" }
   | { id: "notes" | `notes:${string}`; kind: "notes" }
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
 
@@ -282,8 +279,6 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "device":
       return { id: "device", kind };
-    case "reviews":
-      return { id: "reviews", kind };
     case "notes":
       return { id: "notes", kind };
   }
@@ -596,18 +591,16 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     const kind = (surface as { kind?: string }).kind;
-                    if (kind === "plan" || kind === "agents" || kind === "environments") return [];
+                    if (
+                      kind === "plan" ||
+                      kind === "agents" ||
+                      kind === "environments" ||
+                      kind === "inspect" ||
+                      kind === "reviews"
+                    )
+                      return [];
                     if (surface.kind === "notes")
                       return validAreaId(surface.id, "notes") ? [surface] : [];
-                    // Artifacts and Inspect moved to the sidebar; only the QA view stays a tab.
-                    if (kind === "inspect") return [];
-                    if (surface.kind === "reviews") {
-                      const legacy = surface as { reviewId?: unknown; workspaceSection?: string };
-                      return validAreaId(surface.id, "reviews") &&
-                        (!("reviewId" in legacy) || legacy.workspaceSection === "qa")
-                        ? [{ id: surface.id, kind: "reviews" }]
-                        : [];
-                    }
                     if (
                       (surface.kind === "file" || surface.kind === "files") &&
                       "folderTrail" in surface &&
@@ -886,13 +879,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       add: (ref, kind) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) =>
-            upsertSurface(
-              current,
-              kind === "reviews"
-                ? (current.surfaces.find((surface) => surface.kind === "reviews") ??
-                    singletonSurface(kind))
-                : instanceSurface(kind),
-            ),
+            upsertSurface(current, instanceSurface(kind)),
           ),
         ),
       restoreSurface: (ref, surface) =>

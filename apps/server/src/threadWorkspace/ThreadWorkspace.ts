@@ -384,7 +384,6 @@ const make = Effect.gen(function* () {
         details: change.details ?? old?.details ?? "",
         parentId: change.parentId === undefined ? (old?.parentId ?? null) : change.parentId,
         links: change.links ?? old?.links ?? [],
-        needsQa: change.needsQa ?? old?.needsQa ?? false,
       } satisfies ListItem;
       item.doneAt = item.state === "done" || item.state === "dropped" ? (old?.doneAt ?? now) : null;
       const keys = item.text.match(/\bBW-\d+\b/g) ?? [];
@@ -504,9 +503,7 @@ const make = Effect.gen(function* () {
           summaryNotes: workspace.summaryNotes,
           childPreamble: workspace.childPreamble,
           items: workspace.items.filter(
-            (item) =>
-              (input.all || item.state === "open" || item.state === "handed_off") &&
-              (input.needsQa === undefined || item.needsQa === input.needsQa),
+            (item) => input.all || item.state === "open" || item.state === "handed_off",
           ),
         });
       }

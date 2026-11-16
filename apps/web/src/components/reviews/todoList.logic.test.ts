@@ -15,7 +15,6 @@ const item = (
   details: "",
   parentId: options.parentId ?? null,
   links: [],
-  needsQa: false,
 });
 
 const shape = (nodes: ReadonlyArray<TodoNode>): unknown[] =>

@@ -37,7 +37,6 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dn
 import { CSS } from "@dnd-kit/utilities";
 import {
   Smartphone,
-  ListChecks,
   NotebookPen,
   ChevronDown,
   ChevronLeft,
@@ -614,8 +613,6 @@ export function surfaceTitle(
       return surface.title ?? surface.target?.name ?? "Device";
     case "side-chat":
       return "Side chat";
-    case "reviews":
-      return "Your QA";
     case "notes":
       return "Notes";
     case "preview": {
@@ -708,8 +705,6 @@ export function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
-    case "reviews":
-      return <ListChecks className="size-3 shrink-0" />;
     case "notes":
       return <NotebookPen className="size-3 shrink-0" />;
     case "device":
