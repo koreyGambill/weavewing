@@ -173,7 +173,7 @@ const makeWithCursor = (read: CursorAccountReader.CursorAccountReader["Service"]
       layerCursorUsageAccounts(Layer.succeed(CursorAccountReader.CursorAccountReader, { read })),
     );
     const accounts = Context.get(context, CursorUsageAccounts.CursorUsageAccounts);
-    const service = yield* UsageService.make.pipe(Effect.provideContext(context));
+    const service = yield* makeUsageService.pipe(Effect.provideContext(context));
     return {
       ...service,
       awaitPersisted: Effect.andThen(service.awaitPersisted, accounts.awaitPersisted),
@@ -247,6 +247,9 @@ const layerService = (input: {
       }),
     ),
   );
+
+// Weavewing fetches the price list only on an explicit refresh; these cases price as after one.
+const makeUsageService = UsageService.make.pipe(Effect.tap((service) => service.refreshRates));
 
 const BEFORE_NARROW_WINDOW = Date.parse("2026-08-01T10:00:00Z") / 1000;
 const NARROW_WINDOW_MTIME = Date.parse("2026-09-01T10:00:00Z") / 1000;
@@ -554,7 +557,7 @@ describe("UsageService", () => {
         await NodeFSP.writeFile(compressedPath, NodeZlib.zstdCompressSync(compressed));
       });
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         const first = yield* service.readSummary(WINDOW);
         assert.strictEqual(totalOutputTokens(first), 40);
         assert.strictEqual(
@@ -602,7 +605,7 @@ describe("UsageService", () => {
           };
           await NodeFSP.writeFile(cachePath, encodeUnknownJsonString(document));
         });
-        const restarted = yield* UsageService.make;
+        const restarted = yield* makeUsageService;
         const restored = yield* restarted.readSummary(WINDOW);
         assert.deepStrictEqual(restored.buckets, rewritten.buckets);
         assert.strictEqual(
@@ -618,7 +621,7 @@ describe("UsageService", () => {
           assert.strictEqual(document.files[originalPath], undefined);
           await NodeFSP.rm(compressedPath);
         });
-        const removed = yield* UsageService.make;
+        const removed = yield* makeUsageService;
         const retained = yield* removed.readSummary(WINDOW);
         assert.deepStrictEqual(retained.buckets, rewritten.buckets);
         assert.strictEqual(
@@ -645,7 +648,7 @@ describe("UsageService", () => {
         ["container-d", undefined, "container-a"],
       ] as const) {
         const summary = yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           return yield* service.readSummary(WINDOW);
         }).pipe(
           Effect.scoped,
@@ -679,7 +682,7 @@ describe("UsageService", () => {
           Effect.gen(function* () {
             const fileSystem = yield* FileSystem.FileSystem;
             let firstRead = true;
-            const service = yield* UsageService.make.pipe(
+            const service = yield* makeUsageService.pipe(
               Effect.provideService(FileSystem.FileSystem, {
                 ...fileSystem,
                 readFileString: (path, encoding) =>
@@ -708,7 +711,7 @@ describe("UsageService", () => {
       const hostId = persisted.trim();
       assert.include(["container-a", "container-b"], hostId);
       const restarted = yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         return yield* service.readSummary(WINDOW);
       }).pipe(
         Effect.scoped,
@@ -771,10 +774,10 @@ describe("UsageService", () => {
           );
         });
         yield* Effect.gen(function* () {
-          const first = yield* UsageService.make;
+          const first = yield* makeUsageService;
           verify(yield* first.readSummary(WINDOW), 7, 7);
           yield* first.awaitPersisted;
-          const pending = yield* UsageService.make;
+          const pending = yield* makeUsageService;
           verify(yield* pending.readSummary(WINDOW), 7, 7);
           yield* seedCodexHistory({ id: "fast-turn", sessionId: "fast-session" });
           yield* seedCodexHistory({
@@ -786,7 +789,7 @@ describe("UsageService", () => {
           yield* sql`ALTER TABLE orchestration_events RENAME TO unavailable_events`;
           verify(yield* pending.readSummary(WINDOW), 7, 7);
           yield* pending.awaitPersisted;
-          const retry = yield* UsageService.make;
+          const retry = yield* makeUsageService;
           verify(yield* retry.readSummary(WINDOW), 7, 7);
           yield* sql`ALTER TABLE unavailable_events RENAME TO orchestration_events`;
           // History repair must touch both the committed record and tentative tail.
@@ -794,7 +797,7 @@ describe("UsageService", () => {
           yield* retry.awaitPersisted;
           yield* sql`ALTER TABLE orchestration_events RENAME TO resolved_events`;
           verify(yield* retry.readSummary(WINDOW), 7, 30);
-          const resolved = yield* UsageService.make;
+          const resolved = yield* makeUsageService;
           verify(yield* resolved.readSummary(WINDOW), 7, 30);
           yield* sql`ALTER TABLE resolved_events RENAME TO orchestration_events`;
 
@@ -828,7 +831,7 @@ describe("UsageService", () => {
           );
           verify(yield* resolved.readSummary(WINDOW), 32, 62);
           yield* resolved.awaitPersisted;
-          const native = yield* UsageService.make;
+          const native = yield* makeUsageService;
           verify(yield* native.readSummary(WINDOW), 32, 62);
           yield* seedCodexHistory({
             id: "after-restart-native",
@@ -849,7 +852,7 @@ describe("UsageService", () => {
             await NodeFSP.rm(ultraPath);
           });
           yield* sql`DELETE FROM orchestration_events`;
-          const deleted = yield* UsageService.make;
+          const deleted = yield* makeUsageService;
           verify(yield* deleted.readSummary(WINDOW), 49, 132);
         }).pipe(
           Effect.provide(
@@ -926,7 +929,7 @@ describe("UsageService", () => {
             options: [{ id: "serviceTier", value: "ultrafast" }],
           });
           yield* seedCodexHistory({ id: "standard-turn", sessionId: "tier-session", options: [] });
-          const first = yield* UsageService.make;
+          const first = yield* makeUsageService;
           verify(yield* first.readSummary(WINDOW), 2, 7);
           yield* first.awaitPersisted;
 
@@ -943,10 +946,10 @@ describe("UsageService", () => {
           });
           const sql = yield* SqlClient.SqlClient;
           yield* sql`ALTER TABLE orchestration_events RENAME TO unavailable_events`;
-          const upgraded = yield* UsageService.make;
+          const upgraded = yield* makeUsageService;
           verify(yield* upgraded.readSummary(WINDOW), 4, 9);
           yield* upgraded.awaitPersisted;
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           verify(yield* restarted.readSummary(WINDOW), 4, 9);
           yield* sql`ALTER TABLE unavailable_events RENAME TO orchestration_events`;
         }).pipe(
@@ -1055,7 +1058,7 @@ describe("UsageService", () => {
           );
         });
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const first = yield* service.readSummary(WINDOW);
           const pi = first.buckets.filter((bucket) => bucket.provider === "pi");
           assert.strictEqual(
@@ -1119,7 +1122,7 @@ describe("UsageService", () => {
             45,
           );
           yield* service.awaitPersisted;
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           assert.deepStrictEqual((yield* restarted.readSummary(WINDOW)).buckets, grown.buckets);
         }).pipe(
           Effect.scoped,
@@ -1256,7 +1259,7 @@ describe("UsageService", () => {
           } as unknown as MuseSdk.MuseSdkHost),
         );
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const window = {
             timeZone: "UTC",
             sinceDay: UsageDay.make("2026-08-01"),
@@ -1317,7 +1320,7 @@ describe("UsageService", () => {
           yield* Effect.promise(() => NodeFSP.appendFile(file, appended.slice(0, -10)));
           assert.deepStrictEqual(muse(yield* service.readSummary(window)), buckets);
           yield* service.awaitPersisted;
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           yield* Effect.promise(() => NodeFSP.appendFile(file, appended.slice(-10) + "\n"));
           const grown = muse(yield* restarted.readSummary(window));
           assert.strictEqual(
@@ -1400,7 +1403,7 @@ describe("UsageService", () => {
           .filter((source) => source.fingerprint.provider === "muse")
           .map((source) => [source.fingerprint.resolvedHomePath, source.status, source.refreshing]);
       const [pending, refreshed] = yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         const read = yield* Effect.forkChild(service.readSummary(WINDOW));
         yield* Deferred.await(museStarted);
         const pending = yield* Fiber.join(read);
@@ -1446,7 +1449,7 @@ describe("UsageService", () => {
       Effect.gen(function* () {
         const { home, settings } = yield* setup;
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const missing = yield* service.readSummary(WINDOW);
           assert.strictEqual(
             missing.sources.find((source) => source.fingerprint.provider === "pi")?.status,
@@ -1560,7 +1563,7 @@ describe("UsageService", () => {
           );
         });
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const summary = yield* service.readSummary(WINDOW);
           const pi = summary.buckets.filter((bucket) => bucket.provider === "pi");
           assert.strictEqual(pi.length, 1);
@@ -1642,7 +1645,7 @@ describe("UsageService", () => {
             );
           });
         }
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         return yield* service.readSummary(WINDOW);
       }).pipe(
         Effect.scoped,
@@ -2012,7 +2015,7 @@ describe("UsageService", () => {
             db.close();
           }
         });
-        const service = yield* UsageService.make.pipe(
+        const service = yield* makeUsageService.pipe(
           Effect.provide(layerService({ prefix: "usage-service-opencode", home, settings })),
         );
         const summary = yield* service.readSummary(WINDOW);
@@ -2054,7 +2057,7 @@ describe("UsageService", () => {
         await NodeFSP.writeFile(NodePath.join(directory, "msg_priced.json"), priced);
         await NodeFSP.writeFile(NodePath.join(directory, "msg_unpriced.json"), unpriced);
       });
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(layerService({ prefix: "usage-service-unpriced-tokens", home, settings })),
       );
       const summary = yield* service.readSummary(WINDOW);
@@ -2098,7 +2101,7 @@ describe("UsageService", () => {
         }
         await NodeFSP.symlink(instanceRoot, alias, "junction");
       });
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(
           layerService({
             prefix: "usage-service-opencode-instances",
@@ -2173,7 +2176,7 @@ describe("UsageService", () => {
           "junction",
         );
       });
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(
           layerService({
             prefix: "usage-service-aliased-roots-test",
@@ -2238,7 +2241,7 @@ describe("UsageService", () => {
         driver: ProviderDriverKind.make("antigravity"),
         environment: [{ name: "ANTIGRAVITY_DATA_DIR", value: dataDir, sensitive: false }],
       });
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(
           layerService({
             prefix: "usage-service-antigravity-instances-test",
@@ -2323,7 +2326,7 @@ describe("UsageService", () => {
           }) + "\n",
         );
       });
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(
           layerService({
             prefix: "usage-service-accounts-test",
@@ -2418,7 +2421,7 @@ describe("UsageService", () => {
         });
         yield* Effect.gen(function* () {
           const settingsService = yield* ServerSettings.ServerSettingsService;
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const first = yield* service.readSummary(WINDOW);
           assert.strictEqual(totalOutputTokens(first), 7);
           const configuredProjects = yield* Effect.promise(() =>
@@ -2481,7 +2484,7 @@ describe("UsageService", () => {
       Effect.gen(function* () {
         const { transcript, settings, home } = yield* setup;
         yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
-        const service = yield* UsageService.make.pipe(
+        const service = yield* makeUsageService.pipe(
           Effect.provide(
             layerService({
               prefix: "usage-service-inherited-homes-test",
@@ -2533,7 +2536,7 @@ describe("UsageService", () => {
           await NodeFSP.chmod(unreadable, 0);
         });
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const partial = yield* service.readSummary(WINDOW);
           assert.strictEqual(totalOutputTokens(partial), 5);
           assert.strictEqual(partial.sources[0]?.status, "partial");
@@ -2560,7 +2563,7 @@ describe("UsageService", () => {
           summary.sources.find((source) => source.fingerprint.provider === "claude");
         yield* Effect.gen(function* () {
           // With nothing persisted, the first answer is a full scan.
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const loop = NodePath.join(NodePath.dirname(transcript), "loop.jsonl");
           yield* Effect.promise(() => NodeFSP.symlink(loop, loop, "junction"));
           assert.strictEqual(claude(yield* service.readSummary(provisional))?.status, "partial");
@@ -2570,7 +2573,7 @@ describe("UsageService", () => {
           yield* service.awaitPersisted;
 
           yield* Effect.promise(() => NodeFSP.appendFile(transcript, claudeLine(2, 7)));
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           const saved = yield* restarted.readSummary(provisional);
           assert.strictEqual(totalOutputTokens(saved), 5);
           assert.isTrue(claude(saved)?.refreshing);
@@ -2609,7 +2612,7 @@ describe("UsageService", () => {
             };
             await NodeFSP.writeFile(cachePath, JSON.stringify(document));
           });
-          const reloaded = yield* UsageService.make;
+          const reloaded = yield* makeUsageService;
           assert.isUndefined(claude(yield* reloaded.readSummary(provisional))?.refreshing);
         }).pipe(
           Effect.scoped,
@@ -2659,7 +2662,7 @@ describe("UsageService", () => {
         }));
 
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         // Same service, concurrent reads: the in-flight key must keep these scans apart.
         const [unfiltered, noOp, keepNothing, included, reordered, excluded, hourly] =
           yield* Effect.all(
@@ -2730,7 +2733,7 @@ describe("UsageService", () => {
 
       yield* Effect.gen(function* () {
         const settingsService = yield* ServerSettings.ServerSettingsService;
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
 
         const original = yield* service.readSummary(WINDOW);
         assert.strictEqual(original.buckets[0]?.costUsd, 0);
@@ -2836,12 +2839,12 @@ describe("UsageService", () => {
           const open = vi.spyOn(NodeFSP, "open");
           open.mockClear();
           yield* Effect.addFinalizer(() => Effect.sync(() => open.mockRestore()));
-          const first = yield* UsageService.make;
+          const first = yield* makeUsageService;
           const cold = yield* first.readSummary(WINDOW);
           assert.isTrue(open.mock.calls.some(([path]) => path === transcript));
           verify(cold, 20, 20, 1);
           yield* first.awaitPersisted;
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           open.mockClear();
           verify(yield* first.readSummary(WINDOW), 20, 20, 1);
           verify(yield* restarted.readSummary(WINDOW), 20, 20, 1);
@@ -2853,7 +2856,7 @@ describe("UsageService", () => {
           yield* Effect.promise(() => NodeFSP.appendFile(transcript, append));
           verify(yield* restarted.readSummary(WINDOW), 22, 24, 1);
           yield* restarted.awaitPersisted;
-          const resumed = yield* UsageService.make;
+          const resumed = yield* makeUsageService;
           verify(yield* resumed.readSummary(WINDOW), 22, 24, 1);
           const next = tier("ultrafast") + "\n" + counted(10, 2, 150, 32) + "\n";
           content += next;
@@ -2899,18 +2902,18 @@ describe("UsageService", () => {
         const complete = claudeCopy(COMPLETE_USAGE);
         yield* Effect.promise(() => NodeFSP.writeFile(transcript, partial));
         yield* Effect.gen(function* () {
-          const first = yield* UsageService.make;
+          const first = yield* makeUsageService;
           assert.strictEqual(totalOutputTokens(yield* first.readSummary(WINDOW)), 3);
           yield* first.awaitPersisted;
 
           yield* Effect.promise(() => NodeFSP.appendFile(transcript, complete.trimEnd()));
-          const resumed = yield* UsageService.make;
+          const resumed = yield* makeUsageService;
           const tail = yield* resumed.readSummary(WINDOW);
           assert.deepStrictEqual(tail.buckets[0]?.totals, COMPLETE_TOTALS);
           assert.strictEqual(tail.buckets[0]?.records, 1);
           assert.closeTo(tail.buckets[0]?.costUsd ?? 0, COMPLETE_COST_USD, 1e-12);
           yield* resumed.awaitPersisted;
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           assert.deepStrictEqual((yield* restarted.readSummary(WINDOW)).buckets, tail.buckets);
 
           // Grow the file without changing its settled prefix: the old tail must be discarded.
@@ -2933,7 +2936,7 @@ describe("UsageService", () => {
           assert.deepStrictEqual((yield* restarted.readSummary(WINDOW)).buckets, grown.buckets);
           yield* restarted.awaitPersisted;
           assert.deepStrictEqual(
-            (yield* (yield* UsageService.make).readSummary(WINDOW)).buckets,
+            (yield* (yield* makeUsageService).readSummary(WINDOW)).buckets,
             grown.buckets,
           );
         }).pipe(
@@ -2960,7 +2963,7 @@ describe("UsageService", () => {
         );
         yield* Effect.promise(() => NodeFSP.writeFile(transcript, large));
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const first = yield* service.readSummary(WINDOW);
           assert.strictEqual(totalOutputTokens(first), 9900);
           assert.closeTo(
@@ -2978,12 +2981,12 @@ describe("UsageService", () => {
             20,
           );
           yield* service.awaitPersisted;
-          const restarted = yield* UsageService.make;
+          const restarted = yield* makeUsageService;
           const restored = yield* restarted.readSummary(WINDOW);
           assert.deepStrictEqual(restored.buckets, appended.buckets);
           yield* restarted.awaitPersisted;
           yield* Effect.promise(() => NodeFSP.rm(transcript));
-          const afterCleanup = yield* UsageService.make;
+          const afterCleanup = yield* makeUsageService;
           assert.deepStrictEqual(
             (yield* afterCleanup.readSummary(WINDOW)).buckets,
             appended.buckets,
@@ -3051,7 +3054,7 @@ describe("UsageService", () => {
             stateDir,
             version === 4 ? "usage-scan-cache.json" : `usage-scan-cache-v${version}.json`,
           );
-          const first = yield* UsageService.make;
+          const first = yield* makeUsageService;
           yield* first.readSummary(WINDOW);
           yield* first.awaitPersisted;
 
@@ -3098,7 +3101,7 @@ describe("UsageService", () => {
             await NodeFSP.mkdir(`${cachePath}.active`);
           });
 
-          const upgraded = yield* UsageService.make;
+          const upgraded = yield* makeUsageService;
           const summary = yield* upgraded.readSummary(WINDOW);
           assert.strictEqual(totalOutputTokens(summary), 30);
           assert.strictEqual(
@@ -3179,7 +3182,7 @@ describe("UsageService", () => {
         const { stateDir } = yield* ServerConfig.ServerConfig;
         const tokens = (summary: UsageSummary) =>
           summary.buckets.reduce((sum, bucket) => sum + totalTokens(bucket.totals), 0);
-        const first = yield* UsageService.make;
+        const first = yield* makeUsageService;
         assert.strictEqual(tokens(yield* first.readSummary(WINDOW)), 120);
         yield* first.awaitPersisted;
 
@@ -3209,7 +3212,7 @@ describe("UsageService", () => {
           );
         });
 
-        const upgraded = yield* UsageService.make;
+        const upgraded = yield* makeUsageService;
         const summary = yield* upgraded.readSummary(WINDOW);
         assert.deepStrictEqual(
           {
@@ -3245,7 +3248,7 @@ describe("UsageService", () => {
       const content = claudeLine(1, 5);
       yield* Effect.promise(() => NodeFSP.writeFile(transcript, content));
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         const first = yield* service.readSummary(WINDOW);
         assert.strictEqual(totalOutputTokens(first), 5);
         assert.isAbove(first.buckets[0]?.costUsd ?? 0, 0);
@@ -3256,7 +3259,7 @@ describe("UsageService", () => {
         assert.deepStrictEqual(deleted.sources, first.sources);
 
         yield* service.awaitPersisted;
-        const restarted = yield* UsageService.make;
+        const restarted = yield* makeUsageService;
         const restored = yield* restarted.readSummary(WINDOW);
         assert.deepStrictEqual(restored.buckets, first.buckets);
         assert.deepStrictEqual(restored.sources, first.sources);
@@ -3272,7 +3275,7 @@ describe("UsageService", () => {
         yield* Effect.promise(() =>
           NodeFSP.rm(NodePath.join(home, "claude", "projects"), { recursive: true }),
         );
-        const afterRootCleanup = yield* UsageService.make;
+        const afterRootCleanup = yield* makeUsageService;
         const missingRoot = yield* afterRootCleanup.readSummary(WINDOW);
         assert.deepStrictEqual(missingRoot.buckets, first.buckets);
         assert.strictEqual(missingRoot.sources[0]?.distinctSessions, 1);
@@ -3357,7 +3360,7 @@ describe("UsageService", () => {
         await NodeFSP.writeFile(second, forked(claudeLine(1, 5)) + forked(claudeLine(2, 7)));
       });
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         const live = yield* service.readSummary(WINDOW);
         assert.strictEqual(live.buckets[0]?.sessions, 2);
 
@@ -3366,7 +3369,7 @@ describe("UsageService", () => {
         assert.deepStrictEqual(saved.buckets, live.buckets);
         assert.deepStrictEqual(saved.sources, live.sources);
         yield* service.awaitPersisted;
-        const restored = yield* (yield* UsageService.make).readSummary(WINDOW);
+        const restored = yield* (yield* makeUsageService).readSummary(WINDOW);
         assert.deepStrictEqual(restored.buckets, live.buckets);
       }).pipe(
         Effect.provide(layerService({ prefix: "usage-service-copy-order-test", home, settings })),
@@ -3391,12 +3394,12 @@ describe("UsageService", () => {
         await NodeFSP.writeFile(second, forked(claudeLine(1, 5)) + forked(claudeLine(2, 7)));
       });
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         // The narrow window saves the second copy before the wide one reads the first.
         yield* service.readSummary(NARROW_WINDOW);
         const exact = yield* service.readSummary(WINDOW);
         yield* service.awaitPersisted;
-        const restarted = yield* UsageService.make;
+        const restarted = yield* makeUsageService;
         const saved = yield* restarted.readSummary({ ...WINDOW, provisional: true });
         assert.isTrue(saved.sources.some((source) => source.refreshing === true));
         assert.deepStrictEqual(saved.buckets, exact.buckets);
@@ -3416,7 +3419,7 @@ describe("UsageService", () => {
         await NodeFSP.utimes(second, BEFORE_NARROW_WINDOW, BEFORE_NARROW_WINDOW);
       });
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
+        const service = yield* makeUsageService;
         yield* service.readSummary(WINDOW);
         yield* Effect.promise(() =>
           NodeFSP.utimes(first, NARROW_WINDOW_MTIME, NARROW_WINDOW_MTIME),
@@ -3444,7 +3447,7 @@ describe("UsageService", () => {
         yield* makeGate(probe, BEFORE_NARROW_WINDOW);
         yield* makeGate(hold, BEFORE_NARROW_WINDOW);
         yield* Effect.gen(function* () {
-          const service = yield* UsageService.make;
+          const service = yield* makeUsageService;
           const wide = yield* service.readSummary(WINDOW).pipe(Effect.forkChild);
           yield* openGate(probe);
           yield* replaceFile(transcript, claudeLine(1, 5) + claudeLine(2, 7));
@@ -3495,7 +3498,7 @@ describe("UsageService", () => {
             await NodeFSP.mkdir(stateDir, { recursive: true });
             await NodeFSP.writeFile(NodePath.join(stateDir, SCAN_CACHE_FILE_NAME), cache);
           });
-          const summary = yield* (yield* UsageService.make).readSummary(WINDOW);
+          const summary = yield* (yield* makeUsageService).readSummary(WINDOW);
           const source = summary.sources.find((source) => source.fingerprint.provider === "claude");
           assert.strictEqual(source?.status, "missing");
           assert.strictEqual(source?.scannedFiles, 0);
@@ -3519,7 +3522,7 @@ describe("UsageService", () => {
         const lastWrite = Date.parse("2026-08-01T10:00:00Z") / 1000;
         await NodeFSP.utimes(transcript, lastWrite, lastWrite);
       });
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(layerService({ prefix: "usage-service-saved-window-test", home, settings })),
       );
       const first = yield* service.readSummary(WINDOW);
@@ -3589,6 +3592,7 @@ describe("UsageService", () => {
           ),
         );
 
+        yield* service.refreshRates.pipe(Effect.forkChild);
         const first = yield* service.readSummary(WINDOW).pipe(Effect.forkChild);
         yield* Deferred.await(firstScanStarted);
         yield* settingsService.updateSettings({
@@ -3602,12 +3606,41 @@ describe("UsageService", () => {
 
         const original = yield* Fiber.join(first);
         const updated = yield* Fiber.join(second);
-        // Fetched rates price the first read, so scans must start while the fetch is pending.
+        // Refreshed rates price the first read, so scans must start while the fetch is pending.
         assert.isAbove(original.buckets[0]?.costUsd ?? 0, 0);
         assert.closeTo(updated.buckets[0]?.costUsd ?? -1, 0.00006, 1e-12);
       }).pipe(
         Effect.provide(layerService({ prefix: "usage-service-price-race-test", home, settings })),
       );
+    }),
+  );
+
+  it.effect("fetches the price list only on an explicit refresh", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
+      const requests: string[] = [];
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-rates-explicit-test",
+            home,
+            settings,
+            onRatesFetch: (request) => requests.push(request.url),
+            ratesDocument: {
+              "claude-fable-5": { input_cost_per_token: 1e-5, output_cost_per_token: 5e-5 },
+            },
+          }),
+        ),
+      );
+
+      const unpriced = yield* service.readSummary(WINDOW);
+      assert.strictEqual(unpriced.pricing.status, "unavailable");
+      assert.strictEqual(yield* service.priceRecords([]), null);
+      assert.deepStrictEqual(requests, []);
+
+      assert.strictEqual((yield* service.refreshRates).status, "fresh");
+      assert.strictEqual(requests.length, 1);
     }),
   );
 
@@ -3647,7 +3680,7 @@ describe("UsageService", () => {
             );
           },
         });
-        const service = yield* UsageService.make.pipe(Effect.provide(serviceLayer));
+        const service = yield* makeUsageService.pipe(Effect.provide(serviceLayer));
 
         const summary = yield* service.readSummary(WINDOW);
         assert.strictEqual(summary.pricing.status, "fresh");
@@ -3662,7 +3695,7 @@ describe("UsageService", () => {
         );
         assert.strictEqual(requests[1]?.headers.accept, "application/vnd.github.raw+json");
 
-        const restarted = yield* UsageService.make.pipe(Effect.provide(serviceLayer));
+        const restarted = yield* makeUsageService.pipe(Effect.provide(serviceLayer));
         const cached = yield* restarted.readSummary(WINDOW);
         assert.strictEqual(cached.pricing.status, "cached");
         assert.deepStrictEqual(cached.buckets, summary.buckets);
@@ -3673,7 +3706,7 @@ describe("UsageService", () => {
   it.effect("does not orphan an in-flight scan when its first caller is interrupted", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
-      const service = yield* UsageService.make.pipe(
+      const service = yield* makeUsageService.pipe(
         Effect.provide(layerService({ prefix: "usage-service-interruption-test", home, settings })),
       );
 
