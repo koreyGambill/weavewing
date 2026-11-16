@@ -545,6 +545,26 @@ fs.createReadStream(null, { fd: 3 }).on("end", quit).on("data", (chunk) => {
     }),
   );
 
+  it.live("refuses every outside URL while inline script still runs", (ctx) =>
+    Effect.gen(function* () {
+      const executable = (yield* HostProcess.Environment)[TEST_BROWSER_ENV];
+      if (!executable) return ctx.skip(`Set ${TEST_BROWSER_ENV} to run this test.`);
+      yield* Effect.gen(function* () {
+        const htmlRender = yield* HtmlRender.HtmlRender;
+        const preview = yield* htmlRender.preview({
+          html: [
+            '<img src="https://t3-csp-check.invalid/x.png?phi=1">',
+            '<script src="https://t3-csp-check.invalid/lib.js"></script>',
+            '<script>fetch("https://t3-csp-check.invalid/").catch(() => console.log("fetch refused"));</script>',
+          ].join(""),
+        });
+        const texts = preview.consoleMessages.map((message) => message.text).join("\n");
+        expect(texts).toContain("fetch refused");
+        expect(texts.match(/Content Security Policy/g)?.length).toBeGreaterThanOrEqual(3);
+      }).pipe(Effect.provide(layerHtmlRender(executable)));
+    }),
+  );
+
   it.live("keeps every local file but the page itself out of the browser", (ctx) =>
     Effect.gen(function* () {
       const executable = (yield* HostProcess.Environment)[TEST_BROWSER_ENV];

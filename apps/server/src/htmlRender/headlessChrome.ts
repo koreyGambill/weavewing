@@ -1,4 +1,5 @@
 import type { ThemeAppearance } from "@t3tools/shared/themePalettes";
+import { OFFLINE_HTML_CSP } from "@t3tools/shared/weavewingOutbound";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -51,6 +52,10 @@ const CAPTURE_TIMEOUT = "20 seconds";
 const PAGE_ORIGIN = "http://t3-page.localhost";
 const PAGE_URL = `${PAGE_ORIGIN}/page.html`;
 const PAGE_NAME = "page.html";
+const PAGE_CSP_HEADER = JSON.stringify({
+  name: "Content-Security-Policy",
+  value: OFFLINE_HTML_CSP,
+});
 const MEASURE_CONCURRENCY = 3;
 
 const textEncoder = new TextEncoder();
@@ -268,7 +273,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
   const fulfillPage = (sessionId: string, requestId: string, body: Uint8Array) =>
     Queue.offerAll(outgoing, [
       textEncoder.encode(
-        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":"text/html; charset=utf-8"}],"body":"`,
+        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":"text/html; charset=utf-8"},${PAGE_CSP_HEADER}],"body":"`,
       ),
       body,
       textEncoder.encode('"}}\0'),
