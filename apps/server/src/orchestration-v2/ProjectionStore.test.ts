@@ -10956,6 +10956,182 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 
+  it.effect(
+    "shows queued input of a run cancelled after it started, in SQL windows and forks",
+    () =>
+      Effect.gen(function* () {
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const prefix = "projection-started-cancelled-queue";
+        const sourceThreadId = ThreadId.make(`thread:${prefix}:source`);
+        const forkThreadId = ThreadId.make(`thread:${prefix}:fork`);
+        const runIds = [1, 2, 3].map((ordinal) => RunId.make(`run:${prefix}:${ordinal}`));
+        const [answeredRunId, deliveredRunId, heldRunId] = runIds as [RunId, RunId, RunId];
+
+        for (const [threadId, forkedFrom] of [
+          [sourceThreadId, null],
+          [forkThreadId, { type: "run", threadId: sourceThreadId, runId: deliveredRunId }],
+        ] as const) {
+          yield* projectionStore.apply({
+            id: EventId.make(`event:${threadId}:created`),
+            type: "thread.created",
+            threadId,
+            occurredAt: now,
+            payload: {
+              createdBy: "user",
+              creationSource: "web",
+              id: threadId,
+              projectId: ProjectId.make(`project:${prefix}`),
+              title: threadId,
+              providerInstanceId,
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              activeProviderThreadId: null,
+              lineage: {
+                parentThreadId: forkedFrom === null ? null : sourceThreadId,
+                relationshipToParent: forkedFrom === null ? null : "fork",
+                rootThreadId: sourceThreadId,
+              },
+              forkedFrom,
+              createdAt: now,
+              updatedAt: now,
+              archivedAt: null,
+              settledOverride: null,
+              settledAt: null,
+              lastVisitedAt: null,
+              deletedAt: null,
+            },
+          });
+        }
+
+        const applyRun = (runId: RunId, status: "completed" | "cancelled" | "rolled_back") => {
+          const ordinal = runIds.indexOf(runId) + 1;
+          const attemptId = RunAttemptId.make(`attempt:${runId}`);
+          const nodeId = NodeId.make(`node:${runId}`);
+          return Effect.all([
+            projectionStore.apply({
+              id: EventId.make(`event:${runId}:${status}`),
+              type: "run.updated",
+              threadId: sourceThreadId,
+              runId,
+              nodeId,
+              driver,
+              occurredAt: now,
+              payload: {
+                id: runId,
+                threadId: sourceThreadId,
+                ordinal,
+                providerInstanceId,
+                modelSelection,
+                providerThreadId: null,
+                userMessageId: MessageId.make(`message:${runId}`),
+                rootNodeId: nodeId,
+                activeAttemptId: attemptId,
+                status,
+                requestedAt: now,
+                // Server recovery cancels the delivered run after it started.
+                startedAt: runId === heldRunId ? null : now,
+                completedAt: now,
+                checkpointId: null,
+                contextHandoffId: null,
+              },
+            }),
+            projectionStore.apply({
+              id: EventId.make(`event:${attemptId}:${status}`),
+              type: "run-attempt.created",
+              threadId: sourceThreadId,
+              runId,
+              nodeId,
+              driver,
+              occurredAt: now,
+              payload: {
+                id: attemptId,
+                runId,
+                attemptOrdinal: 1,
+                rootNodeId: nodeId,
+                providerInstanceId,
+                providerThreadId: ProviderThreadId.make(`provider-thread:${prefix}`),
+                providerTurnId: null,
+                reason: "initial",
+                status: status === "completed" ? "completed" : "cancelled",
+                startedAt: runId === heldRunId ? null : now,
+                completedAt: now,
+              },
+            }),
+          ]);
+        };
+        yield* applyRun(answeredRunId, "completed");
+        yield* applyRun(deliveredRunId, "cancelled");
+        yield* applyRun(heldRunId, "cancelled");
+        for (const [runId, text, inputIntent] of [
+          [answeredRunId, "answered", "turn_start"],
+          [deliveredRunId, "sent while busy", "queued_turn"],
+          [heldRunId, "never delivered", "queued_turn"],
+        ] as const) {
+          const ordinal = runIds.indexOf(runId) + 1;
+          yield* projectionStore.apply({
+            id: EventId.make(`event:${runId}:item`),
+            type: "turn-item.updated",
+            threadId: sourceThreadId,
+            runId,
+            occurredAt: now,
+            payload: {
+              createdBy: "user",
+              creationSource: "web",
+              id: TurnItemId.make(`turn-item:${runId}`),
+              threadId: sourceThreadId,
+              runId,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: ordinal * 100,
+              status: "completed",
+              title: null,
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              type: "user_message",
+              messageId: MessageId.make(`message:${runId}`),
+              inputIntent,
+              text,
+              attachments: [],
+            },
+          });
+        }
+
+        const assertVisible = Effect.fn("assertVisible")(function* (
+          threadId: ThreadId,
+          expected: ReadonlyArray<string>,
+        ) {
+          const projection = yield* projectionStore.getThreadProjection(threadId);
+          const texts = (rows: typeof projection.visibleTurnItems) =>
+            rows.map((row) => (row.item.type === "user_message" ? row.item.text : row.item.type));
+          assert.deepEqual(texts(projection.visibleTurnItems), expected);
+          const window = yield* projectionStore.getThreadSnapshotWindow(threadId, {
+            rowLimit: expected.length + 1,
+          });
+          assert.deepEqual(texts(window.projection.visibleTurnItems), expected);
+          const page = yield* projectionStore.getTimelinePage(threadId, {
+            view: "activity",
+            limit: expected.length + 1,
+          });
+          assert.deepEqual(texts(page.items), expected);
+        });
+
+        yield* assertVisible(sourceThreadId, ["answered", "sent while busy"]);
+        yield* assertVisible(forkThreadId, ["answered", "sent while busy", "fork"]);
+        // A later rewind keeps the fork's inherited history, delivered queued input included.
+        yield* applyRun(deliveredRunId, "rolled_back");
+        yield* assertVisible(sourceThreadId, ["answered"]);
+        yield* assertVisible(forkThreadId, ["answered", "sent while busy", "fork"]);
+      }),
+  );
+
   it.effect("hides source turns rewound before the fork from a fork's visible items", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;

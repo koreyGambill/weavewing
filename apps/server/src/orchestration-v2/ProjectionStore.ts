@@ -85,7 +85,10 @@ import {
   ProjectId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
-import { createOrchestrationV2TurnItemVisibility } from "@t3tools/shared/orchestrationV2Timeline";
+import {
+  createOrchestrationV2TurnItemVisibility,
+  orchestrationV2RunHoldsQueuedInput,
+} from "@t3tools/shared/orchestrationV2Timeline";
 import {
   deriveBlockedOnThreadWait,
   derivePendingBackgroundWork,
@@ -3306,15 +3309,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     AND NOT (
                       item.type = 'user_message'
                       AND (
-                        COALESCE(run.status IN ('queued', 'cancelled'), 0)
-                        OR (
-                          run.status = 'rolled_back'
-                          AND EXISTS (
-                            SELECT 1
-                            FROM orchestration_v2_projection_run_attempts AS attempt
-                            WHERE attempt.run_id = run.run_id
-                              AND attempt.status = 'cancelled'
-                          )
+                        COALESCE(
+                          run.status = 'queued'
+                            OR (
+                              json_extract(run.payload_json, '$.startedAt') IS NULL
+                              AND (
+                                run.status = 'cancelled'
+                                OR (
+                                  run.status = 'rolled_back'
+                                  AND EXISTS (
+                                    SELECT 1
+                                    FROM orchestration_v2_projection_run_attempts AS attempt
+                                    WHERE attempt.run_id = run.run_id
+                                      AND attempt.status = 'cancelled'
+                                  )
+                                )
+                              )
+                            ),
+                          0
                         )
                       )
                       AND json_extract(item.payload_json, '$.inputIntent') = 'queued_turn'
@@ -6895,13 +6907,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         })),
       });
       // Only these runs can hide rows: every row of a rolled-back run, the queued turn of a
-      // queued or cancelled run, and the stop result of a replaced attempt. So the hidden rows
-      // are found without reading the thread.
+      // queued run or one cancelled before it started, and the stop result of a replaced
+      // attempt. So the hidden rows are found without reading the thread.
       const stoppedRuns = new Set(stopRequests.map((row) => row.run_id));
       const runsWithStatus = (...statuses: ReadonlyArray<OrchestrationV2Run["status"]>) =>
         records.runs.flatMap((run) => (statuses.includes(run.status) ? [String(run.id)] : []));
       const rolledBack = runsWithStatus("rolled_back");
-      const heldInput = runsWithStatus("queued", "cancelled");
+      const heldInput = records.runs.flatMap((run) =>
+        orchestrationV2RunHoldsQueuedInput(run) ? [String(run.id)] : [],
+      );
       const steered = [...new Set(superseded.map((attempt) => String(attempt.runId)))].filter(
         (runId) => !stoppedRuns.has(runId) && !rolledBack.includes(runId),
       );
@@ -8142,6 +8156,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     // Forks do not inherit undelivered queued input, including from cancelled runs
     // rolled back later. Checking the run first limits sparse-index seeks to those few runs.
+    // Both counts read only run status from a covering index, so a run cancelled after it
+    // started (server recovery) counts its delivered queued input as hidden: one row short.
     const selectShellRunItemCounts = (threadIds: ReadonlyArray<ThreadId>) =>
       sql<ShellRunItemCountRow>`
         SELECT per_run.thread_id, per_run.run_key AS run_id,

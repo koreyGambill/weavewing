@@ -5,11 +5,15 @@ import type {
   OrchestrationV2UserMessageInputIntent,
 } from "@t3tools/contracts";
 
-type TimelineRun = Pick<OrchestrationV2Run, "id" | "status">;
+type TimelineRun = Pick<OrchestrationV2Run, "id" | "status" | "startedAt">;
 type TimelineRunAttempt = Pick<OrchestrationV2RunAttempt, "runId" | "rootNodeId" | "status">;
 type TimelineTurnItem = Pick<OrchestrationV2TurnItem, "type" | "runId" | "nodeId"> & {
   readonly inputIntent?: OrchestrationV2UserMessageInputIntent;
 };
+
+// Server recovery also cancels runs that already started; their queued input was delivered.
+export const orchestrationV2RunHoldsQueuedInput = (run: TimelineRun) =>
+  run.status === "queued" || (run.status === "cancelled" && run.startedAt === null);
 
 function isOrchestrationV2SupersededInterrupt(input: {
   readonly item: TimelineTurnItem;
@@ -53,14 +57,12 @@ export function isOrchestrationV2TurnItemVisible(input: {
   }
 
   // A steer can return to the queue before delivery. Keep its retained item out
-  // of conversation history until its run starts; cancelled queued inputs stay hidden.
+  // of conversation history until its run starts; input cancelled before delivery stays hidden.
   if (
     item.type === "user_message" &&
     item.inputIntent === "queued_turn" &&
     item.runId !== null &&
-    input.runs.some(
-      (run) => run.id === item.runId && (run.status === "queued" || run.status === "cancelled"),
-    )
+    input.runs.some((run) => run.id === item.runId && orchestrationV2RunHoldsQueuedInput(run))
   ) {
     return false;
   }
@@ -79,7 +81,7 @@ export function createOrchestrationV2TurnItemVisibility(input: {
 }): (item: TimelineTurnItem) => boolean {
   const statuses = new Map<TimelineRun["id"], TimelineRun["status"]>();
   for (const run of input.runs) {
-    if (run.status === "rolled_back" || run.status === "cancelled" || run.status === "queued")
+    if (run.status === "rolled_back" || orchestrationV2RunHoldsQueuedInput(run))
       statuses.set(run.id, run.status);
     else statuses.delete(run.id);
   }
