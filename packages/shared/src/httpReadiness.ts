@@ -2,8 +2,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Schedule from "effect/Schedule";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 const DEFAULT_HTTP_READY_PROBE_TIMEOUT_MS = 1_000;
 
@@ -35,6 +36,7 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
 >(input: {
   readonly baseUrl: string;
   readonly path?: string;
+  readonly expectedEnvironmentId?: string;
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
   readonly probeTimeoutMs?: number;
@@ -82,6 +84,25 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
       Effect.gen(function* () {
         attempt += 1;
         const responseOption = yield* effect.pipe(
+          Effect.tap((response) =>
+            input.expectedEnvironmentId === undefined
+              ? Effect.void
+              : HttpClientResponse.schemaBodyJson(Schema.Struct({ environmentId: Schema.String }))(
+                  response,
+                ).pipe(
+                  Effect.flatMap(({ environmentId }) =>
+                    environmentId === input.expectedEnvironmentId
+                      ? Effect.void
+                      : Effect.fail(
+                          fail({
+                            kind: "environment-mismatch",
+                            expected: input.expectedEnvironmentId,
+                            actual: environmentId,
+                          }),
+                        ),
+                  ),
+                ),
+          ),
           Effect.timeoutOption(Duration.millis(probeTimeoutMs)),
           Effect.mapError((cause) => fail(cause)),
         );

@@ -404,7 +404,7 @@ describe("DesktopBackendConfiguration", () => {
               runtimeId: archive.runtimeId,
               sha256: archive.sha256,
             });
-            return { ok: true, linuxAppRoot };
+            return { ok: true, linuxAppRoot, environmentId: "wsl-environment" };
           },
           probeRuntime: () => {
             probeCount += 1;
@@ -429,6 +429,7 @@ describe("DesktopBackendConfiguration", () => {
             },
           ]);
           assert.equal(probeCount, 1);
+          assert.equal(config.expectedEnvironmentId, "wsl-environment");
           assert.equal(
             config.entryPath,
             path.join(baseDir, "server.asar/apps/server/dist/bin.mjs"),
@@ -522,6 +523,33 @@ describe("DesktopBackendConfiguration", () => {
         }),
     );
   });
+
+  it.effect(
+    "resolveWsl fails retryably on a staged probe transport timeout without extracting",
+    () =>
+      withPackagedWslHarness(
+        {
+          archiveHash: "d".repeat(64),
+          forbidFallback: "Transport failures cannot be repaired by extracting server.asar",
+          wsl: () => ({
+            prepareRuntime: () => ({ ok: true, linuxAppRoot: "/runtime/staged" }),
+            probeRuntime: () => ({
+              ok: false,
+              reason: "probe timed out",
+              transportFailure: "timeout",
+            }),
+          }),
+        },
+        () =>
+          Effect.gen(function* () {
+            const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+            const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
+            const failure = Option.getOrThrow(config.preflightFailure);
+            assert.isFalse(failure.fatal);
+            assert.include(failure.reason, "timed out");
+          }),
+      ),
+  );
 
   it.effect("resolveWsl retires a staged runtime whose launch probe fails", () => {
     const archiveHash = "c".repeat(64);

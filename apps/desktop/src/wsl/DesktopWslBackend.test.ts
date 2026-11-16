@@ -86,6 +86,20 @@ const layerNet = Layer.succeed(NetService.NetService, {
 } satisfies NetService.NetService["Service"]);
 
 describe("DesktopWslBackend", () => {
+  it.effect("keeps the preferred mirrored port without consulting the Windows listener", () =>
+    Effect.gen(function* () {
+      assert.equal(yield* DesktopWslBackend.scanForWslPort(3774, "mirrored"), 3774);
+    }).pipe(
+      Effect.provideService(NetService.NetService, {
+        canListenOnHost: () => Effect.die("Windows retains closed mirrored listeners"),
+        isPortAvailableOnLoopback: () => Effect.succeed(false),
+        hasListenerOnHost: () => Effect.succeed(true),
+        reserveLoopbackPort: () => Effect.succeed(41773),
+        findAvailablePort: (preferred) => Effect.succeed(preferred),
+      }),
+    ),
+  );
+
   it.effect("waits for the preferred port so peer links keep a stable URL across restarts", () => {
     let preferredChecks = 0;
     const layerBusyPreferred = Layer.succeed(NetService.NetService, {

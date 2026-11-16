@@ -47,7 +47,10 @@ const buildLabel = (distro: string | null): string =>
 // WSL auto-forwards loopback ports, so only IPv4 loopback availability matters.
 export const scanForWslPort = Effect.fn("desktop.wslBackend.scanForWslPort")(function* (
   startPort: number,
+  networkingMode: "mirrored" | "nat" | null = null,
 ): Effect.fn.Return<number, NetService.NetError, NetService.NetService> {
+  // Windows keeps mirrored listeners reserved after Linux can already rebind them.
+  if (networkingMode === "mirrored") return startPort;
   const net = yield* NetService.NetService;
   // Linked environments store this URL, and a draining predecessor can hold the port for over 10s.
   for (let attempt = 0; attempt < PREFERRED_PORT_ATTEMPTS; attempt += 1) {
@@ -101,7 +104,8 @@ export const layer = Layer.effect(
       readonly distro: string | null;
     }) {
       const primaryConfig = yield* serverExposure.backendConfig;
-      const port = yield* scanForWslPort(primaryConfig.port + 1).pipe(
+      const networkingMode = yield* wslEnvironment.getNetworkingMode(input.distro);
+      const port = yield* scanForWslPort(primaryConfig.port + 1, networkingMode).pipe(
         Effect.provideService(NetService.NetService, net),
         Effect.asSome,
         Effect.catch((error) =>
