@@ -52,6 +52,7 @@ export interface UpdatesHarnessOptions {
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
+  let automaticUpdates = options.automaticUpdates ?? true;
   let quitAndInstallCount = 0;
   let downloadCount = 0;
   let allowDowngrade = false;
@@ -259,7 +260,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
         if (options.rawServerSettings !== null) {
           return Effect.succeed(
             options.rawServerSettings ??
-              JSON.stringify({ enableProviderUpdateChecks: options.automaticUpdates ?? true }),
+              JSON.stringify({ enableProviderUpdateChecks: automaticUpdates }),
           );
         }
       }
@@ -327,6 +328,9 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    setAutomaticUpdates: (value: boolean) => {
+      automaticUpdates = value;
+    },
     quitAndInstalls: () => quitAndInstallCount,
     installSteps,
     updateRestartMarkers,

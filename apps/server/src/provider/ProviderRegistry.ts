@@ -1240,7 +1240,7 @@ export const layer = Layer.effect(
           (entry) => entry.instanceId === instance.instanceId,
         );
         if (!provider?.enabled || !provider.installed) continue;
-        const maintenance = yield* instance.snapshot.resolveMaintenance();
+        const maintenance = yield* instance.snapshot.resolveMaintenance({ fresh: true });
         const enriched = yield* enrichProviderSnapshotWithVersionAdvisory(provider, maintenance, {
           enableProviderUpdateChecks: true,
         }).pipe(

@@ -2254,6 +2254,7 @@ it.layer(
           yield* first.takeMaintenanceReads;
 
           const checked = yield* registry.checkUpdates(first.instance.instanceId);
+          assert.deepStrictEqual(yield* first.takeMaintenanceReads, [true]);
           assert.equal(
             checked.find((provider) => provider.instanceId === first.instance.instanceId)
               ?.versionAdvisory?.latestVersion,

@@ -270,8 +270,11 @@ describe("DesktopUpdates", () => {
         assert.equal(harness.checkCount(), enabled ? 1 : 0);
         yield* TestClock.adjust("4 hours");
         assert.equal(harness.checkCount(), enabled ? 2 : 0);
+        harness.setAutomaticUpdates(!enabled);
+        yield* TestClock.adjust("4 hours");
+        assert.equal(harness.checkCount(), enabled ? 2 : 1);
         yield* updates.check("manual");
-        assert.equal(harness.checkCount(), enabled ? 3 : 1);
+        assert.equal(harness.checkCount(), enabled ? 3 : 2);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     },
   );

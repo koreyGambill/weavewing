@@ -397,10 +397,10 @@ export const make = Effect.gen(function* () {
     const entry = found?.document.settings?.enableProviderUpdateChecks;
     const stored = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(
       Effect.flatMap(decodeStoredUpdateSettings),
-      Effect.catchIf(
-        (error) => error._tag === "SystemError" && error.reason === "NotFound",
-        () => Effect.succeed({}),
-      ),
+      Effect.catchTags({
+        PlatformError: (error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed({}) : Effect.fail(error),
+      }),
     );
     const settings = yield* decodeUpdateSettings({
       ...(entry ? { enableProviderUpdateChecks: entry.value } : {}),
