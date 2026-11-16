@@ -121,10 +121,10 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
   ).data;
   const dismissed = useThreadContextSidebarStore((state) => state.evidenceCoverageDismissed);
   const coverageKey = (projectId: string) => `${environmentId}:${projectId}`;
-  const shown = (coverage ?? []).filter((project) => {
-    return dismissed[coverageKey(project.projectId)] !== project.head;
-  });
-  const hiddenCoverage = (coverage ?? []).filter((project) => !shown.includes(project));
+  const shown = (coverage ?? []).filter(
+    (project) => dismissed[coverageKey(project.projectId)] !== project.head,
+  );
+  const anyDismissed = shown.length < (coverage?.length ?? 0);
   if (environmentId === null) {
     return (
       <Empty size="compact">
@@ -174,12 +174,12 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
                 </MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
-            {hiddenCoverage.length ? <MenuSeparator /> : null}
-            {hiddenCoverage.length ? (
+            {anyDismissed ? <MenuSeparator /> : null}
+            {anyDismissed ? (
               <MenuItem
                 onClick={() => {
                   const { dismissEvidenceCoverage } = useThreadContextSidebarStore.getState();
-                  for (const project of hiddenCoverage)
+                  for (const project of coverage ?? [])
                     dismissEvidenceCoverage(coverageKey(project.projectId), null);
                 }}
               >
@@ -215,7 +215,6 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
   );
 }
 
-/** Merges on the landings' branch that no landing covers; dismissed until the branch moves. */
 function CoverageNotice({
   environmentId,
   threadRef,

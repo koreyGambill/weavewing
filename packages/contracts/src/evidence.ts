@@ -153,9 +153,7 @@ export const EvidenceProjectCoverage = Schema.Struct({
   leadThreadId: ThreadId,
   uncoveredCount: NonNegativeInt,
   /** Newest first, capped. */
-  uncovered: Schema.Array(
-    Schema.Struct({ sha: Schema.String, subject: Schema.String, committedAt: Schema.String }),
-  ),
+  uncovered: Schema.Array(Schema.Struct({ sha: Schema.String, subject: Schema.String })),
 });
 export type EvidenceProjectCoverage = typeof EvidenceProjectCoverage.Type;
 

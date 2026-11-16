@@ -53,7 +53,6 @@ export function failedQaDraft(
   return appendDraft(existing, message);
 }
 
-/** Asks the lead to record evidence for merges that have none, after any draft already there. */
 export function coverageDraft(
   existing: string,
   coverage: Pick<EvidenceProjectCoverage, "branch" | "uncovered" | "uncoveredCount">,

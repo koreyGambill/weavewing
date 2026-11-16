@@ -39,9 +39,28 @@ import * as Service from "./EvidenceService.ts";
 const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-evidence-test-",
 });
+/** Counts the coverage check's git runs and can mark their output truncated. */
+const gitProbe = { calls: 0, truncate: false };
+const layerGitProbe = Layer.effect(
+  GitVcsDriver.GitVcsDriver,
+  Effect.gen(function* () {
+    const real = yield* GitVcsDriver.GitVcsDriver;
+    return {
+      ...real,
+      execute: (input: GitVcsDriver.ExecuteGitInput) =>
+        input.operation !== "EvidenceService.coverage"
+          ? real.execute(input)
+          : Effect.sync(() => gitProbe.calls++).pipe(
+              Effect.andThen(real.execute(input)),
+              Effect.map((result) => ({ ...result, stdoutTruncated: gitProbe.truncate })),
+            ),
+    };
+  }),
+).pipe(Layer.provide(GitVcsDriver.layer.pipe(Layer.provideMerge(VcsProcess.layer))));
+
 const testLayer = Service.layer.pipe(
   Layer.provideMerge(NotificationService.layer),
-  Layer.provideMerge(GitVcsDriver.layer.pipe(Layer.provideMerge(VcsProcess.layer))),
+  Layer.provideMerge(layerGitProbe),
   Layer.provideMerge(
     Layer.mergeAll(
       Sqlite.layerMemory,
@@ -440,87 +459,168 @@ it.effect("records even when the Inbox refuses, and says so", () =>
   ).pipe(Effect.provide(testLayer)),
 );
 
+/** A scratch repository registered as `project`, with fixed dates so its commit ids never change. */
+const scratchRepo = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const driver = yield* GitVcsDriver.GitVcsDriver;
+  const sql = yield* SqlClient.SqlClient;
+  const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "t3-ev-repo-" }));
+  const git = (args: ReadonlyArray<string>, date = "2026-01-01T00:00:00Z", stdin?: string) =>
+    driver
+      .execute({
+        operation: "test",
+        cwd: repo,
+        args,
+        env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        ...(stdin === undefined ? {} : { stdin }),
+      })
+      .pipe(Effect.map((result) => result.stdout.trim()));
+  const commit = (message: string) =>
+    git(["commit", "--allow-empty", "-m", message]).pipe(
+      Effect.andThen(git(["rev-parse", "HEAD"])),
+    );
+  const merge = (branch: string, from: string, date?: string) =>
+    Effect.gen(function* () {
+      if (from !== branch) yield* git(["checkout", "-q", "-b", branch, from]);
+      const work = from === branch ? "" : yield* commit(`work on ${branch}`);
+      yield* git(["checkout", "-q", "main"]);
+      yield* git(["merge", "--no-ff", "-m", `Merge ${branch}`, branch], date);
+      return { work, merge: yield* git(["rev-parse", "HEAD"]) };
+    });
+  yield* git(["init", "-q", "-b", "main"]);
+  for (const [key, value] of [
+    ["user.name", "Test"],
+    ["user.email", "test@test.com"],
+    ["commit.gpgsign", "false"],
+    ["core.hooksPath", "/dev/null"],
+  ] as const)
+    yield* git(["config", key, value]);
+  yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
+    VALUES (${project}, 'Repo', ${repo}, '[]', '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z')`;
+  gitProbe.calls = 0;
+  gitProbe.truncate = false;
+  return { repo, git, commit, merge, base: yield* commit("base") };
+});
+
 it.effect("flags merges on the target branch that no landing covers", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const driver = yield* GitVcsDriver.GitVcsDriver;
-    const sql = yield* SqlClient.SqlClient;
     const evidence = yield* Service.EvidenceService;
-    const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "t3-ev-repo-" }));
-    const git = (args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) =>
-      driver
-        .execute({ operation: "test", cwd: repo, args, ...(env ? { env } : {}) })
-        .pipe(Effect.map((result) => result.stdout.trim()));
-    const commit = (message: string) =>
-      git(["commit", "--allow-empty", "-m", message]).pipe(
-        Effect.andThen(git(["rev-parse", "HEAD"])),
-      );
-    const merge = (branch: string, from: string, env?: NodeJS.ProcessEnv) =>
-      Effect.gen(function* () {
-        yield* git(["checkout", "-q", "-b", branch, from]);
-        const work = yield* commit(`work on ${branch}`);
-        yield* git(["checkout", "-q", "main"]);
-        yield* git(["merge", "--no-ff", "-m", `Merge ${branch}`, branch], env);
-        return { work, merge: yield* git(["rev-parse", "HEAD"]) };
-      });
-    yield* git(["init", "-q", "-b", "main"]);
-    for (const [key, value] of [
-      ["user.name", "Test"],
-      ["user.email", "test@test.com"],
-      ["commit.gpgsign", "false"],
-      ["core.hooksPath", "/dev/null"],
-    ] as const)
-      yield* git(["config", key, value]);
-    const base = yield* commit("base");
+    const { repo, git, commit, merge, base } = yield* scratchRepo;
     // Committed before the first landing, so it predates Evidence and never flags.
-    yield* merge("old", "main", { GIT_COMMITTER_DATE: "1999-06-01T00:00:00Z" });
+    yield* git(["checkout", "-q", "-b", "old"]);
+    yield* commit("work on old");
+    yield* merge("old", "old", "1999-06-01T00:00:00Z");
     const first = yield* merge("first", "main");
     // Branched from `first`'s work: its merge brings in only its own commit.
     const second = yield* merge("second", first.work);
     const third = yield* merge("third", "main");
     yield* commit("direct fixup on main");
-    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
-      VALUES (${project}, 'Repo', ${repo}, '[]', '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z')`;
-    yield* evidence.record(
-      recordInput("cutoff", [change("a", { commits: [first.work.slice(0, 7)] })], {
-        target: { branch: "main", sha: base },
-        landedAt: "2000-01-01T00:00:00.000Z",
-      }),
-    );
+    const cutoff = (commits: ReadonlyArray<string>) =>
+      evidence.record(
+        recordInput("cutoff", [change("a", { commits })], {
+          target: { branch: "main", sha: base },
+          landedAt: "2000-01-01T00:00:00.000Z",
+        }),
+      );
+    yield* cutoff([first.work.slice(0, 7)]);
 
-    const [flagged] = yield* evidence.coverage({});
+    // Two cold calls at once share one run: rev-parse, log, cat-file and rev-list.
+    const [[flagged], [same]] = yield* Effect.all([evidence.coverage({}), evidence.coverage({})], {
+      concurrency: "unbounded",
+    });
+    assert.strictEqual(gitProbe.calls, 4);
+    assert.deepStrictEqual(same, flagged);
+    assert.deepStrictEqual(flagged, {
+      projectId: project,
+      branch: "main",
+      head: yield* git(["rev-parse", "main"]),
+      leadThreadId: lead,
+      uncoveredCount: 2,
+      uncovered: [
+        { sha: third.merge, subject: "Merge third" },
+        { sha: second.merge, subject: "Merge second" },
+      ],
+    });
+
+    // Re-recording with the same timestamp still recomputes; `second`'s commit now covers it.
+    yield* cutoff([first.work.slice(0, 7), second.work]);
+    const [rerecorded] = yield* evidence.coverage({});
     assert.deepStrictEqual(
-      { ...flagged, uncovered: flagged?.uncovered.map(({ sha, subject }) => ({ sha, subject })) },
-      {
-        projectId: project,
-        branch: "main",
-        head: yield* git(["rev-parse", "main"]),
-        leadThreadId: lead,
-        uncoveredCount: 2,
-        uncovered: [
-          { sha: third.merge, subject: "Merge third" },
-          { sha: second.merge, subject: "Merge second" },
-        ],
-      },
+      rerecorded?.uncovered.map(({ sha }) => sha),
+      [third.merge],
     );
 
-    // A new landing recomputes at once; its target sha covers `third`.
+    // A new landing's target sha covers `third`.
     yield* evidence.record(
       recordInput("later", [change("b", { commits: [] })], {
         target: { branch: "main", sha: third.merge },
         landedAt: "2001-01-01T00:00:00.000Z",
       }),
     );
-    const [rest] = yield* evidence.coverage({ projectId: project });
-    assert.deepStrictEqual(
-      rest?.uncovered.map(({ sha }) => sha),
-      [second.merge],
-    );
+    assert.deepStrictEqual(yield* evidence.coverage({ projectId: project }), []);
 
     // Within the TTL nothing runs git, so a vanished repository still answers from cache.
+    yield* cutoff([first.work.slice(0, 7)]);
+    assert.strictEqual((yield* evidence.coverage({}))[0]?.uncoveredCount, 1);
+    gitProbe.calls = 0;
     yield* fs.remove(repo, { recursive: true });
-    assert.deepStrictEqual((yield* evidence.coverage({}))[0]?.uncoveredCount, 1);
+    assert.strictEqual((yield* evidence.coverage({}))[0]?.uncoveredCount, 1);
+    assert.strictEqual(gitProbe.calls, 0);
     yield* TestClock.adjust("31 seconds");
     assert.deepStrictEqual(yield* evidence.coverage({}), []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("treats truncated git output as a failure and retries it after the TTL", () =>
+  Effect.gen(function* () {
+    const evidence = yield* Service.EvidenceService;
+    const { merge, base } = yield* scratchRepo;
+    yield* merge("first", "main");
+    yield* merge("second", "main");
+    yield* evidence.record(
+      recordInput("cutoff", [change("a", { commits: [] })], {
+        target: { branch: "main", sha: base },
+        landedAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    gitProbe.truncate = true;
+    assert.deepStrictEqual(yield* evidence.coverage({}), []);
+    gitProbe.truncate = false;
+    yield* TestClock.adjust("31 seconds");
+    assert.strictEqual((yield* evidence.coverage({}))[0]?.uncoveredCount, 2);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("an abbreviated sha that git finds ambiguous covers nothing", () =>
+  Effect.gen(function* () {
+    const evidence = yield* Service.EvidenceService;
+    const { git, merge, base } = yield* scratchRepo;
+    // Two branches of 400 commits each share at least one 4-character prefix across them.
+    const branch = (name: string) =>
+      git(
+        ["fast-import", "--quiet"],
+        undefined,
+        Array.from(
+          { length: 400 },
+          (_, index) =>
+            `commit refs/heads/${name}\ncommitter Test <test@test.com> ${1767225600 + index} +0000\ndata ${`${name} ${index}`.length}\n${name} ${index}\n${index === 0 ? `from ${base}\n` : ""}`,
+        ).join("\n"),
+      ).pipe(Effect.andThen(git(["rev-list", `${base}..${name}`])));
+    const left = (yield* branch("left")).split("\n");
+    const right = new Set((yield* branch("right")).split("\n").map((sha) => sha.slice(0, 4)));
+    const shared = left.find((sha) => right.has(sha.slice(0, 4)))!.slice(0, 4);
+    const leftMerge = yield* merge("left", "left");
+    const rightMerge = yield* merge("right", "right");
+    yield* evidence.record(
+      recordInput("cutoff", [change("a", { commits: [shared] })], {
+        target: { branch: "main", sha: base },
+        landedAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.deepStrictEqual(
+      (yield* evidence.coverage({}))[0]?.uncovered.map(({ sha }) => sha),
+      [rightMerge.merge, leftMerge.merge],
+    );
   }).pipe(Effect.provide(testLayer)),
 );

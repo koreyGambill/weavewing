@@ -24,8 +24,8 @@ describe("coverageDraft", () => {
         branch: "main",
         uncoveredCount: 3,
         uncovered: [
-          { sha: "f78458466e0123", subject: "Merge branch 'a'", committedAt: "" },
-          { sha: "fd2bcbdbd20123", subject: "Merge branch 'b'", committedAt: "" },
+          { sha: "f78458466e0123", subject: "Merge branch 'a'" },
+          { sha: "fd2bcbdbd20123", subject: "Merge branch 'b'" },
         ],
       }),
     ).toBe(
