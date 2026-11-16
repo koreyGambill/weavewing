@@ -2402,6 +2402,28 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
         ),
     );
 
+    it.effect.each([false, true])("enforces the automatic update policy (%s)", (value) =>
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        assert.equal((yield* service.getSettings).enableProviderUpdateChecks, value);
+        const error = yield* service
+          .updateSettings({ enableProviderUpdateChecks: !value })
+          .pipe(Effect.flip);
+        assert.equal(error.operation, "write-managed-setting");
+        assert.equal(error.managedSetting, "enableProviderUpdateChecks");
+        yield* service.updateSettings({ enableProviderUpdateChecks: value });
+        assert.equal((yield* service.getSettings).enableProviderUpdateChecks, value);
+      }).pipe(
+        Effect.provide(
+          layerServerSettings({
+            schemaVersion: 1,
+            organization: "Northwind Health",
+            settings: { enableProviderUpdateChecks: { value, locked: true } },
+          }),
+        ),
+      ),
+    );
+
     it.effect("lays locks over the user's own and per-project values without persisting them", () =>
       Effect.gen(function* () {
         const service = yield* ServerSettingsModule.ServerSettingsService;

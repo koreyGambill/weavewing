@@ -259,6 +259,61 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect.each([false, true])(
+    "gates automatic checks but allows manual checks (enabled=%s)",
+    (enabled) => {
+      const harness = makeHarness({ automaticUpdates: enabled });
+      return Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* TestClock.adjust("15 seconds");
+        assert.equal(harness.checkCount(), enabled ? 1 : 0);
+        yield* TestClock.adjust("4 hours");
+        assert.equal(harness.checkCount(), enabled ? 2 : 0);
+        yield* updates.check("manual");
+        assert.equal(harness.checkCount(), enabled ? 3 : 1);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    },
+  );
+
+  it.effect.each([false, true])(
+    "applies locked automatic update policy over saved preference (%s)",
+    (value) => {
+      const harness = makeHarness({
+        automaticUpdates: !value,
+        updateCheckPolicy: {
+          schemaVersion: 1,
+          organization: "Northwind Health",
+          settings: { enableProviderUpdateChecks: { value, locked: true } },
+        },
+      });
+      return Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* TestClock.adjust("15 seconds");
+        assert.equal(harness.checkCount(), value ? 1 : 0);
+        yield* updates.check("manual");
+        assert.equal(harness.checkCount(), value ? 2 : 1);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    },
+  );
+
+  it.effect.each([null, "{}", "broken JSON"])(
+    "defaults automatic checks off for settings %s",
+    (rawServerSettings) => {
+      const harness = makeHarness({ rawServerSettings });
+      return Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* TestClock.adjust("15 seconds");
+        yield* TestClock.adjust("4 hours");
+        assert.equal(harness.checkCount(), 0);
+        yield* updates.check("manual");
+        assert.equal(harness.checkCount(), 1);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    },
+  );
+
   it.effect("checks shortly after startup and then every four hours", () => {
     const harness = makeHarness();
 

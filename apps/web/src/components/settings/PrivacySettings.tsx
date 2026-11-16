@@ -1,11 +1,20 @@
 import { Link } from "@tanstack/react-router";
-import type { EnvironmentId } from "@t3tools/contracts";
+import {
+  AuthSettingsWriteScope,
+  isManagedSettingPath,
+  type EnvironmentId,
+} from "@t3tools/contracts";
 import { InfoIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkState } from "~/cloud/cloudLinkState";
 import { useEnvironment } from "~/state/environments";
+import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
+import { useManagedPolicy } from "~/state/managedPolicy";
+import { useEnvironmentScope } from "~/state/session";
+import { ManagedNotice } from "../ManagedPolicy";
+import { Switch } from "../ui/switch";
 import { Button } from "../ui/button";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -67,6 +76,13 @@ export function PrivacySettings({
 }) {
   const environment = useEnvironment(environmentId);
   const relay = useCloudLinkState(environmentId);
+  const policy = useManagedPolicy(environmentId);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const automaticUpdates = environment?.serverConfig?.settings.enableProviderUpdateChecks === true;
+  const managedUpdates = isManagedSettingPath(policy, "enableProviderUpdateChecks")
+    ? `Managed by ${policy?.organization}.`
+    : undefined;
   const remote =
     networkAccessible || environment?.serverConfig?.settings.tailnetConnect.enabled === true;
   const relayState = !hasCloudPublicConfig()
@@ -82,6 +98,24 @@ export function PrivacySettings({
     <>
       {/* The Chat content row from the remote-media slice belongs before the summary. */}
       {children}
+      <SettingsSection title="Updates">
+        <SettingsRow
+          {...searchableSetting("provider-update-checks")}
+          description="Checks GitHub, npm and provider sites for new app and CLI versions and model catalogs, disclosing your IP address and version numbers. Off: checks wait for Check now or Refresh."
+          managed={managedUpdates}
+          status={managedUpdates ? <ManagedNotice>{managedUpdates}</ManagedNotice> : null}
+          control={
+            <Switch
+              checked={automaticUpdates}
+              disabled={!canWrite || environment?.connection.phase !== "connected"}
+              onCheckedChange={(checked) =>
+                updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
+              }
+              aria-label="Check for updates automatically"
+            />
+          }
+        />
+      </SettingsSection>
       <SettingsSection {...searchableSetting("what-weavewing-sends")}>
         <SettingsRow
           title="Your providers"
@@ -103,15 +137,21 @@ export function PrivacySettings({
         />
         <SettingsRow
           title="Update checks"
-          description="Weavewing and your provider CLIs check for new versions. These requests disclose version numbers and your IP address."
+          description={`Automatic update checks: ${automaticUpdates ? "On" : "Off"}. App and provider versions and model catalogs contact GitHub, npm or provider sites, disclosing version numbers and your IP address. Manual checks contact these sites when you ask.`}
           control={
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                render={<Link to="/settings/maintenance" hash="provider-update-checks" />}
+                render={
+                  <Link
+                    to="/settings/privacy"
+                    search={{ machine: environmentId }}
+                    hash="provider-update-checks"
+                  />
+                }
               >
-                Provider checks
+                Update checks
               </Button>
               <Button variant="outline" size="sm" render={<Link to="/settings/about" />}>
                 About

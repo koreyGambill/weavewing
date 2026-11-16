@@ -178,7 +178,9 @@ const checkForUpdatesFromMacMenu = (state: Partial<DesktopUpdateState>) =>
     if (!Array.isArray(appMenu?.submenu)) {
       throw new Error("Expected the macOS app menu submenu to be an array.");
     }
-    const checkForUpdates = appMenu.submenu.find((item) => item.label === "Check for Updates...");
+    const checkForUpdates = appMenu.submenu.find(
+      (item) => item.label === "Check for Updates... (contacts GitHub)",
+    );
     if (typeof checkForUpdates?.click !== "function") {
       throw new Error("Expected Check for Updates... menu item to have a click handler.");
     }

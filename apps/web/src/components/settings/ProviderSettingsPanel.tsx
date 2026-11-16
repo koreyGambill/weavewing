@@ -1018,7 +1018,9 @@ export function EnvironmentProviderSettings({
                   </Button>
                 }
               />
-              <TooltipPopup side="top">Refresh provider status</TooltipPopup>
+              <TooltipPopup side="top">
+                Refresh provider status. Contacts GitHub, npm and provider sites.
+              </TooltipPopup>
             </Tooltip>
           </div>
         }

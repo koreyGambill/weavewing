@@ -197,7 +197,7 @@ export const make = Effect.gen(function* () {
         submenu: [
           { role: "about", label: `About ${environment.displayName}` },
           {
-            label: "Check for Updates...",
+            label: "Check for Updates... (contacts GitHub)",
             click: checkForUpdatesClick,
           },
           { type: "separator" },
@@ -350,7 +350,7 @@ export const make = Effect.gen(function* () {
         role: "help",
         submenu: [
           {
-            label: "Check for Updates...",
+            label: "Check for Updates... (contacts GitHub)",
             click: checkForUpdatesClick,
           },
         ],

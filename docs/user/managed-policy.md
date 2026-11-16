@@ -274,6 +274,10 @@ starts the binary you set.
 
 ### Updates
 
+Automatic checks also require **Check for updates automatically** in Settings → Privacy.
+To lock that preference, use `"enableProviderUpdateChecks": { "value": false, "locked": true }`
+in the policy's `settings` block. Manual checks remain available unless `mode` is `off`.
+
 - `mode`: `auto` keeps the normal update flow. `off` stops T3 Code from checking for updates, for
   machines that get T3 Code through device management.
 - `feedUrl`: T3 Code updates from your own mirror instead of GitHub: the desktop app, `t3 update`,

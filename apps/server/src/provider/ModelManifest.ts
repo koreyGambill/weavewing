@@ -239,7 +239,8 @@ export const make = Effect.gen(function* () {
     const settings = yield* settingsService.getSettings.pipe(
       Effect.catchCause(() => Effect.succeed(null)),
     );
-    if (settings !== null && !settings.enableProviderUpdateChecks) return manifest;
+    // Weavewing: only an explicit refresh may bypass the automatic outbound preference.
+    if (!force && settings?.enableProviderUpdateChecks !== true) return manifest;
 
     lastAttemptMs = now;
     const fetched = yield* httpClient.get(MODEL_MANIFEST_URL).pipe(

@@ -2610,6 +2610,8 @@ export const layerWsRpc = (
                 providers = yield* providerRegistry.refreshInstance(instance.instanceId);
               }
             }
+            if (input.refreshModels)
+              providers = yield* providerRegistry.checkUpdates(input.instanceId);
             const { instanceId, cwd } = input;
             if (input.omitProviders === true && (instanceId === undefined || cwd === undefined)) {
               return { providers: [] };

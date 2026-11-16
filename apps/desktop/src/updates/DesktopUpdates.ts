@@ -3,6 +3,7 @@ import {
   DESKTOP_UPDATE_IN_PROGRESS_MARKER_FILE,
   DESKTOP_UPDATE_IN_PROGRESS_TTL_MS,
   DesktopUpdateChannelSchema,
+  ServerSettings,
   type DesktopRuntimeInfo,
   type DesktopUpdateActionResult,
   type DesktopUpdateChannel,
@@ -36,6 +37,7 @@ import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
+import * as DesktopManagedPolicy from "../app/DesktopManagedPolicy.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
@@ -384,6 +386,25 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const policy = yield* DesktopUpdatePolicy.DesktopUpdatePolicy;
+  const managedPolicy = yield* DesktopManagedPolicy.DesktopManagedPolicy;
+  // Weavewing: the desktop owns its local install even when its window views a remote server.
+  const automaticChecksAllowed = Effect.gen(function* () {
+    const found = yield* managedPolicy.read;
+    const entry = found?.document.settings?.enableProviderUpdateChecks;
+    const stored = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
+      Effect.catchIf(
+        (error) => error._tag === "SystemError" && error.reason === "NotFound",
+        () => Effect.succeed({}),
+      ),
+    );
+    const settings = yield* Schema.decodeUnknownEffect(ServerSettings)({
+      ...(entry ? { enableProviderUpdateChecks: entry.value } : {}),
+      ...(typeof stored === "object" && stored !== null ? stored : {}),
+      ...(entry?.locked ? { enableProviderUpdateChecks: entry.value } : {}),
+    });
+    return settings.enableProviderUpdateChecks;
+  }).pipe(Effect.catchCause(() => Effect.succeed(false)));
   // Any user can set the mock flag, so it never replaces an administrator's update source.
   const mockUpdates = config.mockUpdates && policy.message === null;
 
@@ -574,6 +595,8 @@ export const make = Effect.gen(function* () {
     allowDowngrade = false,
   ) {
     yield* Effect.annotateCurrentSpan({ reason });
+    if ((reason === "startup" || reason === "poll") && !(yield* automaticChecksAllowed))
+      return false;
     if (yield* Ref.get(desktopState.quitting)) return false;
     if (!(yield* Ref.get(updaterConfiguredRef))) return false;
 

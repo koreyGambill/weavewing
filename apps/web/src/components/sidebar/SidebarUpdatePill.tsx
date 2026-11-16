@@ -259,7 +259,7 @@ function SidebarUpdateControl() {
         : "Update available"
       : showCheckIcon
         ? "Checking for updates…"
-        : (idleTooltip?.title ?? "Check for updates");
+        : `${idleTooltip?.title ?? "Check for updates"}. Contacts GitHub, npm and provider sites.`;
   const disabled = showCheckIcon
     ? true
     : runsEverything
