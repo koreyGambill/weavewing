@@ -15122,17 +15122,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
 
       const parentThreadId = childControls.thread.lineage.parentThreadId;
-      if (
-        options.resultTransfers.some(
-          (transfer) =>
-            transfer.type === "subagent_result" &&
-            transfer.sourceThreadId === childThreadId &&
-            transfer.targetThreadId === parentThreadId &&
-            (transfer.sourcePoint.runId === childRun.id ||
-              (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
-        )
-      )
-        return;
+      const runReported = options.resultTransfers.some(
+        (transfer) =>
+          transfer.type === "subagent_result" &&
+          transfer.sourceThreadId === childThreadId &&
+          transfer.targetThreadId === parentThreadId &&
+          (transfer.sourcePoint.runId === childRun.id ||
+            (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
+      );
+      // A run that absorbed other tasks' queued runs reports once, so only a task without a result settles from it.
+      if (runReported && options.task.result !== null) return;
 
       const childResult = yield* projectionStore.getThreadRecords(
         childThreadId,
@@ -15187,6 +15186,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       // A cancelled task's completed run ends it interrupted.
       const cancelled = task.cancelledRunId === childRun.id;
+      const reporterId = childRun.delegatedTaskId ?? forkedFrom.nodeId;
+      const reporter = runReported
+        ? (yield* projectionStore.getThreadRecords(parentThreadId, ["subagents"], {
+            subagentIds: [reporterId],
+          })).subagents[0]
+        : undefined;
+      // The parent run already holds a wake carrying this run's report.
+      const cohortWoken =
+        reporter !== undefined &&
+        reporter.runId === task.runId &&
+        ["claimed", "delivered", "acknowledged"].includes(reporter.completionDelivery?.state ?? "");
       if (cancelled && terminalStatus === "completed") outcome = terminalStatus = "interrupted";
       const now = yield* DateTime.now;
       const result =
@@ -15214,7 +15224,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               cancelledRunId: childRun.id,
               completionDelivery: { state: "disposed" as const, observedByRunId: null },
             }
-          : {}),
+          : cohortWoken
+            ? { completionDelivery: { state: "disposed" as const, observedByRunId: null } }
+            : {}),
       };
       const completionPlan = yield* planDelegatedCompletionDelivery({
         parentProjection,
@@ -15304,14 +15316,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 },
               },
             ]),
-        {
-          type: "context-transfer.created",
-          threadId: parentThreadId,
-          ...(parentRun === undefined ? {} : { runId: parentRun.id }),
-          providerInstanceId: childRun.providerInstanceId,
-          occurredAt: now,
-          payload: resultTransfer,
-        },
+        ...(runReported
+          ? []
+          : [
+              {
+                type: "context-transfer.created" as const,
+                threadId: parentThreadId,
+                ...(parentRun === undefined ? {} : { runId: parentRun.id }),
+                providerInstanceId: childRun.providerInstanceId,
+                occurredAt: now,
+                payload: resultTransfer,
+              },
+            ]),
       ];
       yield* writeSystemEvents(completionEvents, [], { updateDelegatedCompletionOnly: true });
       yield* releaseFinishedDelegateSessions(childThreadId, childRun.id);
@@ -15319,7 +15335,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (completionPlan.offer && completionPlan.parentRun !== undefined) {
         yield* offerDelegatedCompletionDelivery(parentThreadId, completionPlan.parentRun.id);
       }
-      return resultTransfer;
+      return runReported ? undefined : resultTransfer;
     },
   );
 
