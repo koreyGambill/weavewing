@@ -53,13 +53,9 @@ import {
 } from "../state/evidence";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { useInboxSignal } from "../state/inbox";
+import { sidebarWorkspaceGet } from "../state/threadWorkspace";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import {
-  FLUSH_THREAD_TOOLS,
-  sidebarWorkspaceGet,
-  ThreadInspect,
-  ThreadToolSection,
-} from "./ThreadToolViews";
+import { FLUSH_THREAD_TOOLS, ThreadInspect, ThreadToolSection } from "./ThreadToolViews";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription } from "./ui/empty";
 import {

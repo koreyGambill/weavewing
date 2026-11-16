@@ -1,11 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import {
-  AuthOrchestrationReadScope,
-  ThreadId,
-  type ScopedThreadRef,
-  WS_METHODS,
-} from "@t3tools/contracts";
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
+import { AuthOrchestrationReadScope, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -38,7 +32,6 @@ import {
   type LinkSort,
 } from "./threadToolFilters.logic";
 import { createPortal } from "react-dom";
-import { connectionAtomRuntime } from "../connection/runtime";
 import {
   useProject,
   useQuietThreadProjection,
@@ -48,6 +41,7 @@ import {
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "../state/session";
 import { threadMarksGet } from "../state/threadMarks";
+import { sidebarWorkspaceGet } from "../state/threadWorkspace";
 import { useXwingEnvironmentsSupport } from "../state/xwingEnvironments";
 import { talkedWithThreads, withDelegates } from "../threadContextSidebar";
 import {
@@ -84,13 +78,6 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadEnvironmentUsage } from "./xwing/ThreadEnvironments";
 import { XwingEnvironmentsPanel } from "./xwing/XwingEnvironmentsPanel";
-
-export const sidebarWorkspaceGet = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-  label: "thread-context:workspace",
-  tag: WS_METHODS.threadWorkspaceGet,
-  staleTimeMs: 0,
-  idleTtlMs: 0,
-});
 
 /** Views that lay out their own padding and scrolling. */
 export const FLUSH_THREAD_TOOLS: ReadonlySet<ThreadContextSection> = new Set([
