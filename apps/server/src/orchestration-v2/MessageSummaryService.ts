@@ -1,5 +1,6 @@
 import { CommandId, type MessageId, type ThreadId } from "@t3tools/contracts";
 import * as NodeOS from "node:os";
+import { MESSAGE_SUMMARY_MODEL } from "@t3tools/shared/serverSettings";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -10,11 +11,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import {
-  MESSAGE_SUMMARY_MODEL,
-  incomingCardSummarySource,
-  messageSummarySourceHash,
-} from "./incomingCardSummary.ts";
+import { incomingCardSummarySource, messageSummarySourceHash } from "./incomingCardSummary.ts";
 
 /** Attempts per UTC day, failures included; past it cards keep their first line until tomorrow. */
 const DAILY_SUMMARY_LIMIT = 100;

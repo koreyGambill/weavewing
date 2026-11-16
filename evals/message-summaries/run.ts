@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { MESSAGE_SUMMARY_MODEL } from "../../apps/server/src/orchestration-v2/incomingCardSummary.ts";
+import { MESSAGE_SUMMARY_MODEL } from "@t3tools/shared/serverSettings";
 import { makeClaudeTextGeneration } from "../../apps/server/src/textGeneration/ClaudeTextGeneration.ts";
 import { cases } from "./cases.ts";
 import { grade } from "./grade.ts";

@@ -174,6 +174,69 @@ export function resolveSpeechPostProcessingModelSelection(
     : settings.textGenerationModelSelection;
 }
 
+const CLAUDE = ProviderDriverKind.make("claudeAgent");
+/** Incoming card summaries always ask Haiku; low effort keeps it from thinking past the output cap. */
+export const MESSAGE_SUMMARY_MODEL: ModelSelection = {
+  instanceId: defaultInstanceIdForDriver(CLAUDE),
+  model: DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[CLAUDE] ?? "claude-haiku-5-5",
+  options: [{ id: "effort", value: "low" }],
+};
+
+/**
+ * Whether snapshots show a selection's agent cannot run: missing, off, unavailable, unable to write
+ * text, or a failed probe. Unknown snapshots and pending probes are not reasons to warn.
+ */
+function isTextGenerationSelectionUnusable(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+  selection: ModelSelection,
+): boolean {
+  const generator = textGeneratorForSelection(settings, selection.instanceId);
+  if (generator !== undefined) return !generator.enabled;
+  if (providers === undefined || providers.length === 0) return false;
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  return (
+    provider === undefined ||
+    !provider.enabled ||
+    !resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId) ||
+    !isProviderAvailable(provider) ||
+    !isProviderTextGenerationCapable(provider) ||
+    provider.models.find((model) => model.slug === selection.model)?.supportsTextGeneration ===
+      false ||
+    (provider.status === "error" &&
+      (!provider.installed || provider.auth.status === "unauthenticated"))
+  );
+}
+
+export type TextGenerationPurpose =
+  | "titles"
+  | "summaries"
+  | "sourceControl"
+  | "reviewGuides"
+  | "transcripts";
+
+/** Purposes whose own selection cannot run; a purpose that follows the titles model is not listed. */
+export function unusableTextGenerationPurposes(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+): ReadonlyArray<{ readonly purpose: TextGenerationPurpose; readonly selection: ModelSelection }> {
+  const selections: ReadonlyArray<readonly [TextGenerationPurpose, ModelSelection | null]> = [
+    ["titles", settings.textGenerationModelSelection],
+    ["summaries", settings.incomingCardSummaries ? MESSAGE_SUMMARY_MODEL : null],
+    ["sourceControl", settings.sourceControlWriterModelSelection],
+    ["reviewGuides", settings.reviewGuideModelSelection],
+    ["transcripts", settings.speechPostProcessingModelSelection],
+  ];
+  return selections.flatMap(([purpose, selection]) =>
+    selection !== null &&
+    isTextGenerationSelectionUnusable(settings, providers, projectId, selection)
+      ? [{ purpose, selection }]
+      : [],
+  );
+}
+
 export interface PersistedServerObservabilitySettings {
   readonly otlpTracesUrl: string | undefined;
   readonly otlpMetricsUrl: string | undefined;

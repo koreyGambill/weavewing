@@ -20,6 +20,7 @@ import {
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { TextGenerationWarnings, useTextGenerationWarnings } from "./TextGenerationWarnings";
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useTextGenerationTargets } from "../../textGenerators";
 import {
@@ -98,6 +99,10 @@ export function SourceControlWritingSettingsSection() {
   const scopeKey = targets.map((target) => `${target.environmentId}:${target.projectId}`).join(",");
   const customInstructionsRef = useRef<HTMLTextAreaElement>(null);
   const [editingAllInstructions, setEditingAllInstructions] = useState(false);
+  const writerWarnings = useTextGenerationWarnings("sourceControl", targets);
+  const reviewGuideWarnings = useTextGenerationWarnings("reviewGuides", targets);
+  const [writerPickerOpen, setWriterPickerOpen] = useState(false);
+  const [reviewGuidePickerOpen, setReviewGuidePickerOpen] = useState(false);
   const [allInstructions, setAllInstructions] = useState<string | null>(null);
   const style = settings.sourceControlWritingStyle;
   const defaults = DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle;
@@ -335,6 +340,17 @@ export function SourceControlWritingSettingsSection() {
             settingKeys={["reviewGuideModelSelection"]}
             {...searchableSetting("review-guide-model")}
             description="Must be a coding agent: it reads the pull request over many steps. Off uses the writer model, or Codex or Claude if that model is a text generator."
+            status={
+              reviewGuideWarnings.length > 0 ? (
+                <TextGenerationWarnings
+                  warnings={reviewGuideWarnings}
+                  purpose="reviewGuides"
+                  {...(canEnableReviewGuideModel
+                    ? { onChoose: () => setReviewGuidePickerOpen(true) }
+                    : {})}
+                />
+              ) : undefined
+            }
             control={
               !hasServerTargets ? (
                 <span className="text-sm text-muted-foreground">
@@ -345,6 +361,8 @@ export function SourceControlWritingSettingsSection() {
                   {(usesReviewGuideModel || mixedReviewGuideModel) && canEnableReviewGuideModel ? (
                     <ProviderModelPicker
                       environmentId={environmentId}
+                      open={reviewGuidePickerOpen}
+                      onOpenChange={setReviewGuidePickerOpen}
                       activeInstanceId={reviewGuideSelection.instanceId}
                       model={reviewGuideSelection.model}
                       lockedProvider={null}
@@ -519,6 +537,15 @@ export function SourceControlWritingSettingsSection() {
           settingKeys={["sourceControlWriterModelSelection"]}
           {...searchableSetting("source-control-writer-model")}
           description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model configured for this environment."
+          status={
+            writerWarnings.length > 0 ? (
+              <TextGenerationWarnings
+                warnings={writerWarnings}
+                purpose="sourceControl"
+                {...(canEnableDedicatedModel ? { onChoose: () => setWriterPickerOpen(true) } : {})}
+              />
+            ) : undefined
+          }
           control={
             !hasServerTargets ? (
               <span className="text-sm text-muted-foreground">
@@ -534,6 +561,8 @@ export function SourceControlWritingSettingsSection() {
                 {usesDedicatedModel && canEnableDedicatedModel ? (
                   <ProviderModelPicker
                     environmentId={environmentId}
+                    open={writerPickerOpen}
+                    onOpenChange={setWriterPickerOpen}
                     activeInstanceId={activeSelection.instanceId}
                     model={activeSelection.model}
                     lockedProvider={null}

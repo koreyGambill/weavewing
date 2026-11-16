@@ -135,6 +135,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
+import { TextGenerationWarnings, useTextGenerationWarnings } from "./TextGenerationWarnings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -499,7 +500,9 @@ function ProjectDictionaryRow() {
 
 /** Cleanup runs on the draft's environment, so its model is an environment setting there. */
 function CleanupModelRow() {
-  const { environment, connectedEnvironments } = useSettingsScope();
+  const { environment, connectedEnvironments, targets: scopeTargets } = useSettingsScope();
+  const warnings = useTextGenerationWarnings("transcripts", scopeTargets);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const providersByEnvironment = useEnvironmentProviders();
@@ -554,6 +557,15 @@ function CleanupModelRow() {
       {...searchableSetting("speech-post-processing-model")}
       title="Cleanup model"
       description="Model for transcript cleanup, such as a cheaper or faster one. When disabled, use the text generation model configured for this environment."
+      status={
+        warnings.length > 0 ? (
+          <TextGenerationWarnings
+            warnings={warnings}
+            purpose="transcripts"
+            {...(hasProvider && instanceEntry ? { onChoose: () => setPickerOpen(true) } : {})}
+          />
+        ) : undefined
+      }
       control={
         connectedEnvironments.length === 0 ? (
           <span className="text-sm text-muted-foreground">Connect an environment first.</span>
@@ -568,6 +580,8 @@ function CleanupModelRow() {
               <>
                 <ProviderModelPicker
                   environmentId={environment?.environmentId ?? null}
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
                   activeInstanceId={selection.instanceId}
                   model={selection.model}
                   lockedProvider={null}

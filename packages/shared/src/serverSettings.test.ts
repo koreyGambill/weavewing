@@ -26,6 +26,7 @@ import {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
   resolveSpeechPostProcessingModelSelection,
+  unusableTextGenerationPurposes,
 } from "./serverSettings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
@@ -1093,5 +1094,106 @@ describe("resolveSpeechPostProcessingModelSelection", () => {
       applyServerSettingsPatch(pinned, { speechPostProcessingModelSelection: null })
         .speechPostProcessingModelSelection,
     ).toBeNull();
+  });
+});
+
+describe("unusableTextGenerationPurposes", () => {
+  const codex = ProviderInstanceId.make("codex");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const snapshot = (
+    instanceId: ProviderInstanceId,
+    overrides: Partial<ServerProvider> = {},
+  ): ServerProvider => ({
+    instanceId,
+    driver: ProviderDriverKind.make(instanceId),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-16T00:00:00.000Z",
+    availability: "available",
+    models: [],
+    slashCommands: [],
+    skills: [],
+    ...overrides,
+  });
+  const purposes = (
+    settings: ServerSettings,
+    providers: ReadonlyArray<ServerProvider> | undefined,
+    projectId: ProjectId | null = null,
+  ) => unusableTextGenerationPurposes(settings, providers, projectId).map((entry) => entry.purpose);
+  const ready = [snapshot(codex), snapshot(claude)];
+
+  it("names the titles model when its agent failed its probe, is off, or is gone", () => {
+    expect(purposes(DEFAULT_SERVER_SETTINGS, ready)).toEqual([]);
+    for (const failed of [
+      snapshot(codex, { status: "error", installed: false }),
+      snapshot(codex, { status: "error", auth: { status: "unauthenticated" } }),
+      snapshot(codex, { enabled: false, status: "disabled" }),
+      snapshot(codex, { availability: "unavailable" }),
+      snapshot(codex, { supportsTextGeneration: false }),
+    ]) {
+      expect(purposes(DEFAULT_SERVER_SETTINGS, [failed, snapshot(claude)])).toEqual(["titles"]);
+    }
+    expect(purposes(DEFAULT_SERVER_SETTINGS, [snapshot(claude)])).toEqual(["titles"]);
+  });
+
+  it("waits for snapshots and probes before warning", () => {
+    expect(purposes(DEFAULT_SERVER_SETTINGS, undefined)).toEqual([]);
+    expect(purposes(DEFAULT_SERVER_SETTINGS, [])).toEqual([]);
+    const probing = snapshot(codex, { status: "warning", installed: false });
+    expect(purposes(DEFAULT_SERVER_SETTINGS, [probing, snapshot(claude)])).toEqual([]);
+  });
+
+  it("follows project overrides that turn the agent off", () => {
+    const projectId = ProjectId.make("project-a");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: {
+        [projectId]: { providerInstances: { [codex]: { enabled: false } } },
+      },
+    };
+    expect(purposes(settings, ready)).toEqual([]);
+    expect(purposes(settings, ready, projectId)).toEqual(["titles"]);
+  });
+
+  it("checks a text generator by its own switch, not by agent snapshots", () => {
+    const generator = ProviderInstanceId.make("openrouter");
+    const config = {
+      kind: "openaiCompatible" as const,
+      baseUrl: "https://openrouter.ai/api/v1",
+      enabled: true,
+    };
+    const settings = decodeServerSettings({
+      textGenerationModelSelection: { instanceId: generator, model: "some/model" },
+      textGenerators: { [generator]: config },
+    });
+    expect(purposes(settings, ready)).toEqual([]);
+    const off = decodeServerSettings({
+      textGenerationModelSelection: { instanceId: generator, model: "some/model" },
+      textGenerators: { [generator]: { ...config, enabled: false } },
+    });
+    expect(purposes(off, ready)).toEqual(["titles"]);
+  });
+
+  it("lists summaries only while they are on, and other purposes only for their own model", () => {
+    const noClaude = [snapshot(codex), snapshot(claude, { status: "error", installed: false })];
+    expect(purposes(DEFAULT_SERVER_SETTINGS, noClaude)).toEqual([]);
+    expect(purposes({ ...DEFAULT_SERVER_SETTINGS, incomingCardSummaries: true }, noClaude)).toEqual(
+      ["summaries"],
+    );
+    const haiku = createModelSelection(claude, "claude-haiku-5-5");
+    expect(
+      purposes(
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          sourceControlWriterModelSelection: haiku,
+          reviewGuideModelSelection: haiku,
+          speechPostProcessingModelSelection: haiku,
+        },
+        noClaude,
+      ),
+    ).toEqual(["sourceControl", "reviewGuides", "transcripts"]);
   });
 });
