@@ -173,10 +173,22 @@ export function SourceControlWritingSettingsSection() {
       (entry) => entry.instanceId === provider.instanceId && entry.enabled && entry.isAvailable,
     ),
   );
+  const runnableReviewGuideSelection = resolveReviewGuideModelSelection(
+    settings,
+    projectAgentProviders,
+    target?.projectId ?? null,
+  );
   const reviewGuideSelection = resolveOwnModelSelectionState(
     settings,
     settings.reviewGuideModelSelection,
-    resolveReviewGuideModelSelection(settings, projectAgentProviders, target?.projectId ?? null),
+    runnableReviewGuideSelection,
+    projectAgentProviders,
+  );
+  // Whether the row can offer a picker depends on an agent that can run, not on the saved one.
+  const usableReviewGuideSelection = resolveOwnModelSelectionState(
+    settings,
+    null,
+    runnableReviewGuideSelection,
     projectAgentProviders,
   );
   const reviewGuideModelOptionsByInstance = getTextGenerationModelOptionsByInstance(
@@ -187,7 +199,9 @@ export function SourceControlWritingSettingsSection() {
   );
   const canEnableReviewGuideModel = instanceEntries.some(
     (entry) =>
-      entry.instanceId === reviewGuideSelection.instanceId && entry.enabled && entry.isAvailable,
+      entry.instanceId === usableReviewGuideSelection.instanceId &&
+      entry.enabled &&
+      entry.isAvailable,
   );
   const reviewGuideInstanceEntry = instanceEntries.find(
     (entry) => entry.instanceId === reviewGuideSelection.instanceId,

@@ -1020,6 +1020,17 @@ describe("instance-scoped model selection", () => {
 
     expect(resolveOwnModelSelectionState(settings, own, inherited, [claude])).toEqual(own);
     expect(resolveOwnModelSelectionState(settings, null, inherited, [claude])).toEqual(inherited);
+    // Listed but off: the row still shows the saved model, while the agent it can offer is Claude.
+    const codexOff = {
+      ...provider({ instanceId: "codex", models: ["gpt-6-luna"] }),
+      enabled: false,
+    };
+    expect(resolveOwnModelSelectionState(settings, own, inherited, [codexOff, claude])).toEqual(
+      own,
+    );
+    expect(resolveOwnModelSelectionState(settings, null, inherited, [codexOff, claude])).toEqual(
+      inherited,
+    );
   });
 
   it("falls back to the text generation default, not the chat default, for a removed model", () => {
