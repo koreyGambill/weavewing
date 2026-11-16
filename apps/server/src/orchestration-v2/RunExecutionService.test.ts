@@ -4120,7 +4120,6 @@ function captureRootRunTermination(input: {
                           ids,
                           providerInstanceId,
                           childThreadId: ids.childThreadId,
-                          ...(input.afterTurn === undefined ? {} : { afterTurn: input.afterTurn }),
                           driver,
                           status: "running",
                         }),
@@ -4165,6 +4164,7 @@ function captureRootRunTermination(input: {
         providerTurnOrdinal: 1,
         shouldFinalizeRun: input.shouldFinalizeRun,
         loadUnsettledWork,
+        ...(input.afterTurn === undefined ? {} : { afterTurn: input.afterTurn }),
         ...(input.loadRunInterruptReason === undefined
           ? {}
           : { loadRunInterruptReason: input.loadRunInterruptReason }),

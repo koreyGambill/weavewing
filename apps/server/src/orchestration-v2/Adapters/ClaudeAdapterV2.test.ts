@@ -12661,10 +12661,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           session_id: WAKE_NATIVE_SESSION,
         }),
       );
+      // The fork keeps a release explicit, so the refreshed roster still says not awaited.
       assert.equal(
         providerThreadRosterEvents(harness.events).at(-1)?.providerThread
           .pendingBackgroundTasks?.[0]?.awaited,
-        undefined,
+        false,
       );
     }).pipe(
       Effect.provide(

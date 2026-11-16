@@ -2829,7 +2829,11 @@ it.effect("admits idle check-ins only for an idle main with at most one working 
         scenario.name,
       );
       if (!scenario.admitted)
-        assert.equal(yield* orchestrator.getThreadEventSequence(threadId), beforeSequence);
+        assert.equal(
+          yield* orchestrator.getThreadEventSequence(threadId),
+          beforeSequence,
+          scenario.name,
+        );
       if (scenario.name === "idle-two") {
         for (const task of (yield* projections.getThreadRecords(threadId, ["subagents"]))
           .subagents) {

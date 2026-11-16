@@ -3877,9 +3877,10 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
                     ),
                   ),
                 );
-                // The worker takes requests in order, so this one marks the queued wakes handled.
+                // The worker takes one thread's requests in order, so this one on the parent marks
+                // its queued wakes handled.
                 yield* requests.offer({
-                  threadId: child.childThreadId,
+                  threadId: parentThreadId,
                   providerThreadId: firstWake.providerThreadId,
                   driver: firstWake.driver,
                   detail: null,

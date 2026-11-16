@@ -128,7 +128,8 @@ const TaskProgressTool = Tool.make("task_progress", {
   .annotate(Tool.Title, "Get compact delegated task progress")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const TaskCancelTool = Tool.make("task_cancel", {
   description:
