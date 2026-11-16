@@ -44,6 +44,7 @@ import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
 
@@ -8305,6 +8306,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       const runningThreadId = ThreadId.make("thread:recovery-candidates:running");
       const memberThreadId = ThreadId.make("thread:recovery-candidates:member");
       const childThreadId = ThreadId.make("thread:recovery-candidates:child");
+      const customThreadId = ThreadId.make("thread:recovery-candidates:custom");
+      const openCodeThreadId = ThreadId.make("thread:recovery-candidates:opencode");
       const rolledBackThreadId = yield* addRolledBackRecoveryCandidate("recovery-candidates");
       const orphanedThreadId = yield* addOrphanedRecoveryCandidate("recovery-candidates");
       const projectId = ProjectId.make("project:recovery-candidates");
@@ -8336,7 +8339,14 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         deletedAt: null,
       });
 
-      for (const threadId of [settledThreadId, runningThreadId, memberThreadId, childThreadId]) {
+      for (const threadId of [
+        settledThreadId,
+        runningThreadId,
+        memberThreadId,
+        childThreadId,
+        customThreadId,
+        openCodeThreadId,
+      ]) {
         yield* projectionStore.apply({
           id: EventId.make(`event:recovery-candidates:${threadId}:created`),
           type: "thread.created",
@@ -8477,6 +8487,26 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           payload: shared,
         });
       }
+      for (const [threadId, sessionDriver] of [
+        [customThreadId, "codex"],
+        [openCodeThreadId, "opencode"],
+      ] as const) {
+        const instance = ProviderInstanceId.make(`custom-${sessionDriver}`);
+        yield* projectionStore.apply({
+          id: EventId.make(`event:recovery-candidates:custom:${sessionDriver}`),
+          type: "provider-session.attached",
+          threadId,
+          driver: ProviderDriverKind.make(sessionDriver),
+          providerInstanceId: instance,
+          occurredAt: now,
+          payload: {
+            ...shared,
+            id: IdAllocator.derive.providerSession({ providerInstanceId: instance }),
+            driver: ProviderDriverKind.make(sessionDriver),
+            providerInstanceId: instance,
+          },
+        });
+      }
       // Session-only recovery still applies to a dedicated process.
       yield* projectionStore.apply({
         id: EventId.make("event:recovery-candidates:dedicated"),
@@ -8493,6 +8523,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       assert.include(recoveryThreadIds, memberThreadId);
       assert.include(recoveryThreadIds, childThreadId);
       assert.notInclude(recoveryThreadIds, settledThreadId);
+      assert.notInclude(recoveryThreadIds, customThreadId);
+      assert.notInclude(recoveryThreadIds, openCodeThreadId);
+      assert.includeMembers(
+        [...(yield* projectionStore.getRecoveryThreadIds("restart-continuations"))],
+        [settledThreadId, customThreadId, openCodeThreadId],
+      );
       assert.include(recoveryThreadIds, rolledBackThreadId);
       yield* sql`UPDATE orchestration_v2_projection_provider_sessions
         SET status = 'error', payload_json = json_set(payload_json, '$.extensionStatuses', json('[{"status":"running"}]'))

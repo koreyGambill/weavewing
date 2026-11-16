@@ -1,3 +1,4 @@
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { isReactionOnlyAssistantText } from "@t3tools/shared/messageReactions";
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
 import {
@@ -4949,6 +4950,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           readonly exclude?: ReadonlyArray<string>;
         },
       ) {
+        const sharedSessionIds =
+          kind === "runtime"
+            ? (yield* sql<{ readonly provider_instance_id: string }>`
+              SELECT DISTINCT provider_instance_id FROM orchestration_v2_projection_provider_sessions
+              WHERE driver IN ('codex', 'opencode') AND status NOT IN ('stopped', 'error')
+                AND provider_instance_id IS NOT NULL
+            `).map(({ provider_instance_id }) =>
+                IdAllocator.derive.providerSession({
+                  providerInstanceId: ProviderInstanceId.make(provider_instance_id),
+                }),
+              )
+            : [];
         const candidates = (() => {
           switch (kind) {
             case "queued-runs":
@@ -5049,9 +5062,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 CROSS JOIN orchestration_v2_projection_provider_session_bindings AS bindings
                   ON bindings.provider_session_id = sessions.provider_session_id
                 WHERE (sessions.status NOT IN ('stopped', 'error')
-                  -- Idle Codex bindings share one process; active work is selected independently.
-                  AND NOT (sessions.driver = 'codex' AND sessions.provider_session_id =
-                    'provider-session:provider-instance:' || sessions.provider_instance_id || ':shared'))
+                  -- Idle shared bindings have no recovery work; active work is selected independently.
+                  AND sessions.provider_session_id NOT IN (
+                    SELECT value FROM json_each(${JSON.stringify(sharedSessionIds)})
+                  ))
                   OR (sessions.status = 'error' AND CASE WHEN json_valid(sessions.payload_json)
                     THEN json_array_length(sessions.payload_json, '$.extensionStatuses') > 0
                     ELSE 0 END)
