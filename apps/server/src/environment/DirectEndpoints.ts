@@ -22,6 +22,7 @@ import {
   isWildcardHost,
 } from "@t3tools/shared/hostClassification";
 
+import { makeStaleWhileRevalidate } from "./staleWhileRevalidate.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 import { isLoopbackHost, isPrivateNetworkAddress, isVirtualInterface } from "../startupAccess.ts";
@@ -128,6 +129,7 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const platform = yield* HostProcess.Platform;
   const environmentId = yield* (yield* ServerEnvironment.ServerEnvironment).getEnvironmentId;
+  const scope = yield* Effect.scope;
   // Only the service default listens on every interface without being asked,
   // so only it checks once whether it runs in a cloud. The check starts now so
   // the first client does not wait for its timeout.
@@ -138,6 +140,7 @@ export const make = Effect.gen(function* () {
 
   const servedEndpoint = yield* Ref.make<Option.Option<string>>(Option.none());
   const resolveAvailable = Effect.fn("DirectEndpoints.resolveAvailable")(function* () {
+    yield* cachedServe.pipe(Effect.forkIn(scope));
     const endpoints = [
       ...resolveBoundEndpoints({
         platform,
@@ -152,7 +155,7 @@ export const make = Effect.gen(function* () {
     return endpoints;
   });
 
-  const resolve = Effect.gen(function* () {
+  const refreshServe = Effect.gen(function* () {
     // Serve setup can fail without stopping startup; advertise only after it answers as this server.
     if (config.tailscaleServeEnabled) {
       const servedUrl = yield* readTailscaleStatus.pipe(
@@ -175,13 +178,15 @@ export const make = Effect.gen(function* () {
       );
       yield* Ref.set(servedEndpoint, servedUrl);
     }
-    return yield* resolveAvailable();
   });
+  const cachedServe = yield* makeStaleWhileRevalidate(refreshServe, "60 seconds");
+  yield* cachedServe.pipe(Effect.forkScoped({ startImmediately: true }));
 
   return DirectEndpoints.of({
     resolveAvailable,
-    resolve: Effect.fn("DirectEndpoints.resolve")(function () {
-      return resolve;
+    resolve: Effect.fn("DirectEndpoints.resolve")(function* () {
+      yield* cachedServe;
+      return yield* resolveAvailable();
     }),
   });
 });

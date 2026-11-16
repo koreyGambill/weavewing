@@ -294,6 +294,7 @@ interface WslPreflightSuccess {
   readonly runtime: WslPreflightRuntime;
   readonly resolvedPath: string;
   readonly runtimeId?: string;
+  readonly expectedEnvironmentId?: string;
 }
 
 interface WslPreflightFailure {
@@ -424,7 +425,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     const runtime = yield* wslEnv.prepareRuntime(runningDistro, input.runtimeArchive);
     if (runtime.ok) {
       // Staged runtimes bundle Node and node-pty; provider PATH discovery must not require them.
-      const stagedProbe = yield* wslEnv.probeRuntime(runningDistro);
+      const stagedProbe = yield* wslEnv.probeRuntime(runningDistro, input.runtimeArchive.runtimeId);
       if (stagedProbe.ok) {
         yield* wslServerTree.cleanupLegacy;
         return {
@@ -434,7 +435,13 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
           runtime: { kind: "executable", entryPath: `${runtime.linuxAppRoot}/t3` },
           resolvedPath: stagedProbe.resolvedPath,
           runtimeId: input.runtimeArchive.runtimeId,
+          ...(runtime.environmentId === undefined
+            ? {}
+            : { expectedEnvironmentId: runtime.environmentId }),
         } as const;
+      }
+      if (stagedProbe.transportFailure !== undefined) {
+        return { _tag: "Failed", reason: stagedProbe.reason, fatal: false } as const;
       }
       yield* Effect.logWarning(
         "The staged WSL runtime probe failed; retrying from the mounted server tree.",
@@ -646,6 +653,9 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
         ? null
         : {
             windowsPath: archivePath,
+            ...(Option.isSome(environment.devServerUrl)
+              ? { devUrl: environment.devServerUrl.value }
+              : {}),
             runtimeId: `sha256-${archiveHash}`,
             sha256: archiveHash,
           },
@@ -752,6 +762,9 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     ],
     preflightFailure: Option.none(),
     ...(preflight.runtimeId === undefined ? {} : { wslRuntimeId: preflight.runtimeId }),
+    ...(preflight.expectedEnvironmentId === undefined
+      ? {}
+      : { expectedEnvironmentId: preflight.expectedEnvironmentId }),
   } satisfies DesktopBackendManager.DesktopBackendStartConfig;
 });
 

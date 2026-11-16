@@ -141,6 +141,7 @@ interface PackagedWslHarnessContext {
 const withPackagedWslHarness = <A, E, R>(
   input: {
     readonly archiveHash: string;
+    readonly devServerUrl?: string;
     readonly wsl: (
       context: PackagedWslHarnessContext,
     ) => DesktopWslEnvironment.DesktopWslEnvironmentTestStub;
@@ -214,6 +215,7 @@ const withPackagedWslHarness = <A, E, R>(
               appPath: baseDir,
               platform: "win32",
               resourcesPath: baseDir,
+              ...(input.devServerUrl === undefined ? {} : { devServerUrl: input.devServerUrl }),
             }),
           ),
         ),
@@ -379,6 +381,36 @@ describe("DesktopBackendConfiguration", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
+  it.effect("passes the launch dev URL to staged WSL identity discovery", () => {
+    const devServerUrl = "http://localhost:5173/";
+    let observedDevUrl: URL | undefined;
+    return withPackagedWslHarness(
+      {
+        archiveHash: "e".repeat(64),
+        devServerUrl,
+        forbidFallback: "the dev archive must not extract a mounted fallback",
+        wsl: () => ({
+          prepareRuntime: (_distro, archive) => {
+            observedDevUrl = archive.devUrl;
+            return { ok: true, linuxAppRoot: "/runtime/dev", environmentId: "dev-environment" };
+          },
+        }),
+      },
+      () =>
+        Effect.gen(function* () {
+          const config =
+            yield* (yield* DesktopBackendConfiguration.DesktopBackendConfiguration).resolveWsl({
+              port: 5000,
+              distro: "Ubuntu",
+            });
+          assert.equal(observedDevUrl?.href, devServerUrl);
+          assert.equal(config.expectedEnvironmentId, "dev-environment");
+          assert.include(config.args, "--dev-url");
+          assert.include(config.args, devServerUrl);
+        }),
+    );
+  });
+
   it.effect("resolveWsl launches a packaged backend from the WSL-local runtime cache", () => {
     const observedArchives: Array<{
       windowsArchivePath: string;
@@ -404,7 +436,7 @@ describe("DesktopBackendConfiguration", () => {
               runtimeId: archive.runtimeId,
               sha256: archive.sha256,
             });
-            return { ok: true, linuxAppRoot };
+            return { ok: true, linuxAppRoot, environmentId: "wsl-environment" };
           },
           probeRuntime: () => {
             probeCount += 1;
@@ -429,6 +461,7 @@ describe("DesktopBackendConfiguration", () => {
             },
           ]);
           assert.equal(probeCount, 1);
+          assert.equal(config.expectedEnvironmentId, "wsl-environment");
           assert.equal(
             config.entryPath,
             path.join(baseDir, "server.asar/apps/server/dist/bin.mjs"),
@@ -522,6 +555,33 @@ describe("DesktopBackendConfiguration", () => {
         }),
     );
   });
+
+  it.effect(
+    "resolveWsl fails retryably on a staged probe transport timeout without extracting",
+    () =>
+      withPackagedWslHarness(
+        {
+          archiveHash: "d".repeat(64),
+          forbidFallback: "Transport failures cannot be repaired by extracting server.asar",
+          wsl: () => ({
+            prepareRuntime: () => ({ ok: true, linuxAppRoot: "/runtime/staged" }),
+            probeRuntime: () => ({
+              ok: false,
+              reason: "probe timed out",
+              transportFailure: "timeout",
+            }),
+          }),
+        },
+        () =>
+          Effect.gen(function* () {
+            const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+            const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
+            const failure = Option.getOrThrow(config.preflightFailure);
+            assert.isFalse(failure.fatal);
+            assert.include(failure.reason, "timed out");
+          }),
+      ),
+  );
 
   it.effect("resolveWsl retires a staged runtime whose launch probe fails", () => {
     const archiveHash = "c".repeat(64);

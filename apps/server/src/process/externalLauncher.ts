@@ -989,6 +989,10 @@ export const make = Effect.gen(function* () {
     EDITOR_DISCOVERY_CACHE_TTL,
   );
 
+  yield* Effect.all([cachedAvailableEditors, cachedFileManagerRevealKind], {
+    concurrency: "unbounded",
+  }).pipe(Effect.forkScoped({ startImmediately: true }));
+
   // Forwarders retain the underlying launcher and discovery spans.
   return ExternalLauncher.of({
     resolveAvailableEditors: Effect.fnUntraced(function* () {

@@ -68,6 +68,7 @@ export interface BackendProcessContext {
   readonly entryPath: string;
   readonly cwd: string;
   readonly httpBaseUrl: URL;
+  readonly expectedEnvironmentId?: string;
 }
 
 export type DesktopBackendBootstrapDelivery = "fd3" | "stdin";
@@ -369,6 +370,9 @@ const pollHttpReady = (
   return waitForHttpReadyShared({
     baseUrl: options.httpBaseUrl.href,
     path: BACKEND_READINESS_PATH,
+    ...(options.expectedEnvironmentId === undefined
+      ? {}
+      : { expectedEnvironmentId: options.expectedEnvironmentId }),
     timeoutMs: Duration.toMillis(options.timeout),
     intervalMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_INTERVAL),
     probeTimeoutMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
@@ -599,6 +603,9 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
         entryPath: options.entryPath,
         cwd: options.cwd,
         httpBaseUrl: options.httpBaseUrl,
+        ...(options.expectedEnvironmentId === undefined
+          ? {}
+          : { expectedEnvironmentId: options.expectedEnvironmentId }),
         timeout: options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
       }),
       Deferred.await(serverReady),

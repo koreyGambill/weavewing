@@ -86,6 +86,43 @@ const layerNet = Layer.succeed(NetService.NetService, {
 } satisfies NetService.NetService["Service"]);
 
 describe("DesktopWslBackend", () => {
+  it.effect("ignores stale Windows bind reservations on a free mirrored port", () =>
+    Effect.gen(function* () {
+      assert.equal(yield* DesktopWslBackend.scanForWslPort(3774, "mirrored"), 3774);
+    }).pipe(
+      Effect.provideService(NetService.NetService, {
+        canListenOnHost: () => Effect.die("Windows retains closed mirrored listeners"),
+        isPortAvailableOnLoopback: () => Effect.succeed(false),
+        hasListenerOnHost: () => Effect.succeed(false),
+        reserveLoopbackPort: () => Effect.succeed(41773),
+        findAvailablePort: (preferred) => Effect.succeed(preferred),
+      }),
+    ),
+  );
+
+  it.effect("falls back to the NAT scan when the mirrored preferred port has a listener", () =>
+    Effect.gen(function* () {
+      let checks = 0;
+      const pending = yield* DesktopWslBackend.scanForWslPort(3774, "mirrored").pipe(
+        Effect.provideService(NetService.NetService, {
+          canListenOnHost: (port) =>
+            Effect.sync(() => {
+              checks += 1;
+              return port === 3776;
+            }),
+          hasListenerOnHost: () => Effect.succeed(true),
+          isPortAvailableOnLoopback: () => Effect.succeed(false),
+          reserveLoopbackPort: () => Effect.succeed(41773),
+          findAvailablePort: (port) => Effect.succeed(port),
+        }),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("60 seconds");
+      assert.equal(yield* Fiber.join(pending), 3776);
+      assert.equal(checks, 122);
+    }),
+  );
+
   it.effect("waits for the preferred port so peer links keep a stable URL across restarts", () => {
     let preferredChecks = 0;
     const layerBusyPreferred = Layer.succeed(NetService.NetService, {

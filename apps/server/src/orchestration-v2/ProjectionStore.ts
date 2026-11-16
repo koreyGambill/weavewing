@@ -1,3 +1,4 @@
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { isReactionOnlyAssistantText } from "@t3tools/shared/messageReactions";
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
 import {
@@ -4949,6 +4950,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           readonly exclude?: ReadonlyArray<string>;
         },
       ) {
+        const sharedSessionIds =
+          kind === "runtime"
+            ? (yield* sql<{ readonly provider_instance_id: string }>`
+              SELECT DISTINCT provider_instance_id FROM orchestration_v2_projection_provider_sessions
+              WHERE driver IN ('codex', 'opencode') AND status NOT IN ('stopped', 'error')
+                AND provider_instance_id IS NOT NULL
+            `).map(({ provider_instance_id }) =>
+                IdAllocator.derive.providerSession({
+                  providerInstanceId: ProviderInstanceId.make(provider_instance_id),
+                }),
+              )
+            : [];
         const candidates = (() => {
           switch (kind) {
             case "queued-runs":
@@ -5048,7 +5061,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 FROM orchestration_v2_projection_provider_sessions AS sessions
                 CROSS JOIN orchestration_v2_projection_provider_session_bindings AS bindings
                   ON bindings.provider_session_id = sessions.provider_session_id
-                WHERE sessions.status NOT IN ('stopped', 'error')
+                WHERE (sessions.status NOT IN ('stopped', 'error')
+                  -- Idle shared bindings have no recovery work; active work is selected independently.
+                  AND sessions.provider_session_id NOT IN (
+                    SELECT value FROM json_each(${JSON.stringify(sharedSessionIds)})
+                  ))
                   OR (sessions.status = 'error' AND CASE WHEN json_valid(sessions.payload_json)
                     THEN json_array_length(sessions.payload_json, '$.extensionStatuses') > 0
                     ELSE 0 END)
@@ -5429,16 +5446,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const getRuntimeRecoveryProjection: ProjectionStoreV2Shape["getRuntimeRecoveryProjection"] =
       Effect.fn("ProjectionStore.getRuntimeRecoveryProjection")(
         function* (threadId) {
-          const threadRows = yield* sql<PayloadRow>`
-            SELECT payload_json FROM orchestration_v2_projection_threads
-            WHERE thread_id = ${threadId}
-          `;
-          if (threadRows[0] === undefined) {
-            return yield* new ProjectionStoreThreadNotFoundError({ threadId });
-          }
-          const thread = yield* decodeThreadPayload(threadRows[0].payload_json);
-          // One worker round trip and one SQLite snapshot; decisions still read after the prior commit.
           const queries = {
+            thread: sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_threads
+              WHERE thread_id = ${threadId}
+            `,
             runs: sql<PayloadRow>`
               SELECT payload_json FROM orchestration_v2_projection_runs AS run
               WHERE run.thread_id = ${threadId}
@@ -5722,6 +5734,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ${sql.join(" UNION ALL ", false)(sections)}
             ORDER BY section, position
           `;
+          const threadRow = rows.find((row) => row.section === "thread");
+          if (threadRow === undefined)
+            return yield* new ProjectionStoreThreadNotFoundError({ threadId });
+          const thread = yield* decodeThreadPayload(threadRow.payload_json);
           const readRows = (section: keyof typeof queries) =>
             rows.filter((row) => row.section === section);
           const [

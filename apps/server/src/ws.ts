@@ -308,19 +308,18 @@ const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
 const resolveDiscoveryForConfig = <A, E, R>(
   discovery: Effect.Effect<A, E, R>,
   onTimeout: () => A,
-) =>
-  discovery.pipe(
-    Effect.timeoutOption(CONFIG_DISCOVERY_TIMEOUT),
-    Effect.map(Option.getOrElse(onTimeout)),
-  );
+  timeout: Duration.Input = CONFIG_DISCOVERY_TIMEOUT,
+) => discovery.pipe(Effect.timeoutOption(timeout), Effect.map(Option.getOrElse(onTimeout)));
 
 const resolveAvailableEditorsForConfig = <A, E, R>(
   discovery: Effect.Effect<ReadonlyArray<A>, E, R>,
-) => resolveDiscoveryForConfig(discovery, () => []);
+  timeout: Duration.Input = CONFIG_DISCOVERY_TIMEOUT,
+) => resolveDiscoveryForConfig(discovery, () => [], timeout);
 
 const resolveFileManagerRevealKindForConfig = <E, R>(
   discovery: Effect.Effect<FileManagerRevealKind | undefined, E, R>,
-) => resolveDiscoveryForConfig(discovery, () => undefined);
+  timeout: Duration.Input = CONFIG_DISCOVERY_TIMEOUT,
+) => resolveDiscoveryForConfig(discovery, () => undefined, timeout);
 
 type EditorDiscovery = Pick<
   ExternalLauncher.ExternalLauncher["Service"],
@@ -430,6 +429,7 @@ export const withLateConfigDiscovery = <E, R>(
 // Discoveries run side by side so the slowest one, not their sum, bounds the
 // server config snapshot. Each degrades on timeout rather than failing it.
 export const resolveOpenDiscoveryForConfig = <T, D, E1, R1, E2, R2, E3, R3, E4, R4>(discovery: {
+  readonly deferEditors?: boolean;
   readonly editors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;
   readonly fileManagerRevealKind: Effect.Effect<FileManagerRevealKind | undefined, E2, R2>;
   readonly remoteOpenTargets: Effect.Effect<ReadonlyArray<T>, E3, R3>;
@@ -437,11 +437,17 @@ export const resolveOpenDiscoveryForConfig = <T, D, E1, R1, E2, R2, E3, R3, E4, 
 }) =>
   Effect.all(
     {
-      editorConfig: resolveAvailableEditorsForConfig(discovery.editors).pipe(
+      editorConfig: resolveAvailableEditorsForConfig(
+        discovery.editors,
+        discovery.deferEditors ? Duration.zero : CONFIG_DISCOVERY_TIMEOUT,
+      ).pipe(
         Effect.flatMap((availableEditors) =>
           resolveEditorConfig(
             availableEditors,
-            resolveFileManagerRevealKindForConfig(discovery.fileManagerRevealKind),
+            resolveFileManagerRevealKindForConfig(
+              discovery.fileManagerRevealKind,
+              discovery.deferEditors ? Duration.zero : CONFIG_DISCOVERY_TIMEOUT,
+            ),
           ),
         ),
       ),
@@ -1868,6 +1874,7 @@ export const layerWsRpc = (
         const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
         const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
         const discovery = yield* resolveOpenDiscoveryForConfig({
+          deferEditors: options.deferNetworkDiscovery,
           editors: externalLauncher.resolveAvailableEditors(),
           fileManagerRevealKind: externalLauncher.resolveFileManagerRevealKind(),
           remoteOpenTargets: options.deferNetworkDiscovery

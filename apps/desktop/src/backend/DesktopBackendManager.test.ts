@@ -240,6 +240,44 @@ describe("DesktopBackendManager", () => {
     }),
   );
 
+  it.effect("rejects another environment listening on the WSL port", () =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const exit = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+      const environmentId = yield* Ref.make("other-environment");
+      const probed = yield* Queue.unbounded<void>();
+      const instance = yield* makeTestInstance({
+        config: { ...baseConfig, expectedEnvironmentId: "wsl-environment" },
+        onReady: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
+        spawnerLayer: Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.acquireRelease(
+              Effect.succeed(makeProcess({ exitCode: Deferred.await(exit) })),
+              () => Deferred.succeed(exit, ChildProcessSpawner.ExitCode(0)),
+            ),
+          ),
+        ),
+        httpClientLayer: layerHttpClient((request) =>
+          Ref.get(environmentId).pipe(
+            Effect.tap(() => Queue.offer(probed, undefined)),
+            Effect.map((id) =>
+              HttpClientResponse.fromWeb(request, Response.json({ environmentId: id })),
+            ),
+          ),
+        ),
+      });
+      yield* instance.start;
+      yield* Queue.take(probed);
+      yield* TestClock.adjust("0 seconds");
+      assert.isFalse(yield* Deferred.isDone(ready));
+      yield* Ref.set(environmentId, "wsl-environment");
+      yield* TestClock.adjust("100 millis");
+      yield* Deferred.await(ready);
+      yield* instance.stop();
+    }),
+  );
+
   it.effect("notices a WSL backend soon after it listens despite slow refused connects", () =>
     Effect.gen(function* () {
       const ready = yield* Deferred.make<void>();
