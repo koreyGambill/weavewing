@@ -7,8 +7,9 @@ import {
   textGeneratorForSelection,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import {
+  followsThreadTextGeneration,
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
 } from "@t3tools/shared/serverSettings";
@@ -20,7 +21,7 @@ import {
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { TextGenerationWarnings, useTextGenerationWarnings } from "./TextGenerationWarnings";
+import { useTextGenerationStatus } from "./TextGenerationWarnings";
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useTextGenerationTargets } from "../../textGenerators";
 import {
@@ -99,8 +100,6 @@ export function SourceControlWritingSettingsSection() {
   const scopeKey = targets.map((target) => `${target.environmentId}:${target.projectId}`).join(",");
   const customInstructionsRef = useRef<HTMLTextAreaElement>(null);
   const [editingAllInstructions, setEditingAllInstructions] = useState(false);
-  const writerWarnings = useTextGenerationWarnings("sourceControl", targets);
-  const reviewGuideWarnings = useTextGenerationWarnings("reviewGuides", targets);
   const [writerPickerOpen, setWriterPickerOpen] = useState(false);
   const [reviewGuidePickerOpen, setReviewGuidePickerOpen] = useState(false);
   const [allInstructions, setAllInstructions] = useState<string | null>(null);
@@ -141,6 +140,7 @@ export function SourceControlWritingSettingsSection() {
     projectEffectiveTextGenerationProviders,
   );
   const usesDedicatedModel = settings.sourceControlWriterModelSelection !== null;
+  const followsThread = followsThreadTextGeneration(settings);
   const activeSelection = resolveAppModelSelectionState(
     {
       ...settings,
@@ -196,6 +196,16 @@ export function SourceControlWritingSettingsSection() {
   );
   const reviewGuideInstanceEntry = instanceEntries.find(
     (entry) => entry.instanceId === reviewGuideSelection.instanceId,
+  );
+  const writerStatus = useTextGenerationStatus(
+    "sourceControl",
+    targets,
+    canEnableDedicatedModel ? () => setWriterPickerOpen(true) : undefined,
+  );
+  const reviewGuideStatus = useTextGenerationStatus(
+    "reviewGuides",
+    targets,
+    canEnableReviewGuideModel ? () => setReviewGuidePickerOpen(true) : undefined,
   );
 
   return (
@@ -339,18 +349,8 @@ export function SourceControlWritingSettingsSection() {
             serverScoped
             settingKeys={["reviewGuideModelSelection"]}
             {...searchableSetting("review-guide-model")}
-            description="Must be a coding agent: it reads the pull request over many steps. Off uses the writer model, or Codex or Claude if that model is a text generator."
-            status={
-              reviewGuideWarnings.length > 0 ? (
-                <TextGenerationWarnings
-                  warnings={reviewGuideWarnings}
-                  purpose="reviewGuides"
-                  {...(canEnableReviewGuideModel
-                    ? { onChoose: () => setReviewGuidePickerOpen(true) }
-                    : {})}
-                />
-              ) : undefined
-            }
+            description="A coding agent that reads the pull request. Off uses the writer model, or the text model. If that is a text generator, pick Codex or Claude here."
+            status={reviewGuideStatus}
             control={
               !hasServerTargets ? (
                 <span className="text-sm text-muted-foreground">
@@ -383,7 +383,11 @@ export function SourceControlWritingSettingsSection() {
                           return;
                         }
                         updateSettings({
-                          reviewGuideModelSelection: createModelSelection(instanceId, model),
+                          reviewGuideModelSelection: pickModelSelection(
+                            mixedReviewGuideModel ? null : reviewGuideSelection,
+                            instanceId,
+                            model,
+                          ),
                         });
                       }}
                     />
@@ -410,6 +414,11 @@ export function SourceControlWritingSettingsSection() {
                         })
                       }
                     />
+                  ) : null}
+                  {!usesReviewGuideModel && (usesDedicatedModel || followsThread) ? (
+                    <span className="text-sm text-muted-foreground">
+                      {usesDedicatedModel ? "Same as the writer model" : "Same as the thread"}
+                    </span>
                   ) : null}
                   <Switch
                     mixed={mixedReviewGuideModel}
@@ -536,16 +545,8 @@ export function SourceControlWritingSettingsSection() {
           serverScoped
           settingKeys={["sourceControlWriterModelSelection"]}
           {...searchableSetting("source-control-writer-model")}
-          description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model configured for this environment."
-          status={
-            writerWarnings.length > 0 ? (
-              <TextGenerationWarnings
-                warnings={writerWarnings}
-                purpose="sourceControl"
-                {...(canEnableDedicatedModel ? { onChoose: () => setWriterPickerOpen(true) } : {})}
-              />
-            ) : undefined
-          }
+          description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model, which is the thread's own model by default."
+          status={writerStatus}
           control={
             !hasServerTargets ? (
               <span className="text-sm text-muted-foreground">
@@ -593,7 +594,11 @@ export function SourceControlWritingSettingsSection() {
                         return;
                       }
                       updateSettings({
-                        sourceControlWriterModelSelection: createModelSelection(instanceId, model),
+                        sourceControlWriterModelSelection: pickModelSelection(
+                          mixedWriterModel ? null : activeSelection,
+                          instanceId,
+                          model,
+                        ),
                       });
                     }}
                   />
@@ -620,6 +625,9 @@ export function SourceControlWritingSettingsSection() {
                       })
                     }
                   />
+                ) : null}
+                {followsThread && !usesDedicatedModel ? (
+                  <span className="text-sm text-muted-foreground">Same as the thread</span>
                 ) : null}
                 <Switch
                   checked={usesDedicatedModel}

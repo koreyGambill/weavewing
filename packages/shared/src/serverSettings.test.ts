@@ -18,7 +18,6 @@ import { createModelSelection } from "./model.ts";
 import { resolveProjectScripts } from "./projectScripts.ts";
 import {
   applyServerSettingsPatch,
-  fallbackTextGenerationModelSelection,
   modelPreferencesMigrationPatch,
   resolveModelPreferences,
   isModelSelectionProviderEnabled,
@@ -26,6 +25,8 @@ import {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
   resolveSpeechPostProcessingModelSelection,
+  isTextGenerationSelectionUnusable,
+  settingsForThread,
   unusableTextGenerationPurposes,
 } from "./serverSettings.ts";
 
@@ -33,63 +34,6 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
-
-describe("fallbackTextGenerationModelSelection", () => {
-  it("uses Big Pickle when only OpenCode is enabled", () => {
-    expect(
-      fallbackTextGenerationModelSelection({}, (instanceId) => instanceId === "opencode"),
-    ).toEqual({ instanceId: "opencode", model: "opencode/big-pickle" });
-    const threadDefault = {
-      instanceId: ProviderInstanceId.make("opencode"),
-      model: "opencode-go/glm-5.3",
-    };
-    const providerInstances = {
-      [threadDefault.instanceId]: {
-        driver: ProviderDriverKind.make("opencode"),
-        config: { customModels: [threadDefault.model] },
-      },
-    };
-    // An exhausted Go quota leaves the custom model unusable but Big Pickle still works.
-    expect(
-      fallbackTextGenerationModelSelection(
-        providerInstances,
-        (instanceId, _driver, model) =>
-          instanceId === "opencode" && !model.startsWith("opencode-go/"),
-        { defaultModelSelection: threadDefault },
-      ),
-    ).toEqual({ instanceId: "opencode", model: "opencode/big-pickle" });
-  });
-
-  it("replaces and clears the fallback without carrying model options", () => {
-    const fallbackModelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "new" };
-    const settings = applyServerSettingsPatch(
-      {
-        ...DEFAULT_SERVER_SETTINGS,
-        fallbackModelSelection: {
-          ...fallbackModelSelection,
-          model: "old",
-          options: [{ id: "effort", value: "high" }],
-        },
-      },
-      { fallbackModelSelection },
-    );
-    expect(settings.fallbackModelSelection).toEqual(fallbackModelSelection);
-    expect(
-      applyServerSettingsPatch(settings, { fallbackModelSelection: null }).fallbackModelSelection,
-    ).toBeNull();
-  });
-  it("falls back to a configured non-default instance", () => {
-    const configured = ProviderInstanceId.make("codex_work");
-    const providerInstances = {
-      [configured]: { driver: ProviderDriverKind.make("codex"), config: {} },
-    };
-    const fallback = fallbackTextGenerationModelSelection(
-      providerInstances,
-      (instanceId) => instanceId === configured,
-    );
-    expect(fallback?.instanceId).toBe(configured);
-  });
-});
 
 describe("serverSettings helpers", () => {
   it("translates a shipped client's idle compaction switch into a mode", () => {
@@ -1097,6 +1041,43 @@ describe("resolveSpeechPostProcessingModelSelection", () => {
   });
 });
 
+describe("settingsForThread", () => {
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const codex = ProviderInstanceId.make("codex");
+  const thread = createModelSelection(claude, "claude-opus-5-5", [{ id: "effort", value: "high" }]);
+  const textGenerationFor = (
+    selection: Parameters<typeof settingsForThread>[1],
+    settings: ServerSettings = DEFAULT_SERVER_SETTINGS,
+  ) => settingsForThread(settings, selection).textGenerationModelSelection;
+
+  it("runs background text on the thread's exact model by default", () => {
+    expect(textGenerationFor(thread)).toBe(thread);
+  });
+
+  it("lets an explicit choice win, however it was made", () => {
+    const chosen = createModelSelection(codex, "gpt-6-luna");
+    expect(
+      textGenerationFor(thread, { ...DEFAULT_SERVER_SETTINGS, textGenerationFollowsThread: false }),
+    ).toBe(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
+    expect(
+      textGenerationFor(thread, {
+        ...DEFAULT_SERVER_SETTINGS,
+        textGenerationModelSelection: chosen,
+      }),
+    ).toBe(chosen);
+  });
+
+  it("falls back to the default thread model for jobs without a thread", () => {
+    const settings = { ...DEFAULT_SERVER_SETTINGS, defaultModelSelection: thread };
+    expect(textGenerationFor(undefined, settings)).toBe(thread);
+    expect(textGenerationFor(undefined)).toBe(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
+  });
+
+  it("decodes settings that predate the flag as following the thread", () => {
+    expect(decodeServerSettings({}).textGenerationFollowsThread).toBe(true);
+  });
+});
+
 describe("unusableTextGenerationPurposes", () => {
   const codex = ProviderInstanceId.make("codex");
   const claude = ProviderInstanceId.make("claudeAgent");
@@ -1118,6 +1099,8 @@ describe("unusableTextGenerationPurposes", () => {
     skills: [],
     ...overrides,
   });
+  // Picking a model in Settings stops following the thread, even when it matches the default.
+  const chosenCodex = { ...DEFAULT_SERVER_SETTINGS, textGenerationFollowsThread: false };
   const purposes = (
     settings: ServerSettings,
     providers: ReadonlyArray<ServerProvider> | undefined,
@@ -1125,33 +1108,59 @@ describe("unusableTextGenerationPurposes", () => {
   ) => unusableTextGenerationPurposes(settings, providers, projectId).map((entry) => entry.purpose);
   const ready = [snapshot(codex), snapshot(claude)];
 
-  it("names the titles model when its agent failed its probe, is off, or is gone", () => {
-    expect(purposes(DEFAULT_SERVER_SETTINGS, ready)).toEqual([]);
+  it("names a chosen model whose agent failed its probe, is off, or is gone", () => {
+    expect(purposes(chosenCodex, ready)).toEqual([]);
     for (const failed of [
       snapshot(codex, { status: "error", installed: false }),
       snapshot(codex, { status: "error", auth: { status: "unauthenticated" } }),
-      snapshot(codex, { enabled: false, status: "disabled" }),
+      snapshot(codex, { enabled: false, status: "disabled", installed: false }),
       snapshot(codex, { availability: "unavailable" }),
       snapshot(codex, { supportsTextGeneration: false }),
     ]) {
-      expect(purposes(DEFAULT_SERVER_SETTINGS, [failed, snapshot(claude)])).toEqual(["titles"]);
+      expect(purposes(chosenCodex, [failed, snapshot(claude)])).toEqual(["titles"]);
     }
-    expect(purposes(DEFAULT_SERVER_SETTINGS, [snapshot(claude)])).toEqual(["titles"]);
+    expect(purposes(chosenCodex, [snapshot(claude)])).toEqual(["titles"]);
+  });
+
+  it("never warns while text follows the thread", () => {
+    const noCodex = [snapshot(codex, { status: "error", installed: false }), snapshot(claude)];
+    expect(purposes({ ...DEFAULT_SERVER_SETTINGS, incomingCardSummaries: true }, noCodex)).toEqual(
+      [],
+    );
   });
 
   it("waits for snapshots and probes before warning", () => {
-    expect(purposes(DEFAULT_SERVER_SETTINGS, undefined)).toEqual([]);
-    expect(purposes(DEFAULT_SERVER_SETTINGS, [])).toEqual([]);
-    const probing = snapshot(codex, { status: "warning", installed: false });
-    expect(purposes(DEFAULT_SERVER_SETTINGS, [probing, snapshot(claude)])).toEqual([]);
+    expect(purposes(chosenCodex, undefined)).toEqual([]);
+    expect(purposes(chosenCodex, [])).toEqual([]);
+    // Antigravity's first snapshot while it checks: not installed, no text generation yet.
+    const checking = snapshot(codex, {
+      status: "warning",
+      installed: false,
+      auth: { status: "unknown" },
+      supportsTextGeneration: false,
+    });
+    expect(
+      isTextGenerationSelectionUnusable(
+        chosenCodex,
+        [checking],
+        null,
+        chosenCodex.textGenerationModelSelection,
+      ),
+    ).toBe(false);
+    expect(purposes(chosenCodex, [{ ...checking, enabled: false }])).toEqual(["titles"]);
   });
 
-  it("follows project overrides that turn the agent off", () => {
+  it("applies a project's provider switches only to jobs that run in the project", () => {
     const projectId = ProjectId.make("project-a");
+    const haiku = createModelSelection(claude, "claude-haiku-5-5");
     const settings = {
       ...DEFAULT_SERVER_SETTINGS,
+      textGenerationFollowsThread: false,
+      textGenerationModelSelection: haiku,
+      incomingCardSummaries: true,
+      speechPostProcessingModelSelection: haiku,
       projectSettingsOverrides: {
-        [projectId]: { providerInstances: { [codex]: { enabled: false } } },
+        [projectId]: { providerInstances: { [claude]: { enabled: false } } },
       },
     };
     expect(purposes(settings, ready)).toEqual([]);
@@ -1165,24 +1174,23 @@ describe("unusableTextGenerationPurposes", () => {
       baseUrl: "https://openrouter.ai/api/v1",
       enabled: true,
     };
-    const settings = decodeServerSettings({
-      textGenerationModelSelection: { instanceId: generator, model: "some/model" },
-      textGenerators: { [generator]: config },
-    });
-    expect(purposes(settings, ready)).toEqual([]);
-    const off = decodeServerSettings({
-      textGenerationModelSelection: { instanceId: generator, model: "some/model" },
-      textGenerators: { [generator]: { ...config, enabled: false } },
-    });
-    expect(purposes(off, ready)).toEqual(["titles"]);
+    const settings = (enabled: boolean) =>
+      decodeServerSettings({
+        textGenerationFollowsThread: false,
+        textGenerationModelSelection: { instanceId: generator, model: "some/model" },
+        textGenerators: { [generator]: { ...config, enabled } },
+      });
+    expect(purposes(settings(true), ready)).toEqual([]);
+    expect(purposes(settings(false), ready)).toEqual(["titles"]);
   });
 
-  it("lists summaries only while they are on, and other purposes only for their own model", () => {
+  it("lists summaries with the chosen model while on, and other jobs by their own model", () => {
+    const noCodex = [snapshot(codex, { status: "error", installed: false }), snapshot(claude)];
+    expect(purposes({ ...chosenCodex, incomingCardSummaries: true }, noCodex)).toEqual([
+      "titles",
+      "summaries",
+    ]);
     const noClaude = [snapshot(codex), snapshot(claude, { status: "error", installed: false })];
-    expect(purposes(DEFAULT_SERVER_SETTINGS, noClaude)).toEqual([]);
-    expect(purposes({ ...DEFAULT_SERVER_SETTINGS, incomingCardSummaries: true }, noClaude)).toEqual(
-      ["summaries"],
-    );
     const haiku = createModelSelection(claude, "claude-haiku-5-5");
     expect(
       purposes(

@@ -1,9 +1,6 @@
 import type { ModelPreferences } from "@t3tools/contracts/settings";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_TEXT_GENERATION_MODEL,
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  defaultInstanceIdForDriver,
+  DEFAULT_TEXT_GENERATION_MODEL_SELECTION,
   globalIdleCompaction,
   type IdleCompactionMode,
   isProviderAvailable,
@@ -17,19 +14,19 @@ import {
   type ProjectId,
   type ProjectScopedServerSettingKey,
   ProjectSettingsOverrides,
-  ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
   withIdleCompaction,
 } from "@t3tools/contracts";
+import * as Equal from "effect/Equal";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
-import { createModelSelection, readCustomModelEntries } from "./model.ts";
+import { createModelSelection } from "./model.ts";
 import {
   getBackgroundActivityBaseProfile,
   normalizeBackgroundActivitySettings,
@@ -61,61 +58,6 @@ export function isModelSelectionProviderEnabled(
   return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
-const TEXT_GENERATION_FALLBACK_DRIVERS = [
-  "codex",
-  "claudeAgent",
-  "cursor",
-  "grok",
-  "muse",
-  "pi",
-  "opencode",
-  "antigravity",
-].map((driver) => ProviderDriverKind.make(driver));
-
-/** Configured instances come after every default instance, so they only win when no default qualifies. */
-export function fallbackTextGenerationModelSelection(
-  providerInstances: ServerSettings["providerInstances"],
-  isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind, model: string) => boolean,
-  options?: { readonly defaultModelSelection?: ModelSelection | null },
-): ModelSelection | null {
-  const threadDefault = options?.defaultModelSelection;
-  // The thread default's custom model wins on its instance; the driver default still serves when that model is unusable.
-  const selectionsFor = (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => {
-    const config = providerInstances[instanceId]?.config as { customModels?: unknown } | undefined;
-    const driverDefault = { instanceId, model: defaultTextGenerationModel(driver) };
-    return threadDefault?.instanceId === instanceId &&
-      readCustomModelEntries(config?.customModels).some(
-        (entry) => entry.slug === threadDefault.model,
-      )
-      ? [threadDefault, driverDefault]
-      : [driverDefault];
-  };
-  const candidates = [
-    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
-      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
-    ),
-    ...Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-      TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
-        ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
-        : [],
-    ),
-  ];
-  for (const [instanceId, driver] of candidates) {
-    for (const selection of selectionsFor(instanceId, driver)) {
-      if (isEnabled(instanceId, driver, selection.model)) return selection;
-    }
-  }
-  return null;
-}
-
-function defaultTextGenerationModel(driver: ProviderDriverKind): string {
-  return (
-    DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
-    DEFAULT_MODEL_BY_PROVIDER[driver] ??
-    DEFAULT_TEXT_GENERATION_MODEL
-  );
-}
-
 /** A text generator, or a provider whose snapshot can generate text; no snapshots trusts settings. */
 function isTextGenerationTargetUsable(
   settings: ServerSettings,
@@ -130,6 +72,85 @@ function isTextGenerationTargetUsable(
     provider?.enabled === true &&
     isProviderAvailable(provider) &&
     isProviderTextGenerationCapable(provider)
+  );
+}
+
+/** True until the user picks a text generation model: background text then follows the thread. */
+export const followsThreadTextGeneration = (settings: ServerSettings) =>
+  settings.textGenerationFollowsThread &&
+  Equal.equals(settings.textGenerationModelSelection, DEFAULT_TEXT_GENERATION_MODEL_SELECTION);
+
+/** Background text runs on the thread's own model so it never reaches a second vendor. */
+export function settingsForThread(
+  settings: ServerSettings,
+  thread: ModelSelection | null | undefined,
+): ServerSettings {
+  const source = thread ?? settings.defaultModelSelection;
+  return source && followsThreadTextGeneration(settings)
+    ? { ...settings, textGenerationModelSelection: source }
+    : settings;
+}
+
+/**
+ * Whether snapshots show a selection's agent cannot run: missing, off, unavailable, unable to write
+ * text, or a failed probe. Unknown snapshots and pending probes are not reasons to warn.
+ */
+export function isTextGenerationSelectionUnusable(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+  selection: ModelSelection,
+): boolean {
+  const generator = textGeneratorForSelection(settings, selection.instanceId);
+  if (generator !== undefined) return !generator.enabled;
+  if (providers === undefined || providers.length === 0) return false;
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  if (provider === undefined || !provider.enabled) return true;
+  if (!resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId))
+    return true;
+  // A probe still running reports not installed without an error; its capabilities are not known yet.
+  if (!provider.installed && provider.status !== "error") return false;
+  return (
+    !provider.installed ||
+    provider.auth.status === "unauthenticated" ||
+    !isProviderAvailable(provider) ||
+    !isProviderTextGenerationCapable(provider) ||
+    provider.models.find((model) => model.slug === selection.model)?.supportsTextGeneration ===
+      false
+  );
+}
+
+export type TextGenerationPurpose =
+  | "titles"
+  | "summaries"
+  | "sourceControl"
+  | "reviewGuides"
+  | "transcripts";
+
+/**
+ * Purposes whose explicitly chosen model cannot run. Following the thread or another purpose's
+ * model is not listed. Summaries and transcript cleanup run without a project, so a project's
+ * provider switches do not apply to them.
+ */
+export function unusableTextGenerationPurposes(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+): ReadonlyArray<{ readonly purpose: TextGenerationPurpose; readonly selection: ModelSelection }> {
+  const own = followsThreadTextGeneration(settings) ? null : settings.textGenerationModelSelection;
+  const selections: ReadonlyArray<
+    readonly [TextGenerationPurpose, ModelSelection | null, ProjectId | null]
+  > = [
+    ["titles", own, projectId],
+    ["summaries", settings.incomingCardSummaries ? own : null, null],
+    ["sourceControl", settings.sourceControlWriterModelSelection, projectId],
+    ["reviewGuides", settings.reviewGuideModelSelection, projectId],
+    ["transcripts", settings.speechPostProcessingModelSelection, null],
+  ];
+  return selections.flatMap(([purpose, selection, scope]) =>
+    selection !== null && isTextGenerationSelectionUnusable(settings, providers, scope, selection)
+      ? [{ purpose, selection }]
+      : [],
   );
 }
 
@@ -172,69 +193,6 @@ export function resolveSpeechPostProcessingModelSelection(
     isTextGenerationTargetUsable(settings, providers, selection.instanceId)
     ? selection
     : settings.textGenerationModelSelection;
-}
-
-const CLAUDE = ProviderDriverKind.make("claudeAgent");
-/** Incoming card summaries always ask Haiku; low effort keeps it from thinking past the output cap. */
-export const MESSAGE_SUMMARY_MODEL: ModelSelection = {
-  instanceId: defaultInstanceIdForDriver(CLAUDE),
-  model: DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[CLAUDE] ?? "claude-haiku-5-5",
-  options: [{ id: "effort", value: "low" }],
-};
-
-/**
- * Whether snapshots show a selection's agent cannot run: missing, off, unavailable, unable to write
- * text, or a failed probe. Unknown snapshots and pending probes are not reasons to warn.
- */
-function isTextGenerationSelectionUnusable(
-  settings: ServerSettings,
-  providers: ReadonlyArray<ServerProvider> | undefined,
-  projectId: ProjectId | null,
-  selection: ModelSelection,
-): boolean {
-  const generator = textGeneratorForSelection(settings, selection.instanceId);
-  if (generator !== undefined) return !generator.enabled;
-  if (providers === undefined || providers.length === 0) return false;
-  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
-  return (
-    provider === undefined ||
-    !provider.enabled ||
-    !resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId) ||
-    !isProviderAvailable(provider) ||
-    !isProviderTextGenerationCapable(provider) ||
-    provider.models.find((model) => model.slug === selection.model)?.supportsTextGeneration ===
-      false ||
-    (provider.status === "error" &&
-      (!provider.installed || provider.auth.status === "unauthenticated"))
-  );
-}
-
-export type TextGenerationPurpose =
-  | "titles"
-  | "summaries"
-  | "sourceControl"
-  | "reviewGuides"
-  | "transcripts";
-
-/** Purposes whose own selection cannot run; a purpose that follows the titles model is not listed. */
-export function unusableTextGenerationPurposes(
-  settings: ServerSettings,
-  providers: ReadonlyArray<ServerProvider> | undefined,
-  projectId: ProjectId | null,
-): ReadonlyArray<{ readonly purpose: TextGenerationPurpose; readonly selection: ModelSelection }> {
-  const selections: ReadonlyArray<readonly [TextGenerationPurpose, ModelSelection | null]> = [
-    ["titles", settings.textGenerationModelSelection],
-    ["summaries", settings.incomingCardSummaries ? MESSAGE_SUMMARY_MODEL : null],
-    ["sourceControl", settings.sourceControlWriterModelSelection],
-    ["reviewGuides", settings.reviewGuideModelSelection],
-    ["transcripts", settings.speechPostProcessingModelSelection],
-  ];
-  return selections.flatMap(([purpose, selection]) =>
-    selection !== null &&
-    isTextGenerationSelectionUnusable(settings, providers, projectId, selection)
-      ? [{ purpose, selection }]
-      : [],
-  );
 }
 
 export interface PersistedServerObservabilitySettings {

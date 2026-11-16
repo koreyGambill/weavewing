@@ -152,6 +152,10 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("still lets readers load settings the way installed Swift clients ask", () => {
+    expect(requiredScopeForRpcMethod("server.getSettings")).toBe(AuthOrchestrationReadScope);
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(
@@ -406,41 +410,48 @@ describe("settings mutation authorization", () => {
     }),
   );
 
-  it.effect("does not let a settings grant create or remove providers or secret providers", () =>
-    Effect.gen(function* () {
-      let handled = false;
-      const client = yield* RpcTest.makeClient(group).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
-              Effect.sync(() => {
-                handled = true;
-                return DEFAULT_SERVER_SETTINGS;
-              }),
+  it.effect(
+    "does not let a settings grant manage providers or turn off T3 Connect device approval",
+    () =>
+      Effect.gen(function* () {
+        let handled = false;
+        const client = yield* RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
+                Effect.sync(() => {
+                  handled = true;
+                  return DEFAULT_SERVER_SETTINGS;
+                }),
+              ),
+              RpcAuthorization.layer([AuthSettingsWriteScope]),
             ),
-            RpcAuthorization.layer([AuthSettingsWriteScope]),
           ),
-        ),
-      );
-      expect(
-        yield* client[WS_METHODS.serverUpdateSettings]({
-          patch: {},
-          providerInstanceMutation,
-        }).pipe(Effect.flip),
-      ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
-      expect(
-        yield* client[WS_METHODS.serverUpdateSettings]({
-          patch: { secretProviders: { [SecretProviderId.make("personal")]: null } },
-        }).pipe(Effect.flip),
-      ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
-      // Tailnet pairing decides who may pair, which only an access grant may change.
-      expect(
-        yield* client[WS_METHODS.serverUpdateSettings]({
-          patch: { tailnetConnect: { enabled: true } },
-        }).pipe(Effect.flip),
-      ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
-      expect(handled).toBe(false);
-    }),
+        );
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: {},
+            providerInstanceMutation,
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: { secretProviders: { [SecretProviderId.make("personal")]: null } },
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: { requireConnectDeviceApproval: false },
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
+        // Tailnet pairing decides who may pair, which only an access grant may change.
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: { tailnetConnect: { enabled: true } },
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
+        expect(handled).toBe(false);
+      }),
   );
 });
 

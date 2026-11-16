@@ -52,6 +52,7 @@ import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
   DESKTOP_RENDERER_ORIGINS,
+  MCP_HTTP_PATH,
 } from "./httpCors.ts";
 import { requestUrl } from "./requestUrl.ts";
 import { isTailnetPagePath } from "./tailnet/TailnetConnect.ts";
@@ -272,10 +273,12 @@ export const layerBrowserApiCors = Layer.unwrap(
     });
     // The tailnet pages trust whichever tailnet device sends the request, so no other site may read them.
     return HttpRouter.middleware(
-      (httpApp) => {
-        const withCors = cors(httpApp);
+      (httpEffect) => {
+        const withCors = cors(httpEffect);
         return Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-          isTailnetPagePath(request.url) ? httpApp : withCors,
+          isTailnetPagePath(request.url) || request.url.split("?", 1)[0] === MCP_HTTP_PATH
+            ? httpEffect
+            : withCors,
         );
       },
       { global: true },
@@ -575,6 +578,12 @@ const streamStaticFile = (file: FileSystem.File, size: bigint) =>
     }),
   );
 
+// The app can approve agents and start threads in one click, so no other site may frame it.
+const SPA_FRAME_HEADERS = {
+  "Content-Security-Policy": "frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+};
+
 const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
   function* (immutableBuildAssets: ReadonlySet<string>) {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -675,6 +684,7 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
     };
     const headers: Record<string, string> = {
       "Cache-Control": cacheControl,
+      ...(isHtml ? SPA_FRAME_HEADERS : {}),
       ...validators(fileInfo),
     };
     const etag = headers.ETag;
@@ -711,6 +721,7 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
       return HttpServerResponse.uint8Array(bytes, {
         headers: {
           "Cache-Control": cacheControl,
+          ...(isHtml ? SPA_FRAME_HEADERS : {}),
           ...validators({ ...info, size: ByteSize.bytes(bytes.byteLength) }),
         },
         contentType,

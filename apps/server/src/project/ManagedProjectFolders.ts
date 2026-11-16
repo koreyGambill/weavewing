@@ -13,6 +13,7 @@ import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -71,6 +72,10 @@ export class ScratchProjectError extends Schema.TaggedError<ScratchProjectError>
     return "Failed to create the project for threads without a project.";
   }
 }
+
+/** Where No project threads keep their folders, whether or not this T3 home allows them. */
+export const scratchFolderRoot = (baseDir: string, path: Path.Path) =>
+  path.resolve(baseDir, "scratch");
 
 export type ScratchError = ScratchUnavailableError | ScratchFolderError | ScratchProjectError;
 
@@ -253,59 +258,56 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const legacyScratchRoot = path.resolve(config.baseDir, "scratch");
+  const legacyScratchRoot = scratchFolderRoot(config.baseDir, path);
   // A shared start folder must not inherit a parent repository's status or checkpoints.
-  const resolveScratchRoot = Effect.fn("ManagedProjectFolders.resolveScratchRoot")(
-    function* (setting: string) {
-      const configured = path.resolve(expandHomePath(setting, home));
-      const root = (yield* fileSystem.exists(configured))
-        ? yield* fileSystem.realPath(configured)
-        : legacyScratchRoot;
-      const realHome = yield* fileSystem
-        .realPath(home)
-        .pipe(Effect.orElseSucceed(() => path.resolve(home)));
-      const realXwing = yield* fileSystem
-        .realPath(path.join(realHome, ".xwing"))
-        .pipe(Effect.orElseSucceed(() => path.join(realHome, ".xwing")));
-      const dataDirectory = yield* fileSystem
-        .realPath(config.baseDir)
-        .pipe(Effect.orElseSucceed(() => path.resolve(config.baseDir)));
-      const dataRelative = path.relative(root, dataDirectory);
-      if (
-        root === realHome ||
-        root === realXwing ||
-        dataRelative === "" ||
-        (!dataRelative.startsWith(`..${path.sep}`) &&
-          dataRelative !== ".." &&
-          !path.isAbsolute(dataRelative))
-      )
-        return Result.fail(new ScratchUnavailableError({ baseDir: config.baseDir }));
-      return yield* gitWorkflow
-        .repositoryRoot(root === legacyScratchRoot ? config.baseDir : root)
-        .pipe(
-          Effect.catchIf(isGitMissing, () => Effect.succeed(null)),
-          Effect.flatMap(
-            (repositoryRoot): Effect.Effect<Result.Result<string, ScratchUnavailableError>> => {
-              if (repositoryRoot === null) return Effect.succeed(Result.succeed(root));
-              const unavailable = new ScratchUnavailableError({
-                baseDir: config.baseDir,
-                repositoryRoot,
-                ...(root === legacyScratchRoot ? {} : { scratchRoot: root }),
-              });
-              return Effect.logWarning(unavailable.message).pipe(
-                Effect.as(Result.fail(unavailable)),
-              );
-            },
-          ),
-        );
-    },
-    Effect.catchCause((cause) =>
-      Cause.hasInterrupts(cause)
-        ? Effect.interrupt
-        : Effect.succeed(Result.fail(new ScratchUnavailableError({ baseDir: config.baseDir }))),
-    ),
-  );
-  const scratchRoots = yield* Cache.make({ capacity: 1, lookup: resolveScratchRoot });
+  const resolveScratchRoot = Effect.fn("ManagedProjectFolders.resolveScratchRoot")(function* (
+    setting: string,
+  ) {
+    const configured = path.resolve(expandHomePath(setting, home));
+    const root = (yield* fileSystem.exists(configured))
+      ? yield* fileSystem.realPath(configured)
+      : legacyScratchRoot;
+    const realHome = yield* fileSystem
+      .realPath(home)
+      .pipe(Effect.orElseSucceed(() => path.resolve(home)));
+    const realXwing = yield* fileSystem
+      .realPath(path.join(realHome, ".xwing"))
+      .pipe(Effect.orElseSucceed(() => path.join(realHome, ".xwing")));
+    const dataDirectory = yield* fileSystem
+      .realPath(config.baseDir)
+      .pipe(Effect.orElseSucceed(() => path.resolve(config.baseDir)));
+    const dataRelative = path.relative(root, dataDirectory);
+    if (
+      root === realHome ||
+      root === realXwing ||
+      dataRelative === "" ||
+      (!dataRelative.startsWith(`..${path.sep}`) &&
+        dataRelative !== ".." &&
+        !path.isAbsolute(dataRelative))
+    )
+      return Result.fail(new ScratchUnavailableError({ baseDir: config.baseDir }));
+    return yield* gitWorkflow
+      .repositoryRoot(root === legacyScratchRoot ? config.baseDir : root)
+      .pipe(
+        Effect.catchIf(isGitMissing, () => Effect.succeed(null)),
+        Effect.flatMap(
+          (repositoryRoot): Effect.Effect<Result.Result<string, ScratchUnavailableError>> => {
+            if (repositoryRoot === null) return Effect.succeed(Result.succeed(root));
+            const unavailable = new ScratchUnavailableError({
+              baseDir: config.baseDir,
+              repositoryRoot,
+              ...(root === legacyScratchRoot ? {} : { scratchRoot: root }),
+            });
+            return Effect.logWarning(unavailable.message).pipe(Effect.as(Result.fail(unavailable)));
+          },
+        ),
+      );
+  });
+  const scratchRoots = yield* Cache.makeWith(resolveScratchRoot, {
+    capacity: 1,
+    // A failed check (say, a git timeout on a busy machine) is not an answer; ask again next time.
+    timeToLive: Exit.match({ onSuccess: () => Duration.infinity, onFailure: () => Duration.zero }),
+  });
   const scratchProbe = settings.getSettings.pipe(
     Effect.flatMap((value) => Cache.get(scratchRoots, value.scratchStartDirectory)),
     Effect.catchCause((cause) =>

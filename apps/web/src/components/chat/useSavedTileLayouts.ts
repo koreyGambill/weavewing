@@ -76,10 +76,10 @@ export function useSavedTileLayouts(environmentId: EnvironmentId, projectId: Pro
     setProjectDefault: (id: string | null | undefined) => {
       if (!projectId || !projectOverridesSupported) return;
       const { scope, environments } = readProjectGroupScope(environmentId, projectId);
-      runPlan(
+      runPlan(environments, (current) =>
         id === undefined
-          ? planScopedSettingsClear(scope, environments, ["defaultTileLayoutId"])
-          : planScopedSettingsPatch(scope, environments, { defaultTileLayoutId: id }),
+          ? planScopedSettingsClear(scope, current, ["defaultTileLayoutId"])
+          : planScopedSettingsPatch(scope, current, { defaultTileLayoutId: id }),
       );
     },
   };

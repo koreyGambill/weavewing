@@ -535,7 +535,6 @@ export function PullRequestDetailPanel({
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { copyToClipboard: copyReference } = useCopyToClipboard<string>({
     target: `${terminology.singular} reference`,
-    onCopy: (label) => toastManager.add({ type: "success", title: `${label} copied` }),
     onError: (error, label) =>
       toastManager.add({
         type: "error",
@@ -863,6 +862,7 @@ export function PullRequestDetailPanel({
     environmentId,
     reference,
     title: detail?.title ?? null,
+    threadId: threadRef?.threadId,
   });
   const writeGuide = () => {
     void guideWriter.write();
@@ -1651,7 +1651,6 @@ export function PullRequestDetailPanel({
                     pullRequestKey={pullRequestKey}
                     detail={detail}
                     canWriteSourceControl={canWriteSourceControl}
-                    onSaved={refreshDetail}
                   />
                 }
                 author={
@@ -1906,6 +1905,7 @@ export function PullRequestDetailPanel({
                   reference={reference}
                   active={tab === "guide"}
                   title={detail.title}
+                  threadId={threadRef?.threadId}
                   workspaceRoot={detail.workspaceRoot}
                   canComment={
                     detail.capabilities.review.inlineComment && detail.viewerPermissions.comment

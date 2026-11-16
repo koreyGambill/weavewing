@@ -28,8 +28,11 @@ import {
   type SpeechModelUnloadTimeout,
   type VoiceShortcutMode,
 } from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
-import { resolveSpeechPostProcessingModelSelection } from "@t3tools/shared/serverSettings";
+import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
+import {
+  followsThreadTextGeneration,
+  resolveSpeechPostProcessingModelSelection,
+} from "@t3tools/shared/serverSettings";
 import { cloudSpeechLanguages } from "@t3tools/shared/speech";
 import {
   ArrowDownUpIcon,
@@ -135,7 +138,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
-import { TextGenerationWarnings, useTextGenerationWarnings } from "./TextGenerationWarnings";
+import { useTextGenerationStatus } from "./TextGenerationWarnings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -500,9 +503,7 @@ function ProjectDictionaryRow() {
 
 /** Cleanup runs on the draft's environment, so its model is an environment setting there. */
 function CleanupModelRow() {
-  const { environment, connectedEnvironments, targets: scopeTargets } = useSettingsScope();
-  const warnings = useTextGenerationWarnings("transcripts", scopeTargets);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const { environment, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const providersByEnvironment = useEnvironmentProviders();
@@ -541,6 +542,17 @@ function CleanupModelRow() {
     selection.model,
   );
   const instanceEntry = instanceEntries.find((entry) => entry.instanceId === selection.instanceId);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Cleanup reads environment settings, so project overrides never decide its warning.
+  const status = useTextGenerationStatus(
+    "transcripts",
+    connectedEnvironments.flatMap((candidate) =>
+      candidate.serverConfig
+        ? [{ ...candidate, projectId: null, settings: candidate.serverConfig.settings }]
+        : [],
+    ),
+    hasProvider && instanceEntry ? () => setPickerOpen(true) : undefined,
+  );
   const modelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries, true);
   const setModel = (next: ReturnType<typeof createModelSelection>) => {
     const reason = modelDisabledReason(next.instanceId, next.model);
@@ -556,16 +568,8 @@ function CleanupModelRow() {
       settingKeys={["speechPostProcessingModelSelection"]}
       {...searchableSetting("speech-post-processing-model")}
       title="Cleanup model"
-      description="Model for transcript cleanup, such as a cheaper or faster one. When disabled, use the text generation model configured for this environment."
-      status={
-        warnings.length > 0 ? (
-          <TextGenerationWarnings
-            warnings={warnings}
-            purpose="transcripts"
-            {...(hasProvider && instanceEntry ? { onChoose: () => setPickerOpen(true) } : {})}
-          />
-        ) : undefined
-      }
+      description="Model for transcript cleanup, such as a cheaper or faster one. When disabled, use the text generation model, which is the default thread model unless you chose one."
+      status={status}
       control={
         connectedEnvironments.length === 0 ? (
           <span className="text-sm text-muted-foreground">Connect an environment first.</span>
@@ -590,7 +594,7 @@ function CleanupModelRow() {
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                   getModelDisabledReason={modelDisabledReason}
                   onInstanceModelChange={(instanceId, model) =>
-                    setModel(createModelSelection(instanceId, model))
+                    setModel(pickModelSelection(selection, instanceId, model))
                   }
                 />
                 <TraitsPicker
@@ -605,6 +609,9 @@ function CleanupModelRow() {
                   }
                 />
               </>
+            ) : null}
+            {!dedicated && followsThreadTextGeneration(settings) ? (
+              <span className="text-sm text-muted-foreground">Same as the thread</span>
             ) : null}
             <Switch
               checked={dedicated}

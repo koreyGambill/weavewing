@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
 import {
@@ -15,6 +15,8 @@ import { useEnvironmentSpeechInput } from "./useEnvironmentSpeechInput";
 export function useTextFieldSpeech(input: {
   readonly environmentId: EnvironmentId;
   readonly projectId?: ProjectId | null | undefined;
+  /** The thread the text belongs to: cleanup runs on its model. */
+  readonly threadId?: ThreadId | null | undefined;
   readonly ownerKey: string;
   readonly text: string;
   readonly textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -30,6 +32,7 @@ export function useTextFieldSpeech(input: {
   const speech = useEnvironmentSpeechInput({
     environmentId: input.environmentId,
     projectId: input.projectId,
+    threadId: input.threadId,
     ownerKey: input.ownerKey,
     disabled: input.disabled,
     offerSetup: false,

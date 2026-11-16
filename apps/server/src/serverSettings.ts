@@ -51,8 +51,6 @@ import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJso
 import {
   applyServerSettingsPatch,
   deriveLegacyProjectOverrides,
-  fallbackTextGenerationModelSelection,
-  isModelSelectionProviderEnabled,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
@@ -305,7 +303,7 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
   });
   const currentSettingsRef = yield* Ref.make<ServerSettings>(initialSettings);
   const writeSemaphore = yield* Semaphore.make(1);
-  const getSettings = Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider));
+  const getSettings = Ref.get(currentSettingsRef);
 
   const updateTestSettings = (
     update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
@@ -315,7 +313,6 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
         Effect.flatMap(update),
         Effect.flatMap(normalizeServerSettings),
         Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
-        Effect.map(resolveTextGenerationProvider),
       ),
     );
 
@@ -495,50 +492,6 @@ function migrateLegacyProviderSettings(
   };
 }
 
-const ACP_REGISTRY_DRIVER = ProviderDriverKind.make("acpRegistry");
-
-function selectionSupportsTextGeneration(
-  settings: ServerSettings,
-  selection: ModelSelection,
-): boolean {
-  return settings.providerInstances[selection.instanceId]?.driver !== ACP_REGISTRY_DRIVER;
-}
-
-type DriverAllowed = (driver: ProviderDriverKind) => boolean;
-const anyDriver: DriverAllowed = () => true;
-
-function resolveTextGenerationProvider(
-  settings: ServerSettings,
-  isDriverAllowed: DriverAllowed = anyDriver,
-): ServerSettings {
-  const selection = settings.textGenerationModelSelection;
-  return isModelSelectionProviderEnabled(settings, selection) &&
-    selectionSupportsTextGeneration(settings, selection) &&
-    isDriverAllowed(
-      settings.providerInstances[selection.instanceId]?.driver ??
-        ProviderDriverKind.make(selection.instanceId),
-    )
-    ? settings
-    : fallbackTextGenerationProvider(settings, isDriverAllowed);
-}
-
-function fallbackTextGenerationProvider(
-  settings: ServerSettings,
-  isDriverAllowed: DriverAllowed,
-): ServerSettings {
-  const fallback = fallbackTextGenerationModelSelection(
-    settings.providerInstances,
-    (instanceId, driver) =>
-      // A default instance id can be configured with another driver.
-      isDriverAllowed(settings.providerInstances[instanceId]?.driver ?? driver) &&
-      resolveProviderInstanceEnabled(
-        settings.providerInstances[instanceId] ?? { driver, config: {} },
-      ),
-    { defaultModelSelection: settings.defaultModelSelection },
-  );
-  return fallback === null ? settings : { ...settings, textGenerationModelSelection: fallback };
-}
-
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "backgroundActivity",
   "automaticGitFetchInterval",
@@ -680,10 +633,7 @@ const make = Effect.gen(function* () {
   } = yield* ManagedPolicy.ManagedPolicy;
   // Locks are laid over every settings value that leaves this service, never persisted.
   const toEffective = (settings: ServerSettings) =>
-    resolveTextGenerationProvider(
-      managedProviders.applyLimits(managed.applyLocks(settings)),
-      managedProviders.isDriverAllowed,
-    );
+    managedProviders.applyLimits(managed.applyLocks(settings));
   const writeSemaphore = yield* Semaphore.make(1);
   const cacheKey = "settings" as const;
   const changesPubSub = yield* PubSub.unbounded<ServerSettings>();

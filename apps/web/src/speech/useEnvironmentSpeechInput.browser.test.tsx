@@ -12,6 +12,7 @@ import {
   EnvironmentId,
   type EnvironmentSpeechModel,
   type ProjectId,
+  type ThreadId,
   type SpeechCustomWords,
   type SpeechPostProcessingOptions,
   type SpeechTranscriptionOptions,
@@ -51,6 +52,7 @@ const mocks = vi.hoisted(() => ({
   microphoneRequests: [] as string[],
   transcribeCalls: [] as string[],
   cleanupCalls: [] as string[],
+  cleanupContext: [] as Array<{ threadId: unknown; projectId: unknown }>,
   cleanupDraft: vi.fn(),
   cleanupOptions: [] as SpeechPostProcessingOptions[],
   recordingOptions: [] as SpeechTranscriptionOptions[],
@@ -156,9 +158,13 @@ vi.mock("@t3tools/client-runtime/voice-input", async (importOriginal) => ({
     transcript: string,
     draft: unknown,
     options: SpeechPostProcessingOptions,
+    _canSend: unknown,
+    threadId?: unknown,
+    projectId?: unknown,
   ) =>
     Effect.sync(() => {
       mocks.cleanupCalls.push(prepared.environmentId);
+      mocks.cleanupContext.push({ threadId, projectId });
       mocks.cleanupDraft(draft);
       mocks.cleanupOptions.push(options);
       return { text: `Cleaned ${transcript}` };
@@ -229,6 +235,7 @@ function setup(options: { readonly destination?: string | null } = {}) {
   mocks.microphoneRequests = [];
   mocks.transcribeCalls = [];
   mocks.cleanupCalls = [];
+  mocks.cleanupContext = [];
   mocks.cleanupDraft.mockClear();
   mocks.cleanupOptions = [];
   mocks.recordingOptions = [];
@@ -246,6 +253,7 @@ function setDestination(environmentId: string | null) {
 
 function Probe(props: {
   readonly projectId?: string;
+  readonly threadId?: string;
   readonly projectName?: string;
   readonly cleanup?: boolean;
   readonly showWizard?: boolean;
@@ -253,6 +261,7 @@ function Probe(props: {
   const value = useEnvironmentSpeechInput({
     environmentId: THREAD_ENV as EnvironmentId,
     projectId: props.projectId as ProjectId | undefined,
+    threadId: props.threadId as ThreadId | undefined,
     projectName: props.projectName,
     cleanup: props.cleanup,
     ownerKey: "draft",
@@ -725,6 +734,17 @@ it("cleans text on a cloud-only draft environment only while cleanup is separate
   await screen.rerender(<Probe />);
   await act(() => mocks.voice.stop());
   expect(mocks.cleanupCalls).toHaveLength(1);
+});
+
+it("sends the draft's thread and project with cleanup so the server picks that model", async () => {
+  setup({ destination: "env-a" });
+  mocks.voiceCapable.delete(THREAD_ENV);
+  mocks.cloudVoiceCapable.add(THREAD_ENV);
+  chooseTranscriptCleanup(true);
+  await using _screen = await render(<Probe projectId="proj-1" threadId="thread-1" />);
+  await act(() => mocks.voice.start());
+  await act(() => mocks.voice.stop());
+  expect(mocks.cleanupContext).toEqual([{ threadId: "thread-1", projectId: "proj-1" }]);
 });
 
 // The settings model test must show what the model heard, not what a provider rewrote.

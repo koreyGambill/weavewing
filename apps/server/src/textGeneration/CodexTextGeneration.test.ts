@@ -295,6 +295,12 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
     },
     { selectedModel: "gpt-6-luna", models: ["gpt-5.6-luna"], expected: "gpt-5.6-luna" },
     { selectedModel: "gpt-6-luna", models: [], expected: "gpt-6-luna" },
+    // Only the old default model is swapped; any other choice runs as asked or fails in Codex.
+    {
+      selectedModel: "gpt-9-thread-model",
+      models: ["gpt-6-astra"],
+      expected: "gpt-9-thread-model",
+    },
   ])(
     "dispatches $expected for $selectedModel from $models",
     ({ selectedModel, models, defaultModel, expected }) =>
@@ -333,6 +339,26 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
             { id: "reasoningEffort", value: "none" },
             { id: "serviceTier", value: "priority" },
           ]),
+        }),
+    ),
+  );
+
+  it.effect("keeps the options of an unlisted model it passes through unchanged", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Live title" }),
+        models: ["gpt-6-astra"],
+        requireArg: '--model gpt-9-thread-model --config model_reasoning_effort="high"',
+      },
+      (textGeneration) =>
+        textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "Describe this change",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("codex"),
+            "gpt-9-thread-model",
+            [{ id: "reasoningEffort", value: "high" }],
+          ),
         }),
     ),
   );
@@ -499,6 +525,26 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
     ),
   );
 
+  it.effect("keeps user hooks off over launch args that turn them on", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Hookless title" }),
+        launchArgs: "--config features.hooks=true --enable hooks",
+        requireArg: "--config features.codex_hooks=false --config features.hooks=false",
+        forbidArg: "--enable",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Describe this change",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(result.title).toBe("Hookless title");
+        }),
+    ),
+  );
+
   it.effect("passes exec-safe launch args into codex exec", () =>
     withFakeCodexEnv(
       {
@@ -613,161 +659,145 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
   );
 });
 
+// Whatever its state, the chosen provider runs the job: no other vendor stands in.
 const PREFLIGHT_PRIMARY_STATES = [
   "ready",
   "pending",
   "exhausted",
   "not installed",
-  "not installed, fallback disabled for project",
   "signed out",
-  "signed out, fallback failed",
   "cannot generate text",
   "model cannot generate text",
 ] as const;
 
-it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (primaryState) =>
-  Effect.gen(function* () {
-    const primary = ProviderInstanceId.make("codex");
-    const fallback = ProviderInstanceId.make("claude_work");
-    const projectId = ProjectId.make("project-a");
-    const selection = {
-      instanceId: primary,
-      model: "chat-model",
-      options: [{ id: "effort", value: "high" }],
-    };
-    const threadDefault = {
-      instanceId: fallback,
-      model: "z-ai/glm-5.3-flash",
-      options: [{ id: "thinking", value: false }],
-    };
-    const calls: ModelSelection[] = [];
-    const instances: ProviderInstance[] = [primary, fallback].map((instanceId) => {
-      const driver = ProviderDriverKind.make(instanceId === primary ? "codex" : "claudeAgent");
-      const snapshot: ServerProvider = {
-        instanceId,
-        driver,
-        enabled: true,
-        installed: true,
-        status: "ready",
-        auth: { status: "authenticated" },
-        version: null,
-        checkedAt: "1970-01-01T00:00:00Z",
-        models: [],
-        slashCommands: [],
-        skills: [],
-        ...(primaryState === "pending" && instanceId === primary
-          ? { installed: false, status: "warning", auth: { status: "unknown" } }
-          : {}),
-        ...(primaryState.startsWith("not installed") && instanceId === primary
-          ? { installed: false, status: "error", auth: { status: "unknown" } }
-          : {}),
-        ...(primaryState.startsWith("signed out") && instanceId === primary
-          ? { status: "error", auth: { status: "unauthenticated" } }
-          : {}),
-        ...(primaryState === "signed out, fallback failed" && instanceId === fallback
-          ? { status: "error", auth: { status: "unknown" } }
-          : {}),
-        ...(primaryState === "cannot generate text" && instanceId === primary
-          ? { supportsTextGeneration: false }
-          : {}),
-        ...(primaryState === "model cannot generate text" && instanceId === primary
-          ? {
-              models: [
-                {
-                  slug: selection.model,
-                  name: selection.model,
-                  isCustom: false,
-                  supportsTextGeneration: false,
-                  capabilities: null,
-                },
-              ],
-            }
-          : {}),
-        ...(primaryState === "exhausted" && instanceId === primary
-          ? {
-              usageLimits: {
-                checkedAt: "1970-01-01T00:00:00Z",
-                windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 100 }],
-              },
-            }
-          : {}),
+it.effect.each(PREFLIGHT_PRIMARY_STATES)(
+  "text generation keeps the chosen provider: %s",
+  (primaryState) =>
+    Effect.gen(function* () {
+      const primary = ProviderInstanceId.make("codex");
+      const fallback = ProviderInstanceId.make("claude_work");
+      const projectId = ProjectId.make("project-a");
+      const selection = {
+        instanceId: primary,
+        model: "chat-model",
+        options: [{ id: "effort", value: "high" }],
       };
-      return {
-        instanceId,
-        driverKind: driver,
-        continuationIdentity: { driverKind: driver, continuationKey: instanceId },
-        displayName: undefined,
-        enabled: true,
-        snapshot: { getSnapshot: Effect.succeed(snapshot) } as ProviderInstance["snapshot"],
-        orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
-        textGeneration: TextGeneration.TextGeneration.of({
-          generateCommitMessage: () => Effect.die("unused"),
-          generatePrContent: () => Effect.die("unused"),
-          generateBranchName: () => Effect.die("unused"),
-          generateReviewGuide: () => Effect.die("unused"),
-          generateTranscriptionPostProcessing: () => Effect.die("unused"),
-          generateThreadTitle: (input) =>
-            Effect.sync(() => {
-              calls.push(input.modelSelection);
-              return { title: "Generated title" };
-            }),
-        }),
+      const threadDefault = {
+        instanceId: fallback,
+        model: "z-ai/glm-5.3-flash",
+        options: [{ id: "thinking", value: false }],
       };
-    });
-    const service = yield* TextGeneration.make.pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-            listInstances: Effect.succeed(instances),
-            getInstance: (id) =>
-              Effect.succeed(instances.find((instance) => instance.instanceId === id)),
-          }),
-          ServerSettings.layerTest({
-            providerInstances: {
-              [fallback]: {
-                driver: ProviderDriverKind.make("claudeAgent"),
-                config: { customModels: [threadDefault.model] },
-              },
-            },
-            defaultModelSelection: threadDefault,
-            ...(primaryState === "not installed, fallback disabled for project"
-              ? {
-                  projectSettingsOverrides: {
-                    [projectId]: { providerInstances: { [fallback]: { enabled: false } } },
+      const calls: ModelSelection[] = [];
+      const instances: ProviderInstance[] = [primary, fallback].map((instanceId) => {
+        const driver = ProviderDriverKind.make(instanceId === primary ? "codex" : "claudeAgent");
+        const snapshot: ServerProvider = {
+          instanceId,
+          driver,
+          enabled: true,
+          installed: true,
+          status: "ready",
+          auth: { status: "authenticated" },
+          version: null,
+          checkedAt: "1970-01-01T00:00:00Z",
+          models: [],
+          slashCommands: [],
+          skills: [],
+          ...(primaryState === "pending" && instanceId === primary
+            ? { installed: false, status: "warning", auth: { status: "unknown" } }
+            : {}),
+          ...(primaryState.startsWith("not installed") && instanceId === primary
+            ? { installed: false, status: "error", auth: { status: "unknown" } }
+            : {}),
+          ...(primaryState.startsWith("signed out") && instanceId === primary
+            ? { status: "error", auth: { status: "unauthenticated" } }
+            : {}),
+          ...(primaryState === "cannot generate text" && instanceId === primary
+            ? { supportsTextGeneration: false }
+            : {}),
+          ...(primaryState === "model cannot generate text" && instanceId === primary
+            ? {
+                models: [
+                  {
+                    slug: selection.model,
+                    name: selection.model,
+                    isCustom: false,
+                    supportsTextGeneration: false,
+                    capabilities: null,
                   },
-                }
-              : {}),
+                ],
+              }
+            : {}),
+          ...(primaryState === "exhausted" && instanceId === primary
+            ? {
+                usageLimits: {
+                  checkedAt: "1970-01-01T00:00:00Z",
+                  windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 100 }],
+                },
+              }
+            : {}),
+        };
+        return {
+          instanceId,
+          driverKind: driver,
+          continuationIdentity: { driverKind: driver, continuationKey: instanceId },
+          displayName: undefined,
+          enabled: true,
+          snapshot: { getSnapshot: Effect.succeed(snapshot) } as ProviderInstance["snapshot"],
+          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          textGeneration: TextGeneration.TextGeneration.of({
+            generateCommitMessage: () => Effect.die("unused"),
+            generatePrContent: () => Effect.die("unused"),
+            generateBranchName: () => Effect.die("unused"),
+            generateReviewGuide: () => Effect.die("unused"),
+            generateTranscriptionPostProcessing: () => Effect.die("unused"),
+            generateThreadTitle: (input) =>
+              Effect.sync(() => {
+                calls.push(input.modelSelection);
+                return { title: "Generated title" };
+              }),
           }),
-          Layer.mock(TextGenerators.TextGenerators)({ runner: () => Effect.undefined }),
-          Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
-            resolveLink: () => Effect.die("unused"),
-          }),
-          ProviderInstallationGate.layer,
+        };
+      });
+      const service = yield* TextGeneration.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+              listInstances: Effect.succeed(instances),
+              getInstance: (id) =>
+                Effect.succeed(instances.find((instance) => instance.instanceId === id)),
+            }),
+            ServerSettings.layerTest({
+              providerInstances: {
+                [fallback]: {
+                  driver: ProviderDriverKind.make("claudeAgent"),
+                  config: { customModels: [threadDefault.model] },
+                },
+              },
+              defaultModelSelection: threadDefault,
+            }),
+            Layer.mock(TextGenerators.TextGenerators)({ runner: () => Effect.undefined }),
+            Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+              resolveLink: () => Effect.die("unused"),
+            }),
+            ProviderInstallationGate.layer,
+          ),
         ),
-      ),
-    );
-    expect(
-      yield* service.generateThreadTitle({
-        cwd: "/tmp",
-        message: "hello",
-        linkedContext: "",
-        modelSelection: selection,
-        projectId,
-      }),
-    ).toEqual({ title: "Generated title" });
-    expect(calls).toEqual([
-      primaryState === "ready" ||
-      primaryState === "pending" ||
-      primaryState === "not installed, fallback disabled for project" ||
-      primaryState === "signed out, fallback failed"
-        ? selection
-        : threadDefault,
-    ]);
-  }),
+      );
+      expect(
+        yield* service.generateThreadTitle({
+          cwd: "/tmp",
+          message: "hello",
+          linkedContext: "",
+          modelSelection: selection,
+          projectId,
+        }),
+      ).toEqual({ title: "Generated title" });
+      expect(calls).toEqual([selection]);
+    }),
 );
 
 it.effect(
-  "a review guide aimed at a text generator falls back to an agent that can read the checkout",
+  "a review guide aimed at a text generator fails with a setup message instead of switching vendor",
   () =>
     Effect.gen(function* () {
       const claude = ProviderInstanceId.make("claudeAgent");
@@ -843,13 +873,12 @@ it.effect(
         settledReview: "",
         modelSelection: { instanceId: ProviderInstanceId.make("openrouter"), model: "some/model" },
       };
-      yield* (yield* serviceWith([instance])).generateReviewGuide(input);
-      expect(calls.map((selection) => selection.instanceId)).toEqual([claude]);
-
-      // With no agent ready, it says what is missing instead of looking up a provider by that id.
-      const failure = yield* Effect.flip((yield* serviceWith([])).generateReviewGuide(input));
+      const failure = yield* Effect.flip(
+        (yield* serviceWith([instance])).generateReviewGuide(input),
+      );
       expect(failure.detail).toMatch(
         /^Review guides need a coding agent that can read the checkout/,
       );
+      expect(calls).toEqual([]);
     }),
 );

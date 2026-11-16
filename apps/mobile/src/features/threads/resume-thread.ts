@@ -70,7 +70,7 @@ export async function resumeThread<E>(input: {
           messageId: input.messageId,
           origin: { kind: "system" as const, event: "manual continuation" },
           role: "user",
-          text: "Continue where you left off.",
+          text: "",
           attachments: [],
         },
         runtimeMode,
