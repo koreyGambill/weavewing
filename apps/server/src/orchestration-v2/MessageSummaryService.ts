@@ -20,7 +20,7 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { incomingCardSummarySource } from "./incomingCardSummary.ts";
 
 /** About 2.5x the expected daily volume; past it cards keep their first line until tomorrow. */
-export const DAILY_SUMMARY_LIMIT = 1_000;
+const DAILY_SUMMARY_LIMIT = 1_000;
 
 const CLAUDE = ProviderDriverKind.make("claudeAgent");
 const SUMMARY_MODEL = {
