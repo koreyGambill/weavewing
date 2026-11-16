@@ -144,6 +144,19 @@ describe("resolveProjectSettings", () => {
       expect(resolved.overrides.defaultModelSelection?.model).toBe("gpt-5.6-sol");
     },
   );
+
+  it("lets a project turn off following the thread for its own text generation", () => {
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: { [projectId]: { textGenerationFollowsThread: false } },
+    };
+    expect(resolveProjectSettings(settings, projectId).settings.textGenerationFollowsThread).toBe(
+      false,
+    );
+    expect(
+      resolveProjectSettings(settings, otherProjectId).settings.textGenerationFollowsThread,
+    ).toBe(true);
+  });
 });
 
 describe("resolveProjectSettings with a t3.json", () => {

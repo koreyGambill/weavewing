@@ -1733,7 +1733,10 @@ export function ThreadsSettingsPanel() {
     true,
   );
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
-  const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
+  const mixedTextGenerationModel = useScopedSettingsMixed([
+    "textGenerationModelSelection",
+    "textGenerationFollowsThread",
+  ]);
 
   return (
     <SettingsPageContainer>
@@ -1948,7 +1951,7 @@ export function ThreadsSettingsPanel() {
       <SettingsSection id="text-generation" title="Text generation">
         <SettingsRow
           serverScoped
-          settingKeys={["textGenerationModelSelection"]}
+          settingKeys={["textGenerationModelSelection", "textGenerationFollowsThread"]}
           {...searchableSetting("text-generation-model")}
           description="For thread titles and other generated text. By default each thread's own model writes its text. Source control has its own setting. Text generators from Providers also appear here."
           resetAction={

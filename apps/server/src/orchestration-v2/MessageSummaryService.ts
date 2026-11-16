@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { settingsForThread } from "@t3tools/shared/serverSettings";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -67,8 +68,10 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
         cwd: NodeOS.tmpdir(),
         source,
         message: message.text,
-        modelSelection: settingsForThread(settings, thread.modelSelection)
-          .textGenerationModelSelection,
+        modelSelection: settingsForThread(
+          resolveProjectSettings(settings, thread.projectId).settings,
+          thread.modelSelection,
+        ).textGenerationModelSelection,
       });
       if (summary.length === 0) return;
       yield* threads.dispatch({
