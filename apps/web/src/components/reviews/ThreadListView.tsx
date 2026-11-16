@@ -82,7 +82,7 @@ const filterOptions = [
 const ownerLabel = (owner: Owner) =>
   owner === "agent" ? "Agent is responsible" : "You're responsible";
 
-export function ThreadListView({ threadRef }: { threadRef: ScopedThreadRef }) {
+function ThreadListView({ threadRef }: { threadRef: ScopedThreadRef }) {
   const readable = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationReadScope);
   const query = useEnvironmentQuery(
     readable
