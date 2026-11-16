@@ -14,6 +14,7 @@ export function preferences(settings: ServerSettings) {
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
     enableProviderUpdateChecks,
+    autoLoadRemoteMedia,
     backgroundActivity,
     sourceControlWritingStyle,
   } = settings;
@@ -22,6 +23,7 @@ export function preferences(settings: ServerSettings) {
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
     enableProviderUpdateChecks,
+    autoLoadRemoteMedia,
     backgroundActivity: { profile: backgroundActivity.profile },
     sourceControlWritingStyle: {
       ...sourceControlWritingStyle,

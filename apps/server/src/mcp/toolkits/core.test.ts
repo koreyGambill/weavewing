@@ -35,6 +35,7 @@ import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import { EnvironmentToolkit } from "./environment/tools.ts";
 import { McpAttachmentInput } from "./attachment/input.ts";
 import { McpSchema, McpServer } from "effect/ai";
 import { FetchHttpClient } from "effect/http";
@@ -713,6 +714,15 @@ it("keeps MCP preference output allowlisted and Unicode-bounded", () => {
     },
   };
   const result = EnvironmentHandlers.preferences(settings);
+  expect(result).toHaveProperty("autoLoadRemoteMedia", false);
+  expect(
+    EnvironmentHandlers.preferences({ ...settings, autoLoadRemoteMedia: true }),
+  ).toHaveProperty("autoLoadRemoteMedia", true);
+  expect(
+    Schema.decodeUnknownSync(
+      EnvironmentToolkit.tools.t3_environment_preferences_update.parametersSchema,
+    )({ autoLoadRemoteMedia: true }),
+  ).not.toHaveProperty("autoLoadRemoteMedia");
   expect(result).not.toHaveProperty("privateCredential");
   expect(result).not.toHaveProperty("providers");
   expect(result.sourceControlWritingStyle).toMatchObject({
