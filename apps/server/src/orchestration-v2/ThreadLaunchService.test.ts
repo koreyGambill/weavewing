@@ -360,7 +360,7 @@ it.effect.each(
     (["user", "agent"] as const).map((createdBy) => ({ target, createdBy })),
   ),
 )(
-  "attributes $createdBy-configured automations in $target threads without changing their prompt",
+  "attributes $createdBy-configured automations in $target threads, prefacing only the threads they start",
   ({ target, createdBy }) => {
     const harness = makeHarness();
     const layerScheduledTasks = ScheduledTasks.layer.pipe(

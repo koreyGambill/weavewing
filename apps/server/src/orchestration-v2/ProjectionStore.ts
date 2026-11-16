@@ -2282,7 +2282,7 @@ function shellFromState(input: {
 
 // Dynamic tool output the client renders inline (HTML, MCP apps, viewed images, delegated
 // tasks, messages sent to the user), so its work group never defers. Mirrors the LIKE backfill
-// in migration 095, where a tool name counts anywhere after the first toolName. Searching from
+// in migration 110, where a tool name counts anywhere after the first toolName. Searching from
 // that first one once avoids rescanning the payload for every nested toolName.
 const INLINE_WORK_OUTPUT = new RegExp(
   `htmlRender|${MCP_APP_OUTPUT_KEY}|"viewedImagePath"|sentMessage`,
@@ -2305,7 +2305,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    // SQLite uses the partial conversation index of migration 082 only for this exact predicate.
+    // SQLite uses the partial conversation index of migration 087 only for this exact predicate.
     const CONVERSATION_INDEX_EXCLUDED_TYPES = sql.literal(
       `(${DEFERRED_WORK_ITEM_TYPES.map((type) => `'${type}'`).join(", ")})`,
     );
