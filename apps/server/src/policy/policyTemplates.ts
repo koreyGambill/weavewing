@@ -108,6 +108,12 @@ const policies = (): ReadonlyArray<Policy> => [
     toggle: "Connect",
   },
   {
+    id: "TailscaleServe",
+    title: "Allow Tailscale Serve",
+    help: "Disabled prevents Tailscale Serve from publishing this server, even when Allowed clients includes Remote. LAN access and Tailnet pairing follow their own controls.\n\nEnabled or Not Configured leaves Serve available when Remote is allowed.",
+    toggle: "TailscaleServe",
+  },
+  {
     id: "WebhookTasks",
     title: "Allow webhook tasks",
     help: "Disabled stops scheduled tasks from using webhook triggers. Existing webhook tasks are kept but do not run.",

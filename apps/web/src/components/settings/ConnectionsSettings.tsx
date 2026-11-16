@@ -40,7 +40,7 @@ import {
 import { settingsScopeEnvironmentLabel } from "./settingsScopeAxis";
 import { useAccessEnvironment } from "./useAccessEnvironment";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { ManagedByOrganization } from "../ManagedPolicy";
+import { ManagedByOrganization, ManagedNotice } from "../ManagedPolicy";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
@@ -384,6 +384,9 @@ function ConnectionsSettingsContent({
     primaryServerConfig?.managedPolicy,
     "remoteClients",
   );
+  const tailscaleServeDenial =
+    remoteClientsDenial ??
+    managedCapabilityDenial(primaryServerConfig?.managedPolicy, "tailscaleServe");
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const primaryServerUpdateState = useAtomValue(
     serverEnvironment.updateStateAtom(primaryEnvironmentId),
@@ -1098,7 +1101,14 @@ function ConnectionsSettingsContent({
           />
         ) : null
       }
-      managed={tailscaleHttpsEndpoint?.status === "available" ? undefined : remoteClientsDenial}
+      managed={tailscaleServeDenial}
+      status={
+        tailscaleServeDenial && primaryServerConfig?.managedPolicy ? (
+          <ManagedNotice>
+            Managed by {primaryServerConfig.managedPolicy.organization}.
+          </ManagedNotice>
+        ) : undefined
+      }
     />
   );
   const newestPairingLink = visibleDesktopPairingLinks.find(

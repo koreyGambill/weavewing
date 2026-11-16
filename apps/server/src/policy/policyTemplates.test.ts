@@ -5,10 +5,12 @@ import {
   WINDOWS_POLICY_VALUES,
 } from "@t3tools/shared/managedPolicyFile";
 
-import { macosProfile, windowsAdmx } from "./policyTemplates.ts";
+import { macosProfile, windowsAdmx, windowsAdml } from "./policyTemplates.ts";
 
 it("gives every registry value the Windows reader accepts a Group Policy control", () => {
   const admx = windowsAdmx();
+  assert.include(admx, 'valueName="TailscaleServe"');
+  assert.include(windowsAdml(), "Allow Tailscale Serve");
   for (const name of Object.keys(WINDOWS_POLICY_VALUES)) {
     assert.include(admx, `valueName="${name}"`);
   }
@@ -18,6 +20,16 @@ it("gives every registry value the Windows reader accepts a Group Policy control
   for (const name of Object.keys(WINDOWS_POLICY_GROUPS)) {
     assert.include(admx, `valueName="${name}"`);
   }
+});
+
+it("includes the Serve limit in a macOS profile", () => {
+  const profile = macosProfile(
+    { schemaVersion: 1, organization: "Example Corp", limits: { tailscaleServe: false } },
+    { profile: "profile-uuid", payload: "payload-uuid" },
+  );
+  assert.equal(profile._tag, "Valid");
+  if (profile._tag === "Valid")
+    assert.match(profile.profile, /<key>tailscaleServe<\/key>\s*<false\s*\/>/);
 });
 
 it("refuses a profile for a policy with a null value, which a plist cannot hold", () => {
