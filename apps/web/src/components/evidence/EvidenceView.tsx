@@ -1,11 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentId,
   EvidenceChange,
   EvidenceChangeQa,
   EvidenceLandingSummary,
   EvidenceListInput,
+  EvidenceProjectCoverage,
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
@@ -21,6 +22,7 @@ import {
   PlayIcon,
   SendIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
 import * as Option from "effect/Option";
 import { useRef, useState } from "react";
@@ -30,7 +32,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
-import { useThreadShell } from "../../state/entities";
+import { useProject, useThreadShell } from "../../state/entities";
 import { useEnvironmentShellStatus } from "../../state/shell";
 import { useEnvironmentThread } from "../../state/threads";
 import {
@@ -38,6 +40,7 @@ import {
   resolveThreadRouteRenderState,
 } from "../../threadRoutes";
 import {
+  evidenceCoverage,
   evidenceGet,
   evidenceList,
   evidenceSetQa,
@@ -57,9 +60,11 @@ import {
   Menu,
   MenuGroup,
   MenuGroupLabel,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
@@ -68,6 +73,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   captureKind,
   CHECKS,
+  coverageDraft,
   failedQaDraft,
   leavesNeedsQa,
   QA_STATES,
@@ -103,6 +109,22 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
   const storedScope = useThreadContextSidebarStore((state) => state.evidenceScope);
   const needsQa = useThreadContextSidebarStore((state) => state.evidenceNeedsQa);
   const scope = threadRef === null ? "all" : (storedScope ?? "thread");
+  const threadProjectId = useThreadShell(threadRef)?.projectId;
+  const root = useRef<HTMLDivElement>(null);
+  const coverage = useEnvironmentQuery(
+    environmentId === null || (scope === "thread" && threadProjectId === undefined)
+      ? null
+      : evidenceCoverage({
+          environmentId,
+          input: scope === "thread" ? { projectId: threadProjectId } : {},
+        }),
+  ).data;
+  const dismissed = useThreadContextSidebarStore((state) => state.evidenceCoverageDismissed);
+  const coverageKey = (projectId: string) => `${environmentId}:${projectId}`;
+  const shown = (coverage ?? []).filter((project) => {
+    return dismissed[coverageKey(project.projectId)] !== project.head;
+  });
+  const hiddenCoverage = (coverage ?? []).filter((project) => !shown.includes(project));
   if (environmentId === null) {
     return (
       <Empty size="compact">
@@ -115,7 +137,7 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
     ...(needsQa ? { needsQa: true } : {}),
   };
   return (
-    <div className="@container/evidence flex min-w-0 flex-col gap-2 text-xs">
+    <div ref={root} className="@container/evidence flex min-w-0 flex-col gap-2 text-xs">
       <div className="flex items-center gap-1">
         <ToggleGroup
           aria-label="Evidence scope"
@@ -152,9 +174,36 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
                 </MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
+            {hiddenCoverage.length ? <MenuSeparator /> : null}
+            {hiddenCoverage.length ? (
+              <MenuItem
+                onClick={() => {
+                  const { dismissEvidenceCoverage } = useThreadContextSidebarStore.getState();
+                  for (const project of hiddenCoverage)
+                    dismissEvidenceCoverage(coverageKey(project.projectId), null);
+                }}
+              >
+                Show uncovered merges
+              </MenuItem>
+            ) : null}
           </MenuPopup>
         </Menu>
       </div>
+      {shown.map((project) => (
+        <CoverageNotice
+          key={project.projectId}
+          environmentId={environmentId}
+          threadRef={threadProjectId === project.projectId ? threadRef : null}
+          coverage={project}
+          showProject={scope === "all"}
+          onDismiss={() => {
+            useThreadContextSidebarStore
+              .getState()
+              .dismissEvidenceCoverage(coverageKey(project.projectId), project.head);
+            root.current?.querySelector<HTMLElement>('[aria-label="Evidence filter"]')?.focus();
+          }}
+        />
+      ))}
       <LandingPage
         key={JSON.stringify(filter)}
         environmentId={environmentId}
@@ -162,6 +211,79 @@ export function EvidenceView({ threadRef }: { threadRef: ScopedThreadRef | null 
         showThread={scope === "all"}
         first
       />
+    </div>
+  );
+}
+
+/** Merges on the landings' branch that no landing covers; dismissed until the branch moves. */
+function CoverageNotice({
+  environmentId,
+  threadRef,
+  coverage,
+  showProject,
+  onDismiss,
+}: {
+  environmentId: EnvironmentId;
+  threadRef: ScopedThreadRef | null;
+  coverage: EvidenceProjectCoverage;
+  showProject: boolean;
+  onDismiss: () => void;
+}) {
+  const navigate = useNavigate();
+  const project = useProject(
+    showProject ? scopeProjectRef(environmentId, coverage.projectId) : null,
+  );
+  const threadId = threadRef?.threadId ?? coverage.leadThreadId;
+  const target = useLandingThread(environmentId, threadId);
+  const count = coverage.uncoveredCount;
+  const listed = coverage.uncovered.slice(0, 3);
+  const ask = () => {
+    if (target.missing) {
+      toastManager.add({ type: "error", title: "The lead's thread no longer exists." });
+      return;
+    }
+    const ref = scopeThreadRef(environmentId, threadId);
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(ref, coverageDraft(store.getComposerDraft(ref)?.prompt ?? "", coverage));
+    void navigate({ to: "/$environmentId/$threadId", params: { environmentId, threadId } });
+  };
+  return (
+    <div
+      role="status"
+      className="min-w-0 space-y-1.5 rounded-md border border-warning/32 bg-warning-surface p-2 text-warning-foreground"
+    >
+      <div className="flex items-start gap-1.5">
+        <TriangleAlertIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-warning" />
+        <p className="min-w-0 flex-1 break-words">
+          <span className="font-medium">
+            {count} merge{count === 1 ? "" : "s"}
+          </span>{" "}
+          on {coverage.branch}
+          {project ? ` in ${project.title}` : ""} {count === 1 ? "has" : "have"} no evidence.
+        </p>
+        <Button
+          variant="ghost"
+          size="icon-tiny"
+          aria-label={`Dismiss until ${coverage.branch} moves`}
+          onClick={onDismiss}
+        >
+          <XIcon />
+        </Button>
+      </div>
+      <ul className="space-y-0.5 pl-5">
+        {listed.map((merge) => (
+          <li key={merge.sha} className="line-clamp-2 break-words">
+            <span className="font-mono">{merge.sha.slice(0, 7)}</span> {merge.subject}
+          </li>
+        ))}
+        {count > listed.length ? <li>and {count - listed.length} more</li> : null}
+      </ul>
+      <div className="pl-5">
+        <Button variant="outline" size="micro" onClick={ask}>
+          <SendIcon />
+          Ask lead
+        </Button>
+      </div>
     </div>
   );
 }

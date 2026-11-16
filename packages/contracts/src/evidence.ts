@@ -141,6 +141,24 @@ export type EvidenceSetQaInput = typeof EvidenceSetQaInput.Type;
 export const EvidenceCounts = Schema.Struct({ pending: NonNegativeInt, failed: NonNegativeInt });
 export type EvidenceCounts = typeof EvidenceCounts.Type;
 
+export const EvidenceCoverageInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });
+export type EvidenceCoverageInput = typeof EvidenceCoverageInput.Type;
+
+/** A project whose target branch has merges since its first landing that no landing covers. */
+export const EvidenceProjectCoverage = Schema.Struct({
+  projectId: ProjectId,
+  branch: Schema.String,
+  head: Schema.String,
+  /** The newest landing's thread, where "Ask lead" drafts when no thread is open. */
+  leadThreadId: ThreadId,
+  uncoveredCount: NonNegativeInt,
+  /** Newest first, capped. */
+  uncovered: Schema.Array(
+    Schema.Struct({ sha: Schema.String, subject: Schema.String, committedAt: Schema.String }),
+  ),
+});
+export type EvidenceProjectCoverage = typeof EvidenceProjectCoverage.Type;
+
 export const EvidenceRecordResult = Schema.Struct({
   landingId: EvidenceSlug,
   changes: Schema.Array(Schema.Struct({ id: EvidenceSlug, qa: EvidenceQaState })),

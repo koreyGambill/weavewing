@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { failedQaDraft, leavesNeedsQa } from "./evidence.logic";
+import { coverageDraft, failedQaDraft, leavesNeedsQa } from "./evidence.logic";
 
 describe("failedQaDraft", () => {
   const change = {
@@ -14,6 +14,30 @@ describe("failedQaDraft", () => {
     ["my draft\n", "my draft\n\nQA failed on BW-3612: still two rows\nAsk: Watcher fires twice"],
   ])("keeps an existing draft %j", (existing, expected) => {
     expect(failedQaDraft(existing, change, " still two rows ")).toBe(expected);
+  });
+});
+
+describe("coverageDraft", () => {
+  it("lists each merge and counts the ones past the cap", () => {
+    expect(
+      coverageDraft("my draft", {
+        branch: "main",
+        uncoveredCount: 3,
+        uncovered: [
+          { sha: "f78458466e0123", subject: "Merge branch 'a'", committedAt: "" },
+          { sha: "fd2bcbdbd20123", subject: "Merge branch 'b'", committedAt: "" },
+        ],
+      }),
+    ).toBe(
+      [
+        "my draft",
+        "",
+        "These merges on main have no evidence. Record it with evidence_record, or tell me why none is needed:",
+        "- f78458466e Merge branch 'a'",
+        "- fd2bcbdbd2 Merge branch 'b'",
+        "- and 1 more",
+      ].join("\n"),
+    );
   });
 });
 

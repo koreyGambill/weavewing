@@ -17,7 +17,9 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as AssetSigner from "../assets/AssetSigner.ts";
 import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "../assets/AssetAccess.ts";
@@ -29,6 +31,8 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as Service from "./EvidenceService.ts";
 
@@ -37,6 +41,7 @@ const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
 });
 const testLayer = Service.layer.pipe(
   Layer.provideMerge(NotificationService.layer),
+  Layer.provideMerge(GitVcsDriver.layer.pipe(Layer.provideMerge(VcsProcess.layer))),
   Layer.provideMerge(
     Layer.mergeAll(
       Sqlite.layerMemory,
@@ -433,4 +438,89 @@ it.effect("records even when the Inbox refuses, and says so", () =>
       assert.strictEqual((yield* evidence.get({ landingId: "one-more" })).id, "one-more");
     }),
   ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("flags merges on the target branch that no landing covers", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    const sql = yield* SqlClient.SqlClient;
+    const evidence = yield* Service.EvidenceService;
+    const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "t3-ev-repo-" }));
+    const git = (args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) =>
+      driver
+        .execute({ operation: "test", cwd: repo, args, ...(env ? { env } : {}) })
+        .pipe(Effect.map((result) => result.stdout.trim()));
+    const commit = (message: string) =>
+      git(["commit", "--allow-empty", "-m", message]).pipe(
+        Effect.andThen(git(["rev-parse", "HEAD"])),
+      );
+    const merge = (branch: string, from: string, env?: NodeJS.ProcessEnv) =>
+      Effect.gen(function* () {
+        yield* git(["checkout", "-q", "-b", branch, from]);
+        const work = yield* commit(`work on ${branch}`);
+        yield* git(["checkout", "-q", "main"]);
+        yield* git(["merge", "--no-ff", "-m", `Merge ${branch}`, branch], env);
+        return { work, merge: yield* git(["rev-parse", "HEAD"]) };
+      });
+    yield* git(["init", "-q", "-b", "main"]);
+    for (const [key, value] of [
+      ["user.name", "Test"],
+      ["user.email", "test@test.com"],
+      ["commit.gpgsign", "false"],
+      ["core.hooksPath", "/dev/null"],
+    ] as const)
+      yield* git(["config", key, value]);
+    const base = yield* commit("base");
+    // Committed before the first landing, so it predates Evidence and never flags.
+    yield* merge("old", "main", { GIT_COMMITTER_DATE: "1999-06-01T00:00:00Z" });
+    const first = yield* merge("first", "main");
+    // Branched from `first`'s work: its merge brings in only its own commit.
+    const second = yield* merge("second", first.work);
+    const third = yield* merge("third", "main");
+    yield* commit("direct fixup on main");
+    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
+      VALUES (${project}, 'Repo', ${repo}, '[]', '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z')`;
+    yield* evidence.record(
+      recordInput("cutoff", [change("a", { commits: [first.work.slice(0, 7)] })], {
+        target: { branch: "main", sha: base },
+        landedAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+
+    const [flagged] = yield* evidence.coverage({});
+    assert.deepStrictEqual(
+      { ...flagged, uncovered: flagged?.uncovered.map(({ sha, subject }) => ({ sha, subject })) },
+      {
+        projectId: project,
+        branch: "main",
+        head: yield* git(["rev-parse", "main"]),
+        leadThreadId: lead,
+        uncoveredCount: 2,
+        uncovered: [
+          { sha: third.merge, subject: "Merge third" },
+          { sha: second.merge, subject: "Merge second" },
+        ],
+      },
+    );
+
+    // A new landing recomputes at once; its target sha covers `third`.
+    yield* evidence.record(
+      recordInput("later", [change("b", { commits: [] })], {
+        target: { branch: "main", sha: third.merge },
+        landedAt: "2001-01-01T00:00:00.000Z",
+      }),
+    );
+    const [rest] = yield* evidence.coverage({ projectId: project });
+    assert.deepStrictEqual(
+      rest?.uncovered.map(({ sha }) => sha),
+      [second.merge],
+    );
+
+    // Within the TTL nothing runs git, so a vanished repository still answers from cache.
+    yield* fs.remove(repo, { recursive: true });
+    assert.deepStrictEqual((yield* evidence.coverage({}))[0]?.uncoveredCount, 1);
+    yield* TestClock.adjust("31 seconds");
+    assert.deepStrictEqual(yield* evidence.coverage({}), []);
+  }).pipe(Effect.provide(testLayer)),
 );

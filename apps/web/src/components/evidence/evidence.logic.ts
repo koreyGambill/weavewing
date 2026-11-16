@@ -1,4 +1,4 @@
-import type { EvidenceChange, EvidenceQaState } from "@t3tools/contracts";
+import type { EvidenceChange, EvidenceProjectCoverage, EvidenceQaState } from "@t3tools/contracts";
 import { CheckIcon, CircleDashedIcon, MinusIcon, XIcon } from "lucide-react";
 
 export const QA_STATES = [
@@ -50,5 +50,22 @@ export function failedQaDraft(
     `QA failed on ${change.ticket?.key ?? change.id}: ${note.trim() || "(no note)"}`,
     `Ask: ${ask}`,
   ].join("\n");
-  return existing.trim() ? `${existing.trimEnd()}\n\n${message}` : message;
+  return appendDraft(existing, message);
 }
+
+/** Asks the lead to record evidence for merges that have none, after any draft already there. */
+export function coverageDraft(
+  existing: string,
+  coverage: Pick<EvidenceProjectCoverage, "branch" | "uncovered" | "uncoveredCount">,
+): string {
+  const more = coverage.uncoveredCount - coverage.uncovered.length;
+  const message = [
+    `These merges on ${coverage.branch} have no evidence. Record it with evidence_record, or tell me why none is needed:`,
+    ...coverage.uncovered.map(({ sha, subject }) => `- ${sha.slice(0, 10)} ${subject}`),
+    ...(more > 0 ? [`- and ${more} more`] : []),
+  ].join("\n");
+  return appendDraft(existing, message);
+}
+
+const appendDraft = (existing: string, message: string) =>
+  existing.trim() ? `${existing.trimEnd()}\n\n${message}` : message;
