@@ -1,5 +1,8 @@
 # Product analytics
 
+Weavewing provides a [no-op layer](../../apps/server/src/telemetry/WeavewingAnalytics.ts) in place
+of the delivery below, so nothing is sent. Upstream call sites stay so merges stay clean.
+
 The server owns analytics delivery, opt-out, and identity for every connected client.
 Clients do not load the PostHog browser SDK. Client-use events require an
 authenticated connection, so visiting the hosted app without connecting does not
