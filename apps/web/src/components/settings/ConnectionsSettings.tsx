@@ -1079,11 +1079,13 @@ function ConnectionsSettingsContent({
     <SettingsRow
       title={searchableSetting("tailscale-https").title}
       description={
-        tailscaleHttpsEndpoint
-          ? tailscaleHttpsEndpoint.status === "available"
-            ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
-          : missingTailscaleEndpointDescription(desktopServerExposureState)
+        tailscaleServeDenial && tailscaleHttpsEndpoint?.status !== "available"
+          ? tailscaleServeDenial
+          : tailscaleHttpsEndpoint
+            ? tailscaleHttpsEndpoint.status === "available"
+              ? tailscaleHttpsEndpoint.httpBaseUrl
+              : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
+            : missingTailscaleEndpointDescription(desktopServerExposureState)
       }
       control={
         tailscaleHttpsEndpoint ? (
@@ -1101,7 +1103,7 @@ function ConnectionsSettingsContent({
           />
         ) : null
       }
-      managed={tailscaleServeDenial}
+      managed={tailscaleHttpsEndpoint?.status === "available" ? undefined : tailscaleServeDenial}
       status={
         tailscaleServeDenial && primaryServerConfig?.managedPolicy ? (
           <ManagedNotice>

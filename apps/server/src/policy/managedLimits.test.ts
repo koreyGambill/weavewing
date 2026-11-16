@@ -168,6 +168,7 @@ it.effect(
       /** `serve status` never answers, as on a Mac where Tailscale was never set up. */
       readonly statusHangs?: boolean;
       readonly recheckHangs?: boolean;
+      readonly bindHost?: string;
       /** `off` exits as told but leaves the config alone. */
       readonly offIgnored?: boolean;
     }
@@ -186,7 +187,7 @@ it.effect(
       const tcp = answers.tcp ?? {};
       const currentName = answers.currentName ?? "box.tailnet.ts.net";
       return ManagedLimits.closeTailscaleServeTo(managed, {
-        host: "127.0.0.1",
+        host: answers.bindHost ?? "127.0.0.1",
         port: 3773,
       }).pipe(
         Effect.provideService(
@@ -332,15 +333,39 @@ it.effect(
         "old.tailnet.ts.net:443": { "/": "http://127.0.0.1:9000" },
         "new.tailnet.ts.net:443": {},
       });
-      const hung = yield* close({ statusHangs: true }).pipe(Effect.forkChild);
-      yield* TestClock.adjust("10 seconds");
-      yield* Fiber.join(hung);
+      for (const managed of [
+        desktopAndLocal,
+        policy({ clients: ["remote"], tailscaleServe: false }),
+      ]) {
+        const hung = yield* close({ statusHangs: true }, [], managed).pipe(
+          Effect.flip,
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("10 seconds");
+        assert.equal(
+          (yield* Fiber.join(hung)).message,
+          `Example Corp's policy does not allow ${managed === desktopAndLocal ? "remote clients" : "Tailscale Serve"}, so the server does not start until Tailscale Serve can be checked, and Tailscale did not answer; open Tailscale and finish setting it up, or remove it.`,
+        );
+      }
       const recheck = yield* close({ recheckHangs: true }).pipe(Effect.flip, Effect.forkChild);
       yield* TestClock.adjust("10 seconds");
       assert.include((yield* Fiber.join(recheck)).message, "Tailscale did not answer");
-      const remoteWeb: Web = { "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" } };
-      yield* close({ web: remoteWeb }, [], policy({ clients: ["remote"], tailscaleServe: false }));
-      assert.deepEqual(remoteWeb, { "box.tailnet.ts.net:443": {} });
+      for (const bindHost of ["127.0.0.1", "0.0.0.0", "", "::", "192.168.1.5"]) {
+        const remoteWeb: Web = { "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" } };
+        const closeRoutes = close(
+          { web: remoteWeb, bindHost },
+          [],
+          policy({ clients: ["remote"], tailscaleServe: false }),
+        );
+        if (bindHost === "192.168.1.5") {
+          const error = yield* closeRoutes.pipe(Effect.flip);
+          assert.include(error.message, "might be another service");
+          assert.equal(remoteWeb["box.tailnet.ts.net:443"]?.["/"], "http://127.0.0.1:3773");
+        } else {
+          yield* closeRoutes;
+          assert.deepEqual(remoteWeb, { "box.tailnet.ts.net:443": {} });
+        }
+      }
       const allowedWeb: Web = { "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" } };
       yield* close({ web: allowedWeb }, [], policy({ clients: ["remote"] }));
       assert.equal(allowedWeb["box.tailnet.ts.net:443"]?.["/"], "http://127.0.0.1:3773");

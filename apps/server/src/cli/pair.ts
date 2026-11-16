@@ -569,11 +569,7 @@ export const pairCommand = Command.make("pair", {
         // Serve stays on after this command exits, so refuse before turning it on.
         const policy = yield* ManagedPolicy.ManagedPolicy.pipe(Effect.provide(ManagedPolicy.layer));
         if (!ManagedLimits.allowsTailscaleServe(policy)) {
-          return yield* new ManagedLimits.ManagedPolicyRefusedError({
-            organization: policy.document?.organization ?? "Your organization",
-            action: "Tailscale Serve",
-            detail: "so Tailscale Serve cannot be turned on",
-          });
+          return yield* ManagedLimits.refuseTailscaleServe(policy);
         }
         const resolved = yield* resolveTailscalePairingBase({
           target,

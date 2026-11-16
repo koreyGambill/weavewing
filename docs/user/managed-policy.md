@@ -75,9 +75,9 @@ Administrative Templates > T3 Code. Set **Organization** whenever you set any ot
 Locks and provider fields go in the two JSON policies, as the same objects a policy file would hold.
 Machines pick up a change at the next Group Policy refresh; run `gpupdate /target:computer /force`
 to apply it now, then restart T3 Code.
-Setting **Allow T3 Connect**, **Allow Tailscale Serve**, **Allow webhook tasks**, **Allow importing browser cookies**, or
-**Allow usage data** to **Disabled** turns that feature off. Setting any other T3 Code policy to
-**Disabled** restricts nothing, the same as **Not Configured**.
+Setting **Allow T3 Connect**, **Allow Tailscale Serve**, **Allow webhook tasks**,
+**Allow importing browser cookies**, or **Allow usage data** to **Disabled** turns that feature off.
+Setting any other T3 Code policy to **Disabled** restricts nothing, the same as **Not Configured**.
 
 **Windows registry value.** Instead of the template, set the `Policy` value (`REG_SZ`) to the whole policy as one line of JSON,
 from Group Policy Preferences or an Intune script. T3 Code reads it through the Windows registry
@@ -238,6 +238,8 @@ To allow LAN clients while refusing Tailscale Serve, include `remote` in `client
 `"tailscaleServe": false`. Omitted or `true` leaves Serve available when `remote` is allowed.
 The desktop app keeps its Tailscale HTTPS control off under this limit. On Windows, the matching
 registry value is `TailscaleServe` (`REG_DWORD`, `0` to refuse, `1` to allow).
+Deploy a build that supports this limit before adding the key: older builds reject unknown policy
+keys and refuse to start.
 
 When Serve is refused, either by this limit or by leaving out `remote`, startup turns off each
 Tailscale Serve route, HTTPS or TCP, that forwards to this server and leaves other routes alone.
@@ -246,10 +248,15 @@ the error names the command that turns the route off. A route whose target is a 
 `localhost` or another machine on the same port, also stops it, since a name can resolve to this
 server; change the route or T3 Code's port.
 
-If the initial Tailscale check times out, startup continues with a warning: existing routes could
-not be checked. Once a route is detected, startup requires a fresh check confirming its removal,
-even if that check times out. Startup also continues when Tailscale is not installed, not running,
-or logged out. Routes Tailscale kept can return when it runs again, so restart T3 Code after that.
+For a wildcard bind, the check includes routes to loopback addresses on the server's port. A
+loopback route on a specific LAN bind, or an IPv6 loopback route on an IPv4-only bind, may belong
+to another service; startup refuses without deleting that route. Change the route or T3 Code's port.
+
+If Tailscale is installed but does not answer, startup refuses until Tailscale can be checked;
+open Tailscale and finish setting it up, or remove it. This applies to both the initial check
+and verification after removing a route. Startup continues when Tailscale is not installed,
+not running, or logged out. Routes Tailscale kept can return when it runs again, so restart
+T3 Code after that.
 
 This limit does not disable Tailnet pairing (lock `tailnetConnect.enabled` to `false` for that),
 or prevent a LAN listener from being reached through a tailnet interface. Those clients still
