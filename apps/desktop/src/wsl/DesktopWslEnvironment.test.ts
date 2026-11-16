@@ -4,6 +4,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
 import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -142,11 +143,11 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
     const archiveSha = readField(result.stdout, "archiveSha");
     const runtimeId = `sha256-${archiveSha}`;
     // WSL does not inherit HOME; embed the fixture's override in the script.
-    const installScript = (archive = archivePath, sha = archiveSha) =>
+    const installScript = (archive = archivePath, sha = archiveSha, devUrl?: URL) =>
       [
         `HOME=${sh(`${work}/home`)}`,
         "export HOME",
-        buildWslRuntimeInstallScript(archive, runtimeId, sha),
+        buildWslRuntimeInstallScript(archive, runtimeId, sha, devUrl),
       ].join("\n");
     return {
       work,
@@ -178,6 +179,23 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         buildWslRuntimeProbeScript(),
       ].join("\n"),
     );
+
+  it("reads the launched server's dev identity instead of the production identity", () => {
+    const fixture = createFixture();
+    const setup =
+      runShell(`mkdir -p ${sh(`${fixture.work}/home/.t3/userdata`)} ${sh(`${fixture.work}/home/.t3/dev`)}
+      printf 'production-id\\n' > ${sh(`${fixture.work}/home/.t3/userdata/environment-id`)}
+      printf 'development-id\\n' > ${sh(`${fixture.work}/home/.t3/dev/environment-id`)}`);
+    expect(setup.status, setup.stderr).toBe(0);
+    const dev = runShell(
+      fixture.installScript(undefined, undefined, new URL("http://localhost:5173")),
+    );
+    expect(dev.status, dev.stderr).toBe(0);
+    expect(readField(dev.stdout, "environmentId")).toBe("development-id");
+    const prod = fixture.install();
+    expect(prod.status, prod.stderr).toBe(0);
+    expect(readField(prod.stdout, "environmentId")).toBe("production-id");
+  });
 
   it("discovers version-managed Node for providers with a standalone runtime", () => {
     const fixture = createFixture();
@@ -624,6 +642,7 @@ describe("WSL startup probes", () => {
     output: (command: ChildProcess.Command) => Effect.Effect<string>,
     run: Effect.Effect<void, never, DesktopWslEnvironment>,
     stateDir?: string,
+    onPersist: Effect.Effect<void> = Effect.void,
   ) => {
     const spawner = ChildProcessSpawner.make((command) =>
       Effect.succeed(
@@ -664,11 +683,52 @@ describe("WSL startup probes", () => {
               ),
             ),
           ),
-          Layer.provide(NodeServices.layer),
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              Layer.effect(
+                FileSystem.FileSystem,
+                Effect.map(FileSystem.FileSystem, (fs) => ({
+                  ...fs,
+                  rename: (from, to) => fs.rename(from, to).pipe(Effect.andThen(onPersist)),
+                })),
+              ).pipe(Layer.provide(NodeServices.layer)),
+            ),
+          ),
         ),
       ),
     );
   };
+
+  it.effect("allows a healthy login-shell probe that takes four seconds", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Queue.unbounded<Deferred.Deferred<void>>();
+      yield* withProbe(
+        () =>
+          Effect.gen(function* () {
+            const finish = yield* Deferred.make<void>();
+            yield* Queue.offer(attempts, finish);
+            yield* Deferred.await(finish);
+            return "resolvedPath:/slow-but-healthy/bin\n";
+          }),
+        Effect.gen(function* () {
+          const wsl = yield* DesktopWslEnvironment;
+          const pending = yield* wsl.probeRuntime("Ubuntu", "slow").pipe(Effect.forkChild);
+          yield* Queue.take(attempts);
+          yield* TestClock.adjust("3 seconds");
+          const second = yield* Queue.take(attempts);
+          yield* TestClock.adjust("4 seconds");
+          yield* Deferred.succeed(second, undefined);
+          yield* TestClock.adjust("0 seconds");
+          assert.equal(Queue.sizeUnsafe(attempts), 0);
+          assert.deepEqual(yield* Fiber.join(pending), {
+            ok: true,
+            resolvedPath: "/slow-but-healthy/bin",
+          });
+        }),
+      );
+    }),
+  );
 
   it.effect("retries a timed out login shell and caches PATH by distro and runtime", () =>
     Effect.gen(function* () {
@@ -695,7 +755,7 @@ describe("WSL startup probes", () => {
           assert.equal(calls, 2);
           yield* wsl.probeRuntime("Ubuntu", "v2");
           yield* wsl.probeRuntime("Debian", "v2");
-          assert.equal(calls, 4);
+          assert.equal(calls, 5);
         }),
       );
     }),
@@ -709,11 +769,84 @@ describe("WSL startup probes", () => {
         assert.deepEqual(result, { ok: true, resolvedPath: "/persisted/bin" });
       });
       yield* withProbe(() => Effect.succeed("resolvedPath:/persisted/bin\n"), read, stateDir);
-      yield* withProbe(() => Effect.die("a warm runtime must not launch wsl.exe"), read, stateDir);
+      yield* withProbe(() => Effect.never, read, stateDir);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("bounds transport retries to three short attempts", () =>
+  it.effect("returns stale PATH while one refresh persists the new login-shell PATH", () =>
+    Effect.gen(function* () {
+      const stateDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+      const started = yield* Deferred.make<void>();
+      const finish = yield* Deferred.make<void>();
+      const persisted = yield* Deferred.make<void>();
+      let calls = 0;
+      yield* withProbe(
+        () =>
+          Effect.suspend(() =>
+            ++calls === 1
+              ? Effect.succeed("resolvedPath:/old/bin\n")
+              : Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(Deferred.await(finish)),
+                  Effect.as("resolvedPath:/new/bin\n"),
+                ),
+          ),
+        Effect.gen(function* () {
+          const wsl = yield* DesktopWslEnvironment;
+          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), {
+            ok: true,
+            resolvedPath: "/old/bin",
+          });
+          const stale = yield* wsl.probeRuntime("Ubuntu", "v1");
+          assert.deepEqual(stale, { ok: true, resolvedPath: "/old/bin" });
+          yield* TestClock.adjust("0 seconds");
+          assert.isTrue(yield* Deferred.isDone(started));
+          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), stale);
+          yield* TestClock.adjust("0 seconds");
+          assert.equal(calls, 2);
+          yield* Deferred.succeed(finish, undefined);
+          yield* Deferred.await(persisted);
+        }),
+        stateDir,
+        Effect.suspend(() =>
+          calls > 1 ? Deferred.succeed(persisted, undefined).pipe(Effect.asVoid) : Effect.void,
+        ),
+      );
+      yield* withProbe(
+        () => Effect.never,
+        Effect.gen(function* () {
+          const result = yield* (yield* DesktopWslEnvironment).probeRuntime("Ubuntu", "v1");
+          assert.deepEqual(result, { ok: true, resolvedPath: "/new/bin" });
+        }),
+        stateDir,
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("retains cached PATH when every background probe times out", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let calls = 0;
+      yield* withProbe(
+        () =>
+          Effect.suspend(() =>
+            ++calls === 1
+              ? Effect.succeed("resolvedPath:/working/bin\n")
+              : Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+          ),
+        Effect.gen(function* () {
+          const wsl = yield* DesktopWslEnvironment;
+          const original = yield* wsl.probeRuntime("Ubuntu", "v1");
+          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), original);
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("21 seconds");
+          assert.equal(calls, 4);
+          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), original);
+        }),
+      );
+    }),
+  );
+
+  it.effect("bounds transport retries to escalating three-, six- and twelve-second attempts", () =>
     Effect.gen(function* () {
       let calls = 0;
       const started = yield* Deferred.make<void>();
@@ -729,7 +862,7 @@ describe("WSL startup probes", () => {
           const wsl = yield* DesktopWslEnvironment;
           const pending = yield* wsl.probeRuntime("Ubuntu", "v1").pipe(Effect.forkChild);
           yield* Deferred.await(started);
-          yield* TestClock.adjust("9 seconds");
+          yield* TestClock.adjust("21 seconds");
           const result = yield* Fiber.join(pending);
           assert.isFalse(result.ok);
           assert.equal(calls, 3);
@@ -739,23 +872,33 @@ describe("WSL startup probes", () => {
     }),
   );
 
-  it.effect.each(["mirrored", "nat", "unknown"])("reads the actual %s networking mode", (mode) =>
-    withProbe(
-      (command) => {
-        assert(ChildProcess.isStandardCommand(command));
-        assert.deepEqual(command.args, [
-          "-d",
-          "Ubuntu",
-          "--exec",
-          "/usr/bin/wslinfo",
-          "--networking-mode",
-        ]);
-        return Effect.succeed(mode + "\n");
-      },
-      Effect.gen(function* () {
-        const wsl = yield* DesktopWslEnvironment;
-        assert.equal(yield* wsl.getNetworkingMode("Ubuntu"), mode === "unknown" ? null : mode);
-      }),
-    ),
+  it.effect.each(["mirrored", "nat", "unknown"])(
+    "caches the actual %s networking mode per distro",
+    (mode) => {
+      let calls = 0;
+      return withProbe(
+        (command) => {
+          calls += 1;
+          assert(ChildProcess.isStandardCommand(command));
+          assert.deepEqual(command.args, [
+            "-d",
+            calls === 1 ? "Ubuntu" : "Debian",
+            "--exec",
+            "/usr/bin/wslinfo",
+            "--networking-mode",
+          ]);
+          return Effect.succeed(mode + "\n");
+        },
+        Effect.gen(function* () {
+          const wsl = yield* DesktopWslEnvironment;
+          assert.equal(yield* wsl.getNetworkingMode("Ubuntu"), mode === "unknown" ? null : mode);
+          assert.equal(yield* wsl.getNetworkingMode("Ubuntu"), mode === "unknown" ? null : mode);
+          assert.equal(calls, 1);
+          assert.equal(yield* wsl.getNetworkingMode("Debian"), mode === "unknown" ? null : mode);
+          assert.equal(yield* wsl.getNetworkingMode("Debian"), mode === "unknown" ? null : mode);
+          assert.equal(calls, 2);
+        }),
+      );
+    },
   );
 });

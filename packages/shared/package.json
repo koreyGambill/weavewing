@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./serverPaths": {
+      "types": "./src/serverPaths.ts",
+      "import": "./src/serverPaths.ts"
+    },
     "./messageReactions": {
       "types": "./src/messageReactions.ts",
       "import": "./src/messageReactions.ts"

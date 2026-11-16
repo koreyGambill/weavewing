@@ -141,6 +141,7 @@ interface PackagedWslHarnessContext {
 const withPackagedWslHarness = <A, E, R>(
   input: {
     readonly archiveHash: string;
+    readonly devServerUrl?: string;
     readonly wsl: (
       context: PackagedWslHarnessContext,
     ) => DesktopWslEnvironment.DesktopWslEnvironmentTestStub;
@@ -214,6 +215,7 @@ const withPackagedWslHarness = <A, E, R>(
               appPath: baseDir,
               platform: "win32",
               resourcesPath: baseDir,
+              ...(input.devServerUrl === undefined ? {} : { devServerUrl: input.devServerUrl }),
             }),
           ),
         ),
@@ -378,6 +380,36 @@ describe("DesktopBackendConfiguration", () => {
       assert.isTrue(Option.isNone(config.preflightFailure));
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
+
+  it.effect("passes the launch dev URL to staged WSL identity discovery", () => {
+    const devServerUrl = "http://localhost:5173/";
+    let observedDevUrl: URL | undefined;
+    return withPackagedWslHarness(
+      {
+        archiveHash: "e".repeat(64),
+        devServerUrl,
+        forbidFallback: "the dev archive must not extract a mounted fallback",
+        wsl: () => ({
+          prepareRuntime: (_distro, archive) => {
+            observedDevUrl = archive.devUrl;
+            return { ok: true, linuxAppRoot: "/runtime/dev", environmentId: "dev-environment" };
+          },
+        }),
+      },
+      () =>
+        Effect.gen(function* () {
+          const config =
+            yield* (yield* DesktopBackendConfiguration.DesktopBackendConfiguration).resolveWsl({
+              port: 5000,
+              distro: "Ubuntu",
+            });
+          assert.equal(observedDevUrl?.href, devServerUrl);
+          assert.equal(config.expectedEnvironmentId, "dev-environment");
+          assert.include(config.args, "--dev-url");
+          assert.include(config.args, devServerUrl);
+        }),
+    );
+  });
 
   it.effect("resolveWsl launches a packaged backend from the WSL-local runtime cache", () => {
     const observedArchives: Array<{

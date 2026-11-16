@@ -49,9 +49,11 @@ export const scanForWslPort = Effect.fn("desktop.wslBackend.scanForWslPort")(fun
   startPort: number,
   networkingMode: "mirrored" | "nat" | null = null,
 ): Effect.fn.Return<number, NetService.NetError, NetService.NetService> {
-  // Windows keeps mirrored listeners reserved after Linux can already rebind them.
-  if (networkingMode === "mirrored") return startPort;
   const net = yield* NetService.NetService;
+  // Windows keeps mirrored bind reservations after the listener itself is gone.
+  if (networkingMode === "mirrored" && !(yield* net.hasListenerOnHost(startPort, "127.0.0.1"))) {
+    return startPort;
+  }
   // Linked environments store this URL, and a draining predecessor can hold the port for over 10s.
   for (let attempt = 0; attempt < PREFERRED_PORT_ATTEMPTS; attempt += 1) {
     if (yield* net.canListenOnHost(startPort, "127.0.0.1")) return startPort;

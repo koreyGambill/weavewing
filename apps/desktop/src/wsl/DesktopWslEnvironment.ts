@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -12,6 +13,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { serverStateDirectoryName } from "@t3tools/shared/serverPaths";
 import { buildRemoteNodeEnvScript } from "@t3tools/ssh/tunnel";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
 
@@ -41,6 +43,7 @@ export interface EnsureWslNodePtyOptions {
 
 export interface WslRuntimeArchive {
   readonly windowsPath: string;
+  readonly devUrl?: URL;
   readonly runtimeId: string;
   readonly sha256: string;
 }
@@ -275,13 +278,15 @@ export const buildWslRuntimeInstallScript = (
   linuxArchivePath: string | null,
   runtimeId: string,
   archiveSha256: string,
+  devUrl?: URL,
 ): string => {
+  const stateDirectory = serverStateDirectoryName({ devUrl });
   const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
   const readyCheck = [
     "set -eu",
     'runtime_parent="$HOME/.t3/wsl-runtime"',
-    'if [ -s "$HOME/.t3/userdata/environment-id" ]; then',
-    `  printf 'environmentId:%s\\n' "$(cat "$HOME/.t3/userdata/environment-id")"`,
+    `if [ -s "$HOME/.t3/${stateDirectory}/environment-id" ]; then`,
+    `  printf 'environmentId:%s\\n' "$(cat "$HOME/.t3/${stateDirectory}/environment-id")"`,
     "fi",
     `runtime_root="$runtime_parent/${safeRuntimeId}"`,
     `ready_marker="$runtime_root/${WSL_RUNTIME_READY_MARKER}"`,
@@ -607,8 +612,8 @@ const probeWslRuntimeImpl = Effect.fn("DesktopWslEnvironment.probeWslRuntimeImpl
   distro: string | null,
 ): Effect.fn.Return<ProbeWslRuntimeResult, never, ChildProcessSpawner.ChildProcessSpawner> {
   let probe = TIMEOUT_RESULT;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    probe = yield* runWslShell(distro, buildWslRuntimeProbeScript(), Duration.seconds(3), {
+  for (const seconds of [3, 6, 12]) {
+    probe = yield* runWslShell(distro, buildWslRuntimeProbeScript(), Duration.seconds(seconds), {
       resolveNode: false,
     });
     if (probe.transportFailure !== "timeout") break;
@@ -810,7 +815,12 @@ const runWslRuntimeInstall = Effect.fn("desktop.wsl.runRuntimeInstall")(function
 ): Effect.fn.Return<WslRuntimeInstallOutcome, never, ChildProcessSpawner.ChildProcessSpawner> {
   const install = yield* runWslShell(
     distro,
-    buildWslRuntimeInstallScript(linuxArchivePath, archive.runtimeId, archive.sha256),
+    buildWslRuntimeInstallScript(
+      linuxArchivePath,
+      archive.runtimeId,
+      archive.sha256,
+      archive.devUrl,
+    ),
     RUNTIME_INSTALL_TIMEOUT,
     { resolveNode: false },
   );
@@ -1263,6 +1273,7 @@ export const layer = Layer.effect(
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fileSystem = yield* FileSystem.FileSystem;
+    const scope = yield* Effect.scope;
     // Not Config: Windows variable names are case-insensitive only on the live process.env.
     const windir = (yield* HostProcess.Environment).WINDIR ?? "C:\\Windows";
 
@@ -1316,6 +1327,49 @@ export const layer = Layer.effect(
         `${encodeURIComponent(runtimeKey(distro, runtimeId))}.txt`,
       );
 
+    const refreshingPaths = new Map<string, Fiber.Fiber<ProbeWslRuntimeResult>>();
+    const refreshRuntimePath = Effect.fn("desktop.wsl.refreshRuntimePath")(function* (
+      distro: string | null,
+      runtimeId: string,
+    ) {
+      const result = yield* provideSpawner(probeWslRuntimeImpl(distro));
+      if (result.ok) {
+        runtimePaths.set(runtimeKey(distro, runtimeId), result.resolvedPath);
+        yield* Effect.gen(function* () {
+          const destination = runtimePathFile(distro, runtimeId);
+          const directory = environment.path.dirname(destination);
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+          const temporary = yield* fileSystem.makeTempFileScoped({ directory, prefix: ".path-" });
+          yield* fileSystem.writeFileString(temporary, `resolvedPath:${result.resolvedPath}\n`);
+          yield* fileSystem.rename(temporary, destination);
+        }).pipe(Effect.scoped, Effect.ignore);
+      }
+      return result;
+    });
+    const networkingModes = new Map<string | null, Effect.Effect<"mirrored" | "nat" | null>>();
+    const getNetworkingMode = Effect.fn("desktop.wsl.getNetworkingMode")(function* (
+      distro: string | null,
+    ) {
+      let cached = networkingModes.get(distro);
+      if (cached === undefined) {
+        cached = yield* provideSpawner(
+          runWslProcess(
+            [...buildDistroArgs(distro), "--exec", "/usr/bin/wslinfo", "--networking-mode"],
+            Stream.empty,
+            Duration.seconds(3),
+          ),
+        ).pipe(
+          Effect.map((result) => {
+            const mode = result.stdout.trim().toLowerCase();
+            return result.exitCode === 0 && (mode === "mirrored" || mode === "nat") ? mode : null;
+          }),
+          Effect.cached,
+        );
+        networkingModes.set(distro, cached);
+      }
+      return yield* cached;
+    });
+
     return DesktopWslEnvironment.of({
       isAvailable,
       listDistros: probeDistros.pipe(
@@ -1329,17 +1383,7 @@ export const layer = Layer.effect(
       windowsToWslPath,
       getUserHome,
       getDistroIp,
-      getNetworkingMode: Effect.fn("desktop.wsl.getNetworkingMode")(function* (distro) {
-        const result = yield* provideSpawner(
-          runWslProcess(
-            [...buildDistroArgs(distro), "--exec", "/usr/bin/wslinfo", "--networking-mode"],
-            Stream.empty,
-            Duration.seconds(3),
-          ),
-        );
-        const mode = result.stdout.trim().toLowerCase();
-        return result.exitCode === 0 && (mode === "mirrored" || mode === "nat") ? mode : null;
-      }),
+      getNetworkingMode,
       prepareRuntime: Effect.fn("desktop.wsl.prepareRuntime")(function (distro, archive) {
         return provideSpawner(
           prepareWslRuntimeImpl(distro, archive, windowsToWslPath).pipe(
@@ -1350,9 +1394,12 @@ export const layer = Layer.effect(
       pruneRuntimes: Effect.fn("desktop.wsl.pruneRuntimes")(function (distro, runtimeId) {
         return provideSpawner(pruneWslRuntimesImpl(distro, runtimeId));
       }),
-      invalidateRuntime: Effect.fn("desktop.wsl.invalidateRuntime")(function (distro, runtimeId) {
-        runtimePaths.delete(runtimeKey(distro, runtimeId));
-        return fileSystem
+      invalidateRuntime: Effect.fn("desktop.wsl.invalidateRuntime")(function* (distro, runtimeId) {
+        const key = runtimeKey(distro, runtimeId);
+        const refresh = refreshingPaths.get(key);
+        if (refresh !== undefined) yield* Fiber.interrupt(refresh);
+        runtimePaths.delete(key);
+        return yield* fileSystem
           .remove(runtimePathFile(distro, runtimeId), { force: true })
           .pipe(
             Effect.ignore,
@@ -1369,26 +1416,16 @@ export const layer = Layer.effect(
           ));
         if (cached != null) {
           runtimePaths.set(key, cached);
+          if (!refreshingPaths.has(key)) {
+            const refresh = yield* refreshRuntimePath(distro, runtimeId).pipe(
+              Effect.ensuring(Effect.sync(() => refreshingPaths.delete(key))),
+              Effect.forkIn(scope),
+            );
+            refreshingPaths.set(key, refresh);
+          }
           return { ok: true, resolvedPath: cached } as const;
         }
-        const result = yield* provideSpawner(probeWslRuntimeImpl(distro));
-        if (result.ok) {
-          runtimePaths.set(key, result.resolvedPath);
-          yield* fileSystem
-            .makeDirectory(environment.path.dirname(runtimePathFile(distro, runtimeId)), {
-              recursive: true,
-            })
-            .pipe(
-              Effect.andThen(
-                fileSystem.writeFileString(
-                  runtimePathFile(distro, runtimeId),
-                  `resolvedPath:${result.resolvedPath}\n`,
-                ),
-              ),
-              Effect.ignore,
-            );
-        }
-        return result;
+        return yield* refreshRuntimePath(distro, runtimeId);
       }),
       ensureNodePty: Effect.fn("desktop.wsl.ensureNodePty")(
         function (distro, linuxAppRoot, options) {

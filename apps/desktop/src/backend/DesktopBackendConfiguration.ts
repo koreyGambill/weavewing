@@ -653,6 +653,9 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
         ? null
         : {
             windowsPath: archivePath,
+            ...(Option.isSome(environment.devServerUrl)
+              ? { devUrl: environment.devServerUrl.value }
+              : {}),
             runtimeId: `sha256-${archiveHash}`,
             sha256: archiveHash,
           },
