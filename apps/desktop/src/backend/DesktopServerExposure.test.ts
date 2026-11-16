@@ -202,39 +202,54 @@ describe("DesktopServerExposure", () => {
     ),
   );
 
-  it.effect("starts local-only, Serve off, when a managed policy keeps clients local", () =>
-    withHarness(
-      lanNetworkInterfaces,
-      Effect.gen(function* () {
-        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-        const settings = yield* DesktopAppSettings.DesktopAppSettings;
-        yield* settings.setServerExposureMode("network-accessible");
-        yield* settings.setTailscaleServe({ enabled: true, port: Option.none() });
+  it.effect.each([
+    {
+      clients: ["desktop"] as const,
+      bindHost: "127.0.0.1",
+      mode: "local-only",
+      tailscaleServe: undefined,
+    },
+    {
+      clients: ["desktop", "remote"] as const,
+      bindHost: "0.0.0.0",
+      mode: "network-accessible",
+      tailscaleServe: false,
+    },
+  ])(
+    "keeps Serve off under managed limits: $clients",
+    ({ clients, bindHost, mode, tailscaleServe }) =>
+      withHarness(
+        lanNetworkInterfaces,
+        Effect.gen(function* () {
+          const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+          const settings = yield* DesktopAppSettings.DesktopAppSettings;
+          yield* settings.setServerExposureMode("network-accessible");
+          yield* settings.setTailscaleServe({ enabled: true, port: Option.none() });
 
-        const state = yield* serverExposure.configureFromSettings({ port: 4173 });
-        assert.equal(state.mode, "local-only");
-        const backendConfig = yield* serverExposure.backendConfig;
-        assert.equal(backendConfig.bindHost, "127.0.0.1");
-        assert.isFalse(backendConfig.tailscaleServeEnabled);
-        // Choosing them again while the policy applies does not widen the backend either.
-        yield* serverExposure.setMode("network-accessible");
-        yield* serverExposure.setTailscaleServeEnabled({ enabled: true });
-        assert.equal((yield* serverExposure.backendConfig).bindHost, "127.0.0.1");
-        assert.isFalse((yield* serverExposure.backendConfig).tailscaleServeEnabled);
-        // The saved choice returns once the policy allows it.
-        const saved = yield* settings.get;
-        assert.equal(saved.serverExposureMode, "network-accessible");
-        assert.isTrue(saved.tailscaleServeEnabled);
-      }),
-      {},
-      undefined,
-      undefined,
-      DesktopManagedPolicy.layerTest({
-        schemaVersion: 1,
-        organization: "Example Corp",
-        limits: { clients: ["desktop"] },
-      }),
-    ),
+          const state = yield* serverExposure.configureFromSettings({ port: 4173 });
+          assert.equal(state.mode, mode);
+          const backendConfig = yield* serverExposure.backendConfig;
+          assert.equal(backendConfig.bindHost, bindHost);
+          assert.isFalse(backendConfig.tailscaleServeEnabled);
+          // Choosing them again while the policy applies does not widen the backend either.
+          yield* serverExposure.setMode("network-accessible");
+          yield* serverExposure.setTailscaleServeEnabled({ enabled: true });
+          assert.equal((yield* serverExposure.backendConfig).bindHost, bindHost);
+          assert.isFalse((yield* serverExposure.backendConfig).tailscaleServeEnabled);
+          // The saved choice returns once the policy allows it.
+          const saved = yield* settings.get;
+          assert.equal(saved.serverExposureMode, "network-accessible");
+          assert.isTrue(saved.tailscaleServeEnabled);
+        }),
+        {},
+        undefined,
+        undefined,
+        DesktopManagedPolicy.layerTest({
+          schemaVersion: 1,
+          organization: "Example Corp",
+          limits: { clients, ...(tailscaleServe === undefined ? {} : { tailscaleServe }) },
+        }),
+      ),
   );
 
   it.effect("persists network-accessible mode and updates backend binding state", () =>

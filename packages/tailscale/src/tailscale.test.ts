@@ -245,6 +245,47 @@ describe("tailscale", () => {
       ),
       [{ servePort: 443, mount: "/", host: "box" }],
     );
+    const loopbackRoutes = JSON.stringify({
+      TCP: { "7000": { TCPForward: "[::1]:3773" } },
+      Web: {
+        "box:443": {
+          Handlers: {
+            "/": { Proxy: "http://127.0.0.1:3773" },
+            "/other": { Proxy: "http://127.0.0.1:9000" },
+            "/wild4": { Proxy: "http://0.0.0.0:3773" },
+            "/wild6": { Proxy: "http://[::]:3773" },
+          },
+        },
+      },
+    });
+    for (const host of ["0.0.0.0", "", "::", "192.168.1.5", "localhost"]) {
+      const ambiguous = host === "192.168.1.5" || host === "localhost";
+      assert.deepEqual(
+        parseTailscaleServeRoutesTo(loopbackRoutes, { host, port: 3773 }),
+        [
+          { servePort: 7000, ...(ambiguous || host === "0.0.0.0" ? { ambiguous: "[::1]" } : {}) },
+          {
+            servePort: 443,
+            mount: "/",
+            host: "box",
+            ...(ambiguous ? { ambiguous: "127.0.0.1" } : {}),
+          },
+          {
+            servePort: 443,
+            mount: "/wild4",
+            host: "box",
+            ...(ambiguous ? { ambiguous: "0.0.0.0" } : {}),
+          },
+          {
+            servePort: 443,
+            mount: "/wild6",
+            host: "box",
+            ...(ambiguous || host === "0.0.0.0" ? { ambiguous: "[::]" } : {}),
+          },
+        ],
+        host,
+      );
+    }
     assert.deepEqual(parseTailscaleServeRoutesTo("{}", { host: "127.0.0.1", port: 3773 }), []);
     assert.deepEqual(parseTailscaleServeRoutesTo("null", { host: "127.0.0.1", port: 3773 }), []);
     assert.isUndefined(parseTailscaleServeRoutesTo("not json", { host: "127.0.0.1", port: 3773 }));

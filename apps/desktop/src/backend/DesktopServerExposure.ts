@@ -486,14 +486,17 @@ export const make = Effect.gen(function* () {
   // The server refuses to bind wider than the policy's clients allow, so network access or Serve
   // saved before the policy would keep the backend from starting. The backend runs without them;
   // the saved choice stays for when the policy allows it.
-  const remoteAllowed = yield* (yield* DesktopManagedPolicy.DesktopManagedPolicy).read.pipe(
-    Effect.map((found) => found?.document.limits?.clients?.includes("remote") ?? true),
-    Effect.orElseSucceed(() => false),
+  const managedPolicy = yield* (yield* DesktopManagedPolicy.DesktopManagedPolicy).read.pipe(
+    Effect.orElseSucceed(() => null),
   );
-  const withinPolicy = (settings: DesktopAppSettings.DesktopSettings) =>
-    remoteAllowed
-      ? settings
-      : { ...settings, serverExposureMode: "local-only" as const, tailscaleServeEnabled: false };
+  const remoteAllowed =
+    managedPolicy !== null && (managedPolicy?.document.limits?.clients?.includes("remote") ?? true);
+  const serveAllowed = remoteAllowed && managedPolicy?.document.limits?.tailscaleServe !== false;
+  const withinPolicy = (settings: DesktopAppSettings.DesktopSettings) => ({
+    ...settings,
+    serverExposureMode: remoteAllowed ? settings.serverExposureMode : ("local-only" as const),
+    tailscaleServeEnabled: serveAllowed && settings.tailscaleServeEnabled,
+  });
 
   const readCurrentState = (currentNetworkInterfaces: DesktopNetworkInterfaces.NetworkInterfaces) =>
     Ref.get(stateRef).pipe(

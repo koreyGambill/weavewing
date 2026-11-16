@@ -1,7 +1,11 @@
 import { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
-import { isLocalLoopbackHost, normalizeHostname } from "@t3tools/shared/hostClassification";
+import {
+  isLocalLoopbackHost,
+  isWildcardHost,
+  normalizeHostname,
+} from "@t3tools/shared/hostClassification";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -745,7 +749,11 @@ const decodeTailscaleServeStatusJson = Schema.decodeUnknownOption(
  * either loopback, since Go dials `::` and then 0.0.0.0 (golang/go#18806), and a name such as
  * `localhost` may resolve to whatever the server binds.
  */
-const reaches = (hostname: string, bindHost: string): "exact" | "either" | undefined => {
+const reaches = (
+  hostname: string,
+  bindHost: string,
+  includeLoopback = false,
+): "exact" | "either" | undefined => {
   let address = normalizeHostname(hostname);
   // Compare IPv6 by value: 0:0:0:0:0:ffff:7f00:1 is ::ffff:7f00:1.
   if (address.includes(":") && URL.canParse(`http://[${address}]`)) {
@@ -765,6 +773,15 @@ const reaches = (hostname: string, bindHost: string): "exact" | "either" | undef
     address.includes(":") ||
     /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?!$)|$)){4}$/u.test(address);
   if (!literal) return "either";
+  if (
+    includeLoopback &&
+    (!isLocalLoopbackHost(bindHost) || normalizeHostname(bindHost) === "localhost") &&
+    (isLocalLoopbackHost(address) || address === "0.0.0.0" || address === "::")
+  ) {
+    const wildcard = bindHost === "" || isWildcardHost(bindHost);
+    // An IPv4 listener can coexist with another service on IPv6 at the same port.
+    return wildcard && !(bindHost === "0.0.0.0" && address.includes(":")) ? "exact" : "either";
+  }
   if (address === "::")
     return bindHost === "127.0.0.1" || bindHost === "::1" ? "either" : undefined;
   return (address === "0.0.0.0" ? "127.0.0.1" : address) === bindHost ? "exact" : undefined;
@@ -791,17 +808,22 @@ const dialedHostPort = (url: string) => {
   return { host, port: port || (scheme.toLowerCase() === "https" ? "443" : "80") };
 };
 
-const reachesTarget = (url: string, target: { readonly host: string; readonly port: number }) => {
+const reachesTarget = (
+  url: string,
+  target: { readonly host: string; readonly port: number },
+  includeLoopback = false,
+) => {
   const dialed = dialedHostPort(url);
   // Go reads the port as a decimal number, so 03773 is 3773.
   if (dialed === undefined || Number(dialed.port) !== target.port) return undefined;
-  const reach = reaches(dialed.host, target.host);
+  const reach = reaches(dialed.host, target.host, includeLoopback);
   return reach === undefined ? undefined : { reach, hostname: dialed.host };
 };
 
 /**
  * The Serve routes that forward to the server bound at `target`, or undefined when the status
- * cannot be read.
+ * cannot be read. Includes loopback routes for non-loopback binds; marks them ambiguous when
+ * the bind cannot establish ownership, so a policy check can refuse without deleting them.
  */
 export const parseTailscaleServeRoutesTo = (
   rawServeStatusJson: string,
@@ -815,7 +837,7 @@ export const parseTailscaleServeRoutesTo = (
   ): ReadonlyArray<TailscaleServeRoute> => {
     const scope = owner === undefined ? {} : { owner };
     const reached = (url: string) => {
-      const found = reachesTarget(url, target);
+      const found = reachesTarget(url, target, true);
       if (found === undefined) return undefined;
       return found.reach === "either" ? { ambiguous: found.hostname } : {};
     };

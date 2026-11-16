@@ -143,6 +143,7 @@ function summarizeLimits(
     ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
     ...(clients === undefined ? {} : { clients }),
     ...(connect ? {} : { connect: false }),
+    ...(ManagedLimits.allowsTailscaleServe({ document }) ? {} : { tailscaleServe: false }),
     ...(webhookTasks === undefined ? {} : { webhookTasks }),
     ...(telemetry === undefined ? {} : { telemetry }),
     ...(browserCookieImport === undefined ? {} : { browserCookieImport }),

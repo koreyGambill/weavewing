@@ -77,6 +77,7 @@ export const ManagedPolicyLimits = Schema.Struct({
   clients: Schema.optionalKey(Schema.NonEmptyArray(ManagedPolicyClient)),
   /** `false` turns T3 Connect off and unlinks this machine. */
   connect: Schema.optionalKey(Schema.Boolean),
+  tailscaleServe: Schema.optionalKey(Schema.Boolean),
   webhookTasks: Schema.optionalKey(Schema.Boolean),
   /** Can only turn product analytics off, never force it on. */
   telemetry: Schema.optionalKey(Schema.Boolean),
@@ -92,6 +93,7 @@ export const ManagedPolicySummaryLimits = Schema.Struct({
   clients: Schema.optionalKey(Schema.NonEmptyArray(ManagedPolicyClient)),
   /** `false` also when `clients` leaves out `remote`, since Connect is remote access. */
   connect: Schema.optionalKey(Schema.Boolean),
+  tailscaleServe: Schema.optionalKey(Schema.Boolean),
   webhookTasks: Schema.optionalKey(Schema.Boolean),
   telemetry: Schema.optionalKey(Schema.Boolean),
   browserCookieImport: Schema.optionalKey(Schema.Boolean),
@@ -207,6 +209,7 @@ export function clampManagedRuntimeMode(
 const CAPABILITY_LABELS = {
   remoteClients: "connecting from other devices",
   connect: "T3 Connect",
+  tailscaleServe: "Tailscale Serve",
   webhookTasks: "webhook tasks",
   browserCookieImport: "importing browser cookies",
 } as const;

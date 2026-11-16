@@ -40,7 +40,7 @@ import {
 import { settingsScopeEnvironmentLabel } from "./settingsScopeAxis";
 import { useAccessEnvironment } from "./useAccessEnvironment";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { ManagedByOrganization } from "../ManagedPolicy";
+import { ManagedByOrganization, ManagedNotice } from "../ManagedPolicy";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
@@ -384,6 +384,9 @@ function ConnectionsSettingsContent({
     primaryServerConfig?.managedPolicy,
     "remoteClients",
   );
+  const tailscaleServeDenial =
+    remoteClientsDenial ??
+    managedCapabilityDenial(primaryServerConfig?.managedPolicy, "tailscaleServe");
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const primaryServerUpdateState = useAtomValue(
     serverEnvironment.updateStateAtom(primaryEnvironmentId),
@@ -1076,11 +1079,13 @@ function ConnectionsSettingsContent({
     <SettingsRow
       title={searchableSetting("tailscale-https").title}
       description={
-        tailscaleHttpsEndpoint
-          ? tailscaleHttpsEndpoint.status === "available"
-            ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
-          : missingTailscaleEndpointDescription(desktopServerExposureState)
+        tailscaleServeDenial && tailscaleHttpsEndpoint?.status !== "available"
+          ? tailscaleServeDenial
+          : tailscaleHttpsEndpoint
+            ? tailscaleHttpsEndpoint.status === "available"
+              ? tailscaleHttpsEndpoint.httpBaseUrl
+              : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
+            : missingTailscaleEndpointDescription(desktopServerExposureState)
       }
       control={
         tailscaleHttpsEndpoint ? (
@@ -1098,7 +1103,14 @@ function ConnectionsSettingsContent({
           />
         ) : null
       }
-      managed={tailscaleHttpsEndpoint?.status === "available" ? undefined : remoteClientsDenial}
+      managed={tailscaleHttpsEndpoint?.status === "available" ? undefined : tailscaleServeDenial}
+      status={
+        tailscaleServeDenial && primaryServerConfig?.managedPolicy ? (
+          <ManagedNotice>
+            Managed by {primaryServerConfig.managedPolicy.organization}.
+          </ManagedNotice>
+        ) : undefined
+      }
     />
   );
   const newestPairingLink = visibleDesktopPairingLinks.find(

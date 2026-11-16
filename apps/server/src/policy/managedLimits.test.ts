@@ -85,6 +85,23 @@ it.effect("refuses Tailscale Serve when remote clients are not allowed", () =>
   }),
 );
 
+it.effect("refuses Serve independently while allowing LAN clients", () =>
+  Effect.gen(function* () {
+    const managed = policy({ clients: ["remote"], tailscaleServe: false });
+    const input = {
+      authPolicy: "remote-reachable" as const,
+      host: "0.0.0.0",
+      tailscaleServeEnabled: false,
+    };
+    assert.equal(yield* ManagedLimits.checkServerReachability(managed, input), "0.0.0.0");
+    const error = yield* ManagedLimits.checkServerReachability(managed, {
+      ...input,
+      tailscaleServeEnabled: true,
+    }).pipe(Effect.flip);
+    assert.include(error.message, "does not allow Tailscale Serve");
+  }),
+);
+
 it.effect("refuses an auth policy the clients list leaves out", () =>
   Effect.gen(function* () {
     const error = yield* ManagedLimits.checkServerReachability(policy({ clients: ["desktop"] }), {
@@ -124,6 +141,7 @@ it.effect("tells clients Connect is off when the policy leaves out remote client
     assert.deepEqual(managed.summary?.limits, {
       clients: ["desktop", "local-browser"],
       connect: false,
+      tailscaleServe: false,
     });
     assert.isTrue(ManagedLimits.allowsConnect(policy({ clients: ["remote"] })));
     assert.isFalse(ManagedLimits.allowsConnect(policy({ connect: false })));
@@ -149,20 +167,27 @@ it.effect(
       readonly offExitCode?: number;
       /** `serve status` never answers, as on a Mac where Tailscale was never set up. */
       readonly statusHangs?: boolean;
+      readonly recheckHangs?: boolean;
+      readonly bindHost?: string;
       /** `off` exits as told but leaves the config alone. */
       readonly offIgnored?: boolean;
     }
     // Acts as the real CLI: `serve status --json` prints the config; `serve --https=<port> off`
     // drops every handler on that port of the current name unless `--set-path` names one
     // (serve_v2.go removeWebServe), and `serve --tcp=<port> off` drops that port's forward.
-    const close = (answers: Answers, offCalls: Array<ReadonlyArray<string>> = []) => {
+    const close = (
+      answers: Answers,
+      offCalls: Array<ReadonlyArray<string>> = [],
+      managed = desktopAndLocal,
+    ) => {
+      let statusCalls = 0;
       const web: Web = answers.web ?? {
         "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" },
       };
       const tcp = answers.tcp ?? {};
       const currentName = answers.currentName ?? "box.tailnet.ts.net";
-      return ManagedLimits.closeTailscaleServeTo(desktopAndLocal, {
-        host: "127.0.0.1",
+      return ManagedLimits.closeTailscaleServeTo(managed, {
+        host: answers.bindHost ?? "127.0.0.1",
         port: 3773,
       }).pipe(
         Effect.provideService(
@@ -192,6 +217,7 @@ it.effect(
               );
             }
             const isStatus = args.includes("status");
+            if (isStatus) statusCalls++;
             if (!isStatus) {
               offCalls.push(args);
               const port = args.find((arg) => arg.startsWith("--https="))?.slice(8);
@@ -229,7 +255,9 @@ it.effect(
               ChildProcessSpawner.makeHandle({
                 pid: ChildProcessSpawner.ProcessId(1),
                 exitCode:
-                  isStatus && answers.statusHangs === true
+                  isStatus &&
+                  (answers.statusHangs === true ||
+                    (answers.recheckHangs === true && statusCalls > 1))
                     ? Effect.never
                     : Effect.succeed(
                         ChildProcessSpawner.ExitCode(
@@ -305,6 +333,42 @@ it.effect(
         "old.tailnet.ts.net:443": { "/": "http://127.0.0.1:9000" },
         "new.tailnet.ts.net:443": {},
       });
+      for (const managed of [
+        desktopAndLocal,
+        policy({ clients: ["remote"], tailscaleServe: false }),
+      ]) {
+        const hung = yield* close({ statusHangs: true }, [], managed).pipe(
+          Effect.flip,
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("10 seconds");
+        assert.equal(
+          (yield* Fiber.join(hung)).message,
+          `Example Corp's policy does not allow ${managed === desktopAndLocal ? "remote clients" : "Tailscale Serve"}, so the server does not start until Tailscale Serve can be checked, and Tailscale did not answer; open Tailscale and finish setting it up, or remove it.`,
+        );
+      }
+      const recheck = yield* close({ recheckHangs: true }).pipe(Effect.flip, Effect.forkChild);
+      yield* TestClock.adjust("10 seconds");
+      assert.include((yield* Fiber.join(recheck)).message, "Tailscale did not answer");
+      for (const bindHost of ["127.0.0.1", "0.0.0.0", "", "::", "192.168.1.5", "localhost"]) {
+        const remoteWeb: Web = { "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" } };
+        const closeRoutes = close(
+          { web: remoteWeb, bindHost },
+          [],
+          policy({ clients: ["remote"], tailscaleServe: false }),
+        );
+        if (bindHost === "192.168.1.5" || bindHost === "localhost") {
+          const error = yield* closeRoutes.pipe(Effect.flip);
+          assert.include(error.message, "might be another service");
+          assert.equal(remoteWeb["box.tailnet.ts.net:443"]?.["/"], "http://127.0.0.1:3773");
+        } else {
+          yield* closeRoutes;
+          assert.deepEqual(remoteWeb, { "box.tailnet.ts.net:443": {} });
+        }
+      }
+      const allowedWeb: Web = { "box.tailnet.ts.net:443": { "/": "http://127.0.0.1:3773" } };
+      yield* close({ web: allowedWeb }, [], policy({ clients: ["remote"] }));
+      assert.equal(allowedWeb["box.tailnet.ts.net:443"]?.["/"], "http://127.0.0.1:3773");
       // A `localhost` target might reach another service on the other loopback, so it stays.
       const localhostOffCalls: Array<ReadonlyArray<string>> = [];
       const localhost = yield* close(
@@ -357,10 +421,6 @@ it.effect(
         const unread = yield* close({ status }).pipe(Effect.flip);
         assert.include(unread.message, "does not start until Tailscale Serve can be checked");
       }
-      // A Tailscale that never answers is not read as nothing to close, and the refusal says why.
-      const hung = yield* close({ statusHangs: true }).pipe(Effect.flip, Effect.forkChild);
-      yield* TestClock.adjust("10 seconds");
-      assert.include((yield* Fiber.join(hung)).message, "Tailscale did not answer");
       // Tailscale down, logged out, or not installed forwards nothing now.
       for (const stderr of [
         dialFailure("connection refused"),
