@@ -276,7 +276,10 @@ it.effect("a remote policy refresh preserves a newer health result on the regist
       ),
     );
     const layerDependencies = Layer.mergeAll(
-      Layer.mock(HttpClient.HttpClient)({}),
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("Unexpected HTTP request")),
+      ),
       ProviderLatestVersions.layer,
       Layer.succeed(ModelManifest.ModelManifest, {
         current: Ref.get(manifest),
