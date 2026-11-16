@@ -119,6 +119,7 @@ import {
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
 } from "./CommandPolicy.ts";
+import { incomingCardSummarySource, messageSummarySourceHash } from "./incomingCardSummary.ts";
 import { CommandReceiptStoreV2, type CommandReceiptV2 } from "./CommandReceiptStore.ts";
 import {
   ContextHandoffServiceV2,
@@ -754,6 +755,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
       return command.parentThreadId;
     case "secret_request.record":
     case "link_request.record":
+    case "message.summary.set":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -772,6 +774,13 @@ const decodeUserInputAnswers = Schema.decodeUnknownEffect(
     ]),
   ),
 );
+
+function withoutSummary<T extends { readonly summary?: string | undefined }>(
+  value: T,
+): Omit<T, "summary"> {
+  const { summary: _summary, ...rest } = value;
+  return rest;
+}
 
 function pendingThreadTitleGenerationEffect(
   commandId: CommandId,
@@ -10972,6 +10981,62 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  const dispatchMessageSummarySet = Effect.fn("orchestrationV2.dispatch.messageSummarySet")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { readonly type: "message.summary.set" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const { messages } = yield* projectionStore
+        .getThreadRecords(command.threadId, ["messages"], { messageIds: [command.messageId] })
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const message = messages.find((candidate) => candidate.id === command.messageId);
+      if (
+        message === undefined ||
+        message.summary !== undefined ||
+        messageSummarySourceHash(message.text) !== command.sourceHash
+      )
+        return;
+      const { turnItems } =
+        message.runId === null
+          ? { turnItems: [] }
+          : yield* projectionStore
+              .getThreadRecords(command.threadId, ["turnItems"], {
+                turnItemTypes: ["user_message"],
+                turnItemRunIds: [message.runId],
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+                ),
+              );
+      const emitEvent = emit(events, command);
+      const base = {
+        threadId: command.threadId,
+        ...(message.runId === null ? {} : { runId: message.runId }),
+        ...(message.nodeId === null ? {} : { nodeId: message.nodeId }),
+        occurredAt: yield* DateTime.now,
+      };
+      yield* emitEvent({
+        ...base,
+        type: "message.updated",
+        payload: { ...message, summary: command.summary },
+      });
+      // Timelines render the user_message item, which carries its own copy of message fields.
+      for (const item of turnItems) {
+        if (item.type !== "user_message" || item.messageId !== command.messageId) continue;
+        yield* emitEvent({
+          ...base,
+          type: "turn-item.updated",
+          payload: { ...item, summary: command.summary },
+        });
+      }
+    },
+  );
+
   const dispatchSecretRequestRecord = Effect.fn("orchestrationV2.dispatch.secretRequestRecord")(
     function* (
       command: Extract<OrchestrationV2InternalCommand, { readonly type: "secret_request.record" }>,
@@ -12247,8 +12312,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
       providerInstanceId: queuedRun.providerInstanceId,
       occurredAt: now,
+      // An edit outdates the summary; the card shows the new first line instead.
       payload: withoutGuestAttribution({
-        ...queuedMessage,
+        ...withoutSummary(queuedMessage),
         text: command.text,
         ...editedAttachments,
         ...(command.context ? { context: command.context } : {}),
@@ -12264,7 +12330,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         providerInstanceId: queuedRun.providerInstanceId,
         occurredAt: now,
         payload: withoutGuestAttribution({
-          ...queuedTurnItem,
+          ...withoutSummary(queuedTurnItem),
           text: command.text,
           ...editedAttachments,
           ...(command.context ? { context: command.context } : {}),
@@ -16159,9 +16225,28 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
         break;
+      case "message.summary.set":
+        yield* dispatchMessageSummarySet(command, events);
+        break;
       default:
         return yield* dispatchUnsupported(command);
     }
+    // One attempt per message: the outbox ignores a second insert of the same effect id.
+    const summaryEffects = (yield* Ref.get(events)).flatMap(
+      (event): Array<PendingOrchestrationEffectV2> =>
+        event.type === "message.updated" && incomingCardSummarySource(event.payload) !== null
+          ? [
+              {
+                id: `effect:message-summary:${event.threadId}:${event.payload.id}`,
+                commandId: command.commandId,
+                threadId: event.threadId,
+                request: { type: "message-summary.generate", messageId: event.payload.id },
+              },
+            ]
+          : [],
+    );
+    if (summaryEffects.length > 0)
+      yield* Ref.update(effects, (existing) => [...existing, ...summaryEffects]);
     return {
       events: yield* Ref.get(events),
       effects: yield* Ref.get(effects),

@@ -139,6 +139,7 @@ export interface ThreadFeedMessage {
   readonly delegatedCompletion?: import("@t3tools/contracts").OrchestrationV2ConversationMessage["delegatedCompletion"];
   readonly linkedSender?: import("@t3tools/contracts").OrchestrationV2LinkedSender;
   readonly idleCompaction?: import("@t3tools/contracts").OrchestrationV2IdleCompaction;
+  readonly summary?: string;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
   readonly sourceThreadId: ThreadId;
   readonly createdAt: string;
@@ -2401,6 +2402,7 @@ export function buildThreadFeed(
                 ...(item.senderThreadId ? { senderThreadId: item.senderThreadId } : {}),
                 ...(item.linkedSender ? { linkedSender: item.linkedSender } : {}),
                 ...(item.idleCompaction ? { idleCompaction: item.idleCompaction } : {}),
+                ...(item.summary ? { summary: item.summary } : {}),
               }
             : {}),
           visibility: row.visibility,

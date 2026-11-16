@@ -11,6 +11,8 @@ import { ChevronRightIcon, MessageSquareIcon, SettingsIcon } from "lucide-react"
 import { senderCardDetails } from "@t3tools/client-runtime/user-message";
 import { resolveThreadGlyph } from "@t3tools/client-runtime/thread-glyphs";
 import { ThreadContextChip, useThreadContextMetadata } from "../ThreadContextChip";
+import { useServerConfigs } from "../../state/entities";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { WorkLogRow } from "./WorkLog";
 import { TimelineRowTimestamp } from "./TimelineRowParts";
@@ -25,6 +27,7 @@ export function SenderCard(props: {
   readonly threadRef: ScopedThreadRef | null;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly text?: string;
+  readonly summary?: string | undefined;
   readonly createdAt?: string;
   readonly timestampFormat?: TimestampFormat;
   readonly queued?: boolean;
@@ -35,7 +38,17 @@ export function SenderCard(props: {
 }) {
   const sender = "threadId" in props.origin ? props.origin : null;
   const { shell, title } = useThreadContextMetadata(sender);
-  const details = senderCardDetails(props.origin, props.text ?? "", props.threadRef, shell);
+  const serverConfigs = useServerConfigs();
+  const summariesOn =
+    props.threadRef === null ||
+    serverConfigs.get(props.threadRef.environmentId)?.settings.incomingCardSummaries !== false;
+  const details = senderCardDetails(
+    props.origin,
+    props.text ?? "",
+    props.threadRef,
+    shell,
+    summariesOn ? props.summary : undefined,
+  );
   const name = sender ? title : details.name;
   const glyph = sender ? resolveThreadGlyph(sender.threadId, shell?.glyphSeed) : null;
   const [expanded, setExpanded] = useState(false);
@@ -47,7 +60,7 @@ export function SenderCard(props: {
       : "var(--border)",
   };
   return (
-    <div className="w-full min-w-0">
+    <div className="@container/sender w-full min-w-0">
       <WorkLogRow
         role="button"
         tabIndex={0}
@@ -66,20 +79,27 @@ export function SenderCard(props: {
           }
         }}
         icon={
-          sender ? (
-            <MessageSquareIcon aria-hidden className="size-4 text-icon-muted" />
-          ) : (
-            <SettingsIcon aria-hidden className="size-4 text-icon-muted" />
-          )
+          // Narrow columns hide the label; the icon keeps it as a tooltip.
+          <Tooltip>
+            <TooltipTrigger render={<span className="flex" />}>
+              {sender ? (
+                <MessageSquareIcon aria-hidden className="size-4 text-icon-muted" />
+              ) : (
+                <SettingsIcon aria-hidden className="size-4 text-icon-muted" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{details.label}</TooltipPopup>
+          </Tooltip>
         }
         label={
-          // A preview with no room wraps onto the clipped second line instead of leaving a bare "· …".
-          <span className="flex h-lh min-w-0 flex-wrap content-start items-center gap-x-1 overflow-hidden text-foreground/80">
+          // The preview keeps a share of the row; the sender chip shrinks first, then the label
+          // hides below 36rem and the timestamp below 24rem.
+          <span className="flex h-lh min-w-0 items-center gap-x-1 overflow-hidden text-foreground/80">
             <span className="flex min-w-0 max-w-full items-center gap-1">
-              <span className="min-w-0 truncate">{details.label}</span>
+              <span className="min-w-0 truncate @max-[36rem]/sender:hidden">{details.label}</span>
               {sender ? (
                 <span
-                  className="flex min-w-14 max-w-60 shrink-[100000]"
+                  className="flex min-w-14 max-w-40 shrink-[100000] @max-[24rem]/sender:min-w-5 @max-[24rem]/sender:max-w-24"
                   onClick={stopRowToggle}
                   onKeyDown={stopRowToggle}
                 >
@@ -94,11 +114,13 @@ export function SenderCard(props: {
                   />
                 </span>
               ) : details.name ? (
-                <span className="min-w-14 max-w-60 shrink-[100000] truncate">{details.name}</span>
+                <span className="min-w-14 max-w-40 shrink-[100000] truncate @max-[24rem]/sender:min-w-5 @max-[24rem]/sender:max-w-24">
+                  {details.name}
+                </span>
               ) : null}
             </span>
             {details.preview ? (
-              <span className="min-w-16 flex-1 basis-0 truncate text-muted-foreground">
+              <span className="min-w-[50%] flex-1 basis-0 truncate text-muted-foreground @max-[24rem]/sender:min-w-[72%]">
                 · {details.preview}
               </span>
             ) : null}
@@ -119,6 +141,7 @@ export function SenderCard(props: {
                 createdAt={props.createdAt}
                 timestampFormat={props.timestampFormat ?? "locale"}
                 alwaysVisible
+                className="@max-[24rem]/sender:hidden"
               />
             ) : null}
             <MessageReactionChip reaction={props.reaction} />

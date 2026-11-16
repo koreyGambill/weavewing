@@ -116,7 +116,19 @@ export interface TranscriptionPostProcessingResult {
   transcription: string;
 }
 
+export interface MessageSummaryGenerationInput {
+  cwd: string;
+  /** The card's origin label, such as "Report from child thread". */
+  source: string;
+  message: string;
+  modelSelection: ModelSelection;
+  onCost?: (costUsd: number) => void;
+}
+
 export interface ProviderTextGeneration {
+  readonly generateMessageSummary?: (
+    input: MessageSummaryGenerationInput,
+  ) => Effect.Effect<{ readonly summary: string }, TextGenerationError>;
   readonly generateMonitoringAssessment?: (input: {
     readonly cwd: string;
     readonly prompt: string;

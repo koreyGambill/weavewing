@@ -296,6 +296,7 @@ function UserMessageContent({ row }: { row: Extract<TimelineRow, { kind: "messag
       <MessageAuthorHeading>{"title" in origin ? origin.title : "T3 Code"}</MessageAuthorHeading>
       <SenderCard
         text={resolveUserMessagePresentation(row.message).text}
+        summary={row.message.summary}
         createdAt={row.message.createdAt}
         timestampFormat={ctx.timestampFormat}
         origin={origin}

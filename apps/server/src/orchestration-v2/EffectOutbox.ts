@@ -133,6 +133,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("delegated-tasks.stop"),
     reason: Schema.optional(Schema.String),
   }),
+  Schema.Struct({ type: Schema.Literal("message-summary.generate"), messageId: MessageId }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -148,6 +149,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "attachment.cleanup",
   "thread-title.generate",
   "delegated-tasks.stop",
+  "message-summary.generate",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
@@ -329,6 +331,8 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
         available,
         Array.from({ length: Math.min(64, Math.max(0, Math.floor(count))) }, () => undefined),
       ).pipe(Effect.asVoid);
+    // Slow model calls queue among themselves so they never hold back a thread's turn work.
+    const textGenerationLane = sql`('thread-title.generate', 'message-summary.generate')`;
     // Retry backoff must block later effects so turns cannot race a pending rollback.
     const claimableCandidatePredicate = (
       availableBefore?: string,
@@ -360,13 +364,13 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             )
             AND (
               (
-                candidate.effect_type = 'thread-title.generate'
-                AND active.effect_type = 'thread-title.generate'
+                candidate.effect_type IN ${textGenerationLane}
+                AND active.effect_type IN ${textGenerationLane}
               )
               OR
               (
-                candidate.effect_type != 'thread-title.generate'
-                AND active.effect_type != 'thread-title.generate'
+                candidate.effect_type NOT IN ${textGenerationLane}
+                AND active.effect_type NOT IN ${textGenerationLane}
               )
             )
         )
@@ -374,12 +378,12 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           maxRunningTitleGenerations === undefined
             ? sql`1 = 1`
             : sql`(
-                candidate.effect_type != 'thread-title.generate'
+                candidate.effect_type NOT IN ${textGenerationLane}
                 OR (
                   SELECT COUNT(*)
                   FROM orchestration_v2_effect_outbox AS running_title
                   WHERE running_title.status = 'running'
-                    AND running_title.effect_type = 'thread-title.generate'
+                    AND running_title.effect_type IN ${textGenerationLane}
                 ) < ${maxRunningTitleGenerations}
               )`
         }

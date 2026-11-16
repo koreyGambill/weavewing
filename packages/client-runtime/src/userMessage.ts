@@ -193,16 +193,20 @@ function messageFirstLine(text: string): string {
   return text.trim().split(/\r?\n/, 1)[0] ?? "";
 }
 
-/** The collapsed row of a message another thread, task or T3 Code sent to `receiver`. */
+/**
+ * The collapsed row of a message another thread, task or T3 Code sent to `receiver`.
+ * A generated `summary` stands in for the first line once it arrives.
+ */
 export function senderCardDetails(
   origin: Exclude<TurnOrigin, { kind: "user" }>,
   text: string,
   receiver: ScopedThreadRef | null,
   senderShell: Pick<EnvironmentThreadShell, "lineage" | "delegatedFrom"> | null,
+  summary?: string,
 ) {
   return {
     ...senderOriginLabel(origin, receiver, senderShell),
-    preview: messageFirstLine(text),
+    preview: summary || messageFirstLine(text),
   };
 }
 

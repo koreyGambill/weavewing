@@ -1797,6 +1797,7 @@ function renderFeedEntry(
             origin={origin}
             threadRef={scopeThreadRef(props.environmentId, props.threadId)}
             text={presentation.text}
+            summary={message.summary}
             createdAt={message.createdAt}
             reaction={message.reaction}
           >

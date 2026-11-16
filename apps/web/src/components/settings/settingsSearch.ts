@@ -893,6 +893,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
+    id: "incoming-card-summaries",
+    title: "Summarize incoming messages",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["haiku summary one line card collapsed agent report delegated task message"],
+  },
+  {
     id: "thread-title-instructions",
     title: "Thread title instructions",
     to: "/settings/threads",

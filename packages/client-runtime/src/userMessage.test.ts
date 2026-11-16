@@ -393,4 +393,14 @@ describe("senderCardDetails", () => {
       preview: "",
     });
   });
+
+  it("shows a generated summary in place of the first line", () => {
+    const origin = { kind: "scheduled-task", title: "Daily audit" } as const;
+    expect(
+      senderCardDetails(origin, "## Report\nAll good", receiver, null, "Done: audit clean"),
+    ).toMatchObject({ preview: "Done: audit clean" });
+    expect(senderCardDetails(origin, "## Report\nAll good", receiver, null, "")).toMatchObject({
+      preview: "## Report",
+    });
+  });
 });

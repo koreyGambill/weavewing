@@ -21,6 +21,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateMonitoringReview",
   "generateMonitoringAssessment",
   "generateTranscriptionPostProcessing",
+  "generateMessageSummary",
 ]);
 
 const openCodeTextGenerationErrorContext = {

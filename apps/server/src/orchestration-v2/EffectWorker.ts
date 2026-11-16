@@ -26,6 +26,7 @@ import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
+import * as MessageSummaryService from "./MessageSummaryService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
@@ -81,6 +82,7 @@ export const layerExecutor: Layer.Layer<
   | ProviderTurnStartService.ProviderTurnStartServiceV2
   | RuntimeRequestService.RuntimeRequestServiceV2
   | ThreadTitleRegenerationService.ThreadTitleRegenerationService
+  | MessageSummaryService.MessageSummaryService
   | ThreadManagementService.ThreadManagementService
   | ServerSettings.ServerSettingsService
 > = Layer.effect(
@@ -95,6 +97,7 @@ export const layerExecutor: Layer.Layer<
     const runtimeRequests = yield* RuntimeRequestService.RuntimeRequestServiceV2;
     const threadTitleRegeneration =
       yield* ThreadTitleRegenerationService.ThreadTitleRegenerationService;
+    const messageSummaries = yield* MessageSummaryService.MessageSummaryService;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const settings = yield* ServerSettings.ServerSettingsService;
     return OrchestrationEffectExecutorV2.of({
@@ -614,6 +617,11 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "message-summary.generate":
+            return messageSummaries.execute({
+              threadId: effect.threadId,
+              messageId: effect.request.messageId,
+            });
           case "delegated-tasks.stop":
             return threads
               .stopDelegatedTasks({

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { limitSection, sanitizeCommitSubject, sanitizeThreadTitle } from "./textGenerationUtils.ts";
+import {
+  limitSection,
+  sanitizeCommitSubject,
+  sanitizeMessageSummary,
+  sanitizeThreadTitle,
+} from "./textGenerationUtils.ts";
 
 describe("limitSection", () => {
   it("cuts a long section without splitting an emoji", () => {
@@ -31,5 +36,16 @@ describe("sanitizeThreadTitle", () => {
     const title = `${prefix}${character} more`;
 
     expect(sanitizeThreadTitle(title)).toBe(`${prefix}${retained}...`);
+  });
+});
+
+describe("sanitizeMessageSummary", () => {
+  it.each([
+    { raw: '  "**Done:** gate\n green"  ', summary: "Done: gate green" },
+    { raw: "`Asks`: approve # BW-1", summary: "Asks: approve BW-1" },
+    { raw: "  \n ", summary: "" },
+    { raw: `${"a".repeat(98)}🚀 more`, summary: `${"a".repeat(98)}…` },
+  ])("cleans $raw to one card line", ({ raw, summary }) => {
+    expect(sanitizeMessageSummary(raw)).toBe(summary);
   });
 });
