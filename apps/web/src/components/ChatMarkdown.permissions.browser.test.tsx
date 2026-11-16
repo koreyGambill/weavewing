@@ -1,5 +1,6 @@
 import {
   AuthOrchestrationOperateScope,
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
   ThreadId,
@@ -121,6 +122,7 @@ const linkedPullRequest: ThreadPullRequestLink = {
   stack: null,
 };
 const serverConfig = {
+  settings: DEFAULT_SERVER_SETTINGS,
   availableEditors: ["vscode", "file-manager"] as readonly EditorId[],
   shellRevealInFileManager: true,
   shellRevealInFileManagerKind: "xdg-open",
