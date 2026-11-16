@@ -411,14 +411,19 @@ it.effect.each(
       assert.equal(result.threadId, thread!.id);
       const projection = yield* threads.getThreadProjection(thread!.id);
       const wire = yield* encodeThreadProjection(projection);
-      assert.equal(wire.messages[0]?.text, task.prompt);
+      // A run that starts its own thread opens with the automation preface.
+      const sentText =
+        target === "existing"
+          ? task.prompt
+          : `[Automated run of "Daily audit" (Run now). Use t3_notify for anything the user must see.]\n\n${task.prompt}`;
+      assert.equal(wire.messages[0]?.text, sentText);
       assert.equal(wire.messages[0]?.scheduledTaskId, task.id);
       assert.equal(wire.messages[0]?.createdBy, createdBy);
       const turnItem = wire.turnItems.find(
         (item): item is Extract<typeof item, { type: "user_message" }> =>
           item.type === "user_message",
       );
-      assert.equal(turnItem?.text, task.prompt);
+      assert.equal(turnItem?.text, sentText);
       assert.equal(turnItem?.scheduledTaskId, task.id);
     }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
   },
