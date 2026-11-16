@@ -46,6 +46,24 @@ describe("extractToolActivityPresentation", () => {
     ).toEqual({ toolSource: source });
   });
 
+  it("keeps only inline provider logos and favicons, which render without a request", () => {
+    const inline = "data:image/png;base64,iVBORw0KGgo=";
+    const remote = "https://www.google.com/s2/favicons?domain=firecrawl.dev&sz=64";
+    expect(
+      extractToolActivityPresentation({ toolIcon: { _tag: "themed-logo", logoUrl: remote } }),
+    ).toEqual({});
+    expect(
+      extractToolActivityPresentation({
+        toolIcon: { _tag: "themed-logo", logoUrl: inline, logoUrlDark: remote },
+      }),
+    ).toEqual({ toolIcon: { _tag: "themed-logo", logoUrl: inline } });
+    expect(
+      extractToolActivityPresentation({
+        toolIcon: { _tag: "website", pageUrl: "https://example.com/a", faviconUrl: remote },
+      }),
+    ).toEqual({ toolIcon: { _tag: "website", pageUrl: "https://example.com/a" } });
+  });
+
   it("retains valid image paths independently of redacted output", () => {
     expect(
       extractToolActivityPresentation({ viewedImagePath: " /workspace/reference.webp " }),

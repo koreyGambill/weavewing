@@ -26,17 +26,10 @@ function trimmedString(value: unknown, maxLength: number): string | undefined {
   return trimmed && trimmed.length <= maxLength ? trimmed : undefined;
 }
 
+// Weavewing: provider logos and favicons render only when inline; a URL would load on sight.
 function imageUrl(value: unknown): string | undefined {
   const raw = trimmedString(value, 4096);
-  if (!raw) return undefined;
-  try {
-    const url = new URL(raw);
-    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:"
-      ? url.href
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  return raw && /^data:image\//i.test(raw) ? raw : undefined;
 }
 
 function pageUrl(value: unknown): string | undefined {

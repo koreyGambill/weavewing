@@ -1511,7 +1511,7 @@ function ToolActivityIconView(props: {
     return <WorkLogIcon icon={props.fallback} color={props.fallbackColor} />;
   }
   if (props.icon._tag === "website") {
-    const source = toolActivityFaviconUrl(props.icon, props.themeAppearance, 32);
+    const source = toolActivityFaviconUrl(props.icon, props.themeAppearance);
     return source ? (
       <ToolActivityImage
         key={source}
