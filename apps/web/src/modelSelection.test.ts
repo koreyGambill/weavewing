@@ -29,6 +29,7 @@ import {
   getTextGenerationModelOptionsByInstance,
   resolveAppModelSelectionForInstance,
   resolveAppModelSelectionState,
+  resolveOwnModelSelectionState,
   resolveEffectiveDefaultModelSelection,
 } from "./modelSelection";
 
@@ -1007,6 +1008,20 @@ describe("instance-scoped model selection", () => {
       expect(resolveAppModelSelectionState(settings, [unusable, claude])).toEqual(chosen);
     }
   });
+  it("shows a job's own saved model even when its agent is filtered out as off", () => {
+    const claude = provider({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      instanceId: "claudeAgent",
+      models: ["claude-haiku-5-5"],
+    });
+    const own = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-luna");
+    const inherited = createModelSelection(claude.instanceId, "claude-haiku-5-5");
+    const settings = settingsWithProviderInstances();
+
+    expect(resolveOwnModelSelectionState(settings, own, inherited, [claude])).toEqual(own);
+    expect(resolveOwnModelSelectionState(settings, null, inherited, [claude])).toEqual(inherited);
+  });
+
   it("falls back to the text generation default, not the chat default, for a removed model", () => {
     const codex = provider({ instanceId: "codex", models: ["gpt-6-astra", "gpt-6-luna"] });
     const providers = [

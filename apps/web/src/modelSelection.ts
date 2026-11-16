@@ -457,3 +457,20 @@ export function resolveAppModelSelectionState(
 
   return NO_PROVIDER_MODEL_SELECTION;
 }
+
+/**
+ * What a job's picker shows: its own saved model, kept even when its agent is off or filtered
+ * out so the row never names another vendor, or else the model the job follows. Display only.
+ */
+export function resolveOwnModelSelectionState(
+  settings: UnifiedSettings,
+  own: ModelSelection | null,
+  inherited: ModelSelection,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const resolved = resolveAppModelSelectionState(
+    { ...settings, textGenerationModelSelection: own ?? inherited },
+    providers,
+  );
+  return own !== null && resolved.instanceId !== own.instanceId ? own : resolved;
+}

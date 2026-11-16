@@ -76,7 +76,7 @@ import { updateClientSettings, useClientSettings } from "../../hooks/useSettings
 import { runEnvironmentSpeech } from "../../speech/runEnvironmentSpeech";
 import {
   getTextGenerationModelOptionsByInstance,
-  resolveAppModelSelectionState,
+  resolveOwnModelSelectionState,
 } from "../../modelSelection";
 import { useTextGenerationTargets } from "../../textGenerators";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
@@ -525,14 +525,10 @@ function CleanupModelRow() {
   const instanceEntries = targets.entries;
   const hasProvider = instanceEntries.some((entry) => entry.enabled && entry.isAvailable);
   const dedicated = settings.speechPostProcessingModelSelection !== null;
-  const selection = resolveAppModelSelectionState(
-    {
-      ...settings,
-      textGenerationModelSelection: resolveSpeechPostProcessingModelSelection(
-        settings,
-        textGenerationProviders,
-      ),
-    },
+  const selection = resolveOwnModelSelectionState(
+    settings,
+    settings.speechPostProcessingModelSelection,
+    resolveSpeechPostProcessingModelSelection(settings, textGenerationProviders),
     textGenerationProviders,
   );
   const modelOptionsByInstance = getTextGenerationModelOptionsByInstance(

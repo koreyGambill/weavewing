@@ -27,6 +27,7 @@ import { useTextGenerationTargets } from "../../textGenerators";
 import {
   getTextGenerationModelOptionsByInstance,
   resolveAppModelSelectionState,
+  resolveOwnModelSelectionState,
   selectsPlanAgent,
 } from "../../modelSelection";
 import { useEnvironmentProviders } from "../../state/environments";
@@ -141,15 +142,14 @@ export function SourceControlWritingSettingsSection() {
   );
   const usesDedicatedModel = settings.sourceControlWriterModelSelection !== null;
   const followsThread = followsThreadTextGeneration(settings);
-  const activeSelection = resolveAppModelSelectionState(
-    {
-      ...settings,
-      textGenerationModelSelection: resolveSourceControlWriterModelSelection(
-        settings,
-        projectEffectiveTextGenerationProviders,
-        target?.projectId ?? null,
-      ),
-    },
+  const activeSelection = resolveOwnModelSelectionState(
+    settings,
+    settings.sourceControlWriterModelSelection,
+    resolveSourceControlWriterModelSelection(
+      settings,
+      projectEffectiveTextGenerationProviders,
+      target?.projectId ?? null,
+    ),
     projectEffectiveTextGenerationProviders,
   );
   const canEnableDedicatedModel = writerEntries.some(
@@ -173,15 +173,10 @@ export function SourceControlWritingSettingsSection() {
       (entry) => entry.instanceId === provider.instanceId && entry.enabled && entry.isAvailable,
     ),
   );
-  const reviewGuideSelection = resolveAppModelSelectionState(
-    {
-      ...settings,
-      textGenerationModelSelection: resolveReviewGuideModelSelection(
-        settings,
-        projectAgentProviders,
-        target?.projectId ?? null,
-      ),
-    },
+  const reviewGuideSelection = resolveOwnModelSelectionState(
+    settings,
+    settings.reviewGuideModelSelection,
+    resolveReviewGuideModelSelection(settings, projectAgentProviders, target?.projectId ?? null),
     projectAgentProviders,
   );
   const reviewGuideModelOptionsByInstance = getTextGenerationModelOptionsByInstance(
