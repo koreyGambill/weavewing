@@ -139,6 +139,22 @@ const buildTimeline = (threadId: ThreadId, rows: ReadonlyArray<Row>): Timeline =
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // The conversation window's rule (ProjectionStore retainedWindowRows): rolled-back runs and
+  // queued input that never started are not in the transcript.
+  const shownInConversation = (alias: string) => {
+    const item = sql.literal(alias);
+    return sql`NOT EXISTS (
+      SELECT 1 FROM orchestration_v2_projection_runs AS run
+      WHERE run.run_id = ${item}.run_id
+        AND (run.status = 'rolled_back' OR (
+          ${item}.type = 'user_message'
+          AND json_extract(${item}.payload_json, '$.inputIntent') = 'queued_turn'
+          AND (run.status = 'queued' OR (
+            run.status = 'cancelled' AND json_extract(run.payload_json, '$.startedAt') IS NULL
+          ))
+        ))
+    )`;
+  };
   return ThreadTimeline.of({
     get: Effect.fn("ThreadTimeline.get")(
       function* ({ threadId }) {
@@ -188,7 +204,7 @@ const make = Effect.gen(function* () {
         // The reply is the last assistant text before the next user-role message, as on the client.
         const turns = yield* sql<ThreadUserTurn>`
           WITH own AS (
-            SELECT ordinal, updated_at, payload_json FROM orchestration_v2_projection_turn_items
+            SELECT ordinal, updated_at, payload_json FROM orchestration_v2_projection_turn_items AS item
               INDEXED BY orchestration_v2_projection_turn_items_user_message_idx
             WHERE thread_id = ${threadId} AND type = 'user_message'
               AND COALESCE(json_extract(payload_json, '$.createdBy'), 'user') = 'user'
@@ -196,14 +212,16 @@ const make = Effect.gen(function* () {
                 THEN json_type(payload_json, '$.linkedSender') IS NULL
                   AND json_type(payload_json, '$.scheduledTaskId') IS NULL
                 ELSE json_extract(payload_json, '$.origin.kind') = 'user' END
+              AND ${shownInConversation("item")}
             ORDER BY ordinal DESC LIMIT ${THREAD_USER_TURN_LIMIT}
           ),
           bounded AS (
             SELECT own.*, COALESCE((
-              SELECT MIN(next.ordinal) FROM orchestration_v2_projection_turn_items AS next
+              SELECT next.ordinal FROM orchestration_v2_projection_turn_items AS next
                 INDEXED BY orchestration_v2_projection_turn_items_user_message_idx
               WHERE next.thread_id = ${threadId} AND next.type = 'user_message'
-                AND next.ordinal > own.ordinal
+                AND next.ordinal > own.ordinal AND ${shownInConversation("next")}
+              ORDER BY next.ordinal LIMIT 1
             ), 9223372036854775807) AS next_ordinal FROM own
           )
           SELECT json_extract(payload_json, '$.messageId') AS "messageId",
@@ -219,6 +237,7 @@ const make = Effect.gen(function* () {
                 AND reply.type NOT IN (
                   'command_execution', 'reasoning', 'file_change', 'file_search', 'web_search', 'dynamic_tool'
                 )
+                AND ${shownInConversation("reply")}
               ORDER BY reply.ordinal DESC LIMIT 1
             ) AS "replyText"
           FROM bounded ORDER BY ordinal`;

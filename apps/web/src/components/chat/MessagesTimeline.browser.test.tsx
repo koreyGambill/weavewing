@@ -691,6 +691,70 @@ describe("MessagesTimeline messages", () => {
     });
   });
 
+  it("reveals an unloaded minimap turn selected with Space", async () => {
+    setup();
+    const props = baseProps();
+    // As in the app, a message entry's id is its message id.
+    const own = (id: string, text: string): Entry => ({ ...message(text, {}, id), id });
+    const old = own("old", "Old question");
+    const recent = own("recent", "Recent question");
+    const answers = Array.from({ length: 12 }, (_, index) =>
+      message(`Answer ${index}\n\n${"x ".repeat(300)}`, { role: "assistant" }, `answer-${index}`),
+    );
+    const userTurns = [old, recent].flatMap((entry) =>
+      entry.kind === "message"
+        ? [
+            {
+              messageId: entry.message.id,
+              createdAt: CREATED_AT,
+              text: entry.message.text,
+              replyText: null,
+            },
+          ]
+        : [],
+    );
+    function Thread({ loaded }: { loaded: boolean }) {
+      const [request, setRequest] = useState<NonNullable<TimelineProps["citationRequest"]> | null>(
+        null,
+      );
+      return (
+        <MessagesTimeline
+          {...props}
+          timelineEntries={loaded ? [old, ...answers, recent] : [...answers, recent]}
+          userTurns={userTurns}
+          onRevealMessage={(messageId) =>
+            setRequest({
+              key: "reveal-old",
+              citation: { environmentId: ENVIRONMENT_ID, threadId: ThreadId.make("t"), messageId },
+            })
+          }
+          citationRequest={request}
+          citationHistory={loaded ? { _tag: "found" } : { _tag: "loading" }}
+        />
+      );
+    }
+    await using screen = await renderElement(<Thread loaded={false} />);
+    const viewport = props.listRef.current!.getScrollableNode()!;
+    await vi.waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(0));
+    screen
+      .getByRole("button", { name: /^Jump to message/ })
+      .element()
+      .focus();
+    await userEvent.keyboard("{Home}[Space]");
+
+    await screen.rerender(<Thread loaded />);
+    await vi.waitFor(() => {
+      const row = screen
+        .getByText("Old question")
+        .elements()
+        .find((element) => !element.closest("[data-testid=timeline-minimap]"))!
+        .getBoundingClientRect();
+      const view = viewport.getBoundingClientRect();
+      expect(row.top).toBeGreaterThanOrEqual(view.top);
+      expect(row.bottom).toBeLessThan(view.bottom);
+    });
+  });
+
   it("enables the minimap's next turn button on a thread restored above its bottom", async () => {
     setup();
     const base = baseProps();

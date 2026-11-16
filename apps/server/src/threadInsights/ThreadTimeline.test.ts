@@ -161,11 +161,16 @@ it.effect("fails for a missing thread", () =>
   }).pipe(Effect.provide(layer)),
 );
 
-const insertItem = (ordinal: number, type: string, fields: Record<string, unknown>) =>
+const insertItem = (
+  ordinal: number,
+  type: string,
+  fields: Record<string, unknown>,
+  runId: string | null = null,
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const payload = JSON.stringify({ startedAt: iso(ordinal), ...fields });
-    yield* sql`INSERT INTO orchestration_v2_projection_turn_items (turn_item_id,thread_id,ordinal,type,status,updated_at,payload_json) VALUES (${`item-${ordinal}`},'root',${ordinal},${type},'completed',${at},${payload})`;
+    yield* sql`INSERT INTO orchestration_v2_projection_turn_items (turn_item_id,thread_id,run_id,ordinal,type,status,updated_at,payload_json) VALUES (${`item-${ordinal}`},'root',${runId},${ordinal},${type},'completed',${at},${payload})`;
   });
 
 const userTurns = Effect.fn(function* (threadId: string) {
@@ -227,5 +232,42 @@ it.effect("lists the user's own turns with each turn's last reply, newest first 
     expect(capped).toHaveLength(THREAD_USER_TURN_LIMIT);
     expect(capped[0]?.messageId).toBe("m11");
     expect(capped.at(-1)?.messageId).toBe(`m${10 + THREAD_USER_TURN_LIMIT}`);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("leaves out inputs and replies the conversation hides", () =>
+  Effect.gen(function* () {
+    const input = (ordinal: number, run: number, inputIntent = "queued_turn") =>
+      insertItem(
+        ordinal,
+        "user_message",
+        { messageId: `m${ordinal}`, createdBy: "user", text: `ask ${ordinal}`, inputIntent },
+        `root-${run}`,
+      );
+    const reply = (ordinal: number, run: number) =>
+      insertItem(
+        ordinal,
+        "assistant_message",
+        { messageId: `a${ordinal}`, text: `re ${ordinal}` },
+        `root-${run}`,
+      );
+    yield* insertRun("root", 1, "completed", 0, 1);
+    yield* insertRun("root", 2, "queued", null, null);
+    yield* insertRun("root", 3, "cancelled", null, 3);
+    yield* insertRun("root", 4, "cancelled", 4, 5);
+    yield* insertRun("root", 5, "rolled_back", 6, 7);
+    yield* input(1, 1, "turn_start");
+    yield* input(2, 2);
+    yield* input(3, 3);
+    yield* reply(4, 1);
+    yield* input(5, 4);
+    yield* input(6, 5, "turn_start");
+    yield* reply(7, 5);
+
+    const { turns } = yield* userTurns("root");
+    expect(turns.map(({ messageId, replyText }) => [messageId, replyText])).toEqual([
+      ["m1", "re 4"],
+      ["m5", null],
+    ]);
   }).pipe(Effect.provide(layer)),
 );
