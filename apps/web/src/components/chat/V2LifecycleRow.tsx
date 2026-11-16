@@ -23,7 +23,10 @@ import {
   type HandoffTimelineRun,
   resolveModelSwitchChange,
 } from "@t3tools/client-runtime/handoff";
-import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
+import {
+  formatSubagentDisplayTitle,
+  subagentCardDetail,
+} from "@t3tools/client-runtime/state/subagent-display";
 import {
   ProviderDriverKind,
   PROVIDER_DISPLAY_NAMES,
@@ -182,17 +185,6 @@ const SETTLED_SUBAGENT_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
   "cancelled",
   "interrupted",
 ]);
-
-const GENERIC_CHILD_END = /^Child task ended with status\b/i;
-
-function plainDetail(text: string): string {
-  return text
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/`/g, "")
-    .replace(/^[ \t]*[-*][ \t]+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function isoOrNull(value: DateTime.Utc | null | undefined): string | null {
   return value ? DateTime.formatIso(value) : null;
@@ -458,8 +450,7 @@ function SubagentTimelineLink(props: {
   const rawDetail = parseAssistantReactions(
     (settled ? result || progress : progress || result) ?? "",
   ).body;
-  const detail =
-    rawDetail && !GENERIC_CHILD_END.test(rawDetail) ? plainDetail(rawDetail) || null : null;
+  const detail = subagentCardDetail(rawDetail);
   const failed = status === "failed";
   const timing = {
     status: liveStatus,

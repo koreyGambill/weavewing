@@ -56,6 +56,7 @@ export function ThreadContextChip(props: {
               <Link
                 to="/$environmentId/$threadId"
                 params={{ environmentId, threadId }}
+                draggable={false}
                 onClick={(event) => {
                   if (
                     props.onOpenThread &&
