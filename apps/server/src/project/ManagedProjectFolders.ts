@@ -13,6 +13,7 @@ import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -71,6 +72,10 @@ export class ScratchProjectError extends Schema.TaggedError<ScratchProjectError>
     return "Failed to create the project for threads without a project.";
   }
 }
+
+/** Where No project threads keep their folders, whether or not this T3 home allows them. */
+export const scratchFolderRoot = (baseDir: string, path: Path.Path) =>
+  path.resolve(baseDir, "scratch");
 
 export type ScratchError = ScratchUnavailableError | ScratchFolderError | ScratchProjectError;
 
@@ -253,7 +258,7 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const legacyScratchRoot = path.resolve(config.baseDir, "scratch");
+  const legacyScratchRoot = scratchFolderRoot(config.baseDir, path);
   // A shared start folder must not inherit a parent repository's status or checkpoints.
   const resolveScratchRoot = Effect.fn("ManagedProjectFolders.resolveScratchRoot")(
     function* (setting: string) {
@@ -299,13 +304,12 @@ const make = Effect.gen(function* () {
           ),
         );
     },
-    Effect.catchCause((cause) =>
-      Cause.hasInterrupts(cause)
-        ? Effect.interrupt
-        : Effect.succeed(Result.fail(new ScratchUnavailableError({ baseDir: config.baseDir }))),
-    ),
   );
-  const scratchRoots = yield* Cache.make({ capacity: 1, lookup: resolveScratchRoot });
+  const scratchRoots = yield* Cache.makeWith(resolveScratchRoot, {
+    capacity: 1,
+    // A failed check (say, a git timeout on a busy machine) is not an answer; ask again next time.
+    timeToLive: Exit.match({ onSuccess: () => Duration.infinity, onFailure: () => Duration.zero }),
+  });
   const scratchProbe = settings.getSettings.pipe(
     Effect.flatMap((value) => Cache.get(scratchRoots, value.scratchStartDirectory)),
     Effect.catchCause((cause) =>

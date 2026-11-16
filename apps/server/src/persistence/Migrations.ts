@@ -113,6 +113,8 @@ import Migration0101 from "./Migrations/101_MonitoringReviewWatermarks.ts";
 import Migration0102 from "./Migrations/102_EvidenceLandings.ts";
 import Migration0103 from "./Migrations/103_MessageFollowUps.ts";
 import Migration0104 from "./Migrations/104_MessageSummaryAttempts.ts";
+import Migration0105 from "./Migrations/105_AuthConnectDevices.ts";
+import Migration0106 from "./Migrations/106_AuthConnectDeniedRequests.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -220,6 +222,8 @@ const migrationEntries = [
   [102, "EvidenceLandings", Migration0102],
   [103, "MessageFollowUps", Migration0103],
   [104, "MessageSummaryAttempts", Migration0104],
+  [105, "AuthConnectDevices", Migration0105],
+  [106, "AuthConnectDeniedRequests", Migration0106],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

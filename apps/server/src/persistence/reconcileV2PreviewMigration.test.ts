@@ -84,6 +84,8 @@ describe("V2 preview upgrade", () => {
         [102, "EvidenceLandings"],
         [103, "MessageFollowUps"],
         [104, "MessageSummaryAttempts"],
+        [105, "AuthConnectDevices"],
+        [106, "AuthConnectDeniedRequests"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -211,6 +213,8 @@ describe("V2 preview upgrade", () => {
         [102, "EvidenceLandings"],
         [103, "MessageFollowUps"],
         [104, "MessageSummaryAttempts"],
+        [105, "AuthConnectDevices"],
+        [106, "AuthConnectDeniedRequests"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

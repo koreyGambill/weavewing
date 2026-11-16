@@ -11,6 +11,10 @@
       "types": "./src/workspaceMarks.ts",
       "import": "./src/workspaceMarks.ts"
     },
+    "./png": {
+      "types": "./src/png.ts",
+      "import": "./src/png.ts"
+    },
     "./pullRequestAnchor": {
       "types": "./src/pullRequestAnchor.ts",
       "import": "./src/pullRequestAnchor.ts"
@@ -42,6 +46,10 @@
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
+    },
+    "./themeCss": {
+      "types": "./src/themeCss.ts",
+      "import": "./src/themeCss.ts"
     },
     "./themePreview": {
       "types": "./src/themePreview.ts",
@@ -106,6 +114,10 @@
     "./shell": {
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
+    },
+    "./envTrampoline": {
+      "types": "./src/envTrampoline.ts",
+      "import": "./src/envTrampoline.ts"
     },
     "./semver": {
       "types": "./src/semver.ts",

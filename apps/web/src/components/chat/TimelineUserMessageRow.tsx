@@ -875,6 +875,7 @@ function UserTimelineRow({
           folded && "border border-primary/20 bg-primary/5",
           folded && expanded && "w-full",
         )}
+        data-user-message-bubble=""
       >
         {followUp && !cardBody ? <MessageFollowUpGlyph followUp={followUp} /> : null}
         {/* Outside the fold so a collapsed message still has a heading to navigate to. */}
