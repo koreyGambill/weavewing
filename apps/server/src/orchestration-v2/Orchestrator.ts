@@ -15122,17 +15122,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
 
       const parentThreadId = childControls.thread.lineage.parentThreadId;
-      if (
-        options.resultTransfers.some(
-          (transfer) =>
-            transfer.type === "subagent_result" &&
-            transfer.sourceThreadId === childThreadId &&
-            transfer.targetThreadId === parentThreadId &&
-            (transfer.sourcePoint.runId === childRun.id ||
-              (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
-        )
-      )
-        return;
+      const runReported = options.resultTransfers.some(
+        (transfer) =>
+          transfer.type === "subagent_result" &&
+          transfer.sourceThreadId === childThreadId &&
+          transfer.targetThreadId === parentThreadId &&
+          (transfer.sourcePoint.runId === childRun.id ||
+            (options.task.id === forkedFrom.nodeId && transfer.sourcePoint.runId === undefined)),
+      );
+      // A run merging several tasks' queued runs reports once; the tasks it absorbed settle without another wake.
+      if (runReported && options.task.result !== null) return;
 
       const childResult = yield* projectionStore.getThreadRecords(
         childThreadId,
@@ -15214,7 +15213,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               cancelledRunId: childRun.id,
               completionDelivery: { state: "disposed" as const, observedByRunId: null },
             }
-          : {}),
+          : runReported
+            ? { completionDelivery: { state: "disposed" as const, observedByRunId: null } }
+            : {}),
       };
       const completionPlan = yield* planDelegatedCompletionDelivery({
         parentProjection,
@@ -15304,14 +15305,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 },
               },
             ]),
-        {
-          type: "context-transfer.created",
-          threadId: parentThreadId,
-          ...(parentRun === undefined ? {} : { runId: parentRun.id }),
-          providerInstanceId: childRun.providerInstanceId,
-          occurredAt: now,
-          payload: resultTransfer,
-        },
+        ...(runReported
+          ? []
+          : [
+              {
+                type: "context-transfer.created" as const,
+                threadId: parentThreadId,
+                ...(parentRun === undefined ? {} : { runId: parentRun.id }),
+                providerInstanceId: childRun.providerInstanceId,
+                occurredAt: now,
+                payload: resultTransfer,
+              },
+            ]),
       ];
       yield* writeSystemEvents(completionEvents, [], { updateDelegatedCompletionOnly: true });
       yield* releaseFinishedDelegateSessions(childThreadId, childRun.id);
@@ -15319,7 +15324,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (completionPlan.offer && completionPlan.parentRun !== undefined) {
         yield* offerDelegatedCompletionDelivery(parentThreadId, completionPlan.parentRun.id);
       }
-      return resultTransfer;
+      return runReported ? undefined : resultTransfer;
     },
   );
 

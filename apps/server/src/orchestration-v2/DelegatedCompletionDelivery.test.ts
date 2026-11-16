@@ -3002,17 +3002,16 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
                     ? { sourceRunId: child.childRunId }
                     : undefined,
                 );
+                // The first pass settles each task the merged run absorbed, once.
                 yield* recover;
-                assert.equal(childResultReads, 1);
+                assert.equal(childResultReads, 11);
                 yield* recover;
-                assert.equal(childResultReads, 1);
+                assert.equal(childResultReads, 11);
               }),
             (spy) => Effect.sync(() => spy.mockRestore()),
           );
-          const task = (yield* orchestrator.getThreadProjection(threadId)).subagents.find(
-            (task) => task.id === child.taskId,
-          );
-          assert.equal(task?.status, "completed");
+          const { subagents } = yield* orchestrator.getThreadProjection(threadId);
+          assert.isTrue(subagents.every((task) => task.status === "completed"));
           const { contextTransfers } = yield* store.getThreadRecords(threadId, [
             "contextTransfers",
           ]);
@@ -3965,6 +3964,7 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
       readonly parentThreadId: ThreadId;
       readonly childThreadId: ThreadId;
       readonly reply?: "not expected";
+      readonly queue?: true;
     }) =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -3987,7 +3987,7 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           messageId,
           text: "Check the same work again.",
           attachments: [],
-          dispatchMode: { type: "start_immediately" },
+          dispatchMode: { type: input.queue ? "queue_after_active" : "start_immediately" },
         });
         return (yield* orchestrator.getThreadProjection(input.childThreadId)).runs.find(
           (row) => row.userMessageId === messageId,
@@ -4057,6 +4057,105 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           wake = yield* requests.take;
         }
         assert.equal(wake.delegatedCompletion?.parentRunId, seeded.parentRunId);
+      }),
+    );
+
+    it.effect("settles a follow-up whose queued run was merged into another's", () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const now = yield* DateTime.now;
+        const requests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
+        const name = "merged-followup";
+        const { parentThreadId, parentRunId, child, firstWake } =
+          yield* seedFinishedChildWithIdleParent(name);
+        const childThreadId = child.childThreadId;
+        const target = yield* parentSend({ name: `${name}-target`, parentThreadId, childThreadId });
+        const absorbed = yield* parentSend({
+          name: `${name}-absorbed`,
+          parentThreadId,
+          childThreadId,
+          queue: true,
+        });
+        const taskIds = [target.delegatedTaskId!, absorbed.delegatedTaskId!];
+        assert.notEqual(taskIds[0], taskIds[1]);
+        yield* eventSink.write({
+          commandId: reconcileCommandId(`${name}-finished`),
+          events: [
+            {
+              id: EventId.make(`event:${name}-merged`),
+              type: "run.updated",
+              threadId: childThreadId,
+              runId: absorbed.id,
+              occurredAt: now,
+              payload: {
+                ...absorbed,
+                status: "cancelled",
+                queuePosition: null,
+                completedAt: now,
+                mergedIntoRunId: target.id,
+              },
+            },
+            {
+              id: EventId.make(`event:${name}-result`),
+              type: "message.updated",
+              threadId: childThreadId,
+              runId: target.id,
+              occurredAt: now,
+              payload: {
+                id: MessageId.make(`message:${name}-result`),
+                threadId: childThreadId,
+                runId: target.id,
+                nodeId: null,
+                role: "assistant",
+                text: "BOTH",
+                attachments: [],
+                streaming: false,
+                createdBy: "agent",
+                creationSource: "server",
+                createdAt: now,
+                updatedAt: now,
+              },
+            },
+            {
+              id: EventId.make(`event:${name}-target-finished`),
+              type: "run.updated",
+              threadId: childThreadId,
+              runId: target.id,
+              occurredAt: now,
+              payload: {
+                ...target,
+                // Queue promotion renumbers a merged run past the runs started ahead of it.
+                ordinal: absorbed.ordinal + 1,
+                inputMessageIds: [target.userMessageId, absorbed.userMessageId],
+                status: "completed",
+                startedAt: now,
+                completedAt: now,
+              },
+            },
+          ],
+        });
+        yield* orchestrator.recoverDelegatedTasks;
+        yield* orchestrator.recoverDelegatedTasks;
+        const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+        const tasks = taskIds.map((id) => parent.subagents.find((task) => task.id === id)!);
+        for (const task of tasks) {
+          assert.equal(task.status, "completed", `${task.id} stayed open`);
+          assert.equal(task.result, "BOTH");
+        }
+        // The parent hears the shared run once: only one task claims a wake.
+        assert.deepEqual(tasks.map((task) => task.completionDelivery?.state).toSorted(), [
+          "claimed",
+          "disposed",
+        ]);
+        let wake = yield* requests.take;
+        while (
+          wake.threadId !== parentThreadId ||
+          wake.delegatedCompletion?.messageId === firstWake.delegatedCompletion?.messageId
+        ) {
+          wake = yield* requests.take;
+        }
+        assert.equal(wake.delegatedCompletion?.parentRunId, parentRunId);
       }),
     );
 
