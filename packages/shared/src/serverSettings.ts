@@ -91,6 +91,71 @@ export function settingsForThread(
     : settings;
 }
 
+/**
+ * Whether snapshots show a selection's agent cannot run: missing, off, unavailable, unable to write
+ * text, or a failed probe. Unknown snapshots and pending probes are not reasons to warn.
+ */
+export function isTextGenerationSelectionUnusable(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+  selection: ModelSelection,
+): boolean {
+  const generator = textGeneratorForSelection(settings, selection.instanceId);
+  if (generator !== undefined) return !generator.enabled;
+  if (providers === undefined || providers.length === 0) return false;
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  if (provider === undefined || !provider.enabled) return true;
+  if (!resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId))
+    return true;
+  // A probe still running reports not installed without an error; its capabilities are not known yet.
+  if (!provider.installed && provider.status !== "error") return false;
+  return (
+    !provider.installed ||
+    provider.auth.status === "unauthenticated" ||
+    !isProviderAvailable(provider) ||
+    !isProviderTextGenerationCapable(provider) ||
+    provider.models.find((model) => model.slug === selection.model)?.supportsTextGeneration ===
+      false
+  );
+}
+
+export type TextGenerationPurpose =
+  | "titles"
+  | "summaries"
+  | "sourceControl"
+  | "reviewGuides"
+  | "transcripts";
+
+/**
+ * Purposes whose explicitly chosen model cannot run. Following the thread or another purpose's
+ * model is not listed. Summaries and transcript cleanup run without a project, so a project's
+ * provider switches do not apply to them.
+ */
+export function unusableTextGenerationPurposes(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+): ReadonlyArray<{ readonly purpose: TextGenerationPurpose; readonly selection: ModelSelection }> {
+  const own = followsThreadTextGeneration(settings) ? null : settings.textGenerationModelSelection;
+  const selections: ReadonlyArray<
+    readonly [TextGenerationPurpose, ModelSelection | null | undefined, ProjectId | null]
+  > = [
+    ["titles", own, projectId],
+    ["summaries", settings.incomingCardSummaries ? own : null, null],
+    ["sourceControl", settings.sourceControlWriterModelSelection, projectId],
+    ["reviewGuides", settings.reviewGuideModelSelection, projectId],
+    ["transcripts", settings.speechPostProcessingModelSelection, null],
+  ];
+  return selections.flatMap(([purpose, selection, scope]) =>
+    // Older servers omit settings they predate.
+    Predicate.isNotNullish(selection) &&
+    isTextGenerationSelectionUnusable(settings, providers, scope, selection)
+      ? [{ purpose, selection }]
+      : [],
+  );
+}
+
 export function resolveSourceControlWriterModelSelection(
   settings: ServerSettings,
   providers: ReadonlyArray<ServerProvider> | undefined,

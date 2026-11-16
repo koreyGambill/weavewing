@@ -25,7 +25,9 @@ import {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
   resolveSpeechPostProcessingModelSelection,
+  isTextGenerationSelectionUnusable,
   settingsForThread,
+  unusableTextGenerationPurposes,
 } from "./serverSettings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
@@ -1073,5 +1075,133 @@ describe("settingsForThread", () => {
 
   it("decodes settings that predate the flag as following the thread", () => {
     expect(decodeServerSettings({}).textGenerationFollowsThread).toBe(true);
+  });
+});
+
+describe("unusableTextGenerationPurposes", () => {
+  const codex = ProviderInstanceId.make("codex");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const snapshot = (
+    instanceId: ProviderInstanceId,
+    overrides: Partial<ServerProvider> = {},
+  ): ServerProvider => ({
+    instanceId,
+    driver: ProviderDriverKind.make(instanceId),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-16T00:00:00.000Z",
+    availability: "available",
+    models: [],
+    slashCommands: [],
+    skills: [],
+    ...overrides,
+  });
+  // Picking a model in Settings stops following the thread, even when it matches the default.
+  const chosenCodex = { ...DEFAULT_SERVER_SETTINGS, textGenerationFollowsThread: false };
+  const purposes = (
+    settings: ServerSettings,
+    providers: ReadonlyArray<ServerProvider> | undefined,
+    projectId: ProjectId | null = null,
+  ) => unusableTextGenerationPurposes(settings, providers, projectId).map((entry) => entry.purpose);
+  const ready = [snapshot(codex), snapshot(claude)];
+
+  it("names a chosen model whose agent failed its probe, is off, or is gone", () => {
+    expect(purposes(chosenCodex, ready)).toEqual([]);
+    for (const failed of [
+      snapshot(codex, { status: "error", installed: false }),
+      snapshot(codex, { status: "error", auth: { status: "unauthenticated" } }),
+      snapshot(codex, { enabled: false, status: "disabled", installed: false }),
+      snapshot(codex, { availability: "unavailable" }),
+      snapshot(codex, { supportsTextGeneration: false }),
+    ]) {
+      expect(purposes(chosenCodex, [failed, snapshot(claude)])).toEqual(["titles"]);
+    }
+    expect(purposes(chosenCodex, [snapshot(claude)])).toEqual(["titles"]);
+  });
+
+  it("never warns while text follows the thread", () => {
+    const noCodex = [snapshot(codex, { status: "error", installed: false }), snapshot(claude)];
+    expect(purposes({ ...DEFAULT_SERVER_SETTINGS, incomingCardSummaries: true }, noCodex)).toEqual(
+      [],
+    );
+  });
+
+  it("waits for snapshots and probes before warning", () => {
+    expect(purposes(chosenCodex, undefined)).toEqual([]);
+    expect(purposes(chosenCodex, [])).toEqual([]);
+    // Antigravity's first snapshot while it checks: not installed, no text generation yet.
+    const checking = snapshot(codex, {
+      status: "warning",
+      installed: false,
+      auth: { status: "unknown" },
+      supportsTextGeneration: false,
+    });
+    expect(
+      isTextGenerationSelectionUnusable(
+        chosenCodex,
+        [checking],
+        null,
+        chosenCodex.textGenerationModelSelection,
+      ),
+    ).toBe(false);
+    expect(purposes(chosenCodex, [{ ...checking, enabled: false }])).toEqual(["titles"]);
+  });
+
+  it("applies a project's provider switches only to jobs that run in the project", () => {
+    const projectId = ProjectId.make("project-a");
+    const haiku = createModelSelection(claude, "claude-haiku-5-5");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      textGenerationFollowsThread: false,
+      textGenerationModelSelection: haiku,
+      incomingCardSummaries: true,
+      speechPostProcessingModelSelection: haiku,
+      projectSettingsOverrides: {
+        [projectId]: { providerInstances: { [claude]: { enabled: false } } },
+      },
+    };
+    expect(purposes(settings, ready)).toEqual([]);
+    expect(purposes(settings, ready, projectId)).toEqual(["titles"]);
+  });
+
+  it("checks a text generator by its own switch, not by agent snapshots", () => {
+    const generator = ProviderInstanceId.make("openrouter");
+    const config = {
+      kind: "openaiCompatible" as const,
+      baseUrl: "https://openrouter.ai/api/v1",
+      enabled: true,
+    };
+    const settings = (enabled: boolean) =>
+      decodeServerSettings({
+        textGenerationFollowsThread: false,
+        textGenerationModelSelection: { instanceId: generator, model: "some/model" },
+        textGenerators: { [generator]: { ...config, enabled } },
+      });
+    expect(purposes(settings(true), ready)).toEqual([]);
+    expect(purposes(settings(false), ready)).toEqual(["titles"]);
+  });
+
+  it("lists summaries with the chosen model while on, and other jobs by their own model", () => {
+    const noCodex = [snapshot(codex, { status: "error", installed: false }), snapshot(claude)];
+    expect(purposes({ ...chosenCodex, incomingCardSummaries: true }, noCodex)).toEqual([
+      "titles",
+      "summaries",
+    ]);
+    const noClaude = [snapshot(codex), snapshot(claude, { status: "error", installed: false })];
+    const haiku = createModelSelection(claude, "claude-haiku-5-5");
+    expect(
+      purposes(
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          sourceControlWriterModelSelection: haiku,
+          reviewGuideModelSelection: haiku,
+          speechPostProcessingModelSelection: haiku,
+        },
+        noClaude,
+      ),
+    ).toEqual(["sourceControl", "reviewGuides", "transcripts"]);
   });
 });

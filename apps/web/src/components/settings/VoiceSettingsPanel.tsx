@@ -76,7 +76,7 @@ import { updateClientSettings, useClientSettings } from "../../hooks/useSettings
 import { runEnvironmentSpeech } from "../../speech/runEnvironmentSpeech";
 import {
   getTextGenerationModelOptionsByInstance,
-  resolveAppModelSelectionState,
+  resolveOwnModelSelectionState,
 } from "../../modelSelection";
 import { useTextGenerationTargets } from "../../textGenerators";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
@@ -138,6 +138,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
+import { useTextGenerationStatus } from "./TextGenerationWarnings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -524,14 +525,10 @@ function CleanupModelRow() {
   const instanceEntries = targets.entries;
   const hasProvider = instanceEntries.some((entry) => entry.enabled && entry.isAvailable);
   const dedicated = settings.speechPostProcessingModelSelection !== null;
-  const selection = resolveAppModelSelectionState(
-    {
-      ...settings,
-      textGenerationModelSelection: resolveSpeechPostProcessingModelSelection(
-        settings,
-        textGenerationProviders,
-      ),
-    },
+  const selection = resolveOwnModelSelectionState(
+    settings,
+    settings.speechPostProcessingModelSelection,
+    resolveSpeechPostProcessingModelSelection(settings, textGenerationProviders),
     textGenerationProviders,
   );
   const modelOptionsByInstance = getTextGenerationModelOptionsByInstance(
@@ -541,6 +538,17 @@ function CleanupModelRow() {
     selection.model,
   );
   const instanceEntry = instanceEntries.find((entry) => entry.instanceId === selection.instanceId);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Cleanup reads environment settings, so project overrides never decide its warning.
+  const status = useTextGenerationStatus(
+    "transcripts",
+    connectedEnvironments.flatMap((candidate) =>
+      candidate.serverConfig
+        ? [{ ...candidate, projectId: null, settings: candidate.serverConfig.settings }]
+        : [],
+    ),
+    hasProvider && instanceEntry ? () => setPickerOpen(true) : undefined,
+  );
   const modelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries, true);
   const setModel = (next: ReturnType<typeof createModelSelection>) => {
     const reason = modelDisabledReason(next.instanceId, next.model);
@@ -557,6 +565,7 @@ function CleanupModelRow() {
       {...searchableSetting("speech-post-processing-model")}
       title="Cleanup model"
       description="Model for transcript cleanup, such as a cheaper or faster one. When disabled, use the text generation model, which is the default thread model unless you chose one."
+      status={status}
       control={
         connectedEnvironments.length === 0 ? (
           <span className="text-sm text-muted-foreground">Connect an environment first.</span>
@@ -571,6 +580,8 @@ function CleanupModelRow() {
               <>
                 <ProviderModelPicker
                   environmentId={environment?.environmentId ?? null}
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
                   activeInstanceId={selection.instanceId}
                   model={selection.model}
                   lockedProvider={null}

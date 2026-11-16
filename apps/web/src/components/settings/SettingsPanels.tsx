@@ -59,6 +59,7 @@ import {
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { useTextGenerationStatus } from "./TextGenerationWarnings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { TileLayoutsRow } from "./TileLayoutsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
@@ -1676,7 +1677,8 @@ export function ThreadsSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
-  const { environment, connectedEnvironments, target, scope } = useSettingsScope();
+  const { environment, connectedEnvironments, target, targets, scope } = useSettingsScope();
+  const [textGenPickerOpen, setTextGenPickerOpen] = useState(false);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const environmentId = environment?.environmentId ?? null;
   const hasServerTargets = connectedEnvironments.length > 0;
@@ -1737,6 +1739,11 @@ export function ThreadsSettingsPanel() {
     "textGenerationModelSelection",
     "textGenerationFollowsThread",
   ]);
+  const chooseTextGenModel = hasTextGenerationProvider
+    ? () => setTextGenPickerOpen(true)
+    : undefined;
+  const titlesStatus = useTextGenerationStatus("titles", targets, chooseTextGenModel);
+  const summariesStatus = useTextGenerationStatus("summaries", targets, chooseTextGenModel);
 
   return (
     <SettingsPageContainer>
@@ -1954,6 +1961,7 @@ export function ThreadsSettingsPanel() {
           settingKeys={["textGenerationModelSelection", "textGenerationFollowsThread"]}
           {...searchableSetting("text-generation-model")}
           description="For thread titles and other generated text. By default each thread's own model writes its text. Source control has its own setting. Text generators from Providers also appear here."
+          status={titlesStatus}
           resetAction={
             hasServerTargets && isTextGenerationModelDirty ? (
               <SettingResetButton
@@ -1981,6 +1989,8 @@ export function ThreadsSettingsPanel() {
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <ProviderModelPicker
                   environmentId={environmentId}
+                  open={textGenPickerOpen}
+                  onOpenChange={setTextGenPickerOpen}
                   activeInstanceId={textGenInstanceId}
                   model={textGenModel}
                   lockedProvider={null}
@@ -2065,6 +2075,7 @@ export function ThreadsSettingsPanel() {
           settingKeys={["incomingCardSummaries"]}
           {...searchableSetting("incoming-card-summaries")}
           description="The receiving thread's model writes one line for long messages from other threads, delegated tasks and scheduled tasks, up to 100 a day. Off shows each message's first line."
+          status={summariesStatus}
           resetAction={
             settings.incomingCardSummaries !== DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries ? (
               <SettingResetButton
