@@ -274,7 +274,10 @@ function workEntryFallbackIconPresentation(
     case "fork":
       return { iconName: "zap", label: "Forked thread" };
     case "system_notice":
-      return workLogIcons.warning;
+      return workEntry.structuredPayload?.type === "system_notice" &&
+        workEntry.structuredPayload.level === "info"
+        ? { iconName: "zap", label: "Notice" }
+        : workLogIcons.warning;
     case "run_interrupt_request":
       return { iconName: "stop", label: "Stop request" };
     case "run_interrupt_result":
@@ -760,6 +763,7 @@ function summaryActionPriority(action: ToolGroupAction | T3McpToolSummaryAction)
     case "project-delete":
     case "project-clone":
     case "environment-update":
+    case "theme-set":
     case "attachment-prepare":
     case "attachment-discard":
     case "attachment-send":

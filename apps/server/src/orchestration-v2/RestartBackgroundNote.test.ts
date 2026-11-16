@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import {
   cancelledRosterTaskWork,
   delegatedTaskResultRun,
+  delegatedTaskRuns,
   cancelledTurnItemWork,
   isAwaitedWork,
   isRestartNoteContinuation,
@@ -289,7 +290,9 @@ it("tracks a delegated task through its merged run while ignoring held and cance
     status: "cancelled",
     startedAt: null,
   });
-  assert.equal(delegatedTaskResultRun([merged, target, held, cancelled], taskId), target);
+  const resultRun = (runs: ReadonlyArray<typeof target>) =>
+    delegatedTaskResultRun(delegatedTaskRuns({ runs, messages: [] }, taskId));
+  assert.equal(resultRun([merged, target, held, cancelled]), target);
   const completed = { ...target, status: "completed" as const };
-  assert.equal(delegatedTaskResultRun([merged, completed, held, cancelled], taskId), completed);
+  assert.equal(resultRun([merged, completed, held, cancelled]), completed);
 });

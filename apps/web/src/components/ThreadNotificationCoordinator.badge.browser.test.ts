@@ -479,7 +479,7 @@ it.each([false, true])(
     expect(state.glyph).toHaveBeenCalledTimes(1);
   },
 );
-it("opening a thread closes only its in-app toasts, and disabling notifications closes the rest", async () => {
+it("opening a thread or removing its environment closes only its in-app toasts, and disabling notifications closes the rest", async () => {
   await using app = setup();
   state.inApp = true;
   focused = true;
@@ -505,11 +505,11 @@ it("opening a thread closes only its in-app toasts, and disabling notifications 
   app.openThread("one", "thread");
   expect(state.closeToast.mock.calls).toEqual([["one-completed"], ["one-approval"]]);
 
+  app.setEnvironmentIds(["one"]);
+  expect(state.closeToast.mock.calls.slice(2)).toEqual([["two-completed"]]);
+
   state.mode = "off";
   state.inApp = false;
   app.changeSettings();
-  expect(state.closeToast.mock.calls.slice(2).flat().toSorted()).toEqual([
-    "one-other",
-    "two-completed",
-  ]);
+  expect(state.closeToast.mock.calls.slice(3)).toEqual([["one-other"]]);
 });

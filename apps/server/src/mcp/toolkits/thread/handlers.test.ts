@@ -209,7 +209,8 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
     expect(JSON.stringify((yield* notify({ title: "x", threadId: "missing" })).content)).toContain(
       "thread was not found",
     );
-    expect((yield* notify({ title: "x" }, false)).isError).toBe(true);
+    // An outside client is not offered the tool at all.
+    expect((yield* Effect.flip(notify({ title: "x" }, false))).message).toContain("not found");
     const muted = yield* notify({ title: "x" }, true, ThreadId.make("notify-muted"));
     expect(JSON.stringify(muted.content)).toContain("turn notifications off");
     const runNow = yield* server

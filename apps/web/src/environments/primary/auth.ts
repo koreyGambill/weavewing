@@ -1,6 +1,7 @@
 import type {
   AuthBrowserSessionResult,
   AuthClientMetadata,
+  AuthConnectDeviceRequest,
   AuthEnvironmentScope,
   ServerAuthSessionMethod,
   AuthSessionId,
@@ -110,6 +111,7 @@ export interface ServerPairingLinkRecord {
   readonly label?: string;
   readonly createdAt: string;
   readonly expiresAt: string;
+  readonly connectDeviceRequest?: AuthConnectDeviceRequest;
 }
 
 export interface ServerClientSessionRecord {
@@ -149,7 +151,7 @@ export function stripPairingTokenFromUrl() {
   if (next.toString() === url.toString()) {
     return;
   }
-  window.history.replaceState({}, document.title, next.toString());
+  window.history.replaceState(window.history.state, document.title, next.toString());
 }
 
 export function takePairingTokenFromUrl(): string | null {
@@ -204,6 +206,7 @@ function readEnvironmentHttpErrorStatus(error: EnvironmentHttpCommonErrorType): 
       return 401;
     case "EnvironmentScopeRequiredError":
     case "EnvironmentOperationForbiddenError":
+    case "EnvironmentConnectApprovalPendingError":
       return 403;
     case "EnvironmentResourceNotFoundError":
       return 404;
@@ -293,6 +296,7 @@ export function isTransientBootstrapError(error: unknown): boolean {
   if (isPrimaryEnvironmentRequestError(error)) {
     return (
       TRANSIENT_BOOTSTRAP_STATUS_CODES.has(error.status) ||
+      isTransportError(error.cause) ||
       (HttpClientError.isHttpClientError(error.cause) && error.cause.response === undefined) ||
       error.cause instanceof TypeError
     );
@@ -303,6 +307,10 @@ export function isTransientBootstrapError(error: unknown): boolean {
   }
 
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function isTransportError(error: unknown): boolean {
+  return HttpClientError.isHttpClientError(error) && error.reason._tag === "TransportError";
 }
 
 async function bootstrapServerAuth(urlCredential: string | null): Promise<ServerAuthGateState> {
