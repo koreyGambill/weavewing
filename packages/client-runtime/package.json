@@ -7,6 +7,10 @@
       "types": "./src/threadGlyphs.ts",
       "default": "./src/threadGlyphs.ts"
     },
+    "./pull-request-diff-fold": {
+      "types": "./src/pullRequestDiffFold.ts",
+      "default": "./src/pullRequestDiffFold.ts"
+    },
     "./assembly-highlighting": {
       "types": "./src/assemblyHighlighting.ts",
       "default": "./src/assemblyHighlighting.ts"
