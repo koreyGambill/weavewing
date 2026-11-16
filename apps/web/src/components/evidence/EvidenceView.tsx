@@ -1,13 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type {
-  EnvironmentId,
-  EvidenceChange,
-  EvidenceChangeQa,
-  EvidenceLandingSummary,
-  EvidenceListInput,
-  ScopedThreadRef,
-  ThreadId,
+import {
+  MessageId,
+  type EnvironmentId,
+  type EvidenceChange,
+  type EvidenceChangeQa,
+  type EvidenceLandingSummary,
+  type EvidenceListInput,
+  type ScopedThreadRef,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -29,6 +30,7 @@ import { useAssetUrlState } from "../../assets/assetUrls";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { messageRevealNavigation } from "../../lib/assistantCitationNavigation";
 import { cn } from "../../lib/utils";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironmentShellStatus } from "../../state/shell";
@@ -423,10 +425,13 @@ function ChangeRow({
             variant="link"
             size="micro"
             onClick={() =>
-              void navigate({
-                to: "/$environmentId/$threadId",
-                params: { environmentId, threadId: change.askRef!.threadId },
-              })
+              void navigate(
+                messageRevealNavigation(
+                  environmentId,
+                  change.askRef!.threadId,
+                  MessageId.make(change.askRef!.messageId),
+                ),
+              )
             }
           >
             <ArrowUpRightIcon />
