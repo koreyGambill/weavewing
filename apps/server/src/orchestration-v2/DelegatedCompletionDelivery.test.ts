@@ -4666,7 +4666,8 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           );
           const followup = childTasks.find((task) => task.id === followupTaskId);
           assert.equal(followup?.status, "completed");
-          assert.equal(followup?.result, "FINAL CHECK-OK");
+          // The wake that ends the task keeps the child's earlier report ahead of its own.
+          assert.equal(followup?.result, "INTERIM\n\nFINAL CHECK-OK");
         }),
     );
 

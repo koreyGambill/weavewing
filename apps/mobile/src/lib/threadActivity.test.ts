@@ -52,7 +52,7 @@ it.each(["info", "warning", "error", undefined] as const)(
     const activity = buildThreadFeed([projected(item, 0)]).flatMap((entry) =>
       entry.type === "activity-group" ? entry.activities : [],
     )[0];
-    expect(activity?.icon).toBe(level === "info" ? "zap" : "warning");
+    expect(activity?.icon.iconName).toBe(level === "info" ? "zap" : "warning");
     expect(activity?.summary).toBe(item.message);
   },
 );

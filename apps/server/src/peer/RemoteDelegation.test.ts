@@ -1938,6 +1938,26 @@ it.effect("a follower that keeps hitting defects fails the task and wakes the pa
       expect(task?.status).toBe("failed");
       expect(task?.result).toContain(delegated.remoteChild.threadId);
       expect(task?.result).not.toContain("defect-detail-4f1c9e");
+      // The parent's live run claims the result; its wake is offered once that run ends.
+      const parentRun = (yield* a.orchestrator.getThreadProjection(parentThreadId)).runs.find(
+        (run) => run.id === parentRunId,
+      );
+      if (parentRun === undefined) return yield* Effect.die("The parent run was not seeded.");
+      const now = yield* DateTime.now;
+      yield* a.sink.write({
+        commandId: CommandId.make("command:finish:laptop-parent"),
+        events: [
+          {
+            id: EventId.make("event:finish:laptop-parent"),
+            type: "run.updated",
+            threadId: parentThreadId,
+            runId: parentRunId,
+            providerInstanceId: instanceId,
+            occurredAt: now,
+            payload: { ...parentRun, status: "completed", completedAt: now },
+          },
+        ],
+      });
       const offered = yield* SubscriptionRef.changes(offers).pipe(
         Stream.filter((seen) => seen.some((offer) => offer.threadId === parentThreadId)),
         Stream.runHead,
