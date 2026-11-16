@@ -498,8 +498,7 @@ function TelemetryNotice({ environmentId }: { readonly environmentId: Environmen
   const telemetryOff = managedTelemetryOffMessage(useManagedPolicy(environmentId));
   return (
     <p className="mt-auto pt-12 text-2xs leading-relaxed text-muted-foreground/70">
-      {telemetryOff ?? "Weavewing collects anonymous usage data to improve the app."}{" "}
-      {telemetryOff === undefined ? "To opt out, see the" : "See the"}{" "}
+      {telemetryOff ?? "Weavewing sends no usage data."} See the{" "}
       <a
         className="underline decoration-current/40 underline-offset-2 hover:text-muted-foreground"
         href={PRIVACY_POLICY_URL}
