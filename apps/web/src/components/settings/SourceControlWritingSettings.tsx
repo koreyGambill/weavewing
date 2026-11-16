@@ -336,7 +336,7 @@ export function SourceControlWritingSettingsSection() {
             serverScoped
             settingKeys={["reviewGuideModelSelection"]}
             {...searchableSetting("review-guide-model")}
-            description="Must be a coding agent: it reads the pull request over many steps. Off uses the writer model, or Codex or Claude if that model is a text generator."
+            description="Must be a coding agent: it reads the pull request over many steps. Off uses the writer model, or the text generation model (the thread's own by default). A text generator cannot write a guide, so pick Codex or Claude here in that case."
             control={
               !hasServerTargets ? (
                 <span className="text-sm text-muted-foreground">
@@ -399,8 +399,10 @@ export function SourceControlWritingSettingsSection() {
                       }
                     />
                   ) : null}
-                  {followsThread && !usesReviewGuideModel ? (
-                    <span className="text-sm text-muted-foreground">Same as the thread</span>
+                  {!usesReviewGuideModel && (usesDedicatedModel || followsThread) ? (
+                    <span className="text-sm text-muted-foreground">
+                      {usesDedicatedModel ? "Same as the writer model" : "Same as the thread"}
+                    </span>
                   ) : null}
                   <Switch
                     mixed={mixedReviewGuideModel}
