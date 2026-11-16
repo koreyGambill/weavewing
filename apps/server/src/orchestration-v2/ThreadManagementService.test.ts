@@ -77,6 +77,7 @@ it("stamps authoritative provenance on commands that create threads or messages"
     // A client's message goes through intake; only the server folds one into the creation.
     initialMessage: {
       messageId: MessageId.make("message:thread-management:forged"),
+      origin: { kind: "user" as const },
       text: "Forged",
       attachments: [],
     },
@@ -99,7 +100,7 @@ it("stamps authoritative provenance on commands that create threads or messages"
         type: "message.dispatch",
         origin: { kind: "user" as const },
         commandId: CommandId.make("command:forged-reply"),
-        threadId: command.threadId,
+        threadId: ThreadId.make("thread:thread-management:create"),
         messageId: MessageId.make("message:forged-reply"),
         senderThreadId: ThreadId.make("thread:forged-sender"),
         replyRequested: true,

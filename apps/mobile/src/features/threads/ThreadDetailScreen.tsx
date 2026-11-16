@@ -202,7 +202,6 @@ import {
   COMPOSER_COLLAPSED_CHROME,
   THREAD_COMPOSER_BOTTOM_GUTTER,
   ThreadComposer,
-  type ThreadComposerProps,
 } from "./ThreadComposer";
 import { ComposerPopoverHost } from "./ComposerPopoverHost";
 import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
@@ -1873,7 +1872,6 @@ function ThreadDetailBody(
                         connectionState={props.connectionStateLabel}
                         environmentLabel={props.environmentLabel}
                         selectedThread={props.selectedThread}
-                        compactBeforeSend={props.compactBeforeSend ?? null}
                         hasCompactableConversation={
                           hasCompactableConversation && !props.isCompacting
                         }

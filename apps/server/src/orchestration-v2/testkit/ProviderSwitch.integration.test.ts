@@ -3394,6 +3394,7 @@ describe("orchestration v2 provider switching", () => {
           const send = (ordinal: number, modelSelection: ModelSelection) =>
             orchestrator.dispatch({
               type: "message.dispatch",
+              origin: { kind: "user" as const },
               createdBy: "user",
               creationSource: "web",
               commandId: CommandId.make(`command:retained-session-background:${ordinal}`),
@@ -4852,6 +4853,7 @@ describe("orchestration v2 provider switching", () => {
           const send = (threadId: ThreadId, name: string, modelSelection: ModelSelection) =>
             orchestrator.dispatch({
               type: "message.dispatch",
+              origin: { kind: "user" as const },
               createdBy: "user",
               creationSource: "web",
               commandId: CommandId.make(`command:fork-switch-history:${key}:${name}`),

@@ -2775,7 +2775,7 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.serverGetSettings]: (_input) =>
           Effect.map(serverSettings.getSettings, (settings) =>
-            ServerSettings.redactServerSettingsForClient(settings, settingsClient),
+            ServerSettings.redactServerSettingsForClient(settings, client),
           ),
         [WS_METHODS.serverUpdateSettings]:
           /* Request instrumentation already owns the span; keep this helper in that context. */

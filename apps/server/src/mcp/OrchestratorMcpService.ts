@@ -3625,6 +3625,14 @@ const make = Effect.gen(function* () {
                   ? undefined
                   : {
                       senderThreadId: scope.thread.threadId,
+                      origin: {
+                        kind: "thread" as const,
+                        event: "message" as const,
+                        reply: "not expected" as const,
+                        title: parent.thread.title,
+                        threadId: parent.thread.id,
+                        environmentId: scope.environmentId,
+                      },
                       messageId: stableMessageId({
                         scope,
                         requestKey: key,
@@ -3673,14 +3681,6 @@ const make = Effect.gen(function* () {
                   .dispatch({
                     ...initialMessage,
                     type: "message.dispatch",
-                    origin: {
-                      kind: "thread",
-                      event: "message",
-                      reply: "not expected",
-                      title: parent.thread.title,
-                      threadId: parent.thread.id,
-                      environmentId: scope.environmentId,
-                    },
                     createdBy: "agent",
                     creationSource: "mcp",
                     commandId: stableCommandId({

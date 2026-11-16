@@ -2,6 +2,7 @@ import {
   ClientSettingsSchema,
   type ClientSettingsPatch,
   type EnvironmentId,
+  globalIdleCompaction,
   idleCompactionPatch,
   isNullableProjectSettingsOverride,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,

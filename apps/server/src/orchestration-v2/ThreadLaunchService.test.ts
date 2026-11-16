@@ -19,7 +19,6 @@ import * as DevelopmentEnvironmentCheckouts from "../developmentEnvironments/Dev
 import { assert, it, vi } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
-  EnvironmentId,
   ChatAttachmentId,
   ComposerContextId,
   type ChatAttachment,
@@ -1205,6 +1204,38 @@ it.effect("launches a worktree request for Scratch at the root, in its own folde
         thread: "thread:launch:scratch-worktree",
         message: "Tidy my notes",
         workspace: worktreeStrategy,
+      }),
+    );
+    const scratch = yield* preparationSettled(launched.threadId);
+    assert.equal(scratch.thread.worktreePath, "/scratch/folder-1");
+    // Released past preparation; provider execution is disabled here.
+    assert.equal(scratch.runs[0]?.status, "starting");
+    assert.deepEqual(scratch.runs[0]?.workspacePreparation, {
+      type: "existing_worktree",
+      worktreePath: "/scratch/folder-1",
+    });
+    assert.equal(harness.runSetup.mock.calls[0]?.[0]?.worktreePath, "/scratch/folder-1");
+    assert.equal(harness.createWorktree.mock.calls.length, 0);
+
+    // A Git project still gets the worktree it asked for.
+    const other = yield* launches.launch({
+      ...launchInput({
+        command: "command:launch:git-worktree",
+        thread: "thread:launch:git-worktree",
+        message: "Build the feature",
+        workspace: worktreeStrategy,
+      }),
+      projectId: otherProjectId,
+    });
+    const git = yield* preparationSettled(other.threadId);
+    assert.equal(git.runs[0]?.status, "starting");
+    assert.equal(git.runs[0]?.workspacePreparation?.type, "worktree");
+    assert.equal(git.thread.worktreePath, "/other-repo-worktrees/feature");
+    assert.equal(harness.createWorktree.mock.calls[0]?.[0]?.cwd, "/other-repo");
+    assert.deepEqual(harness.claimed, [launched.threadId]);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("launches into a resolved Xwing checkout without creating or setting it up", () => {
   const harness = scratchHarness();
   return Effect.gen(function* () {
@@ -1346,38 +1377,6 @@ it.effect(
     );
   },
 );
-
-      }),
-    );
-    const scratch = yield* preparationSettled(launched.threadId);
-    assert.equal(scratch.thread.worktreePath, "/scratch/folder-1");
-    // Released past preparation; provider execution is disabled here.
-    assert.equal(scratch.runs[0]?.status, "starting");
-    assert.deepEqual(scratch.runs[0]?.workspacePreparation, {
-      type: "existing_worktree",
-      worktreePath: "/scratch/folder-1",
-    });
-    assert.equal(harness.runSetup.mock.calls[0]?.[0]?.worktreePath, "/scratch/folder-1");
-    assert.equal(harness.createWorktree.mock.calls.length, 0);
-
-    // A Git project still gets the worktree it asked for.
-    const other = yield* launches.launch({
-      ...launchInput({
-        command: "command:launch:git-worktree",
-        thread: "thread:launch:git-worktree",
-        message: "Build the feature",
-        workspace: worktreeStrategy,
-      }),
-      projectId: otherProjectId,
-    });
-    const git = yield* preparationSettled(other.threadId);
-    assert.equal(git.runs[0]?.status, "starting");
-    assert.equal(git.runs[0]?.workspacePreparation?.type, "worktree");
-    assert.equal(git.thread.worktreePath, "/other-repo-worktrees/feature");
-    assert.equal(harness.createWorktree.mock.calls[0]?.[0]?.cwd, "/other-repo");
-    assert.deepEqual(harness.claimed, [launched.threadId]);
-  }).pipe(Effect.provide(harness.layer));
-});
 
 it.effect.each([true, false])(
   "stores a non-Git scheduled task at the root and keeps worktrees elsewhere (Scratch: %s)",
@@ -2382,7 +2381,7 @@ it.effect(
         });
         yield* threads.dispatch({
           type: "message.dispatch",
-        origin: { kind: "user" as const },
+          origin: { kind: "user" as const },
           commandId: CommandId.make(`${input.commandId}:initial-message`),
           threadId: input.threadId,
           messageId,

@@ -1947,6 +1947,7 @@ it.effect("starts and finishes a delegated task without reading the parent's his
     });
     yield* orchestrator.dispatch({
       type: "message.dispatch",
+      origin: { kind: "user" as const },
       commandId: CommandId.make("start-long-parent"),
       threadId: parentThreadId,
       messageId: MessageId.make("message:long-parent"),

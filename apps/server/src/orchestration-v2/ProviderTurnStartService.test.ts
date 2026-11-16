@@ -71,6 +71,7 @@ import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as MessageSummaryService from "./MessageSummaryService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -1420,6 +1421,7 @@ function layerStartEffectWorker(
         Layer.mock(CheckpointRollbackService.CheckpointRollbackServiceV2)({}),
         Layer.mock(RuntimeRequestService.RuntimeRequestServiceV2)({}),
         Layer.mock(ThreadTitleRegenerationService.ThreadTitleRegenerationService)({}),
+        Layer.mock(MessageSummaryService.MessageSummaryService)({}),
         Layer.mock(ThreadManagementService.ThreadManagementService)({}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
         ServerSettings.layerTest(),

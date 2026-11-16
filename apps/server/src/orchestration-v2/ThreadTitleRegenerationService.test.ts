@@ -365,6 +365,7 @@ describe("ThreadTitleRegenerationService", () => {
           const requestId = CommandId.make(`command:title:${key}:message`);
           yield* threads.dispatch({
             type: "message.dispatch",
+            origin: { kind: "user" as const },
             commandId: requestId,
             threadId,
             messageId: MessageId.make(`command:title:${key}:message:message`),

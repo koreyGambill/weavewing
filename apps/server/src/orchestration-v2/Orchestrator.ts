@@ -15595,7 +15595,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
       const parentNode = parentTask.nodes.find((candidate) => candidate.id === task.id);
       const parentTurnItem = parentTask.turnItems.find(
-        (candidate) => candidate.type === "subagent" && candidate.subagentId === task.id,
+        (candidate): candidate is Extract<OrchestrationV2TurnItem, { type: "subagent" }> =>
+          candidate.type === "subagent" && candidate.subagentId === task.id,
       );
       const updatedTask: OrchestrationV2Subagent = {
         ...task,
@@ -15752,7 +15753,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const { contextTransfers } = yield* projectionStore.getThreadRecords(childThreadId, [
       "contextTransfers",
     ]);
-    const resultTransfers = [...parent.contextTransfers];
+    // The child's own transfers hold every result it sent, far fewer than the parent's.
+    const resultTransfers = [...contextTransfers];
     for (const task of parent.subagents) {
       // A cancelled task does not wait for the work its cancel is stopping.
       const cancelled = task.cancelledRunId !== undefined;

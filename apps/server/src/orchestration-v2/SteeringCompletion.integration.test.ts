@@ -1776,6 +1776,7 @@ it.effect.each(declinedSteerTimings)(
           beforeDecline = orchestrator
             .dispatch({
               type: "message.dispatch",
+              origin: { kind: "user" as const },
               commandId: CommandId.make("steer-second"),
               threadId,
               messageId: MessageId.make("message:steer-second"),
