@@ -47,6 +47,8 @@ const SESSION_LOSS_RETRY_DELAY_MS = 250;
 const APPROVAL_PENDING_RETRY_DELAY_MS = 4_000;
 // A request lives 10 minutes; past that nobody is approving, so a forgotten device backs off.
 const APPROVAL_PENDING_FAST_RETRIES = 150;
+// A forgotten device has no restart to recover from quickly, so it climbs past the 5 s ceiling.
+const APPROVAL_EXPIRED_MAX_DELAY_MS = 300_000;
 // A cold server with a large database can take longer than 15 seconds to
 // answer, and that is not a reason to drop a working connection.
 const CONNECTION_ESTABLISHMENT_TIMEOUT = "15 seconds";
@@ -152,8 +154,12 @@ export interface EnvironmentSupervisorOptions {
   }) => Effect.Effect<Option.Option<ConnectionCatalogEntry>>;
 }
 
-function retryDelayMs(failureCount: number, random: number): number {
-  const ceiling = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** (failureCount + 1));
+function retryDelayMs(
+  failureCount: number,
+  random: number,
+  maxDelayMs: number = RETRY_MAX_DELAY_MS,
+): number {
+  const ceiling = Math.min(maxDelayMs, RETRY_BASE_DELAY_MS * 2 ** (failureCount + 1));
   return Math.round(ceiling / 2 + (ceiling / 2) * random);
 }
 
@@ -1245,7 +1251,11 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           : error.reason === "approval-pending"
             ? Math.max(
                 APPROVAL_PENDING_RETRY_DELAY_MS,
-                retryDelayMs(backoffFailures - 1, yield* Random.next),
+                retryDelayMs(
+                  backoffFailures - 1,
+                  yield* Random.next,
+                  APPROVAL_EXPIRED_MAX_DELAY_MS,
+                ),
               )
             : retryDelayMs(backoffFailures - 1, yield* Random.next);
       pendingRetry = Option.map(attemptSpan, (previousAttempt) => ({

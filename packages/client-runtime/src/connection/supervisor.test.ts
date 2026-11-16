@@ -576,10 +576,11 @@ describe("EnvironmentSupervisor", () => {
         delays.push(delay);
         yield* TestClock.adjust(delay);
       }
-      // Ten minutes of 4 s checks, then backoff that never polls faster than that, up to the
-      // fork's 5 s retry ceiling.
+      // Ten minutes of 4 s checks, then backoff that never polls faster than that and climbs
+      // past the 5 s ceiling of ordinary connection failures.
       expect(delays.slice(0, 150).every((delay) => delay === 4_000)).toBe(true);
-      expect(delays.slice(150).every((delay) => delay >= 4_000 && delay <= 5_000)).toBe(true);
+      expect(delays.slice(150).every((delay) => delay >= 4_000)).toBe(true);
+      expect(delays.at(-1)).toBeGreaterThanOrEqual(32_000);
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
