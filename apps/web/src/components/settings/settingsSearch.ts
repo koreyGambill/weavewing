@@ -777,7 +777,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "auto-load-remote-media",
     title: "Load remote images automatically",
-    to: "/settings/chat",
+    to: "/settings/privacy",
     environmentOnly: true,
     searchTerms: ["privacy chat content external images video audio media click consent"],
   },

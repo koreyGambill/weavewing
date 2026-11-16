@@ -8,6 +8,7 @@ import { useCloudLinkState } from "~/cloud/cloudLinkState";
 import { useEnvironment } from "~/state/environments";
 import { Button } from "../ui/button";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
+import { RemoteMediaSettingsRow } from "./RemoteMediaSettingsRow";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
@@ -69,6 +70,7 @@ export function PrivacySettings({
   const relay = useCloudLinkState(environmentId);
   const remote =
     networkAccessible || environment?.serverConfig?.settings.tailnetConnect.enabled === true;
+  const remoteMedia = environment?.serverConfig?.settings.autoLoadRemoteMedia === true;
   const relayState = !hasCloudPublicConfig()
     ? "Not in this build"
     : relay.data === null
@@ -81,6 +83,9 @@ export function PrivacySettings({
   return (
     <>
       {children}
+      <SettingsSection id="chat-content" title="Chat content">
+        <RemoteMediaSettingsRow />
+      </SettingsSection>
       <SettingsSection {...searchableSetting("what-weavewing-sends")}>
         <SettingsRow
           title="Your providers"
@@ -127,8 +132,8 @@ export function PrivacySettings({
           description="No analytics, no crash reports, no favicon lookups."
         />
         <SettingsRow
-          title="Remote routes"
-          description={`Remote devices: ${remote ? "On" : "Off"}. T3 Connect: ${relayState}.`}
+          title="Off unless you turn it on"
+          description={`Remote devices: ${remote ? "On" : "Off"}. T3 Connect: ${relayState}. Remote images: ${remoteMedia ? "On" : "Off"}.`}
         />
       </SettingsSection>
     </>

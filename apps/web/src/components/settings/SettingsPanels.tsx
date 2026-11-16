@@ -1,6 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
 import { NotificationSettings } from "./NotificationSettings";
-import { RemoteMediaSettingsRow } from "./RemoteMediaSettingsRow";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
 import { msg, T, useGT, useMessages } from "gt-react";
@@ -1181,9 +1180,6 @@ export function ChatSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="chat-content" title="Chat content">
-        <RemoteMediaSettingsRow />
-      </SettingsSection>
       <SettingsSection id="composer" title="Composer">
         <SettingsRow
           {...searchableSetting("composer-rich-text")}
