@@ -49,7 +49,7 @@ names, activity status, and environment and thread identifiers to the T3 Connect
 [mobile notifications and live activities](./mobile-notifications.md). This is separate from
 product events and relay diagnostics. The telemetry opt-out does not disable it.
 
-To stop publishing, turn off **Publish agent activity** under **Settings > Sharing & access** on
+To stop publishing, turn off **Publish agent activity** under **Settings > Privacy** on
 the host. Turning off notifications on a phone controls that phone's alerts, not the host's
 publishing setting.
 

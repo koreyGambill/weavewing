@@ -35,9 +35,9 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   },
   {
     id: "network-access",
-    title: "Network access",
-    to: "/settings/access",
-    searchTerms: ["remote pairing backend"],
+    title: "Allow remote devices",
+    to: "/settings/privacy",
+    searchTerms: ["network remote pairing backend"],
   },
   {
     id: "providers",
@@ -61,7 +61,7 @@ describe("searchSettings", () => {
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("sharing", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
+    expect(searchSettings("privacy", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
     expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
     expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     const spanish = (message: string) => (message === "Word wrap" ? "Ajuste de línea" : message);
@@ -380,7 +380,19 @@ describe("movedSettingsPath", () => {
       "/settings/worktrees",
     );
     expect(movedSettingsPath("/settings/appearance", "diff-color-scheme")).toBe("/settings/diffs");
-    expect(movedSettingsPath("/settings/connections", "network-access")).toBe("/settings/access");
+    expect(movedSettingsPath("/settings/connections", "network-access")).toBe("/settings/privacy");
+    for (const id of [
+      "network-access",
+      "tailscale-https",
+      "tailnet-pairing",
+      "t3-connect",
+      "publish-agent-activity",
+      "connect-device-approval",
+      "hold-webhooks-while-offline",
+    ]) {
+      expect(movedSettingsPath("/settings/access", id)).toBe("/settings/privacy");
+    }
+    expect(movedSettingsPath("/settings/about", "mobile-app")).toBe("/settings/privacy");
     expect(movedSettingsPath("/settings/storage", "storage-worktrees")).toBe("/settings/worktrees");
     expect(movedSettingsPath("/settings/storage", "")).toBe("/settings/maintenance");
     expect(movedSettingsPath("/settings/integrations", "devices")).toBe("/settings/devices");

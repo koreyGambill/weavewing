@@ -7,7 +7,7 @@ machine. That machine must stay running and reachable while you work.
 
 T3 Connect makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
-Sharing & access**, sign in, and enable **T3 Connect** for that environment.
+Privacy**, sign in, and enable **T3 Connect** for that environment.
 
 For a command-line host, run:
 
@@ -42,7 +42,7 @@ disconnect an otherwise healthy conversation.
 
 By default, any device signed in to your T3 Connect account can open a linked
 machine. To require approval instead, turn on **Require approval for new
-devices** with the T3 Connect settings in **Settings → Sharing & access** on the
+devices** with the T3 Connect settings in **Settings → Privacy** on the
 host, or when you first set up T3 Connect. Then someone who takes over your T3
 Connect account cannot reach the machine from a new device without your
 approval. Review the devices that are already approved, described below.
@@ -92,9 +92,9 @@ cannot add more until you are under the limit again.
 
 Use direct pairing when the other device can reach the host's network address.
 
-On a desktop host, open **Settings → Sharing & access**, enable **Network access**,
+On a desktop host, open **Settings → Privacy**, enable **Allow remote devices**,
 then create a pairing link using an address the other device can reach. Changing
-network access restarts the desktop app. You can turn it off in the same place.
+**Allow remote devices** restarts the desktop app. You can turn it off in the same place.
 
 For a command-line host, choose the local network in `t3 up`, or run:
 
@@ -148,7 +148,7 @@ machine's current LAN and Tailscale addresses and adds them as routes, so
 pairing once through T3 Connect is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
-address to be learned: **Network access** in the desktop app, or the
+address to be learned: **Allow remote devices** in Settings → Privacy in the desktop app, or the
 [local network](./background-service.md#local-network-access) choice in `t3 up`.
 You can reorder a learned route, but not remove it; it
 goes away with the route it was learned through, or when the machine stops
@@ -205,7 +205,7 @@ Mobile keeps its manual environment selection.
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Sharing & access**. Turn it off there to remove that route.
+HTTPS** in **Settings → Privacy**. Turn it off there to remove that route.
 
 Your tailnet needs MagicDNS and HTTPS certificates enabled; see
 [Tailscale's HTTPS setup](https://tailscale.com/docs/how-to/set-up-https-certificates).
@@ -240,7 +240,7 @@ If that port is already in use, choose another with
 ### Pair from your tailnet without copying codes
 
 Each machine can serve a pairing page to your own Tailscale devices. Turn on
-**Tailnet pairing** in **Settings → Sharing & access** for every machine you want
+**Tailnet pairing** in **Settings → Privacy** for every machine you want
 to reach. On your phone or laptop, open and bookmark
 `http://<tailnet-ip>:<port>/tailnet`, for example
 `http://100.101.102.103:3773/tailnet`. The full MagicDNS name, such as
@@ -522,7 +522,7 @@ page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped. When T3 Connect rejects a host's link, the host
 shows that it was removed from T3 Connect. To link it again, turn on
-**T3 Connect** in **Settings → Sharing & access** on a desktop host, or run
+**T3 Connect** in **Settings → Privacy** on a desktop host, or run
 `t3 connect link` on a command-line host and then restart T3 Code there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `t3 connect unlink` on that host to keep it off.

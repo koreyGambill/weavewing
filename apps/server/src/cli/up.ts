@@ -93,8 +93,8 @@ const readSetup = Effect.fn("cli.up.read_setup")(function* () {
 
 /**
  * The routes `t3 up` starts from. With no route flag it asks about every
- * route, starting a machine with no service from T3 Connect. Any route flag
- * means it asks nothing and keeps the routes not named as they are.
+ * route without selecting a new route. Any route flag means it asks nothing
+ * and keeps the routes not named as they are.
  */
 export const planRoutes = (
   setup: { readonly installed: boolean; readonly connect: boolean | null; readonly lan: boolean },
@@ -102,7 +102,8 @@ export const planRoutes = (
 ) => {
   const ask = Option.isNone(flags.connect) && Option.isNone(flags.lan);
   const start = {
-    connect: setup.connect === true || (ask && !setup.installed && setup.connect !== null),
+    // Weavewing: offering a relay route does not select it for a new install.
+    connect: setup.connect === true,
     lan: setup.lan,
   };
   return {

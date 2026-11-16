@@ -821,7 +821,7 @@ function LinkedLine({
   return <p className="text-xs text-muted-foreground">Linked: {named.join(", ")}</p>;
 }
 
-/** Opens Sharing & access on this environment, where its clients and T3 Connect tunnels live. */
+/** Opens this environment's clients and permissions. */
 function ManageAccessButton({
   environment,
   label = "Manage access",

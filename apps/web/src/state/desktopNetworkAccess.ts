@@ -26,7 +26,7 @@ class DesktopNetworkAccessUnavailableError extends Schema.TaggedError<DesktopNet
   {},
 ) {
   override get message(): string {
-    return "Desktop network access is unavailable.";
+    return "Allow remote devices is unavailable on this desktop.";
   }
 }
 
