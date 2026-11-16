@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { THREAD_TIMELINE_RUN_LIMIT, ThreadId } from "@t3tools/contracts";
+import { THREAD_TIMELINE_RUN_LIMIT, THREAD_USER_TURN_LIMIT, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -158,5 +158,116 @@ it.effect("fails for a missing thread", () =>
   Effect.gen(function* () {
     const error = yield* Effect.flip(run("missing"));
     expect(error.message).toBe("This thread is unavailable.");
+  }).pipe(Effect.provide(layer)),
+);
+
+const insertItem = (
+  ordinal: number,
+  type: string,
+  fields: Record<string, unknown>,
+  runId: string | null = null,
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const payload = JSON.stringify({ startedAt: iso(ordinal), ...fields });
+    yield* sql`INSERT INTO orchestration_v2_projection_turn_items (turn_item_id,thread_id,run_id,ordinal,type,status,updated_at,payload_json) VALUES (${`item-${ordinal}`},'root',${runId},${ordinal},${type},'completed',${at},${payload})`;
+  });
+
+const userTurns = Effect.fn(function* (threadId: string) {
+  return yield* (yield* Timeline.ThreadTimeline).userTurns({ threadId: ThreadId.make(threadId) });
+});
+
+it.effect("lists the user's own turns with each turn's last reply, newest first capped", () =>
+  Effect.gen(function* () {
+    const own = (ordinal: number, extra: Record<string, unknown> = {}) =>
+      insertItem(ordinal, "user_message", {
+        messageId: `m${ordinal}`,
+        createdBy: "user",
+        text: `ask ${ordinal}`,
+        ...extra,
+      });
+    const reply = (ordinal: number, text: string) =>
+      insertItem(ordinal, "assistant_message", { messageId: `a${ordinal}`, text });
+    yield* own(1, { text: "x".repeat(500) });
+    yield* reply(2, "first reply");
+    yield* reply(3, "y".repeat(500));
+    yield* own(4, { origin: { kind: "user" } });
+    yield* insertItem(5, "user_message", {
+      messageId: "m5",
+      createdBy: "user",
+      origin: { kind: "subagent", threadId: "child", title: "Child", event: "completed" },
+      text: "report",
+    });
+    yield* reply(6, "reply to the report");
+    yield* insertItem(7, "user_message", { messageId: "m7", createdBy: "agent", text: "agent" });
+    yield* insertItem(8, "user_message", {
+      messageId: "m8",
+      scheduledTaskId: "task",
+      text: "auto",
+    });
+    yield* insertItem(9, "user_message", {
+      messageId: "m9",
+      linkedSender: { threadId: "peer", environmentId: "env", title: "Peer" },
+      text: "linked",
+    });
+    yield* own(10, { createdBy: undefined });
+
+    const { turns } = yield* userTurns("root");
+    expect(turns.map(({ messageId, replyText }) => [messageId, replyText])).toEqual([
+      ["m1", "y".repeat(300)],
+      ["m4", null],
+      ["m10", null],
+    ]);
+    expect(turns[0]).toMatchObject({ createdAt: iso(1), text: "x".repeat(200) });
+    expect(yield* userTurns("missing")).toEqual({ turns: [] });
+
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      WITH RECURSIVE n(i) AS (SELECT 11 UNION ALL SELECT i + 1 FROM n WHERE i < ${10 + THREAD_USER_TURN_LIMIT})
+      INSERT INTO orchestration_v2_projection_turn_items (turn_item_id,thread_id,ordinal,type,status,updated_at,payload_json)
+      SELECT 'item-' || i, 'root', i, 'user_message', 'completed', ${at},
+        json_object('messageId', 'm' || i, 'createdBy', 'user', 'text', 'more', 'startedAt', ${at})
+      FROM n`;
+    const capped = (yield* userTurns("root")).turns;
+    expect(capped).toHaveLength(THREAD_USER_TURN_LIMIT);
+    expect(capped[0]?.messageId).toBe("m11");
+    expect(capped.at(-1)?.messageId).toBe(`m${10 + THREAD_USER_TURN_LIMIT}`);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("leaves out inputs and replies the conversation hides", () =>
+  Effect.gen(function* () {
+    const input = (ordinal: number, run: number, inputIntent = "queued_turn") =>
+      insertItem(
+        ordinal,
+        "user_message",
+        { messageId: `m${ordinal}`, createdBy: "user", text: `ask ${ordinal}`, inputIntent },
+        `root-${run}`,
+      );
+    const reply = (ordinal: number, run: number) =>
+      insertItem(
+        ordinal,
+        "assistant_message",
+        { messageId: `a${ordinal}`, text: `re ${ordinal}` },
+        `root-${run}`,
+      );
+    yield* insertRun("root", 1, "completed", 0, 1);
+    yield* insertRun("root", 2, "queued", null, null);
+    yield* insertRun("root", 3, "cancelled", null, 3);
+    yield* insertRun("root", 4, "cancelled", 4, 5);
+    yield* insertRun("root", 5, "rolled_back", 6, 7);
+    yield* input(1, 1, "turn_start");
+    yield* input(2, 2);
+    yield* input(3, 3);
+    yield* reply(4, 1);
+    yield* input(5, 4);
+    yield* input(6, 5, "turn_start");
+    yield* reply(7, 5);
+
+    const { turns } = yield* userTurns("root");
+    expect(turns.map(({ messageId, replyText }) => [messageId, replyText])).toEqual([
+      ["m1", "re 4"],
+      ["m5", null],
+    ]);
   }).pipe(Effect.provide(layer)),
 );

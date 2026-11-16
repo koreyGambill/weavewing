@@ -3138,6 +3138,7 @@ export const layerWsRpc = (
         [WS_METHODS.threadDefaultContextGet]: (input) => defaultContext.preview(input),
         [WS_METHODS.threadDefaultContextItem]: (input) => defaultContext.itemText(input),
         [WS_METHODS.threadTimelineGet]: (input) => threadTimeline.get(input),
+        [WS_METHODS.threadUserTurnsGet]: (input) => threadTimeline.userTurns(input),
         [WS_METHODS.threadNotesGet]: (input) => threadNotes.get(input),
         [WS_METHODS.threadNotesSave]: (input) => threadNotes.save(input),
         [WS_METHODS.threadNotesSettings]: () => threadNotes.settings(),

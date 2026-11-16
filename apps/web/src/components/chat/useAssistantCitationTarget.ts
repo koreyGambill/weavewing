@@ -92,6 +92,8 @@ export function useAssistantCitationTarget({
         if (event.key === "Escape") {
           dismiss(false);
         } else if (
+          // A handled key did not scroll; the minimap's Space starts the reveal it would end.
+          !event.defaultPrevented &&
           CITATION_SCROLL_KEYS.has(event.key) &&
           event.target instanceof Node &&
           citationViewport?.contains(event.target)

@@ -63,6 +63,7 @@ import { ChatBannerLane } from "./chat/ChatBannerLane";
 import * as Schema from "effect/Schema";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSourceControlWriteScope,
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
@@ -141,6 +142,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   assistantCitationFromLocation,
   messageRevealFromLocation,
+  messageRevealNavigation,
   useSideChatCitationReveal,
 } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
@@ -255,7 +257,8 @@ import { type TerminalContextDraft } from "../lib/terminalContext";
 import { collectInlineContextIds } from "../lib/composerContextReferences";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { useEnvironmentQueryRefresh } from "../state/query";
+import { useEnvironmentQuery, useEnvironmentQueryRefresh } from "../state/query";
+import { threadUserTurnsGet } from "../state/threadInsights";
 import { useEnvironmentScope } from "~/state/session";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
 import { hostEnvironmentIdAtom } from "../state/primaryEnvironment";
@@ -1626,6 +1629,25 @@ export default function ChatView(props: ChatViewProps) {
   const timelineEmpty = timelineEntries.length === 0 && !hasStreamedTimelineRows;
   const displayedTimelineKey = activeThreadKey ?? routeThreadKey;
   const displayedThreadRef = parseScopedThreadKey(displayedTimelineKey);
+  const canReadTurns = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
+  const userTurnsRef = isServerThread && canReadTurns ? displayedThreadRef : null;
+  const userTurns = useEnvironmentQuery(
+    userTurnsRef === null
+      ? null
+      : threadUserTurnsGet({
+          environmentId: userTurnsRef.environmentId,
+          input: { threadId: userTurnsRef.threadId },
+        }),
+  ).data?.turns;
+  const revealUserTurn = (messageId: MessageId) => {
+    if (userTurnsRef === null) return;
+    const { hash, state } = messageRevealNavigation(
+      userTurnsRef.environmentId,
+      userTurnsRef.threadId,
+      messageId,
+    );
+    void navigate({ to: ".", hash, state, resetScroll: false });
+  };
   const {
     worktreeSetup,
     isPreparingWorktree,
@@ -3524,6 +3546,7 @@ export default function ChatView(props: ChatViewProps) {
                 {...(threadHistoryControls === undefined
                   ? {}
                   : { historyControls: threadHistoryControls })}
+                {...(userTurns === undefined ? {} : { userTurns, onRevealMessage: revealUserTurn })}
               />
             </WorkspaceMutationIdContext>
 

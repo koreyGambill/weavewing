@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   IsoDateTime,
+  MessageId,
   NonNegativeInt,
   ProjectId,
   RunId,
@@ -265,3 +266,17 @@ export const ThreadTimeline = Schema.Struct({
 });
 export type ThreadTimeline = typeof ThreadTimeline.Type;
 export const THREAD_TIMELINE_RUN_LIMIT = 1000;
+/** The user's own turns, so the turn rail can mark turns outside the loaded history window. */
+export const ThreadUserTurn = Schema.Struct({
+  messageId: MessageId,
+  createdAt: IsoDateTime,
+  /** Truncated server-side. */
+  text: Schema.String,
+  /** The turn's last assistant text, truncated; null before one arrives. */
+  replyText: Schema.NullOr(Schema.String),
+});
+export type ThreadUserTurn = typeof ThreadUserTurn.Type;
+/** Newest `THREAD_USER_TURN_LIMIT` turns, oldest first. */
+export const ThreadUserTurns = Schema.Struct({ turns: Schema.Array(ThreadUserTurn) });
+export type ThreadUserTurns = typeof ThreadUserTurns.Type;
+export const THREAD_USER_TURN_LIMIT = 60;

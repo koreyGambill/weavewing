@@ -37,6 +37,7 @@ import {
   ThreadInsightsError,
   ThreadTimeline,
   ThreadTimelineGetInput,
+  ThreadUserTurns,
   ThreadContextGetInput,
   ThreadContextResult,
   DefaultContextGetInput,
@@ -573,6 +574,7 @@ export const WS_METHODS = {
   threadDefaultContextGet: "threadInsights.defaultContext",
   threadDefaultContextItem: "threadInsights.defaultContextItem",
   threadTimelineGet: "threadInsights.timeline",
+  threadUserTurnsGet: "threadInsights.userTurns",
   threadNotesGet: "threadNotes.get",
   threadNotesSave: "threadNotes.save",
   threadNotesSettings: "threadNotes.settings",
@@ -1692,6 +1694,12 @@ const WsThreadInsightsGetRpc = Rpc.make(WS_METHODS.threadInsightsGet, {
 const WsThreadTimelineGetRpc = Rpc.make(WS_METHODS.threadTimelineGet, {
   payload: ThreadTimelineGetInput,
   success: ThreadTimeline,
+  error: Schema.Union([ThreadInsightsError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadUserTurnsGetRpc = Rpc.make(WS_METHODS.threadUserTurnsGet, {
+  payload: ThreadTimelineGetInput,
+  success: ThreadUserTurns,
   error: Schema.Union([ThreadInsightsError, EnvironmentAuthorizationError]),
 });
 
@@ -2822,6 +2830,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadDefaultContextItemRpc,
   WsThreadContextGetRpc,
   WsThreadTimelineGetRpc,
+  WsThreadUserTurnsGetRpc,
   WsThreadNotesGetRpc,
   WsThreadNotesSaveRpc,
   WsThreadNotesSettingsRpc,

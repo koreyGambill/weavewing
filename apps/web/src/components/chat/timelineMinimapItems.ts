@@ -1,6 +1,7 @@
 import { nonUserMessageOrigin } from "@t3tools/client-runtime/user-message";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
+import type { ThreadUserTurn } from "@t3tools/contracts";
 import type { Nodes } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -10,6 +11,7 @@ import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
 export interface TimelineMinimapItem {
   readonly id: string;
+  /** -1 for a turn outside the loaded rows; selecting it reveals the message. */
   readonly rowIndex: number;
   readonly userText: string | null;
   readonly assistantText: string | null;
@@ -38,6 +40,30 @@ export function deriveTimelineMinimapItems(
     });
   }
   return items;
+}
+
+/**
+ * Adds the server's own turns older than the loaded window above it. A turn the server knows that
+ * the rows do not yet hold is newer than the window, so it waits for its row.
+ */
+export function mergeUnloadedUserTurns(
+  loaded: ReadonlyArray<TimelineMinimapItem>,
+  turns: ReadonlyArray<ThreadUserTurn> | undefined,
+): ReadonlyArray<TimelineMinimapItem> {
+  if (!turns?.length) return loaded;
+  const loadedIds = new Set(loaded.map((item) => item.id));
+  const firstLoaded = turns.findIndex((turn) => loadedIds.has(turn.messageId));
+  const older = firstLoaded === -1 ? turns : turns.slice(0, firstLoaded);
+  if (older.length === 0) return loaded;
+  return [
+    ...older.map((turn) => ({
+      id: turn.messageId,
+      rowIndex: -1,
+      userText: isAttachmentOnlyBootstrapPrompt(turn.text) ? "" : turn.text,
+      assistantText: turn.replyText,
+    })),
+    ...loaded,
+  ];
 }
 
 function resolveFinalAssistantTextForTurn(

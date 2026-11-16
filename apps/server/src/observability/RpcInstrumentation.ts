@@ -178,6 +178,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.threadDefaultContextGet]: "workspace",
   [WS_METHODS.threadDefaultContextItem]: "workspace",
   [WS_METHODS.threadTimelineGet]: "workspace",
+  [WS_METHODS.threadUserTurnsGet]: "workspace",
   [WS_METHODS.threadNotesGet]: "workspace",
   [WS_METHODS.threadNotesSave]: "workspace",
   [WS_METHODS.threadNotesSettings]: "workspace",
