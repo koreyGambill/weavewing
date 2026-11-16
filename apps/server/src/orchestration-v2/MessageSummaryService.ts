@@ -7,14 +7,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import {
-  MESSAGE_SUMMARY_MODEL,
-  incomingCardSummarySource,
-  messageSummarySourceHash,
-} from "./incomingCardSummary.ts";
+import { incomingCardSummarySource, messageSummarySourceHash } from "./incomingCardSummary.ts";
 
 /** Attempts per UTC day, failures included; past it cards keep their first line until tomorrow. */
 const DAILY_SUMMARY_LIMIT = 100;
@@ -55,8 +52,9 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
     "MessageSummaryService.execute",
   )(
     function* (input) {
-      if (!(yield* serverSettings.getSettings).incomingCardSummaries) return;
-      const { messages } = yield* threads.getThreadRecords(input.threadId, ["messages"], {
+      const settings = yield* serverSettings.getSettings;
+      if (!settings.incomingCardSummaries) return;
+      const { thread, messages } = yield* threads.getThreadRecords(input.threadId, ["messages"], {
         messageIds: [input.messageId],
       });
       const message = messages.find((candidate) => candidate.id === input.messageId);
@@ -65,11 +63,12 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
       if (!generate || message === undefined || source === null || !(yield* reserveAttempt(input)))
         return;
       const { summary } = yield* generate({
-        // Claude summarizes from a temp dir; a fallback provider should not load a project either.
+        // A summary needs no project, so the thread's provider runs it from a temp dir.
         cwd: NodeOS.tmpdir(),
         source,
         message: message.text,
-        modelSelection: MESSAGE_SUMMARY_MODEL,
+        modelSelection: settingsForThread(settings, thread.modelSelection)
+          .textGenerationModelSelection,
       });
       if (summary.length === 0) return;
       yield* threads.dispatch({

@@ -6,7 +6,10 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import { resolveSpeechPostProcessingModelSelection } from "@t3tools/shared/serverSettings";
+import {
+  resolveSpeechPostProcessingModelSelection,
+  settingsForThread,
+} from "@t3tools/shared/serverSettings";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -46,7 +49,9 @@ const make = Effect.gen(function* () {
             input.draft,
             input.options.speechCorrectionWord,
           ),
-          modelSelection: resolveSpeechPostProcessingModelSelection(settings),
+          modelSelection: resolveSpeechPostProcessingModelSelection(
+            settingsForThread(settings, undefined),
+          ),
         });
         const text = generated.transcription.trim();
         return {

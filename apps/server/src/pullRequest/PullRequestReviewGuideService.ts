@@ -24,6 +24,7 @@ import {
 } from "@t3tools/contracts";
 import type { ReviewGuideStackLayer } from "@t3tools/provider-core/server/textGeneration";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 
 import * as ServerConfig from "../config.ts";
@@ -382,7 +383,10 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    const projectSettings = resolveProjectSettings(settings, input.projectId).settings;
+    const projectSettings = settingsForThread(
+      resolveProjectSettings(settings, input.projectId).settings,
+      undefined,
+    );
     const modelSelection = ServerSettings.resolveReviewGuideModelSelection(
       projectSettings,
       providers,

@@ -174,7 +174,7 @@ it.effect("summarizes each long incoming card once and stores the summary on the
     const input = harness.generateMessageSummary.mock.calls[0]![0];
     assert.strictEqual(input.source, 'Report from delegated task "Build BW-1"');
     assert.strictEqual(input.message, longReport);
-    assert.strictEqual(input.modelSelection.model, "claude-haiku-5-5");
+    assert.strictEqual(input.modelSelection.model, modelSelection.model);
     assert.strictEqual(after.summary, "Done: BW-1 gate green");
     assert.strictEqual(after.itemSummary, "Done: BW-1 gate green");
     assert.strictEqual(after.text, longReport);

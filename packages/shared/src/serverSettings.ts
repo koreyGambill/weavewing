@@ -1,6 +1,7 @@
 import type { ModelPreferences } from "@t3tools/contracts/settings";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_TEXT_GENERATION_MODEL_SELECTION,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -24,6 +25,7 @@ import {
   type ServerSettingsPatch,
   withIdleCompaction,
 } from "@t3tools/contracts";
+import * as Equal from "effect/Equal";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -131,6 +133,22 @@ function isTextGenerationTargetUsable(
     isProviderAvailable(provider) &&
     isProviderTextGenerationCapable(provider)
   );
+}
+
+/** True until the user picks a text generation model: background text then follows the thread. */
+export const followsThreadTextGeneration = (settings: ServerSettings) =>
+  settings.textGenerationFollowsThread &&
+  Equal.equals(settings.textGenerationModelSelection, DEFAULT_TEXT_GENERATION_MODEL_SELECTION);
+
+/** Background text runs on the thread's own model so it never reaches a second vendor. */
+export function settingsForThread(
+  settings: ServerSettings,
+  thread: ModelSelection | null | undefined,
+): ServerSettings {
+  const source = thread ?? settings.defaultModelSelection;
+  return source && followsThreadTextGeneration(settings)
+    ? { ...settings, textGenerationModelSelection: source }
+    : settings;
 }
 
 export function resolveSourceControlWriterModelSelection(

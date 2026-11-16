@@ -831,6 +831,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
 
       const custom = yield* serverSettings.updateSettings({
         providerInstances,
+        textGenerationFollowsThread: false,
         defaultModelSelection: {
           instanceId: claude,
           model: "z-ai/glm-5.3-flash",

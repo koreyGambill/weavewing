@@ -54,6 +54,7 @@ import {
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
 } from "@t3tools/shared/git";
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import { isSshRemoteUrl } from "@t3tools/shared/sourceControl";
 import {
   type ChangeRequestTerminology,
@@ -716,24 +717,30 @@ export const make = Effect.gen(function* () {
     readonly threadId?: ThreadId | undefined;
     readonly projectId?: ProjectId | undefined;
   }) {
-    const settings = yield* serverSettingsService.getSettings;
-    if (!hasProjectSettingsOverrides(settings))
-      return { settings, projectId: null as ProjectId | null };
-    const threadProjectId =
+    const thread =
       input.threadId === undefined
         ? null
-        : yield* threads.getThreadShell(input.threadId).pipe(
-            Effect.map((thread) => thread?.projectId ?? null),
-            Effect.orElseSucceed(() => null),
-          );
+        : yield* threads.getThreadShell(input.threadId).pipe(Effect.orElseSucceed(() => null));
+    const settings = yield* serverSettingsService.getSettings;
+    if (!hasProjectSettingsOverrides(settings))
+      return {
+        settings: settingsForThread(settings, thread?.modelSelection),
+        projectId: null as ProjectId | null,
+      };
     const projectId =
-      threadProjectId ??
+      thread?.projectId ??
       input.projectId ??
       (yield* projects.findActiveByWorkspaceRoot(input.cwd).pipe(
         Effect.map((project) => Option.getOrNull(project)?.projectId ?? null),
         Effect.orElseSucceed(() => null),
       ));
-    return { settings: resolveProjectSettings(settings, projectId).settings, projectId };
+    return {
+      settings: settingsForThread(
+        resolveProjectSettings(settings, projectId).settings,
+        thread?.modelSelection,
+      ),
+      projectId,
+    };
   });
   const readThreadContext = Effect.fnUntraced(
     function* (threadId: ThreadId | undefined) {

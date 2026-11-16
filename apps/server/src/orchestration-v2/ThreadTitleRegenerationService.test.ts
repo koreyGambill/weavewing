@@ -61,7 +61,7 @@ function makeHarness(
     layerRegistry,
     { databaseLayer: layerDatabase, runEffectWorker: false },
   );
-  const layerServerSettings = ServerSettings.layerTest({});
+  const layerServerSettings = ServerSettings.layerTest({ defaultModelSelection: modelSelection });
   const layerThreadManagement = ThreadManagement.layer.pipe(
     Layer.provide(layerOrchestrator),
     Layer.provide(layerServerSettings),
@@ -122,6 +122,9 @@ function createThread(input: {
   readonly command: string;
   readonly thread: string;
   readonly worktreePath?: string;
+  readonly modelSelection?:
+    | typeof modelSelection
+    | { instanceId: ProviderInstanceId; model: string };
 }) {
   return Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
@@ -132,7 +135,7 @@ function createThread(input: {
       threadId,
       projectId,
       title: "Seed title",
-      modelSelection,
+      modelSelection: input.modelSelection ?? modelSelection,
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: null,
@@ -149,6 +152,7 @@ function dispatchUserMessage(input: {
   readonly threadId: ThreadId;
   readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment>;
+  readonly modelSelection?: { instanceId: ProviderInstanceId; model: string };
 }) {
   return Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
@@ -160,7 +164,7 @@ function dispatchUserMessage(input: {
       messageId: MessageId.make(`${input.command}:message`),
       text: input.text,
       attachments: input.attachments ?? [],
-      modelSelection,
+      modelSelection: input.modelSelection ?? modelSelection,
       dispatchMode: { type: "defer_start" },
       createdBy: "user",
       creationSource: "web",
@@ -322,6 +326,32 @@ describe("ThreadTitleRegenerationService", () => {
           }).pipe(Effect.provide(harness.layer));
         }
       }),
+  );
+
+  it.effect("titles a thread on its own model", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      yield* Effect.gen(function* () {
+        const service = yield* ThreadTitleRegeneration.ThreadTitleRegenerationService;
+        const threadModel = { instanceId: modelSelection.instanceId, model: "gpt-6-astra" };
+        const threadId = yield* createThread({
+          command: "own-provider:create",
+          thread: "own-provider:thread",
+          modelSelection: threadModel,
+        });
+        yield* dispatchUserMessage({
+          command: "own-provider:message",
+          threadId,
+          text: "Fix it",
+          modelSelection: threadModel,
+        });
+        const requestId = yield* armRegeneration({ command: "own-provider:title", threadId });
+        const messageId = MessageId.make("own-provider:message:message");
+        yield* service.execute({ threadId, requestId, kind: { type: "initial", messageId } });
+        const selection = harness.generateThreadTitle.mock.calls[0]?.[0]?.modelSelection;
+        assert.deepEqual(selection, threadModel);
+      }).pipe(Effect.provide(harness.layer));
+    }),
   );
 
   it.effect("arms and clears the regeneration marker through metadata commands", () =>

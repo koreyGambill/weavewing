@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
+import { followsThreadTextGeneration } from "@t3tools/shared/serverSettings";
 import {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
@@ -136,6 +137,7 @@ export function SourceControlWritingSettingsSection() {
     projectEffectiveTextGenerationProviders,
   );
   const usesDedicatedModel = settings.sourceControlWriterModelSelection !== null;
+  const followsThread = followsThreadTextGeneration(settings);
   const activeSelection = resolveAppModelSelectionState(
     {
       ...settings,
@@ -393,6 +395,9 @@ export function SourceControlWritingSettingsSection() {
                       }
                     />
                   ) : null}
+                  {followsThread && !usesReviewGuideModel ? (
+                    <span className="text-sm text-muted-foreground">Same as the thread</span>
+                  ) : null}
                   <Switch
                     mixed={mixedReviewGuideModel}
                     checked={mixedReviewGuideModel ? false : usesReviewGuideModel}
@@ -518,7 +523,7 @@ export function SourceControlWritingSettingsSection() {
           serverScoped
           settingKeys={["sourceControlWriterModelSelection"]}
           {...searchableSetting("source-control-writer-model")}
-          description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model configured for this environment."
+          description="Model for commit messages, pull request text, and branch or bookmark names. When disabled, use the text generation model, which is the thread's own model by default."
           control={
             !hasServerTargets ? (
               <span className="text-sm text-muted-foreground">
@@ -591,6 +596,9 @@ export function SourceControlWritingSettingsSection() {
                       })
                     }
                   />
+                ) : null}
+                {followsThread && !usesDedicatedModel ? (
+                  <span className="text-sm text-muted-foreground">Same as the thread</span>
                 ) : null}
                 <Switch
                   checked={usesDedicatedModel}
