@@ -419,6 +419,10 @@ export function resolveAppModelSelectionState(
   const selectedEntry = entries.find(
     (entry) => entry.instanceId === selection.instanceId && entry.enabled && entry.isAvailable,
   );
+  // An agent that is off or unavailable keeps the user's choice on screen; Settings warns about it.
+  if (!selectedEntry && entries.some((entry) => entry.instanceId === selection.instanceId)) {
+    return selection;
+  }
   const entry =
     selectedEntry ?? entries.find((candidate) => candidate.enabled && candidate.isAvailable);
   if (entry) {

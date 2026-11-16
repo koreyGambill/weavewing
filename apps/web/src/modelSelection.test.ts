@@ -987,6 +987,26 @@ describe("instance-scoped model selection", () => {
       ProviderInstanceId.make("codex"),
     );
   });
+  it("keeps a chosen model whose agent is off or unavailable instead of showing another", () => {
+    const codex = provider({ instanceId: "codex", models: ["gpt-6-luna"] });
+    const claude = provider({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      instanceId: "claudeAgent",
+      models: ["claude-haiku-5-5"],
+    });
+    const chosen = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-luna");
+    const settings: UnifiedSettings = {
+      ...settingsWithProviderInstances(),
+      textGenerationModelSelection: chosen,
+    };
+
+    for (const unusable of [
+      { ...codex, enabled: false },
+      { ...codex, availability: "unavailable" as const },
+    ]) {
+      expect(resolveAppModelSelectionState(settings, [unusable, claude])).toEqual(chosen);
+    }
+  });
   it("falls back to the text generation default, not the chat default, for a removed model", () => {
     const codex = provider({ instanceId: "codex", models: ["gpt-6-astra", "gpt-6-luna"] });
     const providers = [
