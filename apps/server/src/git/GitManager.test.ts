@@ -3317,7 +3317,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect("uses an explicit project's provider settings for generated commit text", () =>
+  it.effect("generates commit text on the default thread model when no thread is given", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3330,6 +3330,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         serverSettings: {
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          },
           projectSettingsOverrides: {
             [projectId]: {
               providerInstances: { [disabledInstanceId]: { enabled: false } },
@@ -3352,6 +3356,41 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       });
 
       expect(generatedModelSelection?.instanceId).toBe(ProviderInstanceId.make("claudeAgent"));
+    }),
+  );
+
+  it.effect("refuses to generate commit text for a thread that cannot be found", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nproject\n");
+      let generated = 0;
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          },
+        },
+        textGeneration: {
+          generateCommitMessage: () => {
+            generated += 1;
+            return Effect.succeed({ subject: "Should not run", body: "" });
+          },
+        },
+      });
+
+      const failure = yield* Effect.flip(
+        manager.runStackedAction({
+          actionId: "test-missing-thread",
+          cwd: repoDir,
+          action: "commit",
+          threadId: ThreadId.make("thread:deleted"),
+        }),
+      );
+
+      expect(failure.message).toMatch(/thread/i);
+      expect(generated).toBe(0);
     }),
   );
 

@@ -1,5 +1,3 @@
-import { ThreadListPanel } from "./ThreadListPanel";
-import { usePendingDelegatedTaskGroups } from "../../state/use-thread-detail";
 import { ChildThreadApprovals } from "./ChildThreadApprovals";
 import { useOpenThreadInspector } from "./thread-inspector-navigation";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
@@ -201,6 +199,7 @@ import {
   COMPOSER_COLLAPSED_CHROME,
   THREAD_COMPOSER_BOTTOM_GUTTER,
   ThreadComposer,
+  type ThreadComposerProps,
 } from "./ThreadComposer";
 import { ComposerPopoverHost } from "./ComposerPopoverHost";
 import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
@@ -250,6 +249,8 @@ export interface ThreadDetailScreenProps {
   readonly providerSubagentStatus?: ProviderSubagentStatus | null;
   readonly extensionStatuses?: NonNullable<OrchestrationV2ProviderSession["extensionStatuses"]>;
   readonly isCompacting: boolean;
+  /** Set while the next send compacts the thread first. */
+  readonly compactBeforeSend?: ThreadComposerProps["compactBeforeSend"];
   readonly creationState:
     | {
         readonly kind: "preparing";
@@ -738,8 +739,6 @@ function ThreadDetailBody(
   };
   const pendingBackgroundWork = presentPendingBackgroundWork(
     props.selectedThread.pendingBackgroundTasks,
-    props.selectedThread.lineage,
-    usePendingDelegatedTaskGroups(props.selectedThreadDetailRef),
   );
   const extensionStatus = props.extensionStatuses?.length
     ? {
@@ -1456,7 +1455,6 @@ function ThreadDetailBody(
                 : "absolute inset-0 bg-screen"
             }
           />
-          <ThreadListPanel environmentId={props.environmentId} threadId={props.selectedThread.id} />
           <RenderErrorBoundary
             key={selectedThreadKey}
             resetKeys={[props.threadCwd]}
@@ -1862,6 +1860,7 @@ function ThreadDetailBody(
                         connectionState={props.connectionStateLabel}
                         environmentLabel={props.environmentLabel}
                         selectedThread={props.selectedThread}
+                        compactBeforeSend={props.compactBeforeSend ?? null}
                         hasCompactableConversation={
                           hasCompactableConversation && !props.isCompacting
                         }

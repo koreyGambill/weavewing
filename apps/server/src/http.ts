@@ -7,6 +7,7 @@ import {
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { injectMcpAppCookieBootstrap, injectMcpAppThemeBootstrap } from "@t3tools/shared/mcpApp";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+import { AGENT_HTML_SANDBOX, OFFLINE_HTML_CSP } from "@t3tools/shared/weavewingOutbound";
 import * as ByteSize from "effect/ByteSize";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -62,8 +63,7 @@ const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 // Opaque origin blocks cookies, storage and API access while allowing scripts.
 // Agent HTML can open without a click, so disallow blocking modals.
-const HTML_CONTENT_SECURITY_POLICY =
-  "sandbox allow-scripts allow-forms allow-popups allow-downloads";
+const HTML_CONTENT_SECURITY_POLICY = `${OFFLINE_HTML_CSP}; sandbox ${AGENT_HTML_SANDBOX}`;
 
 // Proxies may strip disposition; force document-capable downloads to octet-stream.
 const DOWNLOAD_MIME_TYPE_PATTERN = /^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/;

@@ -1,18 +1,15 @@
-import { SenderCard } from "./SenderCard";
 import { type StaticScreenProps, useNavigation } from "@react-navigation/native";
 import { useAtomValue } from "@effect/atom-react";
 import {
   makeQueuedRunsAtom,
   queuedRunEditBlockedReason,
 } from "@t3tools/client-runtime/queued-run-edit";
-import {
-  nonUserMessageOrigin,
-  resolveUserMessagePresentation,
-} from "@t3tools/client-runtime/user-message";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import type { ChatAttachment, EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { Image } from "expo-image";
@@ -77,12 +74,13 @@ function QueuedRunSender(props: {
   readonly environmentId: EnvironmentId;
   readonly message: QueuedRunMessage;
 }) {
-  const {
-    attribution,
-    scheduledTaskId,
-    sender: originSender,
-  } = resolveUserMessagePresentation(props.message);
-  const senderShell = useQuietThreadShell(originSender ?? null);
+  const { attribution, scheduledTaskId } = resolveUserMessagePresentation(props.message);
+  const senderThreadId = attribution === "agent" ? props.message.senderThreadId : undefined;
+  // A linked environment's agent sent it from a thread there.
+  const linkedSender = attribution === "agent" ? props.message.linkedSender : undefined;
+  const senderShell = useQuietThreadShell(
+    linkedSender ?? (senderThreadId ? scopeThreadRef(props.environmentId, senderThreadId) : null),
+  );
   const tasks = useEnvironmentQuery(
     scheduledTaskId
       ? serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} })
@@ -98,7 +96,7 @@ function QueuedRunSender(props: {
       : attribution === "agent"
         ? {
             icon: "bubble.left.and.bubble.right" as const,
-            label: originSender?.title.trim() || senderShell?.title.trim() || "Agent",
+            label: senderShell?.title.trim() || linkedSender?.title.trim() || "Agent",
           }
         : attribution === "t3code"
           ? { icon: null, label: "Sent by T3 Code" }
@@ -256,14 +254,12 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
           No messages waiting in this queue.
         </Text>
       ) : null}
-      {queuedRuns.map(({ run, text, attachments, context, message, bringsBack }, index) => {
+      {queuedRuns.map(({ run, text, attachments, context, message }, index) => {
         const controls = resolveThreadQueueRowControls({
           busy: busyRunId !== null,
           // A fresh message starts its own turn: it may skip compaction, but not steer into a turn.
-          // A Bring back delivers its context only when its own turn starts.
           canPromoteToSteer:
             (workflow?.canPromoteToSteer ?? false) &&
-            !bringsBack &&
             (run.freshContext !== true || workflow?.promoteSkipsCompaction === true),
           canSendNow: workflow?.canSendNow ?? false,
           editBlocked: editBlockedReason !== null,
@@ -330,28 +326,24 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                       onPressPreview={setPreviewFile}
                     />
                     <View className="min-w-0 flex-1 gap-0.5">
-                      {message && nonUserMessageOrigin(message) ? (
-                        <IncomingQueuedCard target={target} message={message} />
-                      ) : message ? (
+                      {message ? (
                         <QueuedRunSender environmentId={target.environmentId} message={message} />
                       ) : null}
-                      {message && nonUserMessageOrigin(message) ? null : (
-                        <Text
-                          className={
-                            controls.isEditing
-                              ? "text-sm text-foreground-muted"
-                              : "text-sm text-foreground"
-                          }
-                          numberOfLines={1}
-                        >
-                          {context?.guest === undefined ? null : (
-                            <Text className="font-t3-medium text-adaptive-fuchsia-600-300">
-                              {`${context.guest.name}  `}
-                            </Text>
-                          )}
-                          {title}
-                        </Text>
-                      )}
+                      <Text
+                        className={
+                          controls.isEditing
+                            ? "text-sm text-foreground-muted"
+                            : "text-sm text-foreground"
+                        }
+                        numberOfLines={1}
+                      >
+                        {context?.guest === undefined ? null : (
+                          <Text className="font-t3-medium text-adaptive-fuchsia-600-300">
+                            {`${context.guest.name}  `}
+                          </Text>
+                        )}
+                        {title}
+                      </Text>
                     </View>
                     {controls.isEditing ? (
                       <Text className="shrink-0 text-2xs uppercase tracking-wide text-primary">
@@ -537,14 +529,4 @@ function QueueAttachmentThumbnail(props: {
       )}
     </Pressable>
   );
-}
-
-function IncomingQueuedCard(props: {
-  readonly target: QueueTarget;
-  readonly message: QueuedRunMessage;
-}) {
-  const origin = nonUserMessageOrigin(props.message);
-  return origin ? (
-    <SenderCard origin={origin} threadRef={props.target} text={props.message.text} queued />
-  ) : null;
 }

@@ -13,6 +13,8 @@ import * as Semaphore from "effect/Semaphore";
 import {
   PullRequestOperationError,
   type PullRequestDetail,
+  type ModelSelection,
+  type PullRequestGenerateReviewGuideInput,
   type PullRequestRef,
   type PullRequestReviewGuide,
   type PullRequestReviewGuideResult,
@@ -24,9 +26,11 @@ import {
 } from "@t3tools/contracts";
 import type { ReviewGuideStackLayer } from "@t3tools/provider-core/server/textGeneration";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { settingsForThread } from "@t3tools/shared/serverSettings";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as PullRequestReviewGuides from "../persistence/PullRequestReviewGuides.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -48,7 +52,7 @@ export class PullRequestReviewGuideService extends Context.Service<
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestReviewGuideResult, PullRequestService.PullRequestError>;
     readonly generate: (
-      input: PullRequestRef,
+      input: PullRequestGenerateReviewGuideInput,
     ) => Effect.Effect<
       PullRequestReviewGuideResult & { readonly started: boolean },
       PullRequestService.PullRequestError
@@ -68,6 +72,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+  const threads = yield* ProjectionStore.ProjectionStoreV2;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -365,6 +370,7 @@ const make = Effect.gen(function* () {
 
   const write = Effect.fn("PullRequestReviewGuideService.write")(function* (
     input: PullRequestRef,
+    threadModel: ModelSelection | undefined,
     key: ThreadPullRequestKey,
     workspaceRoot: string,
     locator: RepositoryIdentity["locator"],
@@ -382,7 +388,10 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    const projectSettings = resolveProjectSettings(settings, input.projectId).settings;
+    const projectSettings = settingsForThread(
+      resolveProjectSettings(settings, input.projectId).settings,
+      threadModel,
+    );
     const modelSelection = ServerSettings.resolveReviewGuideModelSelection(
       projectSettings,
       providers,
@@ -454,6 +463,29 @@ const make = Effect.gen(function* () {
         detail: "Review guides are off. Turn them on in Settings → Source Control.",
       });
     }
+    // A supplied thread that cannot be read fails the request: guessing a model could send the
+    // pull request to a different provider.
+    const thread =
+      input.threadId === undefined
+        ? null
+        : yield* threads.getThreadShell(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PullRequestOperationError({
+                  operation: "generateReviewGuide",
+                  detail: "Could not read the thread this guide was requested from.",
+                  cause,
+                }),
+            ),
+            Effect.filterOrFail(
+              (shell): shell is NonNullable<typeof shell> => shell !== null,
+              () =>
+                new PullRequestOperationError({
+                  operation: "generateReviewGuide",
+                  detail: "The thread this guide was requested from no longer exists.",
+                }),
+            ),
+          );
     const { key, workspaceRoot, identity } = yield* keyFor(input);
     const locator = yield* requireOwnRepository(key, identity);
     const runKey = keyString(key);
@@ -506,7 +538,17 @@ const make = Effect.gen(function* () {
         return updated;
       });
     const runId = `${runCounter++}`;
-    yield* write(input, key, workspaceRoot, locator, detail, currentHeadSha, runId, owns).pipe(
+    yield* write(
+      input,
+      thread?.modelSelection,
+      key,
+      workspaceRoot,
+      locator,
+      detail,
+      currentHeadSha,
+      runId,
+      owns,
+    ).pipe(
       Effect.andThen(finish(null)),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)

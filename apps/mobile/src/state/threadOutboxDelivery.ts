@@ -896,6 +896,39 @@ export function createThreadOutboxDelivery(): {
       settings,
       currentConfig.providers,
     );
+    if (queuedMessage.compactBeforeSend === true) {
+      if (!hasAccess()) return true;
+      // Queued, since steering a running turn with a compaction is rejected.
+      const compactionResult = await runDeliveryCommand(threadEnvironment.startTurn, {
+        environmentId: queuedMessage.environmentId,
+        input: {
+          commandId: settingsCommandId(queuedMessage, "compact"),
+          creationSource: "mobile",
+          threadId: queuedMessage.threadId,
+          message: {
+            messageId: MessageId.make(`${queuedMessage.messageId}:compact`),
+            origin: { kind: "user" as const },
+            role: "user",
+            text: "/compact",
+            attachments: [],
+            idleCompaction: "onReturn",
+          },
+          modelSelection: sendSettings.modelSelection,
+          runtimeMode: sendSettings.runtimeMode,
+          interactionMode: sendSettings.interactionMode,
+          createdAt: queuedMessage.createdAt,
+          dispatchMode: "queue",
+          resendAfterSocketLoss: false,
+        },
+      });
+      if (AsyncResult.isFailure(compactionResult) && !hasAccess()) return true;
+      const compactionFailure = reportCommandFailure(queuedMessage, compactionResult, "start-turn");
+      if (compactionFailure?.action === "retry") return false;
+      if (compactionFailure?.action === "restore") {
+        return restoreQueuedMessage(persistedMessage, compactionFailure.message);
+      }
+      if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) return true;
+    }
     if (!hasAccess()) return true;
     const deliveryResult = await runDeliveryCommand(threadEnvironment.startTurn, {
       environmentId: queuedMessage.environmentId,

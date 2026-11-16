@@ -31,6 +31,7 @@ import {
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import {
+  AlertTriangleIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -105,6 +106,8 @@ import { getProviderSummary } from "../settings/providerStatus";
 import { AddProviderInstanceDialog } from "../settings/AddProviderInstanceDialog";
 import { useDesktopCliCommand } from "../settings/CliCommandSettingsRow";
 import { CodexSetupSection } from "../settings/CodexSetupSection";
+import { searchableSetting } from "../settings/settingsSearch";
+import { useTextGenerationWarnings } from "../settings/TextGenerationWarnings";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -584,7 +587,14 @@ function AgentsSection({
   // The project scan only reads agents that are on, so turning one on can find more history.
   readonly onImportSourceEnabled: () => void;
 }) {
-  const { providers, serverConfig, checking, found, available } = useWelcomeAgents(environmentId);
+  const { providers, serverConfig, checking, found, available, readyCount } =
+    useWelcomeAgents(environmentId);
+  const titleWarnings = useTextGenerationWarnings(
+    "titles",
+    serverConfig === null
+      ? []
+      : [{ environmentId, label, projectId: null, settings: serverConfig.settings }],
+  );
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -795,6 +805,36 @@ function AgentsSection({
       {checking && found.length === 0 ? (
         <p className="text-sm leading-10 text-muted-foreground">Checking {label}…</p>
       ) : null}
+      {readyCount > 0
+        ? titleWarnings.map((warning) => (
+            <div key={warning.key} role="status" className="flex min-h-10 items-center gap-3">
+              <RowIcon>
+                <AlertTriangleIcon aria-hidden className="size-4 text-warning" />
+              </RowIcon>
+              <span className="min-w-0 flex-1 text-sm text-pretty text-muted-foreground">
+                Thread titles use {warning.agent}, which isn't available on {warning.machine}.
+                {warning.managedBy === undefined
+                  ? null
+                  : ` Ask ${warning.managedBy} to choose another model.`}
+              </span>
+              {warning.managedBy === undefined ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  render={
+                    <Link
+                      to="/settings/threads"
+                      search={{ machine: environmentId }}
+                      hash={searchableSetting("text-generation-model").id}
+                    />
+                  }
+                >
+                  Choose model
+                </Button>
+              ) : null}
+            </div>
+          ))
+        : null}
       {notes.map((note) => (
         <p key={note} className="pl-8 text-xs text-muted-foreground">
           {note}

@@ -271,7 +271,6 @@ export function useThreadComposerState(input: {
     const feed = buildThreadFeed(selectedThreadVisibleTurnItems, {
       anchoredMessages: pendingCreation,
       attempts: selectedThreadAttempts,
-      runs: selectedThreadProjection?.projection.runs,
       nodes: selectedThreadNodes,
       checkpointSummaries,
       cache: feedCache,

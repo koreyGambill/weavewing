@@ -35,6 +35,7 @@ export function AssistantCitationCommentEditor({
   const speech = useTextFieldSpeech({
     environmentId: environmentId ?? citation.environmentId,
     projectId,
+    threadId: citation.threadId,
     ownerKey: JSON.stringify([
       "citation",
       environmentId,

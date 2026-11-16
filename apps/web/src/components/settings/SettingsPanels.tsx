@@ -28,6 +28,7 @@ import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { resolvePastedPath } from "@t3tools/shared/path";
 import * as Equal from "effect/Equal";
+import { followsThreadTextGeneration } from "@t3tools/shared/serverSettings";
 import * as Schema from "effect/Schema";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
 import { AboutVersionTitle } from "./AboutVersionTitle";
@@ -58,6 +59,7 @@ import {
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { useTextGenerationStatus } from "./TextGenerationWarnings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { TileLayoutsRow } from "./TileLayoutsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
@@ -1675,7 +1677,8 @@ export function ThreadsSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
-  const { environment, connectedEnvironments, target, scope } = useSettingsScope();
+  const { environment, connectedEnvironments, target, targets, scope } = useSettingsScope();
+  const [textGenPickerOpen, setTextGenPickerOpen] = useState(false);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const environmentId = environment?.environmentId ?? null;
   const hasServerTargets = connectedEnvironments.length > 0;
@@ -1719,17 +1722,28 @@ export function ThreadsSettingsPanel() {
     textGenInstanceId,
     textGenModel,
   );
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
+  const followsThread = followsThreadTextGeneration(settings);
+  const isTextGenerationModelDirty =
+    !followsThread ||
+    !Equal.equals(
+      settings.textGenerationModelSelection ?? null,
+      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+    );
   const textGenerationModelDisabledReason = useScopedModelDisabledReason(
     settings,
     textGenerationModelInstanceEntries,
     true,
   );
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
-  const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
+  const mixedTextGenerationModel = useScopedSettingsMixed([
+    "textGenerationModelSelection",
+    "textGenerationFollowsThread",
+  ]);
+  const chooseTextGenModel = hasTextGenerationProvider
+    ? () => setTextGenPickerOpen(true)
+    : undefined;
+  const titlesStatus = useTextGenerationStatus("titles", targets, chooseTextGenModel);
+  const summariesStatus = useTextGenerationStatus("summaries", targets, chooseTextGenModel);
 
   return (
     <SettingsPageContainer>
@@ -1944,9 +1958,10 @@ export function ThreadsSettingsPanel() {
       <SettingsSection id="text-generation" title="Text generation">
         <SettingsRow
           serverScoped
-          settingKeys={["textGenerationModelSelection"]}
+          settingKeys={["textGenerationModelSelection", "textGenerationFollowsThread"]}
           {...searchableSetting("text-generation-model")}
-          description="For thread titles and other generated text. Source control has its own setting. Text generators from Providers also appear here."
+          description="For thread titles and other generated text. By default each thread's own model writes its text. Source control has its own setting. Text generators from Providers also appear here."
+          status={titlesStatus}
           resetAction={
             hasServerTargets && isTextGenerationModelDirty ? (
               <SettingResetButton
@@ -1955,6 +1970,7 @@ export function ThreadsSettingsPanel() {
                   updateSettings({
                     textGenerationModelSelection:
                       DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                    textGenerationFollowsThread: true,
                   })
                 }
               />
@@ -1973,13 +1989,19 @@ export function ThreadsSettingsPanel() {
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <ProviderModelPicker
                   environmentId={environmentId}
+                  open={textGenPickerOpen}
+                  onOpenChange={setTextGenPickerOpen}
                   activeInstanceId={textGenInstanceId}
                   model={textGenModel}
                   lockedProvider={null}
                   instanceEntries={textGenerationModelInstanceEntries}
                   modelOptionsByInstance={textGenerationModelOptionsByInstance}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
+                  {...(mixedTextGenerationModel
+                    ? { triggerLabel: "Mixed" }
+                    : followsThread
+                      ? { triggerLabel: "Same as the thread" }
+                      : {})}
                   getModelDisabledReason={textGenerationModelDisabledReason}
                   {...(environmentId
                     ? {
@@ -2002,6 +2024,7 @@ export function ThreadsSettingsPanel() {
                       return;
                     }
                     updateSettings({
+                      textGenerationFollowsThread: false,
                       textGenerationModelSelection: resolveAppModelSelectionState(
                         {
                           ...settings,
@@ -2016,7 +2039,7 @@ export function ThreadsSettingsPanel() {
                     });
                   }}
                 />
-                {textGenInstanceEntry ? (
+                {textGenInstanceEntry && !followsThread ? (
                   <TraitsPicker
                     provider={textGenProvider}
                     models={textGenInstanceEntry?.models ?? []}
@@ -2027,6 +2050,7 @@ export function ThreadsSettingsPanel() {
                     triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                     onModelOptionsChange={(nextOptions) => {
                       updateSettings({
+                        textGenerationFollowsThread: false,
                         textGenerationModelSelection: resolveAppModelSelectionState(
                           {
                             ...settings,
@@ -2050,7 +2074,8 @@ export function ThreadsSettingsPanel() {
           serverScoped
           settingKeys={["incomingCardSummaries"]}
           {...searchableSetting("incoming-card-summaries")}
-          description="Claude Haiku writes one line for long messages from other threads, delegated tasks and scheduled tasks, up to 100 a day. Off shows each message's first line."
+          description="The receiving thread's model writes one line for long messages from other threads, delegated tasks and scheduled tasks, up to 100 a day. Off shows each message's first line."
+          status={summariesStatus}
           resetAction={
             settings.incomingCardSummaries !== DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries ? (
               <SettingResetButton

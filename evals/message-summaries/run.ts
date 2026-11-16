@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 import * as NodeUtil from "node:util";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ClaudeSettings } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderInstanceId } from "@t3tools/contracts";
 import { buildMessageSummaryPrompt } from "@t3tools/provider-core/server/textGenerationPrompts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { MESSAGE_SUMMARY_MODEL } from "../../apps/server/src/orchestration-v2/incomingCardSummary.ts";
 import { makeClaudeTextGeneration } from "../../apps/server/src/textGeneration/ClaudeTextGeneration.ts";
 import { cases } from "./cases.ts";
 import { grade } from "./grade.ts";
@@ -21,6 +20,12 @@ const { values } = NodeUtil.parseArgs({
     "dry-run": { type: "boolean", default: false },
   },
 });
+// Summaries now run on the thread's own model; Haiku is the cheap stand-in for grading prompts.
+const MESSAGE_SUMMARY_MODEL = {
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: "claude-haiku-5-5",
+  options: [{ id: "effort", value: "low" }],
+};
 const selected = values.case ? cases.filter((entry) => values.case!.includes(entry.id)) : cases;
 const modelSelection = values.model
   ? { ...MESSAGE_SUMMARY_MODEL, model: values.model }

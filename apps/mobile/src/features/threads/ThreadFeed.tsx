@@ -1,5 +1,3 @@
-import { MessageReactionChip } from "./MessageReactionChip";
-import { SenderCard } from "./SenderCard";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -45,7 +43,6 @@ import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
 import {
   IDLE_COMPACTING_LABELS,
   resolveUserMessageFileCards,
-  nonUserMessageOrigin,
   resolveUserMessagePresentation,
 } from "@t3tools/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -64,6 +61,7 @@ import {
   type MessageId,
   type OrchestrationV2ProjectedTurnItem,
   type RunId,
+  type ScheduledTaskId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import type { ToolCallVisibility } from "@t3tools/contracts/settings";
@@ -267,7 +265,10 @@ import {
   useQuietThreadShell,
   useThreadChipIcons,
 } from "../../state/entities";
+import { useEnvironmentPresentation } from "../../state/presentation";
 import { useThreadSelection } from "../../state/use-thread-selection";
+import { useEnvironmentQuery } from "../../state/query";
+import { serverEnvironment } from "../../state/server";
 import { useModelMentions } from "../../state/model-mentions";
 import { composerDocumentAttachmentRecord } from "../../lib/composerContext";
 import * as Option from "effect/Option";
@@ -299,6 +300,7 @@ import {
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
 import { ZoomableImagePressable } from "./ZoomableImagePressable";
+import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { useMessageTimeFormatter } from "./useMessageTimeFormatter";
 
@@ -423,7 +425,6 @@ function AssistantForkButton(props: {
   const [busy, setBusy] = useState(false);
   const canFork = canForkProjectedAssistantItem({
     projectedItem: props.projectedItem,
-    runStatus: support.run?.status,
     capabilities: support.providerSession?.capabilities,
   });
   const runId = props.projectedItem.item.runId;
@@ -1453,19 +1454,19 @@ function useMarkdownStyles(): MarkdownStyleSets {
 
 /** Messages from other agents fold to one line so the user's own messages stay easy to find. */
 function AgentMessageFoldHeader(props: {
-  readonly sender?:
-    | Extract<import("@t3tools/contracts").TurnOrigin, { readonly threadId: unknown }>
-    | undefined;
+  readonly environmentId: EnvironmentId;
+  readonly senderThreadId?: ThreadId;
+  /** A linked environment's sender title, for when this client cannot reach it. */
+  readonly senderTitle?: string;
   readonly summary: string;
-  readonly reaction?:
-    | import("@t3tools/client-runtime/state/message-reactions").InputMessageReaction
-    | undefined;
   readonly expanded: boolean;
   readonly onToggle: () => void;
   readonly iconSubtleColor: ColorValue;
 }) {
-  const senderShell = useQuietThreadShell(props.sender ?? null);
-  const label = props.sender?.title.trim() || senderShell?.title.trim() || "Agent";
+  const senderShell = useQuietThreadShell(
+    props.senderThreadId ? scopeThreadRef(props.environmentId, props.senderThreadId) : null,
+  );
+  const label = senderShell?.title.trim() || props.senderTitle?.trim() || "Agent";
   return (
     <Pressable
       accessibilityRole="button"
@@ -1495,7 +1496,6 @@ function AgentMessageFoldHeader(props: {
       <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
         {props.summary}
       </Text>
-      <MessageReactionChip reaction={props.reaction} />
       <ThreadDisclosureChevron
         expanded={props.expanded}
         collapsedDirection="down"
@@ -1507,28 +1507,145 @@ function AgentMessageFoldHeader(props: {
 }
 
 function OpenSenderThreadButton(props: {
-  readonly sender: Extract<import("@t3tools/contracts").TurnOrigin, { readonly threadId: unknown }>;
+  readonly environmentId: EnvironmentId;
+  readonly senderThreadId: ThreadId;
+  /** In a linked environment, shown only when this client is connected to it. */
+  readonly linked?: boolean;
 }) {
   const openLinkedThread = useOpenLinkedThread();
-  const senderShell = useQuietThreadShell(props.sender);
+  const linkedEnvironment = useEnvironmentPresentation(props.linked ? props.environmentId : null);
+  if (props.linked && linkedEnvironment.presentation === null) return null;
   return (
     <Pressable
       accessibilityRole="link"
       hitSlop={6}
       onPress={() =>
         openLinkedThread({
-          environmentId: String(props.sender.environmentId),
-          threadId: String(props.sender.threadId),
+          environmentId: String(props.environmentId),
+          threadId: String(props.senderThreadId),
         })
       }
     >
-      <Text className="font-t3-medium text-xs text-foreground-secondary">
-        {props.sender.title.trim() || senderShell?.title.trim() || "Open thread"}
-      </Text>
+      <Text className="font-t3-medium text-xs text-foreground-secondary">Open thread</Text>
     </Pressable>
   );
 }
 
+/** Automation prompts are long, repeated runbooks; a folded bubble keeps them out of the way. */
+function ThreadAutomationMessageRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly text: string;
+  readonly context?: OrchestrationMessageContext;
+  readonly scheduledTaskId: ScheduledTaskId | undefined;
+  readonly timestampLabel: string;
+  readonly expanded: boolean;
+  readonly onToggle: () => void;
+  readonly bubbleColor: ColorValue;
+  readonly bubbleMaxWidth: number | "85%";
+  readonly contentMaxWidth: number;
+  readonly iconSubtleColor: ColorValue;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly reviewCommentColors: ReviewCommentColors;
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
+  readonly linkHandlers: MarkdownLinkHandlers;
+  readonly renderImage: MarkdownImageRenderer;
+}) {
+  const navigation = useNavigation();
+  const tasks = useEnvironmentQuery(
+    props.scheduledTaskId
+      ? serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} })
+      : null,
+  );
+  const taskTitle = tasks.data?.tasks.find((task) => task.id === props.scheduledTaskId)?.title;
+  const summary = taskTitle ?? props.text.trim().split(/\r?\n/, 1)[0] ?? "";
+
+  return (
+    <View className="mb-5 items-end">
+      <View
+        className="min-w-0 rounded-[20px]"
+        style={{
+          backgroundColor: props.bubbleColor,
+          maxWidth: props.bubbleMaxWidth,
+          ...(props.expanded ? { width: props.bubbleMaxWidth } : null),
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Automation: ${summary}`}
+          accessibilityHint={`Double tap to ${props.expanded ? "hide" : "show"} the prompt.`}
+          accessibilityState={{ expanded: props.expanded }}
+          hitSlop={4}
+          className="min-h-10 flex-row items-center gap-1.5 px-3.5 py-2"
+          onPress={() => {
+            void Haptics.selectionAsync();
+            props.onToggle();
+          }}
+        >
+          <SymbolView
+            name="calendar.badge.clock"
+            size={14}
+            weight="medium"
+            tintColorClassName="accent-user-bubble-foreground-muted"
+            type="monochrome"
+          />
+          <Text className="font-t3-medium text-sm text-user-bubble-foreground-muted">
+            Automation
+          </Text>
+          <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
+            {summary}
+          </Text>
+          <ThreadDisclosureChevron
+            expanded={props.expanded}
+            collapsedDirection="down"
+            size={11}
+            tintColor={props.iconSubtleColor}
+          />
+        </Pressable>
+        {props.expanded ? (
+          <View className="px-3.5 pb-2.5">
+            <MarkdownImageAvailableWidthContext value={props.contentMaxWidth}>
+              <UserMessageContent
+                text={renderAssistantCitationsAsText(props.text)}
+                environmentId={props.environmentId}
+                context={props.context}
+                markdownStyles={props.markdownStyles}
+                reviewCommentColors={props.reviewCommentColors}
+                skills={props.skills}
+                linkHandlers={props.linkHandlers}
+                renderImage={props.renderImage}
+              />
+            </MarkdownImageAvailableWidthContext>
+          </View>
+        ) : null}
+      </View>
+      {props.expanded ? (
+        <View className="mt-1 flex-row items-center justify-end gap-2 pr-0.5">
+          {props.scheduledTaskId ? (
+            <Pressable
+              accessibilityRole="link"
+              hitSlop={6}
+              onPress={() => openSettings(navigation, "SettingsScheduledTasks")}
+            >
+              <Text className="font-t3-medium text-xs text-foreground-secondary">
+                Open automation
+              </Text>
+            </Pressable>
+          ) : null}
+          <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">
+            {props.timestampLabel}
+          </Text>
+          <UserMessageCopyButton
+            text={props.text}
+            onCopy={undefined}
+            tintColor={props.iconSubtleColor}
+          />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Leads with why T3 Code compacted, when it did so without being asked. */
 function compactionLabel(label: string, title: string | undefined) {
   return title !== undefined && label.startsWith("Context compacted")
     ? title + label.slice("Context compacted".length)
@@ -1796,7 +1913,6 @@ function renderFeedEntry(
         themeAppearance={props.themeAppearance}
         toolSurface={entry.toolSurface}
         toolIcon={entry.toolIcon}
-        toolIconLabel={entry.toolIconLabel}
         summaryToolIcon={entry.summaryToolIcon}
         hasFailure={entry.hasFailure}
         shimmer={entry.shimmer}
@@ -1923,43 +2039,38 @@ function renderFeedEntry(
         />
       );
     }
-    const origin = isUser ? nonUserMessageOrigin(message) : null;
-    if (origin) {
+    if (isUser && presentation.attribution === "automation") {
+      const rowId = `automation:${message.id}`;
       return (
-        <View className="mb-2 w-full">
-          <SenderCard
-            origin={origin}
-            threadRef={scopeThreadRef(props.environmentId, props.threadId)}
-            text={presentation.text}
-            summary={message.summary}
-            createdAt={message.createdAt}
-            reaction={message.reaction}
-          >
-            <MessageAttachmentList
-              attachments={attachments}
-              environmentId={props.environmentId}
-              onPressPreview={props.onPressPreview}
-              onPlaybackStart={props.onPlaybackStart}
-            />
-            <MarkdownImageAvailableWidthContext value={props.userBubbleMaxWidth}>
-              <UserMessageContent
-                text={renderedText}
-                environmentId={props.environmentId}
-                context={message.context}
-                markdownStyles={markdownStyles.assistant}
-                reviewCommentColors={props.reviewCommentColors}
-                skills={props.skills}
-                linkHandlers={props.markdownLinkHandlers}
-                renderImage={props.renderMarkdownImage}
-              />
-            </MarkdownImageAvailableWidthContext>
-          </SenderCard>
-        </View>
+        <ThreadAutomationMessageRow
+          environmentId={props.environmentId}
+          text={presentation.text}
+          context={message.context}
+          scheduledTaskId={presentation.scheduledTaskId}
+          timestampLabel={timestampLabel}
+          expanded={props.expandedWorkRows[rowId] ?? false}
+          onToggle={() => props.onToggleWorkRow(rowId, entry.id)}
+          bubbleColor={userBubbleColor}
+          bubbleMaxWidth={props.duoColumns ? "85%" : props.userBubbleMaxWidth}
+          contentMaxWidth={props.userBubbleMaxWidth - USER_BUBBLE_HORIZONTAL_PADDING * 2}
+          iconSubtleColor={iconSubtleColor}
+          markdownStyles={markdownStyles.user}
+          reviewCommentColors={props.reviewCommentColors}
+          skills={props.skills}
+          linkHandlers={props.markdownLinkHandlers}
+          renderImage={props.renderMarkdownImage}
+        />
       );
     }
     if (isUser) {
       const enterAnimated = isFreshTimestamp(message.createdAt);
       const foldRowId = presentation.attribution === "agent" ? `agent:${message.id}` : null;
+      // A linked environment's agent sent it from a thread there.
+      const senderRef =
+        message.linkedSender ??
+        (message.senderThreadId
+          ? scopeThreadRef(props.environmentId, message.senderThreadId)
+          : null);
       const foldExpanded = foldRowId !== null && (props.expandedWorkRows[foldRowId] ?? false);
       const bubbleBodyVisible = foldRowId === null || foldExpanded;
       const intentBadge = props.userMessageGrouping.continuesSteer
@@ -2065,7 +2176,7 @@ function renderFeedEntry(
           ) : null}
           {hasBubble ? (
             <View
-              className={cn("min-w-0 rounded-[20px]", foldRowId !== null && "border border-border")}
+              className="min-w-0 rounded-[20px]"
               style={{
                 backgroundColor: userBubbleColor,
                 maxWidth: props.duoColumns ? "85%" : props.userBubbleMaxWidth,
@@ -2081,8 +2192,9 @@ function renderFeedEntry(
               {presentation.attribution === "guest" ? <GuestBubbleTint /> : null}
               {foldRowId !== null ? (
                 <AgentMessageFoldHeader
-                  sender={presentation.sender}
-                  reaction={message.reaction}
+                  environmentId={senderRef?.environmentId ?? props.environmentId}
+                  senderThreadId={senderRef?.threadId}
+                  {...(message.linkedSender ? { senderTitle: message.linkedSender.title } : {})}
                   summary={
                     replaceComposerContextReferences(presentation.text, (ref) => ref.label)
                       .split(/\r?\n/)
@@ -2187,15 +2299,15 @@ function renderFeedEntry(
               ) : null}
             </View>
           ) : null}
-          {!bubbleBodyVisible && presentation.sender ? (
-            <View className="mt-1 flex-row justify-end pr-0.5">
-              <OpenSenderThreadButton sender={presentation.sender} />
-            </View>
-          ) : null}
           {bubbleBodyVisible ? (
             <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
-              {/* The user's own messages carry a sender when they bring back a fork. */}
-              {presentation.sender ? <OpenSenderThreadButton sender={presentation.sender} /> : null}
+              {foldRowId !== null && senderRef ? (
+                <OpenSenderThreadButton
+                  environmentId={senderRef.environmentId}
+                  senderThreadId={senderRef.threadId}
+                  linked={message.linkedSender !== undefined}
+                />
+              ) : null}
               {intentBadge ? (
                 <View
                   accessible

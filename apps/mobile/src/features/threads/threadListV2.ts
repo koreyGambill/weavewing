@@ -234,10 +234,10 @@ export const THREAD_LIST_V2_SETTLED_INITIAL_COUNT = 10;
 export const THREAD_LIST_V2_SETTLED_PAGE_COUNT = 25;
 
 export function threadHasUnseenCompletion(
-  thread: Pick<EnvironmentThreadShell, "latestRun" | "latestRunReactionOnly" | "lastVisitedAt">,
+  thread: Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt">,
 ): boolean {
   const completedAt = thread.latestRun?.completedAt;
-  if (thread.latestRunReactionOnly || !completedAt) return false;
+  if (!completedAt) return false;
   const status = thread.latestRun?.status;
   if (status === "interrupted" || status === "cancelled") return false;
   const completedAtMs = Date.parse(completedAt);

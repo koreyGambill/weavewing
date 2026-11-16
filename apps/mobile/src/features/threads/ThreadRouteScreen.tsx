@@ -31,7 +31,6 @@ import {
   isProviderNativeSubagentThread,
   MessageId,
   ThreadId,
-  type OrchestrationV2MergeBackScope,
   type ProjectScript,
 } from "@t3tools/contracts";
 import {
@@ -460,7 +459,7 @@ function ThreadRouteContent(
   const mergeBackRun =
     selectedThreadDetail === null ? null : resolveLatestMergeBackRun(selectedThreadDetail);
   const mergeBackBusyRef = useRef(false);
-  const handleMergeBack = async (scope: OrchestrationV2MergeBackScope) => {
+  const handleMergeBack = async () => {
     if (
       mergeBackBusyRef.current ||
       !selectedThread ||
@@ -476,7 +475,6 @@ function ThreadRouteContent(
         sourceThreadId: selectedThread.id,
         targetThreadId: mergeBackTargetThreadId,
         runId: mergeBackRun.id,
-        scope,
         creationSource: "mobile",
       },
     });
@@ -809,11 +807,7 @@ function ThreadRouteContent(
     onOpenGitInspector: handleOpenGitInspector,
     onMergeBack:
       mergeBackTargetThreadId !== null && mergeBackRun !== null
-        ? () => void handleMergeBack("additional")
-        : undefined,
-    onMergeBackAll:
-      mergeBackTargetThreadId !== null && mergeBackRun !== null
-        ? () => void handleMergeBack("all")
+        ? () => void handleMergeBack()
         : undefined,
     currentBranch: selectedThread?.branch ?? null,
     gitStatus: gitStatus.data,

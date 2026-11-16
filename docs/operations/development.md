@@ -385,8 +385,9 @@ vp run desktop:update-local \
 
 Use the repository's pinned Node version and a Vite Plus home containing `current/bin/vp`.
 The driver creates private shims, so archived homes with broken `bin` links work. `VP_HOME` can supply
-`--vp-home`; `patchelf` can come from PATH. Both resource monitors must match the package version's
-release, and their source must be unchanged since that tag. The command targets Windows/WSL x64.
+`--vp-home`; `patchelf` can come from PATH. Both resource monitors come from one release. The Linux
+monitor directory holds a `source-tag` file naming that tag, and `native/resource-monitor` must be
+unchanged since it. The command targets Windows/WSL x64.
 
 The installed receipt selects the update path. Missing provenance, shell or dependency changes,
 shared packages, and migrations require a full update. `--full` forces that path. One full update

@@ -862,6 +862,7 @@ export function PullRequestDetailPanel({
     environmentId,
     reference,
     title: detail?.title ?? null,
+    threadId: threadRef?.threadId,
   });
   const writeGuide = () => {
     void guideWriter.write();
@@ -1904,6 +1905,7 @@ export function PullRequestDetailPanel({
                   reference={reference}
                   active={tab === "guide"}
                   title={detail.title}
+                  threadId={threadRef?.threadId}
                   workspaceRoot={detail.workspaceRoot}
                   canComment={
                     detail.capabilities.review.inlineComment && detail.viewerPermissions.comment

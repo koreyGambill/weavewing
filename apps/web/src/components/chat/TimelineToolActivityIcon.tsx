@@ -94,7 +94,7 @@ export function ToolActivityIconView(props: {
     return <WorkEntryIcon name={props.fallbackName} className={fallbackClassName} />;
   }
   if (props.icon._tag === "website") {
-    const src = toolActivityFaviconUrl(props.icon, resolvedTheme, 32);
+    const src = toolActivityFaviconUrl(props.icon, resolvedTheme);
     return src ? (
       <ToolActivityImageIcon
         key={src}

@@ -889,7 +889,7 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
-      Layer.provide(speechHttpApiLayer),
+      Layer.provide(speechHttpApiLayer.pipe(Layer.provide(ProjectionStoreV2.layer))),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
       Layer.provide(WebhookRoute.layer.pipe(Layer.provide(RelayDeliveryProof.layer))),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),
@@ -922,7 +922,10 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
 ).pipe(
   Layer.provide(
-    PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
+    PullRequestReviewGuideService.layer.pipe(
+      Layer.provide(PullRequestReviewGuides.layer),
+      Layer.provide(ProjectionStoreV2.layer),
+    ),
   ),
   // delegate_task to a linked environment, from /mcp and the follower above.
   Layer.provide(RemoteDelegation.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),

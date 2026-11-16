@@ -103,8 +103,8 @@ export function useStartSideChat() {
         threadId: targetThreadId,
         message: {
           messageId: MessageId.make(uuidv4()),
-          role: "user",
           origin: { kind: "user" },
+          role: "user",
           text: prompt,
           attachments: [],
         },

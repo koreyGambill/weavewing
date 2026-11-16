@@ -145,42 +145,17 @@ describe("resolveProjectSettings", () => {
     },
   );
 
-  it("moves text generation off an instance the project turned off", () => {
-    const codex = ProviderInstanceId.make("codex");
+  it("lets a project turn off following the thread for its own text generation", () => {
     const settings = {
       ...DEFAULT_SERVER_SETTINGS,
-      textGenerationModelSelection: createModelSelection(codex, "gpt-5"),
-      projectSettingsOverrides: {
-        [projectId]: { providerInstances: { [codex]: { enabled: false } } },
-      },
+      projectSettingsOverrides: { [projectId]: { textGenerationFollowsThread: false } },
     };
+    expect(resolveProjectSettings(settings, projectId).settings.textGenerationFollowsThread).toBe(
+      false,
+    );
     expect(
-      resolveProjectSettings(settings, projectId).settings.textGenerationModelSelection.instanceId,
-    ).toBe(ProviderInstanceId.make("claudeAgent"));
-    expect(
-      resolveProjectSettings(settings, otherProjectId).settings.textGenerationModelSelection,
-    ).toEqual(settings.textGenerationModelSelection);
-  });
-
-  it("falls back to a configured instance when every built-in one is off for the project", () => {
-    const codex = ProviderInstanceId.make("codex");
-    const codexWork = ProviderInstanceId.make("codex_work");
-    const settings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      textGenerationModelSelection: createModelSelection(codex, "gpt-5"),
-      providerInstances: { [codexWork]: { driver: ProviderDriverKind.make("codex"), config: {} } },
-      projectSettingsOverrides: {
-        [projectId]: {
-          providerInstances: {
-            [codex]: { enabled: false },
-            [ProviderInstanceId.make("claudeAgent")]: { enabled: false },
-          },
-        },
-      },
-    };
-    expect(
-      resolveProjectSettings(settings, projectId).settings.textGenerationModelSelection.instanceId,
-    ).toBe(codexWork);
+      resolveProjectSettings(settings, otherProjectId).settings.textGenerationFollowsThread,
+    ).toBe(true);
   });
 });
 

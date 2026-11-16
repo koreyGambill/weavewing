@@ -419,6 +419,10 @@ export function resolveAppModelSelectionState(
   const selectedEntry = entries.find(
     (entry) => entry.instanceId === selection.instanceId && entry.enabled && entry.isAvailable,
   );
+  // An agent that is off or unavailable keeps the user's choice on screen; Settings warns about it.
+  if (!selectedEntry && entries.some((entry) => entry.instanceId === selection.instanceId)) {
+    return selection;
+  }
   const entry =
     selectedEntry ?? entries.find((candidate) => candidate.enabled && candidate.isAvailable);
   if (entry) {
@@ -452,4 +456,21 @@ export function resolveAppModelSelectionState(
   }
 
   return NO_PROVIDER_MODEL_SELECTION;
+}
+
+/**
+ * What a job's picker shows: its own saved model, kept even when its agent is off or filtered
+ * out so the row never names another vendor, or else the model the job follows. Display only.
+ */
+export function resolveOwnModelSelectionState(
+  settings: UnifiedSettings,
+  own: ModelSelection | null,
+  inherited: ModelSelection,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const resolved = resolveAppModelSelectionState(
+    { ...settings, textGenerationModelSelection: own ?? inherited },
+    providers,
+  );
+  return own !== null && resolved.instanceId !== own.instanceId ? own : resolved;
 }

@@ -1,7 +1,15 @@
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { PullRequestRef } from "./pullRequest.ts";
+
+/** `threadId` is the thread asking: its model writes the guide. The stored guide stays per PR head. */
+export const PullRequestGenerateReviewGuideInput = Schema.Struct({
+  ...PullRequestRef.fields,
+  threadId: Schema.optional(ThreadId),
+});
+export type PullRequestGenerateReviewGuideInput = typeof PullRequestGenerateReviewGuideInput.Type;
 
 export const PullRequestReviewGuideAttention = Schema.Struct({
   kind: Schema.Literals(["tradeoff", "contract", "product", "risk", "accessibility"]),

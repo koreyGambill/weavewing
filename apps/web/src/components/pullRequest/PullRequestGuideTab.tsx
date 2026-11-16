@@ -1,4 +1,9 @@
-import type { EnvironmentId, PullRequestRef, PullRequestReviewGuideStop } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  PullRequestReviewGuideStop,
+  ThreadId,
+} from "@t3tools/contracts";
 import { ScrollTextIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useEffectEvent } from "react";
 
@@ -23,6 +28,7 @@ export function PullRequestGuideTab({
   environmentId,
   reference,
   title,
+  threadId,
   workspaceRoot,
   active,
   canComment,
@@ -37,6 +43,7 @@ export function PullRequestGuideTab({
   environmentId: EnvironmentId;
   reference: PullRequestRef;
   title: string | null;
+  threadId?: ThreadId | null | undefined;
   workspaceRoot: string;
   active: boolean;
   canComment: boolean;
@@ -54,6 +61,7 @@ export function PullRequestGuideTab({
     environmentId,
     reference,
     title,
+    threadId,
   });
   const reviewKey = pullRequestReviewKey(reference);
   const pending = usePendingReviewComments(reference);

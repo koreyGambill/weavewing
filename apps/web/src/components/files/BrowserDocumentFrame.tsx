@@ -44,6 +44,7 @@ import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
+import { AGENT_HTML_SANDBOX } from "@t3tools/shared/weavewingOutbound";
 
 /**
  * The page reports the keys, and a page script can report any key it likes,
@@ -171,7 +172,7 @@ function FileDocument(props: { readonly src: string; readonly title: string }) {
       title={props.title}
       className="min-h-0 flex-1 border-0"
       style={{ backgroundColor: "Canvas" }}
-      sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+      sandbox={AGENT_HTML_SANDBOX}
     />
   );
 }

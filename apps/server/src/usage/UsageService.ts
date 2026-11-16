@@ -42,7 +42,6 @@ import type {
 import { canonicalModelFilter, resolveModelAliases, UsageAggregator } from "./usageAggregation.ts";
 import {
   createOverrideRateTable,
-  isUnlistedModel,
   parseRateTable,
   priceUsage,
   type PricedRecord,
@@ -70,8 +69,6 @@ const LITELLM_RATES_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 const LITELLM_RATES_API_URL =
   "https://api.github.com/repos/BerriAI/litellm/contents/model_prices_and_context_window.json?ref=main";
-
-const RATES_TTL_MS = 24 * 60 * 60 * 1000;
 
 const RATES_REFRESH_FLOOR_MS = 60 * 1000;
 
@@ -299,9 +296,10 @@ export const make = Effect.gen(function* () {
 
   const loadRates = Effect.fn("UsageService.loadRates")(function* (force: boolean) {
     const now = yield* Clock.currentTimeMillis;
-    const maxAgeMs = force ? RATES_REFRESH_FLOOR_MS : RATES_TTL_MS;
     yield* loadSavedRates;
-    if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < maxAgeMs) return;
+    // Weavewing: only the user's Refresh fetches the price list.
+    if (!force) return;
+    if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < RATES_REFRESH_FLOOR_MS) return;
     if (ratesLastFailedAtMs !== null && now - ratesLastFailedAtMs < RATES_REFRESH_FLOOR_MS) return;
 
     let fetched = yield* fetchRates(LITELLM_RATES_URL);
@@ -326,24 +324,6 @@ export const make = Effect.gen(function* () {
   });
 
   const ensureRates = (force: boolean) => ratesLock.withPermit(loadRates(force));
-
-  // Rates are kept for RATES_TTL_MS, so a model released after the table was fetched would stay unpriced
-  // that long. A scan that meets a model the table does not list refetches early: once per model against
-  // a fresh table, with loadRates keeping RATES_REFRESH_FLOOR_MS between attempts.
-  const checkedUnlistedModels = new Set<string>();
-  const refreshForUnlistedModels = Effect.fn("UsageService.refreshForUnlistedModels")(function* (
-    models: ReadonlySet<string>,
-  ) {
-    const unlisted = [...models].filter(
-      (model) => !checkedUnlistedModels.has(model) && isUnlistedModel(rates, model),
-    );
-    if (unlisted.length === 0) return;
-    yield* ensureRates(true);
-    const now = yield* Clock.currentTimeMillis;
-    // A failed fetch leaves the models unchecked, so a later scan tries again.
-    if (ratesFetchedAtMs === null || now - ratesFetchedAtMs >= RATES_REFRESH_FLOOR_MS) return;
-    for (const model of unlisted) checkedUnlistedModels.add(model);
-  });
 
   const refreshRates = ensureRates(true).pipe(
     Effect.map(pricing),
@@ -980,21 +960,6 @@ export const make = Effect.gen(function* () {
       for (const filePath of ordered) fileCache.set(filePath, entries.get(filePath)!);
       cacheDirty = true;
     }
-
-    // The models priced below, as UsageAggregator resolves them: an alias replaces rateModel.
-    const rateModels = new Set<string>();
-    for (const files of filesByDir) {
-      for (const file of files) {
-        for (const record of file.records) {
-          const alias = modelAliases.get(record.model);
-          const model = alias ?? record.model;
-          if (priceOverrides.has(model.trim())) continue;
-          rateModels.add(alias === undefined ? (record.rateModel ?? model) : model);
-        }
-      }
-    }
-    // A saved answer prices with saved rates and the full scan after it refetches.
-    if (!fromMemory) yield* refreshForUnlistedModels(rateModels);
 
     const summaryPricing = pricing();
 

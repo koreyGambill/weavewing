@@ -354,23 +354,38 @@ it("highlights a code block's own source when an earlier block of the same lengt
 });
 
 describe("ChatMarkdown favicon privacy", () => {
-  it("suppresses private link images while preserving public links across updates", async () => {
+  it("marks links with bundled icons and never loads a favicon", async () => {
     setup();
     const markdown = (url: string) => <ChatMarkdown cwd="/tmp/project" text={`[Link](${url})`} />;
     await using screen = await render(markdown("https://example.com"));
     const { container, rerender } = screen;
-    expect([...container.querySelectorAll("img")].map((image) => image.src)).toEqual([
-      "https://www.google.com/s2/favicons?domain=example.com&sz=32",
-    ]);
-    for (const url of ["http://192.168.1.10:8080", "http://localhost:3000", "http://home.arpa"]) {
+    for (const url of ["https://example.com", "http://localhost:3000", "https://github.com/a/b"]) {
       await rerender(markdown(url));
       expect(container.querySelectorAll("img")).toHaveLength(0);
+      expect(container.querySelector("a svg")).not.toBeNull();
     }
-    await rerender(markdown("https://example.com"));
-    expect(container.querySelectorAll("img")).toHaveLength(1);
-    await rerender(markdown("https://github.com/pingdotgg/t3code/pull/1"));
-    expect(container.querySelectorAll("img")).toHaveLength(0);
-    expect(container.querySelector("a svg")).not.toBeNull();
+  });
+});
+
+describe("ChatMarkdown remote media", () => {
+  it("loads a remote image only after a click on its own placeholder", async () => {
+    setup();
+    const first = "https://cdn.example.com/a.png?q=secret";
+    await using screen = await renderText(`![one](${first}) ![two](//other.example.org/b.png)`);
+    const images = () => [...screen.container.querySelectorAll("img")].map((image) => image.src);
+    const second = page.getByRole("button", { name: "Load image from other.example.org" });
+    await expect.element(second).toBeInTheDocument();
+    expect(images()).toEqual([]);
+    await userEvent.click(page.getByRole("button", { name: "Load image from cdn.example.com" }));
+    // The host does not resolve, so the requested image may already have fallen back.
+    await vi.waitFor(() =>
+      expect(
+        images().includes(first) ||
+          screen.container.textContent?.includes("Image unavailable · one"),
+      ).toBe(true),
+    );
+    await expect.element(second).toBeInTheDocument();
+    expect(images().filter((src) => src.includes("other.example.org"))).toEqual([]);
   });
 });
 

@@ -1,6 +1,4 @@
-import { outgoingT3MessageLabel } from "@t3tools/client-runtime/t3ToolSummary";
 import { Button } from "../../components/ui/Button";
-import { ThreadMessageLink } from "./SenderCard";
 import { ThreadSubagentGroup } from "./thread-subagent-group";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import {
@@ -46,15 +44,14 @@ import {
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
-  EnvironmentId,
+  type EnvironmentId,
   type RunId,
-  ThreadId,
+  type ThreadId,
   type ToolActivityIcon,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
-import { useQuietThreadShell, useThreadTitle } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
@@ -75,7 +72,6 @@ import {
   formatItemFullDetail,
   type ThreadFeedActivity,
   workEntryRowLabel,
-  workRowAccessibilityLabel,
 } from "../../lib/threadActivity";
 import {
   isJsonToolText,
@@ -89,13 +85,10 @@ import {
   type ThreadWorkGroupScrollPosition,
 } from "./thread-feed-scroll-position";
 import {
-  type WorkLogIconName,
-  toolGroupIconPresentation,
-  workLogIcons,
+  resolveWorkEntryToolPresentation,
   toolGroupAction,
   type ToolGroupSummaryKind,
   workEntryViewedImagePath,
-  workEntryOutgoingMessage,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import type { MarkdownImageRenderer } from "../../native/SelectableMarkdownText";
@@ -383,23 +376,23 @@ export function ShimmeringWorkContent(props: {
   );
 }
 
-function workRowSymbolName(icon: WorkLogIconName): WorkContentIcon {
+function workRowSymbolName(icon: ThreadFeedActivity["icon"]): WorkContentIcon {
   switch (icon) {
-    case "bot":
+    case "agent":
       return "robot";
-    case "circle-alert":
+    case "alert":
       return { ios: "exclamationmark.triangle", android: "error" };
     case "browser":
       return { ios: "safari", android: "public" };
     case "check":
       return { ios: "checkmark", android: "check" };
-    case "terminal":
+    case "command":
       return { ios: "terminal", android: "terminal" };
     case "computer":
       return "computer";
     case "code":
       return "chevron.left.forwardslash.chevron.right";
-    case "square-pen":
+    case "edit":
       return { ios: "square.and.pencil", android: "edit" };
     case "eye":
       return { ios: "eye", android: "visibility" };
@@ -413,20 +406,10 @@ function workRowSymbolName(icon: WorkLogIconName): WorkContentIcon {
       return { ios: "hammer", android: "construction" };
     case "lock":
       return { ios: "lock", android: "lock" };
-    case "message-circle":
+    case "message":
       return { ios: "bubble.left", android: "chat_bubble" };
     case "warning":
-      return "exclamationmark.triangle";
-    case "x":
       return { ios: "xmark", android: "close" };
-    case "brain":
-      return "brain";
-    case "list-todo":
-      return "checklist";
-    case "device":
-    case "t3-code":
-    case "pull-request":
-      return icon;
     case "wrench":
       return { ios: "wrench", android: "build" };
     case "zap":
@@ -898,22 +881,6 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
   },
 ) {
   const { row, expanded } = props;
-  const outgoing = workEntryOutgoingMessage(row.workEntry);
-  const outgoingTarget = outgoing?.threadId
-    ? scopeThreadRef(
-        outgoing.environmentId ? EnvironmentId.make(outgoing.environmentId) : props.environmentId,
-        ThreadId.make(outgoing.threadId),
-      )
-    : null;
-  const outgoingShell = useQuietThreadShell(outgoingTarget);
-  const outgoingTitle = useThreadTitle(outgoingTarget)?.trim() || "Thread";
-  const outgoingLabel = outgoing
-    ? outgoingT3MessageLabel(
-        outgoing,
-        scopeThreadRef(props.environmentId, row.projectedItem.item.threadId),
-        outgoingShell,
-      )
-    : null;
   const openLinkedThread = useOpenLinkedThread();
   const streamsOutput =
     useCommandOutputStreaming(props.environmentId) &&
@@ -998,8 +965,6 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
       </WorkLogPressable>
     );
   }
-  const notificationSource =
-    row.projectedItem.item.type === "notification" ? row.projectedItem.item.source : undefined;
   const notifiedSubagentThreadId =
     row.projectedItem.item.type === "notification"
       ? notificationChildThreadId(row.projectedItem.item.source)
@@ -1052,31 +1017,23 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
         exit {failedExitCode}
       </Text>
     );
-  const previewText = outgoingLabel ?? row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry);
+  const toolPresentation = resolveWorkEntryToolPresentation(row.workEntry);
+  const previewText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry);
   const answerPreview = row.workEntry.questionAnswer
     ? getQuestionAnswerPreview(row.workEntry.questionAnswer)
     : null;
-  const accessiblePreview = [
-    outgoing ? `${outgoingLabel} ${outgoingTitle}` : previewText,
-    answerPreview,
-  ]
-    .filter(Boolean)
-    .join(": ");
-  const displayText =
-    outgoingLabel ?? row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, expanded);
+  const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
+  const displayText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, expanded);
   const isSystemNotice = row.projectedItem.item.type === "system_notice";
   const isUsageLimit =
     row.projectedItem.item.type === "error" &&
     row.projectedItem.item.failure.class === "usage_limit" &&
     row.projectedItem.item.status !== "completed";
   const iconIsDestructive =
-    !isSystemNotice &&
-    !isUsageLimit &&
-    (row.icon.iconName === "circle-alert" || row.icon.iconName === "warning");
+    !isSystemNotice && !isUsageLimit && (row.icon === "alert" || row.icon === "warning");
   const failed = row.status === "failure";
   const toolIcon = row.workEntry.toolIcon ?? row.workEntry.toolSource?.icon;
-  const icon = workRowSymbolName(row.icon.iconName);
-  const accessibilityLabel = workRowAccessibilityLabel(row.icon.label, accessiblePreview);
+  const icon = reasoning ? "brain" : (toolPresentation?.icon ?? workRowSymbolName(row.icon));
 
   return (
     <Animated.View
@@ -1088,7 +1045,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
         accessibilityRole={
           notifiedSubagentThreadId !== undefined ? "link" : canExpand ? "button" : undefined
         }
-        accessibilityLabel={failed ? `${accessibilityLabel}, tool call failed` : accessibilityLabel}
+        accessibilityLabel={failed ? `${accessiblePreview}, tool call failed` : accessiblePreview}
         accessibilityHint={
           notifiedSubagentThreadId !== undefined
             ? "Opens this agent's thread. Long press to copy."
@@ -1100,11 +1057,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
         onPress={() => {
           if (notifiedSubagentThreadId !== undefined) {
             openLinkedThread({
-              environmentId: String(
-                notificationSource?.kind === "thread_reply"
-                  ? (notificationSource.environmentId ?? props.environmentId)
-                  : props.environmentId,
-              ),
+              environmentId: String(props.environmentId),
               threadId: String(notifiedSubagentThreadId),
             });
             return;
@@ -1153,33 +1106,22 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
                 />
               )}
             </WorkLogIconSlot>
-            {outgoing ? (
-              <View className="min-w-0 flex-1 flex-row items-center gap-1.5">
-                <Text className="shrink-0 text-sm text-foreground-muted">{outgoingLabel}</Text>
-                {outgoingTarget ? (
-                  <ThreadMessageLink thread={outgoingTarget} title={outgoingTitle} />
-                ) : (
-                  <WorkLogLabel>Thread unavailable</WorkLogLabel>
-                )}
-              </View>
-            ) : (
-              <WorkLogLabel
-                tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
-              >
-                {displayText}
-                {answerPreview ? (
-                  <Text
-                    className={
-                      !expanded &&
-                      row.workEntry.questionAnswer &&
-                      hasQuestionAnswer(row.workEntry.questionAnswer)
-                        ? "text-foreground"
-                        : "text-foreground-subtle"
-                    }
-                  >{`  ${answerPreview}`}</Text>
-                ) : null}
-              </WorkLogLabel>
-            )}
+            <WorkLogLabel
+              tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
+            >
+              {displayText}
+              {answerPreview ? (
+                <Text
+                  className={
+                    !expanded &&
+                    row.workEntry.questionAnswer &&
+                    hasQuestionAnswer(row.workEntry.questionAnswer)
+                      ? "text-foreground"
+                      : "text-foreground-subtle"
+                  }
+                >{`  ${answerPreview}`}</Text>
+              ) : null}
+            </WorkLogLabel>
           </>
         )}
 
@@ -1384,7 +1326,6 @@ export function ThreadWorkGroupToggle(props: {
   readonly themeAppearance: "light" | "dark";
   readonly toolSurface?: import("@t3tools/contracts").ToolActivitySurface;
   readonly toolIcon?: ToolActivityIcon;
-  readonly toolIconLabel?: string | undefined;
   readonly hasFailure: boolean;
   readonly shimmer: boolean;
   readonly thought?: string | undefined;
@@ -1392,16 +1333,12 @@ export function ThreadWorkGroupToggle(props: {
   readonly onToggle: () => void;
 }) {
   const statusLabel = props.hasFailure ? `${props.summary}, tool call failed` : props.summary;
-  const iconPresentation = props.summaryToolIcon
-    ? workLogIcons[props.summaryToolIcon]
-    : props.toolSurface
-      ? workLogIcons[props.toolSurface]
-      : toolGroupIconPresentation(props.summaryKind);
-  const accessibilityLabel = workRowAccessibilityLabel(
-    props.toolIconLabel ?? iconPresentation.label,
-    props.thought ? `${props.thought} ${statusLabel}` : statusLabel,
-  );
-  const icon = workRowSymbolName(iconPresentation.iconName);
+  const accessibilityLabel = props.thought ? `${props.thought} ${statusLabel}` : statusLabel;
+  const icon =
+    props.summaryToolIcon ??
+    (props.toolSurface
+      ? workRowSymbolName(props.toolSurface)
+      : toolGroupSummarySymbolName(props.summaryKind));
 
   return (
     <WorkLogBlock layout="group-header">
@@ -1511,7 +1448,7 @@ function ToolActivityIconView(props: {
     return <WorkLogIcon icon={props.fallback} color={props.fallbackColor} />;
   }
   if (props.icon._tag === "website") {
-    const source = toolActivityFaviconUrl(props.icon, props.themeAppearance, 32);
+    const source = toolActivityFaviconUrl(props.icon, props.themeAppearance);
     return source ? (
       <ToolActivityImage
         key={source}
@@ -1607,4 +1544,43 @@ function ToolActivityImage(props: {
       ) : null}
     </View>
   );
+}
+
+function toolGroupSummarySymbolName(kind: ToolGroupSummaryKind): AppSymbolName {
+  switch (kind) {
+    case "pull-request":
+    case "link-pr":
+    case "unlink-pr":
+    case "list-prs":
+    case "watch-pr":
+    case "unwatch-pr":
+      return PullRequestGlyph.pullRequest;
+    case "read":
+      return { ios: "eye", android: "visibility" };
+    case "edit":
+      return { ios: "square.and.pencil", android: "edit" };
+    case "thread-create":
+      return { ios: "bubble.left", android: "chat" };
+    case "command":
+      return { ios: "terminal", android: "terminal" };
+    case "device":
+      return { ios: "iphone", android: "smartphone" };
+    case "browser":
+    case "search":
+      return { ios: "globe", android: "public" };
+    case "code-search":
+      return "magnifyingglass";
+    case "other":
+      return { ios: "wrench", android: "build" };
+    case "reasoning":
+      return { ios: "brain", android: "psychology" };
+    case "agent-tool":
+      return "robot";
+    case "tone-tool":
+      return { ios: "bolt", android: "bolt" };
+    case "dynamic-tool":
+    case "update":
+    case "mixed":
+      return { ios: "hammer", android: "construction" };
+  }
 }

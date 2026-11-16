@@ -23,7 +23,6 @@ import {
   ComposerContextId,
   type ChatAttachment,
   CommandId,
-  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   GitCommandError,
   MessageId,
@@ -858,7 +857,7 @@ it.effect("arms durable title generation after accepting the first message", () 
       assert.equal(generated.thread.title, "Generated title");
       assert.deepEqual(
         harness.generateThreadTitle.mock.calls[0]?.[0]?.modelSelection,
-        DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
+        input.modelSelection,
       );
 
       const manualRequestId = CommandId.make("command:title-generation:manual");
