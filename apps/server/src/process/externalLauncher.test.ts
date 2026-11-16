@@ -85,22 +85,23 @@ const layerTest = (input: {
     ),
   );
 
-  return Layer.mergeAll(
-    ExternalLauncher.layer.pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          NodeServices.layer,
-          layerSpawner,
-          input.path ? Layer.succeed(Path.Path, input.path) : Layer.empty,
-        ),
-      ),
-    ),
+  const context = Layer.mergeAll(
     Layer.succeed(HostProcess.Platform, input.platform),
     Layer.succeed(
       SpawnExecutableResolution,
       (command) => input.resolveExecutable?.(command) ?? command,
     ),
     ConfigProvider.layer(ConfigProvider.fromEnv({ env: input.env ?? {} })),
+  );
+  return ExternalLauncher.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        layerSpawner,
+        input.path ? Layer.succeed(Path.Path, input.path) : Layer.empty,
+      ),
+    ),
+    Layer.provideMerge(context),
   );
 };
 
@@ -1278,6 +1279,7 @@ it.effect(
   () => {
     let statCalls = 0;
     const rescanned = Deferred.makeUnsafe<void>();
+    const bootScan = Deferred.makeUnsafe<void>();
     let initialScanDone = false;
     const fileInfo = { type: "File" } as FileSystem.File.Info;
     const layerLauncher = ExternalLauncher.layer.pipe(
@@ -1290,7 +1292,9 @@ it.effect(
                 return fileInfo;
               }).pipe(
                 Effect.tap(() =>
-                  initialScanDone ? Deferred.succeed(rescanned, undefined) : Effect.void,
+                  initialScanDone
+                    ? Deferred.succeed(rescanned, undefined)
+                    : Deferred.succeed(bootScan, undefined),
                 ),
               ),
           }),
@@ -1306,6 +1310,8 @@ it.effect(
     return Effect.gen(function* () {
       const launcher = yield* ExternalLauncher.ExternalLauncher;
 
+      yield* TestClock.adjust("0 seconds");
+      assert.isTrue(yield* Deferred.isDone(bootScan));
       const first = yield* launcher.resolveAvailableEditors();
       assert.equal(first.includes("vscode"), true);
       const statCallsAfterFirstScan = statCalls;

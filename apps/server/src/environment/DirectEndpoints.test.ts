@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -389,6 +390,8 @@ describe("DirectEndpoints Tailscale Serve", () => {
             ),
           ),
         );
+        yield* TestClock.adjust("0 seconds");
+        expect(yield* Deferred.isDone(probeStarted)).toBe(true);
         const resolving = yield* Effect.forkScoped(service.resolve());
         yield* Deferred.await(probeStarted);
         const bound = { kind: "lan", httpBaseUrl: "http://192.168.1.10:3773/" };
@@ -401,11 +404,14 @@ describe("DirectEndpoints Tailscale Serve", () => {
         ]);
         expect(yield* service.resolveAvailable()).toEqual(validated);
         yield* Ref.set(status, 502);
-        const revalidating = yield* Effect.forkScoped(service.resolve());
+        expect(yield* service.resolve()).toEqual(validated);
+        expect(yield* Deferred.isDone(revalidationStarted)).toBe(false);
+        yield* TestClock.adjust("61 seconds");
+        expect(yield* service.resolve()).toEqual(validated);
         yield* Deferred.await(revalidationStarted);
         expect(yield* service.resolveAvailable()).toEqual(validated);
         yield* Deferred.succeed(finishRevalidation, undefined);
-        expect(yield* Fiber.join(revalidating)).toEqual([bound]);
+        yield* TestClock.adjust("0 seconds");
         expect(yield* service.resolveAvailable()).toEqual([bound]);
       }),
   );

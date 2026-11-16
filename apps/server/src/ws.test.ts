@@ -247,6 +247,21 @@ it.effect("resends late editors without rolling back updates already sent", () =
   }),
 );
 
+it.effect("returns the initial config while boot editor discovery is still running", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* resolveOpenDiscoveryForConfig({
+      editors: Effect.never,
+      fileManagerRevealKind: Effect.never,
+      remoteOpenTargets: Effect.succeed([]),
+      directEndpoints: Effect.succeed([]),
+      deferEditors: true,
+    }).pipe(Effect.forkChild);
+    yield* TestClock.adjust("0 seconds");
+    assert.isDefined(snapshot.pollUnsafe());
+    assert.deepEqual((yield* Fiber.join(snapshot)).availableEditors, []);
+  }),
+);
+
 it.effect("resends a reveal kind and remote targets that outlast the snapshot timeout", () =>
   Effect.gen(function* () {
     const targets = [{ kind: "mdns" as const, host: "test.local" }];
