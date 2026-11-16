@@ -29,9 +29,6 @@ const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
 const DiffPanel = lazy(() => import("../DiffPanel"));
-const YourQaView = lazy(() =>
-  import("../reviews/ThreadListView").then((module) => ({ default: module.YourQaView })),
-);
 const NotesPanel = lazy(() =>
   import("../notes/NotesPanel").then((module) => ({ default: module.NotesPanel })),
 );
@@ -91,12 +88,6 @@ export function RightPanelSurfaceContent(props: {
   const { surface, threadRef, visible, onCloseSurface } = props;
   if (surface === null) return null;
   switch (surface.kind) {
-    case "reviews":
-      return visible ? (
-        <Suspense fallback={null}>
-          <YourQaView threadRef={threadRef} />
-        </Suspense>
-      ) : null;
     case "notes":
       return (
         <Suspense fallback={null}>

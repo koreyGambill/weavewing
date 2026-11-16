@@ -42,7 +42,6 @@ const listMutationResult = Schema.Struct({
       state: ListItem.fields.state,
       owner: ListItem.fields.owner,
       links: ListItem.fields.links,
-      needsQa: ListItem.fields.needsQa,
       doneAt: ListItem.fields.doneAt,
     }),
   ),
@@ -57,7 +56,7 @@ export const ReviewToolkit = Toolkit.make(
   Tool.make("list_read", {
     ...common,
     description:
-      "Read the thread list and revision. Defaults to open and handed-off items; all includes history. allThreads searches accessible threads; needsQa filters the QA queue. Omit threadId for this thread.",
+      "Read the thread list and revision. Defaults to open and handed-off items; all includes history. allThreads searches accessible threads. Omit threadId for this thread.",
     parameters: ThreadListReadInput,
     success: Schema.Array(ThreadListEntry),
   }).annotate(Tool.Readonly, true),

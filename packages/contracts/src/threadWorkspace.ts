@@ -45,7 +45,6 @@ export const ListItem = Schema.Struct({
       "Parent item ID, or null for a root. Three levels: root, child, grandchild. No cycles.",
   }),
   links: Schema.Array(ListLink),
-  needsQa: Schema.Boolean,
   linkStates: Schema.optional(Schema.Array(ListLinkState)),
 });
 export type ListItem = typeof ListItem.Type;
@@ -94,7 +93,6 @@ export const ListItemChange = Schema.Struct({
   details: Schema.optional(Schema.String),
   parentId: Schema.optional(ListItem.fields.parentId),
   links: Schema.optional(ListItem.fields.links),
-  needsQa: Schema.optional(Schema.Boolean),
 });
 export const ThreadListUpdateInput = Schema.Struct({
   threadId: ThreadId,
@@ -115,7 +113,6 @@ export const ThreadListReadInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
   allThreads: Schema.optional(Schema.Boolean),
   all: Schema.optional(Schema.Boolean),
-  needsQa: Schema.optional(Schema.Boolean),
 });
 export type ThreadListReadInput = typeof ThreadListReadInput.Type;
 export const ThreadListEntry = Schema.Struct({

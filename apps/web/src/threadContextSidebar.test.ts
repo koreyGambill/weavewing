@@ -125,7 +125,6 @@ describe("thread tool signals", () => {
     details: "",
     parentId: null,
     links: [],
-    needsQa: false,
     ...(linkStates ? { linkStates } : {}),
   });
 

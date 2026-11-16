@@ -30,7 +30,6 @@ it("migrates real-shaped Workspace records without losing verification or questi
         id: "work-1",
         owner: "agent",
         state: "done",
-        needsQa: true,
         links: [{ type: "ticket", target: "BW-1" }],
       }),
       expect.objectContaining({ id: "action-1", owner: "you", state: "open" }),

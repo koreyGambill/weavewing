@@ -278,19 +278,9 @@ it.effect("rewrites open items while retaining history and validates explicit or
       "new",
       "handoff",
     ]);
-    yield* h.service.update({
-      threadId,
-      expectedRevision: ordered.revision,
-      changes: [{ id: "done", needsQa: true }],
-    });
-    expect(
-      (yield* h.service.listRead({ allThreads: true, all: true, needsQa: true }))[0]?.items.map(
-        (item) => item.id,
-      ),
-    ).toEqual(["done"]);
     const tree = yield* h.service.update({
       threadId,
-      expectedRevision: 4,
+      expectedRevision: 3,
       changes: [
         { id: "root", text: "Open root" },
         { id: "finished-child", text: "Finished child", parentId: "root", state: "done" },
@@ -631,6 +621,7 @@ it.effect("migrates a legacy file once and persists mark annotations outside the
     expect(yield* h.fs.readFileString(file)).toBe(saved);
     const dirty = JSON.parse(saved);
     const dirtyItem = dirty.workspace.items.find((item: { id: string }) => item.id === "work-1");
+    dirtyItem.needsQa = true;
     dirtyItem.details = `Implementation details\n\nrecordedByThreadId: original-author-thread\n\n${JSON.stringify({ ...fixture.verifications[0], verifier: "Stale raw verifier" })}\n\nLater edit`;
     yield* h.fs.writeFileString(file, JSON.stringify(dirty));
     const cleaned = yield* reloaded.get({ threadId });
@@ -639,6 +630,7 @@ it.effect("migrates a legacy file once and persists mark annotations outside the
     expect(cleanDetails).toContain("Later edit");
     expect(cleanDetails).not.toContain("recordedByThreadId");
     expect(cleanDetails).not.toContain('"workId"');
+    expect(cleaned.items.find((item) => item.id === "work-1")).not.toHaveProperty("needsQa");
     expect(cleaned.revision).toBe(first.revision);
     const cleanedFile = yield* h.fs.readFileString(file);
     yield* reloaded.get({ threadId });

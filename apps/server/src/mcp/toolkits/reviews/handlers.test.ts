@@ -26,7 +26,6 @@ const workspace = {
     state: "open" as const,
     owner: "agent" as const,
     links: [],
-    needsQa: false,
     doneAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     parentId: null,
@@ -332,12 +331,11 @@ it.effect.each(["list_update", "list_rewrite"])(
             state: "open",
             owner: "agent",
             links: [],
-            needsQa: false,
             doneAt: null,
           },
         ],
       });
-      expect(JSON.stringify(result.structuredContent).length).toBe(130);
+      expect(JSON.stringify(result.structuredContent).length).toBe(114);
       const batch = Array.from({ length: 11 }, (_, index) => ({
         id: `item-${index + 29}`,
         text: `Task ${index + 29}`,
@@ -346,7 +344,7 @@ it.effect.each(["list_update", "list_rewrite"])(
         expectedRevision: 3,
         ...(name === "list_update" ? { changes: batch } : { items: batch }),
       });
-      expect(JSON.stringify(updated.structuredContent).length).toBe(1190);
+      expect(JSON.stringify(updated.structuredContent).length).toBe(1014);
       const additions = [{ text: "New item" }];
       const created = yield* call(name, {
         expectedRevision: 3,

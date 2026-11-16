@@ -26,17 +26,16 @@ Action items hold outstanding needs and future work. Mark one done or reopen it
 without starting an agent run. Add it to chat when you want the agent to act on
 its status or your notes.
 
-## Agent work and QA
+## Agent work
 
 **Agent work** keeps the work an agent takes on, what changed, and how to try it.
 Choose **All threads and machines** to review work across connected environments,
 including archived and settled conversations. Each entry links back to its thread.
 Disconnected machines show that their work could not be loaded.
 
-Filter by pending, passed, or issues. Mark an item passed or record issues and save
-a QA note. You can return it to pending later. QA notes are shared with the agent.
-Finished work waits for your QA separately from the agent's completion status, so
-pending QA does not stop routine work or authorized landing.
+QA of landed work lives in **Evidence** in the sidebar strip (see
+[Thread sidebar](thread-sidebar.md)). Pending QA does not stop routine work or
+authorized landing.
 
 Verification entries distinguish a run by another thread from the implementing
 thread's own report. Source review stays labeled as source review, with the tested
