@@ -11,6 +11,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Electron from "electron";
 
 import { type DesktopSnapShotEvent, DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+import { agentHtmlNavigationBlocked } from "@t3tools/shared/weavewingOutbound";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -758,6 +759,13 @@ export const make = Effect.gen(function* () {
       event.preventDefault();
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
+      }
+    });
+    // Weavewing: CSP cannot stop agent HTML navigating its own frame to an outside URL.
+    window.webContents.on("will-frame-navigate", (details) => {
+      const frameUrl = details.frame?.url;
+      if (!details.isMainFrame && frameUrl && agentHtmlNavigationBlocked(frameUrl, details.url)) {
+        details.preventDefault();
       }
     });
 

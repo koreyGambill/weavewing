@@ -15,14 +15,40 @@ export function remoteMediaHost(uri: string): string | null {
 }
 
 /**
- * Fetch directives for agent HTML (html_render pages, previewed .html files).
- * Inline script, style and data: or blob: media keep working; nothing leaves the
- * page. 'self' is the T3 server serving the page, never a third party.
+ * Fetch directives for agent HTML (html_render pages, previewed .html files). Inline
+ * script, style and data: or blob: media work; subresources cannot leave the page.
+ * CSP cannot stop the page navigating itself: see agentHtmlNavigationBlocked.
  */
 export const OFFLINE_HTML_CSP =
   "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; " +
   "style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; " +
   "media-src 'self' data: blob:; worker-src blob:; form-action 'none'";
+
+/** No popups or top navigation; links go through the html_render link bridge. */
+export const AGENT_HTML_SANDBOX = "allow-scripts allow-forms allow-downloads";
+
+const ASSET_ROUTE = "/api/assets/";
+
+/**
+ * Whether an asset-route page (agent HTML) may not navigate its frame to `target`.
+ * Only the desktop shell can enforce this; a web browser lets a scripted frame
+ * navigate itself, so on web agent HTML can still send one request by navigating.
+ */
+export function agentHtmlNavigationBlocked(frameUrl: string, target: string): boolean {
+  let frame: URL;
+  try {
+    frame = new URL(frameUrl);
+  } catch {
+    return false;
+  }
+  if (!frame.pathname.startsWith(ASSET_ROUTE) || target === "about:blank") return false;
+  try {
+    const url = new URL(target);
+    return url.origin !== frame.origin || !url.pathname.startsWith(ASSET_ROUTE);
+  } catch {
+    return true;
+  }
+}
 
 /** Build-time telemetry exporters a Weavewing build never bakes in; runtime env still enables them. */
 export const UNBAKED_TELEMETRY_ENV_KEYS = [

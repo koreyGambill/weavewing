@@ -1413,6 +1413,42 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("keeps agent HTML frames from navigating off the asset route", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const openedExternalUrls: unknown[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        openedExternalUrls,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const willFrameNavigate = fakeWindow.webContentsListeners.get("will-frame-navigate");
+        if (!willFrameNavigate) {
+          return yield* Effect.die("will-frame-navigate listener was not registered");
+        }
+        const page = "http://127.0.0.1:3773/api/assets/token/render.html";
+        for (const [frameUrl, url, expectedPrevented] of [
+          [page, "http://127.0.0.1:19322/navigation?canary=1", true],
+          [page, `${page}?v=2`, false],
+          ["http://127.0.0.1:3773/mcp/app", "https://example.com/", false],
+        ] as const) {
+          const preventDefault = vi.fn();
+          willFrameNavigate({ preventDefault, isMainFrame: false, frame: { url: frameUrl }, url });
+          assert.equal(preventDefault.mock.calls.length, expectedPrevented ? 1 : 0, url);
+        }
+        assert.deepEqual(openedExternalUrls, []);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("offers to copy the bare address when right-clicking a mailto link", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
