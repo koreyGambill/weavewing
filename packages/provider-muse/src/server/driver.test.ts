@@ -13,6 +13,7 @@ import * as Stream from "effect/Stream";
 import * as Sink from "effect/Sink";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { vi } from "vite-plus/test";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -214,3 +215,28 @@ it.layer(layerTest)("MuseDriver usage", (it) => {
       }),
   );
 });
+
+it.effect("manual Muse version discovery works with automatic checks off", () =>
+  Effect.gen(function* () {
+    let requests = 0;
+    const http = HttpClient.make((request) => {
+      expect(request.url).toBe("https://api.meta.ai/muse-code/channels/muse-stable");
+      requests++;
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, Response.json({ version: "1.0.3-R2200.1" })),
+      );
+    });
+    const instance = yield* MuseDriver.create({
+      instanceId: ProviderInstanceId.make("muse-manual"),
+      displayName: "Muse manual",
+      enabled: true,
+      environment: [],
+      config: { ...MuseDriver.defaultConfig(), binaryPath: "/missing/muse" },
+    }).pipe(Effect.provideService(HttpClient.HttpClient, http));
+    yield* instance.snapshot.resolveMaintenance();
+    expect(requests).toBe(0);
+    const capabilities = yield* instance.snapshot.resolveMaintenance({ fresh: true });
+    expect(capabilities.latestVersion).toBe("1.0.3-R2200.1");
+    expect(requests).toBe(1);
+  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+);

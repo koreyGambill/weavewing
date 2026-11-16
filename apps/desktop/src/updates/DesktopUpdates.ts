@@ -65,6 +65,13 @@ const CHANNEL_CHANGE_RETRY_DELAY = Duration.seconds(1);
 const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
+const USER_UPDATE_CHECK_REASONS = new Set([
+  "menu",
+  "web-ui",
+  "remote-update",
+  "channel-change",
+  "install",
+]);
 const UPDATE_CHECK_WAIT = Duration.seconds(90);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
@@ -599,8 +606,7 @@ export const make = Effect.gen(function* () {
     allowDowngrade = false,
   ) {
     yield* Effect.annotateCurrentSpan({ reason });
-    if ((reason === "startup" || reason === "poll") && !(yield* automaticChecksAllowed))
-      return false;
+    if (!USER_UPDATE_CHECK_REASONS.has(reason) && !(yield* automaticChecksAllowed)) return false;
     if (yield* Ref.get(desktopState.quitting)) return false;
     if (!(yield* Ref.get(updaterConfiguredRef))) return false;
 

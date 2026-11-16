@@ -101,7 +101,7 @@ export function PrivacySettings({
       <SettingsSection title="Updates">
         <SettingsRow
           {...searchableSetting("provider-update-checks")}
-          description="Checks GitHub, npm and provider sites for new app and CLI versions and model catalogs, disclosing your IP address and version numbers. Off: checks wait for Check now or Refresh."
+          description="Checks GitHub, npm and provider sites for app, CLI and model updates, sharing your IP and versions. Off: use Refresh provider status on Providers or Check for Updates in desktop About."
           managed={managedUpdates}
           status={managedUpdates ? <ManagedNotice>{managedUpdates}</ManagedNotice> : null}
           control={

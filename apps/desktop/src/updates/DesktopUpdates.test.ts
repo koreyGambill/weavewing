@@ -273,7 +273,7 @@ describe("DesktopUpdates", () => {
         harness.setAutomaticUpdates(!enabled);
         yield* TestClock.adjust("4 hours");
         assert.equal(harness.checkCount(), enabled ? 2 : 1);
-        yield* updates.check("manual");
+        yield* updates.check("web-ui");
         assert.equal(harness.checkCount(), enabled ? 3 : 2);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     },
@@ -295,7 +295,7 @@ describe("DesktopUpdates", () => {
         yield* updates.configure;
         yield* TestClock.adjust("15 seconds");
         assert.equal(harness.checkCount(), value ? 1 : 0);
-        yield* updates.check("manual");
+        yield* updates.check("web-ui");
         assert.equal(harness.checkCount(), value ? 2 : 1);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     },
@@ -311,7 +311,39 @@ describe("DesktopUpdates", () => {
         yield* TestClock.adjust("15 seconds");
         yield* TestClock.adjust("4 hours");
         assert.equal(harness.checkCount(), 0);
-        yield* updates.check("manual");
+        yield* updates.check("web-ui");
+        assert.equal(harness.checkCount(), 1);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    },
+  );
+
+  it.effect.each([
+    "startup",
+    "poll",
+    "startup-recovery",
+    "install-recovery",
+    "manual",
+    "future-automatic-check",
+    "",
+  ])("requires automatic update consent for non-user reason %s", (reason) => {
+    const harness = makeHarness({ automaticUpdates: false });
+    return Effect.gen(function* () {
+      const updates = yield* DesktopUpdates.DesktopUpdates;
+      yield* updates.configure;
+      const result = yield* updates.check(reason);
+      assert.isFalse(result.checked);
+      assert.equal(harness.checkCount(), 0);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect.each(["menu", "web-ui", "remote-update", "channel-change", "install"])(
+    "allows user update reason %s with automatic checks off",
+    (reason) => {
+      const harness = makeHarness({ automaticUpdates: false });
+      return Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        assert.isTrue((yield* updates.check(reason)).checked);
         assert.equal(harness.checkCount(), 1);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     },
@@ -404,7 +436,7 @@ describe("DesktopUpdates", () => {
           yield* Deferred.await(installStarted);
           const checksBefore = harness.checkCount();
 
-          const checkResult = yield* updates.check("manual");
+          const checkResult = yield* updates.check("web-ui");
           assert.isFalse(checkResult.checked);
           assert.equal(harness.checkCount(), checksBefore);
 
@@ -465,7 +497,7 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
 
-        yield* updates.check("manual");
+        yield* updates.check("web-ui");
 
         const state = yield* updates.getState;
         const loggedAnnotation = loggedAnnotations.at(-1);
@@ -1321,7 +1353,7 @@ describe("DesktopUpdates", () => {
           const channelFiber = yield* updates.setChannel("nightly").pipe(Effect.forkScoped);
           yield* Deferred.await(channelChangeStarted);
 
-          const checkResult = yield* updates.check("manual");
+          const checkResult = yield* updates.check("web-ui");
           assert.isFalse(checkResult.checked);
           assert.equal(harness.checkCount(), 0);
 
