@@ -1,4 +1,18 @@
-import type { OrchestrationV2ConversationMessage } from "@t3tools/contracts";
+import {
+  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  type ModelSelection,
+  type OrchestrationV2ConversationMessage,
+  ProviderDriverKind,
+  defaultInstanceIdForDriver,
+} from "@t3tools/contracts";
+
+const CLAUDE = ProviderDriverKind.make("claudeAgent");
+/** Low effort keeps Haiku from thinking past the output cap on a one-line job. */
+export const MESSAGE_SUMMARY_MODEL: ModelSelection = {
+  instanceId: defaultInstanceIdForDriver(CLAUDE),
+  model: DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[CLAUDE] ?? "claude-haiku-5-5",
+  options: [{ id: "effort", value: "low" }],
+};
 
 /** The first line already says everything a one-line card can. */
 const SHORT_MESSAGE_CHARS = 100;

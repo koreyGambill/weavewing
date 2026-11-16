@@ -1,11 +1,4 @@
-import {
-  CommandId,
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  type MessageId,
-  ProviderDriverKind,
-  defaultInstanceIdForDriver,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { CommandId, type MessageId, type ThreadId } from "@t3tools/contracts";
 import * as NodeOS from "node:os";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -17,16 +10,10 @@ import * as Ref from "effect/Ref";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import { incomingCardSummarySource } from "./incomingCardSummary.ts";
+import { MESSAGE_SUMMARY_MODEL, incomingCardSummarySource } from "./incomingCardSummary.ts";
 
 /** About 2.5x the expected daily volume; past it cards keep their first line until tomorrow. */
 const DAILY_SUMMARY_LIMIT = 1_000;
-
-const CLAUDE = ProviderDriverKind.make("claudeAgent");
-const SUMMARY_MODEL = {
-  instanceId: defaultInstanceIdForDriver(CLAUDE),
-  model: DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[CLAUDE] ?? "claude-haiku-5-5",
-};
 
 export class MessageSummaryService extends Context.Service<
   MessageSummaryService,
@@ -69,7 +56,7 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
         cwd: NodeOS.tmpdir(),
         source,
         message: message.text,
-        modelSelection: SUMMARY_MODEL,
+        modelSelection: MESSAGE_SUMMARY_MODEL,
       });
       if (summary.length === 0) return;
       yield* threads.dispatch({

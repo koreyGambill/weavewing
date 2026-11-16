@@ -122,6 +122,7 @@ export interface MessageSummaryGenerationInput {
   source: string;
   message: string;
   modelSelection: ModelSelection;
+  onCost?: (costUsd: number) => void;
 }
 
 export interface ProviderTextGeneration {

@@ -211,7 +211,8 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
         operation: "generateMessageSummary",
         cwd: input.cwd,
         modelSelection: input.modelSelection,
-        maxOutputTokens: 200,
+        maxOutputTokens: 1000,
+        ...(input.onCost === undefined ? {} : { onCost: input.onCost }),
         ...buildMessageSummaryPrompt(input),
       });
       return { summary: sanitizeMessageSummary(generated.summary) };
