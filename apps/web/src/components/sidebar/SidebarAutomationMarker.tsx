@@ -32,7 +32,7 @@ export function SidebarAutomationMarker(props: {
           />
         }
       >
-        <CalendarClockIcon aria-hidden className="size-3 shrink-0" />
+        <CalendarClockIcon aria-hidden className="size-3.5 shrink-0" />
       </TooltipTrigger>
       <TooltipPopup side="top">
         <AutomationMarkerLabel environmentId={props.environmentId} taskId={props.taskId} />
