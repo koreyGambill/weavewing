@@ -12,6 +12,8 @@ import * as Queue from "effect/Queue";
 import * as Tracer from "effect/Tracer";
 import {
   ProjectId,
+  ProviderInstanceId,
+  ThreadId,
   GitCommandError,
   type PullRequestActivity,
   type PullRequestDetail,
@@ -22,6 +24,7 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as PullRequestReviewGuides from "../persistence/PullRequestReviewGuides.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -160,8 +163,30 @@ const makeLayer = (input: {
   readonly enabled?: boolean;
   readonly currentHead?: Ref.Ref<string>;
   readonly identity?: typeof ACME_APP;
+  readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
+  readonly threadModel?: {
+    readonly threadId: ThreadId;
+    readonly instanceId: string;
+    readonly model: string;
+  };
 }) =>
   PullRequestReviewGuideService.layer.pipe(
+    Layer.provide(
+      Layer.mock(ProjectionStore.ProjectionStoreV2)({
+        getThreadShell: (threadId) =>
+          Effect.succeed(
+            input.threadModel?.threadId === threadId
+              ? ({
+                  projectId,
+                  modelSelection: {
+                    instanceId: ProviderInstanceId.make(input.threadModel.instanceId),
+                    model: input.threadModel.model,
+                  },
+                } as never)
+              : null,
+          ),
+      }),
+    ),
     Layer.provide(
       Layer.effect(
         PullRequestReviewGuides.PullRequestReviewGuideRepository,
@@ -212,7 +237,12 @@ const makeLayer = (input: {
         generateReviewGuide: input.generate,
       } as unknown as TextGeneration.TextGeneration["Service"]),
     ),
-    Layer.provide(ServerSettings.layerTest({ reviewGuidesEnabled: input.enabled ?? true })),
+    Layer.provide(
+      ServerSettings.layerTest({
+        reviewGuidesEnabled: input.enabled ?? true,
+        ...input.serverSettings,
+      }),
+    ),
     Layer.provide(ServerConfig.layerTest(input.root, { prefix: "t3-review-guide-config-" })),
   );
 
@@ -416,6 +446,60 @@ it.layer(layerBase, { excludeTestServices: true })("PullRequestReviewGuideServic
       assert.isFalse(run.fetchedRefs.some((ref) => ref.startsWith("-")));
       const fs = yield* FileSystem.FileSystem;
       assert.isFalse(yield* fs.exists(`${run.repositories.root}/injected`));
+    }),
+  );
+
+  it.effect("writes a guide on the model of the thread it was requested from", () =>
+    Effect.gen(function* () {
+      const repositories = yield* makeRepositories;
+      const threadId = ThreadId.make("thread:guide");
+      const used = yield* Deferred.make<string>();
+      const stored = yield* Deferred.make<void>();
+      const context = yield* Layer.build(
+        makeLayer({
+          ...repositories,
+          stored,
+          serverSettings: {
+            defaultModelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-6-astra",
+            },
+          },
+          threadModel: { threadId, instanceId: "claudeAgent", model: "claude-opus-5-5" },
+          generate: (input) =>
+            Deferred.succeed(used, input.modelSelection.instanceId).pipe(Effect.as({ stops: [] })),
+        }),
+      );
+      const service = Context.get(
+        context,
+        PullRequestReviewGuideService.PullRequestReviewGuideService,
+      );
+      yield* service.generate({ ...reference, threadId });
+      assert.strictEqual(yield* Deferred.await(used), "claudeAgent");
+      yield* Deferred.await(stored);
+      // Without a thread the project's default thread model serves.
+      const second = yield* Deferred.make<string>();
+      const secondContext = yield* Layer.build(
+        makeLayer({
+          ...repositories,
+          stored: yield* Deferred.make<void>(),
+          serverSettings: {
+            defaultModelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-6-astra",
+            },
+          },
+          generate: (input) =>
+            Deferred.succeed(second, input.modelSelection.instanceId).pipe(
+              Effect.as({ stops: [] }),
+            ),
+        }),
+      );
+      yield* Context.get(
+        secondContext,
+        PullRequestReviewGuideService.PullRequestReviewGuideService,
+      ).generate(reference);
+      assert.strictEqual(yield* Deferred.await(second), "codex");
     }),
   );
 

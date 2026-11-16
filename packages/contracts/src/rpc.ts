@@ -258,7 +258,10 @@ import {
   GuestShareCreateInput,
   GuestShareCreateResult,
 } from "./guestShare.ts";
-import { PullRequestReviewGuideResult } from "./pullRequestReviewGuide.ts";
+import {
+  PullRequestGenerateReviewGuideInput,
+  PullRequestReviewGuideResult,
+} from "./pullRequestReviewGuide.ts";
 import {
   PullRequestActionInput,
   PullRequestActivity,
@@ -1342,7 +1345,7 @@ const WsPullRequestsReviewGuideRpc = Rpc.make(WS_METHODS.pullRequestsReviewGuide
 });
 
 const WsPullRequestsGenerateReviewGuideRpc = Rpc.make(WS_METHODS.pullRequestsGenerateReviewGuide, {
-  payload: PullRequestRef,
+  payload: PullRequestGenerateReviewGuideInput,
   success: PullRequestReviewGuideResult,
   error: PullRequestRpcError,
 });

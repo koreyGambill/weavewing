@@ -13,6 +13,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   PullRequestOperationError,
   type PullRequestDetail,
+  type PullRequestGenerateReviewGuideInput,
   type PullRequestRef,
   type PullRequestReviewGuide,
   type PullRequestReviewGuideResult,
@@ -28,6 +29,7 @@ import { settingsForThread } from "@t3tools/shared/serverSettings";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as PullRequestReviewGuides from "../persistence/PullRequestReviewGuides.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -49,7 +51,7 @@ export class PullRequestReviewGuideService extends Context.Service<
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestReviewGuideResult, PullRequestService.PullRequestError>;
     readonly generate: (
-      input: PullRequestRef,
+      input: PullRequestGenerateReviewGuideInput,
     ) => Effect.Effect<
       PullRequestReviewGuideResult & { readonly started: boolean },
       PullRequestService.PullRequestError
@@ -69,6 +71,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+  const threads = yield* ProjectionStore.ProjectionStoreV2;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -365,7 +368,7 @@ const make = Effect.gen(function* () {
   });
 
   const write = Effect.fn("PullRequestReviewGuideService.write")(function* (
-    input: PullRequestRef,
+    input: PullRequestGenerateReviewGuideInput,
     key: ThreadPullRequestKey,
     workspaceRoot: string,
     locator: RepositoryIdentity["locator"],
@@ -383,9 +386,13 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
+    const thread =
+      input.threadId === undefined
+        ? null
+        : yield* threads.getThreadShell(input.threadId).pipe(Effect.orElseSucceed(() => null));
     const projectSettings = settingsForThread(
       resolveProjectSettings(settings, input.projectId).settings,
-      undefined,
+      thread?.modelSelection,
     );
     const modelSelection = ServerSettings.resolveReviewGuideModelSelection(
       projectSettings,
