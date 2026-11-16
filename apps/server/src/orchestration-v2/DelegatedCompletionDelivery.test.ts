@@ -3994,21 +3994,69 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
         )!;
       });
 
-    it.effect("a parent's send that expects no reply starts no follow-up task", () =>
+    it.effect("a parent's send that expects no reply still reports the child's new turn", () =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
-        const seeded = yield* seedFinishedChildWithIdleParent("no-reply-followup");
+        const eventSink = yield* EventSink.EventSinkV2;
+        const requests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
+        const now = yield* DateTime.now;
+        const name = "no-reply-followup";
+        const seeded = yield* seedFinishedChildWithIdleParent(name);
         const run = yield* parentSend({
-          name: "no-reply-followup",
+          name,
           parentThreadId: seeded.parentThreadId,
           childThreadId: seeded.child.childThreadId,
           reply: "not expected",
         });
-        assert.isUndefined(run.delegatedTaskId);
-        const parent = yield* orchestrator.getThreadProjection(seeded.parentThreadId);
-        assert.isFalse(
-          parent.subagents.some((task) => task.originalTaskId === seeded.child.taskId),
-        );
+        assert.isDefined(run.delegatedTaskId, "a reply:false continuation started no task");
+        yield* eventSink.write({
+          commandId: reconcileCommandId(`${name}-finished`),
+          events: [
+            {
+              id: EventId.make(`event:${name}:result`),
+              type: "message.updated",
+              threadId: seeded.child.childThreadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: {
+                id: MessageId.make(`message:${name}:result`),
+                threadId: seeded.child.childThreadId,
+                runId: run.id,
+                nodeId: null,
+                role: "assistant",
+                text: "CONTINUED",
+                attachments: [],
+                streaming: false,
+                createdBy: "agent",
+                creationSource: "server",
+                createdAt: now,
+                updatedAt: now,
+              },
+            },
+            {
+              id: EventId.make(`event:${name}:finished`),
+              type: "run.updated",
+              threadId: seeded.child.childThreadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: { ...run, status: "completed", startedAt: now, completedAt: now },
+            },
+          ],
+        });
+        yield* orchestrator.recoverDelegatedTasks;
+        const followup = (yield* orchestrator.getThreadProjection(
+          seeded.parentThreadId,
+        )).subagents.find((task) => task.id === run.delegatedTaskId)!;
+        assert.equal(followup.result, "CONTINUED");
+        assert.equal(followup.completionDelivery?.state, "claimed");
+        let wake = yield* requests.take;
+        while (
+          wake.threadId !== seeded.parentThreadId ||
+          wake.delegatedCompletion?.messageId === seeded.firstWake.delegatedCompletion?.messageId
+        ) {
+          wake = yield* requests.take;
+        }
+        assert.equal(wake.delegatedCompletion?.parentRunId, seeded.parentRunId);
       }),
     );
 
