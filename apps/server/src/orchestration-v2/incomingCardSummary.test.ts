@@ -10,7 +10,7 @@ import * as DateTime from "effect/DateTime";
 import { incomingCardSummarySource } from "./incomingCardSummary.ts";
 
 const now = DateTime.makeUnsafe(0);
-const long = "Line one\nLine two";
+const long = `Line one\n${"x".repeat(300)}`;
 const message = (
   overrides: Partial<OrchestrationV2ConversationMessage>,
 ): OrchestrationV2ConversationMessage => ({
@@ -52,6 +52,18 @@ describe("incomingCardSummarySource", () => {
       },
       'Failure report from delegated task "Build"',
     ],
+    [
+      "a scheduled task",
+      { origin: { kind: "scheduled-task", title: "Audit" } },
+      'Scheduled task "Audit"',
+    ],
+    [
+      "a T3 Code system message",
+      { origin: { kind: "system", event: "pull request update" } },
+      null,
+    ],
+    ["a wake", { origin: { kind: "wake", detail: "Timer" } }, null],
+    ["a body under 300 characters", { text: `Line one\n${"x".repeat(280)}` }, null],
     ["the user's own message", { origin: { kind: "user" } }, null],
     ["an assistant message", { role: "assistant" }, null],
     ["a one-line message the row already shows", { text: "Done: gate green." }, null],

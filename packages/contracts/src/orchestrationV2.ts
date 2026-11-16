@@ -4024,6 +4024,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
     threadId: ThreadId,
     messageId: MessageId,
     summary: TrimmedNonEmptyString,
+    /** Hash of the text that was summarized; an edited message rejects the summary. */
+    sourceHash: TrimmedNonEmptyString,
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

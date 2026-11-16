@@ -5,15 +5,19 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import { MESSAGE_SUMMARY_MODEL, incomingCardSummarySource } from "./incomingCardSummary.ts";
+import {
+  MESSAGE_SUMMARY_MODEL,
+  incomingCardSummarySource,
+  messageSummarySourceHash,
+} from "./incomingCardSummary.ts";
 
-/** About 2.5x the expected daily volume; past it cards keep their first line until tomorrow. */
-const DAILY_SUMMARY_LIMIT = 1_000;
+/** Attempts per UTC day, failures included; past it cards keep their first line until tomorrow. */
+const DAILY_SUMMARY_LIMIT = 100;
 
 export class MessageSummaryService extends Context.Service<
   MessageSummaryService,
@@ -29,14 +33,22 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
-  const spent = yield* Ref.make({ day: "", count: 0 });
+  const sql = yield* SqlClient.SqlClient;
 
-  const takeBudget = Effect.fn("MessageSummaryService.takeBudget")(function* () {
-    const day = DateTime.formatIsoDateUtc(yield* DateTime.now);
-    return yield* Ref.modify(spent, (current) => {
-      const count = current.day === day ? current.count : 0;
-      return count >= dailyLimit ? [false, { day, count }] : [true, { day, count: count + 1 }];
-    });
+  // Reserved before the call and never released, so a restart or replay cannot pay twice.
+  const reserveAttempt = Effect.fn("MessageSummaryService.reserveAttempt")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+  }) {
+    const now = yield* DateTime.now;
+    const day = DateTime.formatIsoDateUtc(now);
+    const reserved = yield* sql`
+      INSERT INTO message_summary_attempts (thread_id, message_id, day, attempted_at)
+      SELECT ${input.threadId}, ${input.messageId}, ${day}, ${DateTime.formatIso(now)}
+      WHERE (SELECT COUNT(*) FROM message_summary_attempts WHERE day = ${day}) < ${dailyLimit}
+      ON CONFLICT DO NOTHING
+      RETURNING message_id`;
+    return reserved.length > 0;
   });
 
   const execute: MessageSummaryService["Service"]["execute"] = Effect.fn(
@@ -50,7 +62,8 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
       const message = messages.find((candidate) => candidate.id === input.messageId);
       const source = message === undefined ? null : incomingCardSummarySource(message);
       const generate = textGeneration.generateMessageSummary;
-      if (!generate || message === undefined || source === null || !(yield* takeBudget())) return;
+      if (!generate || message === undefined || source === null || !(yield* reserveAttempt(input)))
+        return;
       const { summary } = yield* generate({
         // Claude summarizes from a temp dir; a fallback provider should not load a project either.
         cwd: NodeOS.tmpdir(),
@@ -65,6 +78,7 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
         threadId: input.threadId,
         messageId: input.messageId,
         summary,
+        sourceHash: messageSummarySourceHash(message.text),
       });
     },
     Effect.catchCause((cause) =>

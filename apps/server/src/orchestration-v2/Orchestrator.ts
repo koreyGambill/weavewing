@@ -119,7 +119,7 @@ import {
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
 } from "./CommandPolicy.ts";
-import { incomingCardSummarySource } from "./incomingCardSummary.ts";
+import { incomingCardSummarySource, messageSummarySourceHash } from "./incomingCardSummary.ts";
 import { CommandReceiptStoreV2, type CommandReceiptV2 } from "./CommandReceiptStore.ts";
 import {
   ContextHandoffServiceV2,
@@ -10998,7 +10998,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ),
         );
       const message = messages.find((candidate) => candidate.id === command.messageId);
-      if (message === undefined || message.summary !== undefined) return;
+      if (
+        message === undefined ||
+        message.summary !== undefined ||
+        messageSummarySourceHash(message.text) !== command.sourceHash
+      )
+        return;
       const { turnItems } =
         message.runId === null
           ? { turnItems: [] }

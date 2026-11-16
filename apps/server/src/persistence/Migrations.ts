@@ -112,6 +112,7 @@ import Migration0100 from "./Migrations/100_FoldWatchersIntoAutomations.ts";
 import Migration0101 from "./Migrations/101_MonitoringReviewWatermarks.ts";
 import Migration0102 from "./Migrations/102_EvidenceLandings.ts";
 import Migration0103 from "./Migrations/103_MessageFollowUps.ts";
+import Migration0104 from "./Migrations/104_MessageSummaryAttempts.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -218,6 +219,7 @@ const migrationEntries = [
   [101, "MonitoringReviewWatermarks", Migration0101],
   [102, "EvidenceLandings", Migration0102],
   [103, "MessageFollowUps", Migration0103],
+  [104, "MessageSummaryAttempts", Migration0104],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

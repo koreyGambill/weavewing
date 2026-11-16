@@ -41,7 +41,7 @@ const report: TurnOrigin = {
   threadId: ThreadId.make("thread:message-summary:child"),
   environmentId: EnvironmentId.make("environment:local"),
 };
-const longReport = "## Result\n\nAll checks passed on the branch and the gate is green.";
+const longReport = `## Result\n\n${"All checks passed on the branch and the gate is green. ".repeat(6)}`;
 
 function makeHarness(options: {
   readonly summaries?: boolean;
@@ -67,21 +67,25 @@ function makeHarness(options: {
   const generateMessageSummary = vi.fn(
     options.generate ?? (() => Effect.succeed({ summary: "Done: BW-1 gate green" })),
   );
-  const layerSummary = MessageSummary.layerWithDailyLimit(options.dailyLimit ?? 10).pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        layerThreads,
-        layerSettings,
-        Layer.mock(TextGeneration.TextGeneration)({ generateMessageSummary }),
+  // A fresh service instance over the same database stands in for a server restart.
+  const layerSummary = () =>
+    MessageSummary.layerWithDailyLimit(options.dailyLimit ?? 10).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          layerSettings,
+          Layer.mock(TextGeneration.TextGeneration)({ generateMessageSummary }),
+        ),
       ),
-    ),
+    );
+  const layerBase = Layer.mergeAll(
+    layerThreads,
+    layerDatabase,
+    EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
   );
   return {
-    layer: Layer.mergeAll(
-      layerThreads,
-      layerSummary,
-      EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
-    ),
+    layer: Layer.provideMerge(layerSummary(), layerBase),
+    layerBase,
+    layerSummary,
     generateMessageSummary,
   };
 }
@@ -198,5 +202,102 @@ it.effect.each([
     const messageId = MessageId.make("command:fallback:message");
     yield* (yield* MessageSummary.MessageSummaryService).execute({ threadId, messageId });
     assert.isUndefined((yield* readMessage(threadId, messageId)).summary);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+const executeInFreshService = (
+  harness: ReturnType<typeof makeHarness>,
+  input: { readonly threadId: ThreadId; readonly messageId: MessageId },
+) =>
+  Effect.flatMap(MessageSummary.MessageSummaryService, (service) => service.execute(input)).pipe(
+    Effect.provide(harness.layerSummary()),
+  );
+
+it.effect("never pays twice for one message across restarts", () => {
+  const harness = makeHarness({
+    generate: () =>
+      Effect.fail(new TextGenerationError({ operation: "generateMessageSummary", detail: "lost" })),
+  });
+  return Effect.gen(function* () {
+    const threadId = yield* createThread("restart");
+    yield* send(threadId, "command:restart", longReport, report);
+    const messageId = MessageId.make("command:restart:message");
+    yield* executeInFreshService(harness, { threadId, messageId });
+    yield* executeInFreshService(harness, { threadId, messageId });
+    assert.strictEqual(harness.generateMessageSummary.mock.calls.length, 1);
+  }).pipe(Effect.provide(harness.layerBase));
+});
+
+it.effect("keeps the daily cap across restarts", () => {
+  const harness = makeHarness({ dailyLimit: 1 });
+  return Effect.gen(function* () {
+    const threadId = yield* createThread("cap");
+    for (const name of ["first", "second"]) {
+      yield* send(threadId, `command:cap:${name}`, longReport, report);
+      yield* executeInFreshService(harness, {
+        threadId,
+        messageId: MessageId.make(`command:cap:${name}:message`),
+      });
+    }
+    assert.strictEqual(harness.generateMessageSummary.mock.calls.length, 1);
+  }).pipe(Effect.provide(harness.layerBase));
+});
+
+it.effect("drops a summary whose message was edited while it was generated", () => {
+  const threadId = ThreadId.make("thread:message-summary:race");
+  const messageId = MessageId.make("command:race:message");
+  const edited = `Edited result: deployment failed. ${"Do not land this branch. ".repeat(12)}`;
+  let threads: ThreadManagement.ThreadManagementService["Service"] | undefined;
+  const harness = makeHarness({
+    generate: () =>
+      Effect.gen(function* () {
+        if (threads === undefined) return yield* Effect.die("thread service not captured");
+        const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
+        const run = runs.find((candidate) => candidate.userMessageId === messageId)!;
+        yield* threads.dispatch({
+          type: "queued-run.edit",
+          commandId: CommandId.make("command:race:edit"),
+          threadId,
+          runId: run.id,
+          text: edited,
+        });
+        return { summary: "Done: deployment passed" };
+      }).pipe(Effect.orDie),
+  });
+  return Effect.gen(function* () {
+    threads = yield* ThreadManagement.ThreadManagementService;
+    yield* createThread("race");
+    yield* (yield* ThreadManagement.ThreadManagementService).dispatch({
+      type: "message.dispatch",
+      origin: { kind: "user" },
+      commandId: CommandId.make("command:race:active"),
+      threadId,
+      messageId: MessageId.make("command:race:active:message"),
+      text: "Active turn",
+      attachments: [],
+      modelSelection,
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* (yield* ThreadManagement.ThreadManagementService).dispatch({
+      type: "message.dispatch",
+      origin: report,
+      commandId: CommandId.make("command:race"),
+      threadId,
+      messageId,
+      text: longReport,
+      attachments: [],
+      modelSelection,
+      dispatchMode: { type: "queue_after_active" },
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    yield* (yield* MessageSummary.MessageSummaryService).execute({ threadId, messageId });
+    const after = yield* readMessage(threadId, messageId);
+    assert.strictEqual(after.text, edited);
+    assert.isUndefined(after.summary);
+    assert.isUndefined(after.itemSummary);
+    assert.strictEqual(harness.generateMessageSummary.mock.calls.length, 1);
   }).pipe(Effect.provide(harness.layer));
 });

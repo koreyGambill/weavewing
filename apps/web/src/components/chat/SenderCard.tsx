@@ -92,14 +92,14 @@ export function SenderCard(props: {
           </Tooltip>
         }
         label={
-          // A preview with no room wraps onto the clipped second line instead of leaving a bare "· …".
-          // Narrow cards keep one line and give the summary the room the label, time and sender take.
-          <span className="flex h-lh min-w-0 flex-wrap content-start items-center gap-x-1 overflow-hidden text-foreground/80 @max-[24rem]/sender:flex-nowrap">
+          // The preview keeps a share of the row; the sender chip shrinks first, then the label
+          // hides below 36rem and the timestamp below 24rem.
+          <span className="flex h-lh min-w-0 items-center gap-x-1 overflow-hidden text-foreground/80">
             <span className="flex min-w-0 max-w-full items-center gap-1">
-              <span className="min-w-0 truncate @max-[24rem]/sender:hidden">{details.label}</span>
+              <span className="min-w-0 truncate @max-[36rem]/sender:hidden">{details.label}</span>
               {sender ? (
                 <span
-                  className="flex min-w-14 max-w-60 shrink-[100000] @max-[24rem]/sender:min-w-5 @max-[24rem]/sender:max-w-24"
+                  className="flex min-w-14 max-w-40 shrink-[100000] @max-[24rem]/sender:min-w-5 @max-[24rem]/sender:max-w-24"
                   onClick={stopRowToggle}
                   onKeyDown={stopRowToggle}
                 >
@@ -114,13 +114,13 @@ export function SenderCard(props: {
                   />
                 </span>
               ) : details.name ? (
-                <span className="min-w-14 max-w-60 shrink-[100000] truncate @max-[24rem]/sender:min-w-5 @max-[24rem]/sender:max-w-24">
+                <span className="min-w-14 max-w-40 shrink-[100000] truncate @max-[24rem]/sender:min-w-5 @max-[24rem]/sender:max-w-24">
                   {details.name}
                 </span>
               ) : null}
             </span>
             {details.preview ? (
-              <span className="min-w-16 flex-1 basis-0 truncate text-muted-foreground @max-[24rem]/sender:min-w-[72%]">
+              <span className="min-w-[50%] flex-1 basis-0 truncate text-muted-foreground @max-[24rem]/sender:min-w-[72%]">
                 · {details.preview}
               </span>
             ) : null}

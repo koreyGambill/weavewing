@@ -1605,8 +1605,8 @@ export const ServerSettings = Schema.Struct({
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /** Clones default to `<addProjectBaseDirectory>/<host>/<owner>/<repo>`, like ghq. */
   ghqCloneLayout: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Summarize messages from other threads, tasks and T3 Code into one line for their cards. */
-  incomingCardSummaries: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Summarize long messages from other threads and tasks into one line for their cards. */
+  incomingCardSummaries: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({

@@ -2031,7 +2031,7 @@ export function ThreadsSettingsPanel() {
           serverScoped
           settingKeys={["incomingCardSummaries"]}
           {...searchableSetting("incoming-card-summaries")}
-          description="Claude Haiku writes one line for each long message from another thread, a task or T3 Code. Off shows the message's first line."
+          description="Claude Haiku writes one line for long messages from other threads, delegated tasks and scheduled tasks, up to 100 a day. Off shows each message's first line."
           resetAction={
             settings.incomingCardSummaries !== DEFAULT_UNIFIED_SETTINGS.incomingCardSummaries ? (
               <SettingResetButton
