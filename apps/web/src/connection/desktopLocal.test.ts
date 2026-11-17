@@ -1,7 +1,12 @@
+import { it as effectIt } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import { type DesktopEnvironmentBootstrap, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createDesktopSecondaryBootstrapsReader } from "./desktopLocal";
+import { createDesktopSecondaryBootstrapsReader, desktopLocalRefreshes } from "./desktopLocal";
 
 describe("desktop local topology reads", () => {
   it("reuses snapshots when polling returns fresh objects for the same topology", () => {
@@ -108,3 +113,34 @@ describe("desktop local topology reads", () => {
     expect(reader.readSnapshot()).toBe(removedSnapshot);
   });
 });
+
+effectIt.effect("refreshes desktop registrations on readiness before the next poll", () =>
+  Effect.gen(function* () {
+    const updates = yield* Queue.unbounded<void>();
+    const listening = yield* Deferred.make<void>();
+    let notify: (() => void) | undefined;
+    let unsubscribed = false;
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* desktopLocalRefreshes(() => ({
+          onLocalEnvironmentReady: (listener) => {
+            notify = listener;
+            Deferred.doneUnsafe(listening, Effect.void);
+            return () => {
+              unsubscribed = true;
+            };
+          },
+        })).pipe(
+          Stream.runForEach(() => Queue.offer(updates, undefined)),
+          Effect.forkScoped,
+        );
+        yield* Queue.take(updates);
+        yield* Deferred.await(listening);
+        expect(notify).toBeDefined();
+        notify?.();
+        yield* Queue.take(updates);
+      }),
+    );
+    expect(unsubscribed).toBe(true);
+  }),
+);

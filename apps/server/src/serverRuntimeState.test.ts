@@ -177,11 +177,17 @@ describe("server ownership", () => {
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-" });
       const statePath = path.join(root, "server-runtime.json");
-      const state = yield* makeState;
+      const startupTimings = [
+        { phase: "process.entry", at: 1 },
+        { phase: "config.loaded", at: 2 },
+      ];
+      const state = { ...(yield* makeState), startupTimings };
       yield* Effect.scoped(
         Effect.gen(function* () {
           const owner = yield* ServerOwnership.acquireServerOwnership(statePath);
           yield* owner.publish(state);
+          const persisted = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath);
+          assert.deepEqual(Option.getOrThrow(persisted).startupTimings, startupTimings);
           const before = yield* fs.readFileString(statePath);
           const refused = yield* ServerOwnership.acquireServerOwnership(statePath).pipe(
             Effect.flip,

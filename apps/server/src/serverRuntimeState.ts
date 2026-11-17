@@ -8,6 +8,7 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { formatHostForUrl, isWildcardHost } from "@t3tools/shared/hostClassification";
 import packageJson from "../package.json" with { type: "json" };
 import type * as ServerConfig from "./config.ts";
+import { readStartupTimings } from "./startupTiming.ts";
 
 export const PersistedServerRuntimeState = Schema.Struct({
   version: Schema.Literal(1),
@@ -20,6 +21,9 @@ export const PersistedServerRuntimeState = Schema.Struct({
   // Dev is single-origin: browsers must pair through this URL, not `origin`.
   devUrl: Schema.optional(Schema.String),
   startedAt: Schema.String,
+  startupTimings: Schema.optional(
+    Schema.Array(Schema.Struct({ phase: Schema.String, at: Schema.Number })),
+  ),
   serviceManaged: Schema.optional(Schema.Boolean),
   serverVersion: Schema.optional(Schema.String),
   // The managed policy this server loaded at startup, null for none; absent from older servers.
@@ -79,6 +83,7 @@ export const makePersistedServerRuntimeState = (input: {
     origin: runtimeOriginForConfig(input.config, input.port),
     ...(input.config.devUrl ? { devUrl: input.config.devUrl.toString() } : {}),
     startedAt: DateTime.formatIso(now),
+    startupTimings: readStartupTimings(),
     ...(input.serviceManaged ? { serviceManaged: true } : {}),
     serverVersion: packageJson.version,
     ...(input.managedPolicy === undefined ? {} : { managedPolicy: input.managedPolicy }),

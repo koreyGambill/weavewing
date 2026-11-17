@@ -29,6 +29,7 @@ function Harness(props: { readonly onResize?: (width: number) => void }) {
         <CollapseFromInside />
         <SidebarRail />
       </Sidebar>
+      <div data-sidebar-resize-width="left" style={{ width: "var(--sidebar-width)" }} />
       <SidebarTrigger />
     </SidebarProvider>
   );
@@ -66,6 +67,18 @@ describe("Sidebar", () => {
     expect(onResize).toHaveBeenCalledTimes(1);
 
     dragTo(left + 80);
+    const sidebarContainer = screen.container.querySelector<HTMLElement>(
+      '[data-slot="sidebar-container"]',
+    )!;
+    const widthFollower = screen.container.querySelector<HTMLElement>(
+      '[data-sidebar-resize-width="left"]',
+    )!;
+    await vi.waitFor(() => {
+      expect(sidebarContainer.getBoundingClientRect().width).toBeGreaterThan(296);
+      expect(widthFollower.getBoundingClientRect().width).toBe(
+        sidebarContainer.getBoundingClientRect().width,
+      );
+    });
     await userEvent.click(
       screen.container.querySelector<HTMLElement>('[data-slot="sidebar-trigger"]')!,
     );

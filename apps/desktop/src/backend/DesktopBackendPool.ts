@@ -33,6 +33,8 @@ import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as IpcChannels from "../ipc/channels.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 
 const { logWarning: logBackendPoolWarning } =
@@ -123,6 +125,10 @@ export const layer = Layer.effect(
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
     const electronApp = yield* ElectronApp.ElectronApp;
+    const windows = yield* ElectronWindow.ElectronWindow;
+    const notifyReady = windows
+      .sendAll(IpcChannels.LOCAL_ENVIRONMENT_READY_CHANNEL)
+      .pipe(Effect.ignoreCause({ log: true }));
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     const { primaryBackendStartup } = yield* DesktopState.DesktopState;
     // Parent instance scopes to the pool so shutdown runs stop finalizers before the OS kills backends.
@@ -228,6 +234,7 @@ export const layer = Layer.effect(
       onReady: (httpBaseUrl, pid) =>
         FiberHandle.run(updateMarkerWait, releaseUpdateMarker(httpBaseUrl, pid)).pipe(
           Effect.andThen(reloadStaleMain),
+          Effect.andThen(notifyReady),
           Effect.andThen(desktopWindow.handleBackendReady(httpBaseUrl)),
           // Only once the main window exists, so the recovery window never closes into nothing.
           Effect.andThen(SubscriptionRef.set(primaryBackendStartup, { _tag: "Ready" })),
@@ -293,10 +300,11 @@ export const layer = Layer.effect(
             return Effect.gen(function* () {
               // Provide the child Scope last so the captured pool Scope cannot shadow it and orphan stop/restart finalizers.
               const instanceScope = yield* Scope.fork(layerScope, "sequential");
-              const instance = yield* DesktopBackendManager.makeBackendInstance(spec).pipe(
-                Scope.provide(instanceScope),
-                Effect.provide(factoryContext),
-              );
+              const instance = yield* DesktopBackendManager.makeBackendInstance({
+                ...spec,
+                onReady: (url, pid) =>
+                  notifyReady.pipe(Effect.andThen(spec.onReady?.(url, pid) ?? Effect.void)),
+              }).pipe(Scope.provide(instanceScope), Effect.provide(factoryContext));
               const next = new Map(current);
               next.set(spec.id, {
                 _tag: "Active",
