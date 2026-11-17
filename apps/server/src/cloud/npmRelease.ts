@@ -68,7 +68,14 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
           return yield* new ServerNpmReleaseError({
             reason: "This Weavewing release has no database compatibility metadata.",
           });
-        const manifest = yield* decodeManifest(yield* response.text);
+        const manifest = yield* decodeManifest(yield* response.text).pipe(
+          Effect.mapError(
+            () =>
+              new ServerNpmReleaseError({
+                reason: "Invalid Weavewing database compatibility metadata.",
+              }),
+          ),
+        );
         const databaseMigration = npmReleaseDatabaseMigration(manifest);
         if (manifest.version !== version || databaseMigration === undefined)
           return yield* new ServerNpmReleaseError({
@@ -77,9 +84,10 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
         return { version, databaseMigration };
       },
       Effect.timeout(Duration.seconds(15)),
-      Effect.mapError(
-        () =>
-          new ServerNpmReleaseError({ reason: "Could not check Weavewing release compatibility." }),
+      Effect.mapError((error) =>
+        error instanceof ServerNpmReleaseError
+          ? error
+          : new ServerNpmReleaseError({ reason: "Could not check Weavewing release compatibility." }),
       ),
     ),
   });
