@@ -118,14 +118,22 @@ test("the pushed-commit check refreshes a stale origin/main before deciding", ()
 test("Mac preflight refuses missing managed Node with an install hint", () => {
   const home = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-mac-tools-"));
   try {
-    const bin = Path.join(home, "bin");
-    FS.mkdirSync(bin);
+    const bin = Path.join(home, ".local/share/vite-plus/bin");
+    FS.mkdirSync(bin, { recursive: true });
     for (const name of ["vp", "cargo", "rustup", "xcrun"])
       FS.writeFileSync(Path.join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     const result = CP.spawnSync("/bin/sh", ["-c", Release.macPreflight("26.13.1")], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /vp env install 26\.13\.1/);
-    assert.match(result.stderr, /\.vite-plus\/js_runtime\/node\/26\.13\.1\/bin\/node/);
+    assert.match(result.stderr, /js_runtime\/node\/26\.13\.1\/bin\/node/);
+    const managed = Path.join(home, ".local/share/vite-plus/js_runtime/node/26.13.1/bin");
+    FS.mkdirSync(managed, { recursive: true });
+    FS.writeFileSync(Path.join(managed, "node"), "#!/bin/sh\necho v26.13.1\n", { mode: 0o755 });
+    FS.writeFileSync(Path.join(bin, "node"), "#!/bin/sh\necho v26.7.0\n", { mode: 0o755 });
+    FS.writeFileSync(Path.join(bin, "uname"), "#!/bin/sh\necho arm64\n", { mode: 0o755 });
+    const installed = CP.spawnSync("/bin/sh", ["-c", Release.macPreflight("26.13.1")], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stdout, /\.local\/share\/vite-plus\/js_runtime\/node\/26\.13\.1/);
   } finally {
     FS.rmSync(home, { recursive: true });
   }

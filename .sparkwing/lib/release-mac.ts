@@ -28,7 +28,7 @@ try {
   // The remote helper reads the JSON payload on stdin; secrets never become ssh arguments.
   const nodeVersion = JSON.parse(FS.readFileSync(Path.join(worktree, "package.json"), "utf8")).engines.node;
   if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) throw new Error("Invalid managed Node version");
-  run("ssh", [...ssh, `env -C ~/${remote}/source ~/.vite-plus/js_runtime/node/${nodeVersion}/bin/node .sparkwing/lib/release-mac-build.ts`], JSON.stringify({ version, runId, secrets: Object.fromEntries(signingNames.map((name) => [name, process.env[name] ?? ""])) }));
+  run("ssh", [...ssh, `set -eu; vpPath=$(env sh -c 'command -v vp'); node="$(dirname "$(dirname "$vpPath")")/js_runtime/node/${nodeVersion}/bin/node"; exec env -C ~/${remote}/source "$node" .sparkwing/lib/release-mac-build.ts`], JSON.stringify({ version, runId, secrets: Object.fromEntries(signingNames.map((name) => [name, process.env[name] ?? ""])) }));
 } catch (error) {
   failure = error;
 }

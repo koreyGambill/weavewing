@@ -35,7 +35,8 @@ need cargo 'rustup toolchain install 1.100.0 --profile minimal --component rustf
 need tar 'xcode-select --install'
 need xcrun 'xcode-select --install'
 xcrun --find notarytool || { echo 'Install: xcode-select --install' >&2; exit 1; }
-node="$HOME/.vite-plus/js_runtime/node/${nodeVersion}/bin/node"
+vpPath=$(env sh -c 'command -v vp')
+node="$(dirname "$(dirname "$vpPath")")/js_runtime/node/${nodeVersion}/bin/node"
 test -x "$node" || { echo "Missing $node. Install: vp env install ${nodeVersion}" >&2; exit 1; }
 test "$("$node" --version)" = 'v${nodeVersion}' || { echo 'Install: vp env install ${nodeVersion}' >&2; exit 1; }
 echo "Managed Node: $node"
