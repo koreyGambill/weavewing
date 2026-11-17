@@ -142,7 +142,11 @@ export default mergeConfig(
         onlyBundle: false,
       },
       banner: {
-        js: "#!/usr/bin/env node\n",
+        js:
+          "#!/usr/bin/env node\n" +
+          (packBootstrap
+            ? 'globalThis.__t3StartupTimings = [{ phase: "process.entry", at: Date.now() }];\n'
+            : ""),
       },
       define: {
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),

@@ -15,7 +15,7 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     const report = `
       import { getCompileCacheDir, registerHooks } from 'node:module';
       registerHooks({ resolve(specifier, context, nextResolve) {
-        if (specifier === './binMain.ts') console.error('LOADED_CLI_MAIN');
+        if (specifier === './binMain.ts') console.error('LOADED_CLI_MAIN CACHE=' + (getCompileCacheDir() ?? 'disabled'));
         if (specifier === './binCli.ts') console.error('CACHE=' + (getCompileCacheDir() ?? 'disabled'));
         return nextResolve(specifier, context);
       } });
@@ -57,7 +57,9 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     }, Effect.scoped);
     const normal = yield* run({});
     expect(normal.exitCode).toBe(0);
-    expect(normal.stderr).toContain("LOADED_CLI_MAIN");
+    expect(normal.stderr.replaceAll("\\", "/")).toContain(
+      `LOADED_CLI_MAIN CACHE=${root}/cache/t3code/compile-cache`.replaceAll("\\", "/"),
+    );
     expect(normal.stderr.replaceAll("\\", "/")).toContain(
       `CACHE=${root}/cache/t3code/compile-cache`.replaceAll("\\", "/"),
     );

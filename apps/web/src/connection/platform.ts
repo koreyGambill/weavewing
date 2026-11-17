@@ -57,6 +57,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
   desktopLocalConnectionId,
+  desktopLocalRefreshes,
   readDesktopSecondaryBootstrapsResult,
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
@@ -508,8 +509,6 @@ const loadSecondaryConnectionRegistration = Effect.fn(
   };
 });
 
-// The bridge has no topology event. Cache registrations until bearer credentials near expiry.
-const PLATFORM_POLL_INTERVAL = "3 seconds";
 const SECONDARY_BEARER_REFRESH_SKEW_MS = 5_000;
 
 function secondaryBearerExpiresAtEpochMs(
@@ -801,7 +800,7 @@ const layerPlatformConnectionSource = Layer.effect(
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
     return PlatformConnectionSource.PlatformConnectionSource.of({
-      registrations: Stream.tick(PLATFORM_POLL_INTERVAL).pipe(
+      registrations: desktopLocalRefreshes(() => window.desktopBridge).pipe(
         Stream.mapEffect(() => buildPlatformRegistrations),
       ),
     });

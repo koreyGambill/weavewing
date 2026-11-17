@@ -24,6 +24,8 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as IpcChannels from "../ipc/channels.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
@@ -120,6 +122,7 @@ function layerPool(
     readonly spawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
     readonly httpClient?: HttpClient.HttpClient;
     readonly onReady?: Effect.Effect<void>;
+    readonly onBroadcast?: (channel: string) => Effect.Effect<void>;
     readonly backend?: Effect.Success<ReturnType<typeof makeFakeBackendProcess>>;
   } = {},
 ): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
@@ -203,6 +206,16 @@ function layerPool(
           showErrorBox: () => Effect.void,
         } satisfies ElectronDialog.ElectronDialog["Service"]),
         ElectronApp.layer,
+        Layer.effect(
+          ElectronWindow.ElectronWindow,
+          Effect.gen(function* () {
+            const windows = yield* ElectronWindow.make;
+            return {
+              ...windows,
+              sendAll: (channel) => options.onBroadcast?.(channel) ?? Effect.void,
+            };
+          }),
+        ),
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected window create"),
           ensureMain: Effect.die("unexpected window ensure"),
@@ -235,6 +248,7 @@ const makeUpdateMarkerFixture = () =>
     const runtimeChecked = yield* Deferred.make<void>();
     const markerRemoved = yield* Deferred.make<void>();
     const readyRuns = yield* Queue.unbounded<void>();
+    const broadcasts: string[] = [];
     let nextPid = 123;
     const files = new Map([[markerPath, JSON.stringify({ startedAt: 0, expiresAt: 60_000 })]]);
     const removed: string[] = [];
@@ -308,6 +322,10 @@ const makeUpdateMarkerFixture = () =>
         ),
       ),
       onReady: Queue.offer(readyRuns, undefined).pipe(Effect.asVoid),
+      onBroadcast: (channel) =>
+        Effect.sync(() => {
+          broadcasts.push(channel);
+        }),
     });
     const publishRuntime = (pid: number) =>
       files.set(
@@ -326,6 +344,7 @@ const makeUpdateMarkerFixture = () =>
       removed,
       allowReady,
       readyRuns,
+      broadcasts,
       runtimeChecked,
       markerRemoved,
       publishRuntime,
@@ -344,6 +363,7 @@ describe("DesktopBackendPool", () => {
           yield* primary.start;
           yield* Deferred.succeed(fixture.allowReady, undefined);
           yield* Queue.take(fixture.readyRuns);
+          assert.include(fixture.broadcasts, IpcChannels.LOCAL_ENVIRONMENT_READY_CHANNEL);
           assert.isTrue(
             fixture.files.has(markerPath),
             "a launcher could neither wait nor adopt between readiness and publication",
