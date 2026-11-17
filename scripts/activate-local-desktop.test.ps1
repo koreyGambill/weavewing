@@ -33,16 +33,6 @@ try {
   }
   Write-Host 'PASS case: launcher-lines'
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; reads = 0; delays = 0 }
-  $result = Wait-LocalUpdateDrain 0 { throw 'Zero drain must not read' }
-  Assert ($result.reason -eq 'deadline') 'Zero drain did not skip'
-  $result = Wait-LocalUpdateDrain 5 { $clock.reads++; @{ idle = $false } } { $clock.now } { param($seconds) $clock.now = $clock.now.AddSeconds($seconds); $clock.delays++ }
-  Assert ($result.reason -eq 'deadline' -and $clock.reads -eq 60 -and $clock.delays -eq 60) 'Drain did not stop at five minutes'
-  $result = Wait-LocalUpdateDrain 5 { @{ idle = $true } } { $clock.now } { throw 'Idle drain must not wait' }
-  Assert ($result.reason -eq 'idle') 'Idle drain failed'
-  $clock.now = [DateTime]'2026-01-01T00:00:00Z'
-  $result = Wait-LocalUpdateDrain 1 { $clock.now = $clock.now.AddSeconds(65); @{ idle = $false } } { $clock.now } { throw 'Read over deadline must not add a wait' }
-  Assert ($result.reason -eq 'deadline') 'Slow drain read ignored deadline'
-
   $clock.now = [DateTime]'2026-01-01T00:00:00Z'
   $clock.reads = 0
   $clock.authentications = 0
@@ -274,7 +264,7 @@ try {
     $oldDigest = (Get-FileHash (Join-Path $resources 'wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
     $configPath = Join-Path $fixture 'config.json'
     $runtimeOnly = $case.StartsWith('runtime-')
-    $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $false; drainMinutes = 0; healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
+    $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $false; healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
     if ($case -in @('close-late-exit', 'runtime-recovery-late-exit')) { $config.closeSeconds = 0 }
     if ($case -eq 'desktop-exits') { $config.healthSeconds = 3 }
     if ($case -in @('stopped-throws', 'stopped-transient') -or $case -like 'swap*') { $config.notifyThread = 'fixture-thread'; $config.commit = 'fixture-commit' }
@@ -461,7 +451,7 @@ try {
   Set-Content $archive 'new-archive'
   Copy-Item (Join-Path $PSScriptRoot 'stage-windows-desktop.ps1') (Join-Path $fixture 'stage-windows-desktop.ps1')
   $configPath = Join-Path $fixture 'config.json'
-  @{ install = $install; updatePath = 'wsl-only'; archive = $archive; digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $true; drainMinutes = 0 } | ConvertTo-Json | Set-Content $configPath
+  @{ install = $install; updatePath = 'wsl-only'; archive = $archive; digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $true } | ConvertTo-Json | Set-Content $configPath
   $invokeWsl = (Get-Item Function:Invoke-LocalUpdateWsl).ScriptBlock
   $calls = @{ operations = @() }
   function Invoke-LocalUpdateWsl {
@@ -540,5 +530,5 @@ lock.close();
     Assert (-not (Get-Process -Id $record.pid -ErrorAction SilentlyContinue)) 'Snapshot helper remained running after completion or timeout'
   }
   Assert (Test-Path (Join-Path $userdata 'statev2.sqlite')) 'Timeout removed source state'
-  'PASS: runtime selection rollback, responsiveness guard, runtime check-only, early failure receipts, bounded link checks, drain deadline, swap and rollback, refused close, read-only snapshot excluding ownership lock, timeout cleanup and captured helper exit'
+  'PASS: runtime selection rollback, responsiveness guard, runtime check-only, early failure receipts, bounded link checks, swap and rollback, refused close, read-only snapshot excluding ownership lock, timeout cleanup and captured helper exit'
 } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }

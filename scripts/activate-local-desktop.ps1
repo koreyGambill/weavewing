@@ -13,18 +13,6 @@ function Read-LocalUpdateLauncher($path) {
   return $variables
 }
 
-function Wait-LocalUpdateDrain([double]$Minutes, [scriptblock]$Read, [scriptblock]$Now = { [DateTime]::UtcNow }, [scriptblock]$Delay = { param($seconds) Start-Sleep -Seconds $seconds }) {
-  $deadline = (& $Now).AddMinutes($Minutes)
-  $last = $null
-  while ((& $Now) -lt $deadline) {
-    $last = & $Read ($deadline - (& $Now)).TotalSeconds
-    if ($last.idle) { return @{ reason = 'idle'; last = $last } }
-    $remaining = ($deadline - (& $Now)).TotalSeconds
-    if ($remaining -gt 0) { & $Delay ([Math]::Min(5, $remaining)) }
-  }
-  return @{ reason = 'deadline'; last = $last }
-}
-
 function Wait-LocalUpdateLinks([double]$Seconds, [scriptblock]$Read, [scriptblock]$Now = { [DateTime]::UtcNow }, [scriptblock]$Delay = { param($seconds) Start-Sleep -Seconds $seconds }) {
   $deadline = (& $Now).AddSeconds($Seconds)
   $last = @{ status = 'warning'; error = 'Link deadline expired before probing' }
@@ -210,7 +198,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
     $worker = Join-Path $root 'worker.mjs'
     $empty = Join-Path $root 'empty-stdin'
     New-Item -ItemType Directory -Path $helperReceipts -Force | Out-Null
-    $details = @{ timings = @(); updatePath = $config.updatePath; shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; previousDigest = $config.previousDigest; environmentId = $config.environmentId; status = $Mode; helperReceipts = $helperReceipts; commit = $config.commit; digest = $config.digest; install = $install; rollback = $rollback; checkOnly = $config.checkOnly; drainSource = $(if ($config.authorizationFile) { 'mcp' } else { 'read-only-sqlite' }) }
+    $details = @{ timings = @(); updatePath = $config.updatePath; shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; previousDigest = $config.previousDigest; environmentId = $config.environmentId; status = $Mode; helperReceipts = $helperReceipts; commit = $config.commit; digest = $config.digest; install = $install; rollback = $rollback; checkOnly = $config.checkOnly }
     Record-UpdateHelper $PID "powershell:$Mode"
     function Quote-UpdateArgument([string]$value) {
       if ($value.Contains('"') -or $value.Contains("`r") -or $value.Contains("`n")) { throw 'Arguments must not contain quotes or newlines.' }
@@ -403,10 +391,6 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         if (-not $old.healthy) { throw 'Installed runtime is unhealthy; refusing restart.' }
         if ((Get-FileHash -LiteralPath $config.archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.digest) { throw 'Candidate archive changed.' }
         $details.runtimeInstall = Probe-Update 'install-runtime'
-        $details.drain = Wait-LocalUpdateDrain $config.drainMinutes {
-          param($remaining)
-          try { Probe-Update 'idle' @() ([Math]::Min(5, $remaining)) $remaining } catch { @{ idle = $false; error = $_.Exception.Message } }
-        }
         Save-UpdateStatus 'backing-up'
         $details.wslBackup = Probe-Update 'backup' @() 300
         if ($config.checkOnly) { Save-UpdateStatus 'check-only-passed'; return }
@@ -415,7 +399,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         Save-UpdateStatus 'activating-runtime'
         Invoke-LocalRuntimeUpdate $resources $config.archive $config.digest $runtimeRollback {
           if (@(Get-UpdateProcesses | Where-Object { $_.MainWindowHandle -ne 0 }).Count -ne 1) { throw 'Desktop exited before runtime restart.' }
-          Probe-Update 'stop-runtime' @($oldDigest) | Out-Null
+          $details.runtimeStop = Probe-Update 'stop-runtime' @($oldDigest)
         } { Wait-UpdateHealthy $config.digest } {
           Save-UpdateRecovering
           # The supervisor may already have restarted either selection.
@@ -460,12 +444,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       } catch { $details.links = @{ status = 'warning'; error = "Could not capture existing peer links: $($_.Exception.Message)" } }
       $oldDigest = (Get-FileHash -LiteralPath (Join-Path $install 'resources/wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
       $old = Probe-Update 'health' @($oldDigest)
-      if (-not $old.healthy) { throw 'Installed runtime became unhealthy before drain.' }
-      Save-UpdateStatus 'draining'
-      $details.drain = Wait-LocalUpdateDrain $config.drainMinutes {
-        param($remaining)
-        try { Probe-Update 'idle' @() ([Math]::Min(30, $remaining)) $remaining } catch { @{ idle = $false; error = $_.Exception.Message } }
-      }
+      if (-not $old.healthy) { throw 'Installed runtime became unhealthy before activation.' }
       Save-UpdateStatus 'backing-up'
       $details.wslBackup = Probe-Update 'backup' @() 300
       $env:ELECTRON_RUN_AS_NODE = '1'

@@ -35,9 +35,16 @@ maintainer's private notes, not here.
    `--notify-thread <thread id>`, which posts "verified" or "failed, previous
    restored" back to that thread after the restart. End your turn after
    launching.
-6. `--drain-minutes N` waits for active turns (default 5); `0` skips the wait.
-   Any turn still running is cut off by the restart, including the launching
-   thread's. Pick a quiet moment.
+6. Activation proceeds without waiting for turns to finish. The WSL runtime gets
+   SIGTERM and five seconds to shut down before a forced stop. Full updates close
+   the desktop gracefully, whose backends use the same five-second grace period.
+   With **Continue threads after restarts** enabled (the default), threads
+   with saved provider sessions receive a continuation turn after restart.
+   Executing tools and provider-native background work do not resume. App-owned
+   child tasks recover in their own threads and report back. Interrupted runs
+   show a shutdown or restart notice and stop streaming. Scheduled tasks retain
+   their schedules, record interrupted invocations as failed, and follow any
+   dispatched thread turns through recovery.
 
 **Success:** the notify message says verified, and `<output-dir>/receipt.json`
 has `"status": "verified"` with the healthy runtime; `activation.log` sits
