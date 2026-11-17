@@ -507,7 +507,8 @@ it.effect("selects unfinished recovery work without reading settled thread histo
         ),
         new Set<ThreadId>(expected),
       );
-      const [query, params] = statements[0]!;
+      // Runtime recovery first looks up shared session ids; the candidate query runs last.
+      const [query, params] = statements.at(-1)!;
       const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
       assert.isTrue(
         plan.some((row) => row.detail.includes(index)),
