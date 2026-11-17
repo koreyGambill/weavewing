@@ -5,7 +5,7 @@ import * as Path from "node:path";
 import { ConcurrencyGroup, type Context, definePipeline, memoKey } from "@sparkwing/sdk";
 
 import { checkout, checkoutArgs, git, logged, type Checkout } from "../lib/checkout.ts";
-import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
+import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseFlags, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
 
 interface Release {
   id: number;
@@ -16,7 +16,7 @@ interface Release {
   assets: { id: number; name: string }[];
 }
 
-const input = (ctx: Context) => releaseInputs(ctx.args.version ?? "", ctx.args.platforms ?? "linux,win,mac");
+const input = (ctx: Context) => releaseInputs(ctx.args.version ?? "", ctx.args.platforms ?? "linux,win,mac", ctx.args.channel);
 const source = (co: Checkout) => Path.join(co.evidence, "source");
 const assets = (co: Checkout) => Path.join(co.evidence, "assets");
 
@@ -31,7 +31,7 @@ async function findRelease(ctx: Context, co: Checkout): Promise<Release | undefi
 }
 
 async function build(ctx: Context, co: Checkout, name: string, argv: readonly [string, ...string[]]) {
-  const clean = buildEnvironment(`${Path.join(OS.homedir(), ".cargo/bin")}:${co.env.PATH}`, OS.homedir(), "");
+  const clean = buildEnvironment(`${Path.join(OS.homedir(), ".cargo/bin")}:${co.env.PATH}`, OS.homedir(), "", input(ctx).channel);
   delete clean.TMPDIR;
   return logged(ctx, co, name, ["xwing", "env", "exec", "--repo", co.root, "--scratch", "--", "bash", "-c", 'exec env -C "$1" -i "TMPDIR=$TMPDIR" "${@:2}"', "bash", source(co), ...Object.entries(clean).map(([key, value]) => `${key}=${value}`), ...argv]);
 }
@@ -72,7 +72,7 @@ async function assertInput(ctx: Context, co: Checkout) {
     await logged(ctx, co, "host-preflight", ["bash", "-c", 'set -eu; hint="Install prerequisites: sudo apt-get install build-essential pkg-config libsecret-1-dev imagemagick patchelf zip"; for tool in cc make pkg-config convert patchelf zip; do command -v "$tool" >/dev/null || { echo "$hint" >&2; exit 1; }; done; pkg-config --exists libsecret-1 || { echo "$hint" >&2; exit 1; }']);
   if (ctx.args.stage !== "promote" && platforms.includes("win"))
     await logged(ctx, co, "windows-preflight", ["bash", "-c", 'set -eu; for tool in clang lld-link llvm-lib powershell.exe; do command -v "$tool" >/dev/null || { echo "Install Windows cross-build prerequisites: sudo apt-get install clang lld llvm; Windows PowerShell interop is also required" >&2; exit 1; }; done']);
-  return { commit, tag, platforms };
+  return { commit, tag, platforms, channel: input(ctx).channel };
 }
 
 definePipeline({
@@ -81,7 +81,8 @@ definePipeline({
   help: "Manual only. plan builds and records the release without GitHub writes. draft creates a private draft. promote verifies uploaded checksums and needs --allow-risk prod.",
   args: [
     ...checkoutArgs,
-    { name: "version", type: "string", required: true, description: "Plain release semver" },
+    { name: "version", type: "string", required: true, description: "0.x stable or nightly release semver" },
+    { name: "channel", type: "string", default: "stable", enum: ["stable", "test"], description: "Stable release or nightly test prerelease" },
     { name: "platforms", type: "string", default: "linux,win,mac", description: "Comma-separated linux,win,mac subset" },
     { name: "stage", type: "string", default: "draft", enum: ["draft", "plan", "promote"], description: "draft, plan or promote" },
     { name: "build-only", type: "bool", description: "Only with --stage plan: skip CI for artifact proof" },
@@ -91,7 +92,7 @@ definePipeline({
   secrets: ["WEAVEWING_RELEASE_GH_TOKEN", "APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map((name) => ({ name, optional: true })),
   plan(p, run) {
     const version = run.args.version ?? "";
-    const { platforms } = releaseInputs(version || "0.0.0", run.args.platforms || "linux,win,mac");
+    const { platforms, channel } = releaseInputs(version || (run.args.channel === "test" ? "0.0.0-nightly.20000101.0" : "0.0.0"), run.args.platforms || "linux,win,mac", run.args.channel);
     const buildOnly = run.args["build-only"] === "true";
     if (buildOnly && run.args.stage !== "plan") throw new Error("--build-only is restricted to --stage plan");
     p.concurrency(new ConcurrencyGroup("weavewing-release", { capacity: 1 }));
@@ -107,7 +108,7 @@ definePipeline({
         const release = await findRelease(ctx, co);
         if (!release?.draft) throw new Error("Promote requires an existing draft");
         if (release.target_commitish !== commit) throw new Error("The draft target does not match this checkout's commit");
-        const names = [...expectedAssets(version, PLATFORMS), "SHA256SUMS"];
+        const names = [...expectedAssets(version, PLATFORMS, channel), "SHA256SUMS"];
         if (release.assets.length !== names.length || names.some((name) => !release.assets.some((asset) => asset.name === name)))
           throw new Error("Draft does not have the complete three-platform release asset set");
         const download = Path.join(co.evidence, "promote-assets");
@@ -115,7 +116,7 @@ definePipeline({
         await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", download, "--clobber");
         verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit);
         await assertNoTag(ctx, co);
-        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft=false", "--latest");
+        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft=false", ...releaseFlags(channel, "promote"));
         const ref = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/ref/tags/${tag}`));
         const object = ref.object.type === "tag"
           ? JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/tags/${ref.object.sha}`)).object
@@ -174,7 +175,7 @@ definePipeline({
       await build(ctx, co, "linux-cli-smoke", ["node", "scripts/smoke-cli-archive.ts", "--archive", archive, "--expect-version", version]);
       if (platforms.includes("linux")) {
         await build(ctx, co, "linux-desktop", ["vp", "run", "dist:desktop:artifact", "--platform", "linux", "--target", "AppImage", "--arch", "x64", "--build-version", version, "--skip-build", "--output-dir", assets(co), "--verbose"]);
-        normalizeArtifacts(assets(co), "linux", version);
+        normalizeArtifacts(assets(co), "linux", version, channel);
         await build(ctx, co, "linux-appimage", ["node", ".sparkwing/lib/release-linux-proof.ts", "--assets", assets(co), "--version", version, "--evidence", co.evidence]);
       }
       return { archive };
@@ -192,7 +193,7 @@ definePipeline({
       await build(ctx, co, "win-exe", ["node", "apps/server/scripts/cli.ts", "build-exe", "--target", "win-x64"]);
       await build(ctx, co, "win-cli", ["node", "scripts/build-cli-archive.ts", "--platform", "win", "--arch", "x64", "--version", version, "--resource-monitor-dir", Path.dirname(monitor), "--output-dir", assets(co)]);
       await build(ctx, co, "win-desktop-native", ["node", ".sparkwing/lib/release-windows.ts", "--assets", assets(co), "--version", version, "--wsl-runtime", archive]);
-      normalizeArtifacts(assets(co), "win", version);
+      normalizeArtifacts(assets(co), "win", version, channel);
       return { platform: "win" };
     }).inline().cores(8).needs(linux, clean).skipIf(() => !platforms.includes("win"))
       .concurrency(new ConcurrencyGroup("weavewing-desktop", { capacity: 1 }));
@@ -200,7 +201,7 @@ definePipeline({
     const mac = p.job("mac", async (ctx) => {
       const co = checkout(ctx);
       const { commit } = (await ctx.output(preflight))!;
-      await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--run", ctx.run.id, "--evidence", co.evidence], Object.fromEntries(await Promise.all(["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map(async (key) => [key, (await ctx.secret(key)) ?? ""]))));
+      await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--channel", channel, "--run", ctx.run.id, "--evidence", co.evidence], Object.fromEntries(await Promise.all(["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map(async (key) => [key, (await ctx.secret(key)) ?? ""]))));
       return { platform: "mac" };
     }).inline().cores(1).needs(preflight, clean).skipIf(() => !platforms.includes("mac"))
       .concurrency(new ConcurrencyGroup("weavewing-release-moonborn", { capacity: 1 }));
@@ -208,7 +209,7 @@ definePipeline({
     p.job("publish-draft", async (ctx) => {
       const co = checkout(ctx);
       const { commit, tag } = (await ctx.output(preflight))!;
-      const names = expectedAssets(version, platforms);
+      const names = expectedAssets(version, platforms, channel);
       const dir = assets(co);
       const release = await findRelease(ctx, co);
       if (release && (!release.draft || release.target_commitish !== commit))
@@ -217,7 +218,7 @@ definePipeline({
         const previous = Path.join(co.evidence, "previous-draft-assets");
         FS.mkdirSync(previous, { recursive: true });
         const previousNames = release.assets.map((asset) => asset.name).filter((name) => name !== "SHA256SUMS");
-        const allowed = expectedAssets(version, PLATFORMS);
+        const allowed = expectedAssets(version, PLATFORMS, channel);
         if (previousNames.some((name) => !allowed.includes(name))) throw new Error("Existing draft has unexpected assets");
         await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", previous, "--clobber");
         verifyChecksums(previous, previousNames, FS.readFileSync(Path.join(previous, "SHA256SUMS"), "utf8"));
@@ -227,13 +228,15 @@ definePipeline({
         }
         names.sort();
       }
+      await build(ctx, co, "release-metadata", ["node", "scripts/build-npm-launcher.ts", "--version", version, "--output-dir", Path.join(co.evidence, "launcher")]);
+      FS.copyFileSync(Path.join(co.evidence, "launcher/t3/package.json"), Path.join(dir, "release-metadata.json"));
       const inventory = assetInventory(dir, names);
       FS.writeFileSync(Path.join(dir, "SHA256SUMS"), inventory.map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
       const notes = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
-      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
+      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
       if (ctx.args.stage === "plan") {
         ctx.log.info(`Plan complete. No GitHub writes. Evidence: ${co.evidence}`);
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };
@@ -241,11 +244,11 @@ definePipeline({
       await assertInput(ctx, co);
       if (release) {
         if (release.target_commitish !== commit) throw new Error("Existing draft has a different target commit. Delete it before rebuilding.");
-        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, ...(ctx.args["notes-file"] ? ["--notes-file", notesFile] : []));
+        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, ...releaseFlags(channel, "draft"), ...(ctx.args["notes-file"] ? ["--notes-file", notesFile] : []));
         for (const asset of release.assets.filter((asset) => ![...names, "SHA256SUMS"].includes(asset.name)))
           await gh(ctx, co, "api", "--method", "DELETE", `repos/${RELEASE_REPOSITORY}/releases/assets/${asset.id}`);
       } else {
-        await gh(ctx, co, "release", "create", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, "--notes-file", notesFile);
+        await gh(ctx, co, "release", "create", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, "--notes-file", notesFile, ...releaseFlags(channel, "draft"));
       }
       await gh(ctx, co, "release", "upload", tag, "--repo", RELEASE_REPOSITORY, "--clobber", ...[...names, "SHA256SUMS"].map((name) => Path.join(dir, name)));
       return { commit, evidence: co.evidence };

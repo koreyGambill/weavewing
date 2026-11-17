@@ -19,7 +19,24 @@ sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 
 sparkwing run release -C <worktree> --detach --allow-risk prod -- --worktree <worktree> --version 0.1.0 --stage promote --draft-evidence <draft-run-directory>
 ```
 
-Versions must stay in the 0.x range. The pipeline refuses `1.0.0` and above before any job runs.
+`--channel stable` is the default and requires a plain `0.x.y` version. Stable
+releases use `latest*.yml` and publish as the latest normal GitHub release.
+`--channel test` requires `0.x.y-nightly.YYYYMMDD.N`, for example
+`0.2.0-nightly.20261117.1`. Test builds reuse the desktop Nightly channel and
+`nightly*.yml`. Their drafts and promoted releases are prereleases with
+`latest=false`. Both channels refuse `1.0.0` and above, including prereleases.
+
+```bash
+sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 0.2.0-nightly.20261117.1 --channel test --stage plan --build-only --platforms linux
+```
+
+In desktop **Settings → About → Update track**, choose **Stable** or **Nightly**
+(the test channel). Stable installs never see test builds. The test channel gets test builds. Switch to **Stable** in **Settings → About**
+to return, using the guarded migration check. Managed policy can lock this choice.
+Automatic checks are off by default. **Check for Updates** and changing the track
+are manual checks. Unsigned macOS builds cannot auto-update on either channel.
+The release's `release-metadata.json` carries its version and database migration
+compatibility for the existing guarded track switch.
 
 `plan` runs the builds and writes the proposed release without GitHub writes.
 For artifact proof while CI is unavailable, add `--build-only` to a plan run.
@@ -29,7 +46,7 @@ promote runs CI at the release commit before publishing.
 the release commit with tag name `weavewing-v0.1.0`. A draft creates no tag.
 `promote` verifies the complete uploaded asset set against `assets/SHA256SUMS`
 in the draft run's local evidence directory, including its release commit and CI result,
-then publishes the draft as latest. Only promote needs the prod risk grant.
+then publishes it with the selected channel’s prerelease and latest flags. Only promote needs the prod risk grant.
 
 The default platform set is `linux,win,mac`. `--platforms linux,win` rebuilds a
 subset for a draft. Windows always builds the Linux CLI archive for its embedded
@@ -56,7 +73,7 @@ never command arguments or evidence.
 
 All desktop builds ship unsigned. macOS uses ad-hoc signing. Release notes
 include the operating system overrides and explain that unsigned mac builds
-don't auto-update. Managed policy may block the override.
+don't auto-update on either channel. Managed policy may block the override.
 
 For Apple signing, configure all six optional Sparkwing secrets together:
 `APPLE_CSC_LINK` (base64 p12), `APPLE_CSC_KEY_PASSWORD`, `APPLE_API_KEY` (p8 text),

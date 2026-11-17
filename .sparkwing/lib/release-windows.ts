@@ -3,10 +3,11 @@ import * as FS from "node:fs";
 import * as Path from "node:path";
 import { parseArgs } from "node:util";
 
-import { assertUpdaterConfig } from "./release.ts";
+import { assertUpdaterConfig, releaseInputs } from "./release.ts";
 
 const { values } = parseArgs({ options: { assets: { type: "string" }, version: { type: "string" }, "wsl-runtime": { type: "string" } } });
 if (!values.assets || !values.version || !values["wsl-runtime"] || !process.env.TMPDIR) throw new Error("Expected --assets, --version, --wsl-runtime and TMPDIR");
+const release = releaseInputs(values.version, "win", process.env.T3CODE_DESKTOP_CHANNEL === "nightly" ? "test" : "stable");
 const run = (command: string, args: string[]) => CP.execFileSync(command, args, { stdio: "inherit" });
 process.env.T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR = "true";
 run("vp", ["run", "dist:desktop:artifact", "--platform", "win", "--target", "nsis", "--arch", "x64", "--build-version", values.version, "--skip-build", "--keep-stage", "--wsl-runtime", values["wsl-runtime"], "--output-dir", values.assets, "--verbose"]);
@@ -41,7 +42,7 @@ try {
   & tar.exe -xf ${psQuote(windowsPath(Path.join(verify, "payload.tar")))} -C $root
   if ($LASTEXITCODE -ne 0) { throw 'Payload extraction failed' }
   $app = Join-Path $root ${psQuote(unpacked)}
-  $exe = Join-Path $app 'Weavewing.exe'
+  $exe = Join-Path $app ${psQuote(release.channel === 'test' ? 'Weavewing (Nightly).exe' : 'Weavewing.exe')}
   if (!(Test-Path $exe)) { throw 'Packaged executable is missing' }
   $env:ELECTRON_RUN_AS_NODE = '1'
   # Weavewing.exe is a GUI-subsystem binary: PowerShell only waits for it, and sets

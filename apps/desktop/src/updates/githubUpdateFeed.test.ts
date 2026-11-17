@@ -34,7 +34,10 @@ const offeredRelease = async (
 ) => {
   let apiScans = 0;
   const request = async ({ path = "" }: { readonly path?: string | null }) => {
-    if (path === `${REPO}/releases/latest`) return JSON.stringify({ tag_name: feedTags[0] });
+    if (path === `${REPO}/releases/latest`)
+      return JSON.stringify({
+        tag_name: feedTags.find((tag) => !tag.includes("-nightly.")) ?? feedTags[0],
+      });
     if (path === `${REPO}/releases.atom`) return atomFeed(feedTags);
     if (path === `${REPO}/releases/download/update-feed/nightly.json`) {
       if (pointerTag === undefined) throw new Error("404");
@@ -43,6 +46,12 @@ const offeredRelease = async (
     const manifest = /\/releases\/download\/(?:weavewing-)?v([^/]+)\/(?:latest|nightly)\.yml$/.exec(
       path ?? "",
     );
+    if (
+      manifest &&
+      ((manifest[1]!.includes("-nightly.") && !(path ?? "").endsWith("/nightly.yml")) ||
+        (!manifest[1]!.includes("-nightly.") && !(path ?? "").endsWith("/latest.yml")))
+    )
+      throw new Error("Wrong channel manifest");
     if (manifest) return `version: ${manifest[1]}\npath: T3-Code.exe\nsha512: abc\n`;
     apiScans += 1;
     if (listedTag instanceof Error) throw listedTag;
@@ -117,10 +126,10 @@ describe("GitHubProvider nightly lookup", () => {
 });
 
 it("reads fork tags in feed notes, pointers and API fallback", async () => {
-  const tag = "weavewing-v0.1.10-nightly.20261112.4606";
+  const tag = "weavewing-v0.2.0-nightly.20261117.1";
   expect(await offeredRelease([tag], undefined, undefined, "weavewing-v")).toEqual({
     tag,
-    releaseNotes: [{ version: "0.1.10-nightly.20261112.4606", note: `${tag} feed notes` }],
+    releaseNotes: [{ version: "0.2.0-nightly.20261117.1", note: `${tag} feed notes` }],
     apiScans: 0,
   });
   expect(await offeredRelease(crowdedFeed, tag, undefined, "weavewing-v")).toMatchObject({
@@ -141,4 +150,15 @@ it("reads a stable fork release and its notes from the actual GitHub download ta
     releaseNotes: [{ version: "1.0.0", note: `${tag} feed notes` }],
     apiScans: 0,
   });
+});
+
+it("nightly keeps test builds and stable excludes them", async () => {
+  const stable = "weavewing-v0.2.0";
+  const test = "weavewing-v0.2.0-nightly.20261117.1";
+  expect(await offeredRelease([stable, test], undefined, undefined, "weavewing-v")).toMatchObject({
+    tag: test,
+  });
+  expect(
+    await offeredRelease([test, stable], undefined, undefined, "weavewing-v", "latest"),
+  ).toMatchObject({ tag: stable });
 });

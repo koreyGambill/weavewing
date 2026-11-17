@@ -60,40 +60,50 @@ done
 mkdir -p "$HOME/weavewing-release/${runId}/source" "$HOME/weavewing-release/${runId}/assets" "$HOME/weavewing-release/${runId}/tmp"`;
 }
 
-export function releaseInputs(version: string, platforms: string) {
-  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version))
-    throw new Error("--version must be plain semver (for example 0.1.0)");
-  // Raising the major is a deliberate code change, not a flag.
+export type ReleaseChannel = "stable" | "test";
+
+export function releaseFlags(channel: ReleaseChannel, stage: "draft" | "promote"): string[] {
+  return [channel === "test" ? "--prerelease" : "--prerelease=false", channel === "stable" && stage === "promote" ? "--latest" : "--latest=false"];
+}
+
+export function releaseInputs(version: string, platforms: string, channel: string = "stable") {
+  if (channel !== "stable" && channel !== "test") throw new Error("--channel must be stable or test");
+  const base = "(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)";
+  const pattern = new RegExp(`^${base}${channel === "test" ? "-nightly\\.\\d{8}\\.(0|[1-9]\\d*)" : ""}$`);
+  if (!pattern.test(version))
+    throw new Error(channel === "test" ? "--version must use nightly semver (for example 0.2.0-nightly.20261117.1)" : "--version must be plain semver (for example 0.1.0)");
   if (!version.startsWith("0."))
     throw new Error(`--version ${version} is above 0.x; Weavewing releases stay in the 0.x range`);
   const selected = platforms.split(",");
   if (!selected.length || selected.some((p) => !PLATFORMS.includes(p as Platform)) || new Set(selected).size !== selected.length)
     throw new Error("--platforms must be a comma-separated subset of linux,win,mac");
-  return { version, platforms: selected as Platform[], tag: `${TAG_PREFIX}${version}` };
+  return { version, channel: channel as ReleaseChannel, platforms: selected as Platform[], tag: `${TAG_PREFIX}${version}` };
 }
 
-export function expectedAssets(version: string, platforms: readonly Platform[]): string[] {
-  return platforms.flatMap((platform) => {
+export function expectedAssets(version: string, platforms: readonly Platform[], channel: ReleaseChannel = "stable"): string[] {
+  const feed = channel === "test" ? "nightly" : "latest";
+  return ["release-metadata.json", ...platforms.flatMap((platform) => {
     switch (platform) {
-      case "linux": return [`Weavewing-${version}-x86_64.AppImage`, `Weavewing-${version}-amd64.deb`, "latest-linux.yml", `t3-${version}-linux-x64.tar.gz`];
-      case "win": return [`Weavewing-${version}-x64.exe`, `Weavewing-${version}-x64.exe.blockmap`, "latest.yml", `t3-${version}-win32-x64.zip`];
-      case "mac": return [`Weavewing-${version}-arm64.dmg`, `Weavewing-${version}-arm64.dmg.blockmap`, `Weavewing-${version}-arm64.zip`, `Weavewing-${version}-arm64.zip.blockmap`, "latest-mac.yml", `t3-${version}-darwin-arm64.tar.gz`];
+      case "linux": return [`Weavewing-${version}-x86_64.AppImage`, `Weavewing-${version}-amd64.deb`, `${feed}-linux.yml`, `t3-${version}-linux-x64.tar.gz`];
+      case "win": return [`Weavewing-${version}-x64.exe`, `Weavewing-${version}-x64.exe.blockmap`, `${feed}.yml`, `t3-${version}-win32-x64.zip`];
+      case "mac": return [`Weavewing-${version}-arm64.dmg`, `Weavewing-${version}-arm64.dmg.blockmap`, `Weavewing-${version}-arm64.zip`, `Weavewing-${version}-arm64.zip.blockmap`, `${feed}-mac.yml`, `t3-${version}-darwin-arm64.tar.gz`];
     }
-  }).sort();
+  })].sort();
 }
 
-export function normalizeArtifacts(dir: string, platform: Platform, version: string) {
+export function normalizeArtifacts(dir: string, platform: Platform, version: string, channel: ReleaseChannel = "stable") {
+  const feed = channel === "test" ? "nightly" : "latest";
   if (platform === "linux") {
     const name = FS.readdirSync(dir).find((name) => name.endsWith(".AppImage"));
     const expected = `Weavewing-${version}-x86_64.AppImage`;
     if (name && name !== expected) {
       FS.renameSync(Path.join(dir, name), Path.join(dir, expected));
-      const manifest = Path.join(dir, "latest-linux.yml");
+      const manifest = Path.join(dir, `${feed}-linux.yml`);
       FS.writeFileSync(manifest, FS.readFileSync(manifest, "utf8").replaceAll(name, expected));
     }
   }
-  if (platform === "win" && FS.existsSync(Path.join(dir, "latest-win-x64.yml")))
-    FS.renameSync(Path.join(dir, "latest-win-x64.yml"), Path.join(dir, "latest.yml"));
+  if (platform === "win" && FS.existsSync(Path.join(dir, `${feed}-win-x64.yml`)))
+    FS.renameSync(Path.join(dir, `${feed}-win-x64.yml`), Path.join(dir, `${feed}.yml`));
   for (const name of FS.readdirSync(dir).filter((name) => name.startsWith("builder-"))) {
     const metadata = Path.join(Path.dirname(dir), "build-metadata", platform);
     FS.mkdirSync(metadata, { recursive: true });
@@ -147,11 +157,11 @@ export function assertUpdaterConfig(file: string) {
 }
 
 /** Only build inputs cross the release boundary; provider and telemetry credentials stay outside. */
-export function buildEnvironment(path: string, home: string, tmp: string): Record<string, string> {
+export function buildEnvironment(path: string, home: string, tmp: string, channel: ReleaseChannel = "stable"): Record<string, string> {
   return {
     PATH: path, HOME: home, TMPDIR: tmp, LANG: "C.UTF-8", CI: "true",
     T3CODE_DESKTOP_UPDATE_REPOSITORY: RELEASE_REPOSITORY,
-    T3CODE_DESKTOP_CHANNEL: "latest", CSC_IDENTITY_AUTO_DISCOVERY: "false",
+    T3CODE_DESKTOP_CHANNEL: channel === "test" ? "nightly" : "latest", CSC_IDENTITY_AUTO_DISCOVERY: "false",
     CARGO_BUILD_JOBS: "6", RAYON_NUM_THREADS: "6", UV_THREADPOOL_SIZE: "6", MAKEFLAGS: "-j6", XZ_DEFAULTS: "-T6",
     ...(process.env.WSL_INTEROP ? { WSL_INTEROP: process.env.WSL_INTEROP } : {}),
   };
