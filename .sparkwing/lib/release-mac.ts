@@ -16,7 +16,7 @@ const present = signingNames.filter((name) => process.env[name]);
 if (present.length && present.length !== signingNames.length) throw new Error("Apple signing is partially configured. Supply all six secrets or none.");
 let failure: unknown;
 try {
-  run("ssh", [...ssh, macStartup(runId)]);
+  run("ssh", [...ssh, "sh -s"], macStartup(runId));
   const archive = CP.spawn("git", ["-C", worktree, "archive", commit], { stdio: ["ignore", "pipe", "inherit"] });
   const extract = CP.spawn("ssh", [...ssh, `tar -x -C ~/${remote}/source`], { stdio: ["pipe", "inherit", "inherit"] });
   archive.stdout.pipe(extract.stdin);
