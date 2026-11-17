@@ -1,3 +1,4 @@
+import { useToolSidebarStore } from "../toolSidebarStore";
 import { useInboxEnvironments } from "../state/inbox";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { openChangeThreadFolder } from "./chat/changeThreadFolderDialogState";
@@ -1798,6 +1799,19 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  if (window.matchMedia("(min-width: 768px)").matches)
+    actionItems.push({
+      kind: "action",
+      value: "action:tool-sidebar",
+      title: "Toggle tools sidebar",
+      searchTerms: ["calendar", "right", "sidebar", "tools"],
+      icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "toolSidebar.toggle",
+      run: async () => {
+        useToolSidebarStore.getState().dispatch({ type: "toggle" });
+      },
+    });
 
   if (activeThread) actionItems.push(...tilePaletteItems(ITEM_ICON_CLASS));
   if (activeThread || activeDraftThread)

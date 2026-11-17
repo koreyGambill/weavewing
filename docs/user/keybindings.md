@@ -220,3 +220,14 @@ application menu always quits immediately.
 Switch the left sidebar between the thread list and your last thread tool with
 `mod+alt+i` (`threadContext.toggle`). If the sidebar is hidden, it opens on
 that tool.
+
+## Calendar and tools sidebar
+
+On web and desktop, open the tools sidebar with `mod+alt+shift+b` or **Toggle tools
+sidebar** in the command palette, then choose **Calendar**. Select a day to see its
+agenda. Calendar sync is not available yet. Choose Calendar again to collapse its
+page. Hiding and reopening the sidebar restores its last page and width.
+
+Drag the page's left edge to resize it, or focus that edge and use Left and Right.
+Double-click the edge to reset its width. Maximize fills the main workspace;
+Escape restores the sidebar. The tools sidebar is hidden on narrow screens.
