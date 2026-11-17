@@ -119,6 +119,24 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
     }),
   );
 
+  it.effect("keeps an instance META_API_KEY in the probe environment", () =>
+    Effect.gen(function* () {
+      const binaryPath = yield* fakeCli();
+      const createHost = vi.fn(async () => makeHost(metaCatalog));
+      yield* checkMuseProviderStatus(
+        settings({ enabled: true, binaryPath }),
+        { PATH: process.env.PATH, META_API_KEY: "instance-key" },
+        undefined,
+        createHost,
+      );
+      expect(createHost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environment: expect.objectContaining({ META_API_KEY: "instance-key" }),
+        }),
+      );
+    }),
+  );
+
   it.effect("keeps an empty discovered catalog empty instead of advertising a fallback model", () =>
     Effect.gen(function* () {
       const binaryPath = yield* fakeCli();

@@ -66,7 +66,10 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
 ) {
   if (!settings.enabled) return yield* makePendingMuseProvider(settings);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const museEnvironment = providerProbeEnvironment(makeMuseEnvironment(environment, "probe"));
+  // The driver passes its probe environment with instance values, including META_API_KEY, already merged.
+  const museEnvironment = providerProbeEnvironment(
+    environment ?? makeMuseEnvironment(process.env, "probe"),
+  );
   const snapshot = (probe: ProviderProbeResult, models: ReadonlyArray<ServerProviderModel> = []) =>
     buildServerProvider({
       presentation: MUSE_PRESENTATION,
