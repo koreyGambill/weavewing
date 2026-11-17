@@ -78,6 +78,16 @@ describe("terminal close confirmation", () => {
     );
   });
 
+  it("confirms every terminal when session state is unknown", async () => {
+    getSessionsMock.mockReturnValue(null);
+    confirmMock.mockResolvedValue(true);
+    await confirmTerminalClose(threadRef, [{ terminalId: "terminal-2", label: "Unknown" }]);
+    expect(confirmMock).toHaveBeenCalledWith(
+      'Close terminal "Unknown"?\nThis stops the running process and clears its history.',
+      { variant: "destructive" },
+    );
+  });
+
   it("lists only running terminals when several are closing", async () => {
     getSessionsMock.mockReturnValue([
       { target: { terminalId: "terminal-1" }, state: { hasRunningSubprocess: true } },

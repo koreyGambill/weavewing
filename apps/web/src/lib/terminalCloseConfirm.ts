@@ -16,13 +16,16 @@ export async function confirmTerminalClose(
   const sessions = appAtomRegistry.get(
     knownTerminalSessionsAtom(threadRef.environmentId, threadRef.threadId),
   );
-  const runningTerminalIds = new Set(
-    sessions
-      ?.filter((session) => session.state.hasRunningSubprocess)
-      .map((session) => session.target.terminalId),
-  );
+  const runningTerminalIds = sessions
+    ? new Set(
+        sessions
+          .filter((session) => session.state.hasRunningSubprocess)
+          .map((session) => session.target.terminalId),
+      )
+    : null;
+  // Unknown session state (not loaded, reconnecting, no read scope) must still confirm.
   const labels = terminals
-    .filter((terminal) => runningTerminalIds.has(terminal.terminalId))
+    .filter((terminal) => runningTerminalIds?.has(terminal.terminalId) ?? true)
     .map((terminal) => terminal.label);
   if (labels.length === 0) return true;
   const localApi = readLocalApi();

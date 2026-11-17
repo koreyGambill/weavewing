@@ -54,6 +54,11 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           )
             return false;
           state.dispatch({ type: "restore" });
+          if (
+            node.contains(document.activeElement) &&
+            document.activeElement instanceof HTMLElement
+          )
+            document.activeElement.blur();
           event.preventDefault();
           event.stopPropagation();
         },
