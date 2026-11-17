@@ -92,7 +92,7 @@ definePipeline({
   secrets: ["WEAVEWING_RELEASE_GH_TOKEN", "APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map((name) => ({ name, optional: true })),
   plan(p, run) {
     const version = run.args.version ?? "";
-    const { platforms, channel } = releaseInputs(version, run.args.platforms || "linux,win,mac", run.args.channel);
+    const { platforms, channel } = releaseInputs(version || (run.args.channel === "test" ? "0.0.0-nightly.20000101.0" : "0.0.0"), run.args.platforms || "linux,win,mac", run.args.channel);
     const buildOnly = run.args["build-only"] === "true";
     if (buildOnly && run.args.stage !== "plan") throw new Error("--build-only is restricted to --stage plan");
     p.concurrency(new ConcurrencyGroup("weavewing-release", { capacity: 1 }));
