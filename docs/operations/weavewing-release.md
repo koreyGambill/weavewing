@@ -36,7 +36,8 @@ replaces generated notes. Edit the draft notes before promoting if needed.
 Artifacts, checksums, notes, source provenance and command logs live below
 `~/evidence/t3code/sparkwing/runs/release/<run id>/`. `--evidence` selects another
 absolute directory. Keep the generated `release.json` and `artifacts.json` with
-the release evidence. Windows native checks copy the NSIS staging payload to a
+the release evidence. Choose a fresh evidence directory for each run so an old
+source archive cannot leave stale files in the build. Windows native checks copy the NSIS staging payload to a
 new Windows temporary directory and run its native probes and CLI smoke there.
 They do not execute NSIS registration because it could replace an existing app.
 

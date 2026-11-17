@@ -20,8 +20,7 @@ unsigned apps even with these steps.
 
 To install only the CLI, unpack the matching `t3-<version>-linux-x64.tar.gz`,
 `t3-<version>-win32-x64.zip`, or `t3-<version>-darwin-arm64.tar.gz` archive.
-Keep the executable, `client`, `node_modules`, and `resource-monitor` files
-together. Add that directory to `PATH` and run `t3 --version` to check it.
+Keep the extracted directory intact. Add it to `PATH` and run `t3 --version` to check it.
 Package manager commands elsewhere on this page install upstream T3 Code.
 
 Weavewing and T3 Code share the default `~/.t3` home. To keep their data separate,
