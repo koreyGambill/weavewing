@@ -43,7 +43,6 @@ import {
   type ThreadContextSection,
 } from "../threadContextSidebarStore";
 import { useThreadToolsSlots, useThreadToolsTarget } from "./threadToolsHost";
-import { useStatusSignal } from "./statusSources/StatusSources";
 import { InboxView } from "./inbox/InboxView";
 import { EvidenceView } from "./evidence/EvidenceView";
 import {
@@ -51,7 +50,6 @@ import {
   useEvidenceEnvironment,
   useReloadEvidenceOnReturn,
 } from "../state/evidence";
-import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { useInboxSignal } from "../state/inbox";
 import { sidebarWorkspaceGet } from "../state/threadWorkspace";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
@@ -124,7 +122,7 @@ const tools: Record<ThreadContextSection, { title: string; icon: LucideIcon; abo
     title: "Inbox",
     icon: BellIcon,
     about:
-      "Notifications from automations and agents, plus status sources. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
+      "Notifications from automations and agents. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
   },
   inspect: {
     title: "Inspect",
@@ -288,9 +286,8 @@ const attentionToneClass: Record<ThreadToolsAttentionTone, string> = {
 /** What the hidden sidebar would flag, for the sidebar toggle. */
 export function useThreadToolsAttention() {
   const signals = useThreadToolSignals(useThreadToolsTarget());
-  const { state } = useStatusSignal();
   const inbox = useInboxSignal();
-  return threadToolsAttention(signals, state, inbox);
+  return threadToolsAttention(signals, inbox);
 }
 
 export function ThreadToolsAttentionDot({ tone }: { tone: ThreadToolsAttentionTone }) {
@@ -314,8 +311,6 @@ const inboxBadgeClass = {
 
 function InboxStripButton({ active, tooltip }: { active: boolean; tooltip: string }) {
   const { unread, severity, failed } = useInboxSignal();
-  const { state } = useStatusSignal();
-  const statusAlert = state === "fail" || state === "warn" ? state : null;
   return (
     <StripButton
       id="inbox"
@@ -326,18 +321,12 @@ function InboxStripButton({ active, tooltip }: { active: boolean; tooltip: strin
         [
           unread ? `${unread} unread${severity && severity !== "info" ? `, ${severity}` : ""}` : "",
           failed ? "notifications unavailable" : "",
-          statusAlert ? `status ${statusAlert === "fail" ? "failing" : "warning"}` : "",
         ]
           .filter(Boolean)
           .join(", ") || undefined
       }
       icon={BellIcon}
     >
-      {statusAlert ? (
-        <span className="pointer-events-none absolute right-0 bottom-0 flex rounded-full bg-sidebar p-px">
-          <StatusSourceDot state={statusAlert} />
-        </span>
-      ) : null}
       {failed && !unread ? (
         <span
           aria-hidden

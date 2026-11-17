@@ -29,10 +29,12 @@ export type SidebarView = "threads" | ThreadContextSection;
 export type StripItem = ThreadContextSection;
 
 export type InboxTab = "inbox" | "snoozed" | "dismissed";
-/** A view inside the inbox that replaces its list: one notification, or the status panel. */
-export type InboxSelection =
-  | { readonly kind: "notification"; readonly environmentId: string; readonly id: string }
-  | { readonly kind: "status" };
+/** A notification opened from the inbox list. */
+export type InboxSelection = {
+  readonly kind: "notification";
+  readonly environmentId: string;
+  readonly id: string;
+};
 
 export interface ShowTarget {
   /** Pins the tools to this thread. */

@@ -1805,7 +1805,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:tool-sidebar",
       title: "Toggle tools sidebar",
-      searchTerms: ["calendar", "right", "sidebar", "tools"],
+      searchTerms: ["calendar", "status", "right", "sidebar", "tools"],
       icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "toolSidebar.toggle",
       run: async () => {
@@ -1938,7 +1938,7 @@ function OpenCommandPaletteDialog(props: {
     kind: "action",
     value: "action:inbox",
     title: "Open inbox",
-    searchTerms: ["inbox", "notifications", "alerts", "status", "snoozed", "dismissed"],
+    searchTerms: ["inbox", "notifications", "alerts", "snoozed", "dismissed"],
     icon: <BellIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       useThreadContextSidebarStore.getState().show("inbox");

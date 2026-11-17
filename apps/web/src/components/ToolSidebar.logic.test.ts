@@ -57,6 +57,18 @@ describe("tool sidebar", () => {
     expect(restoreToolSidebar({ visible: true, activeTool: "calendar", width: 900 }).width).toBe(
       600,
     );
+    expect(
+      restoreToolSidebar({ visible: true, activeTool: "status", width: 320, maximized: true }),
+    ).toEqual({ visible: true, activeTool: "status", width: 320, maximized: false });
+    const status = transitionToolSidebar(INITIAL_TOOL_SIDEBAR, { type: "select", tool: "status" });
+    expect(status).toMatchObject({ visible: true, activeTool: "status" });
+    expect(transitionToolSidebar(status, { type: "select", tool: "calendar" }).activeTool).toBe(
+      "calendar",
+    );
+    expect(transitionToolSidebar(status, { type: "select", tool: "status" }).activeTool).toBeNull();
+    expect(
+      transitionToolSidebar(transitionToolSidebar(status, { type: "toggle" }), { type: "toggle" }),
+    ).toEqual(status);
     expect(restoreToolSidebar({ activeTool: "missing" })).toEqual(INITIAL_TOOL_SIDEBAR);
     expect(transitionToolSidebar(INITIAL_TOOL_SIDEBAR, { type: "resize", width: 340 }).width).toBe(
       340,
