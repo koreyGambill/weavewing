@@ -189,49 +189,45 @@ describe("thread tool signals", () => {
 
 describe("thread tools attention", () => {
   const quiet = { listCount: 0, questionCount: 0, ticketState: null } as const;
-  const calm = "ok";
   const empty = { unread: 0, severity: null } as const;
 
   it("shows nothing when nothing needs the user", () => {
-    expect(threadToolsAttention(quiet, calm, empty)).toBeNull();
-    expect(threadToolsAttention({ ...quiet, ticketState: "open" }, "unknown", empty)).toBeNull();
-    expect(threadToolsAttention(quiet, calm, { unread: 4, severity: "info" })).toBeNull();
+    expect(threadToolsAttention(quiet, empty)).toBeNull();
+    expect(threadToolsAttention({ ...quiet, ticketState: "open" }, empty)).toBeNull();
+    expect(threadToolsAttention(quiet, { unread: 4, severity: "info" })).toBeNull();
   });
 
   it("raises unread warning and critical notifications at their severity", () => {
-    expect(threadToolsAttention(quiet, calm, { unread: 2, severity: "critical" })).toEqual({
+    expect(threadToolsAttention(quiet, { unread: 2, severity: "critical" })).toEqual({
       tone: "alert",
       summary: "2 unread notifications",
     });
     expect(
-      threadToolsAttention({ ...quiet, questionCount: 1 }, calm, {
-        unread: 1,
-        severity: "warning",
-      }),
+      threadToolsAttention(
+        { ...quiet, questionCount: 1 },
+        {
+          unread: 1,
+          severity: "warning",
+        },
+      ),
     ).toEqual({ tone: "question", summary: "1 unanswered question · 1 unread notification" });
   });
 
   it("takes its tone from the most urgent signal and lists every one", () => {
     expect(
-      threadToolsAttention(
-        { listCount: 3, questionCount: 2, ticketState: "needs_review" },
-        "fail",
-        empty,
-      ),
-    ).toEqual({
-      tone: "alert",
-      summary: "Status alert · 2 unanswered questions · Ticket needs review · 3 open todos",
-    });
-    expect(
-      threadToolsAttention({ ...quiet, questionCount: 1, listCount: 1 }, "warn", empty),
+      threadToolsAttention({ listCount: 3, questionCount: 2, ticketState: "needs_review" }, empty),
     ).toEqual({
       tone: "question",
-      summary: "1 unanswered question · Status warning · 1 open todo",
+      summary: "2 unanswered questions · Ticket needs review · 3 open todos",
     });
-    expect(threadToolsAttention({ ...quiet, ticketState: "needs_review" }, calm, empty)?.tone).toBe(
+    expect(threadToolsAttention({ ...quiet, questionCount: 1, listCount: 1 }, empty)).toEqual({
+      tone: "question",
+      summary: "1 unanswered question · 1 open todo",
+    });
+    expect(threadToolsAttention({ ...quiet, ticketState: "needs_review" }, empty)?.tone).toBe(
       "review",
     );
-    expect(threadToolsAttention({ ...quiet, listCount: 4 }, calm, empty)?.tone).toBe("todo");
+    expect(threadToolsAttention({ ...quiet, listCount: 4 }, empty)?.tone).toBe("todo");
   });
 });
 

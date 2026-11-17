@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 
 const PersistedToolSidebar = Schema.Struct({
   visible: Schema.Boolean,
-  activeTool: Schema.NullOr(Schema.Literal("calendar")),
+  activeTool: Schema.NullOr(Schema.Literals(["calendar", "status"])),
   width: Schema.Finite,
 });
 
@@ -19,7 +19,7 @@ export const INITIAL_TOOL_SIDEBAR: ToolSidebarState = {
 
 export type ToolSidebarAction =
   | { type: "toggle" }
-  | { type: "select"; tool: "calendar" }
+  | { type: "select"; tool: NonNullable<ToolSidebarState["activeTool"]> }
   | { type: "collapse" }
   | { type: "maximize" }
   | { type: "restore" }

@@ -19,11 +19,9 @@ import {
   BellIcon,
   CheckCheckIcon,
   ChevronLeftIcon,
-  ChevronRightIcon,
   MailIcon,
   MailOpenIcon,
   MessageSquareIcon,
-  Settings2Icon,
 } from "lucide-react";
 import { memo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -38,8 +36,6 @@ import { type InboxTab, useThreadContextSidebarStore } from "../../threadContext
 import ChatMarkdown from "../ChatMarkdown";
 import { useScheduledTaskTitle } from "../chat/TimelineUserMessageRow";
 import { RelativeTime } from "../RelativeTime";
-import { StatusSourceDot } from "../statusSources/StatusSourceIcon";
-import { StatusSourcesList, useStatusSignal } from "../statusSources/StatusSources";
 import { ToolHeaderButton } from "../threadToolsHost";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -511,67 +507,13 @@ function InboxDetail({ item, now, onBack }: { item: InboxItem; now: number; onBa
   );
 }
 
-function StatusRow({ onOpen }: { onOpen: () => void }) {
-  const { state, groups } = useStatusSignal();
-  if (groups.length === 0) return null;
-  const sources = groups.flatMap((group) => group.sources ?? []);
-  const failing = sources.filter((source) => source.latest.state === "fail").length;
-  const warning = sources.filter((source) => source.latest.state === "warn").length;
-  const summary = failing
-    ? `${failing} failing`
-    : warning
-      ? `${warning} warning${warning === 1 ? "" : "s"}`
-      : "";
-  return (
-    <button
-      type="button"
-      data-inbox-row="status"
-      className="flex w-full min-w-0 items-center gap-2 border-b border-border px-3 py-2 text-left text-sm outline-hidden hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-      onClick={onOpen}
-    >
-      <span className="shrink-0 font-medium">Status</span>
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-        {state && state !== "ok" ? <StatusSourceDot state={state} /> : null}
-        <span className="truncate">{summary}</span>
-      </span>
-      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-    </button>
-  );
-}
-
-/** Status sources and the notification settings. */
-function StatusPanel() {
-  const navigate = useNavigate();
-  const { groups } = useStatusSignal();
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <StatusSourcesList
-        groups={groups}
-        onConfigureSources={(machine) =>
-          void navigate({ to: "/settings/status-sources", search: { machine } })
-        }
-      />
-      <div className="border-t border-border p-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void navigate({ to: "/settings/general", hash: "notifications" })}
-        >
-          <Settings2Icon />
-          Notification settings
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 const Note = ({ children }: { children: ReactNode }) => (
   <p role="status" className="px-3 py-3 text-sm text-muted-foreground">
     {children}
   </p>
 );
 
-/** The inbox strip view: tabs, notification rows and detail, and the status panel. */
+/** The inbox strip view: tabs, notification rows and detail. */
 export function InboxView({ actions }: { actions: HTMLDivElement | null }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const tab = useThreadContextSidebarStore((state) => state.inboxTab);
@@ -658,12 +600,7 @@ export function InboxView({ actions }: { actions: HTMLDivElement | null }) {
             actions,
           )
         : null}
-      {selection?.kind === "status" ? (
-        <>
-          <BackHeader label="Status" onBack={back} />
-          <StatusPanel />
-        </>
-      ) : selection?.kind === "notification" ? (
+      {selection?.kind === "notification" ? (
         selected ? (
           <InboxDetail
             key={rowKey(selected.environmentId, selected.notification.id)}
@@ -707,9 +644,6 @@ export function InboxView({ actions }: { actions: HTMLDivElement | null }) {
             </ToggleGroup>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {tab === "inbox" ? (
-              <StatusRow onOpen={() => store().selectInbox({ kind: "status" })} />
-            ) : null}
             {failed ? <Note>Could not load notifications.</Note> : null}
             {shown.length > 0 ? (
               <ul aria-label={`${TABS.find((entry) => entry.id === tab)!.label} notifications`}>

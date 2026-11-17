@@ -101,8 +101,8 @@ function EnvironmentStatusSources({
       >
         <p className="px-4 py-3 text-xs text-muted-foreground">
           External tools checked from {label}. See current state and the last transition in the
-          inbox's Status panel. History stays in each tool. Snoozing mutes notifications while
-          checks continue.
+          Status tool in the right tools sidebar. History stays in each tool. Snoozing mutes
+          notifications while checks continue.
         </p>
         {!canEdit && (
           <p className="px-4 pb-3 text-xs text-muted-foreground">
