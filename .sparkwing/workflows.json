@@ -1,7 +1,7 @@
 {
   "$comment": "Each upstream .github/workflows file and where the fork runs it. upstream-merge reports changed or unlisted workflows against this map. disposition: pipeline | github-only | later.",
   "workflows": {
-    "ci.yml": { "disposition": "pipeline", "pipeline": "ci", "notes": "rust, the xvfb desktop launch smoke and mobile_native_static_analysis are not ported: no cargo or xvfb-run here, macOS needed" },
+    "ci.yml": { "disposition": "pipeline", "pipeline": "ci", "notes": "Rust tests, the xvfb desktop launch smoke and mobile_native_static_analysis are not ported in ci. release compiles Rust helpers from source; native mobile analysis needs macOS." },
     "agent-context-budget.yml": { "disposition": "pipeline", "pipeline": "ci", "notes": "ci job context-budget; --allow-context-increase stands in for the label" },
     "windows-tests.yml": { "disposition": "later", "notes": "needs a Windows runner" },
     "mobile-fingerprint-check.yml": { "disposition": "later", "notes": "needs the mobile toolchain on this host" },
