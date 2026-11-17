@@ -10,6 +10,7 @@ import {
   type SpawnedMspConnection,
 } from "@muse-code/sdk";
 import type { RuntimeMode } from "@t3tools/contracts";
+import { withProviderEnvironmentDefaults } from "@t3tools/provider-core/server/instanceEnvironment";
 import { envTrampoline, supportsEnvChdir } from "@t3tools/shared/envTrampoline";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
@@ -65,15 +66,17 @@ export interface MuseSdkHostOptions {
 
 export function makeMuseEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
+  purpose: "probe" | "turn" = "turn",
 ): NodeJS.ProcessEnv {
-  return {
-    ...Object.fromEntries(
+  return withProviderEnvironmentDefaults(
+    "muse",
+    Object.fromEntries(
       Object.keys(environment)
         .filter((key) => key.toUpperCase() !== "META_API_KEY")
         .map((key) => [key, environment[key]]),
     ),
-    MUSE_NO_AUTO_UPDATE: "1",
-  };
+    purpose,
+  );
 }
 
 export function museVerbatimPath(path: string): string {
@@ -174,7 +177,7 @@ export async function createMuseSdkHost(
     command: launch.command,
     args: [...launch.args, ...(options.launchArgs ?? []), ...museServeArgs(options)],
     ...(options.cwd ? { cwd: options.cwd } : {}),
-    env: options.environment ?? makeMuseEnvironment(),
+    env: options.environment ?? makeMuseEnvironment(process.env, "turn"),
     shutdownTimeoutMs: 10_000,
     ...(options.onProcessExit ? { onProcessExit: options.onProcessExit } : {}),
   });

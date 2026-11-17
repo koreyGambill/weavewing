@@ -78,12 +78,15 @@ describe("Muse SDK host", () => {
       expect(makeMuseEnvironment(source)).toEqual({
         PATH: "/bin",
         MUSE_TEST: "yes",
-        MUSE_NO_AUTO_UPDATE: "1",
       });
       expect(read).not.toHaveBeenCalled();
       expect(Object.keys(source)).toContain(key);
     },
   );
+
+  it.each(["", "0"])("preserves the explicit updater value %s", (value) => {
+    expect(makeMuseEnvironment({ MUSE_NO_AUTO_UPDATE: value }).MUSE_NO_AUTO_UPDATE).toBe(value);
+  });
 
   it("selects full access explicitly and keeps other runtime modes sandboxed", async () => {
     for (const mode of ["approval-required", "auto-accept-edits", "auto", "full-access"] as const) {

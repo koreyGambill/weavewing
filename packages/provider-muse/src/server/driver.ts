@@ -90,7 +90,15 @@ export const MuseDriver: ProviderDriver<
     // Drop an inherited META_API_KEY so Muse uses its login; an instance value still wins.
     const processEnvironment = yield* mergeProviderInstanceEnvironment(
       environment,
-      makeMuseEnvironment(hostEnvironment),
+      makeMuseEnvironment(hostEnvironment, "turn"),
+      "muse",
+      "turn",
+    );
+    const probeEnvironment = yield* mergeProviderInstanceEnvironment(
+      environment,
+      makeMuseEnvironment(hostEnvironment, "probe"),
+      "muse",
+      "probe",
     );
     const effectiveConfig = {
       ...config,
@@ -132,7 +140,7 @@ export const MuseDriver: ProviderDriver<
     const resolveInstallation = yield* makeCachedProviderMaintenanceResolution(
       resolveProviderMaintenanceCapabilitiesEffect(museMaintenance, {
         binaryPath: effectiveConfig.binaryPath,
-        env: processEnvironment,
+        env: probeEnvironment,
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -147,7 +155,7 @@ export const MuseDriver: ProviderDriver<
       // and needs the native target version to verify that the command actually upgraded.
       const latestVersion =
         options?.fresh && !capabilities.lookupLatestVersion
-          ? yield* latestMuseVersion(processEnvironment, { fresh: true }).pipe(
+          ? yield* latestMuseVersion(probeEnvironment, { fresh: true }).pipe(
               Effect.provideService(HttpClient.HttpClient, httpClient),
               Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
             )
@@ -170,7 +178,7 @@ export const MuseDriver: ProviderDriver<
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: (settings) =>
         makePendingMuseProvider(settings.provider).pipe(Effect.map(stampIdentity)),
-      checkProvider: checkMuseProviderStatus(effectiveConfig, processEnvironment, cwd).pipe(
+      checkProvider: checkMuseProviderStatus(effectiveConfig, probeEnvironment, cwd).pipe(
         Effect.map(stampIdentity),
         Effect.flatMap(withLatestUsage),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -184,7 +192,7 @@ export const MuseDriver: ProviderDriver<
               snapshot: currentSnapshot,
               maintenanceCapabilities,
               enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-              environment: processEnvironment,
+              environment: probeEnvironment,
             }),
           ),
           Effect.provideService(HttpClient.HttpClient, httpClient),

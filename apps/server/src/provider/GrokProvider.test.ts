@@ -338,7 +338,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("checkGrokProvide
 
   it.effect("reports ready with ACP-discovered models without running startup updates", () =>
     Effect.gen(function* () {
-      const environment = { ...process.env, XAI_API_KEY: "", GROK_DISABLE_AUTOUPDATER: "0" };
+      const environment = { ...process.env, XAI_API_KEY: "", GROK_DISABLE_AUTOUPDATER: undefined };
       const { snapshot, updateRan } = yield* Effect.scoped(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
@@ -358,7 +358,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("checkGrokProvide
       );
 
       expect(updateRan).toBe(false);
-      expect(environment.GROK_DISABLE_AUTOUPDATER).toBe("0");
+      expect(environment.GROK_DISABLE_AUTOUPDATER).toBeUndefined();
       expect(snapshot.status).toBe("ready");
       expect(snapshot.version).toBe("1.0.13");
       expect(snapshot.auth).toEqual({

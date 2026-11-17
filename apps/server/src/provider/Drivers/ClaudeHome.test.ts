@@ -80,29 +80,40 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
           { name: "CLAUDE_EFFORT", value: "low", sensitive: false },
         ];
 
-        expect(yield* mergeClaudeProcessEnvironment({ homePath }, undefined, host)).toEqual({
+        expect(
+          yield* mergeClaudeProcessEnvironment({ homePath }, undefined, host, "probe"),
+        ).toEqual({
           CLAUDE_CODE_ENTRYPOINT: "t3-code",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
           CLAUDECODE: "",
           CLAUDE_CODE_SESSION_ID: "",
           CLAUDE_CODE_MESSAGING_SOCKET: "",
           CLAUDE_EFFORT: "",
           KEEP: "1",
         });
-        expect(yield* mergeClaudeProcessEnvironment({ homePath }, instance, host)).toEqual({
-          CLAUDE_CODE_ENTRYPOINT: "instance",
-          CLAUDE_EFFORT: "low",
-          CLAUDECODE: "",
-          CLAUDE_CODE_SESSION_ID: "",
-          CLAUDE_CODE_MESSAGING_SOCKET: "",
-          KEEP: "1",
-        });
+        expect(yield* mergeClaudeProcessEnvironment({ homePath }, instance, host, "probe")).toEqual(
+          {
+            CLAUDE_CODE_ENTRYPOINT: "instance",
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+            CLAUDE_EFFORT: "low",
+            CLAUDECODE: "",
+            CLAUDE_CODE_SESSION_ID: "",
+            CLAUDE_CODE_MESSAGING_SOCKET: "",
+            KEEP: "1",
+          },
+        );
+
+        expect(
+          (yield* mergeClaudeProcessEnvironment({ homePath }, instance, host, "turn"))
+            .CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+        ).toBeUndefined();
 
         yield* fileSystem.writeFileString(
           path.join(homePath, "settings.json"),
           JSON.stringify({ env: { CLAUDE_CODE_ENTRYPOINT: "custom" } }),
         );
         expect(
-          (yield* mergeClaudeProcessEnvironment({ homePath }, instance, host))
+          (yield* mergeClaudeProcessEnvironment({ homePath }, instance, host, "probe"))
             .CLAUDE_CODE_ENTRYPOINT,
         ).toBe("custom");
       }),
