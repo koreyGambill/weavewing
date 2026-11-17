@@ -37,6 +37,7 @@ import {
   usePanelAnimationSettings,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
+import { ToolSidebarLayout } from "./ToolSidebar";
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
@@ -537,7 +538,7 @@ export function AppSidebarLayout({
               </Sidebar>
             </>
           ) : null}
-          {children}
+          <ToolSidebarLayout>{children}</ToolSidebarLayout>
           <BackgroundThreadAnnouncer />
           {isElectron ? <HistorySwipeNavigation /> : null}
         </SidebarProvider>
