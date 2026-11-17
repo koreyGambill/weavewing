@@ -34,8 +34,9 @@ try {
   FS.mkdirSync(Path.join(evidence, "assets"), { recursive: true });
   run("scp", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", `moonborn:${remote}/assets/*`, Path.join(evidence, "assets/")]);
   normalizeArtifacts(Path.join(evidence, "assets"), "mac", version);
-  if (CP.spawnSync("ssh", [...ssh, `test -f ~/${remote}/mac-proof.json`], { stdio: "ignore" }).status === 0)
-    run("scp", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", `moonborn:${remote}/mac-proof.json`, Path.join(evidence, "mac-proof.json")]);
+  for (const file of ["mac-proof.json", "mac-gatekeeper.txt"])
+    if (CP.spawnSync("ssh", [...ssh, `test -f ~/${remote}/${file}`], { stdio: "ignore" }).status === 0)
+      run("scp", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", `moonborn:${remote}/${file}`, Path.join(evidence, file)]);
 } catch (error) {
   failure ??= error;
 } finally {

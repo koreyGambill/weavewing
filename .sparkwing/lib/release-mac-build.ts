@@ -68,6 +68,10 @@ try {
   try {
     run("codesign", ["--verify", "--deep", "--strict", app]);
     proof.codesign = "passed";
+    const assessment = CP.spawnSync("spctl", ["-a", "-vv", app], { env, encoding: "utf8" });
+    const assessmentText = `exit status: ${assessment.status}\n${assessment.stdout ?? ""}${assessment.stderr ?? ""}`;
+    FS.writeFileSync(Path.join(root, "mac-gatekeeper.txt"), assessmentText);
+    console.log(assessmentText);
   } catch (error) {
     proof.codesign = "failed";
     throw error;
