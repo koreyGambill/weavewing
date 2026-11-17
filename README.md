@@ -69,19 +69,11 @@ and [managed policy](./docs/user/managed-policy.md) before setting up a managed 
 
 ### Command line
 
-This installs the `t3` command. Run `t3` to start the server and open the web app.
-
-```bash
-curl -fsSL https://t3.codes/install.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-To try it once without an install, run `npx t3@latest`.
+Download the `t3-<version>-<platform>` archive for your platform from
+[Weavewing Releases](https://github.com/koreyGambill/weavewing/releases).
+Verify it against `SHA256SUMS`, unpack it, and keep the folder together.
+Add that folder to `PATH`, then run `t3 --version` to check it.
+Run `t3` to start the server and open the web app.
 
 ### Phone
 
