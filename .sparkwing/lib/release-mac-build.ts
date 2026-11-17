@@ -21,6 +21,10 @@ const keychain = Path.join(root, "signing.keychain-db");
 const signed = Boolean(secrets.APPLE_CSC_LINK);
 let mount: string | undefined;
 try {
+  run("vp", ["env", "install", nodeVersion]);
+  const node = CP.execFileSync("vp", ["env", "exec", "--node", nodeVersion, "node", "-p", "process.execPath"], { env, encoding: "utf8" }).trim();
+  env.PATH = `${Path.dirname(node)}:${env.PATH}`;
+  run("node", ["--version"]);
   run("vp", ["i", "--frozen-lockfile"]);
   run("rustup", ["target", "add", "aarch64-apple-darwin"]);
   if (signed) {
@@ -56,7 +60,7 @@ try {
   const bundleId = read("CFBundleIdentifier");
   if (read("CFBundleShortVersionString") !== version || !["dev.weavewing.desktop", "com.t3tools.t3code"].includes(bundleId)) throw new Error("DMG Info.plist does not match release identity");
   run("codesign", ["--verify", "--deep", "--strict", app]);
-  FS.writeFileSync(Path.join(root, "mac-proof.json"), JSON.stringify({ version, bundleId, signed, mounted: true, codesign: "passed" }, null, 2));
+  FS.writeFileSync(Path.join(root, "mac-proof.json"), JSON.stringify({ version, bundleId, signed, nodeVersion, mounted: true, codesign: "passed" }, null, 2));
 } finally {
   if (mount) run("hdiutil", ["detach", mount]);
   if (signed && FS.existsSync(keychain)) run("security", ["delete-keychain", keychain]);
