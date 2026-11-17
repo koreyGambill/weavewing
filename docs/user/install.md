@@ -3,6 +3,37 @@
 T3 Code runs coding agents on your computer and lets you control them from its
 desktop, web, or mobile app. Set up the machine where the agents will work first.
 
+## Weavewing fork
+
+Download the fork from [Weavewing Releases](https://github.com/koreyGambill/weavewing/releases).
+Verify downloads against the release's `SHA256SUMS` before installing.
+
+| Platform    | Download and install                                                                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux x64   | Make the AppImage executable with `chmod +x`, then run it. For Debian or Ubuntu, run `sudo apt install ./Weavewing-<version>-amd64.deb`.                                                       |
+| Windows x64 | Run the `.exe` installer. For SmartScreen, choose **More info → Run anyway**.                                                                                                                  |
+| macOS arm64 | Open the DMG and move Weavewing to Applications. On macOS 15, use **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Weavewing.app`. |
+
+All three desktop builds are unsigned. The macOS build uses ad-hoc signing and
+doesn't auto-update. Download a new DMG to update it. A managed Mac may block
+unsigned apps even with these steps.
+
+To install only the CLI, unpack the matching `t3-<version>-linux-x64.tar.gz`,
+`t3-<version>-win32-x64.zip`, or `t3-<version>-darwin-arm64.tar.gz` archive.
+Keep the executable, `client`, `node_modules`, and `resource-monitor` files
+together. Add that directory to `PATH` and run `t3 --version` to check it.
+Package manager commands elsewhere on this page install upstream T3 Code.
+
+Weavewing and T3 Code share the default `~/.t3` home. To keep their data separate,
+choose another home with `t3 --base-dir <directory>` for the CLI or
+`T3CODE_HOME=<directory>` in the desktop launcher environment.
+These builds omit T3 Connect configuration. Direct remote connections and your
+provider subscriptions remain available.
+
+For a managed machine, follow [managed policy](./managed-policy.md).
+On macOS the policy lives at `/Library/Application Support/T3Code/policy.json`.
+Set `limits.updates.mode` to `off` to keep updates under administrator control.
+
 ## Requirements
 
 You need an installed, authenticated provider before starting a thread. You can
