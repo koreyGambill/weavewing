@@ -61,9 +61,19 @@ try {
   const plist = Path.join(app, "Contents/Info.plist");
   const read = (key: string) => CP.execFileSync("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, plist], { encoding: "utf8" }).trim();
   const bundleId = read("CFBundleIdentifier");
-  if (read("CFBundleShortVersionString") !== version || !["dev.weavewing.desktop", "com.t3tools.t3code"].includes(bundleId)) throw new Error("DMG Info.plist does not match release identity");
-  run("codesign", ["--verify", "--deep", "--strict", app]);
-  FS.writeFileSync(Path.join(root, "mac-proof.json"), JSON.stringify({ version, bundleId, signed, nodeVersion, mounted: true, codesign: "passed" }, null, 2));
+  const proof = { version: read("CFBundleShortVersionString"), bundleId, signed, nodeVersion, mounted: true, codesign: "not checked" };
+  const saveProof = () => FS.writeFileSync(Path.join(root, "mac-proof.json"), JSON.stringify(proof, null, 2));
+  saveProof();
+  if (proof.version !== version || !["dev.weavewing.desktop", "com.t3tools.t3code"].includes(bundleId)) throw new Error("DMG Info.plist does not match release identity");
+  try {
+    run("codesign", ["--verify", "--deep", "--strict", app]);
+    proof.codesign = "passed";
+  } catch (error) {
+    proof.codesign = "failed";
+    throw error;
+  } finally {
+    saveProof();
+  }
 } finally {
   if (mount) run("hdiutil", ["detach", mount]);
   if (signed && FS.existsSync(keychain)) run("security", ["delete-keychain", keychain]);

@@ -45,8 +45,11 @@ export function normalizeArtifacts(dir: string, platform: Platform, version: str
   }
   if (platform === "win" && FS.existsSync(Path.join(dir, "latest-win-x64.yml")))
     FS.renameSync(Path.join(dir, "latest-win-x64.yml"), Path.join(dir, "latest.yml"));
-  for (const name of FS.readdirSync(dir).filter((name) => name.startsWith("builder-")))
-    FS.rmSync(Path.join(dir, name));
+  for (const name of FS.readdirSync(dir).filter((name) => name.startsWith("builder-"))) {
+    const metadata = Path.join(Path.dirname(dir), "build-metadata", platform);
+    FS.mkdirSync(metadata, { recursive: true });
+    FS.renameSync(Path.join(dir, name), Path.join(metadata, name));
+  }
 }
 
 export function assetInventory(dir: string, names: readonly string[]) {
