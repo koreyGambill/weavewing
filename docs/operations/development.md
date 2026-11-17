@@ -380,7 +380,7 @@ vp run desktop:update-local \
   --patchelf-dir /absolute/path/to/patchelf/bin \
   --linux-monitor-dir /absolute/path/to/linux/resource-monitor \
   --windows-monitor /absolute/path/to/t3-resource-monitor.exe \
-  --check-only
+  --prepare-only
 ```
 
 Use the repository's pinned Node version and a Vite Plus home containing `current/bin/vp`.
@@ -402,11 +402,35 @@ any migration-named change and shells without loose-client support. The Windows 
 its previous code until the next full update. Receipts record shell and client commits separately.
 Use `--plan-only --installed-receipt /absolute/path/to/receipt.json` to inspect selection without a build.
 
-`--check-only` (also `--dry-run`) runs the selected build, archive smoke test and state backups
-while leaving the installed app running. Full updates also stage Windows and probe native modules.
-Use a new output directory per run. Omit that flag to detach activation onto Windows.
+`--prepare-only` builds, smoke-tests and stages everything needed for activation. It leaves the
+installed app and runtime selection running and takes no state backups. Full updates stage a unique
+marked Windows sibling slot and probe its native modules. Use a new absolute output directory for each
+preparation, preferably under `~/.local/share/weavewing-builds/`.
+
+When ready to restart, run from the same clean source revision:
+
+```sh
+vp run desktop:update-local --activate /absolute/path/to/prepared-output --notify-thread <thread-id>
+```
+
+Activation verifies `prepared.json`, including the commit, selected update path, installed receipt and
+shell/runtime hashes, configuration, client tree and staged payload. Missing or changed content refuses
+activation before backup or shutdown. If the install changed since preparation, prepare again.
+Activation installs the prepared Linux runtime, takes fresh backups, then stops, swaps, restarts and
+health-checks. It does no build or archive smoke test. The Windows activation detaches so the calling
+thread can survive the restart. End the turn after launching it. Omitting `--prepare-only` prepares and
+then activates in one invocation. The old `--check-only` and `--dry-run` flags are removed.
+
+Preparation reuses verified build artifacts when the source commit, update path, Node/Vite Plus and
+resource-monitor inputs match. It still smoke-tests the archive and stages a separate candidate.
+The managed builds directory keeps the latest three prepared outputs. Claimed activations are retained.
+Pruning removes their owned Windows slots and saves logs, manifests and timings under
+`~/evidence/t3code/prepared-installs/`. Unmarked older output directories are left alone.
+`prepare-timing.json` records preparation time and cache reuse. The activation receipt records
+`durationMilliseconds`, covering validation, fresh backups and restart.
+
 Activation proceeds without waiting for active turns. `--wsl-distro` defaults to `WSL_DISTRO_NAME`
-and `--wsl-home` to `~/.t3`. The install must already have a healthy runtime and `Start Weavewing.cmd`.
+and `--wsl-home` to `~/.t3`. The install must have a healthy runtime and `Start Weavewing.cmd`.
 
 The fast path sends SIGTERM to the verified WSL runtime and allows five seconds for shutdown,
 then uses SIGKILL if that same process remains. The receipt records `runtimeStop.forced`.
@@ -424,8 +448,7 @@ run can continue as a thread turn, while the schedule records the interrupted in
 Both paths snapshot WSL state; full updates also snapshot Windows state. They snapshot `statev2.sqlite` with SQLite's backup API in one step on a
 read-only connection, then copies settings, secrets and thread workspaces. WAL writers can continue
 during the snapshot. Each snapshot helper has a four-minute deadline and removes partial output on
-failure. It excludes `server-owner.sqlite`, the live ownership lock. Check-only snapshots live in
-command scratch and are removed afterwards. Real activation keeps the WSL snapshot on the Linux disk
+failure. It excludes `server-owner.sqlite`, the live ownership lock. Activation keeps the WSL snapshot on the Linux disk
 under `~/.local/share/weavewing-update-backups/<commit>-<attempt>` (writing it through `/mnt/c` is too slow) and
 retains the Windows snapshot in the rollback directory; each keeps only the latest update's copy.
 Keep logs and receipts separate from private state.
@@ -439,7 +462,9 @@ and handed off to a running Weavewing window; the receipt's
 under the new archive digest to answer the environment endpoint with the original environment id.
 `--health-seconds` defaults to 240; the non-migrating fast path caps it at 45 seconds. Transient probe
 failures remain in the receipt while health polling continues to its deadline.
-Every WSL call first runs `/bin/true` with a 3-second limit. A fragmented WSL kernel can fail the
+Every WSL call first runs `/bin/true` with a 3-second limit. A health operation that times out
+retries up to three times within one 90-second total budget. Post-restart health probes share the
+remaining health deadline instead. A deterministic failure refuses at once. A fragmented WSL kernel can fail the
 hvsock channel each `wsl.exe` launch needs (`page allocation failure: order:7` in `dmesg`), so launches
 can hang for minutes while some still pass. Failed probes retry with backoff, logged as
 `wsl-responsive-retry`, and the updater refuses runtime operations only when nothing answers for 5 minutes;
@@ -457,8 +482,7 @@ link check appears as a warning in the receipt and notification, because it can 
 or connectivity while the updated app is healthy. It does not trigger rollback.
 
 Staging requires payload bytes plus 20 GiB free; this local reserve does not guarantee packaging space or
-govern other activity. It replaces only its marked sibling `.<install-name>-candidate` slot and prints its
-`payload` path. Space or copy failure preserves the previous payload. Private state, evidence, unowned slots,
+govern other activity. Preparation uses its own marked sibling `.<install-name>-prepared-<id>` slot. Space or copy failure preserves the previous payload. Private state, evidence, unowned slots,
 and running candidates are refused. Activation keeps one marked `.<install-name>-local-update-rollback`
 directory containing the previous app and state snapshots, replacing only its own older rollback.
 Check `receipt.json` and `activation.log` in the output directory after restart. Every PowerShell mode records exceptions as `failed` with an error message, including setup

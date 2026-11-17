@@ -1,4 +1,4 @@
-param([string]$ConfigPath, [ValidateSet('Preflight', 'Prepare', 'Launch', 'Activate')][string]$Mode = 'Activate')
+param([string]$ConfigPath, [ValidateSet('Preflight', 'Prepare', 'Discard', 'Launch', 'Activate')][string]$Mode = 'Activate')
 $ErrorActionPreference = 'Stop'
 
 # The updater runs the launcher's executable itself, so any line it cannot reproduce must fail before the swap.
@@ -82,7 +82,17 @@ function Invoke-LocalUpdateWsl($distro, [string[]]$arguments, $label, [double]$s
       $wait = [Math]::Min(10, $wait * 2)
     }
   }
-  return & $Invoke 'wsl.exe' $arguments $label $seconds
+  for ($operationAttempt = 1; $operationAttempt -le 3; $operationAttempt++) {
+    $remaining = ($deadline - (& $Now)).TotalSeconds
+    if ($remaining -le 0) { throw (New-LocalUpdateError "$label exhausted its WSL deadline." -Transient) }
+    try { return & $Invoke 'wsl.exe' $arguments $label ([Math]::Min($seconds, $remaining)) }
+    catch {
+      if ($label -ne 'health' -or -not (Test-LocalUpdateTransient $_.Exception) -or $operationAttempt -eq 3) { throw }
+      $remaining = ($deadline - (& $Now)).TotalSeconds
+      if ($remaining -le 0) { throw }
+      & $Delay ([Math]::Min(1, $remaining)) $_.Exception.Message
+    }
+  }
 }
 
 # The old server must exit before its app moves. Once it answers "running", it gets 60s; every call, including
@@ -167,11 +177,13 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
   $receipt = Join-Path $root 'receipt.json'
   $log = Join-Path $root 'activation.log'
   $helperReceipts = Join-Path $root 'helpers'
+  $modeStarted = [DateTime]::UtcNow
   $details = @{ status = $Mode }
   $desktop = @{ process = $null; launch = $null }
   function Save-UpdateStatus($status) {
     $details.status = $status
     $details.at = [DateTime]::UtcNow.ToString('o')
+    $details.durationMilliseconds = ([DateTime]::UtcNow - $modeStarted).TotalMilliseconds
     # Retries spawn many helpers; helpers/ keeps every record, the receipt only the latest.
     $all = @(Get-ChildItem -LiteralPath $helperReceipts -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc)
     $details.helperCount = $all.Count
@@ -191,7 +203,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
   try {
     $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
     $install = $config.install.TrimEnd('\')
-    $candidate = Join-Path (Split-Path $install) ('.' + (Split-Path $install -Leaf) + '-candidate')
+    $candidate = $(if ($config.candidate) { $config.candidate } else { Join-Path (Split-Path $install) ('.' + (Split-Path $install -Leaf) + '-candidate') })
     $payload = Join-Path $candidate 'payload'
     $rollback = Join-Path (Split-Path $install) ('.' + (Split-Path $install -Leaf) + '-local-update-rollback')
     $marker = Join-Path $rollback '.weavewing-update-owner'
@@ -224,6 +236,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       return (Get-Content -LiteralPath $stdout -Raw | ConvertFrom-Json)
     }
     function Probe-Update($operation, [string[]]$extra = @(), [double]$seconds = 30, [double]$responsiveSeconds = 300) {
+      if ($operation -eq 'health') { $responsiveSeconds = [Math]::Min(90, $responsiveSeconds) }
       return Invoke-LocalUpdateWsl $config.distro (@('-d', $config.distro, '--exec', $config.node, ($config.output + '/worker.mjs'), '--worker', $operation, ($config.output + '/config.json')) + $extra) $operation $seconds {
         param($executable, $arguments, $label, $remaining)
         Invoke-UpdateProcess $executable $arguments $label $remaining
@@ -334,20 +347,19 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
     if (-not (Test-Path -LiteralPath $empty)) { Set-Content -LiteralPath $empty -Value '' -NoNewline }
     . (Join-Path $root 'stage-windows-desktop.ps1')
     if ($Mode -eq 'Preflight') {
-      if ($config.updatePath -ne 'wsl-only') { Stage-WindowsDesktop $install $install -CheckOnly }
+      if ($config.updatePath -ne 'wsl-only') { Stage-WindowsDesktop $install $install -CheckOnly -CandidateDirectory $candidate }
       if ($config.updatePath -eq 'wsl-only' -and $config.shellHash -and (Get-FileHash -LiteralPath (Join-Path $install 'resources/app.asar') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.shellHash) { throw 'Installed shell no longer matches its receipt; use --full.' }
       if ($config.updatePath -eq 'wsl-only' -and $config.exeHash -and (Get-FileHash -LiteralPath (Join-Path $install 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.exeHash) { throw 'Installed shell no longer matches its receipt; use --full.' }
       if (-not (Test-Path -LiteralPath (Join-Path $install 'Start Weavewing.cmd'))) { throw 'Install must have Start Weavewing.cmd.' }
       Read-LocalUpdateLauncher (Join-Path $install 'Start Weavewing.cmd') | Out-Null
       Assert-UpdateRollback
       if ($config.updatePath -ne 'wsl-only' -and -not $config.checkOnly -and (Test-Path -LiteralPath $config.backupRootWindows)) { throw "Interrupted state backup: inspect $($config.backupRootWindows) before updating." }
-      $oldDigest = (Get-FileHash -LiteralPath (Join-Path $install 'resources/wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
-      if (-not (Probe-Update 'health' @($oldDigest)).healthy) { throw 'Installed WSL runtime is not healthy; repair it before updating.' }
       Save-UpdateStatus 'preflight-passed'
       return
     }
     if ($Mode -eq 'Prepare') {
-      Stage-WindowsDesktop $config.source $install | Out-Null
+      if ($config.updatePath -eq 'wsl-only') { Save-UpdateStatus 'staged-and-verified'; return }
+      Stage-WindowsDesktop $config.source $install -CandidateDirectory $candidate | Out-Null
       foreach ($name in @('Start Weavewing.cmd', 'Start Scratchboard.cmd', 'Create Weavewing shortcut.ps1', 'Weavewing.ico')) {
         $file = Join-Path $install $name
         if (Test-Path -LiteralPath $file) { Copy-Item -LiteralPath $file -Destination (Join-Path $payload $name) -Force }
@@ -363,8 +375,17 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $native -Recurse -Force -ErrorAction SilentlyContinue
       }
-      $details.runtimeInstall = Probe-Update 'install-runtime'
       Save-UpdateStatus 'staged-and-verified'
+      return
+    }
+    if ($Mode -eq 'Discard') {
+      if ($config.candidate -notmatch '-prepared-[0-9a-f]{16}$' -or (Split-Path $candidate) -ne (Split-Path $install)) { throw 'Not a prepared candidate slot.' }
+      if (Test-Path -LiteralPath $candidate) {
+        if ((Get-Content -LiteralPath (Join-Path $candidate '.weavewing-stage-owner') -Raw).Trim() -ne $install) { throw 'Candidate is unowned.' }
+        if (@(@(Get-Item -LiteralPath $candidate) + @(Get-ChildItem -LiteralPath $candidate -Recurse -Force) | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Candidate contains links.' }
+        if (Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($candidate + '\', [StringComparison]::OrdinalIgnoreCase) }) { throw 'Candidate is running.' }
+        Remove-Item -LiteralPath $candidate -Recurse -Force
+      }
       return
     }
     if ($Mode -eq 'Launch') {
@@ -383,6 +404,10 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
     $windowsScratch = $null
     $oldDigest = ''
     try {
+      if (Test-Path -LiteralPath (Join-Path $root 'prepared.json')) {
+        $details.prepared = Probe-Update 'validate-prepared' @() 120
+      } else { throw 'Prepared manifest missing; prepare again.' }
+      if (Test-Path -LiteralPath (Join-Path $root 'notify-thread')) { $config.notifyThread = (Get-Content -LiteralPath (Join-Path $root 'notify-thread') -Raw).Trim() }
       if ($config.updatePath -eq 'wsl-only') {
         $resources = Join-Path $install 'resources'
         $oldDigest = (Get-FileHash -LiteralPath (Join-Path $resources 'wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -445,6 +470,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       $oldDigest = (Get-FileHash -LiteralPath (Join-Path $install 'resources/wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
       $old = Probe-Update 'health' @($oldDigest)
       if (-not $old.healthy) { throw 'Installed runtime became unhealthy before activation.' }
+      $details.runtimeInstall = Probe-Update 'install-runtime'
       Save-UpdateStatus 'backing-up'
       $details.wslBackup = Probe-Update 'backup' @() 300
       $env:ELECTRON_RUN_AS_NODE = '1'
@@ -567,6 +593,8 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
     $details.error = $_.Exception.Message
     Save-UpdateStatus 'failed'
     throw
+  } finally {
+    if ($Mode -eq 'Activate') { Remove-Item -LiteralPath (Join-Path $root '.activation-claimed') -Recurse -Force -ErrorAction SilentlyContinue }
   }
 }
 

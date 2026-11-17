@@ -7,6 +7,9 @@ import * as NodeSqlite from "node:sqlite";
 import { expect, it, vi } from "vite-plus/test";
 
 import {
+  artifactDigests,
+  assertPreparedUpdate,
+  buildCacheKey,
   assertShellVersion,
   captureLocalLinks,
   checkLocalLink,
@@ -347,4 +350,56 @@ it("resolves the installed receipt from --install-dir unless one is given explic
     installedReceiptPath({ "install-dir": "C:\\x", "installed-receipt": "/r.json" }, toLinux),
   ).resolves.toBe("/r.json");
   await expect(installedReceiptPath({}, toLinux)).resolves.toBeUndefined();
+});
+
+it("rejects stale receipts, config, missing files and changed prepared content", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prepared-update-"));
+  try {
+    const artifact = NodePath.join(root, "client");
+    NodeFS.mkdirSync(artifact);
+    const file = NodePath.join(artifact, "index.html");
+    NodeFS.writeFileSync(file, "original");
+    const receipt = NodePath.join(root, "installed.json");
+    NodeFS.writeFileSync(receipt, "installed");
+    const config = NodePath.join(root, "config.json");
+    NodeFS.writeFileSync(config, "config");
+    const prepared = {
+      schema: 1 as const,
+      commit: "a".repeat(40),
+      updatePath: "full",
+      cacheKey: "cache",
+      installed: artifactDigests([receipt]),
+      files: artifactDigests([artifact, config]),
+      artifacts: artifactDigests([artifact]),
+      staged: artifact,
+    };
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).not.toThrow();
+    expect(() => assertPreparedUpdate(prepared, "b".repeat(40))).toThrow("commit");
+    NodeFS.writeFileSync(receipt, "new install");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Installed");
+    NodeFS.writeFileSync(receipt, "installed");
+    NodeFS.writeFileSync(config, "changed config");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+    NodeFS.writeFileSync(config, "config");
+    NodeFS.writeFileSync(file, "changed client");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+    NodeFS.writeFileSync(file, "original");
+    NodeFS.writeFileSync(NodePath.join(artifact, "extra.js"), "extra");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+    NodeFS.rmSync(file);
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("keys cached builds by commit, tool inputs and update path", () => {
+  const inputs = { commit: "a".repeat(40), updatePath: "full", monitor: "first" };
+  expect(buildCacheKey(inputs)).toBe(buildCacheKey({ ...inputs }));
+  for (const replacement of [
+    { commit: "b".repeat(40) },
+    { updatePath: "wsl-only" },
+    { monitor: "second" },
+  ])
+    expect(buildCacheKey({ ...inputs, ...replacement })).not.toBe(buildCacheKey(inputs));
 });

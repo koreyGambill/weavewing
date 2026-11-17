@@ -102,6 +102,7 @@ try {
   $calls = @{ operations = @() }
   $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
     param($executable, $arguments, $label, $seconds)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     Assert ($seconds -gt 0 -and $seconds -le 5) 'Probe exceeded its operation budget'
     if ($label -eq 'health') { @{ healthy = $true } }
@@ -112,6 +113,7 @@ try {
   $calls = @{ operations = @(); budget = 0 }
   $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'stopped' 5 {
     param($executable, $arguments, $label, $seconds)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'wsl-responsive') { $clock.now = $clock.now.AddSeconds(3); if ($calls.operations.Count -le 4) { throw (New-LocalUpdateError 'wsl-responsive exceeded 3s' -Transient) } }
     else { $calls.budget = $seconds; @{ stopped = $true } }
@@ -124,7 +126,8 @@ try {
   try {
     Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
       param($executable, $arguments, $label, $seconds)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       $clock.now = $clock.now.AddSeconds(3)
       throw (New-LocalUpdateError 'wsl-responsive failed (1). Wsl/Service/WSAETIMEDOUT' -Transient)
     } { param($seconds) $clock.delays += $seconds; $clock.now = $clock.now.AddSeconds($seconds) } 180 { $clock.now }
@@ -138,7 +141,8 @@ try {
   try {
     Invoke-LocalUpdateWsl 'missing-distro' @('fixture-command') 'health' 5 {
       param($executable, $arguments, $label, $seconds)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       throw (New-LocalUpdateError 'wsl-responsive failed (255). There is no distribution with the supplied name. Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND' -ExitCode 255)
     } { throw 'A deterministic failure must not wait' }
   } catch { $failure = $_.Exception }
@@ -148,7 +152,8 @@ try {
   try {
     Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
       param($executable, $arguments, $label, $seconds)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       throw (New-LocalUpdateError 'wsl-responsive failed (1). execvpe(/bin/true) failed: No such file or directory' -ExitCode 1)
     } { throw 'A missing binary must not wait' }
   } catch { $failure = $_.Exception.Message }
@@ -158,11 +163,30 @@ try {
   $calls = @{ operations = @() }
   $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
     param($executable, $arguments, $label, $seconds)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'wsl-responsive' -and $calls.operations.Count -le 2) { throw (New-LocalUpdateError 'wsl-responsive failed (1). Error code: Wsl/Service/E_UNEXPECTED' -ExitCode 1) }
     if ($label -eq 'health') { @{ healthy = $true } }
   } { param($seconds) $clock.delays += $seconds; $clock.now = $clock.now.AddSeconds($seconds) } 180 { $clock.now }
   Assert ($result.healthy -and ($calls.operations -join ',') -eq 'wsl-responsive,wsl-responsive,wsl-responsive,health') 'An unknown wsl.exe exit was not retried'
+  foreach ($case in @('recovers', 'exhausted', 'deterministic')) {
+    $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; operations = 0 }
+    $failure = $null
+    $result = $null
+    try {
+      $result = Invoke-LocalUpdateWsl 'fixture' @('worker') 'health' 30 {
+        param($executable, $arguments, $label, $seconds)
+        if ($label -eq 'wsl-responsive') { return }
+        $clock.operations++
+        if ($case -eq 'recovers' -and $clock.operations -eq 2) { return @{ healthy = $true } }
+        $clock.now = $clock.now.AddSeconds($seconds)
+        throw (New-LocalUpdateError 'health exceeded its deadline' -Transient:($case -ne 'deterministic'))
+      } { param($seconds) $clock.now = $clock.now.AddSeconds($seconds) } 90 { $clock.now }
+    } catch { $failure = $_.Exception.Message }
+    if ($case -eq 'recovers') { Assert ($result.healthy -and $clock.operations -eq 2) 'A stalled health operation failed instead of retrying' }
+    elseif ($case -eq 'exhausted') { Assert ($failure -and $clock.operations -eq 3 -and ($clock.now - [DateTime]'2026-01-01T00:00:00Z').TotalSeconds -le 90) 'Health retries exceeded their attempt or total budget' }
+    else { Assert ($failure -and $clock.operations -eq 1) 'Deterministic health failure retried' }
+  }
   Write-Host 'PASS case: wsl-responsive-window'
 
   $start = [DateTime]'2026-01-01T00:00:00Z'
@@ -273,6 +297,7 @@ try {
       foreach ($index in 1..60) { @{ pid = $index; platform = 'linux'; role = 'fixture' } | ConvertTo-Json | Set-Content (Join-Path $fixture "helpers/linux-$index.json") }
     }
     $config | ConvertTo-Json | Set-Content $configPath
+    Set-Content (Join-Path $fixture 'prepared.json') '{}'
     $invokeWsl = (Get-Item Function:Invoke-LocalUpdateWsl).ScriptBlock
     $calls = @{ operations = @(); starts = 0; sleeps = 0; closed = 0; health = 0; crashedHealth = 0; stopped = 0; notify = $null; restores = 0; launcherVariables = @() }
     $tmp = $env:TMP
@@ -313,7 +338,8 @@ try {
     }
     function Invoke-LocalUpdateWsl {
       param($distro, $arguments, $label, $seconds, $Invoke)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       if ($label -eq 'health') {
         $calls.health++
         if ($case -eq 'health-transient' -and $calls.health -eq 2) { throw 'One slow wsl call' }
@@ -456,17 +482,18 @@ try {
   $calls = @{ operations = @() }
   function Invoke-LocalUpdateWsl {
     param($distro, $arguments, $label, $seconds, $Invoke)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'health') { return @{ healthy = $true; pid = 123; environmentId = 'fixture' } }
     if ($label -eq 'install-runtime') { return @{ installed = $true } }
     if ($label -eq 'backup') { return @{ backedUp = $true } }
     throw "Check-only attempted forbidden operation: $label"
   }
-  try { Invoke-LocalDesktopUpdate $configPath 'Activate' }
+  try { Invoke-LocalDesktopUpdate $configPath 'Prepare' }
   finally { Set-Item Function:Invoke-LocalUpdateWsl $invokeWsl }
   $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
-  Assert ($receipt.status -eq 'check-only-passed') 'Runtime check-only did not complete'
-  Assert (($calls.operations -join ',') -eq 'health,install-runtime,backup') 'Check-only skipped backup or attempted restart'
+  Assert ($receipt.status -eq 'staged-and-verified') 'Runtime preparation did not complete'
+  Assert ($calls.operations.Count -eq 0) 'Preparation touched the installed runtime or state'
   Write-Host 'PASS case: check-only-runtime'
   Assert ((Get-Content (Join-Path $resources 'wsl-runtime.tar.gz')) -eq 'old-archive') 'Check-only replaced the installed runtime selection'
 
