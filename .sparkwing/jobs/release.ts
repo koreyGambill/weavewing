@@ -66,19 +66,23 @@ definePipeline({
     { name: "version", type: "string", required: true, description: "Plain release semver" },
     { name: "platforms", type: "string", default: "linux,win,mac", description: "Comma-separated linux,win,mac subset" },
     { name: "stage", type: "string", default: "draft", enum: ["draft", "plan", "promote"], description: "draft, plan or promote" },
+    { name: "build-only", type: "bool", description: "Only with --stage plan: skip CI for artifact proof" },
     { name: "notes-file", type: "string", description: "Absolute path to release notes to use instead of generated notes" },
   ],
   secrets: ["WEAVEWING_RELEASE_GH_TOKEN", "APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map((name) => ({ name, optional: true })),
   plan(p, run) {
     const version = run.args.version ?? "";
     const { platforms } = releaseInputs(version || "0.0.0", run.args.platforms || "linux,win,mac");
+    const buildOnly = run.args["build-only"] === "true";
+    if (buildOnly && run.args.stage !== "plan") throw new Error("--build-only is restricted to --stage plan");
     p.concurrency(new ConcurrencyGroup("weavewing-release", { capacity: 1 }));
 
     if (run.args.stage === "promote") {
-      const promote = p.job("promote").inline().cores(0.25);
+      const promote = p.job("promote").inline().cores(0.25).startsChildren("ci");
       promote.step("publish", async (ctx) => {
         const co = checkout(ctx);
         const { tag, commit } = await assertInput(ctx, co);
+        await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
         const release = await findRelease(ctx, co);
         if (!release?.draft) throw new Error("Promote requires an existing draft");
         if (release.target_commitish !== commit) throw new Error("The draft target does not match this checkout's commit");
@@ -101,7 +105,7 @@ definePipeline({
       const co = checkout(ctx);
       const result = await assertInput(ctx, co);
       await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts"]);
-      FS.writeFileSync(Path.join(co.evidence, "release-input.json"), JSON.stringify({ ...result, version, stage: ctx.args.stage, run: ctx.run.id }, null, 2));
+      FS.writeFileSync(Path.join(co.evidence, "release-input.json"), JSON.stringify({ ...result, version, stage: ctx.args.stage, buildOnly, run: ctx.run.id }, null, 2));
       return result;
     }).inline().cores(0.25);
 
@@ -110,6 +114,7 @@ definePipeline({
       await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
       return { commit: git(co.root, "rev-parse", "HEAD"), passed: true };
     }).inline().cores(0.25).needs(preflight).startsChildren("ci")
+      .skipIf(() => buildOnly)
       .memo((ctx) => memoKey("release-ci/v1", checkout(ctx).root, git(checkout(ctx).root, "rev-parse", "HEAD"), checkout(ctx).nodeVersion));
 
     const bundle = p.job("bundle", async (ctx) => {
@@ -201,7 +206,7 @@ definePipeline({
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
-      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, draft: true, assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
+      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
       if (ctx.args.stage === "plan") {
         ctx.log.info(`Plan complete. No GitHub writes. Evidence: ${co.evidence}`);
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };

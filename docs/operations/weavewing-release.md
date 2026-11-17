@@ -20,6 +20,9 @@ sparkwing run release -C <worktree> --detach --allow-risk prod -- --worktree <wo
 ```
 
 `plan` runs the builds and writes the proposed release without GitHub writes.
+For artifact proof while CI is unavailable, add `--build-only` to a plan run.
+The evidence records CI as skipped. Draft and promote reject this flag, and
+promote runs CI at the release commit before publishing.
 `draft` creates or refreshes a private draft called `Weavewing 1.0.0`, targeting
 the release commit with tag name `weavewing-v1.0.0`. A draft creates no tag.
 `promote` verifies the complete uploaded asset set and every SHA256 checksum,
