@@ -37,7 +37,8 @@ maintainer's private notes, not here.
    launching.
 6. Activation proceeds without waiting for turns to finish. The WSL runtime gets
    SIGTERM and five seconds to shut down before a forced stop. Full updates close
-   the desktop gracefully, whose backends use the same five-second grace period.
+   the desktop gracefully; the WSL server sees its launcher exit and shuts down
+   on its own.
    With **Continue threads after restarts** enabled (the default), threads
    with saved provider sessions receive a continuation turn after restart.
    Executing tools and provider-native background work do not resume. App-owned

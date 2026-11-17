@@ -214,15 +214,17 @@ export async function runtimeHealth(home: string, digest: string, environmentId?
 export async function stopLocalRuntime(home: string, digest: string, environmentId: string) {
   const current = await runtimeHealth(home, digest, environmentId);
   if (!current.healthy || !current.executable || !current.pid)
-    throw new Error("Runtime identity changed; refusing to stop it.");
+    throw new Error(
+      "Runtime is not healthy or its identity is unknown; refusing to stop an unverified process.",
+    );
   const identity = () => {
     try {
       const stat = NodeFS.readFileSync(`/proc/${current.pid}/stat`, "utf8");
       const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
       if (fields[0] === "Z") return undefined;
       const executable = NodeFS.realpathSync(`/proc/${current.pid}/exe`);
-      if (executable !== current.executable)
-        throw new Error("Runtime identity changed during shutdown; refusing to signal it.");
+      // Another binary on this PID means the runtime already exited and the PID was reused.
+      if (executable !== current.executable) return undefined;
       // Linux start time distinguishes a reused PID, including another launch of the same binary.
       return fields[19];
     } catch (error) {
@@ -234,9 +236,7 @@ export async function stopLocalRuntime(home: string, digest: string, environment
   if (!original) return { stopped: true, pid: current.pid, forced: false };
   const running = () => {
     const actual = identity();
-    if (actual !== undefined && actual !== original)
-      throw new Error("Runtime identity changed during shutdown; refusing to signal it.");
-    return actual !== undefined;
+    return actual !== undefined && actual === original;
   };
   const signal = (value: NodeJS.Signals) => {
     if (!running()) return;
@@ -261,7 +261,7 @@ export async function stopLocalRuntime(home: string, digest: string, environment
   return { stopped: true, pid: current.pid, forced };
 }
 
-async function readThreads(endpoint: string, authorization: string, deadline: number) {
+async function checkMcpResponds(endpoint: string, authorization: string, deadline: number) {
   const requestSignal = () => {
     if (Date.now() >= deadline) throw new Error("MCP health deadline expired");
     return AbortSignal.timeout(Math.max(1, Math.min(5000, Math.floor(deadline - Date.now()))));
@@ -456,7 +456,7 @@ export async function checkLocalLink(
       NodePath.join(userdata, "secrets", `${secretName}.bin`),
       "utf8",
     );
-    await readThreads(`${result.url}/mcp`, `Bearer ${token}`, deadline);
+    await checkMcpResponds(`${result.url}/mcp`, `Bearer ${token}`, deadline);
     result.mcp = true;
     result.status = "passed";
   } catch (error) {

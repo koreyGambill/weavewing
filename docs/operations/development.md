@@ -410,7 +410,7 @@ and `--wsl-home` to `~/.t3`. The install must already have a healthy runtime and
 
 The fast path sends SIGTERM to the verified WSL runtime and allows five seconds for shutdown,
 then uses SIGKILL if that same process remains. The receipt records `runtimeStop.forced`.
-Full updates close the desktop gracefully. Its backend shutdown also allows five seconds before forcing exit.
+Full updates close the desktop gracefully. The WSL server notices its launcher exit and shuts down without a deadline.
 The server saves restart continuation requests before stopping providers and reconciles unfinished runs.
 On startup it also recovers runs left by a forced exit. The old run is cancelled, streaming indicators
 stop, and the thread shows a shutdown or restart notice. With **Continue threads after restarts**

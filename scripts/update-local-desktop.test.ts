@@ -284,9 +284,11 @@ it.each([false, true])(
         .spyOn(globalThis, "fetch")
         .mockImplementation(async () => Response.json({ environmentId: "original" }));
       using signals = vi.spyOn(process, "kill");
-      await expect(stopLocalRuntime(home, "other", "original")).rejects.toThrow("identity changed");
+      await expect(stopLocalRuntime(home, "other", "original")).rejects.toThrow(
+        "identity is unknown",
+      );
       await expect(stopLocalRuntime(home, "fixture", "replacement")).rejects.toThrow(
-        "identity changed",
+        "identity is unknown",
       );
       expect(signals).not.toHaveBeenCalled();
       vi.useFakeTimers();
