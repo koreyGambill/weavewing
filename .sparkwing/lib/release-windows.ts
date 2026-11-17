@@ -44,13 +44,22 @@ try {
   $exe = Join-Path $app 'Weavewing.exe'
   if (!(Test-Path $exe)) { throw 'Packaged executable is missing' }
   $env:ELECTRON_RUN_AS_NODE = '1'
-  & $exe ${psQuote(windowsPath(Path.join(verify, "verify-windows-desktop-artifact.mjs")))} --app-dir $app --arch x64 --build-version ${psQuote(values.version)} --verbose
-  if ($LASTEXITCODE -ne 0) { throw 'Native payload check failed' }
-  & $exe ${psQuote(windowsPath(Path.join(verify, "smoke-cli-archive.mjs")))} --archive ${psQuote(windowsPath(Path.join(values.assets, `t3-${values.version}-win32-x64.zip`)))} --expect-version ${psQuote(values.version)}
-  if ($LASTEXITCODE -ne 0) { throw 'Windows CLI smoke failed' }
+  # Weavewing.exe is a GUI-subsystem binary: PowerShell only waits for it, and sets
+  # $LASTEXITCODE, when its output is piped. Windows PowerShell turns piped stderr into
+  # terminating errors under 'Stop', so the checks run under 'Continue'.
+  $ErrorActionPreference = 'Continue'
+  & $exe ${psQuote(windowsPath(Path.join(verify, "verify-windows-desktop-artifact.mjs")))} --app-dir $app --arch x64 --build-version ${psQuote(values.version)} --verbose 2>&1 | ForEach-Object { "$_" }
+  if ($LASTEXITCODE -ne 0) { throw "Native payload check failed with exit $LASTEXITCODE" }
+  & $exe ${psQuote(windowsPath(Path.join(verify, "smoke-cli-archive.mjs")))} --archive ${psQuote(windowsPath(Path.join(values.assets, `t3-${values.version}-win32-x64.zip`)))} --expect-version ${psQuote(values.version)} 2>&1 | ForEach-Object { "$_" }
+  if ($LASTEXITCODE -ne 0) { throw "Windows CLI smoke failed with exit $LASTEXITCODE" }
+  $ErrorActionPreference = 'Stop'
   Write-Output 'Windows NSIS payload and CLI passed in a throwaway directory. Installer registration was not run.'
 } finally {
-  Remove-Item -LiteralPath $root -Recurse -Force
+  # Defender and exiting children can hold Weavewing.exe briefly after the checks return.
+  foreach ($attempt in 1..10) {
+    try { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop; break }
+    catch { if ($attempt -eq 10) { Write-Warning "Left $root after cleanup retries: $_" } else { Start-Sleep -Seconds 2 } }
+  }
 }
 `;
 run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")]);
