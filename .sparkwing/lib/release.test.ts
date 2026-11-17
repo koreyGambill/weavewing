@@ -76,13 +76,15 @@ test("releaseNotes caps first-release merges and preserves edited draft notes", 
 });
 
 test("release inputs reject non-stable versions and unknown or duplicate platforms", () => {
-  for (const version of ["v0.1.0", "0.1.0-beta", "00.1.0", "0.1", "0.1.0+build", "1.0.0", "2.3.4", "10.0.0"])
-    assert.throws(() => releaseInputs(version, "linux"));
+  for (const version of ["v0.1.0", "0.1.0-beta", "00.1.0", "0.1", "0.1.0+build"])
+    assert.throws(() => releaseInputs(version, "linux"), /plain semver/);
+  for (const version of ["1.0.0", "2.3.4", "10.0.0"])
+    assert.throws(() => releaseInputs(version, "linux"), /above 0\.x/);
   for (const platforms of ["", "linux,linux", "linux,android", "linux,"])
     assert.throws(() => releaseInputs("0.1.0", platforms));
   assert.equal(releaseInputs("0.1.0", "mac,win").tag, "weavewing-v0.1.0");
   assert.equal(releaseInputs("0.12.3", "linux").version, "0.12.3");
-  assert.equal(expectedAssets("1.0.0", ["linux", "win", "mac"]).length, 14);
+  assert.equal(expectedAssets("0.1.0", ["linux", "win", "mac"]).length, 14);
 });
 
 test("an exact existing tag refuses a release, including a draft rerun", () => {
