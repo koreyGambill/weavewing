@@ -14,17 +14,19 @@ Windows cross-builds install the pinned
 `cargo-xwin`, which downloads Microsoft's CRT and Windows SDK.
 
 ```bash
-sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 1.0.0 --stage plan
-sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 1.0.0
-sparkwing run release -C <worktree> --detach --allow-risk prod -- --worktree <worktree> --version 1.0.0 --stage promote --draft-evidence <draft-run-directory>
+sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 0.1.0 --stage plan
+sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 0.1.0
+sparkwing run release -C <worktree> --detach --allow-risk prod -- --worktree <worktree> --version 0.1.0 --stage promote --draft-evidence <draft-run-directory>
 ```
+
+Versions must stay in the 0.x range. The pipeline refuses `1.0.0` and above before any job runs.
 
 `plan` runs the builds and writes the proposed release without GitHub writes.
 For artifact proof while CI is unavailable, add `--build-only` to a plan run.
 The evidence records CI as skipped. Draft and promote reject this flag, and
 promote runs CI at the release commit before publishing.
-`draft` creates or refreshes a private draft called `Weavewing 1.0.0`, targeting
-the release commit with tag name `weavewing-v1.0.0`. A draft creates no tag.
+`draft` creates or refreshes a private draft called `Weavewing 0.1.0`, targeting
+the release commit with tag name `weavewing-v0.1.0`. A draft creates no tag.
 `promote` verifies the complete uploaded asset set against `assets/SHA256SUMS`
 in the draft run's local evidence directory, including its release commit and CI result,
 then publishes the draft as latest. Only promote needs the prod risk grant.
@@ -69,7 +71,7 @@ plan run before publishing a signed release.
 Before promotion, delete the draft and rerun:
 
 ```bash
-gh release delete weavewing-v1.0.0 --repo koreyGambill/weavewing
+gh release delete weavewing-v0.1.0 --repo koreyGambill/weavewing
 ```
 
 After promotion, point latest back to the previous good release, delete the bad

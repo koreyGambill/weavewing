@@ -62,7 +62,10 @@ mkdir -p "$HOME/weavewing-release/${runId}/source" "$HOME/weavewing-release/${ru
 
 export function releaseInputs(version: string, platforms: string) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version))
-    throw new Error("--version must be plain semver (for example 1.0.0)");
+    throw new Error("--version must be plain semver (for example 0.1.0)");
+  // Korey's call: Weavewing stays in the 0.x range; raising the major is a deliberate code change.
+  if (!version.startsWith("0."))
+    throw new Error(`--version ${version} is above 0.x; Weavewing releases stay in the 0.x range`);
   const selected = platforms.split(",");
   if (!selected.length || selected.some((p) => !PLATFORMS.includes(p as Platform)) || new Set(selected).size !== selected.length)
     throw new Error("--platforms must be a comma-separated subset of linux,win,mac");
