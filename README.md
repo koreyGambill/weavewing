@@ -73,6 +73,7 @@ Download the `t3-<version>-<platform>` archive for your platform from
 [Weavewing Releases](https://github.com/koreyGambill/weavewing/releases).
 Verify it against `SHA256SUMS`, unpack it, and keep the folder together.
 Add that folder to `PATH`, then run `t3 --version` to check it.
+On macOS, if the downloaded `t3` is blocked, run `xattr -dr com.apple.quarantine <folder>` once.
 Run `t3` to start the server and open the web app.
 
 ### Phone

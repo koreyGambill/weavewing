@@ -18,9 +18,7 @@ All three desktop builds are unsigned. The macOS build uses ad-hoc signing and
 doesn't auto-update on either channel. Download a new DMG to update it. A managed Mac may block
 unsigned apps even with these steps.
 
-To install only the CLI, unpack the matching `t3-<version>-linux-x64.tar.gz`,
-`t3-<version>-win32-x64.zip`, or `t3-<version>-darwin-arm64.tar.gz` archive.
-Keep the extracted directory intact. Add it to `PATH` and run `t3 --version` to check it.
+To install only the CLI, follow [Command line](#command-line).
 Package manager commands elsewhere on this page install upstream T3 Code.
 
 Weavewing and T3 Code share the default `~/.t3` home. To keep their data separate,
@@ -46,6 +44,7 @@ Download the `t3-<version>-<platform>` archive for your platform from
 [Weavewing Releases](https://github.com/koreyGambill/weavewing/releases).
 Verify it against `SHA256SUMS`, unpack it, and keep the extracted folder together.
 Add that folder to `PATH`, then run `t3 --version` to check it.
+On macOS, if the downloaded `t3` is blocked, run `xattr -dr com.apple.quarantine <folder>` once.
 
 | Task                                  | Command                                                                 |
 | ------------------------------------- | ----------------------------------------------------------------------- |
