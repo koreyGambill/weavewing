@@ -67,6 +67,7 @@ import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
 import * as DesktopState from "./app/DesktopState.ts";
+import { installSpellcheckPolicy } from "./app/DesktopSpellcheck.ts";
 import * as DesktopLegacyLocalStorage from "./app/DesktopLegacyLocalStorage.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopRendererHistory from "./telemetry/DesktopRendererHistory.ts";
@@ -91,6 +92,9 @@ if (process.argv.includes("--version")) {
   }
   Electron.app.exit(0);
 }
+
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Session policy must register synchronously before Electron is ready.
+installSpellcheckPolicy(NodeOS.platform());
 
 const layerDesktopEnvironment = Layer.unwrap(
   Effect.gen(function* () {
