@@ -4,8 +4,13 @@ import * as Path from "node:path";
 
 import { git } from "./checkout.ts";
 
-export const RELEASE_REPOSITORY = "koreyGambill/weavewing";
-export const TAG_PREFIX = "weavewing-v";
+const identityUrl = new URL("../../packages/shared/src/releaseIdentity.ts", import.meta.url);
+// Archived pipeline revisions must also bootstrap before the shared identity module is available.
+const identity: { RELEASE_REPOSITORY: string; RELEASE_TAG_PREFIX: string } = FS.existsSync(identityUrl)
+  ? await import(identityUrl.href)
+  : { RELEASE_REPOSITORY: "koreyGambill/weavewing", RELEASE_TAG_PREFIX: "weavewing-v" };
+export const RELEASE_REPOSITORY = identity.RELEASE_REPOSITORY;
+export const TAG_PREFIX = identity.RELEASE_TAG_PREFIX;
 export const PLATFORMS = ["linux", "win", "mac"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 

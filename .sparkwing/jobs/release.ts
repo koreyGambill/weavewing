@@ -176,6 +176,23 @@ definePipeline({
       const { commit, tag } = (await ctx.output(preflight))!;
       const names = expectedAssets(version, platforms);
       const dir = assets(co);
+      const release = await findRelease(ctx, co);
+      if (release && (!release.draft || release.target_commitish !== commit))
+        throw new Error("Existing release is public or has a different target commit. Delete its draft before rebuilding.");
+      if (ctx.args.stage === "draft" && platforms.length !== PLATFORMS.length && release?.assets.length) {
+        const previous = Path.join(co.evidence, "previous-draft-assets");
+        FS.mkdirSync(previous, { recursive: true });
+        const previousNames = release.assets.map((asset) => asset.name).filter((name) => name !== "SHA256SUMS");
+        const allowed = expectedAssets(version, PLATFORMS);
+        if (previousNames.some((name) => !allowed.includes(name))) throw new Error("Existing draft has unexpected assets");
+        await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", previous, "--clobber");
+        verifyChecksums(previous, previousNames, FS.readFileSync(Path.join(previous, "SHA256SUMS"), "utf8"));
+        for (const name of previousNames.filter((name) => !names.includes(name))) {
+          FS.copyFileSync(Path.join(previous, name), Path.join(dir, name));
+          names.push(name);
+        }
+        names.sort();
+      }
       const inventory = assetInventory(dir, names);
       FS.writeFileSync(Path.join(dir, "SHA256SUMS"), inventory.map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
       const notes = ctx.args["notes-file"] ? FS.readFileSync(ctx.args["notes-file"], "utf8") : releaseNotes(co.root, version, commit);
@@ -188,7 +205,6 @@ definePipeline({
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };
       }
       await assertInput(ctx, co);
-      const release = await findRelease(ctx, co);
       if (release) {
         if (release.target_commitish !== commit) throw new Error("Existing draft has a different target commit. Delete it before rebuilding.");
         await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, "--notes-file", notesFile);
