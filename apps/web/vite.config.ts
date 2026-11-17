@@ -140,7 +140,10 @@ const browserTestProject = {
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright(),
+      // Detached test frames retain native shared-memory handles until V8 collects them.
+      provider: playwright({
+        launchOptions: { args: ["--js-flags=--max-old-space-size=512"] },
+      }),
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
       commands: {
