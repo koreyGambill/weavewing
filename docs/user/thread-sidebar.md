@@ -74,10 +74,14 @@ The **Inbox**, the bell under Threads in the strip, collects notifications that
 automations and agents raise, newest first. Its badge counts unread ones and turns
 red for critical or amber for a warning. Open one to read it; it then counts as
 read. Snooze one to have it come back later, or dismiss it once it's handled. The
-Snoozed and Dismissed tabs show those, where you can unsnooze or restore them. The
-Status row opens your status sources. Critical notifications also send a desktop
-notification and play a sound, and warnings do when T3 Code is in the background,
+Snoozed and Dismissed tabs show those, where you can unsnooze or restore them.
+Critical notifications also send a desktop notification and play a sound, and
+warnings do when T3 Code is in the background,
 following your settings under **Settings → General → Notifications**.
+
+Open **Status** in the right tools sidebar to check your status sources. Its alert
+dot also appears on the tools toggle while the sidebar is hidden. Configure sources
+under **Settings → Status sources**, also linked from the Status tool.
 
 Links, Artifacts and Related have a filter box, and each row can copy its link,
 ticket ID or thread link. Links also filters by service, sorts, and copies every

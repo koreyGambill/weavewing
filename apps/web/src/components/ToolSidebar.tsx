@@ -1,6 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
-import { CalendarIcon, Maximize2, Minimize2, PanelRight, X } from "lucide-react";
+import {
+  ActivityIcon,
+  CalendarIcon,
+  Settings2Icon,
+  Maximize2,
+  Minimize2,
+  PanelRight,
+  X,
+} from "lucide-react";
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { useResizeDrag } from "../hooks/useResizeDrag";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -12,13 +21,16 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useToolSidebarStore } from "../toolSidebarStore";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../workspaceTitlebar";
 import { CalendarTool } from "./CalendarTool";
+import { StatusSourcesList, useStatusSignal } from "./statusSources/StatusSources";
+import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const { visible, activeTool, width, maximized, dispatch } = useToolSidebarStore();
+  const { state: statusState } = useStatusSignal();
+  const statusAlert = statusState === "fail" || statusState === "warn" ? statusState : null;
   const [availableWidth, setAvailableWidth] = useState(1280);
   const pageWidth = resolveToolSidebarWidth(width, availableWidth);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -88,12 +100,26 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       >
         {children}
       </div>
+      {visible ? (
+        <div
+          aria-hidden
+          className={cn(
+            "absolute right-0 top-0 h-[var(--workspace-topbar-height)] bg-background",
+            isElectron && "drag-region",
+          )}
+          style={{ width: maximized ? "100%" : "var(--tools-sidebar-width)" }}
+        />
+      ) : null}
       <div className="pointer-events-auto fixed top-[var(--workspace-controls-top)] right-[var(--workspace-tools-controls-right)] z-50 hidden h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag] md:flex">
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
-                aria-label="Toggle tools sidebar"
+                aria-label={
+                  statusAlert && !visible
+                    ? `Toggle tools sidebar (status ${statusAlert === "fail" ? "failing" : "warning"})`
+                    : "Toggle tools sidebar"
+                }
                 aria-pressed={visible}
                 aria-controls="tools-sidebar"
                 size="icon-sm"
@@ -102,7 +128,10 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
               />
             }
           >
-            <PanelRight className="size-4" />
+            <span className="relative flex">
+              <PanelRight className="size-4" />
+              {!visible && statusAlert ? <ToolStatusDot state={statusAlert} /> : null}
+            </span>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
             Toggle tools sidebar{shortcut ? ` (${shortcut})` : ""}
@@ -115,15 +144,18 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           aria-label="Tools sidebar"
           data-tool-sidebar-state={activeTool ? (maximized ? "maximized" : "expanded") : "rail"}
           className={cn(
-            "hidden min-h-0 shrink-0 border-l bg-sidebar md:flex",
-            maximized && "absolute inset-0 z-40",
+            "mt-[var(--workspace-topbar-height)] hidden min-h-0 shrink-0 border-l bg-sidebar md:flex",
+            maximized &&
+              "absolute inset-x-0 bottom-0 top-[var(--workspace-topbar-height)] z-40 mt-0",
           )}
         >
           {activeTool ? <ToolSidebarPage maximized={maximized} width={pageWidth} /> : null}
           <nav
             aria-label="Tools"
-            style={{ paddingTop: "var(--workspace-topbar-height)" }}
-            className="flex w-11 shrink-0 flex-col items-center gap-2 border-l"
+            className={cn(
+              "flex w-11 shrink-0 flex-col items-center gap-2 py-2",
+              activeTool && "border-l",
+            )}
           >
             <Tooltip>
               <TooltipTrigger
@@ -141,6 +173,32 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
               </TooltipTrigger>
               <TooltipPopup side="left">Calendar</TooltipPopup>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="Status"
+                    aria-description={
+                      statusAlert
+                        ? `Status sources ${statusAlert === "fail" ? "failing" : "warning"}`
+                        : undefined
+                    }
+                    aria-pressed={activeTool === "status"}
+                    size="icon-sm"
+                    variant="ghost-toggle"
+                    onClick={() => dispatch({ type: "select", tool: "status" })}
+                  />
+                }
+              >
+                <span className="relative flex">
+                  <ActivityIcon className="size-4" />
+                  {statusAlert ? <ToolStatusDot state={statusAlert} /> : null}
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup side="left">
+                Status{statusAlert ? ` · ${statusAlert === "fail" ? "Failing" : "Warning"}` : ""}
+              </TooltipPopup>
+            </Tooltip>
           </nav>
         </aside>
       ) : null}
@@ -149,7 +207,8 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
 }
 
 function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: number }) {
-  const dispatch = useToolSidebarStore((state) => state.dispatch);
+  const { activeTool, dispatch } = useToolSidebarStore();
+  const title = activeTool === "status" ? "Status" : "Calendar";
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     const pane = event.currentTarget.parentElement;
     if (!pane || maximized) return null;
@@ -175,7 +234,7 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
   });
   return (
     <div
-      {...workspaceAreaProps("tools", 5, "Calendar")}
+      {...workspaceAreaProps("tools", 5, title)}
       className={cn("relative flex min-h-0 min-w-0 flex-col bg-background", maximized && "flex-1")}
       style={maximized ? undefined : { width, maxWidth: "calc(100vw - 44px)" }}
     >
@@ -192,15 +251,8 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
           onDoubleClick={() => dispatch({ type: "resize", width: 300 })}
         />
       ) : null}
-      <header
-        style={{ paddingRight: "calc(var(--workspace-native-controls-inset) + 0.5rem)" }}
-        className={cn(
-          "flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 border-b pl-3 pr-2",
-          isElectron && "drag-region",
-          maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-        )}
-      >
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">Calendar</h2>
+      <header className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h2>
         <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
           <Tooltip>
             <TooltipTrigger
@@ -209,29 +261,72 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
                   size="icon-micro"
                   variant="ghost-toggle"
                   aria-pressed={maximized}
-                  aria-label={maximized ? "Restore calendar size" : "Maximize calendar"}
+                  aria-label={
+                    maximized
+                      ? `Restore ${title.toLowerCase()} size`
+                      : `Maximize ${title.toLowerCase()}`
+                  }
                   onClick={() => dispatch({ type: "maximize" })}
                 />
               }
             >
               {maximized ? <Minimize2 /> : <Maximize2 />}
             </TooltipTrigger>
-            <TooltipPopup>{maximized ? "Restore calendar size" : "Maximize calendar"}</TooltipPopup>
+            <TooltipPopup>
+              {maximized
+                ? `Restore ${title.toLowerCase()} size`
+                : `Maximize ${title.toLowerCase()}`}
+            </TooltipPopup>
           </Tooltip>
           <Button
             size="icon-micro"
             variant="ghost"
-            aria-label="Collapse calendar"
+            aria-label={`Collapse ${title.toLowerCase()}`}
             onClick={() => {
               dispatch({ type: "collapse" });
-              document.querySelector<HTMLButtonElement>('button[aria-label="Calendar"]')?.focus();
+              document.querySelector<HTMLButtonElement>(`button[aria-label="${title}"]`)?.focus();
             }}
           >
             <X />
           </Button>
         </div>
       </header>
-      <CalendarTool />
+      {activeTool === "status" ? <StatusTool /> : <CalendarTool />}
+    </div>
+  );
+}
+
+function ToolStatusDot({ state }: { state: "fail" | "warn" }) {
+  return (
+    <span className="pointer-events-none absolute -right-1 -top-1 flex rounded-full bg-sidebar p-px">
+      <StatusSourceDot state={state} />
+    </span>
+  );
+}
+
+function StatusTool() {
+  const { groups } = useStatusSignal();
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex justify-end border-b p-2">
+        <Button variant="ghost" size="xs" render={<Link to="/settings/status-sources" />}>
+          <Settings2Icon />
+          Status source settings
+        </Button>
+      </div>
+      {groups.length === 0 ? (
+        <p className="p-3 text-sm text-muted-foreground">
+          Connect to a server that supports status sources.
+        </p>
+      ) : (
+        <StatusSourcesList
+          groups={groups}
+          onConfigureSources={(machine) =>
+            void navigate({ to: "/settings/status-sources", search: { machine } })
+          }
+        />
+      )}
     </div>
   );
 }
