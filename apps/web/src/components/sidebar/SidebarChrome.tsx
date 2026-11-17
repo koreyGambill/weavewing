@@ -109,23 +109,38 @@ export function TitlebarWidthProbe({ onWidthChange }: { onWidthChange: (width: n
 }
 
 /**
- * The window's top-left controls, in one fixed order so none moves with the sidebar.
+ * The mark and collapser stay fixed while navigation follows the expanded sidebar.
  * `compact` keeps only the mark and collapser below md, where the header is narrow.
  */
 export function TitlebarControls({
   collapser,
   onBackdrop,
   compact = false,
+  expanded = false,
 }: {
   collapser: ReactNode;
   onBackdrop: boolean;
   compact?: boolean;
+  expanded?: boolean;
 }) {
   return (
-    <div className="pointer-events-auto flex items-center [-webkit-app-region:no-drag]">
-      <CommandPaletteMarkButton onBackdrop={onBackdrop} />
-      {collapser}
-      <div className={cn("flex items-center", compact && "max-md:hidden")}>
+    <div
+      className={cn(
+        "pointer-events-none flex items-center",
+        expanded && "md:w-[calc(var(--sidebar-width)-var(--workspace-controls-left)-0.75rem-1px)]",
+      )}
+    >
+      <div className="pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]">
+        <CommandPaletteMarkButton onBackdrop={onBackdrop} />
+        {collapser}
+      </div>
+      <div
+        className={cn(
+          "pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]",
+          expanded && "md:ml-auto",
+          compact && "max-md:hidden",
+        )}
+      >
         <HistoryNavigationButton direction="back" onBackdrop={onBackdrop} />
         <HistoryNavigationButton direction="forward" onBackdrop={onBackdrop} />
         <WorkspaceHistoryButton />

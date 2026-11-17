@@ -78,7 +78,7 @@ import { ThreadToolsHost } from "./threadToolsHost";
 import { SidebarFolderDrop } from "./sidebar/SidebarFolderDrop";
 import { resolveThreadRouteRef } from "../threadRoutes";
 
-const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
+const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "calc(var(--desktop-window-controls-inset, 90px) - 8px)";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -399,7 +399,7 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
     <div
       ref={appShellCommandsRef}
       className={cn(
-        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
+        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag]",
         mobileSidebarSheetMounted && "hidden",
       )}
       data-sidebar-control=""
@@ -407,6 +407,7 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
       {showSidebar ? (
         <TitlebarControls
           compact
+          expanded={isSidebarVisible}
           onBackdrop={onBackdrop}
           collapser={
             <span className="relative flex">

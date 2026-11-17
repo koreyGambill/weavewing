@@ -744,6 +744,7 @@ export function ThreadTileWorkspace(props: {
       ) {
         event.preventDefault();
         apply({ type: "maximize", groupId: null });
+        focus(current.focusedGroupId);
       }
     };
     window.addEventListener("keydown", onKeyDown);
