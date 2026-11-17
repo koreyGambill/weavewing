@@ -16,7 +16,6 @@ export function localDesktopBuildEnvironment<Environment extends NodeJS.ProcessE
   return { ...env, T3CODE_DESKTOP_UPDATE_REPOSITORY: "", GITHUB_REPOSITORY: "" };
 }
 
-const activeStatuses = ["preparing", "queued", "starting", "running"];
 // The ownership database holds a lifetime lock and must never enter a backup.
 const stateFiles = [
   "settings.json",
@@ -211,12 +210,58 @@ export async function runtimeHealth(home: string, digest: string, environmentId?
   }
 }
 
-async function readThreads(
-  endpoint: string,
-  authorization: string,
-  deadline: number,
-  peer = false,
-) {
+/** Stops only the verified runtime, allowing shutdown reconciliation before forcing exit. */
+export async function stopLocalRuntime(home: string, digest: string, environmentId: string) {
+  const current = await runtimeHealth(home, digest, environmentId);
+  if (!current.healthy || !current.executable || !current.pid)
+    throw new Error(
+      "Runtime is not healthy or its identity is unknown; refusing to stop an unverified process.",
+    );
+  const identity = () => {
+    try {
+      const stat = NodeFS.readFileSync(`/proc/${current.pid}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (fields[0] === "Z") return undefined;
+      const executable = NodeFS.realpathSync(`/proc/${current.pid}/exe`);
+      // Another binary on this PID means the runtime already exited and the PID was reused.
+      if (executable !== current.executable) return undefined;
+      // Linux start time distinguishes a reused PID, including another launch of the same binary.
+      return fields[19];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  };
+  const original = identity();
+  if (!original) return { stopped: true, pid: current.pid, forced: false };
+  const running = () => {
+    const actual = identity();
+    return actual !== undefined && actual === original;
+  };
+  const signal = (value: NodeJS.Signals) => {
+    if (!running()) return;
+    try {
+      process.kill(current.pid!, value);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  };
+  signal("SIGTERM");
+  const deadline = Date.now() + 5000;
+  while (running() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  const forced = running();
+  if (forced) {
+    signal("SIGKILL");
+    const killDeadline = Date.now() + 1000;
+    while (running() && Date.now() < killDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    if (running()) throw new Error("Runtime did not exit after SIGKILL; refusing activation.");
+  }
+  return { stopped: true, pid: current.pid, forced };
+}
+
+async function checkMcpResponds(endpoint: string, authorization: string, deadline: number) {
   const requestSignal = () => {
     if (Date.now() >= deadline) throw new Error("MCP health deadline expired");
     return AbortSignal.timeout(Math.max(1, Math.min(5000, Math.floor(deadline - Date.now()))));
@@ -225,7 +270,7 @@ async function readThreads(
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     authorization,
-    ...(peer ? { "T3-Mode-Limit": "approval-required/plan" } : {}),
+    "T3-Mode-Limit": "approval-required/plan",
   };
   async function request(message: unknown) {
     const response = await fetch(endpoint, {
@@ -273,18 +318,12 @@ async function readThreads(
         arguments: {
           allProjects: true,
           includeSubagents: true,
-          statuses: activeStatuses,
           limit: 1,
         },
       },
     });
     if (result?.isError || !Number.isInteger(result?.structuredContent?.total))
       throw new Error("MCP returned no thread count");
-    return {
-      idle: result.structuredContent.total === 0,
-      active: result.structuredContent.total,
-      source: "mcp",
-    };
   } finally {
     if (headers["mcp-session-id"] && Date.now() < deadline)
       await fetch(endpoint, {
@@ -293,28 +332,6 @@ async function readThreads(
         headers,
         signal: requestSignal(),
       }).catch(() => undefined);
-  }
-}
-
-async function idle(home: string, authorizationFile?: string) {
-  if (authorizationFile) {
-    const runtime = JSON.parse(
-      NodeFS.readFileSync(NodePath.join(home, "userdata/server-runtime.json"), "utf8"),
-    );
-    const authorization = NodeFS.readFileSync(authorizationFile, "utf8").trim();
-    return readThreads(`http://127.0.0.1:${runtime.port}/mcp`, authorization, Date.now() + 20_000);
-  }
-  const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(NodePath.join(home, "userdata/statev2.sqlite"), { readOnly: true });
-  try {
-    const row = db
-      .prepare(
-        `SELECT count(*) AS count FROM orchestration_v2_projection_runs WHERE status IN (${activeStatuses.map(() => "?").join(",")})`,
-      )
-      .get(...activeStatuses);
-    return { idle: row?.count === 0, active: Number(row?.count), source: "read-only-sqlite" };
-  } finally {
-    db.close();
   }
 }
 
@@ -439,7 +456,7 @@ export async function checkLocalLink(
       NodePath.join(userdata, "secrets", `${secretName}.bin`),
       "utf8",
     );
-    await readThreads(`${result.url}/mcp`, `Bearer ${token}`, deadline, true);
+    await checkMcpResponds(`${result.url}/mcp`, `Bearer ${token}`, deadline);
     result.mcp = true;
     result.status = "passed";
   } catch (error) {
@@ -511,14 +528,8 @@ async function worker(mode: string, configFile: string, extra: string[]) {
     });
     return { installed: true, digest: config.digest };
   }
-  if (mode === "stop-runtime") {
-    const current = await runtimeHealth(config.wslHome, extra[0]!, config.environmentId);
-    if (!current.executable || !current.pid)
-      throw new Error("Runtime identity changed; refusing to stop it.");
-    process.kill(current.pid, "SIGTERM");
-    return { stopped: true, pid: current.pid };
-  }
-  if (mode === "idle") return idle(config.wslHome, config.authorizationFile);
+  if (mode === "stop-runtime")
+    return stopLocalRuntime(config.wslHome, extra[0]!, config.environmentId);
   if (mode === "health") return runtimeHealth(config.wslHome, extra[0]!, config.environmentId);
   if (mode === "stopped") {
     try {
@@ -574,10 +585,8 @@ async function main() {
       "windows-monitor": { type: "string" },
       "wsl-distro": { type: "string", default: process.env.WSL_DISTRO_NAME },
       "wsl-home": { type: "string", default: NodePath.join(NodeOS.homedir(), ".t3") },
-      "drain-minutes": { type: "string", default: "5" },
       "health-seconds": { type: "string", default: "240" },
       "notify-thread": { type: "string" },
-      "mcp-authorization-file": { type: "string" },
       full: { type: "boolean" },
       "wsl-only": { type: "boolean" },
       "plan-only": { type: "boolean" },
@@ -595,14 +604,12 @@ async function main() {
   --windows-monitor PATH      Matching release's Windows x64 monitor executable
   --wsl-distro NAME           WSL distribution (or WSL_DISTRO_NAME)
   --wsl-home PATH             Installed T3 home (default ~/.t3)
-  --drain-minutes N           Wait for active turns, then proceed (default 5, 0 skips)
   --health-seconds N          Runtime health deadline (default 240; non-migrating WSL-only capped at 45)
-  --mcp-authorization-file PATH  File containing an MCP Authorization header
   --notify-thread ID          Send the activation result after restart
   --full / --wsl-only        Force shell replacement / runtime-only update
   --plan-only                Report selection without building or Windows interop
   --installed-receipt PATH   Receipt to read instead of <install-dir>/.weavewing-local-update.json
-  --check-only, --dry-run     Build, verify, stage, drain and back up; leave install running`);
+  --check-only, --dry-run     Build, verify, stage and back up; leave install running`);
     return;
   }
   // oxlint-disable-next-line t3code/no-global-process-runtime -- This standalone WSL driver runs without an Effect runtime.
@@ -751,15 +758,9 @@ async function main() {
     if (!NodeFS.statSync(file, { throwIfNoEntry: false })?.isFile())
       throw new Error(`Required toolchain file is missing: ${file}`);
   }
-  const drainMinutes = Number(values["drain-minutes"]);
   const healthSeconds = Number(values["health-seconds"]);
-  if (
-    !Number.isFinite(drainMinutes) ||
-    drainMinutes < 0 ||
-    !Number.isFinite(healthSeconds) ||
-    healthSeconds <= 0
-  )
-    throw new Error("Drain must be nonnegative and health deadline must be positive.");
+  if (!Number.isFinite(healthSeconds) || healthSeconds <= 0)
+    throw new Error("Health deadline must be positive.");
   const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(repo, "package.json"), "utf8"));
   if (process.versions.node !== manifest.engines.node)
     throw new Error(`Run with Node ${manifest.engines.node}; found ${process.versions.node}.`);
@@ -853,7 +854,6 @@ async function main() {
       distro: values["wsl-distro"],
       wslHome: values["wsl-home"],
       node: process.execPath,
-      drainMinutes,
       healthSeconds: updatePath === "wsl-only" ? Math.min(45, healthSeconds) : healthSeconds,
       checkOnly,
       backupRoot,
@@ -866,7 +866,6 @@ async function main() {
             `${await git("rev-parse", "HEAD")}-${NodeCrypto.randomUUID()}`,
           ),
       notifyThread: values["notify-thread"],
-      authorizationFile: values["mcp-authorization-file"],
       source: await windowsPath(NodePath.join(output, "windows/win-unpacked")),
       digest: "",
       exeHash: updatePath === "wsl-only" ? (installed.exeHash ?? "") : "",

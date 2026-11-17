@@ -394,7 +394,7 @@ shared packages, and migrations require a full update. `--full` forces that path
 installs a shell that can serve loose `resources/client` assets; older shells cannot use the fast path.
 After that, web/server-only changes build the Linux runtime and client, overlay the new client files
 on the installed `resources/client` (old hashed chunks stay so an open page keeps working) and restart
-WSL without restarting Electron. The desktop serves that directory only while its `.shell-version`
+the WSL runtime without restarting Electron. The desktop serves that directory only while its `.shell-version`
 marker matches the running shell version. The desktop must already be running. Press Ctrl+Shift+R in
 Weavewing to load the new UI; the receipt records `reloadPending` and the notification says so.
 The next full update drops stale chunks. `--wsl-only` requests this path, but refuses shared wire or
@@ -402,17 +402,24 @@ any migration-named change and shells without loose-client support. The Windows 
 its previous code until the next full update. Receipts record shell and client commits separately.
 Use `--plan-only --installed-receipt /absolute/path/to/receipt.json` to inspect selection without a build.
 
-`--check-only` (also `--dry-run`) runs the selected build, archive smoke test, drain and state backups
-while leaving the installed app running. Full updates also stage Windows and probe native modules. Use a new output directory
-per run. Omit that flag to detach activation onto Windows. It waits up to `--drain-minutes N`
-(default 5, 0 skips) for active turns, then proceeds even if work remains. This wait admits new turns;
-save interactive work before its deadline. `--wsl-distro` defaults to `WSL_DISTRO_NAME` and
-`--wsl-home` to `~/.t3`. The install must already have a healthy runtime and `Start Weavewing.cmd`.
+`--check-only` (also `--dry-run`) runs the selected build, archive smoke test and state backups
+while leaving the installed app running. Full updates also stage Windows and probe native modules.
+Use a new output directory per run. Omit that flag to detach activation onto Windows.
+Activation proceeds without waiting for active turns. `--wsl-distro` defaults to `WSL_DISTRO_NAME`
+and `--wsl-home` to `~/.t3`. The install must already have a healthy runtime and `Start Weavewing.cmd`.
 
-Drain uses `t3_thread_list` across projects and subagents when `--mcp-authorization-file` names a file
-containing an existing MCP Authorization header. Without that credential, the available read-only
-path is SQLite's persisted run projection; the receipt labels it `read-only-sqlite`. Read errors keep
-the drain waiting until its deadline. Waiting-for-input turns do not hold the update open.
+The fast path sends SIGTERM to the verified WSL runtime and allows five seconds for shutdown,
+then uses SIGKILL if that same process remains. The receipt records `runtimeStop.forced`.
+Full updates close the desktop gracefully. The WSL server notices its launcher exit and shuts down without a deadline.
+The server saves restart continuation requests before stopping providers and reconciles unfinished runs.
+On startup it also recovers runs left by a forced exit. The old run is cancelled, streaming indicators
+stop, and the thread shows a shutdown or restart notice. With **Continue threads after restarts**
+enabled (the default, with per-project overrides), eligible threads receive a continuation turn using
+saved provider history. This requires a saved native session the provider can reopen. It does not
+resume an executing tool call. Provider background commands and native subagents are cancelled.
+App-owned delegated tasks retain their child threads and deliver results after recovery.
+Scheduled tasks retain their schedules and recover dispatched run history. An interrupted scheduled
+run can continue as a thread turn, while the schedule records the interrupted invocation as failed.
 
 Both paths snapshot WSL state; full updates also snapshot Windows state. They snapshot `statev2.sqlite` with SQLite's backup API in one step on a
 read-only connection, then copies settings, secrets and thread workspaces. WAL writers can continue
@@ -454,8 +461,7 @@ govern other activity. It replaces only its marked sibling `.<install-name>-cand
 `payload` path. Space or copy failure preserves the previous payload. Private state, evidence, unowned slots,
 and running candidates are refused. Activation keeps one marked `.<install-name>-local-update-rollback`
 directory containing the previous app and state snapshots, replacing only its own older rollback.
-It never force-kills a process. Check `receipt.json` and `activation.log` in the output directory after
-restart. Every PowerShell mode records exceptions as `failed` with an error message, including setup
+Check `receipt.json` and `activation.log` in the output directory after restart. Every PowerShell mode records exceptions as `failed` with an error message, including setup
 failures. The detached driver's output also points to `detached.stderr` for startup diagnostics.
 The receipt links `helpers/`, which records every helper PID at spawn.
 `--notify-thread ID` additionally sends the result and any error with `t3 thread send`, which queues
@@ -464,4 +470,4 @@ behind a running turn; the receipt's `notification` records whether it was sent.
 The staging helper remains available as `scripts/stage-windows-desktop.ps1`. Run its adjacent fixture
 test and `scripts/activate-local-desktop.test.ps1 -WorkerPath <output-directory>\worker.mjs`
 in Windows PowerShell with a Windows `node.exe` to check staging, early failure receipts, bounded
-link results, drain, rollback and backup behavior.
+link results, rollback and backup behavior.

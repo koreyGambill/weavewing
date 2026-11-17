@@ -13,6 +13,7 @@ import {
   installedReceiptPath,
   selectUpdatePath,
   runtimeHealth,
+  stopLocalRuntime,
 } from "./update-local-desktop.ts";
 
 function linkFixture(source = "wsl", target = "windows") {
@@ -245,6 +246,82 @@ it("requires the expected runtime executable and original environment identity",
     NodeFS.rmSync(home, { recursive: true, force: true });
   }
 });
+
+it.each([false, true])(
+  "stops the captured runtime with bounded grace (force=%s)",
+  async (force) => {
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "update-stop-"));
+    const runtime = NodePath.join(home, "wsl-runtime/sha256-fixture/t3");
+    NodeFS.mkdirSync(NodePath.dirname(runtime), { recursive: true });
+    NodeFS.mkdirSync(NodePath.join(home, "userdata"));
+    NodeFS.copyFileSync(process.execPath, runtime);
+    const child = NodeChildProcess.spawn(
+      runtime,
+      [
+        "-e",
+        `
+    process.on('SIGTERM', () => {
+      process.stdout.write('terminated');
+      ${force ? "" : "process.exit(0)"}
+    });
+    process.stdin.resume();
+    process.stdout.write('ready');
+  `,
+      ],
+      { stdio: "pipe" },
+    );
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.stdout!.once("data", () => resolve());
+        child.once("error", reject);
+      });
+      NodeFS.writeFileSync(
+        NodePath.join(home, "userdata/server-runtime.json"),
+        JSON.stringify({ pid: child.pid, port: 3774 }),
+      );
+      using _fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async () => Response.json({ environmentId: "original" }));
+      using signals = vi.spyOn(process, "kill");
+      await expect(stopLocalRuntime(home, "other", "original")).rejects.toThrow(
+        "identity is unknown",
+      );
+      await expect(stopLocalRuntime(home, "fixture", "replacement")).rejects.toThrow(
+        "identity is unknown",
+      );
+      expect(signals).not.toHaveBeenCalled();
+      vi.useFakeTimers();
+      const terminated = new Promise<void>((resolve) =>
+        child.stdout!.once("data", () => resolve()),
+      );
+      const stopping = stopLocalRuntime(home, "fixture", "original");
+      await terminated;
+      expect(signals.mock.calls).toEqual([[child.pid, "SIGTERM"]]);
+      if (force) {
+        await vi.advanceTimersByTimeAsync(4900);
+        expect(signals.mock.calls).toEqual([[child.pid, "SIGTERM"]]);
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      await exited;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await stopping).toEqual({ stopped: true, pid: child.pid, forced: force });
+      expect(signals.mock.calls).toEqual(
+        force
+          ? [
+              [child.pid, "SIGTERM"],
+              [child.pid, "SIGKILL"],
+            ]
+          : [[child.pid, "SIGTERM"]],
+      );
+    } finally {
+      vi.useRealTimers();
+      child.kill("SIGKILL");
+      await exited;
+      NodeFS.rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
 
 it.each([
   "packages/contracts/src/environment.ts",

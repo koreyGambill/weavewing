@@ -505,8 +505,6 @@ export function AppSidebarLayout({
           storageKey="chat_thread_sidebar_open"
           style={sidebarProviderStyle}
         >
-          {/* Fixed in place; first in the DOM so Tab starts at the title bar. */}
-          <SidebarControl showSidebar={showSidebar} />
           {showSidebar ? (
             <>
               <TitlebarWidthProbe onWidthChange={setTitlebarWidth} />
@@ -540,6 +538,9 @@ export function AppSidebarLayout({
             </>
           ) : null}
           <ToolSidebarLayout>{children}</ToolSidebarLayout>
+          {/* Electron resolves app-region rects in DOM order, so a later drag-region header
+              would swallow clicks on this fixed cluster. It must follow every titlebar. */}
+          <SidebarControl showSidebar={showSidebar} />
           <BackgroundThreadAnnouncer />
           {isElectron ? <HistorySwipeNavigation /> : null}
         </SidebarProvider>
