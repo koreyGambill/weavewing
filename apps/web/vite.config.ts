@@ -140,7 +140,8 @@ const browserTestProject = {
     browser: {
       enabled: true,
       headless: true,
-      // Detached test frames retain native shared-memory handles until V8 collects them.
+      // Caps old-space so V8 collects detached test frames, which pin native shared-memory
+      // handles, before they exhaust the browser connection.
       provider: playwright({
         launchOptions: { args: ["--js-flags=--max-old-space-size=512"] },
       }),
