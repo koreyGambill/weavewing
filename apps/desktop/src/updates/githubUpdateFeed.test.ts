@@ -29,26 +29,31 @@ const offeredRelease = async (
   feedTags: ReadonlyArray<string>,
   pointerTag: string | undefined,
   listedTag?: string | Error,
+  tagNamePrefix?: string,
+  channel: "latest" | "nightly" = "nightly",
 ) => {
   let apiScans = 0;
   const request = async ({ path = "" }: { readonly path?: string | null }) => {
+    if (path === `${REPO}/releases/latest`) return JSON.stringify({ tag_name: feedTags[0] });
     if (path === `${REPO}/releases.atom`) return atomFeed(feedTags);
     if (path === `${REPO}/releases/download/update-feed/nightly.json`) {
       if (pointerTag === undefined) throw new Error("404");
       return JSON.stringify({ tag_name: pointerTag, name: pointerTag, body: "pointer notes" });
     }
-    const manifest = /\/releases\/download\/v([^/]+)\/nightly\.yml$/.exec(path ?? "");
+    const manifest = /\/releases\/download\/(?:weavewing-)?v([^/]+)\/(?:latest|nightly)\.yml$/.exec(
+      path ?? "",
+    );
     if (manifest) return `version: ${manifest[1]}\npath: T3-Code.exe\nsha512: abc\n`;
     apiScans += 1;
     if (listedTag instanceof Error) throw listedTag;
     return JSON.stringify(listedTag ? [{ tag_name: listedTag, body: "API notes" }] : []);
   };
   const provider = new GitHubProvider(
-    { provider: "github", owner: "pingdotgg", repo: "t3code" },
+    { provider: "github", owner: "pingdotgg", repo: "t3code", tagNamePrefix },
     // Only the four fields the provider reads; a real AppUpdater needs Electron.
     {
-      allowPrerelease: true,
-      channel: "nightly",
+      allowPrerelease: channel === "nightly",
+      channel: channel === "nightly" ? "nightly" : null,
       currentVersion: semver.parse("0.1.10-nightly.20261112.4580"),
       fullChangelog: true,
     } as ProviderArgs[1],
@@ -103,5 +108,32 @@ describe("GitHubProvider nightly lookup", () => {
       releaseNotes: [{ version: nightly(4606).slice(1), note: `${nightly(4606)} feed notes` }],
       apiScans: 0,
     });
+  });
+});
+
+it("reads fork tags in feed notes, pointers and API fallback", async () => {
+  const tag = "weavewing-v0.1.10-nightly.20261112.4606";
+  expect(await offeredRelease([tag], undefined, undefined, "weavewing-v")).toEqual({
+    tag,
+    releaseNotes: [{ version: "0.1.10-nightly.20261112.4606", note: `${tag} feed notes` }],
+    apiScans: 0,
+  });
+  expect(await offeredRelease(crowdedFeed, tag, undefined, "weavewing-v")).toMatchObject({
+    tag,
+    releaseNotes: "pointer notes",
+  });
+  expect(await offeredRelease(crowdedFeed, undefined, tag, "weavewing-v")).toMatchObject({
+    tag,
+    releaseNotes: "API notes",
+    apiScans: 1,
+  });
+});
+
+it("reads a stable fork release and its notes from the actual GitHub download tag", async () => {
+  const tag = "weavewing-v1.0.0";
+  expect(await offeredRelease([tag], undefined, undefined, "weavewing-v", "latest")).toEqual({
+    tag,
+    releaseNotes: [{ version: "1.0.0", note: `${tag} feed notes` }],
+    apiScans: 0,
   });
 });

@@ -212,74 +212,85 @@ it.effect.each([
   ).pipe(Effect.provide(DesktopState.layer)),
 );
 
-it.effect("installs the build the update action downloaded, not the one it offered", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const installed = yield* Deferred.make<string>();
-      const shown = yield* Deferred.make<void>();
-      let navigate: ((event: { preventDefault: () => void }, url: string) => void) | undefined;
-      const recovery = {
-        isDestroyed: () => false,
-        loadURL: () => Promise.resolve(),
-        once: () => {},
-        webContents: {
-          setWindowOpenHandler: () => {},
-          on: (_event: string, listener: typeof navigate) => {
-            navigate = listener;
-            Deferred.doneUnsafe(shown, Effect.void);
+it.effect.each(["update", "reinstall", "releases"] as const)(
+  "runs recovery action %s against the offered build or fork releases",
+  (action) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const installed = yield* Deferred.make<string>();
+        const shown = yield* Deferred.make<void>();
+        let navigate: ((event: { preventDefault: () => void }, url: string) => void) | undefined;
+        const recovery = {
+          isDestroyed: () => false,
+          loadURL: () => Promise.resolve(),
+          once: () => {},
+          webContents: {
+            setWindowOpenHandler: () => {},
+            on: (_event: string, listener: typeof navigate) => {
+              navigate = listener;
+              Deferred.doneUnsafe(shown, Effect.void);
+            },
           },
-        },
-      } as unknown as Electron.BrowserWindow;
-      const offered = updateState({ status: "available", availableVersion: "0.1.4" });
-      const state = yield* DesktopState.DesktopState;
-      yield* listen.pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            FileSystem.layerNoop({ readFileString: () => Effect.succeed("0.1.3") }),
-            Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
-              appVersion: "0.1.3",
-              stateDir: "/task/state",
-              logDir: "/task/logs",
-              path: { join: (...parts: string[]) => parts.join("/") },
-            } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]),
-            Layer.succeed(ElectronApp.ElectronApp, {
-              on: () => Effect.void,
-            } as unknown as ElectronApp.ElectronApp["Service"]),
-            Layer.succeed(
-              ElectronShell.ElectronShell,
-              {} as ElectronShell.ElectronShell["Service"],
+        } as unknown as Electron.BrowserWindow;
+        const offered = updateState(
+          action === "update"
+            ? { status: "available", availableVersion: "0.1.4" }
+            : { status: "disabled" },
+        );
+        const state = yield* DesktopState.DesktopState;
+        yield* listen.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              FileSystem.layerNoop({ readFileString: () => Effect.succeed("0.1.2") }),
+              Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+                appVersion: "0.1.3",
+                stateDir: "/task/state",
+                logDir: "/task/logs",
+                path: { join: (...parts: string[]) => parts.join("/") },
+              } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]),
+              Layer.succeed(ElectronApp.ElectronApp, {
+                on: () => Effect.void,
+              } as unknown as ElectronApp.ElectronApp["Service"]),
+              Layer.succeed(ElectronShell.ElectronShell, {
+                openExternal: (url: string) => Deferred.succeed(installed, url).pipe(Effect.asVoid),
+              } as ElectronShell.ElectronShell["Service"]),
+              Layer.succeed(ElectronTheme.ElectronTheme, {
+                shouldUseDarkColors: Effect.succeed(false),
+              } as ElectronTheme.ElectronTheme["Service"]),
+              Layer.succeed(ElectronWindow.ElectronWindow, {
+                main: Effect.succeedNone,
+                create: () => Effect.succeed(recovery),
+              } as unknown as ElectronWindow.ElectronWindow["Service"]),
+              Layer.succeed(DesktopUpdates.DesktopUpdates, {
+                subscribe: Effect.succeed({ latest: offered, changes: Stream.empty }),
+                check: () => Effect.void,
+                getState: Effect.succeed(offered),
+                // A release published since the offer: the download fetches it instead.
+                download: Effect.succeed({
+                  accepted: true,
+                  completed: true,
+                  state: updateState({ status: "downloaded", downloadedVersion: "0.1.5" }),
+                }),
+                installPrepared: (version: string) => Deferred.succeed(installed, version),
+              } as unknown as DesktopUpdates.DesktopUpdates["Service"]),
             ),
-            Layer.succeed(ElectronTheme.ElectronTheme, {
-              shouldUseDarkColors: Effect.succeed(false),
-            } as ElectronTheme.ElectronTheme["Service"]),
-            Layer.succeed(ElectronWindow.ElectronWindow, {
-              main: Effect.succeedNone,
-              create: () => Effect.succeed(recovery),
-            } as unknown as ElectronWindow.ElectronWindow["Service"]),
-            Layer.succeed(DesktopUpdates.DesktopUpdates, {
-              subscribe: Effect.succeed({ latest: offered, changes: Stream.empty }),
-              check: () => Effect.void,
-              getState: Effect.succeed(offered),
-              // A release published since the offer: the download fetches it instead.
-              download: Effect.succeed({
-                accepted: true,
-                completed: true,
-                state: updateState({ status: "downloaded", downloadedVersion: "0.1.5" }),
-              }),
-              installPrepared: (version: string) => Deferred.succeed(installed, version),
-            } as unknown as DesktopUpdates.DesktopUpdates["Service"]),
           ),
-        ),
-      );
-      yield* SubscriptionRef.set(state.primaryBackendStartup, {
-        _tag: "Failing",
-        reason: "Server failed before readiness",
-        managedPolicy: false,
-        output: "Failure details",
-      });
-      yield* Deferred.await(shown);
-      navigate!({ preventDefault: () => {} }, "https://startup-recovery.invalid/update");
-      expect(yield* Deferred.await(installed)).toBe("0.1.5");
-    }),
-  ).pipe(Effect.provide(DesktopState.layer)),
+        );
+        yield* SubscriptionRef.set(state.primaryBackendStartup, {
+          _tag: "Failing",
+          reason: "Server failed before readiness",
+          managedPolicy: false,
+          output: "Failure details",
+        });
+        yield* Deferred.await(shown);
+        navigate!({ preventDefault: () => {} }, `https://startup-recovery.invalid/${action}`);
+        expect(yield* Deferred.await(installed)).toBe(
+          action === "update"
+            ? "0.1.5"
+            : action === "reinstall"
+              ? "https://github.com/koreyGambill/weavewing/releases/tag/weavewing-v0.1.2"
+              : "https://github.com/koreyGambill/weavewing/releases",
+        );
+      }),
+    ).pipe(Effect.provide(DesktopState.layer)),
 );

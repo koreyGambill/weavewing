@@ -15,6 +15,7 @@ import {
   type DirectoryRecord,
 } from "@electron/asar";
 
+import { DESKTOP_APP_ID, RELEASE_TAG_PREFIX } from "@t3tools/shared/releaseIdentity";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
@@ -63,7 +64,8 @@ import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+// Existing Touch ID credentials must keep their keychain namespace when the bundle ID changes.
+const MACOS_WEBAUTHN_KEYCHAIN_SUFFIX = "com.t3tools.t3code.webauthn";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -1256,7 +1258,9 @@ function normalizePasskeyRpDomain(value: string): string {
 
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
-): MacPasskeySigningConfiguration {
+): MacPasskeySigningConfiguration | undefined {
+  if (!env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() && !env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim())
+    return undefined;
   const teamId = env.T3CODE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
   if (!APPLE_TEAM_ID_PATTERN.test(teamId)) {
     throw new InvalidAppleTeamIdError({ teamId });
@@ -1337,10 +1341,10 @@ const readProfileEntitlements = (provisioningProfile: string) => {
 
 export function resolveMacWebAuthnEntitlements(
   provisioningProfile: string,
-  configuration: Pick<MacPasskeySigningConfiguration, "appId" | "teamId">,
+  configuration: Pick<MacPasskeySigningConfiguration, "teamId">,
 ): MacWebAuthnEntitlements {
   const entitlements = readProfileEntitlements(provisioningProfile);
-  const keychainAccessGroup = `${configuration.teamId}.${configuration.appId}.webauthn`;
+  const keychainAccessGroup = `${configuration.teamId}.${MACOS_WEBAUTHN_KEYCHAIN_SUFFIX}`;
   const keychainGroupAuthorized = (entitlements?.["keychain-access-groups"] ?? []).some((group) =>
     group.endsWith("*")
       ? keychainAccessGroup.startsWith(group.slice(0, -1))
@@ -2717,6 +2721,7 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
     provider: "github",
     owner,
     repo,
+    tagNamePrefix: RELEASE_TAG_PREFIX,
     releaseType: updateChannel === "nightly" ? "prerelease" : "release",
     ...(updateChannel === "nightly" ? { channel: "nightly" as const } : {}),
   };
@@ -2944,7 +2949,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     buildConfig.deb = {
       // FPM runs outside the staged app directory, so source paths must be absolute.
       fpm: [
-        `${path.join(repoRoot, "apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml")}=/usr/share/metainfo/com.t3tools.t3code.metainfo.xml`,
+        `${path.join(repoRoot, "apps/desktop/resources/linux/dev.weavewing.desktop.metainfo.xml")}=/usr/share/metainfo/dev.weavewing.desktop.metainfo.xml`,
         `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/t3code/copyright`,
       ],
       // Debian 13 and Ubuntu 24.04 use 64-bit-time names; retain old-name fallbacks.

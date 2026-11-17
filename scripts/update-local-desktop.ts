@@ -9,6 +9,11 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import * as NodeURL from "node:url";
 
+/** Local installs update through desktop-install and must never poll a public release feed. */
+export function localDesktopBuildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, T3CODE_DESKTOP_UPDATE_REPOSITORY: "", GITHUB_REPOSITORY: "" };
+}
+
 const activeStatuses = ["preparing", "queued", "starting", "running"];
 // The ownership database holds a lifetime lock and must never enter a backup.
 const stateFiles = [
@@ -784,14 +789,13 @@ async function main() {
     for (const name of ["vp", "vpr", "vpx", "node", "yarn", "yarnpkg", "bun", "bunx"])
       NodeFS.symlinkSync(vp, NodePath.join(bin, name));
     const env = {
-      ...process.env,
+      ...localDesktopBuildEnvironment(process.env),
       VP_HOME: vpHome,
       VP_NODE_VERSION: manifest.engines.node,
       PATH: [bin, values["patchelf-dir"], NodePath.join(vpHome, "fallback-bin"), process.env.PATH]
         .filter(Boolean)
         .join(NodePath.delimiter),
       T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true",
-      T3CODE_DESKTOP_UPDATE_REPOSITORY: "koreyGambill/t3code",
     };
     const buildTimings: Array<{ command: string; milliseconds: number }> = [];
     const build = async (command: string, args: string[], cwd = repo) => {

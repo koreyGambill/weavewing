@@ -475,6 +475,10 @@
       "types": "./src/hostClassification.ts",
       "import": "./src/hostClassification.ts"
     },
+    "./releaseIdentity": {
+      "types": "./src/releaseIdentity.ts",
+      "import": "./src/releaseIdentity.ts"
+    },
     "./cliRelease": {
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"

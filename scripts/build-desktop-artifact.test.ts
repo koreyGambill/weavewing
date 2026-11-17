@@ -72,6 +72,7 @@ import {
   ReleasePackageManifestError,
   releasePackageFiles,
 } from "./update-release-package-versions.ts";
+import { localDesktopBuildEnvironment } from "./update-local-desktop.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
@@ -540,19 +541,81 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(release.publish, [
         {
           provider: "github",
-          owner: "pingdotgg",
-          repo: "t3code",
+          owner: "koreyGambill",
+          repo: "weavewing",
+          tagNamePrefix: "weavewing-v",
           releaseType: "release",
         },
       ]);
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(
-          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "pingdotgg/t3code" } }),
+          ConfigProvider.fromEnv({
+            env: {
+              T3CODE_DESKTOP_UPDATE_REPOSITORY: "koreyGambill/weavewing",
+              GITHUB_REPOSITORY: "pingdotgg/t3code",
+            },
+          }),
         ),
       ),
     ),
   );
+
+  it.effect("keeps local builds off every feed, including inherited GitHub config", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "win",
+        "nsis",
+        "1.0.0",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.isNull(config.publish);
+      assert.equal(config.appId, "dev.weavewing.desktop");
+      assert.equal(config.productName, "Weavewing");
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: localDesktopBuildEnvironment({
+              T3CODE_DESKTOP_UPDATE_REPOSITORY: "koreyGambill/weavewing",
+              GITHUB_REPOSITORY: "koreyGambill/weavewing",
+            }),
+          }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("allows unsigned and signed macOS builds without passkey entitlements", () =>
+    Effect.gen(function* () {
+      for (const signed of [false, true]) {
+        const config = yield* createBuildConfig(
+          "mac",
+          "dmg",
+          "1.0.0",
+          signed,
+          false,
+          undefined,
+          undefined,
+        );
+        const mac = config.mac as Record<string, unknown>;
+        assert.equal(config.appId, "dev.weavewing.desktop");
+        assert.notProperty(mac, "provisioningProfile");
+        assert.notProperty(mac, "entitlements");
+        assert.equal(typeof mac.sign, signed ? "string" : "undefined");
+      }
+    }),
+  );
+
+  it("omits macOS passkey signing configuration when Clerk is absent", () => {
+    assert.isUndefined(resolveMacPasskeySigningConfiguration({}));
+    assert.isUndefined(
+      resolveMacPasskeySigningConfiguration({ T3CODE_APPLE_TEAM_ID: "ABC1234567" }),
+    );
+  });
 
   it.effect("names the Electron window class in the Linux desktop entry", () =>
     Effect.gen(function* () {
@@ -1564,7 +1627,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "dev.weavewing.desktop",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1578,6 +1641,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       T3CODE_CLERK_PASSKEY_RP_DOMAINS:
         " Clerk.Example.com,example.clerk.accounts.dev,clerk.example.com ",
     });
+    assert.ok(configuration);
     const entitlements = renderMacPasskeyEntitlements(configuration, {
       touchIdKeychainAccessGroup: undefined,
       browserPasskeys: false,
@@ -1587,7 +1651,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.dev.weavewing.desktop</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1597,8 +1661,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.notInclude(entitlements, "com.apple.developer.web-browser.public-key-credential");
   });
 
-  it("grants in-app browser passkey entitlements only when the provisioning profile does", () => {
-    const configuration = { appId: "com.t3tools.t3code", teamId: "ABC1234567" };
+  it("preserves the Touch ID keychain group and requires the profile to authorize it", () => {
+    const configuration = { appId: "dev.weavewing.desktop", teamId: "ABC1234567" };
     const profile = (entitlements: string, outside = "") =>
       `0\x82\x1f\x9a\x06\t*\x86H<?xml version="1.0"?><plist version="1.0"><dict>${outside}<key>Entitlements</key><dict>${entitlements}</dict></dict></plist>\x00\x01`;
     const teamWildcardGroups = `<key>keychain-access-groups</key>

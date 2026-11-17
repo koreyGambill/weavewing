@@ -50,6 +50,10 @@ describe("DesktopEnvironment", () => {
         resourcesPath: "/install/resources",
       });
 
+      assert.equal(environment.appUserModelId, "dev.weavewing.desktop");
+      assert.equal(environment.baseDir, "/Users/alice/.t3");
+      assert.equal(environment.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(environment.appDataDirectory, "/Users/alice/AppData/Roaming");
       assert.equal(environment.appRoot, "/install/resources/app.asar");
       assert.equal(environment.serverRoot, "/install/resources/server.asar");
       assert.equal(
