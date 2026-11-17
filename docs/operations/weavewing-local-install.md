@@ -39,10 +39,13 @@ live in the maintainer's private notes. See
 
    Activation verifies the original installed receipt, commit, update path and artifact digests.
    If the install or prepared content changed, prepare again. Preparation compares the installed runtime
-   commit's migration files and registry with the candidate. Activation skips the large WSL database
-   copy only when those sets match. New or changed migrations, unknown installed history and unreadable
-   migration sets require the copy. Small state files such as settings, secrets, environment identity
-   and thread workspaces are always backed up. Full updates also back up Windows state.
+   commit's migration files, registry and startup migration helpers with the candidate, plus the
+   resolved Effect version. Activation reads the live database's migration records read-only and
+   verifies the receipt's runtime digest. It skips the large WSL database copy only when both the
+   source inputs and live migration records match. New or changed migrations, unknown history,
+   mismatched runtime provenance or unreadable migration records require the copy. Skipping it also
+   leaves no manual-recovery database snapshot for that install. Small state files such as settings,
+   secrets, environment identity and thread workspaces are always backed up. Full updates also back up Windows state.
    Activation uses the staged files without rebuilding. `prepare-timing.json` records preparation time
    and cache reuse.
    `receipt.json` records activation's `durationMilliseconds` and the database copy's result and reason
@@ -86,9 +89,11 @@ on the same database. Automatic rollback restores the app, not a database snapsh
   The update rolls back the app but the database stays migrated; a retry
   verifies.
 - Preparation retries Windows interop launch errors up to three times. A staging timeout stops the
-  run because staging may still be active. Only idempotent probes and cleanup retry timeouts.
-  Activation gives each backup its full operation budget after WSL responsiveness retries. A timed-out health operation gets
-  at most three attempts within 90 seconds. The updater refuses to stop an unverified runtime. If all
+  run because staging may still be active. Only idempotent probes retry timeouts. Cleanup retries
+  launch errors only.
+  Activation gives each backup its full operation budget after WSL responsiveness retries. A timed-out
+  health operation gets at most three attempts within 90 seconds. The updater refuses to stop an
+  unverified runtime. If all
   attempts fail, ask the maintainer to repair WSL before retrying. Do not restart WSL yourself.
 - The resource-monitor helpers must come from a release whose
   `native/resource-monitor` matches `HEAD`. After an upstream merge changes it,

@@ -573,6 +573,11 @@ it("backs up the database unless installed and candidate migrations are provably
     const persistence = NodePath.join(root, "apps/server/src/persistence");
     NodeFS.mkdirSync(NodePath.join(persistence, "Migrations"), { recursive: true });
     NodeFS.writeFileSync(NodePath.join(persistence, "Migrations.ts"), "registry");
+    const lockfile = NodePath.join(root, "pnpm-lock.yaml");
+    NodeFS.writeFileSync(
+      lockfile,
+      "importers:\n  apps/server:\n    dependencies:\n      effect:\n        specifier: 4.1.3\n        version: 4.1.3\n",
+    );
     const migration = NodePath.join(persistence, "Migrations/001_Initial.ts");
     NodeFS.writeFileSync(migration, "initial");
     const installed = await commit();
@@ -591,6 +596,36 @@ it("backs up the database unless installed and candidate migrations are provably
         required: true,
         reason: "installed-history-unavailable",
       });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Sqlite.ts"), "startup migration helper");
+    const startup = await commit();
+    expect(await databaseBackupDecision(git, unchanged, startup)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.appendFileSync(lockfile, "      other: 1.0.0\n");
+    const unrelatedDependency = await commit();
+    expect(await databaseBackupDecision(git, startup, unrelatedDependency)).toMatchObject({
+      required: false,
+    });
+    NodeFS.writeFileSync(
+      lockfile,
+      NodeFS.readFileSync(lockfile, "utf8").replaceAll("4.1.3", "4.1.4"),
+    );
+    const effectChanged = await commit();
+    expect(await databaseBackupDecision(git, unrelatedDependency, effectChanged)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.rmSync(lockfile);
+    const unknownEffect = await commit();
+    expect(await databaseBackupDecision(git, unknownEffect, unknownEffect)).toMatchObject({
+      required: true,
+      reason: "migration-set-unavailable",
+    });
+    NodeFS.writeFileSync(
+      lockfile,
+      "importers:\n  apps/server:\n    dependencies:\n      effect:\n        specifier: 4.1.3\n        version: 4.1.3\n",
+    );
     NodeFS.writeFileSync(NodePath.join(persistence, "Migrations/002_New.ts"), "new migration");
     const added = await commit();
     expect(await databaseBackupDecision(git, installed, added)).toMatchObject({

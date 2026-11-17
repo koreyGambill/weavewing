@@ -166,6 +166,70 @@ async function snapshot(database: string, destination: string) {
   }
 }
 
+async function liveDatabaseBackupDecision(
+  config: {
+    databaseBackup?: { required: boolean; reason: string; installedCommit?: string };
+    installedReceipt?: string;
+    installedRuntimeArchive?: string;
+  },
+  database: string,
+) {
+  const prepared = config.databaseBackup;
+  if (prepared?.required !== false || prepared.reason !== "migration-set-unchanged")
+    return prepared;
+  try {
+    const receipt = JSON.parse(NodeFS.readFileSync(config.installedReceipt!, "utf8"));
+    if (
+      !prepared.installedCommit ||
+      receipt.commit !== prepared.installedCommit ||
+      !receipt.digest ||
+      receipt.digest !== fileDigest(config.installedRuntimeArchive!)
+    )
+      throw new Error("Installed runtime provenance changed");
+  } catch {
+    return { required: true, reason: "installed-runtime-unverified" };
+  }
+  try {
+    const { recordedMigrations, migrationManifest } = await import(
+      new URL("./database-migrations.mjs", import.meta.url).href
+    );
+    const recorded = recordedMigrations(database);
+    if (recorded === null || !Array.isArray(migrationManifest) || migrationManifest.length === 0)
+      throw new Error("Database migration history unavailable");
+    if (
+      JSON.stringify(recorded.map(({ id, name }: { id: number; name: string }) => [id, name])) !==
+      JSON.stringify(migrationManifest)
+    )
+      return { required: true, reason: "database-migrations-differ" };
+    return prepared;
+  } catch {
+    return { required: true, reason: "database-migrations-unavailable" };
+  }
+}
+
+/** Packages the candidate's read-only migration reader without repository runtime dependencies. */
+export async function writeLocalUpdateWorker(repo: string, output: string) {
+  const persistence = NodePath.join(repo, "apps/server/src/persistence");
+  const { recordedMigrations } = await import(
+    NodeURL.pathToFileURL(NodePath.join(persistence, "databaseMigrationHead.ts")).href
+  );
+  const { migrationManifest } = await import(
+    NodeURL.pathToFileURL(NodePath.join(persistence, "Migrations.ts")).href
+  );
+  NodeFS.writeFileSync(
+    NodePath.join(output, "database-migrations.mjs"),
+    `import * as NodeFS from "node:fs";\nimport * as NodeSqlite from "node:sqlite";\n` +
+      `export const migrationManifest = ${JSON.stringify(migrationManifest)};\n` +
+      `export ${recordedMigrations.toString()}\n`,
+  );
+  NodeFS.writeFileSync(
+    NodePath.join(output, "worker.mjs"),
+    NodeModule.stripTypeScriptTypes(
+      NodeFS.readFileSync(NodeURL.fileURLToPath(import.meta.url), "utf8"),
+    ),
+  );
+}
+
 async function backupState(
   source: string,
   destination: string,
@@ -235,6 +299,7 @@ export async function databaseBackupDecision(
     await git("merge-base", "--is-ancestor", installedCommit, candidateCommit);
     const paths = [
       "apps/server/src/persistence/Migrations.ts",
+      "apps/server/src/persistence/Sqlite.ts",
       "apps/server/src/persistence/Migrations",
       "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
       "apps/server/src/persistence/initializeV2Database.ts",
@@ -247,7 +312,13 @@ export async function databaseBackupDecision(
         !/\tapps\/server\/src\/persistence\/Migrations\/\d+_[^\n]+\.ts/.test(tree)
       )
         throw new Error("Migration set unavailable");
-      return tree;
+      const lock = await git("show", `${commit}:pnpm-lock.yaml`);
+      const server = lock.match(/^  apps\/server:\n((?: {4}[^\n]*(?:\n|$)|\n)*)/m)?.[1];
+      const effect = server?.match(
+        /^      effect:\n        specifier: [^\n]+\n        version: ([^\n]+)$/m,
+      )?.[1];
+      if (!effect) throw new Error("Migration engine version unavailable");
+      return JSON.stringify([tree, effect]);
     };
     decision.reason = "migration-set-unavailable";
     const installed = await migrationSet(installedCommit);
@@ -647,7 +718,10 @@ async function worker(mode: string, configFile: string, extra: string[]) {
       NodePath.join(config.wslHome, "userdata"),
       destination,
       config.backupTimeoutMs,
-      config.databaseBackup,
+      await liveDatabaseBackupDecision(
+        config,
+        NodePath.join(config.wslHome, "userdata/statev2.sqlite"),
+      ),
     );
     // Keep only this update's backup, matching the single Windows rollback.
     const parent = NodePath.dirname(config.wslBackupRoot);
@@ -965,25 +1039,23 @@ export async function prunePreparedOutputs(
       );
       if (config.updatePath === "full") {
         const windows = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
-        await retryPreparationInterop(
-          async () =>
-            run(
-              "powershell.exe",
-              [
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                await windows(NodePath.join(directory, "activate.ps1")),
-                "-ConfigPath",
-                await windows(NodePath.join(directory, "config.json")),
-                "-Mode",
-                "Discard",
-              ],
-              { stdio: "pipe", timeout: 120_000 },
-            ),
-          true,
+        await retryPreparationInterop(async () =>
+          run(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              await windows(NodePath.join(directory, "activate.ps1")),
+              "-ConfigPath",
+              await windows(NodePath.join(directory, "config.json")),
+              "-Mode",
+              "Discard",
+            ],
+            { stdio: "pipe", timeout: 120_000 },
+          ),
         );
       }
       const evidence = NodePath.join(evidenceRoot, NodePath.basename(directory));
@@ -1289,12 +1361,7 @@ async function main() {
       NodePath.join(repo, "scripts/stage-windows-desktop.ps1"),
       NodePath.join(output, "stage-windows-desktop.ps1"),
     );
-    NodeFS.writeFileSync(
-      NodePath.join(output, "worker.mjs"),
-      NodeModule.stripTypeScriptTypes(
-        NodeFS.readFileSync(NodeURL.fileURLToPath(import.meta.url), "utf8"),
-      ),
-    );
+    await writeLocalUpdateWorker(repo, output);
     const candidateName = `.${name}-prepared-${NodeCrypto.createHash("sha256").update(output).digest("hex").slice(0, 16)}`;
     const candidate = NodePath.win32.join(parent, candidateName);
     const config = {
@@ -1310,6 +1377,12 @@ async function main() {
       clientCommit: await git("rev-parse", "HEAD"),
       clientAssetsDirectory: "resources/client",
       clientSource: await windowsPath(NodePath.join(output, "client")),
+      installedReceipt: installedFile,
+      installedRuntimeArchive: await run(
+        "wslpath",
+        ["-u", NodePath.win32.join(values["install-dir"]!, "resources/wsl-runtime.tar.gz")],
+        { stdio: "pipe" },
+      ),
       previousDigest: installed.digest,
       environmentId: NodeFS.readFileSync(
         NodePath.join(values["wsl-home"]!, "userdata/environment-id"),
@@ -1498,6 +1571,7 @@ async function main() {
         configFile,
         NodePath.join(output, "installed-digests.json"),
         NodePath.join(output, "worker.mjs"),
+        NodePath.join(output, "database-migrations.mjs"),
         NodePath.join(output, "stage-windows-desktop.ps1"),
         NodePath.join(output, "runtime-install.sh"),
         ...(updatePath === "full" ? [NodePath.join(output, "staged-digests.json")] : []),

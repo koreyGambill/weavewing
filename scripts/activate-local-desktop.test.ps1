@@ -10,6 +10,30 @@ function Must-Fail($action) {
 $root = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $root | Out-Null
 try {
+  $ledgerScript = Join-Path $root 'ledger-fixture.mjs'
+  @'
+import { DatabaseSync } from 'node:sqlite';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [file, worker, scenario] = process.argv.slice(2);
+const { migrationManifest } = await import(pathToFileURL(path.join(path.dirname(worker), 'database-migrations.mjs')).href);
+if (scenario === 'unreadable-db') fs.writeFileSync(file, 'not sqlite');
+else {
+  const db = new DatabaseSync(file);
+  db.exec("CREATE TABLE saved(value TEXT); INSERT INTO saved VALUES ('same-live-database')");
+  if (scenario !== 'missing-ledger') {
+    db.exec("CREATE TABLE effect_sql_migrations (migration_id INTEGER PRIMARY KEY, name TEXT)");
+    const insert = db.prepare('INSERT INTO effect_sql_migrations VALUES (?, ?)');
+    for (const [id, name] of migrationManifest) {
+      if (scenario === 'older-db' && id === migrationManifest.at(-1)[0]) continue;
+      insert.run(id, scenario === 'renamed-db' && id === 1 ? 'Other' : name);
+    }
+    if (scenario === 'newer-db') insert.run(migrationManifest.at(-1)[0] + 1, 'Future');
+  }
+  db.close();
+}
+'@ | Set-Content $ledgerScript
   foreach ($mode in @('Preflight', 'Prepare', 'Launch', 'Activate')) {
     foreach ($failure in @('config', 'startup')) {
       $fixture = Join-Path $root ("early-$mode-$failure")
@@ -311,7 +335,13 @@ try {
       $config.databaseBackup = @{ required = $false; reason = 'migration-set-unchanged' }
       $fixtureHome = Join-Path $fixture 'home'
       New-Item -ItemType Directory -Path (Join-Path $fixtureHome 'userdata') | Out-Null
-      Set-Content (Join-Path $fixtureHome 'userdata/statev2.sqlite') 'same-live-database'
+      & $NodeExecutable $ledgerScript (Join-Path $fixtureHome 'userdata/statev2.sqlite') $WorkerPath 'matching-db'
+      Assert ($LASTEXITCODE -eq 0) 'Rollback fixture database setup failed'
+      $databaseHash = (Get-FileHash (Join-Path $fixtureHome 'userdata/statev2.sqlite') -Algorithm SHA256).Hash
+      $config.databaseBackup.installedCommit = 'installed-commit'
+      $config.installedReceipt = Join-Path $fixture 'installed-receipt.json'
+      $config.installedRuntimeArchive = Join-Path $resources 'wsl-runtime.tar.gz'
+      @{ commit = 'installed-commit'; digest = $oldDigest } | ConvertTo-Json | Set-Content $config.installedReceipt
       $config.wslHome = $fixtureHome
       $config.wslBackupRoot = Join-Path $fixture 'wsl-backup'
     }
@@ -354,7 +384,7 @@ try {
       $exited = $false
       if ($FilePath.EndsWith('Weavewing.exe') -and -not $ArgumentList) {
         $calls.starts++
-        if ($case -eq 'no-db-rollback') { Assert ((Get-Content (Join-Path $fixtureHome 'userdata/statev2.sqlite')) -eq 'same-live-database') 'Relaunch lost the original database' }
+        if ($case -eq 'no-db-rollback') { Assert ((Get-FileHash (Join-Path $fixtureHome 'userdata/statev2.sqlite') -Algorithm SHA256).Hash -eq $databaseHash) 'Relaunch lost the original database' }
         $calls.launcherVariables += $env:T3CODE_FIXTURE_LAUNCHER
         Assert ($RedirectStandardOutput.StartsWith($fixture) -and $RedirectStandardError -and $RedirectStandardInput) 'Desktop output was not captured locally'
         $exited = $case -in @('desktop-exits', 'desktop-handoff') -and $calls.starts -eq 1
@@ -387,7 +417,7 @@ try {
         if ($case -eq 'stopped-transient') { throw 'notify exceeded 30s' }
       }
       if ($label -eq 'backup' -and $case -eq 'no-db-rollback') {
-        $backupConfig = @{ wslHome = $fixtureHome; output = $fixture; wslBackupRoot = (Join-Path $fixture 'wsl-backup'); databaseBackup = $config.databaseBackup }
+        $backupConfig = @{ wslHome = $fixtureHome; output = $fixture; wslBackupRoot = (Join-Path $fixture 'wsl-backup'); databaseBackup = $config.databaseBackup; installedReceipt = $config.installedReceipt; installedRuntimeArchive = $config.installedRuntimeArchive }
         $backupConfigFile = Join-Path $fixture 'backup-worker-config.json'
         $backupConfig | ConvertTo-Json | Set-Content $backupConfigFile
         $result = & $NodeExecutable $WorkerPath --worker backup $backupConfigFile | ConvertFrom-Json
@@ -446,7 +476,7 @@ try {
       Assert ($receipt.installed -eq 'previous' -and $receipt.rollbackHealthy -and $calls.starts -eq 2) 'No-DB rollback did not restart the old build'
       Assert ($receipt.wslBackup.databaseBackup.ran -eq $false -and $receipt.wslBackup.databaseBackup.reason -eq 'migration-set-unchanged') 'No-DB rollback receipt lost backup decision'
       Assert (-not (Test-Path (Join-Path $receipt.wslBackup.path 'statev2.sqlite'))) 'No-DB rollback had a database copy'
-      Assert ((Get-Content (Join-Path $fixtureHome 'userdata/statev2.sqlite')) -eq 'same-live-database') 'No-DB rollback changed the database'
+      Assert ((Get-FileHash (Join-Path $fixtureHome 'userdata/statev2.sqlite') -Algorithm SHA256).Hash -eq $databaseHash) 'No-DB rollback changed the database'
     } elseif ($case -eq 'prestop-retry') {
       Assert ($receipt.status -eq 'verified' -and $calls.starts -eq 1) 'Retry after pre-stop failure did not activate successfully'
     } elseif ($case -eq 'installed-changed') {
@@ -598,9 +628,59 @@ lock.close();
   Assert ((Get-Content (Join-Path $backup 'secrets/fixture')) -eq 'secret') 'Secrets missing'
   Assert ((Get-Content (Join-Path $backup 'thread-workspaces/fixture')) -eq 'workspace') 'Workspace missing'
   Assert (-not (Test-Path (Join-Path $backup 'server-owner.sqlite'))) 'Ownership lock entered backup'
+  $installedArchive = Join-Path $root 'installed-runtime.tar.gz'
+  Set-Content $installedArchive 'installed-runtime'
+  $installedReceipt = Join-Path $root 'installed-receipt.json'
+  $installedDigest = (Get-FileHash $installedArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+  foreach ($ledgerCase in @('older-db', 'newer-db', 'renamed-db', 'unreadable-db', 'missing-ledger', 'digest-mismatch', 'missing-receipt', 'receipt-commit-mismatch', 'missing-reader', 'matching-db')) {
+    $ledgerRoot = Join-Path $root $ledgerCase
+    $ledgerHome = Join-Path $ledgerRoot 'home'
+    $ledgerUserdata = Join-Path $ledgerHome 'userdata'
+    New-Item -ItemType Directory -Path $ledgerUserdata -Force | Out-Null
+    & $NodeExecutable $ledgerScript (Join-Path $ledgerUserdata 'statev2.sqlite') $WorkerPath $ledgerCase
+    Assert ($LASTEXITCODE -eq 0) 'Ledger fixture setup failed'
+    $ledgerDatabaseHash = (Get-FileHash (Join-Path $ledgerUserdata 'statev2.sqlite') -Algorithm SHA256).Hash
+    @{ commit = $(if ($ledgerCase -eq 'receipt-commit-mismatch') { 'other-commit' } else { 'installed-commit' }); digest = $(if ($ledgerCase -eq 'digest-mismatch') { 'wrong' } else { $installedDigest }) } | ConvertTo-Json | Set-Content $installedReceipt
+    if ($ledgerCase -eq 'missing-receipt') { Remove-Item $installedReceipt }
+    $ledgerConfig = @{ wslHome = $ledgerHome; output = $root; wslBackupRoot = $ledgerRoot; installedReceipt = $installedReceipt; installedRuntimeArchive = $installedArchive; databaseBackup = @{ required = $false; reason = 'migration-set-unchanged'; installedCommit = 'installed-commit' } }
+    $ledgerConfig | ConvertTo-Json -Depth 5 | Set-Content $configPath
+    $ledgerWorker = $WorkerPath
+    if ($ledgerCase -eq 'missing-reader') {
+      $ledgerWorker = Join-Path $ledgerRoot 'worker.mjs'
+      Copy-Item $WorkerPath $ledgerWorker
+    }
+    try {
+      $ErrorActionPreference = 'Continue'
+      & $NodeExecutable $ledgerWorker --worker backup $configPath 2> (Join-Path $ledgerRoot 'backup.stderr') | Set-Content (Join-Path $ledgerRoot 'result.json')
+      $ledgerCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
+    Assert ((Get-FileHash (Join-Path $ledgerUserdata 'statev2.sqlite') -Algorithm SHA256).Hash -eq $ledgerDatabaseHash) 'Migration probe modified the live database'
+    if ($ledgerCase -eq 'unreadable-db') {
+      Assert ($ledgerCode -ne 0 -and -not (Test-Path (Join-Path $ledgerRoot 'backup-wsl'))) 'Unreadable database did not fail safely'
+      Write-Host "PASS case: live-ledger-$ledgerCase"
+      continue
+    }
+    Assert ($ledgerCode -eq 0) "Ledger backup failed: $ledgerCase"
+    $ledgerResult = Get-Content (Join-Path $ledgerRoot 'result.json') -Raw | ConvertFrom-Json
+    $shouldCopy = $ledgerCase -ne 'matching-db'
+    Assert ($ledgerResult.databaseBackup.ran -eq $shouldCopy) "Unsafe database-copy decision: $ledgerCase"
+    $expectedReason = switch ($ledgerCase) {
+      { $_ -in @('digest-mismatch', 'missing-receipt', 'receipt-commit-mismatch') } { 'installed-runtime-unverified' }
+      'missing-reader' { 'database-migrations-unavailable' }
+      'matching-db' { 'migration-set-unchanged' }
+      default { 'database-migrations-differ' }
+    }
+    Assert ($ledgerResult.databaseBackup.reason -eq $expectedReason) "Wrong database-copy reason: $ledgerCase"
+    Assert ((Test-Path (Join-Path $ledgerRoot 'backup-wsl/statev2.sqlite')) -eq $shouldCopy) "Database snapshot disagrees with receipt: $ledgerCase"
+    Write-Host "PASS case: live-ledger-$ledgerCase"
+  }
+  & $NodeExecutable $ledgerScript (Join-Path $userdata 'ledger.sqlite') $WorkerPath 'matching-db'
+  Assert ($LASTEXITCODE -eq 0) 'Skip fixture setup failed'
+  Move-Item (Join-Path $userdata 'ledger.sqlite') (Join-Path $userdata 'statev2.sqlite') -Force
+  @{ commit = 'installed-commit'; digest = $installedDigest } | ConvertTo-Json | Set-Content $installedReceipt
   $skipRoot = Join-Path $root 'skip-state'
   New-Item -ItemType Directory -Path $skipRoot | Out-Null
-  @{ wslHome = $fixtureHome; output = $root; wslBackupRoot = $skipRoot; backupTimeoutMs = 0; databaseBackup = @{ required = $false; reason = 'migration-set-unchanged' } } | ConvertTo-Json | Set-Content $configPath
+  @{ wslHome = $fixtureHome; output = $root; wslBackupRoot = $skipRoot; backupTimeoutMs = 0; installedReceipt = $installedReceipt; installedRuntimeArchive = $installedArchive; databaseBackup = @{ required = $false; reason = 'migration-set-unchanged'; installedCommit = 'installed-commit' } } | ConvertTo-Json | Set-Content $configPath
   & $NodeExecutable $WorkerPath --worker backup $configPath | Set-Content (Join-Path $root 'skip-result.json')
   Assert ($LASTEXITCODE -eq 0) 'No-migration backup attempted a database snapshot'
   $skipResult = Get-Content (Join-Path $root 'skip-result.json') -Raw | ConvertFrom-Json
