@@ -54,6 +54,8 @@ const fakeCli = (source = 'process.stdout.write("muse 1.0.3-R2198.1\\n");') =>
     return writeFakeCli({ directory, name: "muse", source });
   });
 
+const HOST_PATH = process.env.PATH;
+
 it.layer(NodeServices.layer)("Muse status", (it) => {
   it.effect("does not expose CLI stderr or start an SDK host after a failed version check", () =>
     Effect.gen(function* () {
@@ -125,7 +127,7 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
       const createHost = vi.fn(async () => makeHost(metaCatalog));
       yield* checkMuseProviderStatus(
         settings({ enabled: true, binaryPath }),
-        { PATH: process.env.PATH, META_API_KEY: "instance-key" },
+        { PATH: HOST_PATH, META_API_KEY: "instance-key" },
         undefined,
         createHost,
       );
