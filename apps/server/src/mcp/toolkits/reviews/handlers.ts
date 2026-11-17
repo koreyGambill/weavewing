@@ -138,7 +138,7 @@ export const layer = McpToolAccess.toLayer(ReviewToolkit, {
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
-        const { projection, caller } = yield* readThread(input.threadId);
+        const { projection } = yield* readThread(input.threadId);
         const thread = projection.thread;
         const evidence = yield* EvidenceService.EvidenceService;
         return yield* evidence
