@@ -8,6 +8,8 @@ import {
   parseTileLayout,
   resizeFloatingTile,
   syncTileLayout,
+  clampTileWidths,
+  tileMinimumWidth,
 } from "./threadTileLayout";
 
 describe("thread tile layout", () => {
@@ -63,6 +65,8 @@ describe("thread tile layout", () => {
     expect(resize(rect, { left: true, bottom: true }, { x: 0.5, y: -0.5 })).toEqual([
       0.4, 0.2, 0.2, 0.2,
     ]);
+    expect(resize(rect, { left: true }, { x: 0.5, y: 0 }, 500)).toEqual([0.15, 0.2, 0.45, 0.4]);
+    expect(resize(rect, { right: true }, { x: -1, y: 0 }, 500)).toEqual([0.2, 0.2, 0.45, 0.4]);
     const firstFloat = (...args: Parameters<typeof firstFloatingTile>) =>
       Object.fromEntries(
         Object.entries(firstFloatingTile(...args)).map(([key, value]) => [
@@ -643,6 +647,33 @@ describe("thread tile layout", () => {
     expect(layout.maximizedGroupId).toBe("panels-group");
     layout = applyTileAction(layout, { type: "resize", splitId: "initial-split", ratio: 0.7 });
     expect(layout.root.kind === "split" && layout.root.ratio).toBe(0.7);
+    for (const [width, ratio, expected] of [
+      [1000, 0.01, 0.224],
+      [1000, 0.99, 0.776],
+      [500, 0.7, 0.552],
+      [300, 0.7, 0.5],
+    ] as const) {
+      const resized = applyTileAction(layout, {
+        type: "resize",
+        splitId: "initial-split",
+        ratio,
+      });
+      const root = clampTileWidths(resized.root, width);
+      expect(root.kind === "split" && root.ratio).toBeCloseTo(expected);
+      expect(tileMinimumWidth(root)).toBe(448);
+    }
+    const nested = applyTileAction(layout, {
+      type: "new-group",
+      targetGroupId: "panels-group",
+      groupId: "third",
+      splitId: "nested",
+      axis: "horizontal",
+      side: "after",
+    });
+    const root = clampTileWidths(nested.root, 400);
+    expect(tileMinimumWidth(root)).toBe(672);
+    expect(root.kind === "split" && root.ratio).toBeCloseTo(1 / 3);
+
     layout = syncTileLayout(layout, ["a"], [], null, false);
     expect(getTileGroups(layout).map((group) => group.tabs)).toEqual([[CONVERSATION_TAB_ID]]);
     expect(layout.maximizedGroupId).toBeNull();

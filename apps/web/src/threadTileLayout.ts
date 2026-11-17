@@ -26,6 +26,36 @@ function placeTabs(group: TileGroup, tabIds: string[]): TileGroup {
   return { ...group, tabs, activeTabId: tabIds[0] ?? group.activeTabId };
 }
 
+// Reserves a 96px tab, three 20px buttons, grip, group number, gaps, padding, and borders.
+export const TILE_MIN_WIDTH_PX = 224;
+
+/** Minimum canvas width that keeps every docked header usable. */
+export function tileMinimumWidth(node: TileNode): number {
+  if (node.kind === "group") return TILE_MIN_WIDTH_PX;
+  const first = tileMinimumWidth(node.first);
+  const second = tileMinimumWidth(node.second);
+  return node.axis === "horizontal" ? first + second : Math.max(first, second);
+}
+
+/** Clamps split ratios against descendant minimums, including restored layouts. */
+export function clampTileWidths(node: TileNode, availableWidth: number): TileNode {
+  if (node.kind === "group") return node;
+  const width = Math.max(availableWidth, tileMinimumWidth(node));
+  const ratio =
+    node.axis === "horizontal"
+      ? Math.max(
+          tileMinimumWidth(node.first) / width,
+          Math.min(1 - tileMinimumWidth(node.second) / width, node.ratio),
+        )
+      : node.ratio;
+  return {
+    ...node,
+    ratio,
+    first: clampTileWidths(node.first, node.axis === "horizontal" ? width * ratio : width),
+    second: clampTileWidths(node.second, node.axis === "horizontal" ? width * (1 - ratio) : width),
+  };
+}
+
 export type FloatingTileRect = { x: number; y: number; width: number; height: number };
 
 export function boundFloatingTile(rect: FloatingTileRect): FloatingTileRect {
@@ -46,13 +76,17 @@ export function resizeFloatingTile(
   rect: FloatingTileRect,
   edges: FloatingTileEdges,
   delta: { x: number; y: number },
+  workspaceWidth?: number,
 ): FloatingTileRect {
   const min = 0.2;
+  const minWidth = workspaceWidth
+    ? Math.min(1, Math.max(min, TILE_MIN_WIDTH_PX / workspaceWidth))
+    : min;
   const right = rect.x + rect.width;
   const bottom = rect.y + rect.height;
-  const left = edges.left ? Math.max(0, Math.min(right - min, rect.x + delta.x)) : rect.x;
+  const left = edges.left ? Math.max(0, Math.min(right - minWidth, rect.x + delta.x)) : rect.x;
   const top = edges.top ? Math.max(0, Math.min(bottom - min, rect.y + delta.y)) : rect.y;
-  const nextRight = edges.right ? Math.min(1, Math.max(left + min, right + delta.x)) : right;
+  const nextRight = edges.right ? Math.min(1, Math.max(left + minWidth, right + delta.x)) : right;
   const nextBottom = edges.bottom ? Math.min(1, Math.max(top + min, bottom + delta.y)) : bottom;
   return { x: left, y: top, width: nextRight - left, height: nextBottom - top };
 }

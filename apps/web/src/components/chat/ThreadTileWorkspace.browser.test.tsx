@@ -146,12 +146,32 @@ async function setup(resizeScenario = false, newThread = false) {
       { router: false },
     ),
   );
-  const selectTab = (name: string) =>
-    userEvent.click(screen.getByRole("tab", { name, exact: true }));
-  const newTileRight = () =>
-    userEvent.click(
-      screen.getByRole("button", { name: "New tile to the right", exact: true }).first(),
+  const selectTab = async (name: string) => {
+    const tab = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+      (element) => element.getAttribute("aria-label") === name,
     );
+    if (tab && !tab.checkVisibility()) {
+      const active = tab
+        .closest("[data-tile-group]")!
+        .querySelector('[role="tab"][aria-selected="true"]')!
+        .getAttribute("aria-label");
+      await userEvent.click(
+        screen
+          .getByRole("region", { name: `Tile: ${active}`, exact: true })
+          .getByRole("button", { name: "Tile actions", exact: true }),
+      );
+      await userEvent.hover(screen.getByRole("menuitem", { name: "Switch tab", exact: true }));
+      await userEvent.click(screen.getByRole("menuitem", { name, exact: true }));
+    } else {
+      await userEvent.click(screen.getByRole("tab", { name, exact: true }));
+    }
+  };
+  const newTileRight = async () => {
+    await userEvent.click(
+      screen.getByRole("button", { name: "Tile actions", exact: true }).first(),
+    );
+    await userEvent.click(screen.getByRole("menuitem", { name: /New tile to the right/ }));
+  };
   const layout = () => selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, threadRef);
   const owned = resources.move();
   return {
@@ -454,11 +474,14 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
   await userEvent.click(
     screen
       .getByRole("region", { name: "Tile: terminal", exact: true })
-      .getByRole("button", { name: "Dock tile", exact: true }),
+      .getByRole("button", { name: "Tile actions", exact: true }),
   );
-  expect(
-    getTileGroups(layout()).find((group) => group.id === "terminal-group")?.lastFloating,
-  ).toEqual(resized.floating);
+  await userEvent.click(screen.getByRole("menuitem", { name: /Dock tile/ }));
+  await vi.waitFor(() =>
+    expect(
+      getTileGroups(layout()).find((group) => group.id === "terminal-group")?.lastFloating,
+    ).toEqual(resized.floating),
+  );
 
   store.applyTileAction(threadRef, {
     type: "new-group",

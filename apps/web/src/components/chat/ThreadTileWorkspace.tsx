@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Check,
   Columns2,
   ArrowRightLeft,
   Ellipsis,
@@ -49,6 +50,9 @@ import {
   getTileGroups,
   boundFloatingTile,
   resizeFloatingTile,
+  clampTileWidths,
+  tileMinimumWidth,
+  TILE_MIN_WIDTH_PX,
   type FloatingTileEdges,
   type TileNode,
   type FloatingTileRect,
@@ -225,6 +229,14 @@ export function ThreadTileWorkspace(props: {
     selectThreadTileLayout(state.byThreadKey, props.threadRef),
   );
   const rootRef = useRef<HTMLDivElement>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the canvas so split minimums also hold after window resizing
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    setWorkspaceWidth(root.clientWidth);
+    return observeResize(root, () => setWorkspaceWidth(root.clientWidth));
+  }, []);
   const tileLayouts = useSavedTileLayouts(props.threadRef.environmentId, props.projectId);
   const [saveLayout, setSaveLayout] = useState<{ dropped: boolean; tiles: number } | null>(null);
   const defaultLayout = props.newThread ? tileLayouts.effectiveDefault : null;
@@ -281,7 +293,9 @@ export function ThreadTileWorkspace(props: {
     const second = tiled(node.second);
     return first && second ? { ...node, first, second } : (first ?? second);
   };
-  const dockedRoot = maximized ? displayTileRoot(layout) : tiled(layout.root);
+  const displayRoot = maximized ? displayTileRoot(layout) : tiled(layout.root);
+  const minimumWidth = displayRoot ? tileMinimumWidth(displayRoot) : TILE_MIN_WIDTH_PX;
+  const dockedRoot = displayRoot ? clampTileWidths(displayRoot, workspaceWidth) : null;
   const floatingGroups = groups.filter((group) => group.floating && !zoomedIds.has(group.id));
   const displayGroups = [...(dockedRoot ? getTileGroups(dockedRoot) : []), ...floatingGroups];
   const dockedGeometry = dockedRoot ? tileGeometry(dockedRoot) : { groups: [], splits: [] };
@@ -293,7 +307,13 @@ export function ThreadTileWorkspace(props: {
     ...dockedGeometry.groups,
     ...floatingGroups.map((group) => ({
       id: group.id,
-      rect: floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!,
+      rect: boundFloatingTile({
+        ...(floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!),
+        width: Math.max(
+          (floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!).width,
+          TILE_MIN_WIDTH_PX / Math.max(workspaceWidth, minimumWidth),
+        ),
+      }),
     })),
   ];
   const geometry = { groups: visibleGroups, splits: dockedGeometry.splits };
@@ -897,7 +917,7 @@ export function ThreadTileWorkspace(props: {
     const handle = event.currentTarget;
     handle.setPointerCapture(event.pointerId);
     apply({ type: "focus", groupId: group.id });
-    const initial = group.floating;
+    const initial = geometry.groups.find((entry) => entry.id === group.id)?.rect ?? group.floating;
     let rect = initial;
     setResizing(true);
     const move = (next: PointerEvent) => {
@@ -906,7 +926,7 @@ export function ThreadTileWorkspace(props: {
         y: (next.clientY - event.clientY) / bounds.height,
       };
       rect = edges
-        ? resizeFloatingTile(initial, edges, delta)
+        ? resizeFloatingTile(initial, edges, delta, bounds.width)
         : boundFloatingTile({ ...initial, x: initial.x + delta.x, y: initial.y + delta.y });
       setFloatingOverride({ groupId: group.id, rect });
     };
@@ -950,674 +970,734 @@ export function ThreadTileWorkspace(props: {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-thread-tiling>
       <div className="relative shrink-0">{props.header}</div>
-      <div
-        ref={rootRef}
-        className="relative isolate min-h-0 min-w-0 flex-1 overflow-hidden bg-border/40"
-        onDragOverCapture={(event) => {
-          if (!dragging) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-          const next = locateDrop(event);
-          setDropTarget((current) =>
-            current?.groupId === next?.groupId && current?.zone === next?.zone ? current : next,
-          );
-        }}
-        onDragLeave={(event) => {
-          if (
-            !(event.relatedTarget instanceof Node) ||
-            !event.currentTarget.contains(event.relatedTarget)
-          )
-            setDropTarget(null);
-        }}
-        onDropCapture={(event) => {
-          if (!dragging) return;
-          event.preventDefault();
-          event.stopPropagation();
-          const target = locateDrop(event);
-          if (target) {
-            const { groupId: targetGroupId, zone } = target;
-            const edge = zone !== "center" && zone !== "tabs";
-            if (dragging.kind === "group") {
-              if (edge)
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
+        <div
+          ref={rootRef}
+          style={{ minWidth: minimumWidth }}
+          className="relative isolate h-full min-h-0 min-w-0 overflow-hidden bg-border/40"
+          onDragOverCapture={(event) => {
+            if (!dragging) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = "move";
+            const next = locateDrop(event);
+            setDropTarget((current) =>
+              current?.groupId === next?.groupId && current?.zone === next?.zone ? current : next,
+            );
+          }}
+          onDragLeave={(event) => {
+            if (
+              !(event.relatedTarget instanceof Node) ||
+              !event.currentTarget.contains(event.relatedTarget)
+            )
+              setDropTarget(null);
+          }}
+          onDropCapture={(event) => {
+            if (!dragging) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const target = locateDrop(event);
+            if (target) {
+              const { groupId: targetGroupId, zone } = target;
+              const edge = zone !== "center" && zone !== "tabs";
+              if (dragging.kind === "group") {
+                if (edge)
+                  apply({
+                    type: "dock-group",
+                    groupId: dragging.id,
+                    targetGroupId,
+                    axis: zone === "left" || zone === "right" ? "horizontal" : "vertical",
+                    side: zone === "left" || zone === "top" ? "before" : "after",
+                    splitId: randomUUID(),
+                  });
+                else if (zone === "tabs")
+                  apply({ type: "merge-groups", groupId: dragging.id, targetGroupId });
+                else
+                  apply({
+                    type: "swap-groups",
+                    firstGroupId: dragging.id,
+                    secondGroupId: targetGroupId,
+                  });
+              } else if (edge)
                 apply({
-                  type: "dock-group",
-                  groupId: dragging.id,
+                  type: "split",
+                  tabId: dragging.id,
                   targetGroupId,
                   axis: zone === "left" || zone === "right" ? "horizontal" : "vertical",
                   side: zone === "left" || zone === "top" ? "before" : "after",
+                  groupId: randomUUID(),
                   splitId: randomUUID(),
                 });
-              else if (zone === "tabs")
-                apply({ type: "merge-groups", groupId: dragging.id, targetGroupId });
-              else
+              else {
+                const tabElement =
+                  event.target instanceof Element
+                    ? event.target.closest<HTMLElement>("[data-tab-id]")
+                    : null;
+                const targetGroup = groups.find((group) => group.id === targetGroupId);
+                const index = tabElement?.dataset.tabId
+                  ? targetGroup?.tabs.indexOf(tabElement.dataset.tabId)
+                  : undefined;
                 apply({
-                  type: "swap-groups",
-                  firstGroupId: dragging.id,
-                  secondGroupId: targetGroupId,
+                  type: "move",
+                  tabId: dragging.id,
+                  targetGroupId,
+                  ...(index !== undefined ? { index } : {}),
                 });
-            } else if (edge)
-              apply({
-                type: "split",
-                tabId: dragging.id,
-                targetGroupId,
-                axis: zone === "left" || zone === "right" ? "horizontal" : "vertical",
-                side: zone === "left" || zone === "top" ? "before" : "after",
-                groupId: randomUUID(),
-                splitId: randomUUID(),
-              });
-            else {
-              const tabElement =
-                event.target instanceof Element
-                  ? event.target.closest<HTMLElement>("[data-tab-id]")
-                  : null;
-              const targetGroup = groups.find((group) => group.id === targetGroupId);
-              const index = tabElement?.dataset.tabId
-                ? targetGroup?.tabs.indexOf(tabElement.dataset.tabId)
-                : undefined;
-              apply({
-                type: "move",
-                tabId: dragging.id,
-                targetGroupId,
-                ...(index !== undefined ? { index } : {}),
-              });
-            }
-          }
-          setDragging(null);
-          setDropTarget(null);
-        }}
-      >
-        {visibleGroups.map(({ id, rect }) => {
-          const group = displayGroups.find((entry) => entry.id === id)!;
-          const groupNumber = groups.findIndex((entry) => entry.id === id) + 1;
-          const others = groups.filter((entry) => entry.id !== id);
-          const chooserSelection =
-            chooserIndex?.groupId === id ? chooserIndex.index : firstOpenable;
-          const chooserActive = focusedGroupId === id || visibleGroups.length === 1;
-          const blank = group.tabs.every(isNewTab);
-          // The only tile's only New tab has nothing to close into.
-          const lastBlankTab = groups.length === 1 && group.tabs.length === 1 && blank;
-          return (
-            <section
-              key={id}
-              style={
-                {
-                  ...rectStyle(rect),
-                  zIndex: group.floating ? (layout.focusedGroupId === id ? 52 : 50) : undefined,
-                  "--tile-group-accent": `var(--tile-accent-${group.colorIndex ?? 0})`,
-                } as CSSProperties
               }
-              className={cn(
-                "workspace-tile-frame @container/tile absolute overflow-hidden bg-background outline-none",
-                group.floating && "shadow-2xl",
-              )}
-              data-focused={focusedGroupId === id}
-              aria-label={`Tile: ${title(group.activeTabId)}`}
-              data-tile-group={id}
-              tabIndex={-1}
-            >
-              <div
-                className="workspace-tile-titlebar flex min-w-0 cursor-grab items-center justify-end gap-0.5 px-1 active:cursor-grabbing"
-                role="toolbar"
-                aria-label={`Move tile: ${title(group.activeTabId)}`}
-                draggable={!maximized && !group.floating}
-                onClickCapture={(event) => {
-                  const button =
-                    event.target instanceof Element
-                      ? event.target.closest<HTMLElement>("button:not([role=tab])")
-                      : null;
-                  if (button) flashPress(button);
-                }}
-                onPointerDownCapture={(event) => {
-                  headerDragBlocked.current =
-                    event.target instanceof Element &&
-                    Boolean(event.target.closest("button, a, input, [role=tab]"));
-                }}
-                onPointerDown={(event) => {
-                  apply({ type: "focus", groupId: id });
-                  floatGesture(event, group);
-                }}
-                onDragStart={(event) => {
-                  if (maximized || headerDragBlocked.current) {
-                    event.preventDefault();
-                    return;
-                  }
-                  event.dataTransfer.setData(GROUP_DRAG_TYPE, id);
-                  event.dataTransfer.effectAllowed = "move";
-                  setDragging({ kind: "group", id });
-                }}
-                onDragEnd={() => {
-                  setDragging(null);
-                  setDropTarget(null);
-                }}
+            }
+            setDragging(null);
+            setDropTarget(null);
+          }}
+        >
+          {visibleGroups.map(({ id, rect }) => {
+            const group = displayGroups.find((entry) => entry.id === id)!;
+            const groupNumber = groups.findIndex((entry) => entry.id === id) + 1;
+            const others = groups.filter((entry) => entry.id !== id);
+            const chooserSelection =
+              chooserIndex?.groupId === id ? chooserIndex.index : firstOpenable;
+            const chooserActive = focusedGroupId === id || visibleGroups.length === 1;
+            const blank = group.tabs.every(isNewTab);
+            // The only tile's only New tab has nothing to close into.
+            const lastBlankTab = groups.length === 1 && group.tabs.length === 1 && blank;
+            return (
+              <section
+                key={id}
+                style={
+                  {
+                    ...rectStyle(rect),
+                    zIndex: group.floating ? (layout.focusedGroupId === id ? 52 : 50) : undefined,
+                    "--tile-group-accent": `var(--tile-accent-${group.colorIndex ?? 0})`,
+                  } as CSSProperties
+                }
+                className={cn(
+                  "workspace-tile-frame @container/tile absolute overflow-hidden bg-background outline-none",
+                  group.floating && "shadow-2xl",
+                )}
+                data-focused={focusedGroupId === id}
+                aria-label={`Tile: ${title(group.activeTabId)}`}
+                data-tile-group={id}
+                tabIndex={-1}
               >
-                <GripVertical aria-hidden className="workspace-tile-grip size-3 shrink-0" />
-                <span
-                  className="workspace-tile-grip shrink-0 text-2xs tabular-nums"
-                  aria-label={`Group ${groupNumber}`}
-                >
-                  {groupNumber}
-                </span>
-                <div className="flex min-w-0 flex-1 items-center overflow-hidden">
-                  <div
-                    // Sized to its tabs so New tab follows the last one, and pinned at the strip's end once they overflow.
-                    className="workspace-tile-tabs flex min-w-0 flex-initial items-center overflow-x-auto px-1"
-                    ref={observeTabStrip}
-                    onScroll={(event) => markTabOverflow(event.currentTarget)}
-                    role="tablist"
-                    aria-label="Tile tabs"
-                  >
-                    {group.tabs.map((tabId) => {
-                      const surface = props.panels.surfaces.find((entry) => entry.id === tabId);
-                      const session =
-                        surface?.kind === "preview" && surface.resourceId
-                          ? props.panels.previewSessions[surface.resourceId]
-                          : null;
-                      const previewUrl =
-                        session && session.navStatus._tag !== "Idle" ? session.navStatus.url : null;
-                      return (
-                        <div
-                          key={tabId}
-                          ref={group.activeTabId === tabId ? revealTab : undefined}
-                          className="workspace-tile-tab flex max-w-44 shrink items-center rounded-sm"
-                          data-active={group.activeTabId === tabId}
-                        >
-                          <button
-                            type="button"
-                            role="tab"
-                            data-tab-id={tabId}
-                            aria-selected={group.activeTabId === tabId}
-                            aria-label={title(tabId)}
-                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 px-1.5 py-0.5 text-2xs outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-                            draggable={!maximized}
-                            onDragStart={(event) => {
-                              event.stopPropagation();
-                              if (maximized) {
-                                event.preventDefault();
-                                return;
-                              }
-                              event.dataTransfer.setData(TAB_DRAG_TYPE, tabId);
-                              event.dataTransfer.effectAllowed = "move";
-                              setDragging({ kind: "tab", id: tabId });
-                            }}
-                            onDragEnd={() => {
-                              setDragging(null);
-                              setDropTarget(null);
-                            }}
-                            onMouseDown={(event) => {
-                              if (event.button === 1) event.preventDefault();
-                            }}
-                            onAuxClick={(event) => {
-                              if (event.button !== 1) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                              closeTab(tabId);
-                            }}
-                            onClick={() => activate(group, tabId)}
-                          >
-                            {surface ? (
-                              <SurfaceIcon
-                                surface={surface}
-                                previewUrl={previewUrl}
-                                previewCapturedUrl={null}
-                                theme={resolvedTheme}
-                                environmentId={props.threadRef.environmentId}
-                                pullRequestStatusSeed={undefined}
-                              />
-                            ) : isNewTab(tabId) ? (
-                              <SquareDashed className="size-3 shrink-0" />
-                            ) : (
-                              <MessagesSquare className="size-3 shrink-0" />
-                            )}
-                            <span className="min-w-10 truncate">{title(tabId)}</span>
-                          </button>
-                          {!lastBlankTab && (
-                            <PanelTabCloseButton
-                              label={`Close ${title(tabId)}`}
-                              onClick={() => closeTab(tabId)}
-                            >
-                              <X className="size-3" />
-                            </PanelTabCloseButton>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="icon-micro"
-                          variant="ghost"
-                          aria-label="New tab"
-                          onClick={() => openNewTab(id)}
-                        />
-                      }
-                    >
-                      <Plus className="size-3" />
-                    </TooltipTrigger>
-                    <TooltipPopup>{withShortcut("New tab", "workspace.tile.newTab")}</TooltipPopup>
-                  </Tooltip>
-                </div>
-                <TileControl
-                  label="New tile to the right"
-                  shortcut={shortcut("workspace.tile.splitRight")}
-                  onClick={() => split(group, "horizontal")}
-                >
-                  <Columns2 />
-                </TileControl>
-                <TileControl
-                  label="New tile below"
-                  shortcut={shortcut("workspace.tile.splitDown")}
-                  onClick={() => split(group, "vertical")}
-                >
-                  <Rows2 />
-                </TileControl>
-                <TileControl
-                  label={group.floating ? "Dock tile" : "Float tile"}
-                  shortcut={shortcut("workspace.tile.float")}
-                  pressed={Boolean(group.floating)}
-                  disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                  onClick={() => toggleFloat(group)}
-                >
-                  <PictureInPicture2 />
-                </TileControl>
-                <TileControl
-                  label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                  shortcut={shortcut("workspace.tile.maximize")}
-                  pressed={zoomedIds.has(id)}
-                  onClick={() =>
-                    apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                  }
-                >
-                  {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
-                </TileControl>
-                <Menu
-                  open={openMenu?.kind === "actions" && openMenu.groupId === id}
-                  onOpenChange={(open) =>
-                    setOpenMenu(open ? { kind: "actions", groupId: id } : null)
-                  }
-                >
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <MenuTrigger
-                          render={
-                            <Button size="icon-micro" variant="ghost" aria-label="Tile actions" />
-                          }
-                        />
-                      }
-                    >
-                      <Ellipsis className="size-3" />
-                    </TooltipTrigger>
-                    <TooltipPopup>
-                      {withShortcut("Tile actions", "workspace.tile.actions")}
-                    </TooltipPopup>
-                  </Tooltip>
-                  <MenuPopup align="end">
-                    <MenuItem
-                      onClick={() =>
-                        apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                      }
-                    >
-                      {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
-                      {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                      <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
-                    </MenuItem>
-                    <MenuItem
-                      disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                      onClick={() => toggleFloat(group)}
-                    >
-                      <PictureInPicture2 />
-                      {group.floating ? "Dock tile" : "Float tile"}
-                      <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
-                    </MenuItem>
-                    <MenuItem onClick={() => split(group, "vertical")}>
-                      <Rows2 />
-                      New tile below
-                      <TileMenuShortcut keys={shortcut("workspace.tile.splitDown")} />
-                    </MenuItem>
-                    <MenuItem onClick={() => split(group, "horizontal")}>
-                      <Columns2 />
-                      New tile to the right
-                      <TileMenuShortcut keys={shortcut("workspace.tile.splitRight")} />
-                    </MenuItem>
-                    <MenuItem onClick={() => openNewTab(id)}>
-                      <Plus />
-                      New tab
-                      <TileMenuShortcut keys={shortcut("workspace.tile.newTab")} />
-                    </MenuItem>
-                    {maximized === id && others.length > 0 && (
-                      <MenuGroup>
-                        <MenuGroupLabel>Show beside…</MenuGroupLabel>
-                        {others.map((entry) => (
-                          <MenuItem
-                            key={entry.id}
-                            onClick={() => apply({ type: "show-beside", groupId: entry.id })}
-                          >
-                            <span
-                              className="size-2 shrink-0 rounded-full"
-                              style={{ background: `var(--tile-accent-${entry.colorIndex ?? 0})` }}
-                            />
-                            {groups.indexOf(entry) + 1}. {title(entry.activeTabId)}
-                          </MenuItem>
-                        ))}
-                        <MenuSeparator />
-                      </MenuGroup>
-                    )}
-                    {layout.besideGroupId && zoomedIds.has(id) && (
-                      <MenuItem onClick={() => apply({ type: "swap-beside" })}>
-                        <ArrowRightLeft />
-                        Swap sides
-                        <TileMenuShortcut keys={shortcut("workspace.tile.swap")} />
-                      </MenuItem>
-                    )}
-                    <MenuSub>
-                      <MenuSubTrigger disabled={others.length === 0}>
-                        <ArrowRightLeft />
-                        Move tab
-                      </MenuSubTrigger>
-                      <MenuSubPopup>
-                        {others.map((entry) => (
-                          <MenuItem
-                            key={entry.id}
-                            onClick={() =>
-                              apply({
-                                type: "move",
-                                tabId: group.activeTabId,
-                                targetGroupId: entry.id,
-                              })
-                            }
-                          >
-                            <span
-                              className="size-2 shrink-0 rounded-full"
-                              style={{ background: `var(--tile-accent-${entry.colorIndex ?? 0})` }}
-                            />
-                            {groups.indexOf(entry) + 1}. {title(entry.activeTabId)}
-                          </MenuItem>
-                        ))}
-                      </MenuSubPopup>
-                    </MenuSub>
-                    <MenuSub>
-                      <MenuSubTrigger disabled={group.tabs.length < 2}>
-                        <Columns2 />
-                        Move tab to new tile
-                      </MenuSubTrigger>
-                      <MenuSubPopup>
-                        <MenuItem onClick={() => moveTabToNewTile(group, "horizontal")}>
-                          <Columns2 />
-                          Right
-                        </MenuItem>
-                        <MenuItem onClick={() => moveTabToNewTile(group, "vertical")}>
-                          <Rows2 />
-                          Below
-                        </MenuItem>
-                      </MenuSubPopup>
-                    </MenuSub>
-                    <MenuSeparator />
-                    <TileLayoutsSubmenu
-                      api={tileLayouts}
-                      hasProject={tileLayouts.projectId !== null}
-                      onSaveAs={saveLayoutAs}
-                      onApply={applySavedLayout}
-                    />
-                    <MenuSeparator />
-                    <MenuItem disabled={lastBlankTab} onClick={() => closeTab(group.activeTabId)}>
-                      <X />
-                      Close tab
-                      <TileMenuShortcut keys={shortcut("workspace.tile.closeTab")} />
-                    </MenuItem>
-                    <MenuItem disabled={groups.length === 1 && blank} onClick={() => closeTile(id)}>
-                      <X />
-                      Close tile
-                    </MenuItem>
-                  </MenuPopup>
-                </Menu>
-                <TileControl
-                  label={blank ? "Close empty tile" : "Close tile"}
-                  disabled={groups.length === 1 && blank}
-                  onClick={() => closeTile(id)}
-                >
-                  <X />
-                </TileControl>
-              </div>
-              {isNewTab(group.activeTabId) && (
                 <div
-                  className="flex h-full flex-col items-center justify-center gap-4 p-6 outline-none"
-                  data-tile-chooser={id}
-                  aria-keyshortcuts={areaChoices
-                    .map((choice) => choice.key.toUpperCase())
-                    .join(" ")}
-                  tabIndex={-1}
+                  className="workspace-tile-titlebar flex min-w-0 cursor-grab items-center justify-end gap-0.5 px-1 active:cursor-grabbing"
+                  role="toolbar"
+                  aria-label={`Move tile: ${title(group.activeTabId)}`}
+                  draggable={!maximized && !group.floating}
+                  onClickCapture={(event) => {
+                    const button =
+                      event.target instanceof Element
+                        ? event.target.closest<HTMLElement>("button:not([role=tab])")
+                        : null;
+                    if (button) flashPress(button);
+                  }}
+                  onPointerDownCapture={(event) => {
+                    headerDragBlocked.current =
+                      event.target instanceof Element &&
+                      Boolean(event.target.closest("button, a, input, [role=tab]"));
+                  }}
                   onPointerDown={(event) => {
+                    if (event.target instanceof Element && event.target.closest('[role="menu"]'))
+                      return;
                     apply({ type: "focus", groupId: id });
-                    if (!(event.target instanceof Element && event.target.closest("button")))
-                      event.currentTarget.focus({ preventScroll: true });
                     floatGesture(event, group);
                   }}
+                  onDragStart={(event) => {
+                    if (maximized || headerDragBlocked.current) {
+                      event.preventDefault();
+                      return;
+                    }
+                    event.dataTransfer.setData(GROUP_DRAG_TYPE, id);
+                    event.dataTransfer.effectAllowed = "move";
+                    setDragging({ kind: "group", id });
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setDropTarget(null);
+                  }}
                 >
-                  <p className="text-sm font-medium">Choose an area</p>
-                  {savedLayout.pendingAreas?.[group.activeTabId] && (
-                    <p className="-mt-2 text-xs text-muted-foreground">
-                      {TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} opens
-                      here once it is available.
-                    </p>
-                  )}
-                  <div
-                    className="flex max-w-md flex-wrap justify-center gap-2"
-                    role="group"
-                    aria-label="Areas"
+                  <GripVertical aria-hidden className="workspace-tile-grip size-3 shrink-0" />
+                  <span
+                    className="workspace-tile-grip shrink-0 text-2xs tabular-nums"
+                    aria-label={`Group ${groupNumber}`}
                   >
-                    {areaChoices.map((choice, index) => {
-                      const openNote =
-                        choice.openElsewhere && chatGroup?.id === id
-                          ? "Main chat is open in this tile"
-                          : choice.openElsewhere;
-                      const button = (
-                        <Button
-                          key={choice.label}
-                          variant={
-                            chooserActive && index === chooserSelection ? "default" : "outline"
-                          }
-                          size="sm"
-                          aria-keyshortcuts={choice.key.toUpperCase()}
-                          aria-disabled={choice.openElsewhere ? true : undefined}
-                          aria-description={openNote ?? undefined}
-                          onClick={() => choice.run(id)}
-                        >
-                          {choice.label}
-                          <Kbd
-                            aria-hidden
-                            variant={
-                              chooserActive && index === chooserSelection ? "primary" : "default"
-                            }
+                    {groupNumber}
+                  </span>
+                  <div className="flex min-w-0 flex-1 items-center overflow-hidden">
+                    <div
+                      // Sized to its tabs so New tab follows the last one, and pinned at the strip's end once they overflow.
+                      className="workspace-tile-tabs flex min-w-0 flex-initial items-center overflow-x-auto px-1"
+                      ref={observeTabStrip}
+                      onScroll={(event) => markTabOverflow(event.currentTarget)}
+                      role="tablist"
+                      aria-label="Tile tabs"
+                    >
+                      {group.tabs.map((tabId) => {
+                        const surface = props.panels.surfaces.find((entry) => entry.id === tabId);
+                        const session =
+                          surface?.kind === "preview" && surface.resourceId
+                            ? props.panels.previewSessions[surface.resourceId]
+                            : null;
+                        const previewUrl =
+                          session && session.navStatus._tag !== "Idle"
+                            ? session.navStatus.url
+                            : null;
+                        return (
+                          <div
+                            key={tabId}
+                            ref={group.activeTabId === tabId ? revealTab : undefined}
+                            className={cn(
+                              "workspace-tile-tab flex max-w-44 shrink items-center rounded-sm",
+                              group.activeTabId === tabId
+                                ? "min-w-24"
+                                : "hidden min-w-20 @min-[480px]/tile:flex",
+                            )}
+                            data-active={group.activeTabId === tabId}
                           >
-                            {choice.key.toUpperCase()}
-                          </Kbd>
-                        </Button>
-                      );
-                      return choice.openElsewhere ? (
-                        <Tooltip key={choice.label}>
-                          <TooltipTrigger render={button} />
-                          <TooltipPopup>{openNote}</TooltipPopup>
-                        </Tooltip>
-                      ) : (
-                        button
-                      );
-                    })}
+                            <button
+                              type="button"
+                              role="tab"
+                              data-tab-id={tabId}
+                              aria-selected={group.activeTabId === tabId}
+                              aria-label={title(tabId)}
+                              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 px-1.5 py-0.5 text-2xs outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+                              draggable={!maximized}
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                if (maximized) {
+                                  event.preventDefault();
+                                  return;
+                                }
+                                event.dataTransfer.setData(TAB_DRAG_TYPE, tabId);
+                                event.dataTransfer.effectAllowed = "move";
+                                setDragging({ kind: "tab", id: tabId });
+                              }}
+                              onDragEnd={() => {
+                                setDragging(null);
+                                setDropTarget(null);
+                              }}
+                              onMouseDown={(event) => {
+                                if (event.button === 1) event.preventDefault();
+                              }}
+                              onAuxClick={(event) => {
+                                if (event.button !== 1) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                closeTab(tabId);
+                              }}
+                              onClick={() => activate(group, tabId)}
+                            >
+                              {surface ? (
+                                <SurfaceIcon
+                                  surface={surface}
+                                  previewUrl={previewUrl}
+                                  previewCapturedUrl={null}
+                                  theme={resolvedTheme}
+                                  environmentId={props.threadRef.environmentId}
+                                  pullRequestStatusSeed={undefined}
+                                />
+                              ) : isNewTab(tabId) ? (
+                                <SquareDashed className="size-3 shrink-0" />
+                              ) : (
+                                <MessagesSquare className="size-3 shrink-0" />
+                              )}
+                              <span className="min-w-0 truncate">{title(tabId)}</span>
+                            </button>
+                            {!lastBlankTab && (
+                              <PanelTabCloseButton
+                                label={`Close ${title(tabId)}`}
+                                onClick={() => closeTab(tabId)}
+                              >
+                                <X className="size-3" />
+                              </PanelTabCloseButton>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            size="icon-micro"
+                            variant="ghost"
+                            aria-label="New tab"
+                            onClick={() => openNewTab(id)}
+                          />
+                        }
+                      >
+                        <Plus className="size-3" />
+                      </TooltipTrigger>
+                      <TooltipPopup>
+                        {withShortcut("New tab", "workspace.tile.newTab")}
+                      </TooltipPopup>
+                    </Tooltip>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Press a letter, or use the arrows and Enter.
-                    {lastBlankTab
-                      ? ""
-                      : group.tabs.length > 1
-                        ? " Esc closes this tab."
-                        : " Esc closes this tile."}
-                  </p>
+                  <TileControl
+                    visibility="split"
+                    label="New tile to the right"
+                    shortcut={shortcut("workspace.tile.splitRight")}
+                    onClick={() => split(group, "horizontal")}
+                  >
+                    <Columns2 />
+                  </TileControl>
+                  <TileControl
+                    visibility="split"
+                    label="New tile below"
+                    shortcut={shortcut("workspace.tile.splitDown")}
+                    onClick={() => split(group, "vertical")}
+                  >
+                    <Rows2 />
+                  </TileControl>
+                  <TileControl
+                    visibility="float"
+                    label={group.floating ? "Dock tile" : "Float tile"}
+                    shortcut={shortcut("workspace.tile.float")}
+                    pressed={Boolean(group.floating)}
+                    disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                    onClick={() => toggleFloat(group)}
+                  >
+                    <PictureInPicture2 />
+                  </TileControl>
+                  <TileControl
+                    visibility="maximize"
+                    label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                    shortcut={shortcut("workspace.tile.maximize")}
+                    pressed={zoomedIds.has(id)}
+                    onClick={() =>
+                      apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                    }
+                  >
+                    {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                  </TileControl>
+                  <Menu
+                    open={openMenu?.kind === "actions" && openMenu.groupId === id}
+                    onOpenChange={(open) =>
+                      setOpenMenu(open ? { kind: "actions", groupId: id } : null)
+                    }
+                  >
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <MenuTrigger
+                            render={
+                              <Button size="icon-micro" variant="ghost" aria-label="Tile actions" />
+                            }
+                          />
+                        }
+                      >
+                        <Ellipsis className="size-3" />
+                      </TooltipTrigger>
+                      <TooltipPopup>
+                        {withShortcut("Tile actions", "workspace.tile.actions")}
+                      </TooltipPopup>
+                    </Tooltip>
+                    <MenuPopup align="end">
+                      <MenuItem
+                        onClick={() =>
+                          apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                        }
+                      >
+                        {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                        {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                        <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
+                      </MenuItem>
+                      <MenuItem
+                        disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                        onClick={() => toggleFloat(group)}
+                      >
+                        <PictureInPicture2 />
+                        {group.floating ? "Dock tile" : "Float tile"}
+                        <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
+                      </MenuItem>
+                      <MenuItem onClick={() => split(group, "vertical")}>
+                        <Rows2 />
+                        New tile below
+                        <TileMenuShortcut keys={shortcut("workspace.tile.splitDown")} />
+                      </MenuItem>
+                      <MenuItem onClick={() => split(group, "horizontal")}>
+                        <Columns2 />
+                        New tile to the right
+                        <TileMenuShortcut keys={shortcut("workspace.tile.splitRight")} />
+                      </MenuItem>
+                      <MenuItem onClick={() => openNewTab(id)}>
+                        <Plus />
+                        New tab
+                        <TileMenuShortcut keys={shortcut("workspace.tile.newTab")} />
+                      </MenuItem>
+                      {group.tabs.length > 1 && (
+                        <MenuSub>
+                          <MenuSubTrigger>
+                            <MessagesSquare />
+                            Switch tab
+                          </MenuSubTrigger>
+                          <MenuSubPopup>
+                            {group.tabs.map((tabId) => {
+                              const surface = props.panels.surfaces.find(
+                                (entry) => entry.id === tabId,
+                              );
+                              return (
+                                <MenuItem key={tabId} onClick={() => activate(group, tabId)}>
+                                  {surface ? (
+                                    <SurfaceIcon
+                                      surface={surface}
+                                      previewUrl={null}
+                                      previewCapturedUrl={null}
+                                      theme={resolvedTheme}
+                                      environmentId={props.threadRef.environmentId}
+                                      pullRequestStatusSeed={undefined}
+                                    />
+                                  ) : isNewTab(tabId) ? (
+                                    <SquareDashed />
+                                  ) : (
+                                    <MessagesSquare />
+                                  )}
+                                  <span className="min-w-0 flex-1 truncate">{title(tabId)}</span>
+                                  {tabId === group.activeTabId && <Check aria-label="Active tab" />}
+                                </MenuItem>
+                              );
+                            })}
+                          </MenuSubPopup>
+                        </MenuSub>
+                      )}
+                      {maximized === id && others.length > 0 && (
+                        <MenuGroup>
+                          <MenuGroupLabel>Show beside…</MenuGroupLabel>
+                          {others.map((entry) => (
+                            <MenuItem
+                              key={entry.id}
+                              onClick={() => apply({ type: "show-beside", groupId: entry.id })}
+                            >
+                              <span
+                                className="size-2 shrink-0 rounded-full"
+                                style={{
+                                  background: `var(--tile-accent-${entry.colorIndex ?? 0})`,
+                                }}
+                              />
+                              {groups.indexOf(entry) + 1}. {title(entry.activeTabId)}
+                            </MenuItem>
+                          ))}
+                          <MenuSeparator />
+                        </MenuGroup>
+                      )}
+                      {layout.besideGroupId && zoomedIds.has(id) && (
+                        <MenuItem onClick={() => apply({ type: "swap-beside" })}>
+                          <ArrowRightLeft />
+                          Swap sides
+                          <TileMenuShortcut keys={shortcut("workspace.tile.swap")} />
+                        </MenuItem>
+                      )}
+                      <MenuSub>
+                        <MenuSubTrigger disabled={others.length === 0}>
+                          <ArrowRightLeft />
+                          Move tab
+                        </MenuSubTrigger>
+                        <MenuSubPopup>
+                          {others.map((entry) => (
+                            <MenuItem
+                              key={entry.id}
+                              onClick={() =>
+                                apply({
+                                  type: "move",
+                                  tabId: group.activeTabId,
+                                  targetGroupId: entry.id,
+                                })
+                              }
+                            >
+                              <span
+                                className="size-2 shrink-0 rounded-full"
+                                style={{
+                                  background: `var(--tile-accent-${entry.colorIndex ?? 0})`,
+                                }}
+                              />
+                              {groups.indexOf(entry) + 1}. {title(entry.activeTabId)}
+                            </MenuItem>
+                          ))}
+                        </MenuSubPopup>
+                      </MenuSub>
+                      <MenuSub>
+                        <MenuSubTrigger disabled={group.tabs.length < 2}>
+                          <Columns2 />
+                          Move tab to new tile
+                        </MenuSubTrigger>
+                        <MenuSubPopup>
+                          <MenuItem onClick={() => moveTabToNewTile(group, "horizontal")}>
+                            <Columns2 />
+                            Right
+                          </MenuItem>
+                          <MenuItem onClick={() => moveTabToNewTile(group, "vertical")}>
+                            <Rows2 />
+                            Below
+                          </MenuItem>
+                        </MenuSubPopup>
+                      </MenuSub>
+                      <MenuSeparator />
+                      <TileLayoutsSubmenu
+                        api={tileLayouts}
+                        hasProject={tileLayouts.projectId !== null}
+                        onSaveAs={saveLayoutAs}
+                        onApply={applySavedLayout}
+                      />
+                      <MenuSeparator />
+                      <MenuItem disabled={lastBlankTab} onClick={() => closeTab(group.activeTabId)}>
+                        <X />
+                        Close tab
+                        <TileMenuShortcut keys={shortcut("workspace.tile.closeTab")} />
+                      </MenuItem>
+                      <MenuItem
+                        disabled={groups.length === 1 && blank}
+                        onClick={() => closeTile(id)}
+                      >
+                        <X />
+                        Close tile
+                      </MenuItem>
+                    </MenuPopup>
+                  </Menu>
+                  <TileControl
+                    label={blank ? "Close empty tile" : "Close tile"}
+                    disabled={groups.length === 1 && blank}
+                    onClick={() => closeTile(id)}
+                  >
+                    <X />
+                  </TileControl>
                 </div>
-              )}
-            </section>
-          );
-        })}
-        {floatingGroups.flatMap((group) => {
-          const rect =
-            floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!;
-          const z = layout.focusedGroupId === group.id ? 54 : 52;
-          return FLOAT_HANDLES.map((handle) => {
-            const corner = handle.edges.bottom && handle.edges.right;
+                {isNewTab(group.activeTabId) && (
+                  <div
+                    className="flex h-full flex-col items-center justify-center gap-4 p-6 outline-none"
+                    data-tile-chooser={id}
+                    aria-keyshortcuts={areaChoices
+                      .map((choice) => choice.key.toUpperCase())
+                      .join(" ")}
+                    tabIndex={-1}
+                    onPointerDown={(event) => {
+                      apply({ type: "focus", groupId: id });
+                      if (!(event.target instanceof Element && event.target.closest("button")))
+                        event.currentTarget.focus({ preventScroll: true });
+                      floatGesture(event, group);
+                    }}
+                  >
+                    <p className="text-sm font-medium">Choose an area</p>
+                    {savedLayout.pendingAreas?.[group.activeTabId] && (
+                      <p className="-mt-2 text-xs text-muted-foreground">
+                        {TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]}{" "}
+                        opens here once it is available.
+                      </p>
+                    )}
+                    <div
+                      className="flex max-w-md flex-wrap justify-center gap-2"
+                      role="group"
+                      aria-label="Areas"
+                    >
+                      {areaChoices.map((choice, index) => {
+                        const openNote =
+                          choice.openElsewhere && chatGroup?.id === id
+                            ? "Main chat is open in this tile"
+                            : choice.openElsewhere;
+                        const button = (
+                          <Button
+                            key={choice.label}
+                            variant={
+                              chooserActive && index === chooserSelection ? "default" : "outline"
+                            }
+                            size="sm"
+                            aria-keyshortcuts={choice.key.toUpperCase()}
+                            aria-disabled={choice.openElsewhere ? true : undefined}
+                            aria-description={openNote ?? undefined}
+                            onClick={() => choice.run(id)}
+                          >
+                            {choice.label}
+                            <Kbd
+                              aria-hidden
+                              variant={
+                                chooserActive && index === chooserSelection ? "primary" : "default"
+                              }
+                            >
+                              {choice.key.toUpperCase()}
+                            </Kbd>
+                          </Button>
+                        );
+                        return choice.openElsewhere ? (
+                          <Tooltip key={choice.label}>
+                            <TooltipTrigger render={button} />
+                            <TooltipPopup>{openNote}</TooltipPopup>
+                          </Tooltip>
+                        ) : (
+                          button
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Press a letter, or use the arrows and Enter.
+                      {lastBlankTab
+                        ? ""
+                        : group.tabs.length > 1
+                          ? " Esc closes this tab."
+                          : " Esc closes this tile."}
+                    </p>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+          {floatingGroups.flatMap((group) => {
+            const rect =
+              floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!;
+            const z = layout.focusedGroupId === group.id ? 54 : 52;
+            return FLOAT_HANDLES.map((handle) => {
+              const corner = handle.edges.bottom && handle.edges.right;
+              return (
+                <div
+                  key={`resize-${group.id}-${Object.keys(handle.edges).join("-")}`}
+                  role="separator"
+                  aria-label={`Resize floating ${title(group.activeTabId)} ${Object.keys(handle.edges).join(" ")}`}
+                  className={cn("absolute touch-none", handle.cursor)}
+                  style={{ ...handle.style(rect), zIndex: z }}
+                  onPointerDown={(event) => floatGesture(event, group, handle.edges)}
+                >
+                  {corner && (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute right-1 bottom-1 size-2.5 border-r-2 border-b-2 border-foreground/50"
+                    />
+                  )}
+                </div>
+              );
+            });
+          })}
+          {[
+            CONVERSATION_TAB_ID,
+            ...props.panels.surfaces
+              .filter((surface) => mounted.includes(surface.id))
+              .map((surface) => surface.id),
+          ].map((tabId) => {
+            const group = displayGroups.find((entry) => entry.tabs.includes(tabId));
+            const placed = visibleGroups.find((entry) => entry.id === group?.id);
+            const visible = Boolean(placed && group?.activeTabId === tabId);
+            const rect = placed?.rect ?? { x: 0, y: 0, width: 1, height: 1 };
+            const surface = props.panels.surfaces.find((entry) => entry.id === tabId);
+            const contentVisible =
+              visible &&
+              !(
+                surface?.kind === "preview" &&
+                (dragging !== null || resizing || gestureResize !== null)
+              );
             return (
               <div
-                key={`resize-${group.id}-${Object.keys(handle.edges).join("-")}`}
-                role="separator"
-                aria-label={`Resize floating ${title(group.activeTabId)} ${Object.keys(handle.edges).join(" ")}`}
-                className={cn("absolute touch-none", handle.cursor)}
-                style={{ ...handle.style(rect), zIndex: z }}
-                onPointerDown={(event) => floatGesture(event, group, handle.edges)}
+                key={tabId}
+                data-tile-content={tabId}
+                data-focused={focusedGroupId === group?.id}
+                tabIndex={-1}
+                inert={!visible}
+                className="workspace-tile-content absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background outline-none"
+                hidden={!visible}
+                style={{
+                  ...rectStyle(rect),
+                  zIndex: group?.floating
+                    ? layout.focusedGroupId === group.id
+                      ? 53
+                      : 51
+                    : undefined,
+                  left: `calc(${rect.x * 100}% + var(--tile-border-width))`,
+                  width: `calc(${rect.width * 100}% - 2 * var(--tile-border-width))`,
+                  top: `calc(${rect.y * 100}% + var(--tile-titlebar-height))`,
+                  height: `calc(${rect.height * 100}% - var(--tile-titlebar-height) - var(--tile-border-width))`,
+                  display: visible ? undefined : "none",
+                }}
+                onFocusCapture={() => {
+                  if (group && layout.focusedGroupId !== group.id) activate(group, tabId);
+                }}
+                onPointerDownCapture={() => {
+                  if (group && layout.focusedGroupId !== group.id) activate(group, tabId);
+                }}
               >
-                {corner && (
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute right-1 bottom-1 size-2.5 border-r-2 border-b-2 border-foreground/50"
+                {visible && (tabId === CONVERSATION_TAB_ID || surface?.kind === "side-chat") && (
+                  <ThreadPaneAttention
+                    threadRef={
+                      surface?.kind === "side-chat"
+                        ? { ...props.threadRef, threadId: surface.threadId }
+                        : props.threadRef
+                    }
                   />
                 )}
+                {tabId === CONVERSATION_TAB_ID
+                  ? props.conversation
+                  : surface
+                    ? props.renderSurface(
+                        surface,
+                        contentVisible,
+                        layoutVersion,
+                        layout.focusedGroupId === group?.id,
+                      )
+                    : null}
               </div>
             );
-          });
-        })}
-        {[
-          CONVERSATION_TAB_ID,
-          ...props.panels.surfaces
-            .filter((surface) => mounted.includes(surface.id))
-            .map((surface) => surface.id),
-        ].map((tabId) => {
-          const group = displayGroups.find((entry) => entry.tabs.includes(tabId));
-          const placed = visibleGroups.find((entry) => entry.id === group?.id);
-          const visible = Boolean(placed && group?.activeTabId === tabId);
-          const rect = placed?.rect ?? { x: 0, y: 0, width: 1, height: 1 };
-          const surface = props.panels.surfaces.find((entry) => entry.id === tabId);
-          const contentVisible =
-            visible &&
-            !(
-              surface?.kind === "preview" &&
-              (dragging !== null || resizing || gestureResize !== null)
-            );
-          return (
+          })}
+          {geometry.splits.map((line) => (
             <div
-              key={tabId}
-              data-tile-content={tabId}
-              data-focused={focusedGroupId === group?.id}
-              tabIndex={-1}
-              inert={!visible}
-              className="workspace-tile-content absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background outline-none"
-              hidden={!visible}
-              style={{
-                ...rectStyle(rect),
-                zIndex: group?.floating
-                  ? layout.focusedGroupId === group.id
-                    ? 53
-                    : 51
-                  : undefined,
-                left: `calc(${rect.x * 100}% + var(--tile-border-width))`,
-                width: `calc(${rect.width * 100}% - 2 * var(--tile-border-width))`,
-                top: `calc(${rect.y * 100}% + var(--tile-titlebar-height))`,
-                height: `calc(${rect.height * 100}% - var(--tile-titlebar-height) - var(--tile-border-width))`,
-                display: visible ? undefined : "none",
-              }}
-              onFocusCapture={() => {
-                if (group && layout.focusedGroupId !== group.id) activate(group, tabId);
-              }}
-              onPointerDownCapture={() => {
-                if (group && layout.focusedGroupId !== group.id) activate(group, tabId);
-              }}
-            >
-              {visible && (tabId === CONVERSATION_TAB_ID || surface?.kind === "side-chat") && (
-                <ThreadPaneAttention
-                  threadRef={
-                    surface?.kind === "side-chat"
-                      ? { ...props.threadRef, threadId: surface.threadId }
-                      : props.threadRef
-                  }
-                />
+              key={line.id}
+              role="separator"
+              tabIndex={0}
+              aria-label={`Resize ${line.axis === "horizontal" ? "columns" : "rows"}`}
+              aria-orientation={line.axis === "horizontal" ? "vertical" : "horizontal"}
+              aria-valuenow={Math.round(line.ratio * 100)}
+              className={cn(
+                "absolute z-40 touch-none bg-transparent hover:bg-ring/40 focus-visible:bg-ring/40",
+                line.axis === "horizontal"
+                  ? "w-1 -translate-x-1/2 cursor-col-resize"
+                  : "h-1 -translate-y-1/2 cursor-row-resize",
+                gestureResize?.some((change) => change.splitId === line.id) && "bg-ring",
               )}
-              {tabId === CONVERSATION_TAB_ID
-                ? props.conversation
-                : surface
-                  ? props.renderSurface(
-                      surface,
-                      contentVisible,
-                      layoutVersion,
-                      layout.focusedGroupId === group?.id,
-                    )
-                  : null}
-            </div>
-          );
-        })}
-        {geometry.splits.map((line) => (
-          <div
-            key={line.id}
-            role="separator"
-            tabIndex={0}
-            aria-label={`Resize ${line.axis === "horizontal" ? "columns" : "rows"}`}
-            aria-orientation={line.axis === "horizontal" ? "vertical" : "horizontal"}
-            aria-valuenow={Math.round(line.ratio * 100)}
-            className={cn(
-              "absolute z-40 touch-none bg-transparent hover:bg-ring/40 focus-visible:bg-ring/40",
-              line.axis === "horizontal"
-                ? "w-1 -translate-x-1/2 cursor-col-resize"
-                : "h-1 -translate-y-1/2 cursor-row-resize",
-              gestureResize?.some((change) => change.splitId === line.id) && "bg-ring",
-            )}
-            style={
-              line.axis === "horizontal"
-                ? {
-                    left: `${(line.rect.x + line.rect.width * line.ratio) * 100}%`,
-                    top: `${line.rect.y * 100}%`,
-                    height: `${line.rect.height * 100}%`,
-                  }
-                : {
-                    top: `${(line.rect.y + line.rect.height * line.ratio) * 100}%`,
-                    left: `${line.rect.x * 100}%`,
-                    width: `${line.rect.width * 100}%`,
-                  }
-            }
-            onPointerDown={(event) => resize(event, line)}
-            onKeyDown={(event) => {
-              const offset =
-                event.key === "ArrowLeft" || event.key === "ArrowUp"
-                  ? -0.05
-                  : event.key === "ArrowRight" || event.key === "ArrowDown"
-                    ? 0.05
-                    : 0;
-              if (offset) {
-                event.preventDefault();
-                apply({
-                  type: "resize",
-                  splitId: line.id,
-                  ratio: Math.max(0.12, Math.min(0.88, line.ratio + offset)),
-                });
+              style={
+                line.axis === "horizontal"
+                  ? {
+                      left: `${(line.rect.x + line.rect.width * line.ratio) * 100}%`,
+                      top: `${line.rect.y * 100}%`,
+                      height: `${line.rect.height * 100}%`,
+                    }
+                  : {
+                      top: `${(line.rect.y + line.rect.height * line.ratio) * 100}%`,
+                      left: `${line.rect.x * 100}%`,
+                      width: `${line.rect.width * 100}%`,
+                    }
               }
-            }}
-          />
-        ))}
-        {gestureResize && (
-          <div
-            className="fixed inset-0 z-50 cursor-move touch-none select-none"
-            data-tile-resize-overlay
-            aria-label="Resizing focused tile"
-            role="status"
-          >
-            <span className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-ring bg-popover px-3 py-1 text-xs text-popover-foreground">
-              Resize · release to keep · Esc to cancel
-            </span>
-          </div>
-        )}
-        {dragging && dropTarget && dropStyle && (
-          <div
-            className="pointer-events-none absolute z-[60] rounded-sm border-2 border-ring bg-ring/15"
-            style={dropStyle}
-            aria-hidden="true"
-          />
-        )}
+              onPointerDown={(event) => resize(event, line)}
+              onKeyDown={(event) => {
+                const offset =
+                  event.key === "ArrowLeft" || event.key === "ArrowUp"
+                    ? -0.05
+                    : event.key === "ArrowRight" || event.key === "ArrowDown"
+                      ? 0.05
+                      : 0;
+                if (offset) {
+                  event.preventDefault();
+                  apply({
+                    type: "resize",
+                    splitId: line.id,
+                    ratio: Math.max(0.12, Math.min(0.88, line.ratio + offset)),
+                  });
+                }
+              }}
+            />
+          ))}
+          {gestureResize && (
+            <div
+              className="fixed inset-0 z-50 cursor-move touch-none select-none"
+              data-tile-resize-overlay
+              aria-label="Resizing focused tile"
+              role="status"
+            >
+              <span className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-ring bg-popover px-3 py-1 text-xs text-popover-foreground">
+                Resize · release to keep · Esc to cancel
+              </span>
+            </div>
+          )}
+          {dragging && dropTarget && dropStyle && (
+            <div
+              className="pointer-events-none absolute z-[60] rounded-sm border-2 border-ring bg-ring/15"
+              style={dropStyle}
+              aria-hidden="true"
+            />
+          )}
+        </div>
       </div>
       {saveLayout && (
         <SaveTileLayoutDialog
@@ -1770,6 +1850,7 @@ function flashPress(button: HTMLElement) {
 }
 
 function TileControl(props: {
+  visibility?: "split" | "float" | "maximize";
   label: string;
   shortcut?: string | null;
   onClick: () => void;
@@ -1778,7 +1859,14 @@ function TileControl(props: {
   pressed?: boolean;
 }) {
   return (
-    <span className="inline-flex shrink-0">
+    <span
+      className={cn("shrink-0", {
+        "hidden @min-[360px]/tile:inline-flex": props.visibility === "split",
+        "hidden @min-[300px]/tile:inline-flex": props.visibility === "float",
+        "hidden @min-[240px]/tile:inline-flex": props.visibility === "maximize",
+        "inline-flex": !props.visibility,
+      })}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
