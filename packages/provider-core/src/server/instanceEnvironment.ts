@@ -35,7 +35,7 @@ const QUIET_ENVIRONMENT_DEFAULTS: Readonly<Record<string, Readonly<Record<string
 export function withProviderEnvironmentDefaults(
   driver: string | undefined,
   environment: NodeJS.ProcessEnv,
-  windows = process.platform === "win32",
+  windows = HostProcess.Platform.defaultValue() === "win32",
 ): NodeJS.ProcessEnv {
   const next = { ...environment };
   for (const [name, value] of Object.entries(QUIET_ENVIRONMENT_DEFAULTS[driver ?? ""] ?? {})) {

@@ -10,6 +10,10 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { mergeProviderInstanceEnvironment } from "./instanceEnvironment.ts";
 import { spawnAndCollect } from "./snapshotProbe.ts";
 
+const decodeEnvironment = Schema.decodeSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
+);
+
 const quietDrivers = [
   { driver: "claudeAgent", defaults: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" } },
   {
@@ -38,13 +42,7 @@ describe("mergeProviderInstanceEnvironment", () => {
               ["-e", "process.stdout.write(JSON.stringify(process.env))"],
               { env: environment, extendEnv: false },
             ),
-          ).pipe(
-            Effect.map((result) =>
-              Schema.decodeSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(
-                result.stdout,
-              ),
-            ),
-          );
+          ).pipe(Effect.map((result) => decodeEnvironment(result.stdout)));
         const defaultEnvironment = yield* mergeProviderInstanceEnvironment(
           undefined,
           { PATH: "/bin" },
