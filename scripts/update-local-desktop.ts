@@ -758,10 +758,16 @@ export async function preparedOutputIsActive(marker: string) {
   if (!NodeFS.existsSync(ownerFile)) {
     if (Date.now() - NodeFS.statSync(marker).mtimeMs < 30_000) return true;
   } else {
-    const owner = JSON.parse(NodeFS.readFileSync(ownerFile, "utf8"));
-    let start: string | null;
-    if (owner.platform === "linux") start = linuxProcessStart(owner.pid);
-    else if (owner.platform === "win32" && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+    let owner: { platform: string; pid: number; startTime: string } | undefined;
+    try {
+      owner = JSON.parse(NodeFS.readFileSync(ownerFile, "utf8"));
+    } catch {
+      if (Date.now() - NodeFS.statSync(marker).mtimeMs < 30_000) return true;
+    }
+    let start: string | null = null;
+    if (owner?.platform === "linux") start = linuxProcessStart(owner.pid);
+    else if (owner?.platform === "win32" && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+      const pid = owner.pid;
       start = await retryPreparationInterop(() =>
         run(
           "powershell.exe",
@@ -769,13 +775,13 @@ export async function preparedOutputIsActive(marker: string) {
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            `$p = Get-Process -Id ${owner.pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
+            `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
           ],
           { stdio: "pipe", timeout: 15_000 },
         ),
       );
-    } else throw new Error(`Unknown prepared output owner: ${marker}`);
-    if (start && start === owner.startTime) return true;
+    } else if (owner) throw new Error(`Unknown prepared output owner: ${marker}`);
+    if (start && start === owner?.startTime) return true;
   }
   console.warn(`Removing stale prepared output marker (owner exited): ${marker}`);
   NodeFS.rmSync(marker, { recursive: true });
@@ -854,8 +860,8 @@ export async function prunePreparedOutputs(
         return (
           config.output === directory &&
           ["full", "wsl-only"].includes(config.updatePath) &&
-          ["prepared.json", "build-cache.json", ".preparation-active"].some((name) =>
-            NodeFS.existsSync(NodePath.join(directory, name)),
+          ["prepared.json", "build-cache.json", ".preparation-active", ".activation-claimed"].some(
+            (name) => NodeFS.existsSync(NodePath.join(directory, name)),
           )
         );
       } catch {

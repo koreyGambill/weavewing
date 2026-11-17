@@ -460,6 +460,9 @@ it.each([".activation-claimed", ".preparation-active"])(
       await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
       NodeFS.writeFileSync(ownerFile, JSON.stringify({ ...owner, pid: 2147483647 }));
       await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
+      NodeFS.writeFileSync(ownerFile, "{");
+      NodeFS.utimesSync(marker, 1, 1);
+      await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
     } finally {
       NodeFS.rmSync(root, { recursive: true, force: true });
     }
