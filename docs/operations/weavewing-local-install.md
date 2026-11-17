@@ -38,9 +38,19 @@ live in the maintainer's private notes. See
    ```
 
    Activation verifies the original installed receipt, commit, update path and artifact digests.
-   If the install or prepared content changed, prepare again. Activation takes fresh backups and uses
-   the staged files without rebuilding. `prepare-timing.json` records preparation time and cache reuse.
-   `receipt.json` records activation's `durationMilliseconds` for comparison. A failure before shutdown
+   If the install or prepared content changed, prepare again. Preparation compares the installed runtime
+   commit's migration files and registry with the candidate. Activation skips the large WSL database
+   copy only when those sets match. New or changed migrations, unknown installed history and unreadable
+   migration sets require the copy. Small state files such as settings, secrets, environment identity
+   and thread workspaces are always backed up. Full updates also back up Windows state.
+   Activation uses the staged files without rebuilding. `prepare-timing.json` records preparation time
+   and cache reuse.
+   `receipt.json` records activation's `durationMilliseconds` and the database copy's result and reason
+   in `wslBackup.databaseBackup`. `timeToCloseDesktopMilliseconds` measures the wait from activation
+   start until the desktop exits. `desktopCloseMilliseconds` measures graceful closure itself, and
+   `desktopDowntimeMilliseconds` measures the close request through a healthy runtime response.
+   Runtime-only updates record zero desktop downtime unless recovery has to close the desktop.
+   A failure before shutdown
    can retry the same prepared output because activation state stays outside its sealed configuration.
 
 5. Activation detaches onto Windows and reports to the named thread after restart. End the turn after
@@ -65,7 +75,8 @@ beside it.
 **Rollback:** automatic when the new runtime is not healthy before the
 deadline; the receipt then says `installed: previous`. Backups land beside the
 install dir (`.<name>-local-update-rollback`) and under
-`~/.local/share/weavewing-update-backups/`.
+`~/.local/share/weavewing-update-backups/`. When the database copy was skipped, the old build restarts
+on the same database. Automatic rollback restores the app, not a database snapshot.
 
 ### Gotchas
 
@@ -74,8 +85,9 @@ install dir (`.<name>-local-update-rollback`) and under
 - Large databases can outrun the 240-second health deadline while migrating.
   The update rolls back the app but the database stays migrated; a retry
   verifies.
-- Preparation retries transient Windows interop launches up to three times. Activation gives each
-  backup its full operation budget after WSL responsiveness retries. A timed-out health operation gets
+- Preparation retries Windows interop launch errors up to three times. A staging timeout stops the
+  run because staging may still be active. Only idempotent probes and cleanup retry timeouts.
+  Activation gives each backup its full operation budget after WSL responsiveness retries. A timed-out health operation gets
   at most three attempts within 90 seconds. The updater refuses to stop an unverified runtime. If all
   attempts fail, ask the maintainer to repair WSL before retrying. Do not restart WSL yourself.
 - The resource-monitor helpers must come from a release whose

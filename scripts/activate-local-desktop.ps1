@@ -220,11 +220,14 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
   $helperReceipts = Join-Path $root 'helpers'
   $modeStarted = [DateTime]::UtcNow
   $details = @{ status = $Mode }
-  $desktop = @{ process = $null; launch = $null }
+  $desktop = @{ process = $null; launch = $null; closeStarted = $null; closedAt = $null }
   function Save-UpdateStatus($status) {
     $details.status = $status
     $details.at = [DateTime]::UtcNow.ToString('o')
     $details.durationMilliseconds = ([DateTime]::UtcNow - $modeStarted).TotalMilliseconds
+    if ($desktop.closeStarted -and $null -eq $details.desktopDowntimeMilliseconds) {
+      $details.desktopDowntimeSoFarMilliseconds = ([DateTime]::UtcNow - $desktop.closeStarted).TotalMilliseconds
+    }
     # Retries spawn many helpers; helpers/ keeps every record, the receipt only the latest.
     $all = @(Get-ChildItem -LiteralPath $helperReceipts -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc)
     $details.helperCount = $all.Count
@@ -251,7 +254,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
     $worker = Join-Path $root 'worker.mjs'
     $empty = Join-Path $root 'empty-stdin'
     New-Item -ItemType Directory -Path $helperReceipts -Force | Out-Null
-    $details = @{ timings = @(); updatePath = $config.updatePath; shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; previousDigest = $config.previousDigest; environmentId = $config.environmentId; status = $Mode; helperReceipts = $helperReceipts; commit = $config.commit; digest = $config.digest; install = $install; rollback = $rollback }
+    $details = @{ timings = @(); updatePath = $config.updatePath; shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; previousDigest = $config.previousDigest; environmentId = $config.environmentId; status = $Mode; timeToCloseDesktopMilliseconds = $null; desktopCloseMilliseconds = 0; desktopDowntimeMilliseconds = $(if ($config.updatePath -eq 'wsl-only') { 0 } else { $null }); helperReceipts = $helperReceipts; commit = $config.commit; digest = $config.digest; install = $install; rollback = $rollback }
     Record-UpdateHelper $PID "powershell:$Mode"
     function Quote-UpdateArgument([string]$value) {
       if ($value.Contains('"') -or $value.Contains("`r") -or $value.Contains("`n")) { throw 'Arguments must not contain quotes or newlines.' }
@@ -302,10 +305,17 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       if ($all.Count -eq 0) { return }
       $main = @($all | Where-Object { $_.MainWindowHandle -ne 0 })
       if ($main.Count -ne 1) { throw "Expected one main window at $install, found $($main.Count). Close it manually; no process was force-killed." }
+      $closeStarted = [DateTime]::UtcNow
       if (-not $main[0].CloseMainWindow()) { throw 'Desktop refused graceful close.' }
+      if (-not $desktop.closeStarted) { $desktop.closeStarted = $closeStarted }
       $details.closeRequested = $true
       $closeSeconds = $(if ($null -ne $config.closeSeconds) { [double]$config.closeSeconds } else { 90 })
       if (-not (Wait-UpdateDesktopExit $closeSeconds)) { throw "Desktop did not close in ${closeSeconds}s; no process was force-killed." }
+      if (-not $desktop.closedAt) {
+        $desktop.closedAt = [DateTime]::UtcNow
+        $details.desktopCloseMilliseconds = ($desktop.closedAt - $closeStarted).TotalMilliseconds
+        $details.timeToCloseDesktopMilliseconds = ($desktop.closedAt - $modeStarted).TotalMilliseconds
+      }
     }
     function Wait-UpdateDesktopExit([double]$seconds) {
       $deadline = [DateTime]::UtcNow.AddSeconds($seconds)
@@ -361,7 +371,11 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         try {
           $health = Probe-Update 'health' @($digest) ([Math]::Min(5, $remaining)) $remaining
           $details.lastHealth = $health
-          if ($health.healthy) { $details.health = $health; return $true }
+          if ($health.healthy) {
+            $details.health = $health
+            if ($desktop.closeStarted) { $details.desktopDowntimeMilliseconds = ([DateTime]::UtcNow - $desktop.closeStarted).TotalMilliseconds }
+            return $true
+          }
         } catch { $details.lastHealth = @{ healthy = $false; error = $_.Exception.Message } }
         $remaining = ($deadline - [DateTime]::UtcNow).TotalSeconds
         if ($remaining -gt 0) { Start-Sleep -Milliseconds ([Math]::Min(500, $remaining * 1000)) }
@@ -468,7 +482,6 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         $details.previousDigest = $oldDigest
         $old = Probe-Update 'health' @($oldDigest)
         if (-not $old.healthy) { throw 'Installed runtime is unhealthy; refusing restart.' }
-        if ((Get-FileHash -LiteralPath $config.archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.digest) { throw 'Candidate archive changed.' }
         $details.runtimeInstall = Probe-Update 'install-runtime'
         Save-UpdateStatus 'backing-up'
         $details.wslBackup = Probe-Update 'backup' @() 300
@@ -495,7 +508,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
           }
         } $config.clientSource
         if ($config.clientSource) { $details.reloadPending = $true; $details.reloadHint = 'UI updated - press Ctrl+Shift+R in Weavewing to load it.' }
-        @{ shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; clientAssetsDirectory = $config.clientAssetsDirectory; commit = $config.commit; digest = $config.digest; previousDigest = $oldDigest; exeHash = $config.exeHash; shellHash = $config.shellHash } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $install '.weavewing-local-update.json')
+        @{ shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; clientAssetsDirectory = $config.clientAssetsDirectory; commit = $config.commit; digest = $config.digest; previousDigest = $oldDigest; databaseBackup = $details.wslBackup.databaseBackup; exeHash = $config.exeHash; shellHash = $config.shellHash } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $install '.weavewing-local-update.json')
         Save-UpdateStatus 'verified'
         return
       }
@@ -558,7 +571,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         }
       }
       if ($details.links.status -ne 'passed') { $details.warning = 'Warning: linked-environment check did not pass. Inspect links in the receipt. The healthy app was kept running.' }
-      @{ shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; clientAssetsDirectory = $config.clientAssetsDirectory; commit = $config.commit; digest = $config.digest; previousDigest = $oldDigest; exeHash = $config.exeHash; shellHash = $config.shellHash } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $install '.weavewing-local-update.json')
+      @{ shellCommit = $config.shellCommit; clientCommit = $config.clientCommit; clientAssetsDirectory = $config.clientAssetsDirectory; commit = $config.commit; digest = $config.digest; previousDigest = $oldDigest; databaseBackup = $details.wslBackup.databaseBackup; exeHash = $config.exeHash; shellHash = $config.shellHash } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $install '.weavewing-local-update.json')
       Save-UpdateStatus 'verified'
     } catch {
       $details.error = $_.Exception.Message

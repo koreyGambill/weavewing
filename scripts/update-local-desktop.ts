@@ -64,12 +64,18 @@ export function localBuildInstallIdentity(repo: string) {
 }
 
 /** Retries preparation launches only for transient Windows interop failures. */
-export async function retryPreparationInterop<T>(operation: () => Promise<T>) {
+export async function retryPreparationInterop<T>(operation: () => Promise<T>, idempotent = false) {
   for (let attempt = 1; ; attempt++) {
     try {
       return await operation();
     } catch (error) {
-      if (attempt === 3 || !/accept4.*110|WSAETIMEDOUT|timed out after/i.test(String(error)))
+      if (
+        attempt === 3 ||
+        !(
+          /accept4.*110|WSAETIMEDOUT/i.test(String(error)) ||
+          (idempotent && /timed out after/i.test(String(error)))
+        )
+      )
         throw error;
       console.warn(`Preparation interop launch stalled; retrying (${attempt}/3).`);
     }
@@ -160,11 +166,19 @@ async function snapshot(database: string, destination: string) {
   }
 }
 
-async function backupState(source: string, destination: string, timeout = 240_000) {
+async function backupState(
+  source: string,
+  destination: string,
+  timeout = 240_000,
+  databaseBackup?: { required: boolean; reason: string },
+) {
   NodeFS.mkdirSync(destination, { mode: 0o700 });
   try {
     const database = NodePath.join(source, "statev2.sqlite");
-    if (NodeFS.existsSync(database)) {
+    const required =
+      databaseBackup?.required !== false || databaseBackup.reason !== "migration-set-unchanged";
+    const ran = required && NodeFS.existsSync(database);
+    if (ran) {
       await run(
         process.execPath,
         [
@@ -186,10 +200,65 @@ async function backupState(source: string, destination: string, timeout = 240_00
           dereference: true,
         });
     }
-    return { backedUp: true, path: destination };
+    return {
+      backedUp: true,
+      path: destination,
+      databaseBackup: {
+        ran,
+        reason: !required
+          ? "migration-set-unchanged"
+          : !ran
+            ? "database-missing"
+            : (databaseBackup?.reason ?? "migration-status-unknown"),
+      },
+    };
   } catch (error) {
     NodeFS.rmSync(destination, { recursive: true, force: true });
     throw error;
+  }
+}
+
+/** Skips the database copy only when both revisions have the same known migration set. */
+export async function databaseBackupDecision(
+  git: (...args: string[]) => Promise<string>,
+  installedCommit: string | undefined,
+  candidateCommit: string,
+) {
+  const decision = {
+    required: true,
+    reason: "installed-history-unavailable",
+    installedCommit,
+    candidateCommit,
+  };
+  if (!installedCommit) return decision;
+  try {
+    await git("merge-base", "--is-ancestor", installedCommit, candidateCommit);
+    const paths = [
+      "apps/server/src/persistence/Migrations.ts",
+      "apps/server/src/persistence/Migrations",
+      "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "apps/server/src/persistence/initializeV2Database.ts",
+      "apps/server/src/persistence/databaseMigrationHead.ts",
+    ];
+    const migrationSet = async (commit: string) => {
+      const tree = await git("ls-tree", "-r", commit, "--", ...paths);
+      if (
+        !tree.includes("\tapps/server/src/persistence/Migrations.ts") ||
+        !/\tapps\/server\/src\/persistence\/Migrations\/\d+_[^\n]+\.ts/.test(tree)
+      )
+        throw new Error("Migration set unavailable");
+      return tree;
+    };
+    decision.reason = "migration-set-unavailable";
+    const installed = await migrationSet(installedCommit);
+    const candidate = await migrationSet(candidateCommit);
+    return {
+      ...decision,
+      required: installed !== candidate,
+      reason: installed === candidate ? "migration-set-unchanged" : "migration-set-changed",
+    };
+  } catch {
+    return decision;
   }
 }
 
@@ -578,6 +647,7 @@ async function worker(mode: string, configFile: string, extra: string[]) {
       NodePath.join(config.wslHome, "userdata"),
       destination,
       config.backupTimeoutMs,
+      config.databaseBackup,
     );
     // Keep only this update's backup, matching the single Windows rollback.
     const parent = NodePath.dirname(config.wslBackupRoot);
@@ -693,6 +763,12 @@ type PreparedUpdate = {
   files: Record<string, string | null>;
   artifacts: Record<string, string | null>;
   staged?: string | undefined;
+  databaseBackup?: {
+    required: boolean;
+    reason: string;
+    installedCommit?: string | undefined;
+    candidateCommit: string;
+  };
 };
 
 /** Refuses stale installations and incomplete or modified prepared files before activation. */
@@ -768,17 +844,19 @@ export async function preparedOutputIsActive(marker: string) {
     if (owner?.platform === "linux") start = linuxProcessStart(owner.pid);
     else if (owner?.platform === "win32" && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
       const pid = owner.pid;
-      start = await retryPreparationInterop(() =>
-        run(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
-          ],
-          { stdio: "pipe", timeout: 15_000 },
-        ),
+      start = await retryPreparationInterop(
+        () =>
+          run(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
+            ],
+            { stdio: "pipe", timeout: 15_000 },
+          ),
+        true,
       );
     } else if (owner) throw new Error(`Unknown prepared output owner: ${marker}`);
     if (start && start === owner?.startTime) return true;
@@ -806,7 +884,8 @@ async function activatePrepared(output: string, commit: string, notifyThread?: s
   const prepared: PreparedUpdate = JSON.parse(
     NodeFS.readFileSync(NodePath.join(output, "prepared.json"), "utf8"),
   );
-  assertPreparedUpdate(prepared, commit);
+  if (prepared.schema !== 2 || prepared.commit !== commit)
+    throw new Error("Prepared commit no longer matches HEAD.");
   const configFile = NodePath.join(output, "config.json");
   const config = JSON.parse(NodeFS.readFileSync(configFile, "utf8"));
   if (
@@ -886,23 +965,25 @@ export async function prunePreparedOutputs(
       );
       if (config.updatePath === "full") {
         const windows = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
-        await retryPreparationInterop(async () =>
-          run(
-            "powershell.exe",
-            [
-              "-NoProfile",
-              "-NonInteractive",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              await windows(NodePath.join(directory, "activate.ps1")),
-              "-ConfigPath",
-              await windows(NodePath.join(directory, "config.json")),
-              "-Mode",
-              "Discard",
-            ],
-            { stdio: "pipe", timeout: 120_000 },
-          ),
+        await retryPreparationInterop(
+          async () =>
+            run(
+              "powershell.exe",
+              [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                await windows(NodePath.join(directory, "activate.ps1")),
+                "-ConfigPath",
+                await windows(NodePath.join(directory, "config.json")),
+                "-Mode",
+                "Discard",
+              ],
+              { stdio: "pipe", timeout: 120_000 },
+            ),
+          true,
         );
       }
       const evidence = NodePath.join(evidenceRoot, NodePath.basename(directory));
@@ -994,6 +1075,7 @@ async function main() {
     run("wslpath", ["-u", path], { stdio: "pipe" }),
   );
   let installed: {
+    commit?: string;
     shellCommit?: string;
     clientCommit?: string;
     clientAssetsDirectory?: string;
@@ -1219,6 +1301,11 @@ async function main() {
       output,
       candidate,
       updatePath,
+      databaseBackup: await databaseBackupDecision(
+        git,
+        installed.commit,
+        await git("rev-parse", "HEAD"),
+      ),
       shellCommit: updatePath === "full" ? await git("rev-parse", "HEAD") : installed.shellCommit,
       clientCommit: await git("rev-parse", "HEAD"),
       clientAssetsDirectory: "resources/client",
@@ -1403,6 +1490,7 @@ async function main() {
       updatePath,
       cacheKey,
       artifacts,
+      databaseBackup: config.databaseBackup,
       staged: updatePath === "full" ? NodePath.win32.join(candidate, "payload") : undefined,
       files: artifactDigests([
         ...Object.keys(artifacts),

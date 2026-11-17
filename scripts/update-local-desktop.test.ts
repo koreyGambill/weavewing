@@ -8,6 +8,7 @@ import { expect, it, vi } from "vite-plus/test";
 
 import {
   artifactDigests,
+  databaseBackupDecision,
   localDesktopBuildEnvironment,
   claimPreparedOutput,
   localBuildInstallIdentity,
@@ -545,4 +546,87 @@ it("prunes crashed preparations and activations while retaining a live owner", a
   } finally {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("backs up the database unless installed and candidate migrations are provably identical", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "migration-backup-"));
+  const git = async (...args: string[]) => {
+    const result = NodeChildProcess.spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = async () => {
+    await git("add", ".");
+    await git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-m",
+      "fixture",
+    );
+    return git("rev-parse", "HEAD");
+  };
+  try {
+    await git("init");
+    const persistence = NodePath.join(root, "apps/server/src/persistence");
+    NodeFS.mkdirSync(NodePath.join(persistence, "Migrations"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Migrations.ts"), "registry");
+    const migration = NodePath.join(persistence, "Migrations/001_Initial.ts");
+    NodeFS.writeFileSync(migration, "initial");
+    const installed = await commit();
+    NodeFS.writeFileSync(NodePath.join(root, "web.ts"), "new UI");
+    const unchanged = await commit();
+    expect(await databaseBackupDecision(git, installed, unchanged)).toMatchObject({
+      required: false,
+      reason: "migration-set-unchanged",
+      installedCommit: installed,
+    });
+    expect(await databaseBackupDecision(git, unchanged, unchanged)).toMatchObject({
+      required: false,
+    });
+    for (const unknown of [undefined, "f".repeat(40)])
+      expect(await databaseBackupDecision(git, unknown, unchanged)).toMatchObject({
+        required: true,
+        reason: "installed-history-unavailable",
+      });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Migrations/002_New.ts"), "new migration");
+    const added = await commit();
+    expect(await databaseBackupDecision(git, installed, added)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    expect(await databaseBackupDecision(git, added, installed)).toMatchObject({ required: true });
+    NodeFS.writeFileSync(migration, "edited historical migration");
+    const edited = await commit();
+    expect(await databaseBackupDecision(git, added, edited)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Migrations.ts"), "changed registry");
+    const registry = await commit();
+    expect(await databaseBackupDecision(git, edited, registry)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.rmSync(NodePath.join(persistence, "Migrations.ts"));
+    const missing = await commit();
+    expect(await databaseBackupDecision(git, missing, missing)).toMatchObject({
+      required: true,
+      reason: "migration-set-unavailable",
+    });
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("does not retry a staging timeout but retries timeouts for explicitly idempotent probes", async () => {
+  const timeout = new Error("powershell.exe timed out after 300000ms");
+  const staging = vi.fn().mockRejectedValue(timeout);
+  await expect(retryPreparationInterop(staging)).rejects.toBe(timeout);
+  expect(staging).toHaveBeenCalledTimes(1);
+  const probe = vi.fn().mockRejectedValueOnce(timeout).mockResolvedValue("alive");
+  await expect(retryPreparationInterop(probe, true)).resolves.toBe("alive");
+  expect(probe).toHaveBeenCalledTimes(2);
 });

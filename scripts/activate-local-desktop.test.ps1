@@ -267,7 +267,7 @@ try {
     Assert ($calls.recoveries -eq $(if ($case -in @('unhealthy', 'stop-failed')) { 1 } else { 0 })) 'Runtime recovery was skipped after stopping'
     Write-Host "PASS case: runtime-selection-$case"
   }
-  foreach ($case in @('prestop-retry', 'installed-changed', 'stopped-throws', 'stopped-transient', 'recovering-save-fails', 'swap-close-throws', 'swap-restore-blocked', 'swapx-installmissing', 'swap-m2fail', 'swap-m2m3fail', 'close-late-exit', 'health-transient', 'desktop-exits', 'desktop-handoff', 'runtime-no-desktop', 'runtime-backup', 'runtime-recovery', 'runtime-recovery-late-exit')) {
+  foreach ($case in @('no-db-rollback', 'prestop-retry', 'installed-changed', 'stopped-throws', 'stopped-transient', 'recovering-save-fails', 'swap-close-throws', 'swap-restore-blocked', 'swapx-installmissing', 'swap-m2fail', 'swap-m2m3fail', 'close-late-exit', 'health-transient', 'desktop-exits', 'desktop-handoff', 'runtime-no-desktop', 'runtime-backup', 'runtime-recovery', 'runtime-recovery-late-exit')) {
     $fixture = Join-Path $root ('activation-' + $case)
     $install = Join-Path $fixture 'installed'
     $resources = Join-Path $install 'resources'
@@ -307,6 +307,14 @@ try {
     $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
     if ($case -in @('close-late-exit', 'runtime-recovery-late-exit')) { $config.closeSeconds = 0 }
     if ($case -eq 'desktop-exits') { $config.healthSeconds = 3 }
+    if ($case -eq 'no-db-rollback') {
+      $config.databaseBackup = @{ required = $false; reason = 'migration-set-unchanged' }
+      $fixtureHome = Join-Path $fixture 'home'
+      New-Item -ItemType Directory -Path (Join-Path $fixtureHome 'userdata') | Out-Null
+      Set-Content (Join-Path $fixtureHome 'userdata/statev2.sqlite') 'same-live-database'
+      $config.wslHome = $fixtureHome
+      $config.wslBackupRoot = Join-Path $fixture 'wsl-backup'
+    }
     if ($case -in @('stopped-throws', 'stopped-transient') -or $case -like 'swap*') { $config.notifyThread = 'fixture-thread'; $config.commit = 'fixture-commit' }
     if ($case -eq 'stopped-transient') {
       New-Item -ItemType Directory -Path (Join-Path $fixture 'helpers') | Out-Null
@@ -330,6 +338,10 @@ try {
         $process = [pscustomobject]@{ Path = (Join-Path $install 'Weavewing.exe'); Id = 101; MainWindowHandle = 456 }
         $process | Add-Member ScriptMethod CloseMainWindow { $calls.closed++; return $true }
         if ($calls.closed -eq 0) { $process }
+      } elseif ($case -eq 'no-db-rollback' -and $calls.closed -eq 0) {
+        $process = [pscustomobject]@{ Path = (Join-Path $install 'Weavewing.exe'); Id = 100; MainWindowHandle = 123 }
+        $process | Add-Member ScriptMethod CloseMainWindow { $calls.closed++; return $true }
+        $process
       } elseif ($runtimeOnly -and $case -ne 'runtime-no-desktop') {
         $process = [pscustomobject]@{ Path = (Join-Path $install 'Weavewing.exe'); Id = 100; MainWindowHandle = 123 }
         $process | Add-Member ScriptMethod CloseMainWindow { $calls.closed++; return $true }
@@ -342,6 +354,7 @@ try {
       $exited = $false
       if ($FilePath.EndsWith('Weavewing.exe') -and -not $ArgumentList) {
         $calls.starts++
+        if ($case -eq 'no-db-rollback') { Assert ((Get-Content (Join-Path $fixtureHome 'userdata/statev2.sqlite')) -eq 'same-live-database') 'Relaunch lost the original database' }
         $calls.launcherVariables += $env:T3CODE_FIXTURE_LAUNCHER
         Assert ($RedirectStandardOutput.StartsWith($fixture) -and $RedirectStandardError -and $RedirectStandardInput) 'Desktop output was not captured locally'
         $exited = $case -in @('desktop-exits', 'desktop-handoff') -and $calls.starts -eq 1
@@ -364,7 +377,7 @@ try {
         if ($case -eq 'prestop-retry' -and $calls.health -eq 1) { throw 'health exhausted its WSL deadline' }
         if ($case -eq 'health-transient' -and $calls.health -eq 2) { throw 'One slow wsl call' }
         if ($case -eq 'desktop-exits' -and $calls.starts -eq 1) { $calls.crashedHealth++; return @{ healthy = $false; pid = 123 } }
-        if ($case -like 'swap*' -and $calls.starts -eq 1) { return @{ healthy = $false; pid = 123 } }
+        if (($case -like 'swap*' -or $case -eq 'no-db-rollback') -and $calls.starts -eq 1) { return @{ healthy = $false; pid = 123 } }
         return @{ healthy = ($case -notin @('runtime-recovery', 'runtime-recovery-late-exit') -or $calls.health -eq 1 -or $calls.starts -gt 0); pid = 123; environmentId = 'fixture' }
       }
       if ($label -eq 'stopped' -and ($case -in @('stopped-throws', 'recovering-save-fails') -or ($case.StartsWith('swap-') -and $calls.starts -gt 0))) { throw (New-LocalUpdateError "WSL distribution 'fixture' is unresponsive; refusing runtime operations. No probe answered.") }
@@ -372,6 +385,14 @@ try {
       if ($label -eq 'notify') {
         $calls.notify = $arguments[-1]
         if ($case -eq 'stopped-transient') { throw 'notify exceeded 30s' }
+      }
+      if ($label -eq 'backup' -and $case -eq 'no-db-rollback') {
+        $backupConfig = @{ wslHome = $fixtureHome; output = $fixture; wslBackupRoot = (Join-Path $fixture 'wsl-backup'); databaseBackup = $config.databaseBackup }
+        $backupConfigFile = Join-Path $fixture 'backup-worker-config.json'
+        $backupConfig | ConvertTo-Json | Set-Content $backupConfigFile
+        $result = & $NodeExecutable $WorkerPath --worker backup $backupConfigFile | ConvertFrom-Json
+        Assert ($LASTEXITCODE -eq 0) 'Rollback fixture backup worker failed'
+        return $result
       }
       if ($label -eq 'capture-links') { throw 'No links in fixture' }
       return @{ installed = $true; backedUp = $true; stopped = $true; path = 'fixture-wsl-backup' }
@@ -408,7 +429,7 @@ try {
         Assert ((Get-Content -LiteralPath $configPath -Raw) -ceq $sealedConfig) 'Pre-stop failure changed the sealed configuration; retry would refuse it'
         Assert ($calls.closed -eq 0 -and $calls.starts -eq 0) 'Pre-stop failure touched the desktop'
         Invoke-LocalDesktopUpdate $configPath 'Activate'
-      } elseif ($case -in @('installed-changed', 'stopped-throws', 'recovering-save-fails', 'close-late-exit') -or $case -like 'swap*' -or $case -in @('desktop-exits', 'runtime-no-desktop', 'runtime-recovery', 'runtime-recovery-late-exit')) { Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' } }
+      } elseif ($case -in @('no-db-rollback', 'installed-changed', 'stopped-throws', 'recovering-save-fails', 'close-late-exit') -or $case -like 'swap*' -or $case -in @('desktop-exits', 'runtime-no-desktop', 'runtime-recovery', 'runtime-recovery-late-exit')) { Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' } }
       else { Invoke-LocalDesktopUpdate $configPath 'Activate' }
     } finally {
       Set-Item Function:Invoke-LocalUpdateWsl $invokeWsl
@@ -420,7 +441,13 @@ try {
     Assert ((Get-Content -LiteralPath $configPath -Raw) -ceq $sealedConfig) 'Activation modified the sealed configuration'
     Assert (@($calls.launcherVariables | Where-Object { $_ -ne 'from launcher' }).Count -eq 0 -and -not $env:T3CODE_FIXTURE_LAUNCHER) 'Desktop launch did not scope the launcher variables to the desktop'
     $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
-    if ($case -eq 'prestop-retry') {
+    if ($case -eq 'no-db-rollback') {
+      Assert ($null -ne $receipt.timeToCloseDesktopMilliseconds -and $null -ne $receipt.desktopDowntimeMilliseconds -and $null -ne $receipt.desktopCloseMilliseconds) 'Receipt lost separate desktop closure and downtime measurements'
+      Assert ($receipt.installed -eq 'previous' -and $receipt.rollbackHealthy -and $calls.starts -eq 2) 'No-DB rollback did not restart the old build'
+      Assert ($receipt.wslBackup.databaseBackup.ran -eq $false -and $receipt.wslBackup.databaseBackup.reason -eq 'migration-set-unchanged') 'No-DB rollback receipt lost backup decision'
+      Assert (-not (Test-Path (Join-Path $receipt.wslBackup.path 'statev2.sqlite'))) 'No-DB rollback had a database copy'
+      Assert ((Get-Content (Join-Path $fixtureHome 'userdata/statev2.sqlite')) -eq 'same-live-database') 'No-DB rollback changed the database'
+    } elseif ($case -eq 'prestop-retry') {
       Assert ($receipt.status -eq 'verified' -and $calls.starts -eq 1) 'Retry after pre-stop failure did not activate successfully'
     } elseif ($case -eq 'installed-changed') {
       Assert ($receipt.status -eq 'failed' -and $receipt.error -match 'Installed content changed' -and $calls.starts -eq 0 -and $calls.closed -eq 0 -and $calls.operations.Count -eq 0) 'Changed install reached runtime operations'
@@ -571,6 +598,18 @@ lock.close();
   Assert ((Get-Content (Join-Path $backup 'secrets/fixture')) -eq 'secret') 'Secrets missing'
   Assert ((Get-Content (Join-Path $backup 'thread-workspaces/fixture')) -eq 'workspace') 'Workspace missing'
   Assert (-not (Test-Path (Join-Path $backup 'server-owner.sqlite'))) 'Ownership lock entered backup'
+  $skipRoot = Join-Path $root 'skip-state'
+  New-Item -ItemType Directory -Path $skipRoot | Out-Null
+  @{ wslHome = $fixtureHome; output = $root; wslBackupRoot = $skipRoot; backupTimeoutMs = 0; databaseBackup = @{ required = $false; reason = 'migration-set-unchanged' } } | ConvertTo-Json | Set-Content $configPath
+  & $NodeExecutable $WorkerPath --worker backup $configPath | Set-Content (Join-Path $root 'skip-result.json')
+  Assert ($LASTEXITCODE -eq 0) 'No-migration backup attempted a database snapshot'
+  $skipResult = Get-Content (Join-Path $root 'skip-result.json') -Raw | ConvertFrom-Json
+  Assert (-not $skipResult.databaseBackup.ran -and $skipResult.databaseBackup.reason -eq 'migration-set-unchanged') 'Skipped database backup lost its reason'
+  Assert (-not (Test-Path (Join-Path $skipRoot 'backup-wsl/statev2.sqlite'))) 'No-migration backup copied the database'
+  foreach ($file in @('settings.json', 'secrets/fixture', 'thread-workspaces/fixture')) {
+    Assert (Test-Path (Join-Path $skipRoot ('backup-wsl/' + $file))) "Small state missing without DB backup: $file"
+  }
+  Write-Host 'PASS case: no-migration-small-state-backup'
   $failureRoot = Join-Path $root 'failure'
   New-Item -ItemType Directory -Path $failureRoot | Out-Null
   @{ wslHome = $fixtureHome; output = $root; backupRoot = $failureRoot; wslBackupRoot = $failureRoot; backupTimeoutMs = 0 } | ConvertTo-Json | Set-Content $configPath
