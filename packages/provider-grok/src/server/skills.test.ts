@@ -177,26 +177,31 @@ describe("discoverGrokSkills", () => {
     });
   });
 
-  it.effect("disables Grok's updater for the probe without touching the caller's env", () => {
-    const spawnOptions: Array<ChildProcess.CommandOptions | undefined> = [];
-    const environment = { GROK_DISABLE_AUTOUPDATER: "0", GROK_HOME: "/home/dev/.grok" };
+  it.effect(
+    "forces the probe updater off and disables reporting without mutating the caller",
+    () => {
+      const spawnOptions: Array<ChildProcess.CommandOptions | undefined> = [];
+      const environment = { GROK_DISABLE_AUTOUPDATER: "0", GROK_HOME: "/home/dev/.grok" };
 
-    return Effect.gen(function* () {
-      yield* discoverGrokSkills({ binaryPath: "grok" }, environment, "/workspaces/demo").pipe(
-        Effect.provideService(
-          ChildProcessSpawner.ChildProcessSpawner,
-          makeInspectSpawner(inspectPayload([]), 0, spawnOptions),
-        ),
-      );
+      return Effect.gen(function* () {
+        yield* discoverGrokSkills({ binaryPath: "grok" }, environment, "/workspaces/demo").pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            makeInspectSpawner(inspectPayload([]), 0, spawnOptions),
+          ),
+        );
 
-      expect(spawnOptions[0]?.env).toEqual({
-        GROK_DISABLE_AUTOUPDATER: "1",
-        GROK_HOME: "/home/dev/.grok",
-        MISE_OFFLINE: "1",
+        expect(spawnOptions[0]?.env).toEqual({
+          GROK_DISABLE_AUTOUPDATER: "1",
+          DISABLE_TELEMETRY: "1",
+          DISABLE_ERROR_REPORTING: "1",
+          GROK_HOME: "/home/dev/.grok",
+          MISE_OFFLINE: "1",
+        });
+        expect(environment.GROK_DISABLE_AUTOUPDATER).toBe("0");
       });
-      expect(environment.GROK_DISABLE_AUTOUPDATER).toBe("0");
-    });
-  });
+    },
+  );
 });
 
 describe("leadingGrokSkillMention", () => {

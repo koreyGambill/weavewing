@@ -107,10 +107,12 @@ const runInteractiveSession = (input: {
   readonly args: ReadonlyArray<string>;
   readonly shell: boolean;
   readonly cwd: string;
+  readonly environment: NodeJS.ProcessEnv;
 }) =>
   Effect.callback<number, TriageAgentSpawnError>((resume) => {
     const child = NodeChildProcess.spawn(input.command, [...input.args], {
       cwd: input.cwd,
+      env: input.environment,
       // The Windows desktop launcher supplies terminal input through the reopened console.
       stdio: [interactiveStdin(), "inherit", "inherit"],
       shell: input.shell,
@@ -214,7 +216,11 @@ export const triageCommand = Command.make("triage", {
         launchPrompt,
       ]);
       yield* Console.log(`Starting ${selected.label}. It will ask what went wrong.\n`);
-      const exitCode = yield* runInteractiveSession({ ...spawnSpec, cwd: sessionDir });
+      const exitCode = yield* runInteractiveSession({
+        ...spawnSpec,
+        cwd: sessionDir,
+        environment: process.env,
+      });
       if (exitCode !== 0) {
         process.exitCode = exitCode;
         yield* Console.log(

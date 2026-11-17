@@ -493,7 +493,12 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
       return yield* makeGrokAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(
+          input.environment,
+          hostEnvironment,
+          "grok",
+          "turn",
+        ),
         hostPlatform,
         selfInvocation,
         continuationRequests,
