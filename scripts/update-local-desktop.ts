@@ -10,10 +10,70 @@ import * as NodeUtil from "node:util";
 import * as NodeURL from "node:url";
 
 /** Local installs update through desktop-install and must never poll a public release feed. */
-export function localDesktopBuildEnvironment<Environment extends NodeJS.ProcessEnv>(
-  env: Environment,
-) {
-  return { ...env, T3CODE_DESKTOP_UPDATE_REPOSITORY: "", GITHUB_REPOSITORY: "" };
+export function localDesktopBuildEnvironment(env: NodeJS.ProcessEnv) {
+  const inherited = Object.fromEntries(
+    [
+      "HOME",
+      "PATH",
+      "TMPDIR",
+      "TMP",
+      "TEMP",
+      "USER",
+      "LOGNAME",
+      "SHELL",
+      "SystemRoot",
+      "WINDIR",
+      "COMSPEC",
+      "PATHEXT",
+      "WSL_INTEROP",
+      "WSL_DISTRO_NAME",
+      "WSLENV",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "NO_PROXY",
+      "SSL_CERT_FILE",
+      "SSL_CERT_DIR",
+    ].flatMap((key) => (env[key] === undefined ? [] : [[key, env[key]]])),
+  );
+  return {
+    ...inherited,
+    T3CODE_SINGLE_ORIGIN_DEV: "1",
+    T3CODE_DESKTOP_UPDATE_REPOSITORY: "",
+    GITHUB_REPOSITORY: "",
+  };
+}
+
+/** Identifies the dependency installation and local config files that Git does not cover. */
+export function localBuildInstallIdentity(repo: string) {
+  const modules = NodeFS.statSync(NodePath.join(repo, "node_modules"), { throwIfNoEntry: false });
+  const envFiles = [repo, NodePath.join(repo, "apps/web")].flatMap((directory) =>
+    NodeFS.readdirSync(directory)
+      .filter((name) => /^\.env(?:\.|$)/.test(name))
+      .sort()
+      .map((name) => NodePath.join(directory, name)),
+  );
+  return {
+    files: artifactDigests([
+      NodePath.join(repo, "pnpm-lock.yaml"),
+      NodePath.join(repo, "node_modules/.modules.yaml"),
+      NodePath.join(repo, "node_modules/.pnpm/lock.yaml"),
+    ]),
+    envFiles: Object.fromEntries(envFiles.map((file) => [file, fileDigest(file)])),
+    modules: modules ? [modules.dev, modules.ino, modules.mtimeMs] : null,
+  };
+}
+
+/** Retries preparation launches only for transient Windows interop failures. */
+export async function retryPreparationInterop<T>(operation: () => Promise<T>) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === 3 || !/accept4.*110|WSAETIMEDOUT|timed out after/i.test(String(error)))
+        throw error;
+      console.warn(`Preparation interop launch stalled; retrying (${attempt}/3).`);
+    }
+  }
 }
 
 // The ownership database holds a lifetime lock and must never enter a backup.
@@ -472,6 +532,15 @@ export async function checkLocalLink(
 
 async function worker(mode: string, configFile: string, extra: string[]) {
   const config = JSON.parse(NodeFS.readFileSync(configFile, "utf8"));
+  if (mode !== "validate-prepared") {
+    const stateFile = NodePath.join(NodePath.dirname(configFile), "activation-state.json");
+    if (NodeFS.existsSync(stateFile)) {
+      const state = JSON.parse(NodeFS.readFileSync(stateFile, "utf8"));
+      config.windowsBackupRoot = state.windowsBackupRoot;
+      config.wslBackupRoot = state.wslBackupRoot ?? config.wslBackupRoot;
+      config.linkBaseline = state.linkBaseline;
+    }
+  }
   if (mode === "validate-prepared") {
     const prepared: PreparedUpdate = JSON.parse(
       NodeFS.readFileSync(NodePath.join(config.output, "prepared.json"), "utf8"),
@@ -510,16 +579,14 @@ async function worker(mode: string, configFile: string, extra: string[]) {
       destination,
       config.backupTimeoutMs,
     );
-    if (!config.checkOnly) {
-      // Keep only this update's backup, matching the single Windows rollback.
-      const parent = NodePath.dirname(config.wslBackupRoot);
-      for (const entry of NodeFS.readdirSync(parent))
-        if (
-          /^[0-9a-f]{40}(?:-[0-9a-f-]{36})?$/.test(entry) &&
-          entry !== NodePath.basename(config.wslBackupRoot)
-        )
-          NodeFS.rmSync(NodePath.join(parent, entry), { recursive: true, force: true });
-    }
+    // Keep only this update's backup, matching the single Windows rollback.
+    const parent = NodePath.dirname(config.wslBackupRoot);
+    for (const entry of NodeFS.readdirSync(parent))
+      if (
+        /^[0-9a-f]{40}(?:-[0-9a-f-]{36})?$/.test(entry) &&
+        entry !== NodePath.basename(config.wslBackupRoot)
+      )
+        NodeFS.rmSync(NodePath.join(parent, entry), { recursive: true, force: true });
     return result;
   }
   if (mode === "backup-windows")
@@ -619,11 +686,10 @@ export function buildCacheKey(inputs: unknown) {
 }
 
 type PreparedUpdate = {
-  schema: 1;
+  schema: 2;
   commit: string;
   updatePath: string;
   cacheKey: string;
-  installed: Record<string, string | null>;
   files: Record<string, string | null>;
   artifacts: Record<string, string | null>;
   staged?: string | undefined;
@@ -631,18 +697,13 @@ type PreparedUpdate = {
 
 /** Refuses stale installations and incomplete or modified prepared files before activation. */
 export function assertPreparedUpdate(prepared: PreparedUpdate, commit: string) {
-  if (prepared.schema !== 1 || prepared.commit !== commit)
+  if (prepared.schema !== 2 || prepared.commit !== commit)
     throw new Error("Prepared commit no longer matches HEAD.");
-  for (const [label, expected] of [
-    ["Installed", prepared.installed],
-    ["Prepared", prepared.files],
-  ] as const) {
-    if (
-      !expected ||
-      JSON.stringify(artifactDigests(Object.keys(expected))) !== JSON.stringify(expected)
-    )
-      throw new Error(`${label} content changed or is missing; prepare again.`);
-  }
+  if (
+    !prepared.files ||
+    JSON.stringify(artifactDigests(Object.keys(prepared.files))) !== JSON.stringify(prepared.files)
+  )
+    throw new Error("Prepared content changed or is missing; prepare again.");
 }
 
 /** Finds intact build artifacts even when a later Windows staging attempt failed. */
@@ -651,7 +712,7 @@ export function findCachedBuild(root: string, cacheKey: string) {
   for (const name of NodeFS.readdirSync(root)) {
     const directory = NodePath.join(root, name);
     try {
-      const cached: PreparedUpdate = JSON.parse(
+      const cached: Pick<PreparedUpdate, "cacheKey" | "artifacts"> & { schema: 1 } = JSON.parse(
         NodeFS.readFileSync(NodePath.join(directory, "build-cache.json"), "utf8"),
       );
       if (
@@ -673,6 +734,68 @@ export function findCachedBuild(root: string, cacheKey: string) {
   return undefined;
 }
 
+function linuxProcessStart(pid: number) {
+  try {
+    const stat = NodeFS.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return (
+      NodeFS.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() +
+      ":" +
+      stat
+        .slice(stat.lastIndexOf(")") + 1)
+        .trim()
+        .split(/\s+/)[19]
+    );
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** Removes an abandoned claim, preserving a live owner even when its PID has been reused. */
+export async function preparedOutputIsActive(marker: string) {
+  if (!NodeFS.existsSync(marker)) return false;
+  const ownerFile = NodePath.join(marker, "owner.json");
+  if (!NodeFS.existsSync(ownerFile)) {
+    if (Date.now() - NodeFS.statSync(marker).mtimeMs < 30_000) return true;
+  } else {
+    const owner = JSON.parse(NodeFS.readFileSync(ownerFile, "utf8"));
+    let start: string | null;
+    if (owner.platform === "linux") start = linuxProcessStart(owner.pid);
+    else if (owner.platform === "win32" && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+      start = await retryPreparationInterop(() =>
+        run(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            `$p = Get-Process -Id ${owner.pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
+          ],
+          { stdio: "pipe", timeout: 15_000 },
+        ),
+      );
+    } else throw new Error(`Unknown prepared output owner: ${marker}`);
+    if (start && start === owner.startTime) return true;
+  }
+  console.warn(`Removing stale prepared output marker (owner exited): ${marker}`);
+  NodeFS.rmSync(marker, { recursive: true });
+  return false;
+}
+
+/** Claims an output until its owning process exits. */
+export async function claimPreparedOutput(marker: string) {
+  if (await preparedOutputIsActive(marker)) throw new Error(`Prepared output is active: ${marker}`);
+  NodeFS.mkdirSync(marker);
+  NodeFS.writeFileSync(
+    NodePath.join(marker, "owner.json"),
+    JSON.stringify({
+      pid: process.pid,
+      platform: "linux",
+      startTime: linuxProcessStart(process.pid),
+    }),
+  );
+}
+
 async function activatePrepared(output: string, commit: string, notifyThread?: string) {
   const prepared: PreparedUpdate = JSON.parse(
     NodeFS.readFileSync(NodePath.join(output, "prepared.json"), "utf8"),
@@ -687,7 +810,7 @@ async function activatePrepared(output: string, commit: string, notifyThread?: s
   )
     throw new Error("Prepared configuration does not match its manifest.");
   const claim = NodePath.join(output, ".activation-claimed");
-  NodeFS.mkdirSync(claim);
+  await claimPreparedOutput(claim);
   helperReceiptDirectory = NodePath.join(output, "helpers");
   recordHelper(process.pid, "activation-driver");
   // Notification is an activation choice; the immutable prepared configuration stays sealed.
@@ -708,13 +831,18 @@ async function activatePrepared(output: string, commit: string, notifyThread?: s
       "Launch",
     ]);
   } catch (error) {
-    NodeFS.rmdirSync(claim);
+    NodeFS.rmSync(claim, { recursive: true, force: true });
     throw error;
   }
   console.log(`Windows activation detached. Receipt: ${NodePath.join(output, "receipt.json")}`);
 }
 
-async function prunePreparedOutputs(root: string, current: string) {
+/** Prunes owned preparation outputs, preserving current work and retaining diagnostics. */
+export async function prunePreparedOutputs(
+  root: string,
+  current: string,
+  evidenceRoot = NodePath.join(NodeOS.homedir(), "evidence/t3code/prepared-installs"),
+) {
   if (!NodeFS.existsSync(root)) return;
   const outputs = NodeFS.readdirSync(root)
     .map((name) => NodePath.join(root, name))
@@ -723,56 +851,55 @@ async function prunePreparedOutputs(root: string, current: string) {
         const config = JSON.parse(
           NodeFS.readFileSync(NodePath.join(directory, "config.json"), "utf8"),
         );
-        const prepared = JSON.parse(
-          NodeFS.readFileSync(
-            NodePath.join(
-              directory,
-              NodeFS.existsSync(NodePath.join(directory, "prepared.json"))
-                ? "prepared.json"
-                : "build-cache.json",
-            ),
-            "utf8",
-          ),
+        return (
+          config.output === directory &&
+          ["full", "wsl-only"].includes(config.updatePath) &&
+          ["prepared.json", "build-cache.json", ".preparation-active"].some((name) =>
+            NodeFS.existsSync(NodePath.join(directory, name)),
+          )
         );
-        return prepared.schema === 1 && config.output === directory;
       } catch {
         return false;
       }
     })
     .sort((a, b) => NodeFS.statSync(b).mtimeMs - NodeFS.statSync(a).mtimeMs);
-  for (const directory of outputs.slice(3)) {
-    if (directory === current || NodeFS.existsSync(NodePath.join(directory, ".preparation-active")))
-      continue;
+  for (const [index, directory] of outputs.entries()) {
+    if (directory === current) continue;
     const claim = NodePath.join(directory, ".activation-claimed");
+    let claimed = false;
     try {
-      NodeFS.mkdirSync(claim);
-    } catch {
-      continue;
-    }
-    try {
+      const preparing = await preparedOutputIsActive(
+        NodePath.join(directory, ".preparation-active"),
+      );
+      const activating = await preparedOutputIsActive(claim);
+      if (preparing || activating || index < 3) continue;
+      await claimPreparedOutput(claim);
+      claimed = true;
       const config = JSON.parse(
         NodeFS.readFileSync(NodePath.join(directory, "config.json"), "utf8"),
       );
       if (config.updatePath === "full") {
         const windows = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
-        await run("powershell.exe", [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          await windows(NodePath.join(directory, "activate.ps1")),
-          "-ConfigPath",
-          await windows(NodePath.join(directory, "config.json")),
-          "-Mode",
-          "Discard",
-        ]);
+        await retryPreparationInterop(async () =>
+          run(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              await windows(NodePath.join(directory, "activate.ps1")),
+              "-ConfigPath",
+              await windows(NodePath.join(directory, "config.json")),
+              "-Mode",
+              "Discard",
+            ],
+            { stdio: "pipe", timeout: 120_000 },
+          ),
+        );
       }
-      const evidence = NodePath.join(
-        NodeOS.homedir(),
-        "evidence/t3code/prepared-installs",
-        NodePath.basename(directory),
-      );
+      const evidence = NodePath.join(evidenceRoot, NodePath.basename(directory));
       NodeFS.mkdirSync(evidence, { recursive: true, mode: 0o700 });
       for (const name of NodeFS.readdirSync(directory)) {
         if (
@@ -787,7 +914,7 @@ async function prunePreparedOutputs(root: string, current: string) {
     } catch (error) {
       console.warn(`Could not prune prepared output ${directory}: ${String(error)}`);
     } finally {
-      NodeFS.rmSync(claim, { recursive: true, force: true });
+      if (claimed) NodeFS.rmSync(claim, { recursive: true, force: true });
     }
   }
 }
@@ -1026,7 +1153,7 @@ async function main() {
     },
   );
   const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "weavewing-update-bin-"));
-  NodeFS.mkdirSync(NodePath.join(output, ".preparation-active"));
+  await claimPreparedOutput(NodePath.join(output, ".preparation-active"));
   try {
     for (const name of ["vp", "vpr", "vpx", "node", "yarn", "yarnpkg", "bun", "bunx"])
       NodeFS.symlinkSync(vp, NodePath.join(bin, name));
@@ -1058,11 +1185,15 @@ async function main() {
     await build("patchelf", ["--version"]);
     await build("vp", ["--version"]);
     const powershell = (args: string[]) =>
-      run(
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
-        { stdio: ["ignore", "inherit", "inherit"] },
-      );
+      retryPreparationInterop(() =>
+        run(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
+          { stdio: "pipe", timeout: 300_000 },
+        ),
+      ).then((result) => {
+        if (result) console.log(result);
+      });
     const windowsPath = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
     const activation = NodePath.join(output, "activate.ps1");
     NodeFS.copyFileSync(NodePath.join(repo, "scripts/activate-local-desktop.ps1"), activation);
@@ -1076,14 +1207,6 @@ async function main() {
         NodeFS.readFileSync(NodeURL.fileURLToPath(import.meta.url), "utf8"),
       ),
     );
-    const installedRoot = await run("wslpath", ["-u", values["install-dir"]!], { stdio: "pipe" });
-    const installedBaseline = artifactDigests([
-      NodePath.join(installedRoot, ".weavewing-local-update.json"),
-      NodePath.join(installedRoot, "Weavewing.exe"),
-      NodePath.join(installedRoot, "resources/app.asar"),
-      NodePath.join(installedRoot, "resources/wsl-runtime.tar.gz"),
-      NodePath.join(installedRoot, "Start Weavewing.cmd"),
-    ]);
     const candidateName = `.${name}-prepared-${NodeCrypto.createHash("sha256").update(output).digest("hex").slice(0, 16)}`;
     const candidate = NodePath.win32.join(parent, candidateName);
     const config = {
@@ -1105,13 +1228,12 @@ async function main() {
       wslHome: values["wsl-home"],
       node: process.execPath,
       healthSeconds: updatePath === "wsl-only" ? Math.min(45, healthSeconds) : healthSeconds,
-      checkOnly: false,
       backupRoot,
       backupRootWindows: await windowsPath(backupRoot),
       wslBackupRoot: NodePath.join(
         NodeOS.homedir(),
         ".local/share/weavewing-update-backups",
-        `${await git("rev-parse", "HEAD")}-${NodeCrypto.randomUUID()}`,
+        await git("rev-parse", "HEAD"),
       ),
       notifyThread: values["notify-thread"],
       source: await windowsPath(NodePath.join(output, "windows/win-unpacked")),
@@ -1132,11 +1254,14 @@ async function main() {
       "-Mode",
       "Preflight",
     ]);
+    if (!NodeFS.existsSync(NodePath.join(repo, "node_modules"))) await build("vp", ["i"]);
     const commit = config.commit;
     const cacheKey = buildCacheKey({
       commit,
       updatePath,
       node: process.versions.node,
+      environment: localDesktopBuildEnvironment({}),
+      installation: localBuildInstallIdentity(repo),
       vp: await build("vp", ["--version"]),
       monitorTag,
       tools: artifactDigests([
@@ -1160,7 +1285,6 @@ async function main() {
         });
       console.log(`Reusing verified build output from ${cacheSource}`);
     } else {
-      if (!NodeFS.existsSync(NodePath.join(repo, "node_modules"))) await build("vp", ["i"]);
       await build("vp", ["run", "--filter", "t3", "build"]);
       if (updatePath === "full") {
         const windowsMonitor = NodePath.join(
@@ -1268,17 +1392,17 @@ async function main() {
     if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
       throw new Error("Source changed during the build; refusing preparation.");
     const prepared: PreparedUpdate = {
-      schema: 1,
+      schema: 2,
       commit,
       updatePath,
       cacheKey,
-      installed: installedBaseline,
       artifacts,
       staged: updatePath === "full" ? NodePath.win32.join(candidate, "payload") : undefined,
       files: artifactDigests([
         ...Object.keys(artifacts),
         activation,
         configFile,
+        NodePath.join(output, "installed-digests.json"),
         NodePath.join(output, "worker.mjs"),
         NodePath.join(output, "stage-windows-desktop.ps1"),
         NodePath.join(output, "runtime-install.sh"),

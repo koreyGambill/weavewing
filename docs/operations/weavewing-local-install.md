@@ -24,8 +24,10 @@ live in the maintainer's private notes. See
 2. Run the normal build command with `--prepare-only` and a new `--output-dir` under
    `~/.local/share/weavewing-builds/<short-sha>`. Preparation builds, smoke-tests and stages a candidate
    without backing up state or changing the running install. It can run after each merge.
-   Matching commits and tool inputs reuse verified build artifacts. The latest three completed builds or prepared outputs
-   are retained, together with preparations and activations still in progress. A staging failure
+   Matching commits, tool inputs, lockfiles, dependency installations and local env files reuse verified
+   build artifacts. Ambient build settings are excluded, and baked HTTP/WebSocket origins are suppressed. The latest three completed builds or prepared outputs
+   are retained, together with preparations and activations whose recorded process is still running.
+   Dead process markers are reported and removed. A staging failure
    keeps the verified build cache for the next attempt.
 3. `--plan-only` reports whether the change needs a full shell replacement or the fast web/server path.
    Shared contracts, migrations, dependencies and shell changes force the full path. `--full` forces it.
@@ -38,7 +40,8 @@ live in the maintainer's private notes. See
    Activation verifies the original installed receipt, commit, update path and artifact digests.
    If the install or prepared content changed, prepare again. Activation takes fresh backups and uses
    the staged files without rebuilding. `prepare-timing.json` records preparation time and cache reuse.
-   `receipt.json` records activation's `durationMilliseconds` for comparison.
+   `receipt.json` records activation's `durationMilliseconds` for comparison. A failure before shutdown
+   can retry the same prepared output because activation state stays outside its sealed configuration.
 
 5. Activation detaches onto Windows and reports to the named thread after restart. End the turn after
    launching. `detached.stderr` records PowerShell startup errors. The old `--check-only` and `--dry-run`
@@ -71,7 +74,8 @@ install dir (`.<name>-local-update-rollback`) and under
 - Large databases can outrun the 240-second health deadline while migrating.
   The update rolls back the app but the database stays migrated; a retry
   verifies.
-- Transient WSL interop stalls retry within a bounded deadline. A timed-out health operation gets
+- Preparation retries transient Windows interop launches up to three times. Activation gives each
+  backup its full operation budget after WSL responsiveness retries. A timed-out health operation gets
   at most three attempts within 90 seconds. The updater refuses to stop an unverified runtime. If all
   attempts fail, ask the maintainer to repair WSL before retrying. Do not restart WSL yourself.
 - The resource-monitor helpers must come from a release whose

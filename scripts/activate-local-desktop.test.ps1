@@ -16,7 +16,7 @@ try {
       New-Item -ItemType Directory -Path $fixture | Out-Null
       $configPath = Join-Path $fixture 'config.json'
       if ($failure -eq 'config') { Set-Content $configPath '{invalid' }
-      else { @{ install = (Join-Path $fixture 'installed'); checkOnly = $true } | ConvertTo-Json | Set-Content $configPath }
+      else { @{ install = (Join-Path $fixture 'installed') } | ConvertTo-Json | Set-Content $configPath }
       Must-Fail { Invoke-LocalDesktopUpdate $configPath $mode }
       $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
       Assert ($receipt.status -eq 'failed' -and $receipt.error) "$mode early $failure failure lost its terminal receipt"
@@ -127,15 +127,15 @@ try {
   # Probes that hang for a while, as during the 44e6918b0d install, must wait it out rather than refuse.
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; delays = @() }
   $calls = @{ operations = @(); budget = 0 }
-  $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'stopped' 5 {
+  $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'backup' 300 {
     param($executable, $arguments, $label, $seconds)
     if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'wsl-responsive') { $clock.now = $clock.now.AddSeconds(3); if ($calls.operations.Count -le 4) { throw (New-LocalUpdateError 'wsl-responsive exceeded 3s' -Transient) } }
-    else { $calls.budget = $seconds; @{ stopped = $true } }
+    else { $calls.budget = $seconds; @{ backedUp = $true } }
   } { param($seconds, $failure) Assert ($failure -match 'exceeded') 'Retry lost its failure'; $clock.delays += $seconds; $clock.now = $clock.now.AddSeconds($seconds) } 180 { $clock.now }
-  Assert ($result.stopped -and ($calls.operations -join ',') -eq 'wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,stopped') 'Transient WSL hangs refused the operation'
-  Assert (($clock.delays -join ',') -eq '1,2,4,8' -and $calls.budget -eq 5) 'Retries did not back off or shortened the operation budget'
+  Assert ($result.backedUp -and ($calls.operations -join ',') -eq 'wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,backup') 'Transient WSL hangs refused the operation'
+  Assert (($clock.delays -join ',') -eq '1,2,4,8' -and $calls.budget -eq 300) 'Retries did not back off or shortened the operation budget'
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; delays = @() }
   $calls = @{ operations = @() }
   $failure = $null
@@ -267,7 +267,7 @@ try {
     Assert ($calls.recoveries -eq $(if ($case -in @('unhealthy', 'stop-failed')) { 1 } else { 0 })) 'Runtime recovery was skipped after stopping'
     Write-Host "PASS case: runtime-selection-$case"
   }
-  foreach ($case in @('stopped-throws', 'stopped-transient', 'recovering-save-fails', 'swap-close-throws', 'swap-restore-blocked', 'swapx-installmissing', 'swap-m2fail', 'swap-m2m3fail', 'close-late-exit', 'health-transient', 'desktop-exits', 'desktop-handoff', 'runtime-no-desktop', 'runtime-backup', 'runtime-recovery', 'runtime-recovery-late-exit')) {
+  foreach ($case in @('prestop-retry', 'installed-changed', 'stopped-throws', 'stopped-transient', 'recovering-save-fails', 'swap-close-throws', 'swap-restore-blocked', 'swapx-installmissing', 'swap-m2fail', 'swap-m2m3fail', 'close-late-exit', 'health-transient', 'desktop-exits', 'desktop-handoff', 'runtime-no-desktop', 'runtime-backup', 'runtime-recovery', 'runtime-recovery-late-exit')) {
     $fixture = Join-Path $root ('activation-' + $case)
     $install = Join-Path $fixture 'installed'
     $resources = Join-Path $install 'resources'
@@ -304,7 +304,7 @@ try {
     $oldDigest = (Get-FileHash (Join-Path $resources 'wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
     $configPath = Join-Path $fixture 'config.json'
     $runtimeOnly = $case.StartsWith('runtime-')
-    $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $false; healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
+    $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
     if ($case -in @('close-late-exit', 'runtime-recovery-late-exit')) { $config.closeSeconds = 0 }
     if ($case -eq 'desktop-exits') { $config.healthSeconds = 3 }
     if ($case -in @('stopped-throws', 'stopped-transient') -or $case -like 'swap*') { $config.notifyThread = 'fixture-thread'; $config.commit = 'fixture-commit' }
@@ -313,7 +313,10 @@ try {
       foreach ($index in 1..60) { @{ pid = $index; platform = 'linux'; role = 'fixture' } | ConvertTo-Json | Set-Content (Join-Path $fixture "helpers/linux-$index.json") }
     }
     $config | ConvertTo-Json | Set-Content $configPath
+    $sealedConfig = Get-Content -LiteralPath $configPath -Raw
     Set-Content (Join-Path $fixture 'prepared.json') '{}'
+    Get-LocalUpdateInstalledManifest $install | Set-Content -LiteralPath (Join-Path $fixture 'installed-digests.json') -Encoding UTF8
+    if ($case -eq 'installed-changed') { Set-Content (Join-Path $install 'Weavewing.exe') 'different-install' }
     $invokeWsl = (Get-Item Function:Invoke-LocalUpdateWsl).ScriptBlock
     $calls = @{ operations = @(); starts = 0; sleeps = 0; closed = 0; health = 0; crashedHealth = 0; stopped = 0; notify = $null; restores = 0; launcherVariables = @() }
     $tmp = $env:TMP
@@ -358,6 +361,7 @@ try {
     $calls.operations += $label
       if ($label -eq 'health') {
         $calls.health++
+        if ($case -eq 'prestop-retry' -and $calls.health -eq 1) { throw 'health exhausted its WSL deadline' }
         if ($case -eq 'health-transient' -and $calls.health -eq 2) { throw 'One slow wsl call' }
         if ($case -eq 'desktop-exits' -and $calls.starts -eq 1) { $calls.crashedHealth++; return @{ healthy = $false; pid = 123 } }
         if ($case -like 'swap*' -and $calls.starts -eq 1) { return @{ healthy = $false; pid = 123 } }
@@ -399,7 +403,12 @@ try {
     # A reader left over from a failed launch must not block the recovery relaunch.
     $stdinHolder = $(if ($case -eq 'desktop-exits') { [IO.File]::Open((Join-Path $fixture 'weavewing-desktop-installed.stdin'), 'OpenOrCreate', 'Read', 'Read') })
     try {
-      if ($case -in @('stopped-throws', 'recovering-save-fails', 'close-late-exit') -or $case -like 'swap*' -or $case -in @('desktop-exits', 'runtime-no-desktop', 'runtime-recovery', 'runtime-recovery-late-exit')) { Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' } }
+      if ($case -eq 'prestop-retry') {
+        Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' }
+        Assert ((Get-Content -LiteralPath $configPath -Raw) -ceq $sealedConfig) 'Pre-stop failure changed the sealed configuration; retry would refuse it'
+        Assert ($calls.closed -eq 0 -and $calls.starts -eq 0) 'Pre-stop failure touched the desktop'
+        Invoke-LocalDesktopUpdate $configPath 'Activate'
+      } elseif ($case -in @('installed-changed', 'stopped-throws', 'recovering-save-fails', 'close-late-exit') -or $case -like 'swap*' -or $case -in @('desktop-exits', 'runtime-no-desktop', 'runtime-recovery', 'runtime-recovery-late-exit')) { Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' } }
       else { Invoke-LocalDesktopUpdate $configPath 'Activate' }
     } finally {
       Set-Item Function:Invoke-LocalUpdateWsl $invokeWsl
@@ -408,9 +417,14 @@ try {
       $env:TMP = $tmp
       if ($stdinHolder) { $stdinHolder.Dispose() }
     }
+    Assert ((Get-Content -LiteralPath $configPath -Raw) -ceq $sealedConfig) 'Activation modified the sealed configuration'
     Assert (@($calls.launcherVariables | Where-Object { $_ -ne 'from launcher' }).Count -eq 0 -and -not $env:T3CODE_FIXTURE_LAUNCHER) 'Desktop launch did not scope the launcher variables to the desktop'
     $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
-    if ($case -eq 'stopped-throws') {
+    if ($case -eq 'prestop-retry') {
+      Assert ($receipt.status -eq 'verified' -and $calls.starts -eq 1) 'Retry after pre-stop failure did not activate successfully'
+    } elseif ($case -eq 'installed-changed') {
+      Assert ($receipt.status -eq 'failed' -and $receipt.error -match 'Installed content changed' -and $calls.starts -eq 0 -and $calls.closed -eq 0 -and $calls.operations.Count -eq 0) 'Changed install reached runtime operations'
+    } elseif ($case -eq 'stopped-throws') {
       Assert ($receipt.status -eq 'failed' -and $calls.starts -eq 1 -and $receipt.rollbackHealthy) 'Stopped probe failure with an older rollback did not relaunch desktop'
       Assert (-not (Test-Path $backupRoot)) 'Failed update left a retry-blocking Windows backup'
       Assert (Test-Path (Join-Path $rollback 'app/previous')) 'Failure removed the existing rollback app'
@@ -482,7 +496,7 @@ try {
     }
     Write-Host "PASS case: activation-$case"
   }
-  $fixture = Join-Path $root 'check-only-runtime'
+  $fixture = Join-Path $root 'prepare-only-runtime'
   $install = Join-Path $fixture 'installed'
   $resources = Join-Path $install 'resources'
   New-Item -ItemType Directory -Path $resources | Out-Null
@@ -493,7 +507,7 @@ try {
   Set-Content $archive 'new-archive'
   Copy-Item (Join-Path $PSScriptRoot 'stage-windows-desktop.ps1') (Join-Path $fixture 'stage-windows-desktop.ps1')
   $configPath = Join-Path $fixture 'config.json'
-  @{ install = $install; updatePath = 'wsl-only'; archive = $archive; digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $true } | ConvertTo-Json | Set-Content $configPath
+  @{ install = $install; updatePath = 'wsl-only'; archive = $archive; digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content $configPath
   $invokeWsl = (Get-Item Function:Invoke-LocalUpdateWsl).ScriptBlock
   $calls = @{ operations = @() }
   function Invoke-LocalUpdateWsl {
@@ -511,13 +525,13 @@ try {
   Assert ($receipt.status -eq 'staged-and-verified') 'Runtime preparation did not complete'
   Assert ($calls.operations.Count -eq 0) 'Preparation touched the installed runtime or state'
   Write-Host 'PASS case: prepare-only-runtime'
-  Assert ((Get-Content (Join-Path $resources 'wsl-runtime.tar.gz')) -eq 'old-archive') 'Check-only replaced the installed runtime selection'
+  Assert ((Get-Content (Join-Path $resources 'wsl-runtime.tar.gz')) -eq 'old-archive') 'Preparation replaced the installed runtime selection'
 
   $fixtureHome = Join-Path $root 'home'
   $userdata = Join-Path $fixtureHome 'userdata'
   New-Item -ItemType Directory -Path $userdata | Out-Null
   $configPath = Join-Path $root 'backup-config.json'
-  @{ wslHome = $fixtureHome; output = $root; backupRoot = $root; wslBackupRoot = $root; checkOnly = $true } | ConvertTo-Json | Set-Content $configPath
+  @{ wslHome = $fixtureHome; output = $root; backupRoot = $root; wslBackupRoot = $root } | ConvertTo-Json | Set-Content $configPath
   $fixtureScript = Join-Path $root 'backup-fixture.mjs'
   @'
 import { DatabaseSync } from 'node:sqlite';
@@ -559,7 +573,7 @@ lock.close();
   Assert (-not (Test-Path (Join-Path $backup 'server-owner.sqlite'))) 'Ownership lock entered backup'
   $failureRoot = Join-Path $root 'failure'
   New-Item -ItemType Directory -Path $failureRoot | Out-Null
-  @{ wslHome = $fixtureHome; output = $root; backupRoot = $failureRoot; wslBackupRoot = $failureRoot; checkOnly = $true; backupTimeoutMs = 0 } | ConvertTo-Json | Set-Content $configPath
+  @{ wslHome = $fixtureHome; output = $root; backupRoot = $failureRoot; wslBackupRoot = $failureRoot; backupTimeoutMs = 0 } | ConvertTo-Json | Set-Content $configPath
   try {
     $ErrorActionPreference = 'Continue'
     & $NodeExecutable $WorkerPath --worker backup $configPath 2> (Join-Path $root 'timeout.stderr')

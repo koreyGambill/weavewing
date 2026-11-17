@@ -415,21 +415,27 @@ vp run desktop:update-local --activate /absolute/path/to/prepared-output --notif
 
 Activation verifies `prepared.json`, including the commit, selected update path, installed receipt and
 shell/runtime hashes, configuration, client tree and staged payload. Missing or changed content refuses
-activation before backup or shutdown. If the install changed since preparation, prepare again.
+activation before shutdown. If the install changed since preparation, prepare again.
 Activation installs the prepared Linux runtime, takes fresh backups, then stops, swaps, restarts and
 health-checks. It does no build or archive smoke test. The Windows activation detaches so the calling
 thread can survive the restart. End the turn after launching it. Omitting `--prepare-only` prepares and
 then activates in one invocation. The old `--check-only` and `--dry-run` flags are removed.
 
 Preparation reuses verified build artifacts when the source commit, update path, Node/Vite Plus and
-resource-monitor inputs match. It still smoke-tests the archive and stages a separate candidate.
+resource-monitor inputs, lockfile, dependency installation and local env files match. Builds inherit only
+execution-related environment variables and suppress baked HTTP/WebSocket origins. Preparation still
+smoke-tests the archive and stages a separate candidate. Transient Windows interop launches get up to
+three attempts.
 The managed builds directory keeps the latest three completed builds or prepared outputs. Active
-preparations and claimed activations are retained. A failed Windows staging attempt keeps its verified
+preparations and claimed activations are retained while their recorded PID and start time match a live
+owner. Stale markers are reported and removed. A failed Windows staging attempt keeps its verified
 build cache, so a fresh preparation can retry staging without rebuilding.
 Pruning removes their owned Windows slots and saves logs, manifests and timings under
 `~/evidence/t3code/prepared-installs/`. Unmarked older output directories are left alone.
 `prepare-timing.json` records preparation time and cache reuse. The activation receipt records
-`durationMilliseconds`, covering validation, fresh backups and restart.
+`durationMilliseconds`, covering validation, fresh backups and restart. Activation writes fresh backup
+paths and peer-link baselines outside the sealed configuration. A failure before shutdown leaves the
+prepared output available for another activation attempt.
 
 Activation proceeds without waiting for active turns. `--wsl-distro` defaults to `WSL_DISTRO_NAME`
 and `--wsl-home` to `~/.t3`. The install must have a healthy runtime and `Start Weavewing.cmd`.

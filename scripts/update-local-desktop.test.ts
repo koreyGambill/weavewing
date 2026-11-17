@@ -8,6 +8,11 @@ import { expect, it, vi } from "vite-plus/test";
 
 import {
   artifactDigests,
+  localDesktopBuildEnvironment,
+  claimPreparedOutput,
+  localBuildInstallIdentity,
+  retryPreparationInterop,
+  prunePreparedOutputs,
   assertPreparedUpdate,
   buildCacheKey,
   findCachedBuild,
@@ -353,32 +358,26 @@ it("resolves the installed receipt from --install-dir unless one is given explic
   await expect(installedReceiptPath({}, toLinux)).resolves.toBeUndefined();
 });
 
-it("rejects stale receipts, config, missing files and changed prepared content", () => {
+it("rejects stale commits, config, missing files and changed prepared content", () => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prepared-update-"));
   try {
     const artifact = NodePath.join(root, "client");
     NodeFS.mkdirSync(artifact);
     const file = NodePath.join(artifact, "index.html");
     NodeFS.writeFileSync(file, "original");
-    const receipt = NodePath.join(root, "installed.json");
-    NodeFS.writeFileSync(receipt, "installed");
     const config = NodePath.join(root, "config.json");
     NodeFS.writeFileSync(config, "config");
     const prepared = {
-      schema: 1 as const,
+      schema: 2 as const,
       commit: "a".repeat(40),
       updatePath: "full",
       cacheKey: "cache",
-      installed: artifactDigests([receipt]),
       files: artifactDigests([artifact, config]),
       artifacts: artifactDigests([artifact]),
       staged: artifact,
     };
     expect(() => assertPreparedUpdate(prepared, prepared.commit)).not.toThrow();
     expect(() => assertPreparedUpdate(prepared, "b".repeat(40))).toThrow("commit");
-    NodeFS.writeFileSync(receipt, "new install");
-    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Installed");
-    NodeFS.writeFileSync(receipt, "installed");
     NodeFS.writeFileSync(config, "changed config");
     expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
     NodeFS.writeFileSync(config, "config");
@@ -422,6 +421,124 @@ it("reuses completed builds before staging and rejects changed artifacts", () =>
     expect(findCachedBuild(root, "inputs")).toBeUndefined();
     NodeFS.rmSync(artifact);
     expect(findCachedBuild(root, "inputs")).toBeUndefined();
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("excludes ambient build settings and origins from local builds", () => {
+  const clean = localDesktopBuildEnvironment({ HOME: "/fixture", PATH: "/bin" });
+  const contaminated = localDesktopBuildEnvironment({
+    HOME: "/fixture",
+    PATH: "/bin",
+    VITE_HTTP_URL: "http://localhost",
+    VITE_WS_URL: "ws://localhost",
+    VITE_RELEASE_CHANNEL: "preview",
+    VITE_HOSTED_APP_URL: "https://preview.test",
+    APP_VERSION: "wrong",
+    VERCEL_ENV: "production",
+    VERCEL_URL: "preview.test",
+    NODE_ENV: "development",
+    NODE_OPTIONS: "--require /untrusted.cjs",
+  });
+  expect(contaminated).toEqual(clean);
+  expect(contaminated).not.toHaveProperty("VITE_HTTP_URL");
+  expect(contaminated).not.toHaveProperty("VITE_WS_URL");
+});
+
+it.each([".activation-claimed", ".preparation-active"])(
+  "reclaims %s only when its PID and start time no longer identify an owner",
+  async (name) => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prepared-owner-"));
+    try {
+      const marker = NodePath.join(root, name);
+      await claimPreparedOutput(marker);
+      await expect(claimPreparedOutput(marker)).rejects.toThrow("active");
+      const ownerFile = NodePath.join(marker, "owner.json");
+      const owner = JSON.parse(NodeFS.readFileSync(ownerFile, "utf8"));
+      NodeFS.writeFileSync(ownerFile, JSON.stringify({ ...owner, startTime: "previous-process" }));
+      await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
+      NodeFS.writeFileSync(ownerFile, JSON.stringify({ ...owner, pid: 2147483647 }));
+      await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it("invalidates cached builds after a lockfile, local config, or dependency install change", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "build-install-"));
+  try {
+    NodeFS.mkdirSync(NodePath.join(root, "apps/web"), { recursive: true });
+    NodeFS.mkdirSync(NodePath.join(root, "node_modules"));
+    const identity = () => buildCacheKey(localBuildInstallIdentity(root));
+    for (const name of ["pnpm-lock.yaml", "node_modules/.modules.yaml", ".env.local"]) {
+      const before = identity();
+      NodeFS.writeFileSync(NodePath.join(root, name), "changed input");
+      expect(identity()).not.toBe(before);
+    }
+    const before = identity();
+    NodeFS.renameSync(NodePath.join(root, "node_modules"), NodePath.join(root, "old-modules"));
+    NodeFS.mkdirSync(NodePath.join(root, "node_modules"));
+    NodeFS.copyFileSync(
+      NodePath.join(root, "old-modules/.modules.yaml"),
+      NodePath.join(root, "node_modules/.modules.yaml"),
+    );
+    expect(identity()).not.toBe(before);
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("retries preparation interop stalls, bounds attempts, and preserves deterministic failures", async () => {
+  const transient = new Error("accept4 failed 110");
+  const run = vi.fn().mockRejectedValueOnce(transient).mockResolvedValue("prepared");
+  await expect(retryPreparationInterop(run)).resolves.toBe("prepared");
+  expect(run).toHaveBeenCalledTimes(2);
+  const stalled = vi.fn().mockRejectedValue(transient);
+  await expect(retryPreparationInterop(stalled)).rejects.toBe(transient);
+  expect(stalled).toHaveBeenCalledTimes(3);
+  const failure = new Error("Unowned candidate");
+  const invalid = vi.fn().mockRejectedValue(failure);
+  await expect(retryPreparationInterop(invalid)).rejects.toBe(failure);
+  expect(invalid).toHaveBeenCalledTimes(1);
+});
+
+it("prunes crashed preparations and activations while retaining a live owner", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prune-prepared-"));
+  try {
+    for (let index = 0; index < 6; index++) {
+      const output = NodePath.join(root, String(index));
+      NodeFS.mkdirSync(output);
+      NodeFS.writeFileSync(
+        NodePath.join(output, "config.json"),
+        JSON.stringify({ output, updatePath: "wsl-only" }),
+      );
+      if (index >= 2)
+        NodeFS.writeFileSync(
+          NodePath.join(output, "build-cache.json"),
+          JSON.stringify({ schema: 1 }),
+        );
+      if (index < 3) {
+        const marker = NodePath.join(
+          output,
+          index === 1 ? ".activation-claimed" : ".preparation-active",
+        );
+        await claimPreparedOutput(marker);
+        if (index < 2)
+          NodeFS.writeFileSync(
+            NodePath.join(marker, "owner.json"),
+            JSON.stringify({ platform: "linux", pid: 2147483647, startTime: "dead" }),
+          );
+      }
+      NodeFS.utimesSync(output, index + 1, index + 1);
+    }
+    await prunePreparedOutputs(root, NodePath.join(root, "5"), NodePath.join(root, "evidence"));
+    expect(NodeFS.existsSync(NodePath.join(root, "0"))).toBe(false);
+    expect(NodeFS.existsSync(NodePath.join(root, "1"))).toBe(false);
+    for (const index of [2, 3, 4, 5])
+      expect(NodeFS.existsSync(NodePath.join(root, String(index)))).toBe(true);
+    expect(NodeFS.existsSync(NodePath.join(root, "evidence/0/config.json"))).toBe(true);
   } finally {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }
