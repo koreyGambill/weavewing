@@ -49,7 +49,12 @@ const offeredRelease = async (
     return JSON.stringify(listedTag ? [{ tag_name: listedTag, body: "API notes" }] : []);
   };
   const provider = new GitHubProvider(
-    { provider: "github", owner: "pingdotgg", repo: "t3code", tagNamePrefix },
+    {
+      provider: "github",
+      owner: "pingdotgg",
+      repo: "t3code",
+      ...(tagNamePrefix === undefined ? {} : { tagNamePrefix }),
+    },
     // Only the four fields the provider reads; a real AppUpdater needs Electron.
     {
       allowPrerelease: channel === "nightly",
