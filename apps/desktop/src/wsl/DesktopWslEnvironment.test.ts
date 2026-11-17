@@ -3,9 +3,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
-import * as Fiber from "effect/Fiber";
-import * as Queue from "effect/Queue";
-import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -28,7 +25,6 @@ import {
   makeIsAvailable,
   buildWslRuntimeInvalidateScript,
   buildWslRuntimePruneScript,
-  buildWslRuntimeProbeScript,
   parseResolvedPath,
   parseWslRuntimeRoot,
   windowsToWslPathImpl,
@@ -162,24 +158,6 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
     };
   };
 
-  const probeFixture = (fixture: ReturnType<typeof createFixture>) =>
-    runShell(
-      [
-        `export HOME=${sh(`${fixture.work}/home`)}`,
-        'export NVM_DIR="$HOME/.nvm" FNM_DIR="$HOME/.fnm" VOLTA_HOME="$HOME/.volta"',
-        "bash() { (",
-        "  command() {",
-        '    case "$*" in',
-        '      "-v node"|"-v mise"|"-v fnm"|"-v nodenv") return 1 ;;',
-        '      *) builtin command "$@" ;;',
-        "    esac",
-        "  }",
-        '  eval "$2"',
-        "); }",
-        buildWslRuntimeProbeScript(),
-      ].join("\n"),
-    );
-
   it("reads the launched server's dev identity instead of the production identity", () => {
     const fixture = createFixture();
     const setup =
@@ -197,54 +175,42 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
     expect(readField(prod.stdout, "environmentId")).toBe("production-id");
   });
 
-  it("discovers version-managed Node for providers with a standalone runtime", () => {
+  it("upgrades a digest-only receipt without touching the archive", () => {
     const fixture = createFixture();
     expect(fixture.install().status).toBe(0);
-    const nodeBin = `${fixture.work}/home/.nvm/versions/node/v24.15.0/bin`;
-    const setup = runShell(
-      [
-        "set -eu",
-        `mkdir -p ${sh(nodeBin)}`,
-        `printf '%s' ${sh('#!/bin/sh\nprintf "linux-node-provider\\n"\n')} > ${sh(`${nodeBin}/node`)}`,
-        `chmod +x ${sh(`${nodeBin}/node`)}`,
-      ].join("\n"),
-    );
-    expect(setup.status, setup.stderr).toBe(0);
-
-    const probe = probeFixture(fixture);
-
-    expect(probe.status, probe.stderr).toBe(0);
-    const resolvedPath = parseResolvedPath(probe.stdout);
-    expect(resolvedPath?.split(":")).toContain(nodeBin);
-    const provider = runShell(`export PATH=${sh(resolvedPath ?? "")}\nnode provider.js`);
-    expect(provider.status, provider.stderr).toBe(0);
-    expect(provider.stdout).toBe("linux-node-provider\n");
-  });
-
-  it("keeps the inherited PATH when bash is unavailable", () => {
-    const fixture = createFixture();
-    expect(fixture.install().status).toBe(0);
-    const probe = runShell(
-      [
-        "bash() { return 127; }",
-        'export PATH="/fixture/bin:/usr/bin:/bin"',
-        buildWslRuntimeProbeScript(),
-      ].join("\n"),
-    );
-
-    expect(probe.status, probe.stderr).toBe(0);
-    expect(parseResolvedPath(probe.stdout)).toBe("/fixture/bin:/usr/bin:/bin");
-  });
-
-  it("reuses a warm cache without touching the archive", () => {
-    const fixture = createFixture();
-    expect(fixture.install().status).toBe(0);
-    expect(runShell(`set -eu\nrm ${sh(fixture.archivePath)}`).status).toBe(0);
+    expect(
+      runShell(
+        [
+          "set -eu",
+          `head -n 1 ${sh(`${fixture.runtimeRoot}/.t3code-wsl-runtime-ready`)} > ${sh(`${fixture.work}/old-receipt`)}`,
+          `mv ${sh(`${fixture.work}/old-receipt`)} ${sh(`${fixture.runtimeRoot}/.t3code-wsl-runtime-ready`)}`,
+          `rm ${sh(fixture.archivePath)}`,
+        ].join("\n"),
+      ).status,
+    ).toBe(0);
 
     const warm = fixture.install();
 
     expect(warm.status, warm.stderr).toBe(0);
     expect(parseWslRuntimeRoot(warm.stdout)).toBe(fixture.runtimeRoot);
+  });
+
+  it("reuses an unchanged cache without running or hashing the executable", () => {
+    const fixture = createFixture(
+      `#!/bin/sh\nprintf x >> "$HOME/version-calls"\n${SERVER_ENTRY_SOURCE}`,
+    );
+    expect(fixture.install().status).toBe(0);
+    const warm = runShell(
+      [
+        `HOME=${sh(`${fixture.work}/home`)}`,
+        "export HOME",
+        "sha256sum() { return 1; }",
+        buildWslRuntimeInstallScript(null, fixture.runtimeId, fixture.archiveSha),
+      ].join("\n"),
+    );
+    expect(warm.status, warm.stderr).toBe(0);
+    expect(parseWslRuntimeRoot(warm.stdout)).toBe(fixture.runtimeRoot);
+    expect(runShell(`cat ${sh(`${fixture.work}/home/version-calls`)}`).stdout).toBe("x");
   });
 
   it("retains the loader error when a bundled executable needs a missing system library", () => {
@@ -259,18 +225,29 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
     expect(parseWslRuntimeRoot(result.stdout)).toBeNull();
   });
 
-  it("reinstalls a cache whose executable was truncated", () => {
-    const fixture = createFixture();
-    expect(fixture.install().status).toBe(0);
-    expect(runShell(`set -eu\n: > ${sh(fixture.serverEntry)}`).status).toBe(0);
+  it.each(["truncated", "rewritten with its size and mtime preserved"])(
+    "reinstalls a cache whose executable was %s",
+    (damage) => {
+      const fixture = createFixture();
+      expect(fixture.install().status).toBe(0);
+      const corrupt =
+        damage === "truncated"
+          ? `: > ${sh(fixture.serverEntry)}`
+          : [
+              `touch -r ${sh(fixture.serverEntry)} ${sh(`${fixture.work}/entry-time`)}`,
+              `printf '%s' ${sh(SERVER_ENTRY_SOURCE.replace("0.0.0", "9.9.9"))} > ${sh(fixture.serverEntry)}`,
+              `touch -r ${sh(`${fixture.work}/entry-time`)} ${sh(fixture.serverEntry)}`,
+            ].join("\n");
+      expect(runShell(`set -eu\n${corrupt}`).status).toBe(0);
 
-    const repaired = fixture.install();
+      const repaired = fixture.install();
 
-    expect(repaired.status, repaired.stderr).toBe(0);
-    expect(parseWslRuntimeRoot(repaired.stdout)).toBe(fixture.runtimeRoot);
-    const restored = runShell(`set -eu\ncat ${sh(fixture.serverEntry)}`);
-    expect(restored.stdout).toBe(SERVER_ENTRY_SOURCE);
-  });
+      expect(repaired.status, repaired.stderr).toBe(0);
+      expect(parseWslRuntimeRoot(repaired.stdout)).toBe(fixture.runtimeRoot);
+      const restored = runShell(`set -eu\ncat ${sh(fixture.serverEntry)}`);
+      expect(restored.stdout).toBe(SERVER_ENTRY_SOURCE);
+    },
+  );
 
   it("reinstalls an executable that fails --version despite a matching recorded digest", () => {
     const fixture = createFixture();
@@ -641,8 +618,6 @@ describe("WSL startup probes", () => {
   const withProbe = (
     output: (command: ChildProcess.Command) => Effect.Effect<string>,
     run: Effect.Effect<void, never, DesktopWslEnvironment>,
-    stateDir?: string,
-    onPersist: Effect.Effect<void> = Effect.void,
   ) => {
     const spawner = ChildProcessSpawner.make((command) =>
       Effect.succeed(
@@ -672,8 +647,7 @@ describe("WSL startup probes", () => {
                 DesktopEnvironment.DesktopEnvironment,
                 Effect.gen(function* () {
                   const path = yield* Path.Path;
-                  const directory =
-                    stateDir ?? (yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped());
+                  const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
                   return {
                     platform: "win32",
                     path,
@@ -683,18 +657,7 @@ describe("WSL startup probes", () => {
               ),
             ),
           ),
-          Layer.provide(
-            Layer.mergeAll(
-              NodeServices.layer,
-              Layer.effect(
-                FileSystem.FileSystem,
-                Effect.map(FileSystem.FileSystem, (fs) => ({
-                  ...fs,
-                  rename: (from, to) => fs.rename(from, to).pipe(Effect.andThen(onPersist)),
-                })),
-              ).pipe(Layer.provide(NodeServices.layer)),
-            ),
-          ),
+          Layer.provide(NodeServices.layer),
         ),
       ),
     );
@@ -719,178 +682,6 @@ describe("WSL startup probes", () => {
             Deferred.await(translating).pipe(Effect.as(null)),
           );
           assert.deepEqual(prepared, { ok: true, linuxAppRoot: "/cached/runtime" });
-        }),
-      );
-    }),
-  );
-
-  it.effect("allows a healthy login-shell probe that takes four seconds", () =>
-    Effect.gen(function* () {
-      const attempts = yield* Queue.unbounded<Deferred.Deferred<void>>();
-      yield* withProbe(
-        () =>
-          Effect.gen(function* () {
-            const finish = yield* Deferred.make<void>();
-            yield* Queue.offer(attempts, finish);
-            yield* Deferred.await(finish);
-            return "resolvedPath:/slow-but-healthy/bin\n";
-          }),
-        Effect.gen(function* () {
-          const wsl = yield* DesktopWslEnvironment;
-          const pending = yield* wsl.probeRuntime("Ubuntu", "slow").pipe(Effect.forkChild);
-          yield* Queue.take(attempts);
-          yield* TestClock.adjust("3 seconds");
-          const second = yield* Queue.take(attempts);
-          yield* TestClock.adjust("4 seconds");
-          yield* Deferred.succeed(second, undefined);
-          yield* TestClock.adjust("0 seconds");
-          assert.equal(Queue.sizeUnsafe(attempts), 0);
-          assert.deepEqual(yield* Fiber.join(pending), {
-            ok: true,
-            resolvedPath: "/slow-but-healthy/bin",
-          });
-        }),
-      );
-    }),
-  );
-
-  it.effect("retries a timed out login shell and caches PATH by distro and runtime", () =>
-    Effect.gen(function* () {
-      const started = yield* Deferred.make<void>();
-      let calls = 0;
-      yield* withProbe(
-        () =>
-          Effect.suspend(() =>
-            ++calls === 1
-              ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-              : Effect.succeed("resolvedPath:/custom/bin:/usr/bin\n"),
-          ),
-        Effect.gen(function* () {
-          const wsl = yield* DesktopWslEnvironment;
-          const pending = yield* wsl.probeRuntime("Ubuntu", "v1").pipe(Effect.forkChild);
-          yield* Deferred.await(started);
-          yield* TestClock.adjust("3 seconds");
-          assert.deepEqual(yield* Fiber.join(pending), {
-            ok: true,
-            resolvedPath: "/custom/bin:/usr/bin",
-          });
-          assert.equal(calls, 2);
-          yield* wsl.probeRuntime("Ubuntu", "v1");
-          assert.equal(calls, 2);
-          yield* wsl.probeRuntime("Ubuntu", "v2");
-          yield* wsl.probeRuntime("Debian", "v2");
-          assert.equal(calls, 5);
-        }),
-      );
-    }),
-  );
-
-  it.effect("reuses a runtime PATH after rebuilding the desktop environment", () =>
-    Effect.gen(function* () {
-      const stateDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
-      const read = Effect.gen(function* () {
-        const result = yield* (yield* DesktopWslEnvironment).probeRuntime("Ubuntu", "v1");
-        assert.deepEqual(result, { ok: true, resolvedPath: "/persisted/bin" });
-      });
-      yield* withProbe(() => Effect.succeed("resolvedPath:/persisted/bin\n"), read, stateDir);
-      yield* withProbe(() => Effect.never, read, stateDir);
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("returns stale PATH while one refresh persists the new login-shell PATH", () =>
-    Effect.gen(function* () {
-      const stateDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
-      const started = yield* Deferred.make<void>();
-      const finish = yield* Deferred.make<void>();
-      const persisted = yield* Deferred.make<void>();
-      let calls = 0;
-      yield* withProbe(
-        () =>
-          Effect.suspend(() =>
-            ++calls === 1
-              ? Effect.succeed("resolvedPath:/old/bin\n")
-              : Deferred.succeed(started, undefined).pipe(
-                  Effect.andThen(Deferred.await(finish)),
-                  Effect.as("resolvedPath:/new/bin\n"),
-                ),
-          ),
-        Effect.gen(function* () {
-          const wsl = yield* DesktopWslEnvironment;
-          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), {
-            ok: true,
-            resolvedPath: "/old/bin",
-          });
-          const stale = yield* wsl.probeRuntime("Ubuntu", "v1");
-          assert.deepEqual(stale, { ok: true, resolvedPath: "/old/bin" });
-          yield* TestClock.adjust("0 seconds");
-          assert.isTrue(yield* Deferred.isDone(started));
-          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), stale);
-          yield* TestClock.adjust("0 seconds");
-          assert.equal(calls, 2);
-          yield* Deferred.succeed(finish, undefined);
-          yield* Deferred.await(persisted);
-        }),
-        stateDir,
-        Effect.suspend(() =>
-          calls > 1 ? Deferred.succeed(persisted, undefined).pipe(Effect.asVoid) : Effect.void,
-        ),
-      );
-      yield* withProbe(
-        () => Effect.never,
-        Effect.gen(function* () {
-          const result = yield* (yield* DesktopWslEnvironment).probeRuntime("Ubuntu", "v1");
-          assert.deepEqual(result, { ok: true, resolvedPath: "/new/bin" });
-        }),
-        stateDir,
-      );
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("retains cached PATH when every background probe times out", () =>
-    Effect.gen(function* () {
-      const started = yield* Deferred.make<void>();
-      let calls = 0;
-      yield* withProbe(
-        () =>
-          Effect.suspend(() =>
-            ++calls === 1
-              ? Effect.succeed("resolvedPath:/working/bin\n")
-              : Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
-          ),
-        Effect.gen(function* () {
-          const wsl = yield* DesktopWslEnvironment;
-          const original = yield* wsl.probeRuntime("Ubuntu", "v1");
-          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), original);
-          yield* Deferred.await(started);
-          yield* TestClock.adjust("21 seconds");
-          assert.equal(calls, 4);
-          assert.deepEqual(yield* wsl.probeRuntime("Ubuntu", "v1"), original);
-        }),
-      );
-    }),
-  );
-
-  it.effect("bounds transport retries to escalating three-, six- and twelve-second attempts", () =>
-    Effect.gen(function* () {
-      let calls = 0;
-      const started = yield* Deferred.make<void>();
-      yield* withProbe(
-        () =>
-          Effect.sync(() => {
-            calls += 1;
-          }).pipe(
-            Effect.andThen(Deferred.succeed(started, undefined)),
-            Effect.andThen(Effect.never),
-          ),
-        Effect.gen(function* () {
-          const wsl = yield* DesktopWslEnvironment;
-          const pending = yield* wsl.probeRuntime("Ubuntu", "v1").pipe(Effect.forkChild);
-          yield* Deferred.await(started);
-          yield* TestClock.adjust("21 seconds");
-          const result = yield* Fiber.join(pending);
-          assert.isFalse(result.ok);
-          assert.equal(calls, 3);
-          if (!result.ok) assert.equal(result.transportFailure, "timeout");
         }),
       );
     }),

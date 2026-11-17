@@ -942,6 +942,20 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                   yield* (spec.onStateDirOwned?.() ?? Effect.void).pipe(Effect.ignore);
                   return;
                 }
+                if (
+                  !wasReady &&
+                  !stopRequested &&
+                  exitObserved &&
+                  (exitCode === 126 || exitCode === 127) &&
+                  config.value.runningDistro !== undefined &&
+                  config.value.wslRuntimeId !== undefined
+                ) {
+                  // System libraries can change while the cached executable's metadata stays intact.
+                  yield* wslEnvironment.invalidateRuntime(
+                    config.value.runningDistro,
+                    config.value.wslRuntimeId,
+                  );
+                }
                 yield* scheduleRestart(reason, exitCode);
               }
             }),

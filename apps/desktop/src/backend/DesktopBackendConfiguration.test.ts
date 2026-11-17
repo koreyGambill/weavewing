@@ -417,10 +417,8 @@ describe("DesktopBackendConfiguration", () => {
       runtimeId: string;
       sha256: string;
     }> = [];
-    let probeCount = 0;
     let legacyCleanupCount = 0;
     const linuxAppRoot = "/home/test/.t3/wsl-runtime/1.2.3-x64";
-    const resolvedPath = "/home/test/.local/bin:/usr/bin:/bin";
 
     return withPackagedWslHarness(
       {
@@ -437,10 +435,6 @@ describe("DesktopBackendConfiguration", () => {
               sha256: archive.sha256,
             });
             return { ok: true, linuxAppRoot, environmentId: "wsl-environment" };
-          },
-          probeRuntime: () => {
-            probeCount += 1;
-            return { ok: true, resolvedPath };
           },
           ensureNodePty: () => {
             throw new Error("the staged runtime must not probe for node-pty");
@@ -460,7 +454,6 @@ describe("DesktopBackendConfiguration", () => {
               sha256: archiveHash,
             },
           ]);
-          assert.equal(probeCount, 1);
           assert.equal(config.expectedEnvironmentId, "wsl-environment");
           assert.equal(
             config.entryPath,
@@ -473,7 +466,7 @@ describe("DesktopBackendConfiguration", () => {
             "~",
             "--exec",
             "env",
-            `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${resolvedPath}`,
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             `${linuxAppRoot}/t3`,
             "--bootstrap-fd",
             "0",
@@ -482,6 +475,7 @@ describe("DesktopBackendConfiguration", () => {
           assert.equal(config.wslRuntimeId, `sha256-${archiveHash}`);
           assert.equal(legacyCleanupCount, 1);
           assert.isTrue(Option.isNone(config.preflightFailure));
+          assert.notProperty(config.bootstrap, "shellEnvironmentPrepared");
         }),
     );
   });
@@ -556,112 +550,30 @@ describe("DesktopBackendConfiguration", () => {
     );
   });
 
-  it.effect(
-    "resolveWsl fails retryably on a staged probe transport timeout without extracting",
-    () =>
-      withPackagedWslHarness(
-        {
-          archiveHash: "d".repeat(64),
-          forbidFallback: "Transport failures cannot be repaired by extracting server.asar",
-          wsl: () => ({
-            getDistroIp: () => {
-              throw new Error("An unavailable runtime must retry without waiting for an IP probe");
-            },
-            prepareRuntime: () => ({ ok: true, linuxAppRoot: "/runtime/staged" }),
-            probeRuntime: () => ({
-              ok: false,
-              reason: "probe timed out",
-              transportFailure: "timeout",
-            }),
-          }),
-        },
-        () =>
-          Effect.gen(function* () {
-            const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
-            const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
-            const failure = Option.getOrThrow(config.preflightFailure);
-            assert.isFalse(failure.fatal);
-            assert.include(failure.reason, "timed out");
-          }),
-      ),
-  );
-
-  it.effect("resolveWsl retires a staged runtime whose launch probe fails", () => {
-    const archiveHash = "c".repeat(64);
-    const stagedAppRoot = `/home/test/.t3/wsl-runtime/sha256-${archiveHash}`;
-    let probeCount = 0;
-    const observedNodePtyRoots: string[] = [];
-    const invalidatedRuntimeIds: string[] = [];
-    return withPackagedWslHarness(
+  it.effect("resolveWsl retries a failed preflight without waiting for an IP query", () =>
+    withPackagedWslHarness(
       {
-        archiveHash,
+        archiveHash: "d".repeat(64),
         wsl: () => ({
-          prepareRuntime: () => ({ ok: true, linuxAppRoot: stagedAppRoot }),
-          invalidateRuntime: (_distro, runtimeId) =>
-            Effect.sync(() => {
-              invalidatedRuntimeIds.push(runtimeId);
-            }),
-          probeRuntime: () => {
-            probeCount += 1;
-            return { ok: false, reason: "WSL login-shell PATH could not be resolved" };
-          },
-          ensureNodePty: (_distro, root) => {
-            observedNodePtyRoots.push(root);
-            return { ok: true, nodePath: "/usr/bin/node", resolvedPath: "/usr/bin:/bin" };
-          },
-        }),
-      },
-      ({ mountedAppRoot, mountedEntryPath }) =>
-        Effect.gen(function* () {
-          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
-          const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
-
-          assert.equal(probeCount, 1);
-          assert.deepEqual(observedNodePtyRoots, [mountedAppRoot]);
-          assert.include(config.args, "/usr/bin/node");
-          assert.include(config.args, `${mountedAppRoot}/apps/server/dist/bin.mjs`);
-          assert.notInclude(config.args, `${stagedAppRoot}/t3`);
-          assert.equal(config.entryPath, mountedEntryPath);
-          assert.isUndefined(config.wslRuntimeId);
-          assert.isTrue(Option.isNone(config.preflightFailure));
-          assert.deepEqual(invalidatedRuntimeIds, [`sha256-${archiveHash}`]);
-        }),
-    );
-  });
-
-  it.effect("resolveWsl keeps WSL retryable when the mounted fallback fails transiently", () => {
-    const stagedAppRoot = "/home/test/.t3/wsl-runtime/cache";
-    const invalidatedRuntimeIds: string[] = [];
-    return withPackagedWslHarness(
-      {
-        archiveHash: "f".repeat(64),
-        wsl: () => ({
-          prepareRuntime: () => ({ ok: true, linuxAppRoot: stagedAppRoot }),
-          invalidateRuntime: (_distro, runtimeId) =>
-            Effect.sync(() => {
-              invalidatedRuntimeIds.push(runtimeId);
-            }),
-          probeRuntime: () => ({ ok: false, reason: "WSL login-shell PATH could not be resolved" }),
-          ensureNodePty: () => ({
-            ok: false,
-            reason: "WSL backend preflight timed out while probing for Node.js.",
-            fatal: false,
+          distroListError: new DesktopWslEnvironment.DesktopWslDistroListError({
+            reason: "WSL unavailable",
           }),
+          getDistroIp: () => {
+            throw new Error("A failed preflight must not wait for an IP query");
+          },
         }),
       },
       () =>
         Effect.gen(function* () {
-          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
-          const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
-          const failure = Option.getOrThrow(config.preflightFailure);
-
-          assert.isFalse(failure.fatal);
-          assert.equal(failure.retryLimit, 12);
-          assert.include(failure.reason, "timed out");
-          assert.deepEqual(invalidatedRuntimeIds, []);
+          const config =
+            yield* (yield* DesktopBackendConfiguration.DesktopBackendConfiguration).resolveWsl({
+              port: 5000,
+              distro: "Ubuntu",
+            });
+          assert.isFalse(Option.getOrThrow(config.preflightFailure).fatal);
         }),
-    );
-  });
+    ),
+  );
 
   it.effect(
     "resolveWsl preserves inherited PATH with quote-sensitive values as separate args",

@@ -146,6 +146,7 @@ interface MakeInstanceInput {
     DesktopTelemetryPublisher.DesktopTelemetryPublisher["Service"]
   >;
   readonly pruneRuntimes?: (distro: string | null, runtimeId: string) => Effect.Effect<void>;
+  readonly invalidateRuntime?: (distro: string | null, runtimeId: string) => Effect.Effect<void>;
 }
 
 function makeTestInstance(input: MakeInstanceInput) {
@@ -179,9 +180,12 @@ function makeTestInstance(input: MakeInstanceInput) {
       ...input.desktopTelemetryPublisher,
     }),
     DesktopBrowserHost.layer,
-    DesktopWslEnvironment.layerTest(
-      input.pruneRuntimes === undefined ? {} : { pruneRuntimes: input.pruneRuntimes },
-    ),
+    DesktopWslEnvironment.layerTest({
+      ...(input.pruneRuntimes === undefined ? {} : { pruneRuntimes: input.pruneRuntimes }),
+      ...(input.invalidateRuntime === undefined
+        ? {}
+        : { invalidateRuntime: input.invalidateRuntime }),
+    }),
   );
 
   const instance = DesktopBackendManager.makeBackendInstance({
@@ -727,20 +731,31 @@ describe("DesktopBackendManager", () => {
 
   // A policy refusal is reported on the first exit, since retrying cannot fix it.
   it.effect.each([
-    { code: 1, exits: 3, managedPolicy: false },
-    { code: SERVER_EXIT_CODE_MANAGED_POLICY, exits: 1, managedPolicy: true },
+    { code: 1, exits: 3, managedPolicy: false, staged: false },
+    { code: 1, exits: 3, managedPolicy: false, staged: true },
+    { code: 127, exits: 3, managedPolicy: false, staged: true },
+    { code: SERVER_EXIT_CODE_MANAGED_POLICY, exits: 1, managedPolicy: true, staged: true },
   ])(
-    "reports exit $code with the server output after $exits exits",
-    ({ code, exits, managedPolicy }) =>
+    "reports exit $code with the server output after $exits exits (staged: $staged)",
+    ({ code, exits, managedPolicy, staged }) =>
       Effect.gen(function* () {
         const message = "Error: Cannot find module 'zod/v4' in /Users/René";
         let exitCount = 0;
+        const invalidated: string[] = [];
         const firstExit = yield* Deferred.make<void>();
         const reports = yield* Queue.unbounded<{
           readonly exitCount: number;
+          readonly invalidated: readonly string[];
           readonly failure: DesktopBackendManager.BackendStartupFailure;
         }>();
         const instance = yield* makeTestInstance({
+          config: staged
+            ? { ...baseConfig, runningDistro: "Ubuntu", wslRuntimeId: "runtime" }
+            : baseConfig,
+          invalidateRuntime: (distro, id) =>
+            Effect.sync(() => {
+              invalidated.push(`${distro}:${id}`);
+            }),
           spawnerLayer: Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
             ChildProcessSpawner.make(() =>
@@ -768,13 +783,25 @@ describe("DesktopBackendManager", () => {
             },
           },
           onStartupFailure: (failure) =>
-            Queue.offer(reports, { exitCount, failure }).pipe(Effect.asVoid),
+            Queue.offer(reports, { exitCount, failure, invalidated: [...invalidated] }).pipe(
+              Effect.asVoid,
+            ),
         });
         yield* instance.start;
         yield* Deferred.await(firstExit);
         yield* TestClock.adjust(Duration.minutes(1));
-        const { exitCount: exitsWhenReported, failure } = yield* Queue.take(reports);
+        const {
+          exitCount: exitsWhenReported,
+          failure,
+          invalidated: invalidatedWhenReported,
+        } = yield* Queue.take(reports);
         assert.equal(exitsWhenReported, exits);
+        assert.deepEqual(
+          invalidatedWhenReported,
+          staged && (code === 126 || code === 127)
+            ? Array.from({ length: exits }, () => "Ubuntu:runtime")
+            : [],
+        );
         assert.equal(failure.reason, `The server could not start (code=${code}).`);
         assert.equal(failure.managedPolicy, managedPolicy);
         assert.isTrue(failure.output.endsWith(message));

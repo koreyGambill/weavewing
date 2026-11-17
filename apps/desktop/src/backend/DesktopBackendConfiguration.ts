@@ -413,7 +413,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
       : ({ ok: true, windowsEntryPath, linuxAppRoot: mountedAppRoot.value } as const);
   });
 
-  let stagedFailure: { readonly runtimeId?: string; readonly reason: string } | undefined;
+  let stagedFailure: { readonly reason: string } | undefined;
   const failedStaged = (failure: { readonly reason: string }) =>
     ({
       _tag: "Failed",
@@ -424,30 +424,19 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
   if (input.runtimeArchive !== null) {
     const runtime = yield* wslEnv.prepareRuntime(runningDistro, input.runtimeArchive);
     if (runtime.ok) {
-      // Staged runtimes bundle Node and node-pty; provider PATH discovery must not require them.
-      const stagedProbe = yield* wslEnv.probeRuntime(runningDistro, input.runtimeArchive.runtimeId);
-      if (stagedProbe.ok) {
-        yield* wslServerTree.cleanupLegacy;
-        return {
-          _tag: "Ready",
-          runningDistro,
-          windowsEntryPath: environment.backendEntryPath,
-          runtime: { kind: "executable", entryPath: `${runtime.linuxAppRoot}/t3` },
-          resolvedPath: stagedProbe.resolvedPath,
-          runtimeId: input.runtimeArchive.runtimeId,
-          ...(runtime.environmentId === undefined
-            ? {}
-            : { expectedEnvironmentId: runtime.environmentId }),
-        } as const;
-      }
-      if (stagedProbe.transportFailure !== undefined) {
-        return { _tag: "Failed", reason: stagedProbe.reason, fatal: false } as const;
-      }
-      yield* Effect.logWarning(
-        "The staged WSL runtime probe failed; retrying from the mounted server tree.",
-        { reason: stagedProbe.reason },
-      );
-      stagedFailure = { runtimeId: input.runtimeArchive.runtimeId, reason: stagedProbe.reason };
+      yield* wslServerTree.cleanupLegacy;
+      // The standalone server hydrates its login-shell PATH before constructing providers.
+      return {
+        _tag: "Ready",
+        runningDistro,
+        windowsEntryPath: environment.backendEntryPath,
+        runtime: { kind: "executable", entryPath: `${runtime.linuxAppRoot}/t3` },
+        resolvedPath: "",
+        runtimeId: input.runtimeArchive.runtimeId,
+        ...(runtime.environmentId === undefined
+          ? {}
+          : { expectedEnvironmentId: runtime.environmentId }),
+      } as const;
     } else {
       stagedFailure = { reason: runtime.reason };
       yield* Effect.logWarning(
@@ -474,10 +463,6 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     return stagedFailure && nodePtyResult.fatal
       ? failedStaged(stagedFailure)
       : failedNodePty(nodePtyResult);
-  }
-
-  if (stagedFailure?.runtimeId) {
-    yield* wslEnv.invalidateRuntime(runningDistro, stagedFailure.runtimeId);
   }
 
   return {
@@ -737,11 +722,11 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     } satisfies DesktopBackendManager.DesktopBackendStartConfig;
   }
 
-  // wsl.exe --exec omits the login-shell PATH needed to find provider CLIs and npm.
+  // Mounted runtimes need the Node selected during preflight; standalone runtimes bundle it.
   const runtime = preflight.runtime;
   const launchPath =
     runtime.kind === "executable"
-      ? `${WSL_SERVER_SYSTEM_PATH}:${preflight.resolvedPath}`
+      ? WSL_SERVER_SYSTEM_PATH
       : `${nodeBinDirOf(runtime.nodePath)}:${WSL_SERVER_SYSTEM_PATH}:${preflight.resolvedPath}`;
   const command =
     runtime.kind === "executable"
