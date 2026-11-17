@@ -3,7 +3,7 @@ import * as FS from "node:fs";
 import * as Path from "node:path";
 import { parseArgs } from "node:util";
 
-import { normalizeArtifacts } from "./release.ts";
+import { macStartup, normalizeArtifacts } from "./release.ts";
 
 const { values } = parseArgs({ options: Object.fromEntries(["worktree", "commit", "version", "run", "evidence"].map((name) => [name, { type: "string" as const }])) });
 const { worktree, commit, version, run: runId, evidence } = values;
@@ -16,7 +16,7 @@ const present = signingNames.filter((name) => process.env[name]);
 if (present.length && present.length !== signingNames.length) throw new Error("Apple signing is partially configured. Supply all six secrets or none.");
 let failure: unknown;
 try {
-  run("ssh", [...ssh, `umask 077; mkdir -p ~/${remote}/source ~/${remote}/assets ~/${remote}/tmp`]);
+  run("ssh", [...ssh, macStartup(runId)]);
   const archive = CP.spawn("git", ["-C", worktree, "archive", commit], { stdio: ["ignore", "pipe", "inherit"] });
   const extract = CP.spawn("ssh", [...ssh, `tar -x -C ~/${remote}/source`], { stdio: ["pipe", "inherit", "inherit"] });
   archive.stdout.pipe(extract.stdin);
@@ -26,7 +26,9 @@ try {
   });
   await Promise.all([exited(archive), exited(extract)]);
   // The remote helper reads the JSON payload on stdin; secrets never become ssh arguments.
-  run("ssh", [...ssh, `env -C ~/${remote}/source node .sparkwing/lib/release-mac-build.ts`], JSON.stringify({ version, runId, secrets: Object.fromEntries(signingNames.map((name) => [name, process.env[name] ?? ""])) }));
+  const nodeVersion = JSON.parse(FS.readFileSync(Path.join(worktree, "package.json"), "utf8")).engines.node;
+  if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) throw new Error("Invalid managed Node version");
+  run("ssh", [...ssh, `env -C ~/${remote}/source ~/.vite-plus/js_runtime/node/${nodeVersion}/bin/node .sparkwing/lib/release-mac-build.ts`], JSON.stringify({ version, runId, secrets: Object.fromEntries(signingNames.map((name) => [name, process.env[name] ?? ""])) }));
 } catch (error) {
   failure = error;
 }

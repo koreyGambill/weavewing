@@ -4,7 +4,7 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import { assertCleanBundle, buildEnvironment } from "./release.ts";
+import { assertCleanBundle, assertUpdaterConfig, buildEnvironment } from "./release.ts";
 
 let payload = "";
 for await (const chunk of process.stdin) payload += chunk;
@@ -20,6 +20,7 @@ const run = (command: string, args: string[]) => CP.execFileSync(command, args, 
 const keychain = Path.join(root, "signing.keychain-db");
 const signed = Boolean(secrets.APPLE_CSC_LINK);
 let mount: string | undefined;
+let failure: unknown;
 try {
   run("vp", ["env", "install", nodeVersion]);
   const vp = CP.execFileSync("/bin/sh", ["-c", "command -v vp"], { env, encoding: "utf8" }).trim();
@@ -58,10 +59,11 @@ try {
   FS.mkdirSync(mount);
   run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, Path.join(root, "assets", `Weavewing-${version}-arm64.dmg`)]);
   const app = Path.join(mount, "Weavewing.app");
+  const updater = assertUpdaterConfig(Path.join(app, "Contents/Resources/app-update.yml"));
   const plist = Path.join(app, "Contents/Info.plist");
   const read = (key: string) => CP.execFileSync("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, plist], { encoding: "utf8" }).trim();
   const bundleId = read("CFBundleIdentifier");
-  const proof = { version: read("CFBundleShortVersionString"), bundleId, signed, nodeVersion, mounted: true, codesign: "not checked" };
+  const proof = { version: read("CFBundleShortVersionString"), bundleId, updater, signed, nodeVersion, mounted: true, codesign: "not checked" };
   const saveProof = () => FS.writeFileSync(Path.join(root, "mac-proof.json"), JSON.stringify(proof, null, 2));
   saveProof();
   if (proof.version !== version || !["dev.weavewing.desktop", "com.t3tools.t3code"].includes(bundleId)) throw new Error("DMG Info.plist does not match release identity");
@@ -78,7 +80,18 @@ try {
   } finally {
     saveProof();
   }
+} catch (error) {
+  failure = error;
 } finally {
-  if (mount) run("hdiutil", ["detach", mount]);
-  if (signed && FS.existsSync(keychain)) run("security", ["delete-keychain", keychain]);
+  try {
+    if (mount) run("hdiutil", ["detach", mount]);
+  } catch (error) {
+    failure ??= error;
+  }
+  try {
+    if (signed && FS.existsSync(keychain)) run("security", ["delete-keychain", keychain]);
+  } catch (error) {
+    failure ??= error;
+  }
 }
+if (failure) throw failure;

@@ -8,11 +8,11 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 Download the fork from [Weavewing Releases](https://github.com/koreyGambill/weavewing/releases).
 Verify downloads against the release's `SHA256SUMS` before installing.
 
-| Platform    | Download and install                                                                                                                                                                           |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Linux x64   | Make the AppImage executable with `chmod +x`, then run it. For Debian or Ubuntu, run `sudo apt install ./Weavewing-<version>-amd64.deb`.                                                       |
-| Windows x64 | Run the `.exe` installer. For SmartScreen, choose **More info → Run anyway**.                                                                                                                  |
-| macOS arm64 | Open the DMG and move Weavewing to Applications. On macOS 15, use **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Weavewing.app`. |
+| Platform    | Download and install                                                                                                                                                                                                                          |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux x64   | Make the AppImage executable with `chmod +x`, then run it. For Debian or Ubuntu, run `sudo apt install ./Weavewing-<version>-amd64.deb`.                                                                                                      |
+| Windows x64 | Run the `.exe` installer. For SmartScreen, choose **More info → Run anyway**.                                                                                                                                                                 |
+| macOS arm64 | Open the DMG and move Weavewing to Applications. On macOS 15, try opening the app once. After it is blocked, use **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Weavewing.app`. |
 
 All three desktop builds are unsigned. The macOS build uses ad-hoc signing and
 doesn't auto-update. Download a new DMG to update it. A managed Mac may block

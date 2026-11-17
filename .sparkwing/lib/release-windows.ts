@@ -3,6 +3,8 @@ import * as FS from "node:fs";
 import * as Path from "node:path";
 import { parseArgs } from "node:util";
 
+import { assertUpdaterConfig } from "./release.ts";
+
 const { values } = parseArgs({ options: { assets: { type: "string" }, version: { type: "string" }, "wsl-runtime": { type: "string" } } });
 if (!values.assets || !values.version || !values["wsl-runtime"] || !process.env.TMPDIR) throw new Error("Expected --assets, --version, --wsl-runtime and TMPDIR");
 const run = (command: string, args: string[]) => CP.execFileSync(command, args, { stdio: "inherit" });
@@ -14,6 +16,7 @@ if (stages.length !== 1) throw new Error("Expected exactly one kept NSIS stage")
 const dist = Path.join(process.env.TMPDIR, stages[0]!, "app/dist");
 const unpacked = FS.readdirSync(dist).find((name) => name.endsWith("-unpacked"));
 if (!unpacked) throw new Error("NSIS stage has no unpacked application");
+assertUpdaterConfig(Path.join(dist, unpacked, "resources/app-update.yml"));
 const verify = Path.join(process.env.TMPDIR, "windows-verify");
 FS.mkdirSync(verify);
 const esbuild = "scripts/node_modules/.bin/esbuild";

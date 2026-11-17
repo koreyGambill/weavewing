@@ -46,7 +46,8 @@ Choose Linux x64 (AppImage or deb), Windows x64 (NSIS), or macOS arm64 (DMG).
 Matching CLI archives and `SHA256SUMS` are included in each release.
 
 The builds are unsigned. On Windows, choose **More info → Run anyway**.
-On macOS 15, use **System Settings → Privacy & Security → Open Anyway**, or run
+On macOS 15, try opening the app once. After it is blocked, use
+**System Settings → Privacy & Security → Open Anyway**, or run
 `xattr -dr com.apple.quarantine /Applications/Weavewing.app` after copying the app.
 Unsigned mac builds don't auto-update. A managed Mac may block the override.
 

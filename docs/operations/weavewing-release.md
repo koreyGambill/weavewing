@@ -16,7 +16,7 @@ Windows cross-builds install the pinned
 ```bash
 sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 1.0.0 --stage plan
 sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 1.0.0
-sparkwing run release -C <worktree> --detach --allow-risk prod -- --worktree <worktree> --version 1.0.0 --stage promote
+sparkwing run release -C <worktree> --detach --allow-risk prod -- --worktree <worktree> --version 1.0.0 --stage promote --draft-evidence <draft-run-directory>
 ```
 
 `plan` runs the builds and writes the proposed release without GitHub writes.
@@ -25,18 +25,22 @@ The evidence records CI as skipped. Draft and promote reject this flag, and
 promote runs CI at the release commit before publishing.
 `draft` creates or refreshes a private draft called `Weavewing 1.0.0`, targeting
 the release commit with tag name `weavewing-v1.0.0`. A draft creates no tag.
-`promote` verifies the complete uploaded asset set and every SHA256 checksum,
+`promote` verifies the complete uploaded asset set against `assets/SHA256SUMS`
+in the draft run's local evidence directory, including its release commit and CI result,
 then publishes the draft as latest. Only promote needs the prod risk grant.
 
 The default platform set is `linux,win,mac`. `--platforms linux,win` rebuilds a
 subset for a draft. Windows always builds the Linux CLI archive for its embedded
 WSL runtime. Promote requires all three platforms. `--notes-file <absolute-path>`
-replaces generated notes. Edit the draft notes before promoting if needed.
+replaces the notes. Draft reruns preserve existing notes unless this flag is given.
+Edit the draft notes before promoting if needed. First-release generated notes list
+at most 40 first-parent merge subjects since the fork point and link to the full comparison.
 
 Artifacts, checksums, notes, source provenance and command logs live below
 `~/evidence/t3code/sparkwing/runs/release/<run id>/`. `--evidence` selects another
 absolute directory. Keep the generated `release.json` and `artifacts.json` with
-the release evidence. Choose a fresh evidence directory for each run so an old
+the release evidence, including `assets/SHA256SUMS` and the original assets needed
+for promotion. Choose a fresh evidence directory for each run so an old
 source archive cannot leave stale files in the build. Windows native checks copy the NSIS staging payload to a
 new Windows temporary directory and run its native probes and CLI smoke there.
 They do not execute NSIS registration because it could replace an existing app.

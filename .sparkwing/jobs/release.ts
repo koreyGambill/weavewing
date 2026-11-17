@@ -5,14 +5,15 @@ import * as Path from "node:path";
 import { ConcurrencyGroup, type Context, definePipeline, memoKey } from "@sparkwing/sdk";
 
 import { checkout, checkoutArgs, git, logged, type Checkout } from "../lib/checkout.ts";
-import { assertCleanBundle, assetInventory, buildEnvironment, expectedAssets, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseNotes, verifyChecksums } from "../lib/release.ts";
+import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
 
 interface Release {
   id: number;
   tag_name: string;
   draft: boolean;
   target_commitish: string;
-  assets: { name: string }[];
+  body: string | null;
+  assets: { id: number; name: string }[];
 }
 
 const input = (ctx: Context) => releaseInputs(ctx.args.version ?? "", ctx.args.platforms ?? "linux,win,mac");
@@ -35,22 +36,38 @@ async function build(ctx: Context, co: Checkout, name: string, argv: readonly [s
   return logged(ctx, co, name, ["xwing", "env", "exec", "--repo", co.root, "--scratch", "--", "bash", "-c", 'exec env -C "$1" -i "TMPDIR=$TMPDIR" "${@:2}"', "bash", source(co), ...Object.entries(clean).map(([key, value]) => `${key}=${value}`), ...argv]);
 }
 
-async function assertInput(ctx: Context, co: Checkout, published = false) {
+async function assertNoTag(ctx: Context, co: Checkout) {
+  const { tag } = input(ctx);
+  const refs = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/matching-refs/tags/${tag}`));
+  assertTagAbsent(tag, refs);
+}
+
+async function assertInput(ctx: Context, co: Checkout) {
   const { tag, platforms } = input(ctx);
   if (ctx.args["notes-file"] && !Path.isAbsolute(ctx.args["notes-file"])) throw new Error("--notes-file must be absolute");
   const commit = git(co.root, "rev-parse", "HEAD");
   if (git(co.root, "status", "--porcelain")) throw new Error("Release source must be clean and committed");
   for (const name of [".env", ".env.local"])
     if (FS.existsSync(Path.join(co.root, name))) throw new Error(`Release source must not contain ${name}`);
-  if (ctx.args.stage !== "plan") git(co.root, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main");
+  if (ctx.args.stage !== "plan") assertPushedCommit(co.root, commit);
   const free = FS.statfsSync("/mnt/d");
   if (free.bavail * free.bsize < 30 * 1024 ** 3) throw new Error("D: has less than 30 GiB free. Stop and free space.");
+  await logged(ctx, co, "release-tools", ["bash", "-c", 'set -eu; export PATH="$HOME/.cargo/bin:$PATH"; for tool in gh xwing tar rustup cargo; do command -v "$tool" >/dev/null || { case "$tool" in rustup|cargo) echo "Install: curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal" >&2;; gh) echo "Install: sudo apt-get install gh" >&2;; tar) echo "Install: sudo apt-get install tar" >&2;; xwing) echo "Install Xwing using the Wing setup" >&2;; esac; exit 1; }; done']);
   const repo = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}`)) as { permissions?: { push?: boolean } };
   if (!repo.permissions?.push) throw new Error(`The gh identity cannot write ${RELEASE_REPOSITORY}`);
   const release = await findRelease(ctx, co);
-  if (!published && release && !release.draft) throw new Error(`${tag} is already public`);
+  if (release && !release.draft) throw new Error(`${tag} is already public`);
+  await assertNoTag(ctx, co);
+  if (git(co.root, "remote").split("\n").includes("upstream"))
+    git(co.root, "fetch", "upstream", "main", "--tags");
+  try {
+    git(co.root, "rev-parse", "--verify", "refs/remotes/upstream/main");
+  } catch {
+    throw new Error("Missing upstream/main; add the upstream remote and run git fetch upstream main --tags");
+  }
+  releaseNotes(co.root, input(ctx).version, commit);
   if (platforms.includes("mac") && ctx.args.stage !== "promote")
-    await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "moonborn", "set -eu; test $(uname -m) = arm64; available=$(df -k \"$HOME\" | tail -1 | awk '{print $4}'); test \"$available\" -gt 31457280; command -v vp; command -v node; xcrun --find notarytool"]);
+    await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "moonborn", macPreflight(co.nodeVersion)]);
   if (ctx.args.stage !== "promote" && (platforms.includes("linux") || platforms.includes("win")))
     await logged(ctx, co, "host-preflight", ["bash", "-c", 'set -eu; hint="Install prerequisites: sudo apt-get install build-essential pkg-config libsecret-1-dev imagemagick patchelf zip"; for tool in cc make pkg-config convert patchelf zip; do command -v "$tool" >/dev/null || { echo "$hint" >&2; exit 1; }; done; pkg-config --exists libsecret-1 || { echo "$hint" >&2; exit 1; }']);
   if (ctx.args.stage !== "promote" && platforms.includes("win"))
@@ -69,6 +86,7 @@ definePipeline({
     { name: "stage", type: "string", default: "draft", enum: ["draft", "plan", "promote"], description: "draft, plan or promote" },
     { name: "build-only", type: "bool", description: "Only with --stage plan: skip CI for artifact proof" },
     { name: "notes-file", type: "string", description: "Absolute path to release notes to use instead of generated notes" },
+    { name: "draft-evidence", type: "string", description: "Required for promote: absolute evidence directory of the draft run" },
   ],
   secrets: ["WEAVEWING_RELEASE_GH_TOKEN", "APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map((name) => ({ name, optional: true })),
   plan(p, run) {
@@ -83,6 +101,8 @@ definePipeline({
       promote.step("publish", async (ctx) => {
         const co = checkout(ctx);
         const { tag, commit } = await assertInput(ctx, co);
+        const draftEvidence = ctx.args["draft-evidence"];
+        if (!draftEvidence || !Path.isAbsolute(draftEvidence)) throw new Error("Promote requires --draft-evidence <absolute draft run directory>");
         await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
         const release = await findRelease(ctx, co);
         if (!release?.draft) throw new Error("Promote requires an existing draft");
@@ -93,8 +113,14 @@ definePipeline({
         const download = Path.join(co.evidence, "promote-assets");
         FS.mkdirSync(download, { recursive: true });
         await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", download, "--clobber");
-        verifyChecksums(download, names.filter((name) => name !== "SHA256SUMS"), FS.readFileSync(Path.join(download, "SHA256SUMS"), "utf8"));
+        verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit);
+        await assertNoTag(ctx, co);
         await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft=false", "--latest");
+        const ref = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/ref/tags/${tag}`));
+        const object = ref.object.type === "tag"
+          ? JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/tags/${ref.object.sha}`)).object
+          : ref.object;
+        if (object.type !== "commit" || object.sha !== commit) throw new Error("Published tag does not match the release commit; follow the release rollback procedure");
         const url = `https://github.com/${RELEASE_REPOSITORY}/releases/tag/${tag}`;
         ctx.log.info(url);
         return { commit, url };
@@ -203,7 +229,7 @@ definePipeline({
       }
       const inventory = assetInventory(dir, names);
       FS.writeFileSync(Path.join(dir, "SHA256SUMS"), inventory.map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
-      const notes = ctx.args["notes-file"] ? FS.readFileSync(ctx.args["notes-file"], "utf8") : releaseNotes(co.root, version, commit);
+      const notes = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
@@ -215,7 +241,9 @@ definePipeline({
       await assertInput(ctx, co);
       if (release) {
         if (release.target_commitish !== commit) throw new Error("Existing draft has a different target commit. Delete it before rebuilding.");
-        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, "--notes-file", notesFile);
+        await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, ...(ctx.args["notes-file"] ? ["--notes-file", notesFile] : []));
+        for (const asset of release.assets.filter((asset) => ![...names, "SHA256SUMS"].includes(asset.name)))
+          await gh(ctx, co, "api", "--method", "DELETE", `repos/${RELEASE_REPOSITORY}/releases/assets/${asset.id}`);
       } else {
         await gh(ctx, co, "release", "create", tag, "--repo", RELEASE_REPOSITORY, "--draft", "--target", commit, "--title", `Weavewing ${version}`, "--notes-file", notesFile);
       }
