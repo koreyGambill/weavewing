@@ -31,7 +31,7 @@ import { useStableCallback } from "./useStableCallback";
 
 /**
  * Closing releases preview and terminal sessions, and deletes a side chat that never ran.
- * Agent-driven browsers and terminal tabs require confirmation.
+ * Agent-driven browsers and terminals running subprocesses require confirmation.
  */
 export function useRightPanelSurfaceClose(input: {
   readonly threadRef: ScopedThreadRef | null;
@@ -147,14 +147,18 @@ export function useRightPanelSurfaceClose(input: {
       finishClose([surface]);
       return;
     }
-    const otherLabels = surface.terminalIds
-      .filter((terminalId) => terminalId !== surface.activeTerminalId)
-      .map(labelFor);
-    void confirmTerminalClose([labelFor(surface.activeTerminalId), ...otherLabels]).then(
-      (confirmed) => {
-        if (confirmed) finishClose([surface]);
-      },
+    const otherTerminalIds = surface.terminalIds.filter(
+      (terminalId) => terminalId !== surface.activeTerminalId,
     );
+    void confirmTerminalClose(
+      threadRef,
+      [surface.activeTerminalId, ...otherTerminalIds].map((terminalId) => ({
+        terminalId,
+        label: labelFor(terminalId),
+      })),
+    ).then((confirmed) => {
+      if (confirmed) finishClose([surface]);
+    });
   });
   const closeOtherSurfaces = useStableCallback((surface: RightPanelSurface) =>
     closeSurfaces(surfaces.filter((entry) => entry.id !== surface.id)),
