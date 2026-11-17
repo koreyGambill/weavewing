@@ -97,6 +97,8 @@ export function assertCleanBundle(root: string) {
         throw new Error(`Public config or credential baked into ${dir}/${relative}`);
       if (/__T3CODE_BUILD_(?:RELAY|CLERK)[A-Z_]*__/.test(text))
         throw new Error(`Unresolved public build constant in ${dir}/${relative}`);
+      if (/(?:tracesUrl|tracesDataset|tracesToken)\s*:\s*(?:[\w$]+\(\s*)?(["'`])[^"'`]+\1/.test(text))
+        throw new Error(`Non-empty tracing default in ${dir}/${relative}`);
       if (/(?:analyticsEnabled|posthogEnabled)\s*[:=]\s*(?:true|!0)\b/.test(text))
         throw new Error(`Analytics enabled by default in ${dir}/${relative}`);
       forkFeed ||= text.includes(RELEASE_REPOSITORY);

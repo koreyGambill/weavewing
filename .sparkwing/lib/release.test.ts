@@ -52,7 +52,7 @@ test("bundle boundary rejects baked public config and requires the fork feed", (
       FS.writeFileSync(Path.join(root, dir, "main.js"), 'const repository="koreyGambill/weavewing";');
     }
     assertCleanBundle(root);
-    for (const value of ["pk_live_abc123", "https://relay.t3.codes", "https://api.axiom.co/v1/traces", "__T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__", "analyticsEnabled: true"]) {
+    for (const value of ["pk_live_abc123", "https://relay.t3.codes", "https://api.axiom.co/v1/traces", "__T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__", 'tracesUrl:readBuildTimeValue("https://telemetry.example/traces")', 'tracesToken:h(`arbitrary-token`)', "analyticsEnabled: true"]) {
       FS.writeFileSync(Path.join(root, "apps/server/dist/main.js"), value);
       assert.throws(() => assertCleanBundle(root));
     }

@@ -37,6 +37,7 @@ async function build(ctx: Context, co: Checkout, name: string, argv: readonly [s
 
 async function assertInput(ctx: Context, co: Checkout, published = false) {
   const { tag, platforms } = input(ctx);
+  if (ctx.args["notes-file"] && !Path.isAbsolute(ctx.args["notes-file"])) throw new Error("--notes-file must be absolute");
   const commit = git(co.root, "rev-parse", "HEAD");
   if (git(co.root, "status", "--porcelain")) throw new Error("Release source must be clean and committed");
   for (const name of [".env", ".env.local"])
