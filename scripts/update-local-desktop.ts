@@ -761,7 +761,8 @@ async function prunePreparedOutputs(root: string, current: string) {
 
 async function main() {
   const prepareStarted = Date.now();
-  const { values } = NodeUtil.parseArgs({
+  const { values, tokens } = NodeUtil.parseArgs({
+    tokens: true,
     options: {
       "install-dir": { type: "string" },
       "output-dir": { type: "string" },
@@ -806,11 +807,9 @@ async function main() {
   const git = (...args: string[]) => run("git", ["-C", repo, ...args], { stdio: "pipe" });
   if (values.activate) {
     if (
-      values["prepare-only"] ||
-      values["plan-only"] ||
-      values.full ||
-      values["wsl-only"] ||
-      values["output-dir"]
+      tokens.some(
+        (token) => token.kind === "option" && !["activate", "notify-thread"].includes(token.name),
+      )
     )
       throw new Error("--activate accepts only a prepared directory and --notify-thread.");
     if (await git("status", "--porcelain"))
