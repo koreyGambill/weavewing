@@ -9,7 +9,8 @@ promote, its commit must already be pushed to `origin/main`. Version alignment
 happens in an archived source tree, leaving the release checkout unchanged.
 The Rust version is pinned in `rust-toolchain.toml`. Install rustup user-locally
 on both hosts. Linux also needs a C toolchain, pkg-config, libsecret development
-headers, ImageMagick, patchelf and zip. Windows cross-builds install the pinned
+headers, ImageMagick, patchelf and zip. Windows also needs Clang, LLD and LLVM.
+Windows cross-builds install the pinned
 `cargo-xwin`, which downloads Microsoft's CRT and Windows SDK.
 
 ```bash

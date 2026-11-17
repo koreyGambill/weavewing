@@ -52,6 +52,8 @@ async function assertInput(ctx: Context, co: Checkout, published = false) {
     await logged(ctx, co, "mac-preflight", ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "moonborn", "set -eu; test $(uname -m) = arm64; available=$(df -k \"$HOME\" | tail -1 | awk '{print $4}'); test \"$available\" -gt 31457280; command -v vp; command -v node; xcrun --find notarytool"]);
   if (ctx.args.stage !== "promote" && (platforms.includes("linux") || platforms.includes("win")))
     await logged(ctx, co, "host-preflight", ["bash", "-c", 'set -eu; command -v cc make pkg-config convert patchelf zip >/dev/null && pkg-config --exists libsecret-1 || { echo "Install prerequisites: sudo apt-get install build-essential pkg-config libsecret-1-dev imagemagick patchelf zip" >&2; exit 1; }']);
+  if (ctx.args.stage !== "promote" && platforms.includes("win"))
+    await logged(ctx, co, "windows-preflight", ["bash", "-c", 'command -v clang lld-link llvm-lib powershell.exe >/dev/null || { echo "Install Windows cross-build prerequisites: sudo apt-get install clang lld llvm; enable Windows PowerShell interop" >&2; exit 1; }']);
   return { commit, tag, platforms };
 }
 

@@ -77,7 +77,8 @@ export function buildEnvironment(path: string, home: string, tmp: string): Recor
     PATH: path, HOME: home, TMPDIR: tmp, LANG: "C.UTF-8", CI: "true",
     T3CODE_DESKTOP_UPDATE_REPOSITORY: RELEASE_REPOSITORY,
     T3CODE_DESKTOP_CHANNEL: "latest", CSC_IDENTITY_AUTO_DISCOVERY: "false",
-    CARGO_BUILD_JOBS: "6", XZ_DEFAULTS: "-T6",
+    CARGO_BUILD_JOBS: "6", RAYON_NUM_THREADS: "6", UV_THREADPOOL_SIZE: "6", MAKEFLAGS: "-j6", XZ_DEFAULTS: "-T6",
+    ...(process.env.WSL_INTEROP ? { WSL_INTEROP: process.env.WSL_INTEROP } : {}),
   };
 }
 
