@@ -1356,21 +1356,21 @@ export function resolveMacWebAuthnEntitlements(
   };
 }
 
-export function renderMacPasskeyEntitlements(
-  configuration: MacPasskeySigningConfiguration,
-  webAuthn: MacWebAuthnEntitlements,
+export function renderMacEntitlements(
+  configuration: MacPasskeySigningConfiguration | undefined,
+  webAuthn: MacWebAuthnEntitlements | undefined,
 ): string {
-  const associatedDomains = configuration.rpDomains
+  const associatedDomains = (configuration?.rpDomains ?? [])
     .map((domain) => `      <string>webcredentials:${escapeXml(domain)}</string>`)
     .join("\n");
-  const keychainAccessGroups = webAuthn.touchIdKeychainAccessGroup
+  const keychainAccessGroups = webAuthn?.touchIdKeychainAccessGroup
     ? `
     <key>keychain-access-groups</key>
     <array>
       <string>${escapeXml(webAuthn.touchIdKeychainAccessGroup)}</string>
     </array>`
     : "";
-  const browserPasskeys = webAuthn.browserPasskeys
+  const browserPasskeys = webAuthn?.browserPasskeys
     ? `
     <key>${BROWSER_PASSKEYS_ENTITLEMENT}</key>
     <true/>`
@@ -1380,14 +1380,18 @@ export function renderMacPasskeyEntitlements(
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
-    <key>com.apple.application-identifier</key>
+${
+  configuration
+    ? `    <key>com.apple.application-identifier</key>
     <string>${escapeXml(`${configuration.teamId}.${configuration.appId}`)}</string>
     <key>com.apple.developer.team-identifier</key>
     <string>${escapeXml(configuration.teamId)}</string>
     <key>com.apple.developer.associated-domains</key>
     <array>
 ${associatedDomains}
-    </array>${keychainAccessGroups}${browserPasskeys}
+    </array>${keychainAccessGroups}${browserPasskeys}`
+    : ""
+}
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
@@ -2885,11 +2889,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      ...(signed
+        ? { entitlements: macPasskeySigning?.entitlementsPath ?? "entitlements.mac.plist" }
+        : {}),
       ...(macPasskeySigning
-        ? {
-            entitlements: macPasskeySigning.entitlementsPath,
-            provisioningProfile: macPasskeySigning.provisioningProfilePath,
-          }
+        ? { provisioningProfile: macPasskeySigning.provisioningProfilePath }
         : {}),
     };
   }
@@ -3878,9 +3882,10 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
         ),
       }
     : undefined;
-  const macEntitlementsPath = macPasskeySigning
-    ? path.join(stageAppDir, "entitlements.mac.plist")
-    : undefined;
+  const macEntitlementsPath =
+    options.platform === "mac" && options.signed
+      ? path.join(stageAppDir, "entitlements.mac.plist")
+      : undefined;
   let macWebAuthn: MacWebAuthnEntitlements | undefined;
   if (macPasskeySigning && macEntitlementsPath) {
     if (!(yield* fs.exists(macPasskeySigning.provisioningProfilePath))) {
@@ -3895,9 +3900,11 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     yield* Effect.log(
       `[desktop-artifact] In-app browser passkeys: Touch ID ${macWebAuthn.touchIdKeychainAccessGroup ? "enabled" : "disabled"}, browser passkeys ${macWebAuthn.browserPasskeys ? "enabled" : "disabled"}.`,
     );
+  }
+  if (macEntitlementsPath) {
     yield* fs.writeFileString(
       macEntitlementsPath,
-      renderMacPasskeyEntitlements(macPasskeySigning, macWebAuthn),
+      renderMacEntitlements(macPasskeySigning, macWebAuthn),
     );
   }
 

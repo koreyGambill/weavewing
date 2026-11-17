@@ -1,9 +1,8 @@
+import { RELEASE_REPOSITORY, releaseTag, releaseVersionFromTag } from "./releaseIdentity.ts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { compareSemverVersions } from "./semver.ts";
-
-import { RELEASE_REPOSITORY, releaseTag, releaseVersionFromTag } from "./releaseIdentity.ts";
 
 const CLI_RELEASE_REPOSITORY = RELEASE_REPOSITORY;
 export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;

@@ -38,7 +38,7 @@ import {
   MissingMacPasskeyProvisioningProfileError,
   packWindowsServerAsar,
   preflightWindowsDesktopBuild,
-  renderMacPasskeyEntitlements,
+  renderMacEntitlements,
   resolveMacFileExclusions,
   resolveMacWebAuthnEntitlements,
   resolveMacPasskeySigningConfiguration,
@@ -589,7 +589,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
-  it.effect("allows unsigned and signed macOS builds without passkey entitlements", () =>
+  it.effect("preserves base entitlements for signed macOS builds without Clerk", () =>
     Effect.gen(function* () {
       for (const signed of [false, true]) {
         const config = yield* createBuildConfig(
@@ -604,11 +604,33 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const mac = config.mac as Record<string, unknown>;
         assert.equal(config.appId, "dev.weavewing.desktop");
         assert.notProperty(mac, "provisioningProfile");
-        assert.notProperty(mac, "entitlements");
+        assert.equal(mac.entitlements, signed ? "entitlements.mac.plist" : undefined);
         assert.equal(typeof mac.sign, signed ? "string" : "undefined");
       }
     }),
   );
+
+  it("renders base macOS entitlements without Clerk", () => {
+    const entitlements = renderMacEntitlements(undefined, undefined);
+    for (const key of [
+      "com.apple.security.cs.allow-jit",
+      "com.apple.security.cs.allow-unsigned-executable-memory",
+      "com.apple.security.cs.disable-library-validation",
+      "com.apple.security.device.camera",
+      "com.apple.security.device.audio-input",
+    ]) {
+      assert.include(entitlements, `<key>${key}</key>\n    <true/>`);
+    }
+    for (const key of [
+      "com.apple.application-identifier",
+      "com.apple.developer.team-identifier",
+      "com.apple.developer.associated-domains",
+      "keychain-access-groups",
+      "com.apple.developer.web-browser.public-key-credential",
+    ]) {
+      assert.notInclude(entitlements, `<key>${key}</key>`);
+    }
+  });
 
   it("omits macOS passkey signing configuration when Clerk is absent", () => {
     assert.isUndefined(resolveMacPasskeySigningConfiguration({}));
@@ -1642,7 +1664,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         " Clerk.Example.com,example.clerk.accounts.dev,clerk.example.com ",
     });
     assert.ok(configuration);
-    const entitlements = renderMacPasskeyEntitlements(configuration, {
+    const entitlements = renderMacEntitlements(configuration, {
       touchIdKeychainAccessGroup: undefined,
       browserPasskeys: false,
     });
@@ -1709,7 +1731,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       },
     );
 
-    const entitlements = renderMacPasskeyEntitlements(
+    const entitlements = renderMacEntitlements(
       { ...configuration, rpDomains: ["clerk.example.com"], provisioningProfilePath: "" },
       resolveMacWebAuthnEntitlements(
         profile(

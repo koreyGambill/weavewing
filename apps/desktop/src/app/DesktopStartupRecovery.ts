@@ -1,3 +1,4 @@
+import { RELEASE_REPOSITORY, releaseTag } from "@t3tools/shared/releaseIdentity";
 import type { DesktopUpdateState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -17,8 +18,6 @@ import type { BackendStartupFailure } from "../backend/DesktopBackendManager.ts"
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
 import * as DesktopState from "./DesktopState.ts";
-
-import { RELEASE_REPOSITORY, releaseTag } from "@t3tools/shared/releaseIdentity";
 
 const RELEASES_URL = `https://github.com/${RELEASE_REPOSITORY}/releases`;
 const LAST_STARTED_VERSION_FILE = "desktop-last-started-version";
