@@ -2888,7 +2888,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           role: "Viewer",
         },
       ],
-      ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      // Apple Silicon refuses an unsealed bundle as damaged; "-" seals it ad hoc. Hardened runtime
+      // only matters for notarization and would demand library-validation entitlements here.
+      ...(signed
+        ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") }
+        : { identity: "-", hardenedRuntime: false }),
       ...(signed && macSigning ? { entitlements: macSigning.entitlementsPath } : {}),
       ...(macSigning?.provisioningProfilePath
         ? { provisioningProfile: macSigning.provisioningProfilePath }

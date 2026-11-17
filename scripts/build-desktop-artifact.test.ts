@@ -606,6 +606,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.notProperty(mac, "provisioningProfile");
         assert.equal(mac.entitlements, signed ? "/stage/app/entitlements.mac.plist" : undefined);
         assert.equal(typeof mac.sign, signed ? "string" : "undefined");
+        assert.equal(mac.identity, signed ? undefined : "-");
+        assert.equal(mac.hardenedRuntime, signed ? undefined : false);
       }
     }),
   );
