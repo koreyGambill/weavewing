@@ -70,6 +70,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       {/* Wide layouts draw the cluster fixed in the window; the mobile sheet covers it. */}
       <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
         <TitlebarControls
+          expanded
           onBackdrop={backdropVariant !== null}
           collapser={
             <SidebarTrigger
@@ -102,7 +103,7 @@ export function TitlebarWidthProbe({ onWidthChange }: { onWidthChange: (width: n
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none invisible fixed top-0 left-0 w-[var(--workspace-titlebar-content-left)]"
+      className="pointer-events-none invisible fixed top-0 left-0 w-[calc(var(--workspace-controls-left)+5*var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap)+0.75rem+1px)]"
       ref={observeWidth}
     />
   );
@@ -110,7 +111,7 @@ export function TitlebarWidthProbe({ onWidthChange }: { onWidthChange: (width: n
 
 /**
  * The mark and collapser stay fixed while navigation follows the expanded sidebar.
- * `compact` keeps only the mark and collapser below md, where the header is narrow.
+ * `compact` keeps only the mark and collapser below md when the sheet is closed.
  */
 export function TitlebarControls({
   collapser,
@@ -125,9 +126,10 @@ export function TitlebarControls({
 }) {
   return (
     <div
+      data-sidebar-resize-width={expanded ? "left" : undefined}
       className={cn(
         "pointer-events-none flex items-center",
-        expanded && "md:w-[calc(var(--sidebar-width)-var(--workspace-controls-left)-0.75rem-1px)]",
+        expanded && "w-[calc(var(--sidebar-width)-var(--workspace-controls-left)-0.75rem-1px)]",
       )}
     >
       <div className="pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]">
@@ -137,8 +139,8 @@ export function TitlebarControls({
       <div
         className={cn(
           "pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]",
-          expanded && "md:ml-auto",
-          compact && "max-md:hidden",
+          expanded && "ml-auto",
+          compact && !expanded && "max-md:hidden",
         )}
       >
         <HistoryNavigationButton direction="back" onBackdrop={onBackdrop} />
