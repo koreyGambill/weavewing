@@ -46,37 +46,47 @@ it.effect.each([
 );
 
 it.effect.each([
-  { status: 404, body: {}, reason: "This Weavewing release has no database compatibility metadata." },
+  {
+    status: 404,
+    body: {},
+    reason: "This Weavewing release has no database compatibility metadata.",
+  },
   {
     status: 200,
     body: { version: "9.9.9", t3code: { databaseMigration: 84 } },
     reason: "Invalid Weavewing database compatibility metadata.",
   },
-  { status: 200, body: { version: nightly }, reason: "Invalid Weavewing database compatibility metadata." },
-])("refuses missing or mismatched release compatibility metadata: $status", ({ status, body, reason }) =>
-  Effect.gen(function* () {
-    const service = yield* NpmRelease.make().pipe(
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.make((request) =>
-          Effect.succeed(
-            HttpClientResponse.fromWeb(
-              request,
-              request.url.includes("api.github.com")
-                ? new Response(JSON.stringify(index))
-                : new Response(JSON.stringify(body), { status }),
+  {
+    status: 200,
+    body: { version: nightly },
+    reason: "Invalid Weavewing database compatibility metadata.",
+  },
+])(
+  "refuses missing or mismatched release compatibility metadata: $status",
+  ({ status, body, reason }) =>
+    Effect.gen(function* () {
+      const service = yield* NpmRelease.make().pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                request.url.includes("api.github.com")
+                  ? new Response(JSON.stringify(index))
+                  : new Response(JSON.stringify(body), { status }),
+              ),
             ),
           ),
         ),
-      ),
-    );
-    const found = yield* service.get({ spec: "nightly" }).pipe(Effect.result);
-    expect(Result.isFailure(found)).toBe(true);
-    if (Result.isFailure(found)) {
-      expect(found.failure).toBeInstanceOf(ServerNpmReleaseError);
-      expect(found.failure.reason).toBe(reason);
-    }
-  }),
+      );
+      const found = yield* service.get({ spec: "nightly" }).pipe(Effect.result);
+      expect(Result.isFailure(found)).toBe(true);
+      if (Result.isFailure(found)) {
+        expect(found.failure).toBeInstanceOf(ServerNpmReleaseError);
+        expect(found.failure.reason).toBe(reason);
+      }
+    }),
 );
 
 it.effect("pages past upstream tags and drafts, returning null for an unpublished channel", () =>

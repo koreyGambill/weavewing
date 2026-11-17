@@ -37,6 +37,8 @@ export class NpmRelease extends Context.Service<
   }
 >()("t3/cloud/npmRelease") {}
 
+const isServerNpmReleaseError = Schema.is(ServerNpmReleaseError);
+
 export const make = Effect.fn("NpmRelease.make")(function* () {
   const http = yield* HttpClient.HttpClient;
   const cache = yield* Cache.make({
@@ -85,9 +87,11 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
       },
       Effect.timeout(Duration.seconds(15)),
       Effect.mapError((error) =>
-        Schema.is(ServerNpmReleaseError)(error)
+        isServerNpmReleaseError(error)
           ? error
-          : new ServerNpmReleaseError({ reason: "Could not check Weavewing release compatibility." }),
+          : new ServerNpmReleaseError({
+              reason: "Could not check Weavewing release compatibility.",
+            }),
       ),
     ),
   });
