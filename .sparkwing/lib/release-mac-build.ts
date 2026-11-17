@@ -4,17 +4,18 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import { assertCleanBundle, assertUpdaterConfig, buildEnvironment } from "./release.ts";
+import { assertCleanBundle, assertUpdaterConfig, buildEnvironment, releaseInputs } from "./release.ts";
 
 let payload = "";
 for await (const chunk of process.stdin) payload += chunk;
-const { version, runId, secrets } = JSON.parse(payload) as { version: string; runId: string; secrets: Record<string, string> };
-if (!/^\d+\.\d+\.\d+$/.test(version) || !/^[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid release inputs");
+const { version, channel, runId, secrets } = JSON.parse(payload) as { version: string; channel: string; runId: string; secrets: Record<string, string> };
+const release = releaseInputs(version, "mac", channel);
+if (!/^[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid release inputs");
 const root = Path.join(OS.homedir(), "weavewing-release", runId);
 if (process.cwd() !== Path.join(root, "source")) throw new Error("Unexpected Mac source directory");
 const nodeVersion = JSON.parse(FS.readFileSync("package.json", "utf8")).engines.node;
 const path = `${OS.homedir()}/.vite-plus/js_runtime/node/${nodeVersion}/bin:${OS.homedir()}/.cargo/bin:${OS.homedir()}/.vite-plus/bin:${process.env.PATH}`;
-const env = buildEnvironment(path, OS.homedir(), Path.join(root, "tmp"));
+const env = buildEnvironment(path, OS.homedir(), Path.join(root, "tmp"), release.channel);
 env.LANG = "en_US.UTF-8";
 const run = (command: string, args: string[]) => CP.execFileSync(command, args, { env, stdio: "inherit" });
 const keychain = Path.join(root, "signing.keychain-db");
@@ -58,7 +59,7 @@ try {
   mount = Path.join(root, "mount");
   FS.mkdirSync(mount);
   run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, Path.join(root, "assets", `Weavewing-${version}-arm64.dmg`)]);
-  const app = Path.join(mount, "Weavewing.app");
+  const app = Path.join(mount, release.channel === "test" ? "Weavewing (Nightly).app" : "Weavewing.app");
   const updater = assertUpdaterConfig(Path.join(app, "Contents/Resources/app-update.yml"));
   const plist = Path.join(app, "Contents/Info.plist");
   const read = (key: string) => CP.execFileSync("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, plist], { encoding: "utf8" }).trim();

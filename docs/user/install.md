@@ -15,7 +15,7 @@ Verify downloads against the release's `SHA256SUMS` before installing.
 | macOS arm64 | Open the DMG and move Weavewing to Applications. On macOS 15, try opening the app once. After it is blocked, use **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Weavewing.app`. |
 
 All three desktop builds are unsigned. The macOS build uses ad-hoc signing and
-doesn't auto-update. Download a new DMG to update it. A managed Mac may block
+doesn't auto-update on either channel. Download a new DMG to update it. A managed Mac may block
 unsigned apps even with these steps.
 
 To install only the CLI, unpack the matching `t3-<version>-linux-x64.tar.gz`,
@@ -28,6 +28,8 @@ choose another home with `t3 --base-dir <directory>` for the CLI or
 `T3CODE_HOME=<directory>` in the desktop launcher environment.
 These builds omit T3 Connect configuration. Direct remote connections and your
 provider subscriptions remain available.
+
+To use the test channel, choose **Nightly** in desktop **Settings → About → Update track**.
 
 For a managed machine, follow [managed policy](./managed-policy.md).
 On macOS the policy lives at `/Library/Application Support/T3Code/policy.json`.

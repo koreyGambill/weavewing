@@ -7,6 +7,7 @@ import * as Path from "node:path";
 import { test } from "node:test";
 
 import * as Release from "./release.ts";
+import { releaseVersionFromTag } from "../../packages/shared/src/releaseIdentity.ts";
 import { assertCleanBundle, buildEnvironment, expectedAssets, releaseInputs, renderReleaseNotes, verifyChecksums } from "./release.ts";
 
 test("packaged updater config must name the fork even when its bundle contains the fork string", () => {
@@ -84,7 +85,7 @@ test("release inputs reject non-stable versions and unknown or duplicate platfor
     assert.throws(() => releaseInputs("0.1.0", platforms));
   assert.equal(releaseInputs("0.1.0", "mac,win").tag, "weavewing-v0.1.0");
   assert.equal(releaseInputs("0.12.3", "linux").version, "0.12.3");
-  assert.equal(expectedAssets("0.1.0", ["linux", "win", "mac"]).length, 14);
+  assert.equal(expectedAssets("0.1.0", ["linux", "win", "mac"]).length, 15);
 });
 
 test("an exact existing tag refuses a release, including a draft rerun", () => {
@@ -219,4 +220,46 @@ test("bundle boundary rejects baked analytics, OTLP endpoints and wrapped tracin
   } finally {
     FS.rmSync(root, { recursive: true });
   }
+});
+
+
+test("test releases require the nightly format and retain the 0.x guard", () => {
+  const version = "0.2.0-nightly.20261117.1";
+  assert.equal(releaseInputs(version, "linux", "test").tag, `weavewing-v${version}`);
+  assert.equal(releaseInputs("0.1.0", "linux").channel, "stable");
+  for (const value of ["0.2.0", "0.2.0-test.20261117.1", "0.2.0-nightly.2026117.1", "0.2.0-nightly.20261117.01", "0.2.0-nightly.20261117.1+build"])
+    assert.throws(() => releaseInputs(value, "linux", "test"), /nightly/);
+  assert.throws(() => releaseInputs(version, "linux", "stable"), /plain semver/);
+  assert.throws(() => releaseInputs("0.1.0", "linux", "nightly"), /channel/);
+  for (const value of ["1.0.0-nightly.20261117.1", "2.3.4-nightly.20261117.1"])
+    assert.throws(() => releaseInputs(value, "linux", "test"), /above 0\.x/);
+});
+
+test("channel feeds and GitHub flags agree for draft and promotion", () => {
+  for (const channel of ["stable", "test"] as const) {
+    const feed = channel === "test" ? "nightly" : "latest";
+    const names = expectedAssets("0.2.0-nightly.20261117.1", ["linux", "win", "mac"], channel);
+    assert.deepEqual(names.filter((name) => name.endsWith(".yml")), [`${feed}-linux.yml`, `${feed}-mac.yml`, `${feed}.yml`]);
+    assert.equal(buildEnvironment("/bin", "/build", "/tmp", channel).T3CODE_DESKTOP_CHANNEL, feed);
+    assert.deepEqual(Release.releaseFlags(channel, "draft"), channel === "test" ? ["--prerelease", "--latest=false"] : ["--prerelease=false", "--latest=false"]);
+    assert.deepEqual(Release.releaseFlags(channel, "promote"), channel === "test" ? ["--prerelease", "--latest=false"] : ["--prerelease=false", "--latest"]);
+  }
+});
+
+test("test AppImage normalization rewrites the nightly feed", () => {
+  const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-nightly-"));
+  try {
+    FS.writeFileSync(Path.join(root, "T3-Code-Nightly-x86_64.AppImage"), "image");
+    FS.writeFileSync(Path.join(root, "nightly-linux.yml"), "path: T3-Code-Nightly-x86_64.AppImage\n");
+    Release.normalizeArtifacts(root, "linux", "0.2.0-nightly.20261117.1", "test");
+    assert.match(FS.readFileSync(Path.join(root, "nightly-linux.yml"), "utf8"), /Weavewing-0\.2\.0-nightly\.20261117\.1-x86_64\.AppImage/);
+  } finally {
+    FS.rmSync(root, { recursive: true });
+  }
+});
+
+
+test("fork nightly tags keep their release version", () => {
+  assert.equal(releaseVersionFromTag("weavewing-v0.2.0-nightly.20261117.1"), "0.2.0-nightly.20261117.1");
+  assert.equal(releaseVersionFromTag("v0.2.0-nightly.20261117.1"), undefined);
 });
