@@ -36,6 +36,23 @@ function Wait-LocalUpdateLinks([double]$Seconds, [scriptblock]$Read, [scriptbloc
   return $last
 }
 
+# Hash Windows payloads on Windows; bulk reads through DrvFS can fail with ENOMEM in WSL.
+function Get-LocalUpdateTreeManifest($directory) {
+  $root = (Get-Item -LiteralPath $directory -Force).FullName.TrimEnd('\')
+  $entries = @(Get-Item -LiteralPath $root -Force) + @(Get-ChildItem -LiteralPath $root -Recurse -Force)
+  if ($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Staged payload contains links.' }
+  $files = [ordered]@{}
+  foreach ($file in ($entries | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName)) {
+    $relative = $file.FullName.Substring($root.Length).TrimStart('\').Replace('\', '/')
+    $files[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+  return ($files | ConvertTo-Json -Compress)
+}
+
+function Assert-LocalUpdateTreeManifest($directory, $manifest) {
+  if ((Get-LocalUpdateTreeManifest $directory) -cne (Get-Content -LiteralPath $manifest -Raw).Trim()) { throw 'Staged payload changed; prepare again.' }
+}
+
 function Invoke-LocalUpdateSwap($install, $payload, $rollback, [scriptblock]$Start, [scriptblock]$Healthy, [scriptblock]$Close) {
   Move-Item -LiteralPath $install -Destination (Join-Path $rollback 'app')
   try {
@@ -342,6 +359,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       if ((Get-FileHash -LiteralPath (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.exeHash) { throw 'Staged executable changed.' }
       if ((Get-FileHash -LiteralPath (Join-Path $payload 'resources/wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.digest) { throw 'Staged runtime digest changed.' }
       if (-not (Test-Path -LiteralPath (Join-Path $payload 'Start Weavewing.cmd'))) { throw 'Staged launcher missing.' }
+      if ($config.candidate -and $Mode -ne 'Prepare') { Assert-LocalUpdateTreeManifest $payload (Join-Path $root 'staged-digests.json') }
     }
     # The detached Activate run receives this file as its own stdin, so it cannot be rewritten then.
     if (-not (Test-Path -LiteralPath $empty)) { Set-Content -LiteralPath $empty -Value '' -NoNewline }
@@ -375,6 +393,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
         Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $native -Recurse -Force -ErrorAction SilentlyContinue
       }
+      Get-LocalUpdateTreeManifest $payload | Set-Content -LiteralPath (Join-Path $root 'staged-digests.json') -Encoding UTF8
       Save-UpdateStatus 'staged-and-verified'
       return
     }

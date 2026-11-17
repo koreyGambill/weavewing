@@ -32,6 +32,22 @@ try {
     Must-Fail { Read-LocalUpdateLauncher $launcherPath }
   }
   Write-Host 'PASS case: launcher-lines'
+  $tree = Join-Path $root 'sealed-payload'
+  New-Item -ItemType Directory -Path $tree | Out-Null
+  $treeFile = Join-Path $tree 'app.bin'
+  Set-Content $treeFile 'original'
+  $treeManifest = Join-Path $root 'staged-digests.json'
+  Get-LocalUpdateTreeManifest $tree | Set-Content $treeManifest -Encoding UTF8
+  Assert-LocalUpdateTreeManifest $tree $treeManifest
+  foreach ($change in @('modified', 'added', 'missing')) {
+    if ($change -eq 'modified') { Set-Content $treeFile 'modified' }
+    elseif ($change -eq 'added') { Set-Content (Join-Path $tree 'extra.bin') 'added' }
+    else { Remove-Item $treeFile }
+    Must-Fail { Assert-LocalUpdateTreeManifest $tree $treeManifest }
+    Remove-Item (Join-Path $tree 'extra.bin') -ErrorAction SilentlyContinue
+    Set-Content $treeFile 'original'
+  }
+  Write-Host 'PASS case: sealed-payload'
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; reads = 0; delays = 0 }
   $clock.now = [DateTime]'2026-01-01T00:00:00Z'
   $clock.reads = 0

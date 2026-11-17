@@ -1052,9 +1052,6 @@ async function main() {
     ]);
     const candidateName = `.${name}-prepared-${NodeCrypto.createHash("sha256").update(output).digest("hex").slice(0, 16)}`;
     const candidate = NodePath.win32.join(parent, candidateName);
-    const staged = await run("wslpath", ["-u", NodePath.win32.join(candidate, "payload")], {
-      stdio: "pipe",
-    });
     const config = {
       output,
       candidate,
@@ -1244,8 +1241,6 @@ async function main() {
       buildWslRuntimeInstallScript(archive, `sha256-${config.digest}`, config.digest),
     );
     saveConfig();
-    if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
-      throw new Error("Source changed during the build; refusing preparation.");
     await powershell([
       "-File",
       await windowsPath(activation),
@@ -1254,6 +1249,8 @@ async function main() {
       "-Mode",
       "Prepare",
     ]);
+    if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
+      throw new Error("Source changed during the build; refusing preparation.");
     const prepared: PreparedUpdate = {
       schema: 1,
       commit,
@@ -1261,7 +1258,7 @@ async function main() {
       cacheKey,
       installed: installedBaseline,
       artifacts,
-      staged: updatePath === "full" ? staged : undefined,
+      staged: updatePath === "full" ? NodePath.win32.join(candidate, "payload") : undefined,
       files: artifactDigests([
         ...Object.keys(artifacts),
         activation,
@@ -1269,7 +1266,7 @@ async function main() {
         NodePath.join(output, "worker.mjs"),
         NodePath.join(output, "stage-windows-desktop.ps1"),
         NodePath.join(output, "runtime-install.sh"),
-        ...(updatePath === "full" ? [staged] : []),
+        ...(updatePath === "full" ? [NodePath.join(output, "staged-digests.json")] : []),
       ]),
     };
     if (Object.values(prepared.files).some((digest) => !digest))
