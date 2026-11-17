@@ -10,7 +10,9 @@ import * as NodeUtil from "node:util";
 import * as NodeURL from "node:url";
 
 /** Local installs update through desktop-install and must never poll a public release feed. */
-export function localDesktopBuildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function localDesktopBuildEnvironment<Environment extends NodeJS.ProcessEnv>(
+  env: Environment,
+) {
   return { ...env, T3CODE_DESKTOP_UPDATE_REPOSITORY: "", GITHUB_REPOSITORY: "" };
 }
 
