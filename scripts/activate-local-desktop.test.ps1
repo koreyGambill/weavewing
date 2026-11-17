@@ -487,14 +487,14 @@ try {
     if ($label -eq 'health') { return @{ healthy = $true; pid = 123; environmentId = 'fixture' } }
     if ($label -eq 'install-runtime') { return @{ installed = $true } }
     if ($label -eq 'backup') { return @{ backedUp = $true } }
-    throw "Check-only attempted forbidden operation: $label"
+    throw "Preparation attempted forbidden operation: $label"
   }
   try { Invoke-LocalDesktopUpdate $configPath 'Prepare' }
   finally { Set-Item Function:Invoke-LocalUpdateWsl $invokeWsl }
   $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
   Assert ($receipt.status -eq 'staged-and-verified') 'Runtime preparation did not complete'
   Assert ($calls.operations.Count -eq 0) 'Preparation touched the installed runtime or state'
-  Write-Host 'PASS case: check-only-runtime'
+  Write-Host 'PASS case: prepare-only-runtime'
   Assert ((Get-Content (Join-Path $resources 'wsl-runtime.tar.gz')) -eq 'old-archive') 'Check-only replaced the installed runtime selection'
 
   $fixtureHome = Join-Path $root 'home'
@@ -557,5 +557,5 @@ lock.close();
     Assert (-not (Get-Process -Id $record.pid -ErrorAction SilentlyContinue)) 'Snapshot helper remained running after completion or timeout'
   }
   Assert (Test-Path (Join-Path $userdata 'statev2.sqlite')) 'Timeout removed source state'
-  'PASS: runtime selection rollback, responsiveness guard, runtime check-only, early failure receipts, bounded link checks, swap and rollback, refused close, read-only snapshot excluding ownership lock, timeout cleanup and captured helper exit'
+  'PASS: runtime selection rollback, responsiveness guard, runtime prepare-only, early failure receipts, bounded link checks, swap and rollback, refused close, read-only snapshot excluding ownership lock, timeout cleanup and captured helper exit'
 } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }

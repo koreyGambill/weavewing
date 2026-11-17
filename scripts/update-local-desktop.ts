@@ -626,7 +626,7 @@ type PreparedUpdate = {
   installed: Record<string, string | null>;
   files: Record<string, string | null>;
   artifacts: Record<string, string | null>;
-  staged?: string;
+  staged?: string | undefined;
 };
 
 /** Refuses stale installations and incomplete or modified prepared files before activation. */
