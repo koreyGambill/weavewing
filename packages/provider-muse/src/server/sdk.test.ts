@@ -85,6 +85,10 @@ describe("Muse SDK host", () => {
     },
   );
 
+  it.each(["", "0"])("preserves the explicit updater value %s", (value) => {
+    expect(makeMuseEnvironment({ MUSE_NO_AUTO_UPDATE: value }).MUSE_NO_AUTO_UPDATE).toBe(value);
+  });
+
   it("selects full access explicitly and keeps other runtime modes sandboxed", async () => {
     for (const mode of ["approval-required", "auto-accept-edits", "auto", "full-access"] as const) {
       const fake = mockSpawn();

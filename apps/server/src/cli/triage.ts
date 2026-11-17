@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeReadlinePromises from "node:readline/promises";
 
+import { withProviderEnvironmentDefaults } from "@t3tools/provider-core/server/instanceEnvironment";
 import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
@@ -107,10 +108,12 @@ const runInteractiveSession = (input: {
   readonly args: ReadonlyArray<string>;
   readonly shell: boolean;
   readonly cwd: string;
+  readonly environment: NodeJS.ProcessEnv;
 }) =>
   Effect.callback<number, TriageAgentSpawnError>((resume) => {
     const child = NodeChildProcess.spawn(input.command, [...input.args], {
       cwd: input.cwd,
+      env: input.environment,
       // The Windows desktop launcher supplies terminal input through the reopened console.
       stdio: [interactiveStdin(), "inherit", "inherit"],
       shell: input.shell,
@@ -214,7 +217,14 @@ export const triageCommand = Command.make("triage", {
         launchPrompt,
       ]);
       yield* Console.log(`Starting ${selected.label}. It will ask what went wrong.\n`);
-      const exitCode = yield* runInteractiveSession({ ...spawnSpec, cwd: sessionDir });
+      const exitCode = yield* runInteractiveSession({
+        ...spawnSpec,
+        cwd: sessionDir,
+        environment: withProviderEnvironmentDefaults(
+          selected.id === "claude" ? "claudeAgent" : selected.id,
+          process.env,
+        ),
+      });
       if (exitCode !== 0) {
         process.exitCode = exitCode;
         yield* Console.log(

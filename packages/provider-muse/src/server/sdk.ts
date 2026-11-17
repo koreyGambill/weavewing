@@ -10,6 +10,7 @@ import {
   type SpawnedMspConnection,
 } from "@muse-code/sdk";
 import type { RuntimeMode } from "@t3tools/contracts";
+import { withProviderEnvironmentDefaults } from "@t3tools/provider-core/server/instanceEnvironment";
 import { envTrampoline, supportsEnvChdir } from "@t3tools/shared/envTrampoline";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
@@ -66,14 +67,14 @@ export interface MuseSdkHostOptions {
 export function makeMuseEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  return {
-    ...Object.fromEntries(
+  return withProviderEnvironmentDefaults(
+    "muse",
+    Object.fromEntries(
       Object.keys(environment)
         .filter((key) => key.toUpperCase() !== "META_API_KEY")
         .map((key) => [key, environment[key]]),
     ),
-    MUSE_NO_AUTO_UPDATE: "1",
-  };
+  );
 }
 
 export function museVerbatimPath(path: string): string {

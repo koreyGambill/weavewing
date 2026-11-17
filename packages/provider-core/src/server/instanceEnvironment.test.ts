@@ -3,11 +3,77 @@ import { describe, expect, it } from "@effect/vitest";
 import { SecretProviderId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { mergeProviderInstanceEnvironment } from "./instanceEnvironment.ts";
+import { spawnAndCollect } from "./snapshotProbe.ts";
+
+const quietDrivers = [
+  { driver: "claudeAgent", defaults: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" } },
+  {
+    driver: "grok",
+    defaults: {
+      GROK_DISABLE_AUTOUPDATER: "1",
+      DISABLE_TELEMETRY: "1",
+      DISABLE_ERROR_REPORTING: "1",
+    },
+  },
+  { driver: "opencode", defaults: { OPENCODE_DISABLE_AUTOUPDATE: "1" } },
+  { driver: "pi", defaults: { PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" } },
+  { driver: "muse", defaults: { MUSE_NO_AUTO_UPDATE: "1" } },
+];
 
 describe("mergeProviderInstanceEnvironment", () => {
+  it.live.each(quietDrivers)(
+    "disables $driver nonessential traffic below explicit values",
+    ({ driver, defaults }) =>
+      Effect.gen(function* () {
+        const launch = (environment: NodeJS.ProcessEnv) =>
+          spawnAndCollect(
+            process.execPath,
+            ChildProcess.make(
+              process.execPath,
+              ["-e", "process.stdout.write(JSON.stringify(process.env))"],
+              { env: environment, extendEnv: false },
+            ),
+          ).pipe(
+            Effect.map((result) =>
+              Schema.decodeSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(
+                result.stdout,
+              ),
+            ),
+          );
+        const defaultEnvironment = yield* mergeProviderInstanceEnvironment(
+          undefined,
+          { PATH: "/bin" },
+          driver,
+        );
+        expect(yield* launch(defaultEnvironment)).toMatchObject(defaults);
+        for (const name of Object.keys(defaults)) {
+          const inherited = { [name]: "", KEEP: "yes" };
+          const configured = [{ name, value: "explicit", sensitive: false }];
+          expect(
+            (yield* mergeProviderInstanceEnvironment(undefined, inherited, driver))[name],
+          ).toBe("");
+          expect(
+            (yield* mergeProviderInstanceEnvironment(configured, inherited, driver))[name],
+          ).toBe("explicit");
+          const overridden = yield* mergeProviderInstanceEnvironment(configured, {}, driver);
+          expect((yield* launch(overridden))[name]).toBe("explicit");
+          expect(inherited).toEqual({ [name]: "", KEEP: "yes" });
+          const lower = name.toLowerCase();
+          const windows = yield* mergeProviderInstanceEnvironment(
+            undefined,
+            { [lower]: "" },
+            driver,
+          ).pipe(Effect.provideService(HostProcess.Platform, "win32"));
+          expect(windows[name]).toBeUndefined();
+          expect(windows[lower]).toBe("");
+        }
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
   it.effect("strips the launching agent identity for every provider", () =>
     Effect.gen(function* () {
       const inherited = {

@@ -61,7 +61,11 @@ export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnviro
   // The desktop runs the server as Node through Electron. Commands Claude runs inherit its env, so
   // an Electron app they start (T3 Code itself, VS Code) would run as Node and exit.
   delete baseEnvironment.ELECTRON_RUN_AS_NODE;
-  const environment = yield* mergeProviderInstanceEnvironment(instanceEnvironment, baseEnvironment);
+  const environment = yield* mergeProviderInstanceEnvironment(
+    instanceEnvironment,
+    baseEnvironment,
+    "claudeAgent",
+  );
   const settingsEntrypoint = (yield* readClaudeSettingsEnv(config, undefined, environment))
     .CLAUDE_CODE_ENTRYPOINT;
   return settingsEntrypoint

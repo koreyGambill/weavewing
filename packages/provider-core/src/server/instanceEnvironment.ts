@@ -23,13 +23,38 @@ const AGENT_IDENTITY_VARIABLES = new Set([
   "AI_AGENT",
 ]);
 
+const QUIET_ENVIRONMENT_DEFAULTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  claudeAgent: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+  grok: { GROK_DISABLE_AUTOUPDATER: "1", DISABLE_TELEMETRY: "1", DISABLE_ERROR_REPORTING: "1" },
+  opencode: { OPENCODE_DISABLE_AUTOUPDATE: "1" },
+  pi: { PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" },
+  muse: { MUSE_NO_AUTO_UPDATE: "1" },
+};
+
+/** Fill vendor traffic controls below inherited and configured environment values. */
+export function withProviderEnvironmentDefaults(
+  driver: string | undefined,
+  environment: NodeJS.ProcessEnv,
+  windows = process.platform === "win32",
+): NodeJS.ProcessEnv {
+  const next = { ...environment };
+  for (const [name, value] of Object.entries(QUIET_ENVIRONMENT_DEFAULTS[driver ?? ""] ?? {})) {
+    const supplied = windows
+      ? Object.keys(next).some((key) => key.toUpperCase() === name && next[key] !== undefined)
+      : next[name] !== undefined;
+    if (!supplied) next[name] = value;
+  }
+  return next;
+}
+
 export const mergeProviderInstanceEnvironment = Effect.fn(function* (
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
+  driver?: string,
 ) {
   const home = yield* HostProcess.HomeDirectory;
   const windows = (yield* HostProcess.Platform) === "win32";
-  const next: NodeJS.ProcessEnv = { ...baseEnv };
+  const next = withProviderEnvironmentDefaults(driver, baseEnv, windows);
   for (const name of Object.keys(next)) {
     if (AGENT_IDENTITY_VARIABLES.has(name.toUpperCase())) next[name] = "";
   }

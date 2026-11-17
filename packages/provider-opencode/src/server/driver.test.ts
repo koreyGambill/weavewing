@@ -292,6 +292,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           runOpenCodeCommand: (input) =>
             Effect.sync(() => {
               probeOffline.push(input.environment?.MISE_OFFLINE);
+              assert.equal(input.environment?.OPENCODE_DISABLE_AUTOUPDATE, "1");
               return {
                 stdout:
                   installedVersion === null ? "unrecognized" : `opencode v${installedVersion}\n`,
