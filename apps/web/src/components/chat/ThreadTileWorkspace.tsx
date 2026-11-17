@@ -7,6 +7,7 @@ import {
 import {
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -230,8 +231,8 @@ export function ThreadTileWorkspace(props: {
   );
   const rootRef = useRef<HTMLDivElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the canvas so split minimums also hold after window resizing
-  useEffect(() => {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the canvas so split minimums also hold after window resizing; measured before paint so saved ratios never flash at the minimum
+  useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     setWorkspaceWidth(root.clientWidth);
@@ -295,7 +296,11 @@ export function ThreadTileWorkspace(props: {
   };
   const displayRoot = maximized ? displayTileRoot(layout) : tiled(layout.root);
   const minimumWidth = displayRoot ? tileMinimumWidth(displayRoot) : TILE_MIN_WIDTH_PX;
-  const dockedRoot = displayRoot ? clampTileWidths(displayRoot, workspaceWidth) : null;
+  const dockedRoot = displayRoot
+    ? workspaceWidth > 0
+      ? clampTileWidths(displayRoot, workspaceWidth)
+      : displayRoot
+    : null;
   const floatingGroups = groups.filter((group) => group.floating && !zoomedIds.has(group.id));
   const displayGroups = [...(dockedRoot ? getTileGroups(dockedRoot) : []), ...floatingGroups];
   const dockedGeometry = dockedRoot ? tileGeometry(dockedRoot) : { groups: [], splits: [] };
