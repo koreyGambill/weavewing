@@ -2077,7 +2077,7 @@ function ScheduledTaskEditorForm({
         <DialogDescription>
           {draft.review === null
             ? "Run a prompt automatically on an interval, at a fixed time, once at a set date, when a webhook is called, or when something happens in your threads."
-            : "Review threads against your rules on a schedule or when something happens in your threads. Findings arrive in the inbox."}
+            : "Review threads against your rules on a schedule or when something happens in your threads. Findings go to the agent thread."}
         </DialogDescription>
       </DialogHeader>
 

@@ -6,7 +6,7 @@ import { runMigrations } from "../Migrations.ts";
 
 const layer = it.layer(NodeSqliteClient.layer({ filename: ":memory:" }));
 layer("112_InboxImportance", (it) => {
-  it.effect("dismisses routine history, marks the rest read and preserves dismissed rows", () =>
+  it.effect("dismisses all active history and preserves dismissed rows", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 111 });
@@ -36,10 +36,7 @@ layer("112_InboxImportance", (it) => {
           assert.isNull(row.read_at);
         } else {
           assert.isNotNull(row.read_at);
-          assert.strictEqual(
-            row.dismissed_at !== null,
-            ["review", "evidence", "routine"].includes(row.id),
-          );
+          assert.isNotNull(row.dismissed_at);
         }
       }
       yield* runMigrations({ toMigrationInclusive: 112 });

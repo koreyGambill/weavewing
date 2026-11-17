@@ -823,7 +823,7 @@ export const OrchestratorMcpScheduleReview = Schema.Struct({
   ),
 }).annotate({
   description:
-    "Review threads against these rules, tool-less, instead of a turn; findings go to the user's inbox. A run_ended event reviews each ended turn. Set `target` to a cheap model.",
+    "Standards watcher: a tool-less review of threads. Use this even if inbox delivery is requested: findings go to the agent thread. Explain that the inbox is only for urgent or important alerts. Use `run_ended` for every turn and a cheap `target`.",
 });
 export type OrchestratorMcpScheduleReview = typeof OrchestratorMcpScheduleReview.Type;
 export const OrchestratorMcpScheduleLimits = Schema.Struct({

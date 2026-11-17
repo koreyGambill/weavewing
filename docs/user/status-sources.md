@@ -48,7 +48,9 @@ the alert. Connecting to a server does not replay its previous transitions.
 The inbox keeps failure alerts as urgent. A warning reaches the inbox after three
 consecutive observations in the running server. Recovery and unknown status stay
 in the Status view. The warning count resets when the source leaves warning or
-the server restarts.
+the server restarts. Each warning or failure episode raises one inbox alert.
+Dismissing it sticks across restarts. When the source leaves that state, its alert
+moves to **Dismissed**; a later episode can raise a new alert.
 
 Choose **Snooze** and select a time or duration to mute a source's notifications while its status continues updating.
 Choose **Unsnooze** to resume early. Remove a source to stop checking it. No sources are added

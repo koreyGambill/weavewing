@@ -367,26 +367,31 @@ const make = Effect.gen(function* () {
               : "pending_verification",
       } satisfies RaiseResult;
     },
-    (effect) => serialized(effect).pipe(Effect.catchTags({ SqlError: raiseFailed })),
+    Effect.catchTags({ SqlError: raiseFailed }),
   );
 
-  const statusObservations = new Map<
-    string,
-    { state: string; warnings: number; alerted: boolean }
-  >();
+  const statusWarnings = new Map<string, number>();
   const observeStatus = Effect.fn("NotificationService.observeStatus")(
     function* (source: StatusSource) {
       const id = source.config.id;
-      const previous = statusObservations.get(id);
       const state = source.latest.state;
-      const warnings = state === "warn" ? (previous?.warnings ?? 0) + 1 : 0;
+      const warnings = state === "warn" ? (statusWarnings.get(id) ?? 0) + 1 : 0;
+      statusWarnings.set(id, warnings);
+      const key = `status:${id}\n${state}`;
+      const episodeKeys = sql.in([`status:${id}\nfail`, `status:${id}\nwarn`]);
+      const now = DateTime.formatIso(yield* DateTime.now);
+      // An episode keeps its key after dismissal; a transition retires it so a later failure can alert.
+      const resolved = yield* sql<Row>`UPDATE notifications SET dedupe_key = id,
+        dismissed_at = coalesce(dismissed_at, ${now}), updated_at = ${now}
+        WHERE dedupe_key IN ${episodeKeys} AND dedupe_key != ${key} RETURNING *`;
+      yield* publish(yield* toNotifications(resolved));
       const severity = state === "fail" ? "critical" : warnings >= 3 ? "warning" : null;
-      const alerted = previous?.state === state && previous.alerted;
       const snoozed =
         source.config.snoozedUntil !== null &&
         Date.parse(source.config.snoozedUntil) > (yield* Clock.currentTimeMillis);
-      statusObservations.set(id, { state, warnings, alerted: Boolean(alerted) });
-      if (severity === null || alerted || snoozed) return;
+      if (severity === null || snoozed) return;
+      const existing = yield* sql`SELECT id FROM notifications WHERE dedupe_key = ${key} LIMIT 1`;
+      if (existing.length > 0) return;
       yield* raise({
         severity,
         title:
@@ -400,9 +405,11 @@ const make = Effect.gen(function* () {
         projectId: null,
         dedupeKey: state,
       });
-      statusObservations.set(id, { state, warnings, alerted: true });
     },
-    Effect.catch((cause) => Effect.logWarning("Could not raise status alert", { cause })),
+    (effect) =>
+      serialized(effect).pipe(
+        Effect.catch((cause) => Effect.logWarning("Could not update status alert", { cause })),
+      ),
   );
 
   const taskRunFinished = Effect.fn("NotificationService.taskRunFinished")(
@@ -412,8 +419,17 @@ const make = Effect.gen(function* () {
         status: string;
       }>`SELECT id, status FROM scheduled_task_runs
       WHERE task_id = ${taskId} AND ended_at IS NOT NULL AND status != 'skipped'
-      ORDER BY started_at DESC, rowid DESC LIMIT 2`;
-      if (runs.length !== 2 || !runs.every((run) => run.status === "failed")) return;
+      ORDER BY started_at DESC, rowid DESC LIMIT 3`;
+      if (
+        runs[0]?.status !== "failed" ||
+        runs[1]?.status !== "failed" ||
+        runs[2]?.status === "failed"
+      )
+        return;
+      const dedupeKey = `repeated-failure:${runs[0].id}`;
+      const existing = yield* sql`SELECT id FROM notifications
+        WHERE dedupe_key = ${`task:${taskId}\n${dedupeKey}`} LIMIT 1`;
+      if (existing.length > 0) return;
       const [task] = yield* sql<{
         title: string;
         thread_id: string | null;
@@ -427,10 +443,15 @@ const make = Effect.gen(function* () {
         source: { kind: "automation", scheduledTaskId: taskId, runId: runs[0]!.id },
         threadId: task.thread_id === null ? null : ThreadId.make(task.thread_id),
         projectId: ProjectId.make(task.project_id),
-        dedupeKey: "repeated-failure",
+        dedupeKey,
       });
     },
-    Effect.catch((cause) => Effect.logWarning("Could not raise repeated task failure", { cause })),
+    (effect) =>
+      serialized(effect).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not raise repeated task failure", { cause }),
+        ),
+      ),
   );
 
   const update = Effect.fn("NotificationService.update")(
@@ -512,7 +533,10 @@ const make = Effect.gen(function* () {
   });
 
   return NotificationService.of({
-    raise,
+    // The raise above owns the span; observations already hold the mutation permit.
+    raise: Effect.fnUntraced(function* (input: RaiseInput) {
+      return yield* serialized(raise(input));
+    }),
     observeStatus,
     taskRunFinished,
     update,

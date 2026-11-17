@@ -404,6 +404,7 @@ it.effect(
         lastTransition: null,
       });
       const rows = sql`SELECT severity, repeat_count FROM notifications ORDER BY rowid`;
+      const active = sql`SELECT severity FROM notifications WHERE dismissed_at IS NULL ORDER BY rowid`;
       yield* service.observeStatus(source("ok"));
       yield* service.observeStatus(source("warn"));
       yield* service.observeStatus(source("warn"));
@@ -417,13 +418,60 @@ it.effect(
         { severity: "warning", repeat_count: 0 },
         { severity: "critical", repeat_count: 0 },
       ]);
+      assert.deepStrictEqual(yield* active, [{ severity: "critical" }]);
+      const events = yield* subscribe;
+      assert.strictEqual((yield* Queue.take(events)).unreadCount, 1);
       yield* service.observeStatus(source("ok"));
+      assert.deepStrictEqual(yield* active, []);
+      const recovered = yield* Queue.take(events);
+      assert.strictEqual(recovered.unreadCount, 0);
+      assert.isString(recovered.items[0]?.dismissedAt);
       yield* service.observeStatus(source("fail", "2099-01-01T00:00:00.000Z"));
       assert.strictEqual((yield* rows)[1]?.repeat_count, 0);
       yield* service.observeStatus(source("fail"));
-      assert.strictEqual((yield* rows)[1]?.repeat_count, 1);
-      yield* service.observeStatus(source("unknown"));
-      assert.strictEqual((yield* rows).length, 2);
+      assert.deepStrictEqual(yield* active, [{ severity: "critical" }]);
+      assert.strictEqual((yield* rows).length, 3);
+      const [failure] = yield* sql<{
+        id: string;
+      }>`SELECT id FROM notifications WHERE dismissed_at IS NULL`;
+      yield* service.update({
+        ids: [NotificationId.make(failure!.id)],
+        action: { type: "dismiss" },
+      });
+      const dismissed =
+        yield* sql`SELECT id, read_at, dismissed_at, repeat_count FROM notifications WHERE id = ${failure!.id}`;
+      yield* TestClock.adjust("2 days");
+      const fresh = yield* Layer.build(Layer.fresh(Service.layer));
+      const restarted = Context.get(fresh, Service.NotificationService);
+      yield* restarted.observeStatus(source("fail"));
+      assert.deepStrictEqual(
+        yield* sql`SELECT id, read_at, dismissed_at, repeat_count FROM notifications ORDER BY rowid DESC LIMIT 1`,
+        dismissed,
+      );
+      assert.strictEqual((yield* rows).length, 3);
+      yield* restarted.observeStatus(source("unknown"));
+      assert.deepStrictEqual(yield* active, []);
+      yield* restarted.observeStatus(source("warn"));
+      yield* restarted.observeStatus(source("warn"));
+      yield* restarted.observeStatus(source("warn"));
+      assert.deepStrictEqual(yield* active, [{ severity: "warning" }]);
+      const [warning] = yield* sql<{
+        id: string;
+      }>`SELECT id FROM notifications WHERE dismissed_at IS NULL`;
+      yield* restarted.update({
+        ids: [NotificationId.make(warning!.id)],
+        action: { type: "dismiss" },
+      });
+      const warningRestart = yield* Layer.build(Layer.fresh(Service.layer));
+      const warningService = Context.get(warningRestart, Service.NotificationService);
+      yield* warningService.observeStatus(source("warn"));
+      yield* warningService.observeStatus(source("warn"));
+      yield* warningService.observeStatus(source("warn"));
+      assert.deepStrictEqual(yield* active, []);
+      assert.strictEqual((yield* rows).length, 4);
+      yield* warningService.observeStatus(source("ok"));
+      yield* warningService.observeStatus(source("fail"));
+      assert.deepStrictEqual(yield* active, [{ severity: "critical" }]);
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
@@ -453,9 +501,37 @@ it.effect(
       yield* finish("4", "failed");
       // A fresh service reads durable run history rather than a process-local failure counter.
       const fresh = yield* Layer.build(Layer.fresh(Service.layer));
-      yield* Context.get(fresh, Service.NotificationService).taskRunFinished(taskId);
+      const restarted = Context.get(fresh, Service.NotificationService);
+      yield* restarted.taskRunFinished(taskId);
       assert.deepStrictEqual(yield* sql`SELECT severity, title FROM notifications`, [
         { severity: "warning", title: "Repeated task failure: Audit" },
       ]);
+      const [alert] = yield* sql<{ id: string }>`SELECT id FROM notifications`;
+      const ids = [NotificationId.make(alert!.id)];
+      yield* restarted.update({ ids, action: { type: "read" } });
+      yield* restarted.update({ ids, action: { type: "dismiss" } });
+      const dismissed =
+        yield* sql`SELECT id, read_at, dismissed_at, repeat_count FROM notifications`;
+      yield* restarted.taskRunFinished(taskId);
+      yield* finish("5", "skipped");
+      yield* finish("6", "failed");
+      yield* restarted.taskRunFinished(taskId);
+      const again = yield* Layer.build(Layer.fresh(Service.layer));
+      yield* Context.get(again, Service.NotificationService).taskRunFinished(taskId);
+      assert.deepStrictEqual(
+        yield* sql`SELECT id, read_at, dismissed_at, repeat_count FROM notifications`,
+        dismissed,
+      );
+      yield* finish("7", "quiet");
+      yield* finish("8", "failed");
+      yield* restarted.taskRunFinished(taskId);
+      assert.strictEqual((yield* sql`SELECT id FROM notifications`).length, 1);
+      yield* finish("9", "failed");
+      yield* restarted.taskRunFinished(taskId);
+      assert.strictEqual((yield* sql`SELECT id FROM notifications`).length, 2);
+      assert.strictEqual(
+        (yield* sql`SELECT id FROM notifications WHERE dismissed_at IS NULL`).length,
+        1,
+      );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

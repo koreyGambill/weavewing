@@ -76,7 +76,9 @@ Agents must choose urgent or important when raising one. Routine progress,
 completions and review nitpicks stay in their threads. Landed work awaiting QA
 stays in **Evidence**. Status failures raise urgent alerts, while warnings need
 three consecutive observations. Scheduled tasks alert after two consecutive
-failed runs. The inbox badge counts unread alerts and turns
+failed runs. Each failure episode raises one alert, so dismissals stick across
+server restarts. A status source leaving its warning or failure state moves that
+alert to **Dismissed**. The inbox badge counts unread alerts and turns
 red for critical or amber for a warning. Open one to read it; it then counts as
 read. Snooze one to have it come back later, or dismiss it once it's handled. The
 Snoozed and Dismissed tabs show those, where you can unsnooze or restore them.
