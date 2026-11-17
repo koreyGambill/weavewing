@@ -244,7 +244,7 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
       });
       const settings = policy.providers.applyLimits({
         ...DEFAULT_SERVER_SETTINGS,
-        providerInstances: { claude: { driver } },
+        providerInstances: { [ProviderInstanceId.make("claude")]: { driver } },
       });
       assert.equal(
         (yield* mergeProviderInstanceEnvironment(undefined, {}, driver))
