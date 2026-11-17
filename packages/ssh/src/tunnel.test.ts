@@ -298,11 +298,42 @@ describe("ssh tunnel scripts", () => {
   });
 
   it.each([
-    { host: "Darwin x86_64", system: "Darwin", machine: "x86_64", downloads: false },
-    { host: "Darwin arm64", system: "Darwin", machine: "arm64", downloads: true },
+    {
+      host: "Darwin x86_64",
+      system: "Darwin",
+      machine: "x86_64",
+      downloads: false,
+      releaseBaseUrl: null,
+      expectedUrl: "",
+    },
+    {
+      host: "Darwin arm64",
+      system: "Darwin",
+      machine: "arm64",
+      downloads: true,
+      releaseBaseUrl: null,
+      expectedUrl:
+        "https://github.com/koreyGambill/weavewing/releases/download/weavewing-v1.0.0/SHA256SUMS",
+    },
+    {
+      host: "mirror Darwin arm64",
+      system: "Darwin",
+      machine: "arm64",
+      downloads: true,
+      releaseBaseUrl: "https://mirror.example/releases/",
+      expectedUrl: "https://mirror.example/releases/weavewing-v1.0.0/SHA256SUMS",
+    },
+    {
+      host: "signed mirror Darwin arm64",
+      system: "Darwin",
+      machine: "arm64",
+      downloads: true,
+      releaseBaseUrl: "https://mirror.example/releases/?token=test",
+      expectedUrl: "https://mirror.example/releases/weavewing-v1.0.0/SHA256SUMS?token=test",
+    },
   ])(
     "only downloads a release archive the host can run: $host",
-    ({ system, machine, downloads }) => {
+    ({ system, machine, downloads, releaseBaseUrl, expectedUrl }) => {
       const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-runner-"));
       try {
         const bin = NodePath.join(root, "bin");
@@ -319,7 +350,10 @@ describe("ssh tunnel scripts", () => {
           { mode: 0o755 },
         );
         const runner = NodePath.join(root, "run-t3.sh");
-        NodeFS.writeFileSync(runner, SshTunnel.buildRemoteT3RunnerScript(ARCHIVE));
+        NodeFS.writeFileSync(
+          runner,
+          SshTunnel.buildRemoteT3RunnerScript({ archiveVersion: "1.0.0", releaseBaseUrl }),
+        );
         const result = NodeChildProcess.spawnSync("sh", [runner, "--version"], {
           encoding: "utf8",
           env: { HOME: NodePath.join(root, "home"), PATH: `${bin}:${process.env.PATH ?? ""}` },
@@ -328,8 +362,8 @@ describe("ssh tunnel scripts", () => {
         if (downloads) {
           assert.include(result.stderr, "download attempt");
           // A bare curl error does not tell the user that t3 itself could not be downloaded.
-          assert.include(result.stderr, ARCHIVE.archiveVersion);
-          assert.include(result.stderr, "https://github.com/pingdotgg/t3code/releases/download");
+          assert.include(result.stderr, "1.0.0");
+          assert.include(result.stderr, expectedUrl);
         } else {
           assert.notInclude(result.stderr, "download attempt");
           assert.include(result.stderr, "has no t3 release archive.");

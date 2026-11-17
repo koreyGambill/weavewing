@@ -609,6 +609,11 @@ platform artifacts unsigned; it does not prevent publication.
 
 ## 2) Apple signing + notarization setup (macOS)
 
+Unsigned builds use the desktop packager's default (`--signed false`) and need no Apple or Clerk
+configuration. For signed builds without Clerk, the packager skips passkey provisioning and
+entitlements. The provisioning-profile and Clerk steps below apply when a Clerk publishable key or
+RP-domain override is configured.
+
 Required secrets used by the workflow:
 
 - `CSC_LINK`
@@ -616,7 +621,7 @@ Required secrets used by the workflow:
 - `APPLE_API_KEY`
 - `APPLE_API_KEY_ID`
 - `APPLE_API_ISSUER`
-- `MACOS_PROVISIONING_PROFILE` (base64-encoded provisioning profile with Associated Domains)
+- `MACOS_PROVISIONING_PROFILE` (base64-encoded profile with Associated Domains, only for Clerk builds)
 
 Required repository variables:
 
@@ -631,7 +636,7 @@ Checklist:
 
 1. Apple Developer account access:
    - Team has rights to create Developer ID certificates.
-2. Create an explicit App ID for `com.t3tools.t3code` and enable Associated Domains.
+2. Create an explicit App ID for `dev.weavewing.desktop`. Enable Associated Domains when baking Clerk configuration.
 3. Create a `Developer ID Application` certificate and a compatible provisioning profile for that
    App ID with Associated Domains enabled.
 4. Export the certificate + private key as `.p12` from Keychain.
@@ -711,7 +716,7 @@ Checklist:
 
 - macOS build unsigned when expected signed:
   - Check all Apple secrets plus `APPLE_TEAM_ID` are populated and non-empty.
-  - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.t3tools.t3code` and includes
+  - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.dev.weavewing.desktop` and includes
     Associated Domains.
 - Windows build unsigned when expected signed:
   - Check all Azure ATS and auth secrets are populated and non-empty.

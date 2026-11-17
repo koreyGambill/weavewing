@@ -82,16 +82,27 @@ describe("desktop update button state", () => {
 
 describe("desktop update UI helpers", () => {
   it.each(["owner/repo/extra", "owner#notes/repo", "owner/repo?tab=notes"])(
-    "falls back to upstream for an invalid configured repository: %s",
+    "falls back to Weavewing for an invalid configured repository: %s",
     (repository) => {
       expect(getDesktopUpdateReleaseHistoryUrl(repository)).toBe(
-        "https://github.com/pingdotgg/t3code/releases",
+        "https://github.com/koreyGambill/weavewing/releases",
       );
       expect(getDesktopUpdateReleaseUrl("1.2.3", repository)).toBe(
-        "https://github.com/pingdotgg/t3code/releases/tag/v1.2.3",
+        "https://github.com/koreyGambill/weavewing/releases/tag/weavewing-v1.2.3",
       );
     },
   );
+});
+
+it("links fork tags in configured repositories and encodes the version", () => {
+  expect(getDesktopUpdateReleaseUrl(" 1.0.0 ", "fork/release")).toBe(
+    "https://github.com/fork/release/releases/tag/weavewing-v1.0.0",
+  );
+  expect(getDesktopUpdateReleaseUrl("1.0.0/#", "fork/release")).toBe(
+    "https://github.com/fork/release/releases/tag/weavewing-v1.0.0%2F%23",
+  );
+  expect(getDesktopUpdateReleaseUrl(null)).toBeNull();
+  expect(getDesktopUpdateReleaseUrl(" ")).toBeNull();
 });
 
 describe("canCheckForUpdate", () => {

@@ -1,8 +1,7 @@
 diff --git a/out/electronHttpExecutor.js b/out/electronHttpExecutor.js
-index 0ae9e1126e1dc136977914ef1bfd46709fc9db1b..c298ffe7808c421c29e16f1e2ba8510f0cd31142 100644
 --- a/out/electronHttpExecutor.js
 +++ b/out/electronHttpExecutor.js
-@@ -61,6 +61,35 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
+@@ -61,6 +61,35 @@
          }
          return request;
      }
@@ -39,10 +38,34 @@ index 0ae9e1126e1dc136977914ef1bfd46709fc9db1b..c298ffe7808c421c29e16f1e2ba8510f
          request.on("redirect", (statusCode, method, redirectUrl) => {
              // no way to modify request options, abort old and make a new one
 diff --git a/out/providers/GitHubProvider.js b/out/providers/GitHubProvider.js
-index e768d24e7a957caf32a4b8ca6c68cb50eb5865ee..708a1fa7d740192944f04259cde6d6bf79d58c53 100644
 --- a/out/providers/GitHubProvider.js
 +++ b/out/providers/GitHubProvider.js
-@@ -107,6 +107,32 @@ class GitHubProvider extends BaseGitHubProvider {
+@@ -8,6 +8,10 @@
+ const util_1 = require("../util");
+ const Provider_1 = require("./Provider");
+ const hrefRegExp = /\/tag\/(v?[^/]+)$/;
++// A publish config may use non-semver tags while update manifests still contain semver versions.
++function versionFromTag(tag, prefix = "") {
++    return typeof tag === "string" && prefix && tag.startsWith(prefix) ? tag.slice(prefix.length) : tag;
++}
+ class BaseGitHubProvider extends Provider_1.Provider {
+     constructor(options, defaultHost, runtimeOptions) {
+         super({
+@@ -66,11 +70,11 @@
+                         }
+                         // This Release's Tag
+                         const hrefTag = hrefElement[1];
+-                        if (!semver.valid(hrefTag)) {
++                        if (!semver.valid(versionFromTag(hrefTag, this.options.tagNamePrefix))) {
+                             continue;
+                         }
+                         //Get Channel from this release's tag
+-                        const hrefChannel = ((_c = semver.prerelease(hrefTag)) === null || _c === void 0 ? void 0 : _c[0]) || null;
++                        const hrefChannel = ((_c = semver.prerelease(versionFromTag(hrefTag, this.options.tagNamePrefix))) === null || _c === void 0 ? void 0 : _c[0]) || null;
+                         const shouldFetchVersion = !currentChannel || ["alpha", "beta"].includes(currentChannel);
+                         const isCustomChannel = hrefChannel !== null && !["alpha", "beta"].includes(String(hrefChannel));
+                         // Allow moving from alpha to beta but not down
+@@ -107,6 +111,32 @@
          catch (e) {
              throw (0, builder_util_runtime_1.newError)(`Cannot parse releases feed: ${e.stack || e.message},\nXML:\n${feedXml}`, "ERR_UPDATER_INVALID_RELEASE_FEED");
          }
@@ -53,20 +76,20 @@ index e768d24e7a957caf32a4b8ca6c68cb50eb5865ee..708a1fa7d740192944f04259cde6d6bf
 +        if (this.updater.allowPrerelease && this.updater.channel) {
 +            const feedTag = tag;
 +            const pointer = await this.getChannelPointerRelease(this.updater.channel, cancellationToken);
-+            if (pointer !== null && (tag == null || semver.gt(pointer.tag_name, tag))) {
++            if (pointer !== null && (tag == null || semver.gt(versionFromTag(pointer.tag_name, this.options.tagNamePrefix), versionFromTag(tag, this.options.tagNamePrefix)))) {
 +                apiRelease = pointer;
 +                tag = pointer.tag_name;
 +            }
 +            // With no nightly in the feed, a pointer that offers nothing new may be stale, so the API
 +            // scan still runs. Its failure is fatal only when nothing else answered.
-+            if (feedTag == null && (tag == null || !semver.gt(tag, this.updater.currentVersion))) {
++            if (feedTag == null && (tag == null || !semver.gt(versionFromTag(tag, this.options.tagNamePrefix), this.updater.currentVersion))) {
 +                const listed = await this.getLatestChannelRelease(this.updater.channel, cancellationToken).catch(e => {
 +                    if (tag == null) {
 +                        throw e;
 +                    }
 +                    return null;
 +                });
-+                if (listed !== null && (tag == null || semver.gt(listed.tag_name, tag))) {
++                if (listed !== null && (tag == null || semver.gt(versionFromTag(listed.tag_name, this.options.tagNamePrefix), versionFromTag(tag, this.options.tagNamePrefix)))) {
 +                    apiRelease = listed;
 +                    tag = listed.tag_name;
 +                }
@@ -75,7 +98,18 @@ index e768d24e7a957caf32a4b8ca6c68cb50eb5865ee..708a1fa7d740192944f04259cde6d6bf
          if (tag == null) {
              throw (0, builder_util_runtime_1.newError)(`No published versions on GitHub`, "ERR_UPDATER_NO_PUBLISHED_VERSIONS");
          }
-@@ -144,6 +170,14 @@ class GitHubProvider extends BaseGitHubProvider {
+@@ -129,8 +159,8 @@
+         };
+         try {
+             let channel = this.channel;
+-            if (this.updater.allowPrerelease && ((_d = semver.prerelease(tag)) === null || _d === void 0 ? void 0 : _d[0])) {
+-                channel = this.getCustomChannelName(String((_e = semver.prerelease(tag)) === null || _e === void 0 ? void 0 : _e[0]));
++            if (this.updater.allowPrerelease && ((_d = semver.prerelease(versionFromTag(tag, this.options.tagNamePrefix))) === null || _d === void 0 ? void 0 : _d[0])) {
++                channel = this.getCustomChannelName(String((_e = semver.prerelease(versionFromTag(tag, this.options.tagNamePrefix))) === null || _e === void 0 ? void 0 : _e[0]));
+             }
+             rawData = await fetchData(channel);
+         }
+@@ -144,16 +174,60 @@
              }
          }
          const result = (0, Provider_1.parseUpdateInfo)(rawData, channelFile, channelFileUrl);
@@ -90,16 +124,21 @@ index e768d24e7a957caf32a4b8ca6c68cb50eb5865ee..708a1fa7d740192944f04259cde6d6bf
          if (result.releaseName == null) {
              result.releaseName = latestRelease.elementValueOrEmpty("title");
          }
-@@ -155,6 +189,42 @@ class GitHubProvider extends BaseGitHubProvider {
+         if (result.releaseNotes == null) {
+-            result.releaseNotes = computeReleaseNotes(this.updater.currentVersion, this.updater.fullChangelog, feed, latestRelease);
++            result.releaseNotes = computeReleaseNotes(this.updater.currentVersion, this.updater.fullChangelog, feed, latestRelease, this.options.tagNamePrefix);
+         }
+         return {
+             tag: tag,
              ...result,
          };
-     }
++    }
 +    async getChannelPointerRelease(channel, cancellationToken) {
 +        try {
 +            const url = (0, util_1.newUrlFromBase)(this.getBaseDownloadPath("update-feed", `${channel}.json`), this.baseUrl);
 +            const rawData = await this.httpRequest(url, { accept: "application/json, */*" }, cancellationToken);
 +            const release = rawData == null ? null : JSON.parse(rawData);
-+            const releaseChannel = release == null || typeof release.tag_name !== "string" ? null : semver.prerelease(release.tag_name);
++            const releaseChannel = release == null || typeof release.tag_name !== "string" ? null : semver.prerelease(versionFromTag(release.tag_name, this.options.tagNamePrefix));
 +            return releaseChannel !== null && releaseChannel[0] === channel ? release : null;
 +        }
 +        catch (e) {
@@ -116,10 +155,10 @@ index e768d24e7a957caf32a4b8ca6c68cb50eb5865ee..708a1fa7d740192944f04259cde6d6bf
 +                return null;
 +            }
 +            for (const release of releases) {
-+                if (release == null || release.draft || typeof release.tag_name !== "string" || !semver.valid(release.tag_name)) {
++                if (release == null || release.draft || typeof release.tag_name !== "string" || !semver.valid(versionFromTag(release.tag_name, this.options.tagNamePrefix))) {
 +                    continue;
 +                }
-+                const releaseChannel = semver.prerelease(release.tag_name);
++                const releaseChannel = semver.prerelease(versionFromTag(release.tag_name, this.options.tagNamePrefix));
 +                if (releaseChannel !== null && releaseChannel[0] === channel) {
 +                    return release;
 +                }
@@ -129,7 +168,42 @@ index e768d24e7a957caf32a4b8ca6c68cb50eb5865ee..708a1fa7d740192944f04259cde6d6bf
 +            }
 +        }
 +        return null;
-+    }
+     }
      async getLatestTagName(cancellationToken) {
          const options = this.options;
-         // do not use API for GitHub to avoid limit, only for custom host or GitHub Enterprise
+@@ -190,14 +264,14 @@
+     // GitHub reports empty notes as <content>No content.</content>
+     return result === "No content." ? "" : result;
+ }
+-function computeReleaseNotes(currentVersion, isFullChangelog, feed, latestRelease) {
++function computeReleaseNotes(currentVersion, isFullChangelog, feed, latestRelease, tagNamePrefix = "") {
+     if (!isFullChangelog) {
+         return getNoteValue(latestRelease);
+     }
+     const releaseVersionRegExp = /\/tag\/v?([^/]+)$/;
+     let latestVersion = undefined;
+     try {
+-        latestVersion = releaseVersionRegExp.exec(latestRelease.element("link").attribute("href"))[1];
++        latestVersion = versionFromTag(releaseVersionRegExp.exec(latestRelease.element("link").attribute("href"))[1], tagNamePrefix);
+         latestVersion = semver.valid(latestVersion) ? latestVersion : undefined;
+     }
+     catch {
+@@ -214,7 +288,7 @@
+             if (!match) {
+                 continue;
+             }
+-            versionRelease = match[1];
++            versionRelease = versionFromTag(match[1], tagNamePrefix);
+         }
+         catch {
+             continue;
+diff --git a/out/providers/GitHubProvider.d.ts b/out/providers/GitHubProvider.d.ts
+--- a/out/providers/GitHubProvider.d.ts
++++ b/out/providers/GitHubProvider.d.ts
+@@ -25,5 +25,5 @@
+     resolveFiles(updateInfo: GithubUpdateInfo): Array<ResolvedUpdateFileInfo>;
+     private getBaseDownloadPath;
+ }
+-export declare function computeReleaseNotes(currentVersion: semver.SemVer, isFullChangelog: boolean, feed: XElement, latestRelease: XElement): string | Array<ReleaseNoteInfo> | null;
++export declare function computeReleaseNotes(currentVersion: semver.SemVer, isFullChangelog: boolean, feed: XElement, latestRelease: XElement, tagNamePrefix?: string): string | Array<ReleaseNoteInfo> | null;
+ export {};
