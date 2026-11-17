@@ -16,8 +16,8 @@ const KIND_LABELS: Record<ReviewDraft["kind"], string> = {
   "context-review": "Context use (Claude Haiku)",
 };
 const DELIVERY_LABELS: Record<ReviewDraft["delivery"], string> = {
-  "thread-or-alert": "Inbox, and tell the thread",
-  alerts: "Inbox only",
+  "thread-or-alert": "Tell the thread",
+  alerts: "Store findings only",
 };
 const STATE_LABELS: Record<ReviewDraft["targets"]["state"], string> = {
   active: "Active threads",
@@ -59,8 +59,9 @@ export function ReviewAgentFields({
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Reviews thread transcripts against these rules without tools. Findings arrive in the inbox.
-        With an event trigger on turn end it reviews each finished turn.
+        Reviews thread transcripts against these rules without tools. Findings go to the reviewed
+        thread when thread delivery is enabled. With an event trigger on turn end it reviews each
+        finished turn.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <Row label="Review" htmlFor="review-kind">

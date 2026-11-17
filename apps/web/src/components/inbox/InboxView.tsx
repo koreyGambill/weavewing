@@ -177,12 +177,13 @@ function IconAction(props: {
 function useSourceLabel(environmentId: EnvironmentId, notification: Notification): string {
   const { source } = notification;
   const taskId: ScheduledTaskId | undefined =
-    source.kind === "agent" ? undefined : source.scheduledTaskId;
+    source.kind === "automation" || source.kind === "review" ? source.scheduledTaskId : undefined;
   const taskTitle = useScheduledTaskTitle(environmentId, taskId);
   const shell = useThreadShell(
     source.kind === "agent" ? scopeThreadRef(environmentId, source.threadId) : null,
   );
   if (source.kind === "agent") return `Agent · ${shell?.title ?? "thread"}`;
+  if (source.kind === "status-source") return "Status source";
   return taskTitle ?? (source.kind === "review" ? "Review" : "Automation");
 }
 

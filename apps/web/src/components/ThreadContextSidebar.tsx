@@ -122,7 +122,7 @@ const tools: Record<ThreadContextSection, { title: string; icon: LucideIcon; abo
     title: "Inbox",
     icon: BellIcon,
     about:
-      "Notifications from automations and agents. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
+      "Urgent problems and important things you must not miss. Snooze or dismiss one to clear it; the Snoozed and Dismissed tabs bring it back.",
   },
   inspect: {
     title: "Inspect",

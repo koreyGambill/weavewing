@@ -184,34 +184,48 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
           Effect.provideService(McpSchema.McpServerClient, client),
         );
 
-    const first = yield* notify({ title: "Lands ran from bash", severity: "warning" });
+    for (const importance of [undefined, "routine", "info"]) {
+      const rejected = yield* Effect.flip(
+        notify({ title: "Routine update", ...(importance === undefined ? {} : { importance }) }),
+      );
+      expect(rejected.message).toContain("importance");
+    }
+    const first = yield* notify({ title: "Lands ran from bash", importance: "important" });
     expect(first.isError).not.toBe(true);
     expect(first.structuredContent).toMatchObject({ status: "delivered" });
-    const repeat = yield* notify({ title: "Lands ran from bash", severity: "warning" });
+    const repeat = yield* notify({ title: "Lands ran from bash", importance: "important" });
     expect(repeat.structuredContent).toEqual(
       first.structuredContent && {
         ...first.structuredContent,
         status: "repeat",
       },
     );
-    yield* notify({ title: "PR merged", threadId: "notify-target" });
+    yield* notify({ title: "Production down", importance: "urgent", threadId: "notify-target" });
     const snapshot = yield* notifications.subscribe().pipe(Stream.runHead);
     expect(Option.getOrThrow(snapshot).items).toMatchObject([
       {
-        title: "PR merged",
-        severity: "info",
+        title: "Production down",
+        severity: "critical",
         threadId: "notify-target",
         source: { kind: "agent", threadId: callerId },
       },
       { title: "Lands ran from bash", severity: "warning", threadId: callerId, repeatCount: 1 },
     ]);
 
-    expect(JSON.stringify((yield* notify({ title: "x", threadId: "missing" })).content)).toContain(
-      "thread was not found",
-    );
+    expect(
+      JSON.stringify(
+        (yield* notify({ title: "x", importance: "important", threadId: "missing" })).content,
+      ),
+    ).toContain("thread was not found");
     // An outside client is not offered the tool at all.
-    expect((yield* Effect.flip(notify({ title: "x" }, false))).message).toContain("not found");
-    const muted = yield* notify({ title: "x" }, true, ThreadId.make("notify-muted"));
+    expect(
+      (yield* Effect.flip(notify({ title: "x", importance: "important" }, false))).message,
+    ).toContain("not found");
+    const muted = yield* notify(
+      { title: "x", importance: "important" },
+      true,
+      ThreadId.make("notify-muted"),
+    );
     expect(JSON.stringify(muted.content)).toContain("turn notifications off");
     const runNow = yield* server
       .callTool({ name: "run_scheduled_task_now", arguments: { taskId: "task:any" } })
@@ -223,16 +237,16 @@ it.effect("t3_notify raises from the calling thread and links the thread it name
         Effect.provideService(McpSchema.McpServerClient, client),
       );
     expect(JSON.stringify(runNow.content)).toContain("can't create tasks");
-    const tooLong = yield* Effect.flip(notify({ title: "x".repeat(121) }));
+    const tooLong = yield* Effect.flip(notify({ title: "x".repeat(121), importance: "important" }));
     expect(tooLong.message).toContain("at most 120");
     expect(
       Option.getOrThrow(yield* notifications.subscribe().pipe(Stream.runHead)).items,
     ).toHaveLength(2);
     for (let index = 0; index < NotificationService.RATE_LIMIT_PER_HOUR - 3; index++)
-      yield* notify({ title: `finding ${index}` });
-    expect(JSON.stringify((yield* notify({ title: "one too many" })).content)).toContain(
-      "notifications per hour",
-    );
+      yield* notify({ title: `finding ${index}`, importance: "important" });
+    expect(
+      JSON.stringify((yield* notify({ title: "one too many", importance: "important" })).content),
+    ).toContain("notifications per hour");
   }).pipe(
     Effect.provide(
       McpHttpServer.layerThreadToolkit.pipe(

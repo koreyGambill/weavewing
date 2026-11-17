@@ -98,13 +98,13 @@ const client = McpSchema.McpServerClient.of({
   getClient: Effect.die("unused"),
 });
 
-// Echoes what the handler resolved, so tests see the thread, project and recorder it passed.
+// Echoes what the handler resolved, so tests see the thread and project it passed.
 const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
   record: (input) =>
     Effect.succeed({
       landingId: input.id,
       changes: input.changes.map((change) => ({ id: change.id, qa: "pending" as const })),
-      warnings: [`${input.threadId} ${input.projectId} ${input.recordedBy}`],
+      warnings: [`${input.threadId} ${input.projectId}`],
     }),
   list: (input) =>
     Effect.succeed({ items: [], next: input.needsQa ? { landedAt: "2026-01-01", id: "x" } : null }),
@@ -387,7 +387,7 @@ it.effect("records evidence on the calling thread and reads summaries or one lan
     expect(recorded.structuredContent).toEqual({
       landingId: "batch-1",
       changes: [{ id: "bw-1", qa: "pending" }],
-      warnings: [`${threadId} ${shell.projectId} ${threadId}`],
+      warnings: [`${threadId} ${shell.projectId}`],
     });
     const reader: Invocation.McpInvocationScope = {
       ...scope,

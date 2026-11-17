@@ -146,7 +146,6 @@ export const layer = McpToolAccess.toLayer(ReviewToolkit, {
             ...input,
             threadId: thread.id,
             projectId: thread.projectId,
-            recordedBy: caller?.id ?? thread.id,
           })
           .pipe(Effect.mapError(evidenceFailure));
       }),

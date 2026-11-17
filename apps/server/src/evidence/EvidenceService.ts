@@ -31,10 +31,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import * as NotificationService from "../notifications/NotificationService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 
@@ -44,8 +45,6 @@ const EVIDENCE_ROOT_NAME = "evidence";
 export interface RecordInput extends Omit<EvidenceRecordInput, "threadId"> {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId | null;
-  /** The agent's thread, named as the Inbox notification's source. */
-  readonly recordedBy: ThreadId;
 }
 
 export class EvidenceService extends Context.Service<
@@ -58,6 +57,7 @@ export class EvidenceService extends Context.Service<
     /** The user's QA verdict; agents have no path to it. */
     readonly setQa: (input: EvidenceSetQaInput) => Effect.Effect<EvidenceChangeQa, EvidenceError>;
     readonly counts: () => Effect.Effect<EvidenceCounts, EvidenceError>;
+    readonly subscribe: () => Stream.Stream<number>;
     /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
     readonly coverage: (
       input: EvidenceCoverageInput,
@@ -100,11 +100,6 @@ const storage = (cause: unknown) =>
   new EvidenceError({ code: "storage", message: "Evidence storage failed.", cause });
 const isEvidenceError = Schema.is(EvidenceError);
 const passStorage = (error: unknown) => (isEvidenceError(error) ? error : storage(error));
-
-const firstLine = (text: string, max: number) => {
-  const line = text.split("\n", 1)[0]!.trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
 
 interface CoverageRow {
   readonly project_id: string;
@@ -155,7 +150,9 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const notifications = yield* NotificationService.NotificationService;
+  const changes = yield* PubSub.sliding<number>(1);
+  let revision = 0;
+  const publish = Effect.suspend(() => PubSub.publish(changes, ++revision));
   const git = yield* GitVcsDriver.GitVcsDriver;
   // Cleared by record(); entries otherwise live for the TTL, then until the branch tip moves.
   const coverageCache = new Map<
@@ -196,26 +193,6 @@ const make = Effect.gen(function* () {
   const readQa = (landingId: string) =>
     sql<QaRow>`SELECT change_id, state, note, updated_at FROM evidence_qa WHERE landing_id = ${landingId}`;
 
-  const notify = Effect.fn("EvidenceService.notify")(function* (
-    input: RecordInput,
-    pending: number,
-  ) {
-    const count = input.changes.length;
-    const asks = input.changes.map(
-      (change) => `- ${change.ticket?.key ?? change.id}: ${firstLine(change.ask, 160)}`,
-    );
-    const body = [firstLine(input.title, 200), ...asks].join("\n");
-    yield* notifications.raise({
-      severity: "info",
-      title: `Landed ${count} change${count === 1 ? "" : "s"} – QA waiting on ${pending}`,
-      body: body.length > 4000 ? `${body.slice(0, 3999)}…` : body,
-      source: { kind: "agent", threadId: input.recordedBy },
-      threadId: input.threadId,
-      projectId: input.projectId,
-      dedupeKey: `evidence:${input.id}`,
-    });
-  });
-
   const record = Effect.fn("EvidenceService.record")(function* (input: RecordInput) {
     const ids = input.changes.map((change) => change.id);
     const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
@@ -248,7 +225,7 @@ const make = Effect.gen(function* () {
         `Record is ${bytes} bytes; the limit is ${EVIDENCE_RECORD_MAX_BYTES}. Shorten summaries or gaps.`,
       );
     const now = DateTime.formatIso(yield* DateTime.now);
-    const { qa, added } = yield* sql
+    const qa = yield* sql
       .withTransaction(
         Effect.gen(function* () {
           const [owner] = yield* sql<{
@@ -263,28 +240,18 @@ const make = Effect.gen(function* () {
               ON CONFLICT (landing_id) DO UPDATE SET project_id = excluded.project_id,
               landed_at = coalesce(${landedAt ?? null}, landed_at), record_json = excluded.record_json, updated_at = excluded.updated_at`;
           yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
-          let added = 0;
           for (const id of ids) {
-            const inserted =
-              yield* sql`INSERT INTO evidence_qa (landing_id, change_id, state, note, updated_at)
-                VALUES (${input.id}, ${id}, 'pending', '', ${now}) ON CONFLICT DO NOTHING RETURNING change_id`;
-            added += inserted.length;
+            yield* sql`INSERT INTO evidence_qa (landing_id, change_id, state, note, updated_at)
+                VALUES (${input.id}, ${id}, 'pending', '', ${now}) ON CONFLICT DO NOTHING`;
           }
-          return { qa: yield* readQa(input.id), added };
+          return yield* readQa(input.id);
         }),
       )
       .pipe(Effect.mapError(passStorage));
     coverageGeneration++;
     coverageCache.clear();
     const states = new Map(qa.map((row) => [row.change_id, row.state]));
-    const pending = qa.filter((row) => row.state === "pending").length;
-    // Only new changes ask for QA again, so a re-record that adds a check stays quiet.
-    if (added > 0)
-      yield* notify(input, pending).pipe(
-        Effect.catch((error) =>
-          Effect.sync(() => warnings.push(`inbox notification skipped: ${error.message}`)),
-        ),
-      );
+    yield* publish;
     return {
       landingId: input.id,
       changes: ids.map((id) => ({ id, qa: states.get(id) ?? "pending" })),
@@ -393,7 +360,9 @@ const make = Effect.gen(function* () {
         code: "not_found",
         message: `No change ${input.changeId} in evidence landing ${input.landingId}.`,
       });
-    return yield* decodeQa({ state: row.state, note: row.note, updatedAt: row.updated_at });
+    const result = yield* decodeQa({ state: row.state, note: row.note, updatedAt: row.updated_at });
+    yield* publish;
+    return result;
   }, Effect.mapError(passStorage));
 
   const counts = Effect.fn("EvidenceService.counts")(function* () {
@@ -515,7 +484,23 @@ const make = Effect.gen(function* () {
     return results.filter((result) => result !== null);
   }, Effect.mapError(storage));
 
-  return EvidenceService.of({ record, list, get, setQa, counts, coverage });
+  return EvidenceService.of({
+    record,
+    list,
+    get,
+    setQa,
+    counts,
+    coverage,
+    subscribe: () =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(changes);
+          return Stream.succeed(revision).pipe(
+            Stream.concat(Stream.fromSubscription(subscription)),
+          );
+        }),
+      ),
+  });
 });
 
 export const layer = Layer.effect(EvidenceService, make);

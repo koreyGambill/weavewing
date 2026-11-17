@@ -28,6 +28,7 @@ import * as Stream from "effect/Stream";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import { verifyWebhookSignature } from "../scheduledTasks/webhookVerification.ts";
+import * as NotificationService from "../notifications/NotificationService.ts";
 import * as Probe from "./StatusSourceProbe.ts";
 
 export interface StatusSourceTransition {
@@ -99,6 +100,7 @@ const make = Effect.gen(function* () {
   const server = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const probe = yield* Probe.StatusSourceProbe;
+  const notifications = yield* NotificationService.NotificationService;
   const random = yield* SecureRandom.SecureRandom;
   const mac = yield* Mac.Mac;
   const scope = yield* Scope.Scope;
@@ -195,6 +197,7 @@ const make = Effect.gen(function* () {
             ...transition,
           });
         }
+        yield* notifications.observeStatus({ ...source, latest, lastTransition: transition });
         if (changed) yield* emit;
         return true;
       }),

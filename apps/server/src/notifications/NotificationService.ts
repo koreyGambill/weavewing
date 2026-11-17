@@ -9,9 +9,10 @@ import {
   type NotificationStreamEvent,
   type NotificationUpdateInput,
   type NotificationUpdateResult,
-  type ProjectId,
+  ProjectId,
   type ScheduledTaskId,
-  type ThreadId,
+  ThreadId,
+  type StatusSource,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -76,11 +77,13 @@ export class NotificationService extends Context.Service<
       RaiseResult,
       NotificationError | NotificationRateLimitedError | NotificationInvalidError
     >;
+    readonly observeStatus: (source: StatusSource) => Effect.Effect<void>;
+    readonly taskRunFinished: (taskId: ScheduledTaskId) => Effect.Effect<void>;
     readonly update: (
       input: NotificationUpdateInput,
     ) => Effect.Effect<NotificationUpdateResult, NotificationError>;
     readonly markAllRead: () => Effect.Effect<NotificationMarkAllReadResult, NotificationError>;
-    /** Rewrites a review finding's report after its discussion moves on, and marks it unread. */
+    /** Keeps historical dismissed review reports up to date. */
     readonly reviseFinding: (input: {
       readonly scheduledTaskId: ScheduledTaskId;
       readonly findingId: string;
@@ -119,6 +122,8 @@ const SEVERITY_RANK: Record<NotificationSeverity, number> = { info: 0, warning: 
 
 const sourceKey = (source: NotificationSource) => {
   switch (source.kind) {
+    case "status-source":
+      return `status:${source.sourceId}`;
     case "agent":
       return `agent:${source.threadId}`;
     case "automation":
@@ -127,9 +132,6 @@ const sourceKey = (source: NotificationSource) => {
       return `review:${source.scheduledTaskId}:${source.findingId}`;
   }
 };
-
-const rateKey = (source: NotificationSource) =>
-  source.kind === "agent" ? `thread:${source.threadId}` : `task:${source.scheduledTaskId}`;
 
 const isDelivered = (verification: NotificationVerification | undefined) =>
   verification === undefined ||
@@ -222,7 +224,7 @@ const make = Effect.gen(function* () {
     source: NotificationSource,
   ) {
     const now = yield* Clock.currentTimeMillis;
-    const key = rateKey(source);
+    const key = sourceKey(source);
     const recent = (raises.get(key) ?? []).filter((at) => at > now - HOUR_MS);
     if (recent.length >= RATE_LIMIT_PER_HOUR) {
       raises.set(key, recent);
@@ -282,6 +284,16 @@ const make = Effect.gen(function* () {
   yield* scheduleWake;
 
   const validate = Effect.fn("NotificationService.validate")(function* (input: RaiseInput) {
+    // Warning means important; critical means urgent. Routine work belongs in its thread.
+    if (
+      input.severity === "info" ||
+      input.source.kind === "review" ||
+      input.dedupeKey?.startsWith("evidence:")
+    )
+      return yield* new NotificationInvalidError({
+        detail:
+          "The inbox is only for urgent problems or important things the human must not miss.",
+      });
     const checked = yield* decodeNotification({
       id: "notification:candidate",
       createdAt: "",
@@ -313,8 +325,7 @@ const make = Effect.gen(function* () {
   const raise = Effect.fn("NotificationService.raise")(
     function* (raw: RaiseInput) {
       const input = yield* validate(raw);
-      // A review run is already capped per hour and yields at most 32 findings; dropping one would lose it.
-      if (input.source.kind !== "review") yield* reserveRaise(input.source);
+      yield* reserveRaise(input.source);
       const now = yield* DateTime.now;
       const nowIso = DateTime.formatIso(now);
       const windowStart = DateTime.formatIso(
@@ -357,6 +368,69 @@ const make = Effect.gen(function* () {
       } satisfies RaiseResult;
     },
     (effect) => serialized(effect).pipe(Effect.catchTags({ SqlError: raiseFailed })),
+  );
+
+  const statusObservations = new Map<
+    string,
+    { state: string; warnings: number; alerted: boolean }
+  >();
+  const observeStatus = Effect.fn("NotificationService.observeStatus")(
+    function* (source: StatusSource) {
+      const id = source.config.id;
+      const previous = statusObservations.get(id);
+      const state = source.latest.state;
+      const warnings = state === "warn" ? (previous?.warnings ?? 0) + 1 : 0;
+      const severity = state === "fail" ? "critical" : warnings >= 3 ? "warning" : null;
+      const alerted = previous?.state === state && previous.alerted;
+      const snoozed =
+        source.config.snoozedUntil !== null &&
+        Date.parse(source.config.snoozedUntil) > (yield* Clock.currentTimeMillis);
+      statusObservations.set(id, { state, warnings, alerted: Boolean(alerted) });
+      if (severity === null || alerted || snoozed) return;
+      yield* raise({
+        severity,
+        title:
+          `${source.config.name}: ${state === "fail" ? "failing" : "persistent warning"}`.slice(
+            0,
+            120,
+          ),
+        body: source.latest.summary.slice(0, 4000) || undefined,
+        source: { kind: "status-source", sourceId: id },
+        threadId: null,
+        projectId: null,
+        dedupeKey: state,
+      });
+      statusObservations.set(id, { state, warnings, alerted: true });
+    },
+    Effect.catch((cause) => Effect.logWarning("Could not raise status alert", { cause })),
+  );
+
+  const taskRunFinished = Effect.fn("NotificationService.taskRunFinished")(
+    function* (taskId: ScheduledTaskId) {
+      const runs = yield* sql<{
+        id: string;
+        status: string;
+      }>`SELECT id, status FROM scheduled_task_runs
+      WHERE task_id = ${taskId} AND ended_at IS NOT NULL AND status != 'skipped'
+      ORDER BY started_at DESC, rowid DESC LIMIT 2`;
+      if (runs.length !== 2 || !runs.every((run) => run.status === "failed")) return;
+      const [task] = yield* sql<{
+        title: string;
+        thread_id: string | null;
+        project_id: string;
+      }>`SELECT title, thread_id, project_id FROM scheduled_tasks WHERE task_id = ${taskId}`;
+      if (!task) return;
+      yield* raise({
+        severity: "warning",
+        title: `Repeated task failure: ${task.title}`.slice(0, 120),
+        body: "The last two scheduled runs failed. Open Scheduled tasks to inspect their run history.",
+        source: { kind: "automation", scheduledTaskId: taskId, runId: runs[0]!.id },
+        threadId: task.thread_id === null ? null : ThreadId.make(task.thread_id),
+        projectId: ProjectId.make(task.project_id),
+        dedupeKey: "repeated-failure",
+      });
+    },
+    Effect.catch((cause) => Effect.logWarning("Could not raise repeated task failure", { cause })),
   );
 
   const update = Effect.fn("NotificationService.update")(
@@ -421,7 +495,7 @@ const make = Effect.gen(function* () {
     }) {
       const now = DateTime.formatIso(yield* DateTime.now);
       const rows =
-        yield* sql<Row>`UPDATE notifications SET body = ${input.body}, read_at = NULL, updated_at = ${now}
+        yield* sql<Row>`UPDATE notifications SET body = ${input.body}, updated_at = ${now}
         WHERE dedupe_key = ${reviewNotificationDedupeKey(input.scheduledTaskId, input.findingId)}
         RETURNING *`;
       yield* publish(yield* toNotifications(rows), rows.length > 0);
@@ -439,6 +513,8 @@ const make = Effect.gen(function* () {
 
   return NotificationService.of({
     raise,
+    observeStatus,
+    taskRunFinished,
     update,
     markAllRead,
     reviseFinding,

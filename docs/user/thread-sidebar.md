@@ -71,7 +71,12 @@ tiles. Hide tools you don't use from the bottom of the strip. Opening a hidden
 tool from elsewhere, such as an artifact reminder, shows it again.
 
 The **Inbox**, the bell under Threads in the strip, collects notifications that
-automations and agents raise, newest first. Its badge counts unread ones and turns
+need urgent action or are important enough that you must not miss them, newest first.
+Agents must choose urgent or important when raising one. Routine progress,
+completions and review nitpicks stay in their threads. Landed work awaiting QA
+stays in **Evidence**. Status failures raise urgent alerts, while warnings need
+three consecutive observations. Scheduled tasks alert after two consecutive
+failed runs. The inbox badge counts unread alerts and turns
 red for critical or amber for a warning. Open one to read it; it then counts as
 read. Snooze one to have it come back later, or dismiss it once it's handled. The
 Snoozed and Dismissed tabs show those, where you can unsnooze or restore them.

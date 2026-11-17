@@ -293,6 +293,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.evidenceGet]: "evidence",
   [WS_METHODS.evidenceSetQa]: "evidence",
   [WS_METHODS.evidenceCounts]: "evidence",
+  [WS_METHODS.evidenceSubscribe]: "evidence",
   [WS_METHODS.evidenceCoverage]: "evidence",
   [WS_METHODS.messageFollowUpsList]: "workspace",
   [WS_METHODS.messageFollowUpsUpdate]: "workspace",

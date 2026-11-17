@@ -7,7 +7,7 @@ import {
   MonitoringFinding,
   NotificationBody,
   NotificationId,
-  NotificationSeverity,
+  NotificationImportance,
   NotificationTitle,
   ScheduledTaskId,
   ScheduledTask,
@@ -293,11 +293,11 @@ const MonitoringRespondTool = Tool.make("respond_monitoring_advisory", {
 
 const NotifyTool = Tool.make("t3_notify", {
   description:
-    "Tell the user something that needs their attention later, in their inbox. Not for answering the conversation. Automations: use it for findings.",
+    "Raise an inbox alert only for an urgent problem (for example, production is down) or something important the human must not miss. Before finishing unattended work, call this for any urgent or important issue: a final reply alone does not reach the inbox. Choose urgent for immediate action, important for a serious issue they must see later. Never use for routine progress, nitpicks, completions, or ordinary conversation replies.",
   parameters: Schema.Struct({
     title: NotificationTitle,
     body: Schema.optional(NotificationBody),
-    severity: Schema.optional(NotificationSeverity),
+    importance: NotificationImportance,
     threadId: Schema.optional(ThreadId).annotate({
       description: "Thread it opens. Default: this thread.",
     }),

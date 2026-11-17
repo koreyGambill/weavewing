@@ -1505,6 +1505,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:runs",
       tag: WS_METHODS.scheduledTasksListRuns,
     }),
+    evidenceLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:evidence:live",
+      tag: WS_METHODS.evidenceSubscribe,
+      idleTtlMs: 0,
+    }),
     notificationsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:notifications:live",
       tag: WS_METHODS.notificationsSubscribe,

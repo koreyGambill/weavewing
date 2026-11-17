@@ -1,3 +1,4 @@
+import * as NotificationService from "../notifications/NotificationService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { checkinFingerprint, pinGitWake, wakeReason } from "./WakeState.ts";
 import * as EventTriggers from "./EventTriggers.ts";
@@ -560,6 +561,7 @@ export const layer = Layer.effect(
     const statusSources = yield* Effect.serviceOption(StatusSources.StatusSources);
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const notifications = yield* NotificationService.NotificationService;
     const serviceScope = yield* Effect.scope;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const secretRequests = yield* SecretRequests.SecretRequests;
@@ -1169,6 +1171,9 @@ export const layer = Layer.effect(
         historyId === null
           ? Effect.void
           : recordHistory(RunHistory.finishRun(historyId, outcome)).pipe(
+              Effect.andThen(
+                outcome.status === "failed" ? notifications.taskRunFinished(taskId) : Effect.void,
+              ),
               Effect.andThen(notifyChanged),
             );
       const shell = yield* threadManagement.getThreadShell(threadId);
@@ -1787,6 +1792,7 @@ export const layer = Layer.effect(
           );
           yield* recordHistory(RunHistory.prune(active.id));
         }
+        if (!runSucceeded) yield* notifications.taskRunFinished(active.id);
         // One transaction, so an edit cannot land between reading the schedule and
         // writing the next run computed from it. The origin is read first: it reads
         // files, and the transaction holds SQLite's writer lock.
@@ -1907,7 +1913,10 @@ export const layer = Layer.effect(
                             endedAt: iso(endedAt),
                             error: errorMessage(cause),
                           }),
-                        ).pipe(Effect.andThen(notifyChanged)),
+                        ).pipe(
+                          Effect.andThen(notifications.taskRunFinished(task.id)),
+                          Effect.andThen(notifyChanged),
+                        ),
                       ),
                     )
                   : // The turn was sent and may still finish; only its bookkeeping failed.
@@ -2106,7 +2115,7 @@ export const layer = Layer.effect(
                   endedAt: now,
                   error: "Run was interrupted by a server restart.",
                 }),
-              )
+              ).pipe(Effect.andThen(notifications.taskRunFinished(run.taskId)))
             : followRunOutcome(run.taskId, run.startedAt, run.threadId, run.messageId, run.id).pipe(
                 Effect.catchCause((cause) =>
                   Effect.logWarning("Could not record scheduled run outcome", {
@@ -3572,4 +3581,4 @@ export const layer = Layer.effect(
       triggerWebhook,
     });
   }),
-);
+).pipe(Layer.provide(NotificationService.layer));

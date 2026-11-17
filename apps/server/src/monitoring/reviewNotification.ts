@@ -28,7 +28,7 @@ interface FindingContent {
 export const reviewNotificationTitle = (finding: { readonly summary: string }) =>
   clip(finding.summary, TITLE_MAX);
 
-/** The finding's report as the inbox shows it; the latest discussion is kept when it overflows. */
+/** A bounded historical finding report that keeps its latest discussion. */
 export function reviewNotificationBody(finding: FindingContent): string {
   const head = [
     finding.detail,

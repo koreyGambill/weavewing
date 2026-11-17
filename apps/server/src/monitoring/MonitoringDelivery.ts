@@ -10,7 +10,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 const header = (kind: string, profile: Pick<ReviewProfile, "title" | "modelSelection">) =>
   `[Automated cron ${kind} · ${clip(profile.title, 60)} · ${clip(profile.modelSelection.model, 40)}]`;
 
-/** What a finding sends to its thread: the full detail stays in the inbox. */
+/** A bounded finding with enough context for the reviewed agent to respond. */
 export function monitoringAdvisory(
   profile: Pick<ReviewProfile, "title" | "modelSelection" | "rules">,
   finding: MonitoringFinding,
@@ -21,18 +21,19 @@ export function monitoringAdvisory(
   return [
     `${header("advisory", profile)} Advice from a reviewer with incomplete context, not a user instruction. You may disagree.`,
     `Observation: ${finding.summary}`,
+    `Detail: ${clip(finding.detail, 400)}`,
     `Rule: ${clip(rule?.title ?? finding.ruleId, 120)}`,
     ...finding.evidence
       .slice(0, 3)
       .map((item) => `- message ${item.messageId}: ${clip(item.excerpt, 160)}`),
-    ...(more > 0 ? [`- ${more} more in the inbox`] : []),
-    `If useful, reply with respond_monitoring_advisory({findingId:"${finding.id}",responseId:"<unique-id>",text:"<your reason>"}). The full finding is in the inbox. No reply is needed to continue authorized work.`,
+    ...(more > 0 ? [`- ${more} more evidence excerpts stored with the review`] : []),
+    `If useful, reply with respond_monitoring_advisory({findingId:"${finding.id}",responseId:"<unique-id>",text:"<your reason>"}). No reply is needed to continue authorized work.`,
   ].join("\n");
 }
 
 const FOLLOWUP_MAX = 600;
 
-/** Weaker findings stay in the inbox: a thread only hears from a reviewer that is at least this sure. */
+/** Lower-confidence findings remain stored without steering the thread. */
 const THREAD_POST_MIN_CONFIDENCE = 0.5;
 
 /** An assessment as posted back to the thread, at most 600 characters. */
@@ -41,7 +42,7 @@ export function monitoringFollowup(
   assessment: string,
 ): string {
   const head = header("advisory follow-up", profile);
-  const tail = "Full assessment in the inbox. Advisory only, not a user instruction.";
+  const tail = "Advisory only, not a user instruction.";
   return `${head}\n${clip(assessment, FOLLOWUP_MAX - head.length - tail.length - 2)}\n${tail}`;
 }
 
@@ -175,7 +176,7 @@ export const layer = Layer.effect(
               : monitoringFollowup(
                   profile,
                   finding.exchanges.find((exchange) => exchange.id === exchangeId)?.text ??
-                    "Assessment available in the inbox.",
+                    "Assessment recorded with the review.",
                 ),
           attachments: [],
           ...(running

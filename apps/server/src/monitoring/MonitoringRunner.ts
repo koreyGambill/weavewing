@@ -16,9 +16,7 @@ import {
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as NotificationService from "../notifications/NotificationService.ts";
 import { reviewProfile, type ReviewProfile } from "./ReviewProfile.ts";
-import { reviewNotificationBody, reviewNotificationTitle } from "./reviewNotification.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -132,7 +130,6 @@ const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const digest = yield* Digest.Digest;
   const delivery = yield* MonitoringDelivery.MonitoringDelivery;
-  const notifications = yield* NotificationService.NotificationService;
   const sql = yield* SqlClient.SqlClient;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -290,35 +287,6 @@ const make = Effect.gen(function* () {
       ...(raw.costUsd === undefined ? {} : { costUsd: raw.costUsd }),
     };
   });
-  const raise = Effect.fn("MonitoringRunner.raise")(function* (
-    profile: ReviewProfile,
-    finding: MonitoringFinding,
-  ) {
-    const raised = yield* notifications
-      .raise({
-        severity: "warning",
-        title: reviewNotificationTitle(finding),
-        body: reviewNotificationBody(finding),
-        source: {
-          kind: "review",
-          scheduledTaskId: profile.id,
-          runId: finding.runId,
-          findingId: finding.id,
-        },
-        threadId: finding.threadId,
-        projectId: profile.projectId,
-        dedupeKey: finding.id,
-      })
-      .pipe(
-        Effect.map((result) => result.notification.id),
-        Effect.catch((cause) =>
-          Effect.logWarning("Review finding was not sent to the inbox", { cause }).pipe(
-            Effect.as(null),
-          ),
-        ),
-      );
-    return raised;
-  });
   const threadProject = (threadId: ThreadId) =>
     sql<{ project_id: string }>`SELECT project_id FROM orchestration_v2_projection_threads
       WHERE thread_id = ${threadId}`.pipe(
@@ -439,8 +407,6 @@ const make = Effect.gen(function* () {
         };
         yield* store.saveFinding(finding);
         raisedNow.push(finding);
-        const notificationId = yield* raise(profile, finding);
-        if (notificationId !== null) notificationIds.push(notificationId);
         const delivered = yield* delivery.deliver({ profile, finding }).pipe(
           Effect.catch((cause) =>
             Effect.logWarning("Monitoring advisory delivery failed", {

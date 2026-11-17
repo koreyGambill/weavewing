@@ -15,6 +15,8 @@ import * as TestClock from "effect/testing/TestClock";
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Probe from "./StatusSourceProbe.ts";
+import * as Notifications from "../notifications/NotificationService.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
 import * as StatusSources from "./StatusSources.ts";
 
 const payload = (state: StatusPayload["state"]): StatusPayload => ({
@@ -35,7 +37,9 @@ const setup = Effect.gen(function* () {
       favicon: () => Effect.undefined,
     }),
   );
-  const context = yield* Layer.build(StatusSources.layer.pipe(Layer.provide(probe)));
+  const context = yield* Layer.build(
+    StatusSources.layer.pipe(Layer.provide(probe), Layer.provide(Notifications.layer)),
+  );
   const service = Context.get(context, StatusSources.StatusSources);
   const updates = yield* Queue.unbounded<ReadonlyArray<StatusSource>>();
   yield* Stream.runForEach(service.subscribe(), (value) => Queue.offer(updates, value)).pipe(
@@ -47,7 +51,9 @@ const setup = Effect.gen(function* () {
 
 const testLayer = ServerSecretStore.layer.pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "status-sources-" })),
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, PlatformNodeCrypto.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(NodeServices.layer, PlatformNodeCrypto.layer, Sqlite.layerMemory),
+  ),
 );
 
 it.effect(

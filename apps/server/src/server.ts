@@ -844,6 +844,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(
     StatusSources.layer.pipe(
       Layer.provide(StatusSourceProbe.layer),
+      Layer.provide(NotificationService.layer.pipe(Layer.provide(layerPersistence))),
       Layer.provide(ServerSecretStore.layer),
     ),
   ),

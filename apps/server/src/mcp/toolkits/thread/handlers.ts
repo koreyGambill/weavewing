@@ -176,7 +176,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
           .pipe(Effect.mapError(unavailable));
       }),
   ),
-  t3_notify: McpToolAccess.actsAsCaller(({ threadId, severity, ...input }) =>
+  t3_notify: McpToolAccess.actsAsCaller(({ threadId, importance, ...input }) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext.pipe(
         Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "t3_notify")),
@@ -197,7 +197,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       const { notification, status } = yield* notifications
         .raise({
           ...input,
-          severity: severity ?? "info",
+          severity: importance === "urgent" ? "critical" : "warning",
           source: { kind: "agent", threadId: callerId },
           threadId: target.id,
           projectId: target.projectId,

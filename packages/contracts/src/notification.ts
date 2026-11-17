@@ -13,6 +13,8 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 export const NotificationId = TrimmedNonEmptyString.pipe(Schema.brand("NotificationId"));
 export type NotificationId = typeof NotificationId.Type;
 
+export const NotificationImportance = Schema.Literals(["urgent", "important"]);
+
 export const NotificationSeverity = Schema.Literals(["info", "warning", "critical"]);
 export type NotificationSeverity = typeof NotificationSeverity.Type;
 
@@ -20,6 +22,7 @@ export const NotificationTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(
 export const NotificationBody = TrimmedNonEmptyString.check(Schema.isMaxLength(4000));
 
 export const NotificationSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("status-source"), sourceId: TrimmedNonEmptyString }),
   Schema.Struct({
     kind: Schema.Literal("automation"),
     scheduledTaskId: ScheduledTaskId,

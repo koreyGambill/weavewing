@@ -561,7 +561,7 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-it.effect("raises each new finding in the inbox and records the message it was sent as", () =>
+it.effect("delivers findings to the agent thread without raising inbox notifications", () =>
   Effect.gen(function* () {
     const findings = yield* Ref.make<ReadonlyArray<MonitoringFinding>>([]);
     const raised = yield* Ref.make<ReadonlyArray<Notifications.RaiseInput>>([]);
@@ -613,37 +613,15 @@ it.effect("raises each new finding in the inbox and records the message it was s
     const saved = yield* Ref.get(findings);
     assert.equal(saved.at(-1)?.sentToThread?.messageId, "monitoring:sent");
     assert.deepEqual(outcome, {
-      status: "notified",
-      notificationIds: ["notification:Landed without review"],
+      status: "quiet",
+      notificationIds: [],
       costUsd: undefined,
     });
-    const [notification] = yield* Ref.get(raised);
-    assert.deepEqual(
-      {
-        severity: notification?.severity,
-        title: notification?.title,
-        source: notification?.source,
-        threadId: notification?.threadId,
-        projectId: notification?.projectId,
-      },
-      {
-        severity: "warning",
-        title: "Landed without review",
-        source: {
-          kind: "review",
-          scheduledTaskId: profile.id,
-          runId: "run:1",
-          findingId: saved[0]!.id,
-        },
-        threadId: ThreadId.make("thread"),
-        projectId: profile.projectId,
-      },
-    );
-    assert.include(notification?.body, "Pushed straight to main");
+    assert.deepEqual(yield* Ref.get(raised), []);
   }).pipe(Effect.scoped),
 );
 
-it.effect("sends every finding of a run to the inbox, past the agents' hourly limit", () =>
+it.effect("keeps all review findings out of the inbox", () =>
   Effect.gen(function* () {
     const count = Notifications.RATE_LIMIT_PER_HOUR + 1;
     const indexes = Array.from({ length: count }, (_, index) => index);
@@ -691,11 +669,11 @@ it.effect("sends every finding of a run to the inbox, past the agents' hourly li
     );
     yield* Effect.gen(function* () {
       const outcome = yield* run(profile);
-      assert.equal(outcome.status, "notified");
-      assert.equal(outcome.notificationIds.length, count);
+      assert.equal(outcome.status, "quiet");
+      assert.equal(outcome.notificationIds.length, 0);
       const sql = yield* SqlClient.SqlClient;
       const rows = yield* sql<{ count: number }>`SELECT count(*) AS count FROM notifications`;
-      assert.equal(rows[0]?.count, count);
+      assert.equal(rows[0]?.count, 0);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -860,11 +838,11 @@ it.effect("reviews a thread's turn end from its watermark and files each inciden
       assert.equal((yield* runTurnEnd).status, "failed");
       assert.deepEqual(yield* Ref.get(watermark), { thread: mark("old") });
       yield* Ref.set(failModel, false);
-      assert.equal((yield* runTurnEnd).status, "notified");
+      assert.equal((yield* runTurnEnd).status, "quiet");
       assert.deepEqual(captured, [{ thread: mark("old") }, { thread: mark("old") }]);
       assert.deepEqual(
         (yield* Ref.get(raised)).map((input) => input.title),
-        ["Pushed again"],
+        [],
       );
       assert.deepEqual(yield* Ref.get(watermark), { thread: mark("claim") });
       // The next turn sees the filed incident in its prompt and does not file it again.

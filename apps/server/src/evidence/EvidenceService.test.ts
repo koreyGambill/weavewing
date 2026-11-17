@@ -2,13 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import {
-  EvidenceRecordInput,
-  ProjectId,
-  ThreadId,
-  type EvidenceChange,
-  type NotificationStreamEvent,
-} from "@t3tools/contracts";
+import { EvidenceRecordInput, ProjectId, ThreadId, type EvidenceChange } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as Deferred from "effect/Deferred";
@@ -16,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -115,7 +110,6 @@ const recordInput = (
   changes,
   threadId: lead,
   projectId: project,
-  recordedBy: lead,
   ...extra,
 });
 
@@ -172,9 +166,7 @@ it.effect(
         const other = ThreadId.make("other");
         for (const changes of [[change("x")], [change("a"), change("c")]]) {
           const error = yield* Effect.flip(
-            evidence.record(
-              recordInput("batch-1", changes, { threadId: other, recordedBy: other }),
-            ),
+            evidence.record(recordInput("batch-1", changes, { threadId: other })),
           );
           assert.strictEqual(error.code, "invalid");
           assert.strictEqual(
@@ -392,7 +384,7 @@ it.effect("refuses duplicate change ids, bad dates and records over 64 KB", () =
 
 it("the record contract refuses shapes the agent cannot send", () => {
   const decode = Schema.decodeUnknownExit(EvidenceRecordInput);
-  const valid = { ...recordInput("ok", [change("a")]), recordedBy: undefined };
+  const valid = recordInput("ok", [change("a")]);
   assert.isTrue(decode(valid)._tag === "Success");
   for (const bad of [
     { ...valid, changes: [] },
@@ -403,69 +395,25 @@ it("the record contract refuses shapes the agent cannot send", () => {
     assert.isTrue(decode(bad)._tag === "Failure");
 });
 
-it.effect("raises one Inbox notification per landing, only when new changes need QA", () =>
+it.effect("publishes evidence changes without adding anything to the inbox", () =>
   withHome(() =>
     Effect.gen(function* () {
       const evidence = yield* Service.EvidenceService;
       const notifications = yield* NotificationService.NotificationService;
-      const events = yield* Queue.unbounded<NotificationStreamEvent>();
-      yield* Stream.runForEach(notifications.subscribe(), (event) =>
-        Queue.offer(events, event),
-      ).pipe(Effect.forkScoped);
-      assert.strictEqual((yield* Queue.take(events)).items.length, 0);
-
-      yield* evidence.record(
-        recordInput("batch-1", [change("a", { ticket: { key: "BW-1" } }), change("b")]),
+      const events = yield* Queue.unbounded<number>();
+      yield* Stream.runForEach(evidence.subscribe(), (event) => Queue.offer(events, event)).pipe(
+        Effect.forkScoped,
       );
-      const raised = yield* Queue.take(events);
-      assert.deepStrictEqual(
-        raised.items.map(({ title, body, source, threadId, projectId, repeatCount }) => ({
-          title,
-          body,
-          source,
-          threadId,
-          projectId,
-          repeatCount,
-        })),
-        [
-          {
-            title: "Landed 2 changes – QA waiting on 2",
-            body: "Landing batch-1\n- BW-1: Ask for a\n- b: Ask for b",
-            source: { kind: "agent", threadId: lead },
-            threadId: lead,
-            projectId: project,
-            repeatCount: 0,
-          },
-        ],
-      );
-      const id = raised.items[0]!.id;
-
-      // Same changes again: nothing new to QA, so the Inbox stays quiet.
-      yield* evidence.record(recordInput("batch-1", [change("a"), change("b")]));
-      yield* notifications.update({ ids: [id], action: { type: "read" } });
-      const read = yield* Queue.take(events);
-      assert.strictEqual(read.items[0]!.repeatCount, 0);
-
-      // A new change updates the same Inbox item rather than adding one.
-      yield* evidence.record(recordInput("batch-1", [change("a"), change("b"), change("c")]));
-      const repeat = yield* Queue.take(events);
-      assert.strictEqual(repeat.items[0]!.id, id);
-      assert.strictEqual(repeat.items[0]!.repeatCount, 1);
-      assert.strictEqual(repeat.items[0]!.title, "Landed 3 changes – QA waiting on 3");
-    }),
-  ).pipe(Effect.provide(testLayer)),
-);
-
-it.effect("records even when the Inbox refuses, and says so", () =>
-  withHome(() =>
-    Effect.gen(function* () {
-      const evidence = yield* Service.EvidenceService;
-      for (let index = 0; index < NotificationService.RATE_LIMIT_PER_HOUR; index++)
-        yield* evidence.record(recordInput(`batch-${index}`, [change("a")]));
-      const result = yield* evidence.record(recordInput("one-more", [change("a")]));
-      assert.strictEqual(result.warnings.length, 1);
-      assert.match(result.warnings[0]!, /^inbox notification skipped: At most 10/);
-      assert.strictEqual((yield* evidence.get({ landingId: "one-more" })).id, "one-more");
+      assert.strictEqual(yield* Queue.take(events), 0);
+      for (let index = 0; index <= NotificationService.RATE_LIMIT_PER_HOUR; index++) {
+        const result = yield* evidence.record(recordInput(`batch-${index}`, [change("a")]));
+        assert.deepStrictEqual(result.warnings, []);
+        assert.strictEqual(yield* Queue.take(events), index + 1);
+      }
+      yield* evidence.setQa({ landingId: "batch-0", changeId: "a", state: "confirmed" });
+      assert.strictEqual(yield* Queue.take(events), NotificationService.RATE_LIMIT_PER_HOUR + 2);
+      const snapshot = yield* notifications.subscribe().pipe(Stream.runHead);
+      assert.deepStrictEqual(Option.getOrThrow(snapshot).items, []);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

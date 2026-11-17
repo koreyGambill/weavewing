@@ -45,6 +45,11 @@ Notifications follow your notification preferences. A source alerts when it leav
 warning or failure, and when it recovers to OK. Repeated checks in the same state do not repeat
 the alert. Connecting to a server does not replay its previous transitions.
 
+The inbox keeps failure alerts as urgent. A warning reaches the inbox after three
+consecutive observations in the running server. Recovery and unknown status stay
+in the Status view. The warning count resets when the source leaves warning or
+the server restarts.
+
 Choose **Snooze** and select a time or duration to mute a source's notifications while its status continues updating.
 Choose **Unsnooze** to resume early. Remove a source to stop checking it. No sources are added
 automatically. Status sources are available in web and desktop. Mobile configuration and status

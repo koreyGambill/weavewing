@@ -751,6 +751,7 @@ export const WS_METHODS = {
   evidenceGet: "evidence.get",
   evidenceSetQa: "evidence.setQa",
   evidenceCounts: "evidence.counts",
+  evidenceSubscribe: "evidence.subscribe",
   evidenceCoverage: "evidence.coverage",
   messageFollowUpsList: "messageFollowUps.list",
   messageFollowUpsUpdate: "messageFollowUps.update",
@@ -2522,6 +2523,12 @@ const WsEvidenceSetQaRpc = Rpc.make(WS_METHODS.evidenceSetQa, {
   success: EvidenceChangeQa,
   error: evidenceErrors,
 });
+const WsEvidenceSubscribeRpc = Rpc.make(WS_METHODS.evidenceSubscribe, {
+  payload: Schema.Struct({}),
+  success: Schema.Number,
+  error: evidenceErrors,
+  stream: true,
+});
 const WsEvidenceCountsRpc = Rpc.make(WS_METHODS.evidenceCounts, {
   payload: Schema.Struct({}),
   success: EvidenceCounts,
@@ -2742,6 +2749,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsEvidenceGetRpc,
   WsEvidenceSetQaRpc,
   WsEvidenceCountsRpc,
+  WsEvidenceSubscribeRpc,
   WsEvidenceCoverageRpc,
   WsMessageFollowUpsListRpc,
   WsMessageFollowUpsUpdateRpc,

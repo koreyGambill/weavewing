@@ -154,7 +154,7 @@ Leaving an edited form asks before discarding unsaved changes.
 ## Review automations
 
 A review automation reads a project's conversations against rules you write,
-without tools, and sends each finding to your inbox. On web and desktop, create
+without tools, and sends findings to the reviewed agent thread when thread delivery is enabled. On web and desktop, create
 a task in **Settings → Scheduled tasks** and choose **Reviews threads** under
 **Each run**. Add rules, instruction file paths on the server's machine (`~/`
 uses that server user's home) or the project's root `AGENTS.md`. Missing
@@ -164,11 +164,9 @@ review uses the model you select and reports a failure if it is unavailable.
 To check every thread when its turn ends, give the automation an **Event**
 schedule on **A turn ends**; it reviews the thread that just finished. Other
 schedules review the threads the targets select. A review sees a bounded
-snapshot, so missing context can limit its conclusions. Read findings and their
-quoted evidence in the inbox, where you can snooze or dismiss them. Choose
-**Inbox only** to keep findings out of the reviewed thread. Watchers made before
-this change became review automations: one that also ran after each turn is now
-two automations, the second named "(scheduled)".
+snapshot, so missing context can limit its conclusions. Review findings stay out
+of the inbox. **Store findings only** keeps findings in the
+automation's stored history without sending an advisory to the reviewed thread.
 
 With thread delivery, a review can offer advice to an active agent when its provider supports steering
 without interrupting tools. The agent can agree or explain a disagreement. The

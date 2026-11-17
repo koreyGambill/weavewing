@@ -6,8 +6,10 @@ import {
   ScheduledTaskId,
   ThreadId,
   type NotificationSource,
+  type StatusSource,
   type NotificationStreamEvent,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -83,25 +85,31 @@ it.effect(
       yield* Queue.take(events);
       const repeat = yield* service.raise({
         ...raiseInput(agent("t1"), "Lands ran from bash"),
-        severity: "info",
+        severity: "warning",
         body: "two",
       });
       assert.strictEqual(repeat.status, "repeat");
       assert.strictEqual(repeat.notification.id, id);
       assert.strictEqual(repeat.notification.repeatCount, 1);
       assert.strictEqual(repeat.notification.body, "two");
-      assert.strictEqual(repeat.notification.severity, "info");
+      assert.strictEqual(repeat.notification.severity, "warning");
       assert.isNull(repeat.notification.readAt);
       assert.isNull(repeat.notification.dismissedAt);
-      assert.deepInclude(yield* Queue.take(events), { unreadCount: 1, maxUnreadSeverity: "info" });
-      const louder = yield* service.raise({ ...raiseInput(agent("t1"), "Lands ran from bash") });
-      assert.strictEqual(louder.notification.severity, "warning");
+      assert.deepInclude(yield* Queue.take(events), {
+        unreadCount: 1,
+        maxUnreadSeverity: "warning",
+      });
+      const louder = yield* service.raise({
+        ...raiseInput(agent("t1"), "Lands ran from bash"),
+        severity: "critical",
+      });
+      assert.strictEqual(louder.notification.severity, "critical");
       yield* Queue.take(events);
       const quieter = yield* service.raise({
         ...raiseInput(agent("t1"), "Lands ran from bash"),
-        severity: "info",
+        severity: "warning",
       });
-      assert.strictEqual(quieter.notification.severity, "warning");
+      assert.strictEqual(quieter.notification.severity, "critical");
       yield* Queue.take(events);
       assert.isNotNull((yield* update({ type: "dismiss" })).dismissedAt);
       yield* Queue.take(events);
@@ -226,41 +234,27 @@ it.effect("limits each thread or automation to ten raises an hour and dedupes wi
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect("a reassessed finding returns unread with its new report, above newer items", () =>
+it.effect("reassessing a historical review keeps it dismissed and read", () =>
   Effect.gen(function* () {
     const service = yield* Service.NotificationService;
-    const taskId = ScheduledTaskId.make("monitoring:watcher");
-    const review = yield* service.raise({
-      ...raiseInput(
-        {
-          kind: "review",
-          scheduledTaskId: taskId,
-          runId: "run-1",
-          findingId: MonitoringFindingId.make("finding-1"),
-        },
-        "Pushed to main",
-      ),
-      body: "first report",
-      dedupeKey: "finding-1",
-    });
-    yield* service.update({ ids: [review.notification.id], action: { type: "read" } });
-    yield* TestClock.adjust("1 minute");
-    yield* service.raise(raiseInput(agent("t1"), "Newer"));
-    yield* TestClock.adjust("1 minute");
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`INSERT INTO notifications (id, created_at, updated_at, severity, title, body, source_json,
+      read_at, dismissed_at, dedupe_key) VALUES ('historical', '', '', 'warning', 'Review', 'old',
+      '{"kind":"review","scheduledTaskId":"monitoring:watcher","runId":"r","findingId":"f"}',
+      '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z', 'review:monitoring:watcher:f
+f')`;
     yield* service.reviseFinding({
-      scheduledTaskId: taskId,
-      findingId: "finding-1",
-      body: "second",
+      scheduledTaskId: ScheduledTaskId.make("monitoring:watcher"),
+      findingId: "f",
+      body: "new report",
     });
-    const events = yield* subscribe;
-    const snapshot = yield* Queue.take(events);
-    assert.deepInclude(snapshot.items[0], {
-      id: review.notification.id,
-      body: "second",
-      readAt: null,
-      updatedAt: "1970-01-01T00:02:00.000Z",
+    const [row] =
+      yield* sql`SELECT body, read_at, dismissed_at FROM notifications WHERE id = 'historical'`;
+    assert.deepStrictEqual(row, {
+      body: "new report",
+      read_at: "1970-01-01T00:00:00.000Z",
+      dismissed_at: "1970-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(snapshot.unreadCount, 2);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
@@ -354,3 +348,114 @@ it.effect("keeps waking snoozes after a bad row and after a failed pass", () => 
     Effect.provide(testLayer.pipe(Layer.provideMerge(Logger.layer([logger])))),
   );
 });
+
+it.effect("refuses routine and review notifications before writing", () =>
+  Effect.gen(function* () {
+    const service = yield* Service.NotificationService;
+    const sql = yield* SqlClient.SqlClient;
+    for (const input of [
+      { ...raiseInput(agent("routine"), "Finished"), severity: "info" as const },
+      { ...raiseInput(agent("routine"), "Landed 1 change"), dedupeKey: "evidence:batch" },
+      raiseInput(
+        {
+          kind: "review",
+          scheduledTaskId: ScheduledTaskId.make("review"),
+          runId: "r",
+          findingId: MonitoringFindingId.make("f"),
+        },
+        "Style nit",
+      ),
+    ]) {
+      assert.strictEqual(
+        (yield* Effect.flip(service.raise(input)))._tag,
+        "NotificationInvalidError",
+      );
+    }
+    assert.deepStrictEqual(yield* sql`SELECT id FROM notifications`, []);
+    for (const severity of ["warning", "critical"] as const) {
+      const result = yield* service.raise({ ...raiseInput(agent(severity), severity), severity });
+      assert.strictEqual(result.status, "delivered");
+    }
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect(
+  "alerts on failures and three warning observations, respects snooze and resets after recovery",
+  () =>
+    Effect.gen(function* () {
+      const service = yield* Service.NotificationService;
+      const sql = yield* SqlClient.SqlClient;
+      const source = (
+        state: StatusSource["latest"]["state"],
+        snoozedUntil: string | null = null,
+      ): StatusSource => ({
+        config: {
+          id: "production",
+          name: "Production",
+          kind: "webhook",
+          icon: "globe",
+          intervalSeconds: 60,
+          timeoutSeconds: 10,
+          target: "",
+          hasCredentials: false,
+          snoozedUntil,
+        },
+        latest: { source: "Production", state, summary: "Health check", items: [] },
+        lastTransition: null,
+      });
+      const rows = sql`SELECT severity, repeat_count FROM notifications ORDER BY rowid`;
+      yield* service.observeStatus(source("ok"));
+      yield* service.observeStatus(source("warn"));
+      yield* service.observeStatus(source("warn"));
+      assert.deepStrictEqual(yield* rows, []);
+      yield* service.observeStatus(source("warn"));
+      yield* service.observeStatus(source("warn"));
+      assert.deepStrictEqual(yield* rows, [{ severity: "warning", repeat_count: 0 }]);
+      yield* service.observeStatus(source("fail"));
+      yield* service.observeStatus(source("fail"));
+      assert.deepStrictEqual(yield* rows, [
+        { severity: "warning", repeat_count: 0 },
+        { severity: "critical", repeat_count: 0 },
+      ]);
+      yield* service.observeStatus(source("ok"));
+      yield* service.observeStatus(source("fail", "2099-01-01T00:00:00.000Z"));
+      assert.strictEqual((yield* rows)[1]?.repeat_count, 0);
+      yield* service.observeStatus(source("fail"));
+      assert.strictEqual((yield* rows)[1]?.repeat_count, 1);
+      yield* service.observeStatus(source("unknown"));
+      assert.strictEqual((yield* rows).length, 2);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect(
+  "alerts only after two consecutive failed task runs, including across service restarts",
+  () =>
+    Effect.gen(function* () {
+      const service = yield* Service.NotificationService;
+      const sql = yield* SqlClient.SqlClient;
+      const taskId = ScheduledTaskId.make("task");
+      yield* sql`INSERT INTO scheduled_tasks (task_id, title, prompt, enabled, schedule_json,
+      project_id, workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode,
+      created_by, creation_source, created_at, updated_at, last_run_status, run_count)
+      VALUES ('task', 'Audit', 'p', 1, '{}', 'project', '{}', '{}', 'full-access', 'default', 'user', 'web', '', '', 'never', 0)`;
+      const finish = (
+        id: string,
+        status: string,
+      ) => sql`INSERT INTO scheduled_task_runs (id, task_id, started_at, ended_at, status, trigger_json)
+      VALUES (${id}, 'task', ${id}, ${id}, ${status}, '{}')`;
+      yield* finish("1", "failed");
+      yield* service.taskRunFinished(taskId);
+      assert.deepStrictEqual(yield* sql`SELECT id FROM notifications`, []);
+      yield* finish("2", "quiet");
+      yield* finish("3", "failed");
+      yield* service.taskRunFinished(taskId);
+      assert.deepStrictEqual(yield* sql`SELECT id FROM notifications`, []);
+      yield* finish("4", "failed");
+      // A fresh service reads durable run history rather than a process-local failure counter.
+      const fresh = yield* Layer.build(Layer.fresh(Service.layer));
+      yield* Context.get(fresh, Service.NotificationService).taskRunFinished(taskId);
+      assert.deepStrictEqual(yield* sql`SELECT severity, title FROM notifications`, [
+        { severity: "warning", title: "Repeated task failure: Audit" },
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);

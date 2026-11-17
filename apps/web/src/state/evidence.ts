@@ -35,27 +35,17 @@ export function useReloadEvidenceOnReturn(enabled: boolean) {
   }, [enabled]);
 }
 
-/**
- * Recording evidence raises an agent Inbox notification, and the notification contract carries no
- * dedupe key to clients, so any agent notification raise refetches evidence. No polling.
- */
-const agentRaiseSignal = Atom.family((environmentId: EnvironmentId) =>
+const evidenceChangeSignal = Atom.family((environmentId: EnvironmentId) =>
   Atom.make((get) => {
-    const inbox = AsyncResult.getOrElse(
-      get(serverEnvironment.notificationsLive({ environmentId, input: {} })),
-      () => null,
+    const revision = AsyncResult.getOrElse(
+      get(serverEnvironment.evidenceLive({ environmentId, input: {} })),
+      () => 0,
     );
-    const reload = get(reloadAtom);
-    let raised = "";
-    for (const item of inbox?.items ?? []) {
-      if (item.source.kind === "agent" && item.updatedAt > raised) raised = item.updatedAt;
-    }
-    return `${reload}:${raised}`;
-  }).pipe(Atom.withLabel(`evidence:agent-raise:${environmentId}`)),
+    return `${get(reloadAtom)}:${revision}`;
+  }),
 );
-
 const refreshTrigger = ({ environmentId }: { readonly environmentId: EnvironmentId }) =>
-  agentRaiseSignal(environmentId);
+  evidenceChangeSignal(environmentId);
 
 export const evidenceList = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "evidence:list",

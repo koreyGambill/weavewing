@@ -16,7 +16,7 @@ const profile = {
 };
 const thread = ThreadId.make("thread");
 
-it("sends the thread a short advisory and leaves rule instructions and detail to the inbox", () => {
+it("sends a bounded finding and evidence to the thread without rule instructions", () => {
   const text = monitoringAdvisory(profile, {
     id: MonitoringFindingId.make("finding"),
     taskId: ScheduledTaskId.make("task"),
@@ -40,9 +40,10 @@ it("sends the thread a short advisory and leaves rule instructions and detail to
   assert.include(text, "Rule: Verify changes");
   assert.include(text, 'respond_monitoring_advisory({findingId:"finding"');
   assert.notInclude(text, "RULE-INSTRUCTIONS");
-  assert.notInclude(text, "DETAIL");
+  assert.include(text, "Detail: DETAIL");
+  assert.notInclude(text, "inbox");
   assert.equal(text.match(/^- message /gm)?.length, 3);
-  assert.isAtMost(text.length, 1200);
+  assert.isAtMost(text.length, 1600);
 });
 
 it("posts an assessment back in at most 600 characters", () => {
@@ -52,7 +53,8 @@ it("posts an assessment back in at most 600 characters", () => {
   );
   assert.isAtMost(text.length, 600);
   assert.include(text, "Assessment: unresolved\nReason: because");
-  assert.include(text, "Full assessment in the inbox");
+  assert.include(text, "Advisory only");
+  assert.notInclude(text, "inbox");
 });
 
 it("clips without splitting a character made of two code units", () => {
