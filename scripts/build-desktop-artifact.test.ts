@@ -599,12 +599,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           signed,
           false,
           undefined,
-          undefined,
+          signed ? { entitlementsPath: "/stage/app/entitlements.mac.plist" } : undefined,
         );
         const mac = config.mac as Record<string, unknown>;
         assert.equal(config.appId, "dev.weavewing.desktop");
         assert.notProperty(mac, "provisioningProfile");
-        assert.equal(mac.entitlements, signed ? "entitlements.mac.plist" : undefined);
+        assert.equal(mac.entitlements, signed ? "/stage/app/entitlements.mac.plist" : undefined);
         assert.equal(typeof mac.sign, signed ? "string" : "undefined");
       }
     }),
