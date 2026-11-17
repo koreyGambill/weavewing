@@ -6,6 +6,7 @@ import { readDesktopSecondaryBootstraps } from "./desktopLocal";
 
 const DESKTOP_LOCAL_BOOTSTRAP_POLL_MS = 2_000;
 
+// Failed reads retain the last good snapshot; unchanged polls notify no one.
 const desktopLocalBootstrapsAtom = Atom.make((get) => {
   const interval = setInterval(
     () => get.setSelf(readDesktopSecondaryBootstraps()),

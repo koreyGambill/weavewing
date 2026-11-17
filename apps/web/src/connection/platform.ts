@@ -800,6 +800,7 @@ const layerPlatformConnectionSource = Layer.effect(
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
     return PlatformConnectionSource.PlatformConnectionSource.of({
+      // Polls reuse registrations until bearer renewal; failed refreshes retain them until expiry.
       registrations: desktopLocalRefreshes(() => window.desktopBridge).pipe(
         Stream.mapEffect(() => buildPlatformRegistrations),
       ),

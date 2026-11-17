@@ -436,6 +436,7 @@ describe("DesktopBackendPool", () => {
   it.effect("unregister during pool quit does not interrupt sibling stops", () =>
     Effect.gen(function* () {
       const backend = yield* makeFakeBackendProcess();
+      const broadcasts: string[] = [];
       yield* Effect.gen(function* () {
         const pool = yield* DesktopBackendPool.DesktopBackendPool;
         const id = DesktopBackendPool.BackendInstanceId("wsl:Ubuntu");
@@ -483,7 +484,18 @@ describe("DesktopBackendPool", () => {
         assert.isFalse(yield* backend.isRunning);
         assert.isTrue(Option.isNone((yield* instance.snapshot).activePid));
         assert.isTrue(Option.isNone(yield* pool.get(id)));
-      }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows"), { backend })));
+        assert.include(broadcasts, IpcChannels.LOCAL_ENVIRONMENT_READY_CHANNEL);
+      }).pipe(
+        Effect.provide(
+          layerPool(Ref.makeUnsafe("Windows"), {
+            backend,
+            onBroadcast: (channel) =>
+              Effect.sync(() => {
+                broadcasts.push(channel);
+              }),
+          }),
+        ),
+      );
     }),
   );
 
