@@ -104,7 +104,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         <div
           aria-hidden
           className={cn(
-            "absolute right-0 top-0 h-[var(--workspace-topbar-height)] bg-background",
+            "absolute right-0 top-0 hidden h-[var(--workspace-topbar-height)] bg-background md:block",
             isElectron && "drag-region",
           )}
           style={{ width: maximized ? "100%" : "var(--tools-sidebar-width)" }}
