@@ -205,7 +205,7 @@ function TelemetryExportForm() {
                   type="url"
                   pattern="[Hh][Tt][Tt][Pp][Ss]?://.*"
                   title="Enter an HTTP or HTTPS endpoint, or leave empty to disable export."
-                  placeholder={`http://localhost:4318/v1/${signal}`}
+                  placeholder="HTTP or HTTPS endpoint"
                   value={values[key]}
                   disabled={saving || !canEdit}
                   onChange={(event) => {

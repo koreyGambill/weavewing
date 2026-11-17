@@ -13,6 +13,24 @@ index 8a3462b185b078a260483635e6d774e2ece6e269..105778c145ab63a26444179215c643a7
              try {
                  await nsisUtil_1.UninstallerReader.exec(installerPath, uninstallerPath);
              }
+@@ -587,7 +589,8 @@ class NsisTarget extends core_1.Target {
+         const scriptGenerator = new nsisScriptGenerator_1.NsisScriptGenerator();
+         const langConfigurator = new nsisLang_1.LangConfigurator(options);
+-        scriptGenerator.include(path.join(nsisUtil_1.nsisTemplatesDir, "include", "StdUtils.nsh"));
+-        const includeDir = path.join(nsisUtil_1.nsisTemplatesDir, "include");
++        // NSIS overflows a fixed-size buffer when absolute include paths exceed 260 bytes.
++        scriptGenerator.include(path.join("include", "StdUtils.nsh"));
++        const includeDir = "include";
+         scriptGenerator.addIncludeDir(includeDir);
+         scriptGenerator.flags(["updated", "force-run", "keep-shortcuts", "no-desktop-shortcut", "delete-app-data", "allusers", "currentuser"]);
+         (0, nsisLang_1.createAddLangsMacro)(scriptGenerator, langConfigurator);
+@@ -643,5 +646,5 @@ class NsisTarget extends core_1.Target {
+         const fileAssociations = packager.fileAssociations;
+         if (fileAssociations.length !== 0) {
+-            scriptGenerator.include(path.join(path.join(nsisUtil_1.nsisTemplatesDir, "include"), "FileAssociation.nsh"));
++            scriptGenerator.include(path.join("include", "FileAssociation.nsh"));
+             if (isInstaller) {
+                 const registerFileAssociationsScript = new nsisScriptGenerator_1.NsisScriptGenerator();
 diff --git a/templates/nsis/include/allowOnlyOneInstallerInstance.nsh b/templates/nsis/include/allowOnlyOneInstallerInstance.nsh
 --- a/templates/nsis/include/allowOnlyOneInstallerInstance.nsh
 +++ b/templates/nsis/include/allowOnlyOneInstallerInstance.nsh

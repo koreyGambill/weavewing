@@ -1,7 +1,7 @@
 {
   "$comment": "Each upstream .github/workflows file and where the fork runs it. upstream-merge reports changed or unlisted workflows against this map. disposition: pipeline | github-only | later.",
   "workflows": {
-    "ci.yml": { "disposition": "pipeline", "pipeline": "ci", "notes": "rust, the xvfb desktop launch smoke and mobile_native_static_analysis are not ported: no cargo or xvfb-run here, macOS needed" },
+    "ci.yml": { "disposition": "pipeline", "pipeline": "ci", "notes": "Rust tests, the xvfb desktop launch smoke and mobile_native_static_analysis are not ported in ci. release compiles Rust helpers from source; native mobile analysis needs macOS." },
     "agent-context-budget.yml": { "disposition": "pipeline", "pipeline": "ci", "notes": "ci job context-budget; --allow-context-increase stands in for the label" },
     "windows-tests.yml": { "disposition": "later", "notes": "needs a Windows runner" },
     "mobile-fingerprint-check.yml": { "disposition": "later", "notes": "needs the mobile toolchain on this host" },
@@ -12,8 +12,8 @@
     "mobile-eas-production.yml": { "disposition": "later", "notes": "store signing, Apple hardware, upstream-only" },
     "mobile-android-apk.yml": { "disposition": "github-only", "notes": "upstream-only Play mirror" },
     "mobile-showcase-screenshots.yml": { "disposition": "later", "notes": "simulator or KVM emulator" },
-    "release.yml": { "disposition": "later", "notes": "signing, store, npm and Vercel secrets; mac and Windows hardware. desktop-install covers local installs" },
-    "release-desktop.yml": { "disposition": "later", "notes": "Linux x64 artifact is a candidate release-fork pipeline" },
+    "release.yml": { "disposition": "pipeline", "pipeline": "release", "notes": "Manual draft/plan/promote for desktop and CLI only. npm t3, Vercel web, marketing, AUR, Discord, mobile and nightly feed pointers remain upstream-only." },
+    "release-desktop.yml": { "disposition": "pipeline", "pipeline": "release", "notes": "Linux x64 AppImage/deb, cross-built Windows x64 NSIS with native payload check, ssh moonborn macOS arm64 DMG/zip and matching CLI archives. All unsigned; optional Apple signing hooks. Linux/Windows arm64 and macOS x64 are omitted." },
     "publish-aur.yml": { "disposition": "github-only", "notes": "upstream-only AUR key" },
     "desktop-macos-preview.yml": { "disposition": "later", "notes": "macOS signing, PR-shaped" },
     "desktop-macos-preview-publish.yml": { "disposition": "later", "notes": "macOS signing, PR-shaped" },

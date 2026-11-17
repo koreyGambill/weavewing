@@ -13,3 +13,5 @@ import "./jobs/desktop-install.ts";
 import "./jobs/upstream-contracts.ts";
 
 import "./jobs/ci.ts";
+
+import "./jobs/release.ts";

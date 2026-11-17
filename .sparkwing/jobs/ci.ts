@@ -14,8 +14,8 @@ import {
   logged,
 } from "../lib/checkout.ts";
 
-// Mirrors .github/workflows/ci.yml. Not ported: rust (no cargo on this host), the xvfb desktop
-// launch smoke and mobile_native_static_analysis (macOS). .sparkwing/workflows.json tracks them.
+// Mirrors .github/workflows/ci.yml. Not ported: Rust tests, the xvfb desktop launch smoke and
+// mobile_native_static_analysis (macOS). .sparkwing/workflows.json tracks them.
 // Change-dependent jobs use skipIf, which runs only after the job's cores are admitted; generating
 // them from the changes output failed with plan_drift on replay (run-81dbc6536cf86825653d8b03).
 const BUDGET = "apps/server/src/provider/agentContextBudget.json";

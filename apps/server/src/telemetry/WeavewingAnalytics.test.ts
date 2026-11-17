@@ -83,7 +83,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Weavewing analyt
       const offenders: Array<string> = [];
       for (const file of yield* fileSystem.readDirectory(srcDir, { recursive: true })) {
         if (!file.endsWith(".ts") || /\.test\.ts$/.test(file)) continue;
-        if (liveLayerUse.test(yield* fileSystem.readFileString(path.join(srcDir, file)))) {
+        const source = yield* fileSystem.readFileString(path.join(srcDir, file));
+        assert.notMatch(source, /phc_[A-Za-z0-9_]+|ingest\.t3\.codes/, file);
+        if (liveLayerUse.test(source)) {
           offenders.push(file);
         }
       }

@@ -39,6 +39,22 @@ It works with Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kir
 
 ## Install
 
+### Weavewing fork
+
+Download Weavewing from [Weavewing Releases](https://github.com/koreyGambill/weavewing/releases).
+Choose Linux x64 (AppImage or deb), Windows x64 (NSIS), or macOS arm64 (DMG).
+Matching CLI archives and `SHA256SUMS` are included in each release.
+
+The builds are unsigned. On Windows, choose **More info → Run anyway**.
+On macOS 15, try opening the app once. After it is blocked, use
+**System Settings → Privacy & Security → Open Anyway**, or run
+`xattr -dr com.apple.quarantine /Applications/Weavewing.app` after copying the app.
+Unsigned mac builds don't auto-update. A managed Mac may block the override.
+
+Weavewing and T3 Code share the default `~/.t3` home. Use separate homes when
+running both. See [Weavewing installation](./docs/user/install.md#weavewing-fork)
+and [managed policy](./docs/user/managed-policy.md) before setting up a managed machine.
+
 ### Desktop app
 
 [Download T3 Code](https://t3.codes/download) for macOS, Windows, or Linux. You can also use a package manager:
