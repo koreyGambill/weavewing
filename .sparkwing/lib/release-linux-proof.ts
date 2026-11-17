@@ -1,0 +1,20 @@
+import * as CP from "node:child_process";
+import * as FS from "node:fs";
+import * as Path from "node:path";
+import { parseArgs } from "node:util";
+
+const { values } = parseArgs({ options: { assets: { type: "string" }, version: { type: "string" }, evidence: { type: "string" } } });
+if (!values.assets || !values.version || !values.evidence || !process.env.TMPDIR) throw new Error("Expected --assets, --version, --evidence and TMPDIR");
+const root = FS.mkdtempSync(Path.join(process.env.TMPDIR, "appimage-proof-"));
+const home = Path.join(root, "home");
+FS.mkdirSync(home);
+const env = { ...process.env, HOME: home, T3CODE_HOME: Path.join(home, "t3"), XDG_CONFIG_HOME: Path.join(home, "config"), ELECTRON_RUN_AS_NODE: "1" };
+const image = Path.join(values.assets, `Weavewing-${values.version}-x86_64.AppImage`);
+FS.chmodSync(image, 0o755);
+CP.execFileSync(image, ["--appimage-extract"], { cwd: root, env, stdio: "ignore" });
+const app = Path.join(root, "squashfs-root");
+const bin = Path.join(app, "resources/app.asar/apps/server/dist/bin.mjs");
+const output = CP.execFileSync(Path.join(app, "AppRun"), [bin, "--version"], { cwd: root, env, encoding: "utf8" }).trim();
+if (!output.includes(values.version)) throw new Error(`AppImage version mismatch: ${output}`);
+FS.writeFileSync(Path.join(values.evidence, "linux-proof.json"), JSON.stringify({ extracted: true, version: output, home: "scratch", result: "passed" }, null, 2));
+console.log(`AppImage extracted and ran its bundled CLI headlessly: ${output}`);
