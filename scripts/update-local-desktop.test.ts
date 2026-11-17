@@ -10,6 +10,7 @@ import {
   artifactDigests,
   assertPreparedUpdate,
   buildCacheKey,
+  findCachedBuild,
   assertShellVersion,
   captureLocalLinks,
   checkLocalLink,
@@ -402,4 +403,26 @@ it("keys cached builds by commit, tool inputs and update path", () => {
     { monitor: "second" },
   ])
     expect(buildCacheKey({ ...inputs, ...replacement })).not.toBe(buildCacheKey(inputs));
+});
+
+it("reuses completed builds before staging and rejects changed artifacts", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "update-cache-"));
+  try {
+    const directory = NodePath.join(root, "attempt");
+    NodeFS.mkdirSync(directory);
+    const artifact = NodePath.join(directory, "runtime.tar.gz");
+    NodeFS.writeFileSync(artifact, "verified runtime");
+    NodeFS.writeFileSync(
+      NodePath.join(directory, "build-cache.json"),
+      JSON.stringify({ schema: 1, cacheKey: "inputs", artifacts: artifactDigests([artifact]) }),
+    );
+    expect(findCachedBuild(root, "inputs")).toBe(directory);
+    expect(findCachedBuild(root, "other inputs")).toBeUndefined();
+    NodeFS.writeFileSync(artifact, "modified runtime");
+    expect(findCachedBuild(root, "inputs")).toBeUndefined();
+    NodeFS.rmSync(artifact);
+    expect(findCachedBuild(root, "inputs")).toBeUndefined();
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
 });

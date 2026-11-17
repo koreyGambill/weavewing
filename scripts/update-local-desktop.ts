@@ -645,6 +645,34 @@ export function assertPreparedUpdate(prepared: PreparedUpdate, commit: string) {
   }
 }
 
+/** Finds intact build artifacts even when a later Windows staging attempt failed. */
+export function findCachedBuild(root: string, cacheKey: string) {
+  if (!NodeFS.existsSync(root)) return undefined;
+  for (const name of NodeFS.readdirSync(root)) {
+    const directory = NodePath.join(root, name);
+    try {
+      const cached: PreparedUpdate = JSON.parse(
+        NodeFS.readFileSync(NodePath.join(directory, "build-cache.json"), "utf8"),
+      );
+      if (
+        cached.schema !== 1 ||
+        cached.cacheKey !== cacheKey ||
+        !cached.artifacts ||
+        Object.values(cached.artifacts).some((digest) => !digest)
+      )
+        continue;
+      if (
+        JSON.stringify(artifactDigests(Object.keys(cached.artifacts))) ===
+        JSON.stringify(cached.artifacts)
+      )
+        return directory;
+    } catch {
+      /* Incomplete or changed outputs cannot supply cached artifacts. */
+    }
+  }
+  return undefined;
+}
+
 async function activatePrepared(output: string, commit: string, notifyThread?: string) {
   const prepared: PreparedUpdate = JSON.parse(
     NodeFS.readFileSync(NodePath.join(output, "prepared.json"), "utf8"),
@@ -696,20 +724,25 @@ async function prunePreparedOutputs(root: string, current: string) {
           NodeFS.readFileSync(NodePath.join(directory, "config.json"), "utf8"),
         );
         const prepared = JSON.parse(
-          NodeFS.readFileSync(NodePath.join(directory, "prepared.json"), "utf8"),
+          NodeFS.readFileSync(
+            NodePath.join(
+              directory,
+              NodeFS.existsSync(NodePath.join(directory, "prepared.json"))
+                ? "prepared.json"
+                : "build-cache.json",
+            ),
+            "utf8",
+          ),
         );
         return prepared.schema === 1 && config.output === directory;
       } catch {
         return false;
       }
     })
-    .sort(
-      (a, b) =>
-        NodeFS.statSync(NodePath.join(b, "prepared.json")).mtimeMs -
-        NodeFS.statSync(NodePath.join(a, "prepared.json")).mtimeMs,
-    );
+    .sort((a, b) => NodeFS.statSync(b).mtimeMs - NodeFS.statSync(a).mtimeMs);
   for (const directory of outputs.slice(3)) {
-    if (directory === current) continue;
+    if (directory === current || NodeFS.existsSync(NodePath.join(directory, ".preparation-active")))
+      continue;
     const claim = NodePath.join(directory, ".activation-claimed");
     try {
       NodeFS.mkdirSync(claim);
@@ -993,6 +1026,7 @@ async function main() {
     },
   );
   const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "weavewing-update-bin-"));
+  NodeFS.mkdirSync(NodePath.join(output, ".preparation-active"));
   try {
     for (const name of ["vp", "vpr", "vpx", "node", "yarn", "yarnpkg", "bun", "bunx"])
       NodeFS.symlinkSync(vp, NodePath.join(bin, name));
@@ -1117,32 +1151,7 @@ async function main() {
       ]),
     });
     const buildsRoot = NodePath.join(NodeOS.homedir(), ".local/share/weavewing-builds");
-    const previous = NodeFS.existsSync(buildsRoot)
-      ? NodeFS.readdirSync(buildsRoot).map((name) => NodePath.join(buildsRoot, name))
-      : [];
-    let cacheSource: string | undefined;
-    for (const directory of previous) {
-      try {
-        const cached: PreparedUpdate = JSON.parse(
-          NodeFS.readFileSync(NodePath.join(directory, "prepared.json"), "utf8"),
-        );
-        if (
-          cached.cacheKey !== cacheKey ||
-          !cached.artifacts ||
-          Object.values(cached.artifacts).some((digest) => !digest)
-        )
-          continue;
-        if (
-          JSON.stringify(artifactDigests(Object.keys(cached.artifacts))) !==
-          JSON.stringify(cached.artifacts)
-        )
-          continue;
-        cacheSource = directory;
-        break;
-      } catch {
-        /* Incomplete or changed outputs cannot supply cached artifacts. */
-      }
-    }
+    const cacheSource = findCachedBuild(buildsRoot, cacheKey);
     const archive = NodePath.join(output, "current", `t3-${version}-linux-x64.tar.gz`);
     if (cacheSource) {
       for (const name of ["current", "client", ...(updatePath === "full" ? ["windows"] : [])])
@@ -1226,6 +1235,13 @@ async function main() {
       NodePath.join(output, "client"),
       ...(updatePath === "full" ? [NodePath.join(output, "windows")] : []),
     ]);
+    if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
+      throw new Error("Source changed during the build; refusing to cache artifacts.");
+    NodeFS.writeFileSync(
+      NodePath.join(output, "build-cache.json"),
+      JSON.stringify({ schema: 1, commit, cacheKey, artifacts }, null, 2),
+      { mode: 0o600 },
+    );
     const hash = fileDigest;
     config.digest = hash(archive);
     config.archive = await windowsPath(archive);
@@ -1292,6 +1308,7 @@ async function main() {
     if (!values["prepare-only"]) await activatePrepared(output, commit, values["notify-thread"]);
   } finally {
     NodeFS.rmSync(bin, { recursive: true, force: true });
+    NodeFS.rmSync(NodePath.join(output, ".preparation-active"), { recursive: true, force: true });
   }
 }
 

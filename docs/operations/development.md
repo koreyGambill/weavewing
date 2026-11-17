@@ -423,7 +423,9 @@ then activates in one invocation. The old `--check-only` and `--dry-run` flags a
 
 Preparation reuses verified build artifacts when the source commit, update path, Node/Vite Plus and
 resource-monitor inputs match. It still smoke-tests the archive and stages a separate candidate.
-The managed builds directory keeps the latest three prepared outputs. Claimed activations are retained.
+The managed builds directory keeps the latest three completed builds or prepared outputs. Active
+preparations and claimed activations are retained. A failed Windows staging attempt keeps its verified
+build cache, so a fresh preparation can retry staging without rebuilding.
 Pruning removes their owned Windows slots and saves logs, manifests and timings under
 `~/evidence/t3code/prepared-installs/`. Unmarked older output directories are left alone.
 `prepare-timing.json` records preparation time and cache reuse. The activation receipt records

@@ -24,8 +24,9 @@ live in the maintainer's private notes. See
 2. Run the normal build command with `--prepare-only` and a new `--output-dir` under
    `~/.local/share/weavewing-builds/<short-sha>`. Preparation builds, smoke-tests and stages a candidate
    without backing up state or changing the running install. It can run after each merge.
-   Matching commits and tool inputs reuse verified build artifacts. The latest three prepared outputs
-   are retained, together with any activation still in progress.
+   Matching commits and tool inputs reuse verified build artifacts. The latest three completed builds or prepared outputs
+   are retained, together with preparations and activations still in progress. A staging failure
+   keeps the verified build cache for the next attempt.
 3. `--plan-only` reports whether the change needs a full shell replacement or the fast web/server path.
    Shared contracts, migrations, dependencies and shell changes force the full path. `--full` forces it.
 4. When the maintainer is ready for a restart, run from that same clean revision:
