@@ -4460,6 +4460,7 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
           input.environment,
           hostEnvironment,
           "opencode",
+          "turn",
         ),
         ...(providerEventLoggers.native === undefined
           ? {}

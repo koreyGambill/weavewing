@@ -497,6 +497,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
           input.environment,
           hostEnvironment,
           "grok",
+          "turn",
         ),
         hostPlatform,
         selfInvocation,

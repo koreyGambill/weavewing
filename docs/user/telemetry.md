@@ -5,7 +5,7 @@ forwards them to PostHog; Weavewing's server discards every event instead, so no
 installation identifier is saved. `T3CODE_TELEMETRY_ENABLED` and `T3CODE_POSTHOG_*` cannot turn
 them on. The web, desktop, and mobile apps load no analytics SDK.
 
-Weavewing defaults supported agent CLIs to disable vendor telemetry, error reporting and automatic update checks where documented, while explicit environment values in provider settings or managed policy take precedence.
+Weavewing's background provider checks run with the vendor's no-telemetry switches; your own turns use the CLI's normal settings.
 
 ## Relay connection diagnostics
 

@@ -31,7 +31,7 @@ const quietDrivers = [
 
 describe("mergeProviderInstanceEnvironment", () => {
   it.live.each(quietDrivers)(
-    "disables $driver nonessential traffic below explicit values",
+    "quiets $driver probes while preserving turns and explicit values",
     ({ driver, defaults }) =>
       Effect.gen(function* () {
         const launch = (environment: NodeJS.ProcessEnv) =>
@@ -47,25 +47,38 @@ describe("mergeProviderInstanceEnvironment", () => {
           undefined,
           { PATH: "/bin" },
           driver,
+          "probe",
         );
         expect(yield* launch(defaultEnvironment)).toMatchObject(defaults);
+        expect(
+          yield* mergeProviderInstanceEnvironment(undefined, { PATH: "/bin" }, driver, "turn"),
+        ).toEqual({ PATH: "/bin" });
         for (const name of Object.keys(defaults)) {
           const inherited = { [name]: "", KEEP: "yes" };
           const configured = [{ name, value: "explicit", sensitive: false }];
           expect(
-            (yield* mergeProviderInstanceEnvironment(undefined, inherited, driver))[name],
+            (yield* mergeProviderInstanceEnvironment(undefined, inherited, driver, "probe"))[name],
           ).toBe("");
           expect(
-            (yield* mergeProviderInstanceEnvironment(configured, inherited, driver))[name],
+            (yield* mergeProviderInstanceEnvironment(configured, inherited, driver, "probe"))[name],
           ).toBe("explicit");
-          const overridden = yield* mergeProviderInstanceEnvironment(configured, {}, driver);
+          const overridden = yield* mergeProviderInstanceEnvironment(
+            configured,
+            {},
+            driver,
+            "probe",
+          );
           expect((yield* launch(overridden))[name]).toBe("explicit");
+          expect(
+            (yield* mergeProviderInstanceEnvironment(configured, inherited, driver, "turn"))[name],
+          ).toBe("explicit");
           expect(inherited).toEqual({ [name]: "", KEEP: "yes" });
           const lower = name.toLowerCase();
           const windows = yield* mergeProviderInstanceEnvironment(
             undefined,
             { [lower]: "" },
             driver,
+            "probe",
           ).pipe(Effect.provideService(HostProcess.Platform, "win32"));
           expect(windows[name]).toBeUndefined();
           expect(windows[lower]).toBe("");

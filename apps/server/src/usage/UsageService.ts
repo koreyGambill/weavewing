@@ -363,6 +363,7 @@ export const make = Effect.gen(function* () {
             instance.environment,
             hostEnvironment,
             driver.driverKind,
+            "probe",
           ),
           configured,
         };

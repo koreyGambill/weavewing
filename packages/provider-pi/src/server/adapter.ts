@@ -4209,6 +4209,7 @@ export const PiAdapterV2Driver: ProviderAdapterDriver<PiSettings, PiAdapterV2Dri
           input.environment,
           hostEnvironment,
           "pi",
+          "turn",
         ),
         continuationRequests,
       });

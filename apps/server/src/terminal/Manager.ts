@@ -1724,7 +1724,12 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
     return yield* new TerminalProviderInstanceNotFoundError({ providerInstanceId });
   }
 
-  let resolved = yield* mergeProviderInstanceEnvironment(instance.environment, input.env ?? {});
+  let resolved = yield* mergeProviderInstanceEnvironment(
+    instance.environment,
+    input.env ?? {},
+    instance.driver,
+    "turn",
+  );
   if (instance.driver === "codex") {
     const config = decodeCodexSettings(instance.config ?? {});
     if (Option.isSome(config)) {

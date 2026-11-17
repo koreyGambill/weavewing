@@ -66,6 +66,7 @@ export interface MuseSdkHostOptions {
 
 export function makeMuseEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
+  purpose: "probe" | "turn" = "turn",
 ): NodeJS.ProcessEnv {
   return withProviderEnvironmentDefaults(
     "muse",
@@ -74,6 +75,7 @@ export function makeMuseEnvironment(
         .filter((key) => key.toUpperCase() !== "META_API_KEY")
         .map((key) => [key, environment[key]]),
     ),
+    purpose,
   );
 }
 
@@ -175,7 +177,7 @@ export async function createMuseSdkHost(
     command: launch.command,
     args: [...launch.args, ...(options.launchArgs ?? []), ...museServeArgs(options)],
     ...(options.cwd ? { cwd: options.cwd } : {}),
-    env: options.environment ?? makeMuseEnvironment(),
+    env: options.environment ?? makeMuseEnvironment(process.env, "turn"),
     shutdownTimeoutMs: 10_000,
     ...(options.onProcessExit ? { onProcessExit: options.onProcessExit } : {}),
   });

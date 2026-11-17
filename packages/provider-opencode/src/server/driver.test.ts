@@ -1058,6 +1058,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
   it.effect("reads Go usage from a stored key when the local server has no Console workspace", () =>
     Effect.gen(function* () {
       let goUsageReads = 0;
+      const updaterValues: Array<string | undefined> = [];
       const usageStarted = yield* Deferred.make<void>();
       const server = HttpClient.make((request) => {
         if (request.url === "https://opencode.ai/zen/go/v1/usage") {
@@ -1089,10 +1090,12 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
         ...openCode2Runtime,
         startOpenCodeServerProcess: ({
           verify,
+          environment,
         }: Parameters<
           OpenCodeRuntime.OpenCodeRuntime["Service"]["startOpenCodeServerProcess"]
         >[0]) =>
           Effect.gen(function* () {
+            updaterValues.push(environment?.OPENCODE_DISABLE_AUTOUPDATE);
             const url = "http://127.0.0.1:4096";
             const version = verify ? yield* verify(url) : "2.0.18";
             return { url, version, isRunning: Effect.succeed(true), exitCode: Effect.never };
@@ -1131,6 +1134,15 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
         ["session", "weekly", "monthly"],
       );
       assert.strictEqual(goUsageReads, 1);
+      // An invalid model ends before generation while still acquiring the turn's process.
+      yield* Effect.flip(
+        instance.textGeneration.generateThreadTitle({
+          cwd: "/work",
+          message: "hello",
+          modelSelection: { instanceId: instance.instanceId, model: "invalid" },
+        }),
+      );
+      assert.deepStrictEqual(updaterValues, ["1", undefined]);
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 });

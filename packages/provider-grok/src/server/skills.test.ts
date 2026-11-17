@@ -178,7 +178,7 @@ describe("discoverGrokSkills", () => {
   });
 
   it.effect(
-    "preserves a probe updater override and disables reporting without mutating the caller",
+    "forces the probe updater off and disables reporting without mutating the caller",
     () => {
       const spawnOptions: Array<ChildProcess.CommandOptions | undefined> = [];
       const environment = { GROK_DISABLE_AUTOUPDATER: "0", GROK_HOME: "/home/dev/.grok" };
@@ -192,7 +192,7 @@ describe("discoverGrokSkills", () => {
         );
 
         expect(spawnOptions[0]?.env).toEqual({
-          GROK_DISABLE_AUTOUPDATER: "0",
+          GROK_DISABLE_AUTOUPDATER: "1",
           DISABLE_TELEMETRY: "1",
           DISABLE_ERROR_REPORTING: "1",
           GROK_HOME: "/home/dev/.grok",

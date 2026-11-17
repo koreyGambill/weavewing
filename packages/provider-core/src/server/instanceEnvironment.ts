@@ -31,13 +31,15 @@ const QUIET_ENVIRONMENT_DEFAULTS: Readonly<Record<string, Readonly<Record<string
   muse: { MUSE_NO_AUTO_UPDATE: "1" },
 };
 
-/** Fill vendor traffic controls below inherited and configured environment values. */
+/** Apply traffic defaults to automatic checks below inherited and configured values. */
 export function withProviderEnvironmentDefaults(
   driver: string | undefined,
   environment: NodeJS.ProcessEnv,
+  purpose: "probe" | "turn",
   windows = HostProcess.Platform.defaultValue() === "win32",
 ): NodeJS.ProcessEnv {
   const next = { ...environment };
+  if (purpose === "turn") return next;
   for (const [name, value] of Object.entries(QUIET_ENVIRONMENT_DEFAULTS[driver ?? ""] ?? {})) {
     const supplied = windows
       ? Object.keys(next).some((key) => key.toUpperCase() === name && next[key] !== undefined)
@@ -51,10 +53,11 @@ export const mergeProviderInstanceEnvironment = Effect.fn(function* (
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
   driver?: string,
+  purpose: "probe" | "turn" = "turn",
 ) {
   const home = yield* HostProcess.HomeDirectory;
   const windows = (yield* HostProcess.Platform) === "win32";
-  const next = withProviderEnvironmentDefaults(driver, baseEnv, windows);
+  const next = withProviderEnvironmentDefaults(driver, baseEnv, purpose, windows);
   for (const name of Object.keys(next)) {
     if (AGENT_IDENTITY_VARIABLES.has(name.toUpperCase())) next[name] = "";
   }

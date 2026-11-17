@@ -78,7 +78,6 @@ describe("Muse SDK host", () => {
       expect(makeMuseEnvironment(source)).toEqual({
         PATH: "/bin",
         MUSE_TEST: "yes",
-        MUSE_NO_AUTO_UPDATE: "1",
       });
       expect(read).not.toHaveBeenCalled();
       expect(Object.keys(source)).toContain(key);

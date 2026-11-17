@@ -53,6 +53,7 @@ export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnviro
   config: Pick<ClaudeSettings, "homePath">,
   instanceEnvironment: ProviderInstanceEnvironment | undefined,
   hostEnvironment: NodeJS.ProcessEnv,
+  purpose: "probe" | "turn",
 ) {
   const baseEnvironment: NodeJS.ProcessEnv = {
     ...hostEnvironment,
@@ -65,6 +66,7 @@ export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnviro
     instanceEnvironment,
     baseEnvironment,
     "claudeAgent",
+    purpose,
   );
   const settingsEntrypoint = (yield* readClaudeSettingsEnv(config, undefined, environment))
     .CLAUDE_CODE_ENTRYPOINT;

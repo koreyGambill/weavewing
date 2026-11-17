@@ -4,7 +4,6 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeReadlinePromises from "node:readline/promises";
 
-import { withProviderEnvironmentDefaults } from "@t3tools/provider-core/server/instanceEnvironment";
 import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
@@ -220,10 +219,7 @@ export const triageCommand = Command.make("triage", {
       const exitCode = yield* runInteractiveSession({
         ...spawnSpec,
         cwd: sessionDir,
-        environment: withProviderEnvironmentDefaults(
-          selected.id === "claude" ? "claudeAgent" : selected.id,
-          process.env,
-        ),
+        environment: process.env,
       });
       if (exitCode !== 0) {
         process.exitCode = exitCode;

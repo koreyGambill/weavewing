@@ -247,15 +247,11 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
         providerInstances: { [ProviderInstanceId.make("claude")]: { driver } },
       });
       assert.equal(
-        (yield* mergeProviderInstanceEnvironment(undefined, {}, driver))
-          .CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
-        "1",
-      );
-      assert.equal(
         (yield* mergeProviderInstanceEnvironment(
           settings.providerInstances[ProviderInstanceId.make("claude")]?.environment,
           {},
           driver,
+          "probe",
         )).CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
         "",
       );

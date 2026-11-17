@@ -1,7 +1,10 @@
 import { withProviderEnvironmentDefaults } from "@t3tools/provider-core/server/instanceEnvironment";
 import { providerProbeEnvironment } from "@t3tools/provider-core/server/snapshotProbe";
 
-/** Keep background probes under the same traffic defaults as turns. */
+/** Suppress probe-time updater consoles on Windows; preserve update settings for other invocations. */
 export function grokProbeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return providerProbeEnvironment(withProviderEnvironmentDefaults("grok", environment));
+  return {
+    ...providerProbeEnvironment(withProviderEnvironmentDefaults("grok", environment, "probe")),
+    GROK_DISABLE_AUTOUPDATER: "1",
+  };
 }

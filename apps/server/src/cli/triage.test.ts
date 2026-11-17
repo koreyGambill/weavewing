@@ -25,25 +25,26 @@ const FAILING_AGENT_WINDOWS = `@echo Error: There is not enough space on the dis
 @exit /b 1
 `;
 
+const FAILING_CLAUDE_POSIX = `#!/bin/sh
+if [ -n "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" ]; then exit 2; fi
+echo "Error: There is not enough space on the disk. (os error 112)" >&2
+exit 1
+`;
+const FAILING_CLAUDE_WINDOWS = `@if defined CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC exit /b 2
+@echo Error: There is not enough space on the disk. (os error 112) 1>&2
+@exit /b 1
+`;
+
 it.live.each(["codex", "claude"])(
-  "a failed %s launch keeps traffic defaults and points at its prompt",
+  "a failed %s launch keeps normal CLI settings and points at its prompt",
   (agent) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-triage-cli-" });
       const binDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-triage-bin-" });
       const codexHome = NodePath.join(baseDir, "codex-home");
-      const posix =
-        agent === "claude"
-          ? FAILING_AGENT_POSIX.replace(
-              'echo "Error:',
-              `if [ "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" != "1" ]; then exit 2; fi\necho "Error:`,
-            )
-          : FAILING_AGENT_POSIX;
-      const windows =
-        agent === "claude"
-          ? `@if not "%CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC%"=="1" exit /b 2\r\n${FAILING_AGENT_WINDOWS}`
-          : FAILING_AGENT_WINDOWS;
+      const posix = agent === "claude" ? FAILING_CLAUDE_POSIX : FAILING_AGENT_POSIX;
+      const windows = agent === "claude" ? FAILING_CLAUDE_WINDOWS : FAILING_AGENT_WINDOWS;
       NodeFS.writeFileSync(NodePath.join(binDir, agent), posix, { mode: 0o755 });
       NodeFS.writeFileSync(NodePath.join(binDir, `${agent}.cmd`), windows);
       yield* Effect.acquireRelease(
