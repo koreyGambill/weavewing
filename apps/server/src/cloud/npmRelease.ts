@@ -85,7 +85,7 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
       },
       Effect.timeout(Duration.seconds(15)),
       Effect.mapError((error) =>
-        error instanceof ServerNpmReleaseError
+        Schema.is(ServerNpmReleaseError)(error)
           ? error
           : new ServerNpmReleaseError({ reason: "Could not check Weavewing release compatibility." }),
       ),
