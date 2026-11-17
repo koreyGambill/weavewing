@@ -22,7 +22,10 @@ const signed = Boolean(secrets.APPLE_CSC_LINK);
 let mount: string | undefined;
 try {
   run("vp", ["env", "install", nodeVersion]);
-  const node = CP.execFileSync("vp", ["env", "exec", "--node", nodeVersion, "node", "-p", "process.execPath"], { env, encoding: "utf8" }).trim();
+  const vp = CP.execFileSync("/bin/sh", ["-c", "command -v vp"], { env, encoding: "utf8" }).trim();
+  const node = Path.join(Path.dirname(Path.dirname(vp)), "js_runtime/node", nodeVersion, "bin/node");
+  const actualVersion = CP.execFileSync(node, ["--version"], { env, encoding: "utf8" }).trim();
+  if (actualVersion !== `v${nodeVersion}`) throw new Error(`Expected Node ${nodeVersion}, got ${actualVersion}`);
   env.PATH = `${Path.dirname(node)}:${env.PATH}`;
   run("node", ["--version"]);
   run("vp", ["i", "--frozen-lockfile"]);

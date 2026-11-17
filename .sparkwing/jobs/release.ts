@@ -122,7 +122,7 @@ definePipeline({
       const co = checkout(ctx);
       const { commit } = (await ctx.output(preflight))!;
       if (git(co.root, "rev-parse", "HEAD") !== commit || git(co.root, "status", "--porcelain")) throw new Error("Release source changed after preflight");
-      FS.mkdirSync(source(co), { recursive: true });
+      FS.mkdirSync(source(co));
       await logged(ctx, co, "archive-source", ["bash", "-c", 'set -euo pipefail; git -C "$1" archive "$2" | tar -x -C "$3"', "bash", co.root, commit, source(co)]);
       await build(ctx, co, "install", ["vp", "i", "--frozen-lockfile"]);
       await build(ctx, co, "align-version", ["node", "scripts/update-release-package-versions.ts", version]);
