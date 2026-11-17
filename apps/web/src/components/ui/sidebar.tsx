@@ -483,13 +483,18 @@ function SidebarRail({
 
     const side = sidebarInstance?.side ?? "left";
     let width = clampSidebarWidth(sidebarContainer.getBoundingClientRect().width, options);
-    // Write width only to gap/container during drag; inherited --sidebar-width restyles the whole app, so
-    // update it at commit.
+    // Keep live width local to the pane and its followers; changing the wrapper restyles the app.
     const widthTargets = [
       sidebarRoot.querySelector<HTMLElement>("[data-slot='sidebar-gap']"),
       sidebarContainer,
     ].filter((element): element is HTMLElement => element !== null);
+    const widthFollowers = wrapper.querySelectorAll<HTMLElement>(
+      `[data-sidebar-resize-width="${side}"]`,
+    );
     const setTargetWidth = (value: number) => {
+      widthFollowers.forEach((element) => {
+        element.style.setProperty("--sidebar-width", `${value}px`);
+      });
       widthTargets.forEach((element) => {
         element.style.setProperty("width", `${value}px`);
       });
@@ -532,6 +537,9 @@ function SidebarRail({
         options.onResize?.(finalWidth);
       },
       cleanup() {
+        widthFollowers.forEach((element) => {
+          element.style.removeProperty("--sidebar-width");
+        });
         widthTargets.forEach((element) => {
           element.style.removeProperty("width");
           element.style.removeProperty("transition-duration");
