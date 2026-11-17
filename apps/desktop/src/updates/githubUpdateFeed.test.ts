@@ -152,11 +152,11 @@ it("reads a stable fork release and its notes from the actual GitHub download ta
   });
 });
 
-it("nightly follows the newer stable release using its latest manifest", async () => {
+it("nightly keeps test builds and stable excludes them", async () => {
   const stable = "weavewing-v0.2.0";
   const test = "weavewing-v0.2.0-nightly.20261117.1";
   expect(await offeredRelease([stable, test], undefined, undefined, "weavewing-v")).toMatchObject({
-    tag: stable,
+    tag: test,
   });
   expect(
     await offeredRelease([test, stable], undefined, undefined, "weavewing-v", "latest"),

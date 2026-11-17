@@ -31,8 +31,8 @@ sparkwing run release -C <worktree> --detach -- --worktree <worktree> --version 
 ```
 
 In desktop **Settings → About → Update track**, choose **Stable** or **Nightly**
-(the test channel). Stable installs never see test builds. Nightly installs take
-the newest stable or test version. Managed policy can lock this choice.
+(the test channel). Stable installs never see test builds. The test channel gets test builds. Switch to **Stable** in **Settings → About**
+to return, using the guarded migration check. Managed policy can lock this choice.
 Automatic checks are off by default. **Check for Updates** and changing the track
 are manual checks. Unsigned macOS builds cannot auto-update on either channel.
 The release's `release-metadata.json` carries its version and database migration
