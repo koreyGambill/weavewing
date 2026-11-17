@@ -1,11 +1,67 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Resolves the real CLI entrypoint for subprocess tests.
 import * as NodeURL from "node:url";
+import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+
+it.live.each(["linux", "win32"])("keeps SEA compile caches inside each %s runtime", (platform) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sea-cache-test-" });
+    for (const runtimeId of ["old", "new"]) {
+      const runtimeRoot = NodePath.join(root, runtimeId);
+      yield* fs.makeDirectory(runtimeRoot);
+      const script = `
+        import { getCompileCacheDir, registerHooks } from 'node:module';
+        registerHooks({ resolve(specifier, context, nextResolve) {
+          if (specifier === 'node:sea') return { url: 'data:text/javascript,export const isSea = () => true', shortCircuit: true };
+          return nextResolve(specifier, context);
+        } });
+        Object.defineProperty(process, 'execPath', { value: ${JSON.stringify(NodePath.join(runtimeRoot, platform === "win32" ? "t3.exe" : "t3"))} });
+        Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
+        const { enableCliCompileCache } = await import(${JSON.stringify(new URL("./cliCompileCache.ts", import.meta.url).href)});
+        enableCliCompileCache();
+        console.log(getCompileCacheDir());
+      `;
+      const child = yield* spawner.spawn(
+        ChildProcess.make(
+          process.execPath,
+          ["--experimental-strip-types", "--input-type=module", "-e", script],
+          {
+            env: {
+              XDG_CACHE_HOME: NodePath.join(root, "shared"),
+              NODE_COMPILE_CACHE: undefined,
+              NODE_DISABLE_COMPILE_CACHE: undefined,
+              APPIMAGE: "",
+            },
+          },
+        ),
+      );
+      const result = yield* Effect.all(
+        {
+          stdout: child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+          stderr: child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+          exitCode: child.exitCode.pipe(Effect.map(Number)),
+        },
+        { concurrency: "unbounded" },
+      );
+      expect(result.stderr).not.toContain("Error");
+      expect(result.exitCode).toBe(0);
+      expect(
+        result.stdout
+          .trim()
+          .replaceAll("\\", "/")
+          .startsWith(`${NodePath.join(runtimeRoot, "compile-cache").replaceAll("\\", "/")}/`),
+      ).toBe(true);
+    }
+    expect(yield* fs.exists(NodePath.join(root, "shared"))).toBe(false);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.live("loads the CLI with its cache settings only when the command needs it", () =>
   Effect.gen(function* () {
@@ -15,7 +71,7 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     const report = `
       import { getCompileCacheDir, registerHooks } from 'node:module';
       registerHooks({ resolve(specifier, context, nextResolve) {
-        if (specifier === './binMain.ts') console.error('LOADED_CLI_MAIN');
+        if (specifier === './binMain.ts') console.error('LOADED_CLI_MAIN CACHE=' + (getCompileCacheDir() ?? 'disabled'));
         if (specifier === './binCli.ts') console.error('CACHE=' + (getCompileCacheDir() ?? 'disabled'));
         return nextResolve(specifier, context);
       } });
@@ -57,7 +113,9 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     }, Effect.scoped);
     const normal = yield* run({});
     expect(normal.exitCode).toBe(0);
-    expect(normal.stderr).toContain("LOADED_CLI_MAIN");
+    expect(normal.stderr.replaceAll("\\", "/")).toContain(
+      `LOADED_CLI_MAIN CACHE=${root}/cache/t3code/compile-cache`.replaceAll("\\", "/"),
+    );
     expect(normal.stderr.replaceAll("\\", "/")).toContain(
       `CACHE=${root}/cache/t3code/compile-cache`.replaceAll("\\", "/"),
     );

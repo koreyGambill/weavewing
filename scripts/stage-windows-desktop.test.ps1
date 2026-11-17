@@ -48,6 +48,13 @@ try {
   }
   function Get-StageProcessPaths { Join-Path $candidate 'payload/Weavewing.exe' }
   try { Must-Refuse { Stage-WindowsDesktop $source $install } } finally { Remove-Item Function:Get-StageProcessPaths }
+  $prepared = Join-Path $root '.installed-prepared-0123456789abcdef'
+  Stage-WindowsDesktop $source $install -CandidateDirectory $prepared | Out-Null
+  Assert (Test-Path (Join-Path $candidate 'payload/Weavewing.exe')) 'Preparation overwrote the existing candidate slot'
+  Assert ((Get-Content (Join-Path $prepared 'payload/Weavewing.exe')) -eq 'new') 'Prepared sibling payload missing'
+  Must-Refuse { Stage-WindowsDesktop $source $install -CandidateDirectory (Join-Path $root 'unowned') }
+  Must-Refuse { Stage-WindowsDesktop $source $install -CandidateDirectory (Join-Path $install '.installed-prepared-0123456789abcdef') }
+  Remove-Item $prepared -Recurse -Force
   Remove-Item (Join-Path $install 'Weavewing.exe')
   Must-Refuse { Stage-WindowsDesktop $source $install }
   Set-Content (Join-Path $install 'Weavewing.exe') 'installed'

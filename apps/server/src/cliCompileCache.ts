@@ -7,13 +7,18 @@ import * as NodeSea from "node:sea";
 
 export function enableCliCompileCache(): void {
   try {
-    // SEA has no separate modules to cache.
-    if (NodeSea.isSea()) return;
-    const cacheRoot =
-      process.env.XDG_CACHE_HOME ||
-      // oxlint-disable-next-line t3code/no-global-process-runtime -- Runs before the CLI's Effect runtime loads.
-      (process.platform === "linux" ? NodePath.join(NodeOS.homedir(), ".cache") : NodeOS.tmpdir());
-    const directory = NodePath.join(cacheRoot, "t3code", "compile-cache");
+    const directory = NodeSea.isSea()
+      ? // Runtime pruning must also remove modules cached under that runtime's absolute paths.
+        NodePath.join(NodePath.dirname(process.execPath), "compile-cache")
+      : NodePath.join(
+          process.env.XDG_CACHE_HOME ||
+            // oxlint-disable-next-line t3code/no-global-process-runtime -- Runs before the CLI's Effect runtime loads.
+            (process.platform === "linux"
+              ? NodePath.join(NodeOS.homedir(), ".cache")
+              : NodeOS.tmpdir()),
+          "t3code",
+          "compile-cache",
+        );
     if (process.env.APPIMAGE) {
       // AppImage paths change each launch. Older shims cached anyway, filling Node's engine folders.
       for (const entry of NodeFS.readdirSync(directory, { withFileTypes: true })) {

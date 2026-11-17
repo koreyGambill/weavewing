@@ -7,6 +7,16 @@ import * as NodeSqlite from "node:sqlite";
 import { expect, it, vi } from "vite-plus/test";
 
 import {
+  artifactDigests,
+  databaseBackupDecision,
+  localDesktopBuildEnvironment,
+  claimPreparedOutput,
+  localBuildInstallIdentity,
+  retryPreparationInterop,
+  prunePreparedOutputs,
+  assertPreparedUpdate,
+  buildCacheKey,
+  findCachedBuild,
   assertShellVersion,
   captureLocalLinks,
   checkLocalLink,
@@ -347,4 +357,311 @@ it("resolves the installed receipt from --install-dir unless one is given explic
     installedReceiptPath({ "install-dir": "C:\\x", "installed-receipt": "/r.json" }, toLinux),
   ).resolves.toBe("/r.json");
   await expect(installedReceiptPath({}, toLinux)).resolves.toBeUndefined();
+});
+
+it("rejects stale commits, config, missing files and changed prepared content", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prepared-update-"));
+  try {
+    const artifact = NodePath.join(root, "client");
+    NodeFS.mkdirSync(artifact);
+    const file = NodePath.join(artifact, "index.html");
+    NodeFS.writeFileSync(file, "original");
+    const config = NodePath.join(root, "config.json");
+    NodeFS.writeFileSync(config, "config");
+    const prepared = {
+      schema: 2 as const,
+      commit: "a".repeat(40),
+      updatePath: "full",
+      cacheKey: "cache",
+      files: artifactDigests([artifact, config]),
+      artifacts: artifactDigests([artifact]),
+      staged: artifact,
+    };
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).not.toThrow();
+    expect(() => assertPreparedUpdate(prepared, "b".repeat(40))).toThrow("commit");
+    NodeFS.writeFileSync(config, "changed config");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+    NodeFS.writeFileSync(config, "config");
+    NodeFS.writeFileSync(file, "changed client");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+    NodeFS.writeFileSync(file, "original");
+    NodeFS.writeFileSync(NodePath.join(artifact, "extra.js"), "extra");
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+    NodeFS.rmSync(file);
+    expect(() => assertPreparedUpdate(prepared, prepared.commit)).toThrow("Prepared");
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("keys cached builds by commit, tool inputs and update path", () => {
+  const inputs = { commit: "a".repeat(40), updatePath: "full", monitor: "first" };
+  expect(buildCacheKey(inputs)).toBe(buildCacheKey({ ...inputs }));
+  for (const replacement of [
+    { commit: "b".repeat(40) },
+    { updatePath: "wsl-only" },
+    { monitor: "second" },
+  ])
+    expect(buildCacheKey({ ...inputs, ...replacement })).not.toBe(buildCacheKey(inputs));
+});
+
+it("reuses completed builds before staging and rejects changed artifacts", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "update-cache-"));
+  try {
+    const directory = NodePath.join(root, "attempt");
+    NodeFS.mkdirSync(directory);
+    const artifact = NodePath.join(directory, "runtime.tar.gz");
+    NodeFS.writeFileSync(artifact, "verified runtime");
+    NodeFS.writeFileSync(
+      NodePath.join(directory, "build-cache.json"),
+      JSON.stringify({ schema: 1, cacheKey: "inputs", artifacts: artifactDigests([artifact]) }),
+    );
+    expect(findCachedBuild(root, "inputs")).toBe(directory);
+    expect(findCachedBuild(root, "other inputs")).toBeUndefined();
+    NodeFS.writeFileSync(artifact, "modified runtime");
+    expect(findCachedBuild(root, "inputs")).toBeUndefined();
+    NodeFS.rmSync(artifact);
+    expect(findCachedBuild(root, "inputs")).toBeUndefined();
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("excludes ambient build settings and origins from local builds", () => {
+  const clean = localDesktopBuildEnvironment({ HOME: "/fixture", PATH: "/bin" });
+  const contaminated = localDesktopBuildEnvironment({
+    HOME: "/fixture",
+    PATH: "/bin",
+    VITE_HTTP_URL: "http://localhost",
+    VITE_WS_URL: "ws://localhost",
+    VITE_RELEASE_CHANNEL: "preview",
+    VITE_HOSTED_APP_URL: "https://preview.test",
+    APP_VERSION: "wrong",
+    VERCEL_ENV: "production",
+    VERCEL_URL: "preview.test",
+    NODE_ENV: "development",
+    NODE_OPTIONS: "--require /untrusted.cjs",
+  });
+  expect(contaminated).toEqual(clean);
+  expect(contaminated).not.toHaveProperty("VITE_HTTP_URL");
+  expect(contaminated).not.toHaveProperty("VITE_WS_URL");
+});
+
+it.each([".activation-claimed", ".preparation-active"])(
+  "reclaims %s only when its PID and start time no longer identify an owner",
+  async (name) => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prepared-owner-"));
+    try {
+      const marker = NodePath.join(root, name);
+      await claimPreparedOutput(marker);
+      await expect(claimPreparedOutput(marker)).rejects.toThrow("active");
+      const ownerFile = NodePath.join(marker, "owner.json");
+      const owner = JSON.parse(NodeFS.readFileSync(ownerFile, "utf8"));
+      NodeFS.writeFileSync(ownerFile, JSON.stringify({ ...owner, startTime: "previous-process" }));
+      await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
+      NodeFS.writeFileSync(ownerFile, JSON.stringify({ ...owner, pid: 2147483647 }));
+      await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
+      NodeFS.writeFileSync(ownerFile, "{");
+      NodeFS.utimesSync(marker, 1, 1);
+      await expect(claimPreparedOutput(marker)).resolves.toBeUndefined();
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it("invalidates cached builds after a lockfile, local config, or dependency install change", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "build-install-"));
+  try {
+    NodeFS.mkdirSync(NodePath.join(root, "apps/web"), { recursive: true });
+    NodeFS.mkdirSync(NodePath.join(root, "node_modules"));
+    const identity = () => buildCacheKey(localBuildInstallIdentity(root));
+    for (const name of ["pnpm-lock.yaml", "node_modules/.modules.yaml", ".env.local"]) {
+      const before = identity();
+      NodeFS.writeFileSync(NodePath.join(root, name), "changed input");
+      expect(identity()).not.toBe(before);
+    }
+    const before = identity();
+    NodeFS.renameSync(NodePath.join(root, "node_modules"), NodePath.join(root, "old-modules"));
+    NodeFS.mkdirSync(NodePath.join(root, "node_modules"));
+    NodeFS.copyFileSync(
+      NodePath.join(root, "old-modules/.modules.yaml"),
+      NodePath.join(root, "node_modules/.modules.yaml"),
+    );
+    expect(identity()).not.toBe(before);
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("retries preparation interop stalls, bounds attempts, and preserves deterministic failures", async () => {
+  const transient = new Error("accept4 failed 110");
+  const run = vi.fn().mockRejectedValueOnce(transient).mockResolvedValue("prepared");
+  await expect(retryPreparationInterop(run)).resolves.toBe("prepared");
+  expect(run).toHaveBeenCalledTimes(2);
+  const stalled = vi.fn().mockRejectedValue(transient);
+  await expect(retryPreparationInterop(stalled)).rejects.toBe(transient);
+  expect(stalled).toHaveBeenCalledTimes(3);
+  const failure = new Error("Unowned candidate");
+  const invalid = vi.fn().mockRejectedValue(failure);
+  await expect(retryPreparationInterop(invalid)).rejects.toBe(failure);
+  expect(invalid).toHaveBeenCalledTimes(1);
+});
+
+it("prunes crashed preparations and activations while retaining a live owner", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prune-prepared-"));
+  try {
+    for (let index = 0; index < 6; index++) {
+      const output = NodePath.join(root, String(index));
+      NodeFS.mkdirSync(output);
+      NodeFS.writeFileSync(
+        NodePath.join(output, "config.json"),
+        JSON.stringify({ output, updatePath: "wsl-only" }),
+      );
+      if (index >= 2)
+        NodeFS.writeFileSync(
+          NodePath.join(output, "build-cache.json"),
+          JSON.stringify({ schema: 1 }),
+        );
+      if (index < 3) {
+        const marker = NodePath.join(
+          output,
+          index === 1 ? ".activation-claimed" : ".preparation-active",
+        );
+        await claimPreparedOutput(marker);
+        if (index < 2)
+          NodeFS.writeFileSync(
+            NodePath.join(marker, "owner.json"),
+            JSON.stringify({ platform: "linux", pid: 2147483647, startTime: "dead" }),
+          );
+      }
+      NodeFS.utimesSync(output, index + 1, index + 1);
+    }
+    await prunePreparedOutputs(root, NodePath.join(root, "5"), NodePath.join(root, "evidence"));
+    expect(NodeFS.existsSync(NodePath.join(root, "0"))).toBe(false);
+    expect(NodeFS.existsSync(NodePath.join(root, "1"))).toBe(false);
+    for (const index of [2, 3, 4, 5])
+      expect(NodeFS.existsSync(NodePath.join(root, String(index)))).toBe(true);
+    expect(NodeFS.existsSync(NodePath.join(root, "evidence/0/config.json"))).toBe(true);
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("backs up the database unless installed and candidate migrations are provably identical", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "migration-backup-"));
+  const git = async (...args: string[]) => {
+    const result = NodeChildProcess.spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = async () => {
+    await git("add", ".");
+    await git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-m",
+      "fixture",
+    );
+    return git("rev-parse", "HEAD");
+  };
+  try {
+    await git("init");
+    const persistence = NodePath.join(root, "apps/server/src/persistence");
+    NodeFS.mkdirSync(NodePath.join(persistence, "Migrations"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Migrations.ts"), "registry");
+    const lockfile = NodePath.join(root, "pnpm-lock.yaml");
+    NodeFS.writeFileSync(
+      lockfile,
+      "importers:\n  apps/server:\n    dependencies:\n      effect:\n        specifier: 4.1.3\n        version: 4.1.3\n",
+    );
+    const migration = NodePath.join(persistence, "Migrations/001_Initial.ts");
+    NodeFS.writeFileSync(migration, "initial");
+    const installed = await commit();
+    NodeFS.writeFileSync(NodePath.join(root, "web.ts"), "new UI");
+    const unchanged = await commit();
+    expect(await databaseBackupDecision(git, installed, unchanged)).toMatchObject({
+      required: false,
+      reason: "migration-set-unchanged",
+      installedCommit: installed,
+    });
+    expect(await databaseBackupDecision(git, unchanged, unchanged)).toMatchObject({
+      required: false,
+    });
+    for (const unknown of [undefined, "f".repeat(40)])
+      expect(await databaseBackupDecision(git, unknown, unchanged)).toMatchObject({
+        required: true,
+        reason: "installed-history-unavailable",
+      });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Sqlite.ts"), "startup migration helper");
+    const startup = await commit();
+    expect(await databaseBackupDecision(git, unchanged, startup)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.appendFileSync(lockfile, "      other: 1.0.0\n");
+    const unrelatedDependency = await commit();
+    expect(await databaseBackupDecision(git, startup, unrelatedDependency)).toMatchObject({
+      required: false,
+    });
+    NodeFS.writeFileSync(
+      lockfile,
+      NodeFS.readFileSync(lockfile, "utf8").replaceAll("4.1.3", "4.1.4"),
+    );
+    const effectChanged = await commit();
+    expect(await databaseBackupDecision(git, unrelatedDependency, effectChanged)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.rmSync(lockfile);
+    const unknownEffect = await commit();
+    expect(await databaseBackupDecision(git, unknownEffect, unknownEffect)).toMatchObject({
+      required: true,
+      reason: "migration-set-unavailable",
+    });
+    NodeFS.writeFileSync(
+      lockfile,
+      "importers:\n  apps/server:\n    dependencies:\n      effect:\n        specifier: 4.1.3\n        version: 4.1.3\n",
+    );
+    NodeFS.writeFileSync(NodePath.join(persistence, "Migrations/002_New.ts"), "new migration");
+    const added = await commit();
+    expect(await databaseBackupDecision(git, installed, added)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    expect(await databaseBackupDecision(git, added, installed)).toMatchObject({ required: true });
+    NodeFS.writeFileSync(migration, "edited historical migration");
+    const edited = await commit();
+    expect(await databaseBackupDecision(git, added, edited)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.writeFileSync(NodePath.join(persistence, "Migrations.ts"), "changed registry");
+    const registry = await commit();
+    expect(await databaseBackupDecision(git, edited, registry)).toMatchObject({
+      required: true,
+      reason: "migration-set-changed",
+    });
+    NodeFS.rmSync(NodePath.join(persistence, "Migrations.ts"));
+    const missing = await commit();
+    expect(await databaseBackupDecision(git, missing, missing)).toMatchObject({
+      required: true,
+      reason: "migration-set-unavailable",
+    });
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("does not retry a staging timeout but retries timeouts for explicitly idempotent probes", async () => {
+  const timeout = new Error("powershell.exe timed out after 300000ms");
+  const staging = vi.fn().mockRejectedValue(timeout);
+  await expect(retryPreparationInterop(staging)).rejects.toBe(timeout);
+  expect(staging).toHaveBeenCalledTimes(1);
+  const probe = vi.fn().mockRejectedValueOnce(timeout).mockResolvedValue("alive");
+  await expect(retryPreparationInterop(probe, true)).resolves.toBe("alive");
+  expect(probe).toHaveBeenCalledTimes(2);
 });

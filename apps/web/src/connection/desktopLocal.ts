@@ -1,3 +1,6 @@
+import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
 import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -100,3 +103,18 @@ export function readDesktopSecondaryBootstrapsResult(): DesktopSecondaryBootstra
 export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap> {
   return desktopSecondaryBootstrapsReader.readSnapshot();
 }
+
+export const desktopLocalRefreshes = (
+  resolveBridge: () => Pick<DesktopBridge, "onLocalEnvironmentReady"> | undefined,
+) =>
+  Stream.merge(
+    Stream.tick("3 seconds"),
+    Stream.callback<void>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() =>
+          resolveBridge()?.onLocalEnvironmentReady?.(() => Queue.offerUnsafe(queue, undefined)),
+        ),
+        (unsubscribe) => Effect.sync(() => unsubscribe?.()),
+      ).pipe(Effect.asVoid),
+    ),
+  );

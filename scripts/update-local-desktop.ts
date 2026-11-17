@@ -10,10 +10,76 @@ import * as NodeUtil from "node:util";
 import * as NodeURL from "node:url";
 
 /** Local installs update through desktop-install and must never poll a public release feed. */
-export function localDesktopBuildEnvironment<Environment extends NodeJS.ProcessEnv>(
-  env: Environment,
-) {
-  return { ...env, T3CODE_DESKTOP_UPDATE_REPOSITORY: "", GITHUB_REPOSITORY: "" };
+export function localDesktopBuildEnvironment(env: NodeJS.ProcessEnv) {
+  const inherited = Object.fromEntries(
+    [
+      "HOME",
+      "PATH",
+      "TMPDIR",
+      "TMP",
+      "TEMP",
+      "USER",
+      "LOGNAME",
+      "SHELL",
+      "SystemRoot",
+      "WINDIR",
+      "COMSPEC",
+      "PATHEXT",
+      "WSL_INTEROP",
+      "WSL_DISTRO_NAME",
+      "WSLENV",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "NO_PROXY",
+      "SSL_CERT_FILE",
+      "SSL_CERT_DIR",
+    ].flatMap((key) => (env[key] === undefined ? [] : [[key, env[key]]])),
+  );
+  return {
+    ...inherited,
+    T3CODE_SINGLE_ORIGIN_DEV: "1",
+    T3CODE_DESKTOP_UPDATE_REPOSITORY: "",
+    GITHUB_REPOSITORY: "",
+  };
+}
+
+/** Identifies the dependency installation and local config files that Git does not cover. */
+export function localBuildInstallIdentity(repo: string) {
+  const modules = NodeFS.statSync(NodePath.join(repo, "node_modules"), { throwIfNoEntry: false });
+  const envFiles = [repo, NodePath.join(repo, "apps/web")].flatMap((directory) =>
+    NodeFS.readdirSync(directory)
+      .filter((name) => /^\.env(?:\.|$)/.test(name))
+      .sort()
+      .map((name) => NodePath.join(directory, name)),
+  );
+  return {
+    files: artifactDigests([
+      NodePath.join(repo, "pnpm-lock.yaml"),
+      NodePath.join(repo, "node_modules/.modules.yaml"),
+      NodePath.join(repo, "node_modules/.pnpm/lock.yaml"),
+    ]),
+    envFiles: Object.fromEntries(envFiles.map((file) => [file, fileDigest(file)])),
+    modules: modules ? [modules.dev, modules.ino, modules.mtimeMs] : null,
+  };
+}
+
+/** Retries preparation launches only for transient Windows interop failures. */
+export async function retryPreparationInterop<T>(operation: () => Promise<T>, idempotent = false) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (
+        attempt === 3 ||
+        !(
+          /accept4.*110|WSAETIMEDOUT/i.test(String(error)) ||
+          (idempotent && /timed out after/i.test(String(error)))
+        )
+      )
+        throw error;
+      console.warn(`Preparation interop launch stalled; retrying (${attempt}/3).`);
+    }
+  }
 }
 
 // The ownership database holds a lifetime lock and must never enter a backup.
@@ -100,11 +166,83 @@ async function snapshot(database: string, destination: string) {
   }
 }
 
-async function backupState(source: string, destination: string, timeout = 240_000) {
+async function liveDatabaseBackupDecision(
+  config: {
+    databaseBackup?: { required: boolean; reason: string; installedCommit?: string };
+    installedReceipt?: string;
+    installedRuntimeArchive?: string;
+  },
+  database: string,
+) {
+  const prepared = config.databaseBackup;
+  if (prepared?.required !== false || prepared.reason !== "migration-set-unchanged")
+    return prepared;
+  try {
+    const receipt = JSON.parse(NodeFS.readFileSync(config.installedReceipt!, "utf8"));
+    if (
+      !prepared.installedCommit ||
+      receipt.commit !== prepared.installedCommit ||
+      !receipt.digest ||
+      receipt.digest !== fileDigest(config.installedRuntimeArchive!)
+    )
+      throw new Error("Installed runtime provenance changed");
+  } catch {
+    return { required: true, reason: "installed-runtime-unverified" };
+  }
+  try {
+    const { recordedMigrations, migrationManifest } = await import(
+      new URL("./database-migrations.mjs", import.meta.url).href
+    );
+    const recorded = recordedMigrations(database);
+    if (recorded === null || !Array.isArray(migrationManifest) || migrationManifest.length === 0)
+      throw new Error("Database migration history unavailable");
+    if (
+      JSON.stringify(recorded.map(({ id, name }: { id: number; name: string }) => [id, name])) !==
+      JSON.stringify(migrationManifest)
+    )
+      return { required: true, reason: "database-migrations-differ" };
+    return prepared;
+  } catch {
+    return { required: true, reason: "database-migrations-unavailable" };
+  }
+}
+
+/** Packages the candidate's read-only migration reader without repository runtime dependencies. */
+export async function writeLocalUpdateWorker(repo: string, output: string) {
+  const persistence = NodePath.join(repo, "apps/server/src/persistence");
+  const { recordedMigrations } = await import(
+    NodeURL.pathToFileURL(NodePath.join(persistence, "databaseMigrationHead.ts")).href
+  );
+  const { migrationManifest } = await import(
+    NodeURL.pathToFileURL(NodePath.join(persistence, "Migrations.ts")).href
+  );
+  NodeFS.writeFileSync(
+    NodePath.join(output, "database-migrations.mjs"),
+    `import * as NodeFS from "node:fs";\nimport * as NodeSqlite from "node:sqlite";\n` +
+      `export const migrationManifest = ${JSON.stringify(migrationManifest)};\n` +
+      `export ${recordedMigrations.toString()}\n`,
+  );
+  NodeFS.writeFileSync(
+    NodePath.join(output, "worker.mjs"),
+    NodeModule.stripTypeScriptTypes(
+      NodeFS.readFileSync(NodeURL.fileURLToPath(import.meta.url), "utf8"),
+    ),
+  );
+}
+
+async function backupState(
+  source: string,
+  destination: string,
+  timeout = 240_000,
+  databaseBackup?: { required: boolean; reason: string },
+) {
   NodeFS.mkdirSync(destination, { mode: 0o700 });
   try {
     const database = NodePath.join(source, "statev2.sqlite");
-    if (NodeFS.existsSync(database)) {
+    const required =
+      databaseBackup?.required !== false || databaseBackup.reason !== "migration-set-unchanged";
+    const ran = required && NodeFS.existsSync(database);
+    if (ran) {
       await run(
         process.execPath,
         [
@@ -126,10 +264,72 @@ async function backupState(source: string, destination: string, timeout = 240_00
           dereference: true,
         });
     }
-    return { backedUp: true, path: destination };
+    return {
+      backedUp: true,
+      path: destination,
+      databaseBackup: {
+        ran,
+        reason: !required
+          ? "migration-set-unchanged"
+          : !ran
+            ? "database-missing"
+            : (databaseBackup?.reason ?? "migration-status-unknown"),
+      },
+    };
   } catch (error) {
     NodeFS.rmSync(destination, { recursive: true, force: true });
     throw error;
+  }
+}
+
+/** Skips the database copy only when both revisions have the same known migration set. */
+export async function databaseBackupDecision(
+  git: (...args: string[]) => Promise<string>,
+  installedCommit: string | undefined,
+  candidateCommit: string,
+) {
+  const decision = {
+    required: true,
+    reason: "installed-history-unavailable",
+    installedCommit,
+    candidateCommit,
+  };
+  if (!installedCommit) return decision;
+  try {
+    await git("merge-base", "--is-ancestor", installedCommit, candidateCommit);
+    const paths = [
+      "apps/server/src/persistence/Migrations.ts",
+      "apps/server/src/persistence/Sqlite.ts",
+      "apps/server/src/persistence/Migrations",
+      "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "apps/server/src/persistence/initializeV2Database.ts",
+      "apps/server/src/persistence/databaseMigrationHead.ts",
+    ];
+    const migrationSet = async (commit: string) => {
+      const tree = await git("ls-tree", "-r", commit, "--", ...paths);
+      if (
+        !tree.includes("\tapps/server/src/persistence/Migrations.ts") ||
+        !/\tapps\/server\/src\/persistence\/Migrations\/\d+_[^\n]+\.ts/.test(tree)
+      )
+        throw new Error("Migration set unavailable");
+      const lock = await git("show", `${commit}:pnpm-lock.yaml`);
+      const server = lock.match(/^  apps\/server:\n((?: {4}[^\n]*(?:\n|$)|\n)*)/m)?.[1];
+      const effect = server?.match(
+        /^      effect:\n        specifier: [^\n]+\n        version: ([^\n]+)$/m,
+      )?.[1];
+      if (!effect) throw new Error("Migration engine version unavailable");
+      return JSON.stringify([tree, effect]);
+    };
+    decision.reason = "migration-set-unavailable";
+    const installed = await migrationSet(installedCommit);
+    const candidate = await migrationSet(candidateCommit);
+    return {
+      ...decision,
+      required: installed !== candidate,
+      reason: installed === candidate ? "migration-set-unchanged" : "migration-set-changed",
+    };
+  } catch {
+    return decision;
   }
 }
 
@@ -472,6 +672,23 @@ export async function checkLocalLink(
 
 async function worker(mode: string, configFile: string, extra: string[]) {
   const config = JSON.parse(NodeFS.readFileSync(configFile, "utf8"));
+  if (mode !== "validate-prepared") {
+    const stateFile = NodePath.join(NodePath.dirname(configFile), "activation-state.json");
+    if (NodeFS.existsSync(stateFile)) {
+      const state = JSON.parse(NodeFS.readFileSync(stateFile, "utf8"));
+      config.windowsBackupRoot = state.windowsBackupRoot;
+      config.wslBackupRoot = state.wslBackupRoot ?? config.wslBackupRoot;
+      config.linkBaseline = state.linkBaseline;
+    }
+  }
+  if (mode === "validate-prepared") {
+    const prepared: PreparedUpdate = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(config.output, "prepared.json"), "utf8"),
+    );
+    assertPreparedUpdate(prepared, config.commit);
+    if (config.updatePath !== prepared.updatePath) throw new Error("Prepared update path changed.");
+    return { verified: true, commit: config.commit };
+  }
   helperReceiptDirectory = NodePath.join(NodePath.dirname(configFile), "helpers");
   recordHelper(process.pid, `worker:${mode}`);
   if (
@@ -501,17 +718,19 @@ async function worker(mode: string, configFile: string, extra: string[]) {
       NodePath.join(config.wslHome, "userdata"),
       destination,
       config.backupTimeoutMs,
+      await liveDatabaseBackupDecision(
+        config,
+        NodePath.join(config.wslHome, "userdata/statev2.sqlite"),
+      ),
     );
-    if (!config.checkOnly) {
-      // Keep only this update's backup, matching the single Windows rollback.
-      const parent = NodePath.dirname(config.wslBackupRoot);
-      for (const entry of NodeFS.readdirSync(parent))
-        if (
-          /^[0-9a-f]{40}(?:-[0-9a-f-]{36})?$/.test(entry) &&
-          entry !== NodePath.basename(config.wslBackupRoot)
-        )
-          NodeFS.rmSync(NodePath.join(parent, entry), { recursive: true, force: true });
-    }
+    // Keep only this update's backup, matching the single Windows rollback.
+    const parent = NodePath.dirname(config.wslBackupRoot);
+    for (const entry of NodeFS.readdirSync(parent))
+      if (
+        /^[0-9a-f]{40}(?:-[0-9a-f-]{36})?$/.test(entry) &&
+        entry !== NodePath.basename(config.wslBackupRoot)
+      )
+        NodeFS.rmSync(NodePath.join(parent, entry), { recursive: true, force: true });
     return result;
   }
   if (mode === "backup-windows")
@@ -574,8 +793,295 @@ async function worker(mode: string, configFile: string, extra: string[]) {
   throw new Error(`Unknown worker mode: ${mode}`);
 }
 
+function fileDigest(file: string) {
+  const hash = NodeCrypto.createHash("sha256");
+  const descriptor = NodeFS.openSync(file, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let bytes: number;
+    while ((bytes = NodeFS.readSync(descriptor, buffer)) > 0)
+      hash.update(buffer.subarray(0, bytes));
+    return hash.digest("hex");
+  } finally {
+    NodeFS.closeSync(descriptor);
+  }
+}
+
+/** Hashes complete trees, including names, so additions and removals invalidate preparation. */
+export function artifactDigests(paths: readonly string[]) {
+  const visit = (file: string): string | null => {
+    const stat = NodeFS.lstatSync(file, { throwIfNoEntry: false });
+    if (!stat) return null;
+    if (stat.isSymbolicLink()) throw new Error(`Artifact contains a link: ${file}`);
+    if (stat.isFile()) return fileDigest(file);
+    if (!stat.isDirectory()) throw new Error(`Unsupported artifact: ${file}`);
+    return buildCacheKey(
+      NodeFS.readdirSync(file)
+        .sort()
+        .map((name) => [name, visit(NodePath.join(file, name))]),
+    );
+  };
+  return Object.fromEntries(paths.map((file) => [file, visit(file)]));
+}
+
+/** Identifies build output by its source revision and external build inputs. */
+export function buildCacheKey(inputs: unknown) {
+  return NodeCrypto.createHash("sha256").update(JSON.stringify(inputs)).digest("hex");
+}
+
+type PreparedUpdate = {
+  schema: 2;
+  commit: string;
+  updatePath: string;
+  cacheKey: string;
+  files: Record<string, string | null>;
+  artifacts: Record<string, string | null>;
+  staged?: string | undefined;
+  databaseBackup?: {
+    required: boolean;
+    reason: string;
+    installedCommit?: string | undefined;
+    candidateCommit: string;
+  };
+};
+
+/** Refuses stale installations and incomplete or modified prepared files before activation. */
+export function assertPreparedUpdate(prepared: PreparedUpdate, commit: string) {
+  if (prepared.schema !== 2 || prepared.commit !== commit)
+    throw new Error("Prepared commit no longer matches HEAD.");
+  if (
+    !prepared.files ||
+    JSON.stringify(artifactDigests(Object.keys(prepared.files))) !== JSON.stringify(prepared.files)
+  )
+    throw new Error("Prepared content changed or is missing; prepare again.");
+}
+
+/** Finds intact build artifacts even when a later Windows staging attempt failed. */
+export function findCachedBuild(root: string, cacheKey: string) {
+  if (!NodeFS.existsSync(root)) return undefined;
+  for (const name of NodeFS.readdirSync(root)) {
+    const directory = NodePath.join(root, name);
+    try {
+      const cached: Pick<PreparedUpdate, "cacheKey" | "artifacts"> & { schema: 1 } = JSON.parse(
+        NodeFS.readFileSync(NodePath.join(directory, "build-cache.json"), "utf8"),
+      );
+      if (
+        cached.schema !== 1 ||
+        cached.cacheKey !== cacheKey ||
+        !cached.artifacts ||
+        Object.values(cached.artifacts).some((digest) => !digest)
+      )
+        continue;
+      if (
+        JSON.stringify(artifactDigests(Object.keys(cached.artifacts))) ===
+        JSON.stringify(cached.artifacts)
+      )
+        return directory;
+    } catch {
+      /* Incomplete or changed outputs cannot supply cached artifacts. */
+    }
+  }
+  return undefined;
+}
+
+function linuxProcessStart(pid: number) {
+  try {
+    const stat = NodeFS.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return (
+      NodeFS.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() +
+      ":" +
+      stat
+        .slice(stat.lastIndexOf(")") + 1)
+        .trim()
+        .split(/\s+/)[19]
+    );
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** Removes an abandoned claim, preserving a live owner even when its PID has been reused. */
+export async function preparedOutputIsActive(marker: string) {
+  if (!NodeFS.existsSync(marker)) return false;
+  const ownerFile = NodePath.join(marker, "owner.json");
+  if (!NodeFS.existsSync(ownerFile)) {
+    if (Date.now() - NodeFS.statSync(marker).mtimeMs < 30_000) return true;
+  } else {
+    let owner: { platform: string; pid: number; startTime: string } | undefined;
+    try {
+      owner = JSON.parse(NodeFS.readFileSync(ownerFile, "utf8"));
+    } catch {
+      if (Date.now() - NodeFS.statSync(marker).mtimeMs < 30_000) return true;
+    }
+    let start: string | null = null;
+    if (owner?.platform === "linux") start = linuxProcessStart(owner.pid);
+    else if (owner?.platform === "win32" && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+      const pid = owner.pid;
+      start = await retryPreparationInterop(
+        () =>
+          run(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
+            ],
+            { stdio: "pipe", timeout: 15_000 },
+          ),
+        true,
+      );
+    } else if (owner) throw new Error(`Unknown prepared output owner: ${marker}`);
+    if (start && start === owner?.startTime) return true;
+  }
+  console.warn(`Removing stale prepared output marker (owner exited): ${marker}`);
+  NodeFS.rmSync(marker, { recursive: true });
+  return false;
+}
+
+/** Claims an output until its owning process exits. */
+export async function claimPreparedOutput(marker: string) {
+  if (await preparedOutputIsActive(marker)) throw new Error(`Prepared output is active: ${marker}`);
+  NodeFS.mkdirSync(marker);
+  NodeFS.writeFileSync(
+    NodePath.join(marker, "owner.json"),
+    JSON.stringify({
+      pid: process.pid,
+      platform: "linux",
+      startTime: linuxProcessStart(process.pid),
+    }),
+  );
+}
+
+async function activatePrepared(output: string, commit: string, notifyThread?: string) {
+  const prepared: PreparedUpdate = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(output, "prepared.json"), "utf8"),
+  );
+  if (prepared.schema !== 2 || prepared.commit !== commit)
+    throw new Error("Prepared commit no longer matches HEAD.");
+  const configFile = NodePath.join(output, "config.json");
+  const config = JSON.parse(NodeFS.readFileSync(configFile, "utf8"));
+  if (
+    config.commit !== commit ||
+    config.updatePath !== prepared.updatePath ||
+    config.output !== output
+  )
+    throw new Error("Prepared configuration does not match its manifest.");
+  const claim = NodePath.join(output, ".activation-claimed");
+  await claimPreparedOutput(claim);
+  helperReceiptDirectory = NodePath.join(output, "helpers");
+  recordHelper(process.pid, "activation-driver");
+  // Notification is an activation choice; the immutable prepared configuration stays sealed.
+  if (notifyThread)
+    NodeFS.writeFileSync(NodePath.join(output, "notify-thread"), notifyThread, { mode: 0o600 });
+  const windowsPath = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
+  try {
+    await run("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      await windowsPath(NodePath.join(output, "activate.ps1")),
+      "-ConfigPath",
+      await windowsPath(configFile),
+      "-Mode",
+      "Launch",
+    ]);
+  } catch (error) {
+    NodeFS.rmSync(claim, { recursive: true, force: true });
+    throw error;
+  }
+  console.log(`Windows activation detached. Receipt: ${NodePath.join(output, "receipt.json")}`);
+}
+
+/** Prunes owned preparation outputs, preserving current work and retaining diagnostics. */
+export async function prunePreparedOutputs(
+  root: string,
+  current: string,
+  evidenceRoot = NodePath.join(NodeOS.homedir(), "evidence/t3code/prepared-installs"),
+) {
+  if (!NodeFS.existsSync(root)) return;
+  const outputs = NodeFS.readdirSync(root)
+    .map((name) => NodePath.join(root, name))
+    .filter((directory) => {
+      try {
+        const config = JSON.parse(
+          NodeFS.readFileSync(NodePath.join(directory, "config.json"), "utf8"),
+        );
+        return (
+          config.output === directory &&
+          ["full", "wsl-only"].includes(config.updatePath) &&
+          ["prepared.json", "build-cache.json", ".preparation-active", ".activation-claimed"].some(
+            (name) => NodeFS.existsSync(NodePath.join(directory, name)),
+          )
+        );
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => NodeFS.statSync(b).mtimeMs - NodeFS.statSync(a).mtimeMs);
+  for (const [index, directory] of outputs.entries()) {
+    if (directory === current) continue;
+    const claim = NodePath.join(directory, ".activation-claimed");
+    let claimed = false;
+    try {
+      const preparing = await preparedOutputIsActive(
+        NodePath.join(directory, ".preparation-active"),
+      );
+      const activating = await preparedOutputIsActive(claim);
+      if (preparing || activating || index < 3) continue;
+      await claimPreparedOutput(claim);
+      claimed = true;
+      const config = JSON.parse(
+        NodeFS.readFileSync(NodePath.join(directory, "config.json"), "utf8"),
+      );
+      if (config.updatePath === "full") {
+        const windows = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
+        await retryPreparationInterop(async () =>
+          run(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              await windows(NodePath.join(directory, "activate.ps1")),
+              "-ConfigPath",
+              await windows(NodePath.join(directory, "config.json")),
+              "-Mode",
+              "Discard",
+            ],
+            { stdio: "pipe", timeout: 120_000 },
+          ),
+        );
+      }
+      const evidence = NodePath.join(evidenceRoot, NodePath.basename(directory));
+      NodeFS.mkdirSync(evidence, { recursive: true, mode: 0o700 });
+      for (const name of NodeFS.readdirSync(directory)) {
+        if (
+          ["current", "client", "windows", ".activation-claimed", "runtime-rollback"].includes(name)
+        )
+          continue;
+        NodeFS.cpSync(NodePath.join(directory, name), NodePath.join(evidence, name), {
+          recursive: true,
+        });
+      }
+      NodeFS.rmSync(directory, { recursive: true });
+    } catch (error) {
+      console.warn(`Could not prune prepared output ${directory}: ${String(error)}`);
+    } finally {
+      if (claimed) NodeFS.rmSync(claim, { recursive: true, force: true });
+    }
+  }
+}
+
 async function main() {
-  const { values } = NodeUtil.parseArgs({
+  const prepareStarted = Date.now();
+  const { values, tokens } = NodeUtil.parseArgs({
+    tokens: true,
     options: {
       "install-dir": { type: "string" },
       "output-dir": { type: "string" },
@@ -591,8 +1097,8 @@ async function main() {
       "wsl-only": { type: "boolean" },
       "plan-only": { type: "boolean" },
       "installed-receipt": { type: "string" },
-      "check-only": { type: "boolean" },
-      "dry-run": { type: "boolean" },
+      "prepare-only": { type: "boolean" },
+      activate: { type: "string" },
       help: { type: "boolean" },
     },
   });
@@ -609,7 +1115,8 @@ async function main() {
   --full / --wsl-only        Force shell replacement / runtime-only update
   --plan-only                Report selection without building or Windows interop
   --installed-receipt PATH   Receipt to read instead of <install-dir>/.weavewing-local-update.json
-  --check-only, --dry-run     Build, verify, stage and back up; leave install running`);
+  --prepare-only             Build, smoke-test and stage without changing the install
+  --activate PATH            Activate a prepared output directory without rebuilding`);
     return;
   }
   // oxlint-disable-next-line t3code/no-global-process-runtime -- This standalone WSL driver runs without an Effect runtime.
@@ -617,6 +1124,22 @@ async function main() {
     throw new Error("Run this command inside WSL with Windows interop enabled.");
   const repo = NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)));
   const git = (...args: string[]) => run("git", ["-C", repo, ...args], { stdio: "pipe" });
+  if (values.activate) {
+    if (
+      tokens.some(
+        (token) => token.kind === "option" && !["activate", "notify-thread"].includes(token.name),
+      )
+    )
+      throw new Error("--activate accepts only a prepared directory and --notify-thread.");
+    if (await git("status", "--porcelain"))
+      throw new Error("Activation requires a clean checkout.");
+    await activatePrepared(
+      NodePath.resolve(values.activate),
+      await git("rev-parse", "HEAD"),
+      values["notify-thread"],
+    );
+    return;
+  }
   if (values.full && values["wsl-only"])
     throw new Error("Choose only one of --full and --wsl-only.");
   const force = values.full ? "full" : values["wsl-only"] ? "wsl-only" : undefined;
@@ -624,6 +1147,7 @@ async function main() {
     run("wslpath", ["-u", path], { stdio: "pipe" }),
   );
   let installed: {
+    commit?: string;
     shellCommit?: string;
     clientCommit?: string;
     clientAssetsDirectory?: string;
@@ -781,13 +1305,15 @@ async function main() {
   NodeFS.mkdirSync(output, { mode: 0o700, recursive: true });
   helperReceiptDirectory = NodePath.join(output, "helpers");
   recordHelper(process.pid, "driver");
-  const checkOnly = !!(values["check-only"] || values["dry-run"]);
-  const backupRoot = checkOnly
-    ? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "weavewing-backups-"))
-    : await run("wslpath", ["-u", NodePath.win32.join(parent, `.${name}-local-update-state`)], {
-        stdio: "pipe",
-      });
+  const backupRoot = await run(
+    "wslpath",
+    ["-u", NodePath.win32.join(parent, `.${name}-local-update-state`)],
+    {
+      stdio: "pipe",
+    },
+  );
   const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "weavewing-update-bin-"));
+  await claimPreparedOutput(NodePath.join(output, ".preparation-active"));
   try {
     for (const name of ["vp", "vpr", "vpx", "node", "yarn", "yarnpkg", "bun", "bunx"])
       NodeFS.symlinkSync(vp, NodePath.join(bin, name));
@@ -819,11 +1345,15 @@ async function main() {
     await build("patchelf", ["--version"]);
     await build("vp", ["--version"]);
     const powershell = (args: string[]) =>
-      run(
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
-        { stdio: ["ignore", "inherit", "inherit"] },
-      );
+      retryPreparationInterop(() =>
+        run(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
+          { stdio: "pipe", timeout: 300_000 },
+        ),
+      ).then((result) => {
+        if (result) console.log(result);
+      });
     const windowsPath = (file: string) => run("wslpath", ["-w", file], { stdio: "pipe" });
     const activation = NodePath.join(output, "activate.ps1");
     NodeFS.copyFileSync(NodePath.join(repo, "scripts/activate-local-desktop.ps1"), activation);
@@ -831,19 +1361,28 @@ async function main() {
       NodePath.join(repo, "scripts/stage-windows-desktop.ps1"),
       NodePath.join(output, "stage-windows-desktop.ps1"),
     );
-    NodeFS.writeFileSync(
-      NodePath.join(output, "worker.mjs"),
-      NodeModule.stripTypeScriptTypes(
-        NodeFS.readFileSync(NodeURL.fileURLToPath(import.meta.url), "utf8"),
-      ),
-    );
+    await writeLocalUpdateWorker(repo, output);
+    const candidateName = `.${name}-prepared-${NodeCrypto.createHash("sha256").update(output).digest("hex").slice(0, 16)}`;
+    const candidate = NodePath.win32.join(parent, candidateName);
     const config = {
       output,
+      candidate,
       updatePath,
+      databaseBackup: await databaseBackupDecision(
+        git,
+        installed.commit,
+        await git("rev-parse", "HEAD"),
+      ),
       shellCommit: updatePath === "full" ? await git("rev-parse", "HEAD") : installed.shellCommit,
       clientCommit: await git("rev-parse", "HEAD"),
       clientAssetsDirectory: "resources/client",
       clientSource: await windowsPath(NodePath.join(output, "client")),
+      installedReceipt: installedFile,
+      installedRuntimeArchive: await run(
+        "wslpath",
+        ["-u", NodePath.win32.join(values["install-dir"]!, "resources/wsl-runtime.tar.gz")],
+        { stdio: "pipe" },
+      ),
       previousDigest: installed.digest,
       environmentId: NodeFS.readFileSync(
         NodePath.join(values["wsl-home"]!, "userdata/environment-id"),
@@ -855,16 +1394,13 @@ async function main() {
       wslHome: values["wsl-home"],
       node: process.execPath,
       healthSeconds: updatePath === "wsl-only" ? Math.min(45, healthSeconds) : healthSeconds,
-      checkOnly,
       backupRoot,
       backupRootWindows: await windowsPath(backupRoot),
-      wslBackupRoot: checkOnly
-        ? backupRoot
-        : NodePath.join(
-            NodeOS.homedir(),
-            ".local/share/weavewing-update-backups",
-            `${await git("rev-parse", "HEAD")}-${NodeCrypto.randomUUID()}`,
-          ),
+      wslBackupRoot: NodePath.join(
+        NodeOS.homedir(),
+        ".local/share/weavewing-update-backups",
+        await git("rev-parse", "HEAD"),
+      ),
       notifyThread: values["notify-thread"],
       source: await windowsPath(NodePath.join(output, "windows/win-unpacked")),
       digest: "",
@@ -885,32 +1421,98 @@ async function main() {
       "Preflight",
     ]);
     if (!NodeFS.existsSync(NodePath.join(repo, "node_modules"))) await build("vp", ["i"]);
-    await build("vp", ["run", "--filter", "t3", "build"]);
-    if (updatePath === "full") {
-      const windowsMonitor = NodePath.join(
-        repo,
-        "native/resource-monitor/target/x86_64-pc-windows-msvc/release/t3-resource-monitor.exe",
-      );
-      NodeFS.mkdirSync(NodePath.dirname(windowsMonitor), { recursive: true });
-      NodeFS.copyFileSync(values["windows-monitor"]!, windowsMonitor);
-      await build("node", ["apps/desktop/scripts/build-preview-annotation-css.mjs"]);
-      await build("vp", ["pack"], NodePath.join(repo, "apps/desktop"));
-    }
-    await build("node", ["apps/server/scripts/cli.ts", "build-exe", "--verbose"]);
-    await build("node", [
-      "scripts/build-cli-archive.ts",
-      "--platform",
-      "linux",
-      "--arch",
-      "x64",
-      "--version",
-      version,
-      "--resource-monitor-dir",
-      values["linux-monitor-dir"]!,
-      "--output-dir",
-      NodePath.join(output, "current"),
-    ]);
+    const commit = config.commit;
+    const cacheKey = buildCacheKey({
+      commit,
+      updatePath,
+      node: process.versions.node,
+      environment: localDesktopBuildEnvironment({}),
+      installation: localBuildInstallIdentity(repo),
+      vp: await build("vp", ["--version"]),
+      monitorTag,
+      tools: artifactDigests([
+        vp,
+        NodePath.join(
+          values["patchelf-dir"] ??
+            NodePath.dirname(await run("which", ["patchelf"], { stdio: "pipe" })),
+          "patchelf",
+        ),
+        NodePath.join(values["linux-monitor-dir"]!, "linux-x64/t3-resource-monitor"),
+        ...(updatePath === "full" ? [values["windows-monitor"]!] : []),
+      ]),
+    });
+    const buildsRoot = NodePath.join(NodeOS.homedir(), ".local/share/weavewing-builds");
+    const cacheSource = findCachedBuild(buildsRoot, cacheKey);
     const archive = NodePath.join(output, "current", `t3-${version}-linux-x64.tar.gz`);
+    if (cacheSource) {
+      for (const name of ["current", "client", ...(updatePath === "full" ? ["windows"] : [])])
+        NodeFS.cpSync(NodePath.join(cacheSource, name), NodePath.join(output, name), {
+          recursive: true,
+        });
+      console.log(`Reusing verified build output from ${cacheSource}`);
+    } else {
+      await build("vp", ["run", "--filter", "t3", "build"]);
+      if (updatePath === "full") {
+        const windowsMonitor = NodePath.join(
+          repo,
+          "native/resource-monitor/target/x86_64-pc-windows-msvc/release/t3-resource-monitor.exe",
+        );
+        NodeFS.mkdirSync(NodePath.dirname(windowsMonitor), { recursive: true });
+        NodeFS.copyFileSync(values["windows-monitor"]!, windowsMonitor);
+        await build("node", ["apps/desktop/scripts/build-preview-annotation-css.mjs"]);
+        await build("vp", ["pack"], NodePath.join(repo, "apps/desktop"));
+      }
+      await build("node", ["apps/server/scripts/cli.ts", "build-exe", "--verbose"]);
+      await build("node", [
+        "scripts/build-cli-archive.ts",
+        "--platform",
+        "linux",
+        "--arch",
+        "x64",
+        "--version",
+        version,
+        "--resource-monitor-dir",
+        values["linux-monitor-dir"]!,
+        "--output-dir",
+        NodePath.join(output, "current"),
+      ]);
+      if (updatePath === "full") {
+        await build("node", [
+          "scripts/build-desktop-artifact.ts",
+          "--platform",
+          "win",
+          "--target",
+          "dir",
+          "--arch",
+          "x64",
+          "--build-version",
+          version,
+          "--skip-build",
+          "--wsl-runtime",
+          archive,
+          "--output-dir",
+          NodePath.join(output, "windows"),
+          "--verbose",
+        ]);
+      }
+      NodeFS.cpSync(
+        NodePath.join(repo, "apps/server/dist/client"),
+        NodePath.join(output, "client"),
+        {
+          recursive: true,
+        },
+      );
+      // DesktopEnvironment serves the loose client only while this matches the running shell.
+      NodeFS.writeFileSync(NodePath.join(output, "client/.shell-version"), version);
+      if (updatePath === "full")
+        NodeFS.cpSync(
+          NodePath.join(output, "client"),
+          NodePath.join(output, "windows/win-unpacked/resources/client"),
+          {
+            recursive: true,
+          },
+        );
+    }
     await build("node", [
       "scripts/smoke-cli-archive.ts",
       "--archive",
@@ -918,40 +1520,19 @@ async function main() {
       "--expect-version",
       version,
     ]);
-    if (updatePath === "full") {
-      await build("node", [
-        "scripts/build-desktop-artifact.ts",
-        "--platform",
-        "win",
-        "--target",
-        "dir",
-        "--arch",
-        "x64",
-        "--build-version",
-        version,
-        "--skip-build",
-        "--wsl-runtime",
-        archive,
-        "--output-dir",
-        NodePath.join(output, "windows"),
-        "--verbose",
-      ]);
-    }
-    NodeFS.cpSync(NodePath.join(repo, "apps/server/dist/client"), NodePath.join(output, "client"), {
-      recursive: true,
-    });
-    // DesktopEnvironment serves the loose client only while this matches the running shell.
-    NodeFS.writeFileSync(NodePath.join(output, "client/.shell-version"), version);
-    if (updatePath === "full")
-      NodeFS.cpSync(
-        NodePath.join(output, "client"),
-        NodePath.join(output, "windows/win-unpacked/resources/client"),
-        {
-          recursive: true,
-        },
-      );
-    const hash = (file: string) =>
-      NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(file)).digest("hex");
+    const artifacts = artifactDigests([
+      NodePath.join(output, "current"),
+      NodePath.join(output, "client"),
+      ...(updatePath === "full" ? [NodePath.join(output, "windows")] : []),
+    ]);
+    if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
+      throw new Error("Source changed during the build; refusing to cache artifacts.");
+    NodeFS.writeFileSync(
+      NodePath.join(output, "build-cache.json"),
+      JSON.stringify({ schema: 1, commit, cacheKey, artifacts }, null, 2),
+      { mode: 0o600 },
+    );
+    const hash = fileDigest;
     config.digest = hash(archive);
     config.archive = await windowsPath(archive);
     if (updatePath === "full") {
@@ -966,35 +1547,60 @@ async function main() {
       buildWslRuntimeInstallScript(archive, `sha256-${config.digest}`, config.digest),
     );
     saveConfig();
-    if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
-      throw new Error("Source changed during the build; refusing activation.");
-    if (updatePath === "full")
-      await powershell([
-        "-File",
-        await windowsPath(activation),
-        "-ConfigPath",
-        await windowsPath(configFile),
-        "-Mode",
-        "Prepare",
-      ]);
     await powershell([
       "-File",
       await windowsPath(activation),
       "-ConfigPath",
       await windowsPath(configFile),
       "-Mode",
-      config.checkOnly ? "Activate" : "Launch",
+      "Prepare",
     ]);
-    console.log(
-      `${config.checkOnly ? "Check complete" : "Windows activation detached"}. Receipt: ${NodePath.join(output, "receipt.json")}`,
+    if ((await git("status", "--porcelain")) || config.commit !== (await git("rev-parse", "HEAD")))
+      throw new Error("Source changed during the build; refusing preparation.");
+    const prepared: PreparedUpdate = {
+      schema: 2,
+      commit,
+      updatePath,
+      cacheKey,
+      artifacts,
+      databaseBackup: config.databaseBackup,
+      staged: updatePath === "full" ? NodePath.win32.join(candidate, "payload") : undefined,
+      files: artifactDigests([
+        ...Object.keys(artifacts),
+        activation,
+        configFile,
+        NodePath.join(output, "installed-digests.json"),
+        NodePath.join(output, "worker.mjs"),
+        NodePath.join(output, "database-migrations.mjs"),
+        NodePath.join(output, "stage-windows-desktop.ps1"),
+        NodePath.join(output, "runtime-install.sh"),
+        ...(updatePath === "full" ? [NodePath.join(output, "staged-digests.json")] : []),
+      ]),
+    };
+    if (Object.values(prepared.files).some((digest) => !digest))
+      throw new Error("Prepared artifact missing.");
+    assertPreparedUpdate(prepared, commit);
+    NodeFS.writeFileSync(
+      NodePath.join(output, "prepared.json"),
+      JSON.stringify(prepared, null, 2),
+      { mode: 0o600 },
     );
-    if (!config.checkOnly)
-      console.log(
-        `Inspect receipt.json and activation.log in ${output}; detached.stderr captures PowerShell startup errors.`,
-      );
+    NodeFS.writeFileSync(
+      NodePath.join(output, "prepare-timing.json"),
+      JSON.stringify(
+        { milliseconds: Date.now() - prepareStarted, cacheSource: cacheSource ?? null },
+        null,
+        2,
+      ),
+    );
+    console.log(
+      `Prepared ${commit} (${updatePath}) in ${((Date.now() - prepareStarted) / 1000).toFixed(1)}s. Activate with --activate ${output}`,
+    );
+    await prunePreparedOutputs(buildsRoot, output);
+    if (!values["prepare-only"]) await activatePrepared(output, commit, values["notify-thread"]);
   } finally {
     NodeFS.rmSync(bin, { recursive: true, force: true });
-    if (checkOnly) NodeFS.rmSync(backupRoot, { recursive: true, force: true });
+    NodeFS.rmSync(NodePath.join(output, ".preparation-active"), { recursive: true, force: true });
   }
 }
 

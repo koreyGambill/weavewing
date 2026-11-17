@@ -1,4 +1,4 @@
-import { enableCliCompileCache } from "./cliCompileCache.ts";
+import { recordStartupTiming } from "./startupTiming.ts";
 
 // Packaged builds load this graph with require(esm): top-level await anywhere in it breaks them.
 // ACP agents spawn `acp-mcp-bridge` per session and `acp-mcp-call` per tool call, so those fast
@@ -31,12 +31,12 @@ export async function runCliCommand() {
     const { runNativeSpeechWorker } = await import("./speech/native.ts");
     await runNativeSpeechWorker(mode, process.argv[4]);
   } else {
-    enableCliCompileCache();
     // Windows desktop launches without stdin; attach before reading, except on fast paths using pipes.
     const { attachConsoleStdin } = await import("./cli/consoleStdin.ts");
     attachConsoleStdin();
     const importStart = performance.now();
     const { runCli } = await import("./binCli.ts");
+    recordStartupTiming("cli.command.loaded");
     if (process.env.T3CODE_STARTUP_PROFILE_DIR) {
       performance.measure("server.import.binCli", { start: importStart });
     }

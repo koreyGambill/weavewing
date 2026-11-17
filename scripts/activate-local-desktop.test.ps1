@@ -10,13 +10,37 @@ function Must-Fail($action) {
 $root = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $root | Out-Null
 try {
+  $ledgerScript = Join-Path $root 'ledger-fixture.mjs'
+  @'
+import { DatabaseSync } from 'node:sqlite';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [file, worker, scenario] = process.argv.slice(2);
+const { migrationManifest } = await import(pathToFileURL(path.join(path.dirname(worker), 'database-migrations.mjs')).href);
+if (scenario === 'unreadable-db') fs.writeFileSync(file, 'not sqlite');
+else {
+  const db = new DatabaseSync(file);
+  db.exec("CREATE TABLE saved(value TEXT); INSERT INTO saved VALUES ('same-live-database')");
+  if (scenario !== 'missing-ledger') {
+    db.exec("CREATE TABLE effect_sql_migrations (migration_id INTEGER PRIMARY KEY, name TEXT)");
+    const insert = db.prepare('INSERT INTO effect_sql_migrations VALUES (?, ?)');
+    for (const [id, name] of migrationManifest) {
+      if (scenario === 'older-db' && id === migrationManifest.at(-1)[0]) continue;
+      insert.run(id, scenario === 'renamed-db' && id === 1 ? 'Other' : name);
+    }
+    if (scenario === 'newer-db') insert.run(migrationManifest.at(-1)[0] + 1, 'Future');
+  }
+  db.close();
+}
+'@ | Set-Content $ledgerScript
   foreach ($mode in @('Preflight', 'Prepare', 'Launch', 'Activate')) {
     foreach ($failure in @('config', 'startup')) {
       $fixture = Join-Path $root ("early-$mode-$failure")
       New-Item -ItemType Directory -Path $fixture | Out-Null
       $configPath = Join-Path $fixture 'config.json'
       if ($failure -eq 'config') { Set-Content $configPath '{invalid' }
-      else { @{ install = (Join-Path $fixture 'installed'); checkOnly = $true } | ConvertTo-Json | Set-Content $configPath }
+      else { @{ install = (Join-Path $fixture 'installed') } | ConvertTo-Json | Set-Content $configPath }
       Must-Fail { Invoke-LocalDesktopUpdate $configPath $mode }
       $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
       Assert ($receipt.status -eq 'failed' -and $receipt.error) "$mode early $failure failure lost its terminal receipt"
@@ -32,6 +56,22 @@ try {
     Must-Fail { Read-LocalUpdateLauncher $launcherPath }
   }
   Write-Host 'PASS case: launcher-lines'
+  $tree = Join-Path $root 'sealed-payload'
+  New-Item -ItemType Directory -Path $tree | Out-Null
+  $treeFile = Join-Path $tree 'app.bin'
+  Set-Content $treeFile 'original'
+  $treeManifest = Join-Path $root 'staged-digests.json'
+  Get-LocalUpdateTreeManifest $tree | Set-Content $treeManifest -Encoding UTF8
+  Assert-LocalUpdateTreeManifest $tree $treeManifest
+  foreach ($change in @('modified', 'added', 'missing')) {
+    if ($change -eq 'modified') { Set-Content $treeFile 'modified' }
+    elseif ($change -eq 'added') { Set-Content (Join-Path $tree 'extra.bin') 'added' }
+    else { Remove-Item $treeFile }
+    Must-Fail { Assert-LocalUpdateTreeManifest $tree $treeManifest }
+    Remove-Item (Join-Path $tree 'extra.bin') -ErrorAction SilentlyContinue
+    Set-Content $treeFile 'original'
+  }
+  Write-Host 'PASS case: sealed-payload'
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; reads = 0; delays = 0 }
   $clock.now = [DateTime]'2026-01-01T00:00:00Z'
   $clock.reads = 0
@@ -102,6 +142,7 @@ try {
   $calls = @{ operations = @() }
   $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
     param($executable, $arguments, $label, $seconds)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     Assert ($seconds -gt 0 -and $seconds -le 5) 'Probe exceeded its operation budget'
     if ($label -eq 'health') { @{ healthy = $true } }
@@ -110,21 +151,23 @@ try {
   # Probes that hang for a while, as during the 44e6918b0d install, must wait it out rather than refuse.
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; delays = @() }
   $calls = @{ operations = @(); budget = 0 }
-  $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'stopped' 5 {
+  $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'backup' 300 {
     param($executable, $arguments, $label, $seconds)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'wsl-responsive') { $clock.now = $clock.now.AddSeconds(3); if ($calls.operations.Count -le 4) { throw (New-LocalUpdateError 'wsl-responsive exceeded 3s' -Transient) } }
-    else { $calls.budget = $seconds; @{ stopped = $true } }
+    else { $calls.budget = $seconds; @{ backedUp = $true } }
   } { param($seconds, $failure) Assert ($failure -match 'exceeded') 'Retry lost its failure'; $clock.delays += $seconds; $clock.now = $clock.now.AddSeconds($seconds) } 180 { $clock.now }
-  Assert ($result.stopped -and ($calls.operations -join ',') -eq 'wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,stopped') 'Transient WSL hangs refused the operation'
-  Assert (($clock.delays -join ',') -eq '1,2,4,8' -and $calls.budget -eq 5) 'Retries did not back off or shortened the operation budget'
+  Assert ($result.backedUp -and ($calls.operations -join ',') -eq 'wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,wsl-responsive,backup') 'Transient WSL hangs refused the operation'
+  Assert (($clock.delays -join ',') -eq '1,2,4,8' -and $calls.budget -eq 300) 'Retries did not back off or shortened the operation budget'
   $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; delays = @() }
   $calls = @{ operations = @() }
   $failure = $null
   try {
     Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
       param($executable, $arguments, $label, $seconds)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       $clock.now = $clock.now.AddSeconds(3)
       throw (New-LocalUpdateError 'wsl-responsive failed (1). Wsl/Service/WSAETIMEDOUT' -Transient)
     } { param($seconds) $clock.delays += $seconds; $clock.now = $clock.now.AddSeconds($seconds) } 180 { $clock.now }
@@ -138,7 +181,8 @@ try {
   try {
     Invoke-LocalUpdateWsl 'missing-distro' @('fixture-command') 'health' 5 {
       param($executable, $arguments, $label, $seconds)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       throw (New-LocalUpdateError 'wsl-responsive failed (255). There is no distribution with the supplied name. Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND' -ExitCode 255)
     } { throw 'A deterministic failure must not wait' }
   } catch { $failure = $_.Exception }
@@ -148,7 +192,8 @@ try {
   try {
     Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
       param($executable, $arguments, $label, $seconds)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       throw (New-LocalUpdateError 'wsl-responsive failed (1). execvpe(/bin/true) failed: No such file or directory' -ExitCode 1)
     } { throw 'A missing binary must not wait' }
   } catch { $failure = $_.Exception.Message }
@@ -158,11 +203,30 @@ try {
   $calls = @{ operations = @() }
   $result = Invoke-LocalUpdateWsl 'fixture-distro' @('fixture-command') 'health' 5 {
     param($executable, $arguments, $label, $seconds)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'wsl-responsive' -and $calls.operations.Count -le 2) { throw (New-LocalUpdateError 'wsl-responsive failed (1). Error code: Wsl/Service/E_UNEXPECTED' -ExitCode 1) }
     if ($label -eq 'health') { @{ healthy = $true } }
   } { param($seconds) $clock.delays += $seconds; $clock.now = $clock.now.AddSeconds($seconds) } 180 { $clock.now }
   Assert ($result.healthy -and ($calls.operations -join ',') -eq 'wsl-responsive,wsl-responsive,wsl-responsive,health') 'An unknown wsl.exe exit was not retried'
+  foreach ($case in @('recovers', 'exhausted', 'deterministic')) {
+    $clock = @{ now = [DateTime]'2026-01-01T00:00:00Z'; operations = 0 }
+    $failure = $null
+    $result = $null
+    try {
+      $result = Invoke-LocalUpdateWsl 'fixture' @('worker') 'health' 30 {
+        param($executable, $arguments, $label, $seconds)
+        if ($label -eq 'wsl-responsive') { return }
+        $clock.operations++
+        if ($case -eq 'recovers' -and $clock.operations -eq 2) { return @{ healthy = $true } }
+        $clock.now = $clock.now.AddSeconds($seconds)
+        throw (New-LocalUpdateError 'health exceeded its deadline' -Transient:($case -ne 'deterministic'))
+      } { param($seconds) $clock.now = $clock.now.AddSeconds($seconds) } 90 { $clock.now }
+    } catch { $failure = $_.Exception.Message }
+    if ($case -eq 'recovers') { Assert ($result.healthy -and $clock.operations -eq 2) 'A stalled health operation failed instead of retrying' }
+    elseif ($case -eq 'exhausted') { Assert ($failure -and $clock.operations -eq 3 -and ($clock.now - [DateTime]'2026-01-01T00:00:00Z').TotalSeconds -le 90) 'Health retries exceeded their attempt or total budget' }
+    else { Assert ($failure -and $clock.operations -eq 1) 'Deterministic health failure retried' }
+  }
   Write-Host 'PASS case: wsl-responsive-window'
 
   $start = [DateTime]'2026-01-01T00:00:00Z'
@@ -227,7 +291,7 @@ try {
     Assert ($calls.recoveries -eq $(if ($case -in @('unhealthy', 'stop-failed')) { 1 } else { 0 })) 'Runtime recovery was skipped after stopping'
     Write-Host "PASS case: runtime-selection-$case"
   }
-  foreach ($case in @('stopped-throws', 'stopped-transient', 'recovering-save-fails', 'swap-close-throws', 'swap-restore-blocked', 'swapx-installmissing', 'swap-m2fail', 'swap-m2m3fail', 'close-late-exit', 'health-transient', 'desktop-exits', 'desktop-handoff', 'runtime-no-desktop', 'runtime-backup', 'runtime-recovery', 'runtime-recovery-late-exit')) {
+  foreach ($case in @('no-db-rollback', 'prestop-retry', 'installed-changed', 'stopped-throws', 'stopped-transient', 'recovering-save-fails', 'swap-close-throws', 'swap-restore-blocked', 'swapx-installmissing', 'swap-m2fail', 'swap-m2m3fail', 'close-late-exit', 'health-transient', 'desktop-exits', 'desktop-handoff', 'runtime-no-desktop', 'runtime-backup', 'runtime-recovery', 'runtime-recovery-late-exit')) {
     $fixture = Join-Path $root ('activation-' + $case)
     $install = Join-Path $fixture 'installed'
     $resources = Join-Path $install 'resources'
@@ -264,15 +328,33 @@ try {
     $oldDigest = (Get-FileHash (Join-Path $resources 'wsl-runtime.tar.gz') -Algorithm SHA256).Hash.ToLowerInvariant()
     $configPath = Join-Path $fixture 'config.json'
     $runtimeOnly = $case.StartsWith('runtime-')
-    $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $false; healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
+    $config = @{ install = $install; updatePath = $(if ($runtimeOnly) { 'wsl-only' } else { 'full' }); archive = (Join-Path $payload 'resources/wsl-runtime.tar.gz'); digest = $digest; exeHash = (Get-FileHash (Join-Path $payload 'Weavewing.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); healthSeconds = 0.1; backupRootWindows = $backupRoot; clientSource = $clientSource; clientCommit = 'client-head'; clientAssetsDirectory = 'resources/client' }
     if ($case -in @('close-late-exit', 'runtime-recovery-late-exit')) { $config.closeSeconds = 0 }
     if ($case -eq 'desktop-exits') { $config.healthSeconds = 3 }
+    if ($case -eq 'no-db-rollback') {
+      $config.databaseBackup = @{ required = $false; reason = 'migration-set-unchanged' }
+      $fixtureHome = Join-Path $fixture 'home'
+      New-Item -ItemType Directory -Path (Join-Path $fixtureHome 'userdata') | Out-Null
+      & $NodeExecutable $ledgerScript (Join-Path $fixtureHome 'userdata/statev2.sqlite') $WorkerPath 'matching-db'
+      Assert ($LASTEXITCODE -eq 0) 'Rollback fixture database setup failed'
+      $databaseHash = (Get-FileHash (Join-Path $fixtureHome 'userdata/statev2.sqlite') -Algorithm SHA256).Hash
+      $config.databaseBackup.installedCommit = 'installed-commit'
+      $config.installedReceipt = Join-Path $fixture 'installed-receipt.json'
+      $config.installedRuntimeArchive = Join-Path $resources 'wsl-runtime.tar.gz'
+      @{ commit = 'installed-commit'; digest = $oldDigest } | ConvertTo-Json | Set-Content $config.installedReceipt
+      $config.wslHome = $fixtureHome
+      $config.wslBackupRoot = Join-Path $fixture 'wsl-backup'
+    }
     if ($case -in @('stopped-throws', 'stopped-transient') -or $case -like 'swap*') { $config.notifyThread = 'fixture-thread'; $config.commit = 'fixture-commit' }
     if ($case -eq 'stopped-transient') {
       New-Item -ItemType Directory -Path (Join-Path $fixture 'helpers') | Out-Null
       foreach ($index in 1..60) { @{ pid = $index; platform = 'linux'; role = 'fixture' } | ConvertTo-Json | Set-Content (Join-Path $fixture "helpers/linux-$index.json") }
     }
     $config | ConvertTo-Json | Set-Content $configPath
+    $sealedConfig = Get-Content -LiteralPath $configPath -Raw
+    Set-Content (Join-Path $fixture 'prepared.json') '{}'
+    Get-LocalUpdateInstalledManifest $install | Set-Content -LiteralPath (Join-Path $fixture 'installed-digests.json') -Encoding UTF8
+    if ($case -eq 'installed-changed') { Set-Content (Join-Path $install 'Weavewing.exe') 'different-install' }
     $invokeWsl = (Get-Item Function:Invoke-LocalUpdateWsl).ScriptBlock
     $calls = @{ operations = @(); starts = 0; sleeps = 0; closed = 0; health = 0; crashedHealth = 0; stopped = 0; notify = $null; restores = 0; launcherVariables = @() }
     $tmp = $env:TMP
@@ -286,6 +368,10 @@ try {
         $process = [pscustomobject]@{ Path = (Join-Path $install 'Weavewing.exe'); Id = 101; MainWindowHandle = 456 }
         $process | Add-Member ScriptMethod CloseMainWindow { $calls.closed++; return $true }
         if ($calls.closed -eq 0) { $process }
+      } elseif ($case -eq 'no-db-rollback' -and $calls.closed -eq 0) {
+        $process = [pscustomobject]@{ Path = (Join-Path $install 'Weavewing.exe'); Id = 100; MainWindowHandle = 123 }
+        $process | Add-Member ScriptMethod CloseMainWindow { $calls.closed++; return $true }
+        $process
       } elseif ($runtimeOnly -and $case -ne 'runtime-no-desktop') {
         $process = [pscustomobject]@{ Path = (Join-Path $install 'Weavewing.exe'); Id = 100; MainWindowHandle = 123 }
         $process | Add-Member ScriptMethod CloseMainWindow { $calls.closed++; return $true }
@@ -298,6 +384,7 @@ try {
       $exited = $false
       if ($FilePath.EndsWith('Weavewing.exe') -and -not $ArgumentList) {
         $calls.starts++
+        if ($case -eq 'no-db-rollback') { Assert ((Get-FileHash (Join-Path $fixtureHome 'userdata/statev2.sqlite') -Algorithm SHA256).Hash -eq $databaseHash) 'Relaunch lost the original database' }
         $calls.launcherVariables += $env:T3CODE_FIXTURE_LAUNCHER
         Assert ($RedirectStandardOutput.StartsWith($fixture) -and $RedirectStandardError -and $RedirectStandardInput) 'Desktop output was not captured locally'
         $exited = $case -in @('desktop-exits', 'desktop-handoff') -and $calls.starts -eq 1
@@ -313,12 +400,14 @@ try {
     }
     function Invoke-LocalUpdateWsl {
       param($distro, $arguments, $label, $seconds, $Invoke)
-      $calls.operations += $label
+      if ($label -eq 'validate-prepared') { return @{ verified = $true } }
+    $calls.operations += $label
       if ($label -eq 'health') {
         $calls.health++
+        if ($case -eq 'prestop-retry' -and $calls.health -eq 1) { throw 'health exhausted its WSL deadline' }
         if ($case -eq 'health-transient' -and $calls.health -eq 2) { throw 'One slow wsl call' }
         if ($case -eq 'desktop-exits' -and $calls.starts -eq 1) { $calls.crashedHealth++; return @{ healthy = $false; pid = 123 } }
-        if ($case -like 'swap*' -and $calls.starts -eq 1) { return @{ healthy = $false; pid = 123 } }
+        if (($case -like 'swap*' -or $case -eq 'no-db-rollback') -and $calls.starts -eq 1) { return @{ healthy = $false; pid = 123 } }
         return @{ healthy = ($case -notin @('runtime-recovery', 'runtime-recovery-late-exit') -or $calls.health -eq 1 -or $calls.starts -gt 0); pid = 123; environmentId = 'fixture' }
       }
       if ($label -eq 'stopped' -and ($case -in @('stopped-throws', 'recovering-save-fails') -or ($case.StartsWith('swap-') -and $calls.starts -gt 0))) { throw (New-LocalUpdateError "WSL distribution 'fixture' is unresponsive; refusing runtime operations. No probe answered.") }
@@ -326,6 +415,14 @@ try {
       if ($label -eq 'notify') {
         $calls.notify = $arguments[-1]
         if ($case -eq 'stopped-transient') { throw 'notify exceeded 30s' }
+      }
+      if ($label -eq 'backup' -and $case -eq 'no-db-rollback') {
+        $backupConfig = @{ wslHome = $fixtureHome; output = $fixture; wslBackupRoot = (Join-Path $fixture 'wsl-backup'); databaseBackup = $config.databaseBackup; installedReceipt = $config.installedReceipt; installedRuntimeArchive = $config.installedRuntimeArchive }
+        $backupConfigFile = Join-Path $fixture 'backup-worker-config.json'
+        $backupConfig | ConvertTo-Json | Set-Content $backupConfigFile
+        $result = & $NodeExecutable $WorkerPath --worker backup $backupConfigFile | ConvertFrom-Json
+        Assert ($LASTEXITCODE -eq 0) 'Rollback fixture backup worker failed'
+        return $result
       }
       if ($label -eq 'capture-links') { throw 'No links in fixture' }
       return @{ installed = $true; backedUp = $true; stopped = $true; path = 'fixture-wsl-backup' }
@@ -357,7 +454,12 @@ try {
     # A reader left over from a failed launch must not block the recovery relaunch.
     $stdinHolder = $(if ($case -eq 'desktop-exits') { [IO.File]::Open((Join-Path $fixture 'weavewing-desktop-installed.stdin'), 'OpenOrCreate', 'Read', 'Read') })
     try {
-      if ($case -in @('stopped-throws', 'recovering-save-fails', 'close-late-exit') -or $case -like 'swap*' -or $case -in @('desktop-exits', 'runtime-no-desktop', 'runtime-recovery', 'runtime-recovery-late-exit')) { Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' } }
+      if ($case -eq 'prestop-retry') {
+        Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' }
+        Assert ((Get-Content -LiteralPath $configPath -Raw) -ceq $sealedConfig) 'Pre-stop failure changed the sealed configuration; retry would refuse it'
+        Assert ($calls.closed -eq 0 -and $calls.starts -eq 0) 'Pre-stop failure touched the desktop'
+        Invoke-LocalDesktopUpdate $configPath 'Activate'
+      } elseif ($case -in @('no-db-rollback', 'installed-changed', 'stopped-throws', 'recovering-save-fails', 'close-late-exit') -or $case -like 'swap*' -or $case -in @('desktop-exits', 'runtime-no-desktop', 'runtime-recovery', 'runtime-recovery-late-exit')) { Must-Fail { Invoke-LocalDesktopUpdate $configPath 'Activate' } }
       else { Invoke-LocalDesktopUpdate $configPath 'Activate' }
     } finally {
       Set-Item Function:Invoke-LocalUpdateWsl $invokeWsl
@@ -366,9 +468,20 @@ try {
       $env:TMP = $tmp
       if ($stdinHolder) { $stdinHolder.Dispose() }
     }
+    Assert ((Get-Content -LiteralPath $configPath -Raw) -ceq $sealedConfig) 'Activation modified the sealed configuration'
     Assert (@($calls.launcherVariables | Where-Object { $_ -ne 'from launcher' }).Count -eq 0 -and -not $env:T3CODE_FIXTURE_LAUNCHER) 'Desktop launch did not scope the launcher variables to the desktop'
     $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
-    if ($case -eq 'stopped-throws') {
+    if ($case -eq 'no-db-rollback') {
+      Assert ($null -ne $receipt.timeToCloseDesktopMilliseconds -and $null -ne $receipt.desktopDowntimeMilliseconds -and $null -ne $receipt.desktopCloseMilliseconds) 'Receipt lost separate desktop closure and downtime measurements'
+      Assert ($receipt.installed -eq 'previous' -and $receipt.rollbackHealthy -and $calls.starts -eq 2) 'No-DB rollback did not restart the old build'
+      Assert ($receipt.wslBackup.databaseBackup.ran -eq $false -and $receipt.wslBackup.databaseBackup.reason -eq 'migration-set-unchanged') 'No-DB rollback receipt lost backup decision'
+      Assert (-not (Test-Path (Join-Path $receipt.wslBackup.path 'statev2.sqlite'))) 'No-DB rollback had a database copy'
+      Assert ((Get-FileHash (Join-Path $fixtureHome 'userdata/statev2.sqlite') -Algorithm SHA256).Hash -eq $databaseHash) 'No-DB rollback changed the database'
+    } elseif ($case -eq 'prestop-retry') {
+      Assert ($receipt.status -eq 'verified' -and $calls.starts -eq 1) 'Retry after pre-stop failure did not activate successfully'
+    } elseif ($case -eq 'installed-changed') {
+      Assert ($receipt.status -eq 'failed' -and $receipt.error -match 'Installed content changed' -and $calls.starts -eq 0 -and $calls.closed -eq 0 -and $calls.operations.Count -eq 0) 'Changed install reached runtime operations'
+    } elseif ($case -eq 'stopped-throws') {
       Assert ($receipt.status -eq 'failed' -and $calls.starts -eq 1 -and $receipt.rollbackHealthy) 'Stopped probe failure with an older rollback did not relaunch desktop'
       Assert (-not (Test-Path $backupRoot)) 'Failed update left a retry-blocking Windows backup'
       Assert (Test-Path (Join-Path $rollback 'app/previous')) 'Failure removed the existing rollback app'
@@ -440,7 +553,7 @@ try {
     }
     Write-Host "PASS case: activation-$case"
   }
-  $fixture = Join-Path $root 'check-only-runtime'
+  $fixture = Join-Path $root 'prepare-only-runtime'
   $install = Join-Path $fixture 'installed'
   $resources = Join-Path $install 'resources'
   New-Item -ItemType Directory -Path $resources | Out-Null
@@ -451,30 +564,31 @@ try {
   Set-Content $archive 'new-archive'
   Copy-Item (Join-Path $PSScriptRoot 'stage-windows-desktop.ps1') (Join-Path $fixture 'stage-windows-desktop.ps1')
   $configPath = Join-Path $fixture 'config.json'
-  @{ install = $install; updatePath = 'wsl-only'; archive = $archive; digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant(); checkOnly = $true } | ConvertTo-Json | Set-Content $configPath
+  @{ install = $install; updatePath = 'wsl-only'; archive = $archive; digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content $configPath
   $invokeWsl = (Get-Item Function:Invoke-LocalUpdateWsl).ScriptBlock
   $calls = @{ operations = @() }
   function Invoke-LocalUpdateWsl {
     param($distro, $arguments, $label, $seconds, $Invoke)
+    if ($label -eq 'validate-prepared') { return @{ verified = $true } }
     $calls.operations += $label
     if ($label -eq 'health') { return @{ healthy = $true; pid = 123; environmentId = 'fixture' } }
     if ($label -eq 'install-runtime') { return @{ installed = $true } }
     if ($label -eq 'backup') { return @{ backedUp = $true } }
-    throw "Check-only attempted forbidden operation: $label"
+    throw "Preparation attempted forbidden operation: $label"
   }
-  try { Invoke-LocalDesktopUpdate $configPath 'Activate' }
+  try { Invoke-LocalDesktopUpdate $configPath 'Prepare' }
   finally { Set-Item Function:Invoke-LocalUpdateWsl $invokeWsl }
   $receipt = Get-Content (Join-Path $fixture 'receipt.json') -Raw | ConvertFrom-Json
-  Assert ($receipt.status -eq 'check-only-passed') 'Runtime check-only did not complete'
-  Assert (($calls.operations -join ',') -eq 'health,install-runtime,backup') 'Check-only skipped backup or attempted restart'
-  Write-Host 'PASS case: check-only-runtime'
-  Assert ((Get-Content (Join-Path $resources 'wsl-runtime.tar.gz')) -eq 'old-archive') 'Check-only replaced the installed runtime selection'
+  Assert ($receipt.status -eq 'staged-and-verified') 'Runtime preparation did not complete'
+  Assert ($calls.operations.Count -eq 0) 'Preparation touched the installed runtime or state'
+  Write-Host 'PASS case: prepare-only-runtime'
+  Assert ((Get-Content (Join-Path $resources 'wsl-runtime.tar.gz')) -eq 'old-archive') 'Preparation replaced the installed runtime selection'
 
   $fixtureHome = Join-Path $root 'home'
   $userdata = Join-Path $fixtureHome 'userdata'
   New-Item -ItemType Directory -Path $userdata | Out-Null
   $configPath = Join-Path $root 'backup-config.json'
-  @{ wslHome = $fixtureHome; output = $root; backupRoot = $root; wslBackupRoot = $root; checkOnly = $true } | ConvertTo-Json | Set-Content $configPath
+  @{ wslHome = $fixtureHome; output = $root; backupRoot = $root; wslBackupRoot = $root } | ConvertTo-Json | Set-Content $configPath
   $fixtureScript = Join-Path $root 'backup-fixture.mjs'
   @'
 import { DatabaseSync } from 'node:sqlite';
@@ -514,9 +628,71 @@ lock.close();
   Assert ((Get-Content (Join-Path $backup 'secrets/fixture')) -eq 'secret') 'Secrets missing'
   Assert ((Get-Content (Join-Path $backup 'thread-workspaces/fixture')) -eq 'workspace') 'Workspace missing'
   Assert (-not (Test-Path (Join-Path $backup 'server-owner.sqlite'))) 'Ownership lock entered backup'
+  $installedArchive = Join-Path $root 'installed-runtime.tar.gz'
+  Set-Content $installedArchive 'installed-runtime'
+  $installedReceipt = Join-Path $root 'installed-receipt.json'
+  $installedDigest = (Get-FileHash $installedArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+  foreach ($ledgerCase in @('older-db', 'newer-db', 'renamed-db', 'unreadable-db', 'missing-ledger', 'digest-mismatch', 'missing-receipt', 'receipt-commit-mismatch', 'missing-reader', 'matching-db')) {
+    $ledgerRoot = Join-Path $root $ledgerCase
+    $ledgerHome = Join-Path $ledgerRoot 'home'
+    $ledgerUserdata = Join-Path $ledgerHome 'userdata'
+    New-Item -ItemType Directory -Path $ledgerUserdata -Force | Out-Null
+    & $NodeExecutable $ledgerScript (Join-Path $ledgerUserdata 'statev2.sqlite') $WorkerPath $ledgerCase
+    Assert ($LASTEXITCODE -eq 0) 'Ledger fixture setup failed'
+    $ledgerDatabaseHash = (Get-FileHash (Join-Path $ledgerUserdata 'statev2.sqlite') -Algorithm SHA256).Hash
+    @{ commit = $(if ($ledgerCase -eq 'receipt-commit-mismatch') { 'other-commit' } else { 'installed-commit' }); digest = $(if ($ledgerCase -eq 'digest-mismatch') { 'wrong' } else { $installedDigest }) } | ConvertTo-Json | Set-Content $installedReceipt
+    if ($ledgerCase -eq 'missing-receipt') { Remove-Item $installedReceipt }
+    $ledgerConfig = @{ wslHome = $ledgerHome; output = $root; wslBackupRoot = $ledgerRoot; installedReceipt = $installedReceipt; installedRuntimeArchive = $installedArchive; databaseBackup = @{ required = $false; reason = 'migration-set-unchanged'; installedCommit = 'installed-commit' } }
+    $ledgerConfig | ConvertTo-Json -Depth 5 | Set-Content $configPath
+    $ledgerWorker = $WorkerPath
+    if ($ledgerCase -eq 'missing-reader') {
+      $ledgerWorker = Join-Path $ledgerRoot 'worker.mjs'
+      Copy-Item $WorkerPath $ledgerWorker
+    }
+    try {
+      $ErrorActionPreference = 'Continue'
+      & $NodeExecutable $ledgerWorker --worker backup $configPath 2> (Join-Path $ledgerRoot 'backup.stderr') | Set-Content (Join-Path $ledgerRoot 'result.json')
+      $ledgerCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
+    Assert ((Get-FileHash (Join-Path $ledgerUserdata 'statev2.sqlite') -Algorithm SHA256).Hash -eq $ledgerDatabaseHash) 'Migration probe modified the live database'
+    if ($ledgerCase -eq 'unreadable-db') {
+      Assert ($ledgerCode -ne 0 -and -not (Test-Path (Join-Path $ledgerRoot 'backup-wsl'))) 'Unreadable database did not fail safely'
+      Write-Host "PASS case: live-ledger-$ledgerCase"
+      continue
+    }
+    Assert ($ledgerCode -eq 0) "Ledger backup failed: $ledgerCase"
+    $ledgerResult = Get-Content (Join-Path $ledgerRoot 'result.json') -Raw | ConvertFrom-Json
+    $shouldCopy = $ledgerCase -ne 'matching-db'
+    Assert ($ledgerResult.databaseBackup.ran -eq $shouldCopy) "Unsafe database-copy decision: $ledgerCase"
+    $expectedReason = switch ($ledgerCase) {
+      { $_ -in @('digest-mismatch', 'missing-receipt', 'receipt-commit-mismatch') } { 'installed-runtime-unverified' }
+      'missing-reader' { 'database-migrations-unavailable' }
+      'matching-db' { 'migration-set-unchanged' }
+      default { 'database-migrations-differ' }
+    }
+    Assert ($ledgerResult.databaseBackup.reason -eq $expectedReason) "Wrong database-copy reason: $ledgerCase"
+    Assert ((Test-Path (Join-Path $ledgerRoot 'backup-wsl/statev2.sqlite')) -eq $shouldCopy) "Database snapshot disagrees with receipt: $ledgerCase"
+    Write-Host "PASS case: live-ledger-$ledgerCase"
+  }
+  & $NodeExecutable $ledgerScript (Join-Path $userdata 'ledger.sqlite') $WorkerPath 'matching-db'
+  Assert ($LASTEXITCODE -eq 0) 'Skip fixture setup failed'
+  Move-Item (Join-Path $userdata 'ledger.sqlite') (Join-Path $userdata 'statev2.sqlite') -Force
+  @{ commit = 'installed-commit'; digest = $installedDigest } | ConvertTo-Json | Set-Content $installedReceipt
+  $skipRoot = Join-Path $root 'skip-state'
+  New-Item -ItemType Directory -Path $skipRoot | Out-Null
+  @{ wslHome = $fixtureHome; output = $root; wslBackupRoot = $skipRoot; backupTimeoutMs = 0; installedReceipt = $installedReceipt; installedRuntimeArchive = $installedArchive; databaseBackup = @{ required = $false; reason = 'migration-set-unchanged'; installedCommit = 'installed-commit' } } | ConvertTo-Json | Set-Content $configPath
+  & $NodeExecutable $WorkerPath --worker backup $configPath | Set-Content (Join-Path $root 'skip-result.json')
+  Assert ($LASTEXITCODE -eq 0) 'No-migration backup attempted a database snapshot'
+  $skipResult = Get-Content (Join-Path $root 'skip-result.json') -Raw | ConvertFrom-Json
+  Assert (-not $skipResult.databaseBackup.ran -and $skipResult.databaseBackup.reason -eq 'migration-set-unchanged') 'Skipped database backup lost its reason'
+  Assert (-not (Test-Path (Join-Path $skipRoot 'backup-wsl/statev2.sqlite'))) 'No-migration backup copied the database'
+  foreach ($file in @('settings.json', 'secrets/fixture', 'thread-workspaces/fixture')) {
+    Assert (Test-Path (Join-Path $skipRoot ('backup-wsl/' + $file))) "Small state missing without DB backup: $file"
+  }
+  Write-Host 'PASS case: no-migration-small-state-backup'
   $failureRoot = Join-Path $root 'failure'
   New-Item -ItemType Directory -Path $failureRoot | Out-Null
-  @{ wslHome = $fixtureHome; output = $root; backupRoot = $failureRoot; wslBackupRoot = $failureRoot; checkOnly = $true; backupTimeoutMs = 0 } | ConvertTo-Json | Set-Content $configPath
+  @{ wslHome = $fixtureHome; output = $root; backupRoot = $failureRoot; wslBackupRoot = $failureRoot; backupTimeoutMs = 0 } | ConvertTo-Json | Set-Content $configPath
   try {
     $ErrorActionPreference = 'Continue'
     & $NodeExecutable $WorkerPath --worker backup $configPath 2> (Join-Path $root 'timeout.stderr')
@@ -530,5 +706,5 @@ lock.close();
     Assert (-not (Get-Process -Id $record.pid -ErrorAction SilentlyContinue)) 'Snapshot helper remained running after completion or timeout'
   }
   Assert (Test-Path (Join-Path $userdata 'statev2.sqlite')) 'Timeout removed source state'
-  'PASS: runtime selection rollback, responsiveness guard, runtime check-only, early failure receipts, bounded link checks, swap and rollback, refused close, read-only snapshot excluding ownership lock, timeout cleanup and captured helper exit'
+  'PASS: runtime selection rollback, responsiveness guard, runtime prepare-only, early failure receipts, bounded link checks, swap and rollback, refused close, read-only snapshot excluding ownership lock, timeout cleanup and captured helper exit'
 } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }

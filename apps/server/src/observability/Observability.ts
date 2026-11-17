@@ -17,9 +17,11 @@ import * as ResourceAttribution from "../resourceTelemetry/ResourceAttribution.t
 import * as ServerLogger from "../serverLogger.ts";
 import * as BrowserTraceCollector from "./BrowserTraceCollector.ts";
 import * as HeapAttribution from "./HeapAttribution.ts";
+import { recordStartupTiming } from "../startupTiming.ts";
 
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
+    recordStartupTiming("tracing.start");
     const config = yield* ServerConfig.ServerConfig;
 
     const traces = config.otlpTracesExport;

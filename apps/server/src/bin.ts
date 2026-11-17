@@ -4,6 +4,8 @@ import * as NodeSea from "node:sea";
 import * as NodeURL from "node:url";
 
 import { isEntrypoint } from "./entrypoint.ts";
+import { enableCliCompileCache } from "./cliCompileCache.ts";
+import { recordStartupTiming } from "./startupTiming.ts";
 
 // Loads the CLI outside the launcher's module graph. Packaged builds embed it as a raw asset.
 async function loadCliMain(): Promise<typeof import("./binMain.ts")> {
@@ -54,7 +56,9 @@ if (
   if (launcher !== undefined && launcherOptions !== undefined) {
     await launcher.runServiceLauncherCli(launcherOptions);
   } else {
+    enableCliCompileCache();
     const { runCliCommand } = await loadCliMain();
+    recordStartupTiming("cli.loaded");
     await runCliCommand();
   }
 }

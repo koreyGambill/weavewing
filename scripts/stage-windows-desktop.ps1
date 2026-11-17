@@ -1,4 +1,4 @@
-param([string]$Source, [string]$InstallDirectory, [switch]$CheckOnly)
+param([string]$Source, [string]$InstallDirectory, [switch]$CheckOnly, [string]$CandidateDirectory)
 $ErrorActionPreference = 'Stop'
 
 function Get-StageFreeBytes($directory) {
@@ -11,7 +11,7 @@ function Assert-StageContent($entries) {
   }
 }
 
-function Stage-WindowsDesktop([string]$source, [string]$install, [switch]$CheckOnly) {
+function Stage-WindowsDesktop([string]$source, [string]$install, [switch]$CheckOnly, [string]$CandidateDirectory) {
   if (-not $source -or -not $install) { throw 'Supply Source and InstallDirectory.' }
   $source = (Get-Item -LiteralPath $source).FullName.TrimEnd('\')
   $install = (Get-Item -LiteralPath $install).FullName.TrimEnd('\')
@@ -19,6 +19,10 @@ function Stage-WindowsDesktop([string]$source, [string]$install, [switch]$CheckO
   if ($install -notmatch '^[A-Za-z]:\\') { throw 'InstallDirectory must be on a local Windows drive.' }
   $parent = Split-Path $install
   $candidate = Join-Path $parent ('.' + (Split-Path $install -Leaf) + '-candidate')
+  if ($CandidateDirectory) {
+    if ((Split-Path $CandidateDirectory) -ne $parent -or (Split-Path $CandidateDirectory -Leaf) -notmatch ('^\.' + [regex]::Escape((Split-Path $install -Leaf)) + '-prepared-[0-9a-f]{16}$')) { throw 'CandidateDirectory must be a prepared sibling slot.' }
+    $candidate = $CandidateDirectory
+  }
   foreach ($path in @($install, $candidate)) {
     if (-not $CheckOnly -and ($source -eq $path -or $source.StartsWith($path + '\', [StringComparison]::OrdinalIgnoreCase) -or $path.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase))) {
       throw 'Source must be separate from installation and candidate.'
@@ -65,4 +69,4 @@ function Stage-WindowsDesktop([string]$source, [string]$install, [switch]$CheckO
   $payload
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Stage-WindowsDesktop $Source $InstallDirectory -CheckOnly:$CheckOnly }
+if ($MyInvocation.InvocationName -ne '.') { Stage-WindowsDesktop $Source $InstallDirectory -CheckOnly:$CheckOnly -CandidateDirectory $CandidateDirectory }
