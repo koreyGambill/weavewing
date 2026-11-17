@@ -48,8 +48,8 @@ const offeredRelease = async (
     );
     if (
       manifest &&
-      ((manifest[1]!.includes("-nightly.") && !path.endsWith("/nightly.yml")) ||
-        (!manifest[1]!.includes("-nightly.") && !path.endsWith("/latest.yml")))
+      ((manifest[1]!.includes("-nightly.") && !(path ?? "").endsWith("/nightly.yml")) ||
+        (!manifest[1]!.includes("-nightly.") && !(path ?? "").endsWith("/latest.yml")))
     )
       throw new Error("Wrong channel manifest");
     if (manifest) return `version: ${manifest[1]}\npath: T3-Code.exe\nsha512: abc\n`;
