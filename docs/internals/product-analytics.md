@@ -137,9 +137,10 @@ repeating the call's outcome and duration, so event counts are not call counts.
 
 ## Delivery
 
-The server sends batches to the ingest endpoint at `ingest.t3.codes`, which archives
-every event and forwards some of them to PostHog. A send can fail after the endpoint
-has stored the batch, so every retry is a copy.
+Weavewing builds send nothing: the server installs a no-op analytics layer, and the
+ingest key, host and enabled default are empty or off. Upstream T3 Code sends batches to
+an ingest endpoint that archives every event and forwards some of them to PostHog. A send
+can fail after the endpoint has stored the batch, so every retry is a copy.
 [Delivery](../../apps/server/src/telemetry/AnalyticsService.ts) gives each event a
 uuid when it is recorded (the endpoint rejects events without one), backs off after
 a failed send, and drops a batch after a few tries. Without these limits, one stuck

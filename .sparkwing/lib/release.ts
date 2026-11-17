@@ -53,8 +53,9 @@ mkdir -p "$HOME/weavewing-release"
 for old in "$HOME"/weavewing-release/run-*; do
   test -d "$old" || continue
   test "$old" != "$HOME/weavewing-release/${runId}" || continue
-  if test -f "$old/signing.keychain-db"; then security delete-keychain "$old/signing.keychain-db"; fi
-  rm -rf "$old"
+  hdiutil info | awk -v dir="$old/" '$1 == "image-path" && index($3, dir) == 1 { mounted = 1 } mounted && $1 ~ /^\/dev\// && $NF ~ /^\/Volumes\// { print $1; mounted = 0 }' | while read -r dev; do hdiutil detach "$dev" -force >/dev/null 2>&1 || true; done
+  if test -f "$old/signing.keychain-db"; then security delete-keychain "$old/signing.keychain-db" || echo "warning: could not delete $old/signing.keychain-db" >&2; fi
+  rm -rf "$old" || echo "warning: could not remove $old" >&2
 done
 mkdir -p "$HOME/weavewing-release/${runId}/source" "$HOME/weavewing-release/${runId}/assets" "$HOME/weavewing-release/${runId}/tmp"`;
 }
@@ -190,7 +191,11 @@ export function assertCleanBundle(root: string) {
       for (const match of text.matchAll(/\b(?:tracesUrl|tracesDataset|tracesToken)["'`]?\s*[:=]\s*/g))
         if (/(["'`])[^"'`]+\1/.test(initializer(text, match.index + match[0].length)))
           throw new Error(`Non-empty tracing default in ${dir}/${relative}`);
-      if (/["'`]T3CODE_TELEMETRY_ENABLED["'`]\s*\)\s*\.pipe\(\s*[\w$.]+\(\s*(?:true|!0)\s*\)/.test(text))
+      if (
+        /["'`]T3CODE_TELEMETRY_ENABLED["'`]\s*\)\s*\.pipe\(\s*[\w$.]+\(\s*(?:true|!0)\s*\)/.test(text) ||
+        /["'`]T3CODE_TELEMETRY_ENABLED["'`]\s*\)\s*,\s*(?:true|!0)\s*\)/.test(text) ||
+        /\bT3CODE_TELEMETRY_ENABLED["'`]?\]?\s*(?:\?\?|\|\|)\s*(?:true|!0|["'`]true["'`])/.test(text)
+      )
         throw new Error(`Telemetry enabled by default in ${dir}/${relative}`);
       if (/(?:analyticsEnabled|posthogEnabled)\s*[:=]\s*(?:true|!0)\b/.test(text))
         throw new Error(`Analytics enabled by default in ${dir}/${relative}`);
