@@ -1640,7 +1640,7 @@ export default function ThreadTerminalDrawer({
   const confirmCloseTerminal = (terminalId: string) => {
     if (!canOperateTerminal) return;
     const label = terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId);
-    void confirmTerminalClose([label]).then((confirmed) => {
+    void confirmTerminalClose(threadRef, [{ terminalId, label }]).then((confirmed) => {
       if (confirmed && readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)) {
         onCloseTerminal(terminalId, threadRef);
       }

@@ -276,7 +276,18 @@ export const OpenCodeDriver: ProviderDriver<
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const digest = yield* Digest.Digest;
     const host = yield* ProviderHost.ProviderHost;
-    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    const processEnv = yield* mergeProviderInstanceEnvironment(
+      environment,
+      process.env,
+      "opencode",
+      "turn",
+    );
+    const probeEnvironment = yield* mergeProviderInstanceEnvironment(
+      environment,
+      process.env,
+      "opencode",
+      "probe",
+    );
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
       instanceId,
@@ -301,7 +312,7 @@ export const OpenCodeDriver: ProviderDriver<
         Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
       );
     const runtimeProbe = yield* makeOpenCodeRuntimeProbe(
-      probeRuntime(providerProbeEnvironment(processEnv)),
+      probeRuntime(providerProbeEnvironment(probeEnvironment)),
     );
     // A mise shim cannot install OpenCode offline; a session or text generation the user started
     // may, so without a cached result it probes once online and caches what mise installed.
@@ -329,7 +340,7 @@ export const OpenCodeDriver: ProviderDriver<
             ? Effect.succeed(noUpdate)
             : resolveProviderMaintenanceCapabilitiesEffect(openCodeUpdateFor(generation.value), {
                 binaryPath: effectiveConfig.binaryPath,
-                env: processEnv,
+                env: probeEnvironment,
               }),
         ),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -341,7 +352,7 @@ export const OpenCodeDriver: ProviderDriver<
         isLocalOpenCodeServerUrl(effectiveConfig.serverUrl)
           ? probeOpenCodeBinary(
               effectiveConfig.binaryPath,
-              providerProbeEnvironment(processEnv),
+              providerProbeEnvironment(probeEnvironment),
             ).pipe(
               Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
               Effect.catch(() => runtimeProbe.get),
@@ -376,19 +387,28 @@ export const OpenCodeDriver: ProviderDriver<
           }),
       ),
     );
-    const openCode2Server = yield* OpenCode2Server.make({
-      binaryPath: effectiveConfig.binaryPath,
-      serverUrl: effectiveConfig.serverUrl,
-      serverPassword: effectiveConfig.serverPassword,
-      directory: host.paths.cwd,
-      environment: processEnv,
-    }).pipe(
-      Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
-      Effect.provideService(
-        OpenCode2Client.OpenCode2Client,
-        yield* OpenCode2Client.make.pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
-      ),
-    );
+    // Discovery must not lend a process with probe-only settings to a turn.
+    const makeServer = Effect.fn("OpenCodeDriver.makeServer")(function* (
+      environment: NodeJS.ProcessEnv,
+    ) {
+      return yield* OpenCode2Server.make({
+        binaryPath: effectiveConfig.binaryPath,
+        serverUrl: effectiveConfig.serverUrl,
+        serverPassword: effectiveConfig.serverPassword,
+        directory: host.paths.cwd,
+        environment,
+      }).pipe(
+        Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
+        Effect.provideService(
+          OpenCode2Client.OpenCode2Client,
+          yield* OpenCode2Client.make.pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+          ),
+        ),
+      );
+    });
+    const openCode2Server = yield* makeServer(processEnv);
+    const probeServer = yield* makeServer(probeEnvironment);
     const orchestrationAdapter = selectOpenCodeRuntimeAdapter({
       probe: runtimeProbe,
       resolve: resolveRuntime,
@@ -398,11 +418,11 @@ export const OpenCodeDriver: ProviderDriver<
       ),
     });
     const loadOpenCode2Models = yield* makeOpenCode2ModelLoader(
-      openCode2Server.withConnection(({ client }) => loadOpenCode2Catalog(client, host.paths.cwd)),
+      probeServer.withConnection(({ client }) => loadOpenCode2Catalog(client, host.paths.cwd)),
       processEnv,
     );
     const listOpenCode2Workspace = (cwd: string) =>
-      openCode2Server.withConnection(({ client, events }) =>
+      probeServer.withConnection(({ client, events }) =>
         Effect.gen(function* () {
           // OpenCode names a location by its resolved path (no trailing slash or `..`).
           const directory = pathService.resolve(cwd);
@@ -451,12 +471,18 @@ export const OpenCodeDriver: ProviderDriver<
       binaryPath: effectiveConfig.binaryPath,
       directory: host.paths.cwd,
       ...(effectiveConfig.serverPassword ? { serverPassword: effectiveConfig.serverPassword } : {}),
+      environment: probeEnvironment,
+    });
+    const textGenerationServer = yield* OpenCodeServerOwner.make({
+      binaryPath: effectiveConfig.binaryPath,
+      directory: host.paths.cwd,
+      ...(effectiveConfig.serverPassword ? { serverPassword: effectiveConfig.serverPassword } : {}),
       environment: processEnv,
     });
     const textGeneration = selectOpenCodeRuntimeTextGeneration(
       resolveRuntime,
       yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
-        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, textGenerationServer),
       ),
       yield* OpenCode2TextGeneration.make().pipe(
         Effect.provideService(OpenCode2Server.OpenCode2Server, openCode2Server),
@@ -479,7 +505,7 @@ export const OpenCodeDriver: ProviderDriver<
       const runtime = yield* runtimeProbe.get;
       if (runtime.generation === "v1" || runtime.version === unsupportedUsageVersion)
         return yield* legacyUsageLimits;
-      const limits = yield* openCode2Server.withConnection((connection) =>
+      const limits = yield* probeServer.withConnection((connection) =>
         connection.usageLimits(host.paths.cwd),
       );
       if (limits === undefined) unsupportedUsageVersion = runtime.version;
@@ -509,7 +535,7 @@ export const OpenCodeDriver: ProviderDriver<
           effectiveConfig.enabled && isLocalOpenCodeServerUrl(effectiveConfig.serverUrl)
             ? probeOpenCodeBinary(
                 effectiveConfig.binaryPath,
-                providerProbeEnvironment(processEnv),
+                providerProbeEnvironment(probeEnvironment),
               ).pipe(
                 Effect.map((probed) => probed.version),
                 Effect.orElseSucceed(() => undefined),
@@ -520,7 +546,7 @@ export const OpenCodeDriver: ProviderDriver<
           host.paths.cwd,
           runtimeProbe.refresh,
           loadOpenCode2Models,
-          processEnv,
+          probeEnvironment,
         ).pipe(
           Effect.annotateLogs({ providerInstanceId: instanceId }),
           Effect.annotateSpans({ providerInstanceId: instanceId }),
@@ -590,7 +616,7 @@ export const OpenCodeDriver: ProviderDriver<
                 ...(effectiveConfig.serverPassword
                   ? { serverPassword: effectiveConfig.serverPassword }
                   : {}),
-                environment: processEnv,
+                environment: probeEnvironment,
               });
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
@@ -620,9 +646,9 @@ export const OpenCodeDriver: ProviderDriver<
         ? replaceOutdatedService({
             binaryPath: effectiveConfig.binaryPath,
             serverUrl,
-            environment: processEnv,
+            environment: probeEnvironment,
           }).pipe(
-            Effect.ensuring(openCode2Server.forget),
+            Effect.ensuring(Effect.all([openCode2Server.forget, probeServer.forget])),
             Effect.mapError(
               (cause) =>
                 new ProviderDriverError({
@@ -710,7 +736,7 @@ export const OpenCodeDriver: ProviderDriver<
                       snapshot.getSnapshot,
                       // A project's opencode.jsonc can define its own providers.
                       readSettledOpenCode2Catalog(
-                        openCode2Server.withConnection(({ client }) =>
+                        probeServer.withConnection(({ client }) =>
                           loadOpenCode2DirectoryCatalog(client, cwd),
                         ),
                         processEnv,
@@ -780,7 +806,9 @@ export const OpenCodeDriver: ProviderDriver<
                 }),
               ),
             ),
-      invalidateCaches: openCode2Server.forget,
+      invalidateCaches: Effect.all([openCode2Server.forget, probeServer.forget]).pipe(
+        Effect.asVoid,
+      ),
       afterUpdate,
       orchestrationAdapter,
       textGeneration,

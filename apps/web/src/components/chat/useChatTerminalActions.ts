@@ -481,9 +481,9 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     focusActiveDrawerTerminal(activeThreadRef);
   };
   const requestCloseTerminal = (terminalId: string) => {
-    if (!hasTerminalWriteAccess()) return;
+    if (!hasTerminalWriteAccess() || !activeThreadRef) return;
     const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
-    void confirmTerminalClose([label]).then((confirmed) => {
+    void confirmTerminalClose(activeThreadRef, [{ terminalId, label }]).then((confirmed) => {
       if (confirmed && readEnvironmentScope(environmentId, AuthTerminalOperateScope)) {
         closeTerminal(terminalId);
       }
@@ -491,9 +491,9 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
   };
   const requestCloseTerminalStable = useStableCallback(requestCloseTerminal);
   const requestClosePanelTerminal = (terminalId: string) => {
-    if (!hasTerminalWriteAccess()) return;
+    if (!hasTerminalWriteAccess() || !activeThreadRef) return;
     const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
-    void confirmTerminalClose([label]).then((confirmed) => {
+    void confirmTerminalClose(activeThreadRef, [{ terminalId, label }]).then((confirmed) => {
       if (confirmed && readEnvironmentScope(environmentId, AuthTerminalOperateScope)) {
         closePanelTerminal(terminalId);
       }

@@ -140,7 +140,12 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv, Path.Path> 
     const path = yield* Path.Path;
     const host = yield* ProviderHost.ProviderHost;
     const { cwd } = host.paths;
-    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    const processEnv = yield* mergeProviderInstanceEnvironment(
+      environment,
+      process.env,
+      "grok",
+      "probe",
+    );
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
       instanceId,
@@ -181,7 +186,10 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv, Path.Path> 
           }),
       ),
     );
-    const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
+    const textGeneration = yield* makeGrokTextGeneration(
+      effectiveConfig,
+      yield* mergeProviderInstanceEnvironment(environment, process.env, "grok", "turn"),
+    );
 
     const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv, cwd).pipe(
       Effect.filterOrElse(

@@ -137,7 +137,7 @@ export const museUsageReader: ProviderUsageReader<
     const binaryPath = expandHomePath(config?.binaryPath ?? "muse", home);
     const museHome = yield* usageHome.resolve({
       binaryPath,
-      environment: makeMuseEnvironment(processEnvironment),
+      environment: makeMuseEnvironment(processEnvironment, "probe"),
       awaitRefresh,
     });
     if (Option.isNone(museHome)) return [{ dir: binaryPath, refreshing: true }];

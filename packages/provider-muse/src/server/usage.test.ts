@@ -225,7 +225,7 @@ describe("Muse history discovery", () => {
           environment: {
             PATH: "/host/bin",
             XDG_DATA_HOME: xdg ?? "/host/data",
-            MUSE_NO_AUTO_UPDATE: "1",
+            MUSE_NO_AUTO_UPDATE: "0",
           },
           readOnly: true,
           startupTimeoutMs: 5_000,

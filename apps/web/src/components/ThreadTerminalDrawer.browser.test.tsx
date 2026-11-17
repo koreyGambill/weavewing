@@ -147,6 +147,13 @@ vi.mock("../state/terminalSessions", async () => {
     });
   };
   return {
+    knownTerminalSessionsAtom: (environmentId: EnvironmentId, threadId: ThreadId) =>
+      Atom.make((get) => [
+        {
+          target: { environmentId, threadId, terminalId: "term-1" },
+          state: get(session(environmentId, threadId)),
+        },
+      ]),
     attachedTerminalSessionAtom: (environmentId: EnvironmentId, terminal: { threadId: ThreadId }) =>
       session(environmentId, terminal.threadId),
   };

@@ -98,7 +98,12 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv, Path.Path> = {
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const host = yield* ProviderHost.ProviderHost;
     const { cwd } = host.paths;
-    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    const processEnv = yield* mergeProviderInstanceEnvironment(
+      environment,
+      process.env,
+      "pi",
+      "probe",
+    );
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
       instanceId,
@@ -139,7 +144,10 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv, Path.Path> = {
           }),
       ),
     );
-    const textGeneration = yield* makePiTextGeneration(effectiveConfig, processEnv);
+    const textGeneration = yield* makePiTextGeneration(
+      effectiveConfig,
+      yield* mergeProviderInstanceEnvironment(environment, process.env, "pi", "turn"),
+    );
 
     const checkProvider = checkPiProviderStatus(effectiveConfig, processEnv, cwd).pipe(
       Effect.map(stampIdentity),

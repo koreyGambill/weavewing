@@ -400,8 +400,13 @@ it("resizes, shows tiles beside a maximized one and opens independent area views
   await userEvent.click(screen.getByRole("textbox", { name: "Editor notes" }));
   await userEvent.keyboard("{Control>}{Alt>}f{/Alt}{/Control}");
   expect(layout().maximizedGroupId).toBe(notesChooser.id);
+  const restoreButton = screen
+    .getByRole("button", { name: "Restore tiles", exact: true })
+    .element();
+  restoreButton.focus();
   await userEvent.keyboard("{Escape}");
   expect(layout().maximizedGroupId).toBeNull();
+  await vi.waitFor(() => expect(document.activeElement).not.toBe(restoreButton));
   expect(JSON.stringify(layout().root)).toBe(fullTree);
   expect(document.querySelectorAll("section.workspace-tile-frame")).toHaveLength(3);
 

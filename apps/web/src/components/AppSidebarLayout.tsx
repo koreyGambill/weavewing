@@ -37,6 +37,7 @@ import {
   usePanelAnimationSettings,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
+import { ToolSidebarLayout } from "./ToolSidebar";
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
@@ -78,7 +79,7 @@ import { ThreadToolsHost } from "./threadToolsHost";
 import { SidebarFolderDrop } from "./sidebar/SidebarFolderDrop";
 import { resolveThreadRouteRef } from "../threadRoutes";
 
-const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
+const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "calc(var(--desktop-window-controls-inset, 90px) - 8px)";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -407,6 +408,7 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
       {showSidebar ? (
         <TitlebarControls
           compact
+          expanded={isSidebarVisible}
           onBackdrop={onBackdrop}
           collapser={
             <span className="relative flex">
@@ -537,7 +539,7 @@ export function AppSidebarLayout({
               </Sidebar>
             </>
           ) : null}
-          {children}
+          <ToolSidebarLayout>{children}</ToolSidebarLayout>
           <BackgroundThreadAnnouncer />
           {isElectron ? <HistorySwipeNavigation /> : null}
         </SidebarProvider>

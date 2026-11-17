@@ -9,6 +9,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
 } from "@t3tools/contracts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { BUILT_IN_DRIVERS } from "../provider/builtInDrivers.ts";
@@ -221,6 +222,39 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
       const host = { PATH: "/usr/bin", T3CODE_CODEX_LAUNCH_ARGS: "-c mcp_servers.x.command=sh" };
       assert.deepEqual(providerHostEnvironment(policy.summary, host), { PATH: "/usr/bin" });
       assert.strictEqual(providerHostEnvironment(undefined, host), host);
+    }),
+  );
+
+  it.effect("keeps policy traffic values above vendor defaults", () =>
+    Effect.gen(function* () {
+      const driver = ProviderDriverKind.make("claudeAgent");
+      const policy = yield* ManagedPolicy.fromDocument("/test/policy.json", {
+        schemaVersion: 1,
+        organization: "Example Corp",
+        limits: {
+          providers: {
+            instances: {
+              [driver]: {
+                locked: true,
+                environment: [{ name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", value: "" }],
+              },
+            },
+          },
+        },
+      });
+      const settings = policy.providers.applyLimits({
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: { [ProviderInstanceId.make("claude")]: { driver } },
+      });
+      assert.equal(
+        (yield* mergeProviderInstanceEnvironment(
+          settings.providerInstances[ProviderInstanceId.make("claude")]?.environment,
+          {},
+          driver,
+          "probe",
+        )).CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+        "",
+      );
     }),
   );
 

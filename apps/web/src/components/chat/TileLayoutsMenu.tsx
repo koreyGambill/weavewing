@@ -1,5 +1,6 @@
 import { MAX_SAVED_TILE_GROUPS, type SavedTileLayout } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
+import { LayoutTemplate } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 import { Button } from "../ui/button";
@@ -65,7 +66,10 @@ export function TileLayoutsSubmenu(props: {
   const globalName = api.layouts.find((layout) => layout.id === api.globalDefaultId)?.name;
   return (
     <MenuSub>
-      <MenuSubTrigger>Layouts</MenuSubTrigger>
+      <MenuSubTrigger>
+        <LayoutTemplate />
+        Layouts
+      </MenuSubTrigger>
       <MenuSubPopup>
         <MenuItem onClick={props.onSaveAs}>Save layout as…</MenuItem>
         <MenuSub>
