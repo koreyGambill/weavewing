@@ -281,7 +281,8 @@ export const buildWslRuntimeInstallScript = (
     `  sha256sum "$1/t3" 2>/dev/null | cut -d ' ' -f 1`,
     "}",
     "runtime_entry_stamp() {",
-    `  stat -Lc '%d:%i:%s:%y:%z:%a' "$1/t3"`,
+    // No device number: WSL can reassign the distro disk's /dev/sdX across reboots.
+    `  stat -Lc '%i:%s:%y:%z:%a' "$1/t3"`,
     "}",
     "runtime_is_ready() {",
     '  [ -f "$ready_marker" ] && [ -x "$runtime_root/t3" ] || return 1',
@@ -294,7 +295,8 @@ export const buildWslRuntimeInstallScript = (
     '  if [ "$recorded_stamp" != "$expected_stamp" ]; then',
     '    [ "$recorded_entry_digest" = "$(runtime_server_entry_digest "$runtime_root")" ] &&',
     '      runtime_entry_runs "$runtime_root" 2>/dev/null || return 1',
-    `    printf '%s\\n%s\\n' "$recorded_entry_digest" "$expected_stamp" > "$ready_marker"`,
+    `    printf '%s\\n%s\\n' "$recorded_entry_digest" "$expected_stamp" > "$ready_marker.tmp"`,
+    '    mv -f "$ready_marker.tmp" "$ready_marker"',
     "  fi",
     "}",
     'mkdir -p "$runtime_parent"',
@@ -820,7 +822,7 @@ const toPrepareWslRuntimeResult = (outcome: WslRuntimeInstallOutcome): PrepareWs
       };
 };
 
-// Without drive mounts (`[automount] enabled=false`) wslpath cannot reach the archive, so copy it in over stdin.
+// Copies the runtime archive into the distro over stdin, so install never depends on drive mounts or wslpath.
 const installWslRuntimeFromHostCopy = Effect.fn("desktop.wsl.installRuntimeFromHostCopy")(
   function* (
     distro: string | null,
@@ -835,7 +837,7 @@ const installWslRuntimeFromHostCopy = Effect.fn("desktop.wsl.installRuntimeFromH
     if (stage === null) {
       return {
         ok: false,
-        reason: `wslpath conversion failed for ${archive.windowsPath}, and the distro did not provide a directory to copy the runtime archive into.`,
+        reason: `The distro did not provide a directory to copy the runtime archive ${archive.windowsPath} into.`,
       } as const;
     }
     const linuxArchivePath = `${stage}/runtime.tar.gz`;
