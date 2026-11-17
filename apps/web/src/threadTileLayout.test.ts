@@ -304,7 +304,11 @@ describe("thread tile layout", () => {
     ]);
     expect(layout.focusedGroupId).toBe("chat-below");
     expect(layout.maximizedGroupId).toBeNull();
+    expect(getTileGroups(layout).find((group) => group.id === "panels-group")?.tabs).toEqual(["b"]);
     layout = applyTileAction(layout, { type: "move", tabId: "b", targetGroupId: "chat-below" });
+    expect(getTileGroups(layout).some((group) => group.id === "panels-group")).toBe(false);
+    expect(layout.focusedGroupId).toBe("chat-below");
+    expect(getTileGroups(layout).find((group) => group.id === "chat-below")?.activeTabId).toBe("b");
     expect(getTileGroups(layout).map((group) => group.tabs)).toEqual([
       ["a"],
       [CONVERSATION_TAB_ID, "b"],

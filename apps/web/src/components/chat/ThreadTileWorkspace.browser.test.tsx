@@ -207,7 +207,7 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
   await expect
     .element(screen.getByRole("textbox", { name: "Editor files" }))
     .toHaveValue("unsaved editor contents");
-  await userEvent.click(screen.getByRole("button", { name: "Maximized · Esc to restore" }));
+  await userEvent.click(screen.getByRole("button", { name: "Restore tiles" }));
   expect(layout().maximizedGroupId).toBeNull();
   await expect
     .element(screen.getByRole("textbox", { name: "Conversation draft" }))
@@ -369,9 +369,6 @@ it("resizes, shows tiles beside a maximized one and opens independent area views
   await userEvent.click(screen.getByRole("menuitem", { name: /terminal$/ }));
   expect(layout().besideGroupId).toBe("terminal-group");
   expect(document.querySelectorAll("section.workspace-tile-frame")).toHaveLength(2);
-  await expect
-    .element(screen.getByRole("button", { name: "2 tiles · Esc to restore" }))
-    .toBeVisible();
   await userEvent.keyboard("{Control>}{Alt>}s{/Alt}{/Control}");
   expect([layout().maximizedGroupId, layout().besideGroupId]).toEqual([
     "terminal-group",
