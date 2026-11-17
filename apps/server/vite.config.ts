@@ -144,9 +144,7 @@ export default mergeConfig(
       banner: {
         js:
           "#!/usr/bin/env node\n" +
-          (packBootstrap
-            ? 'globalThis.__t3StartupTimings = [{ phase: "process.entry", at: Date.now() }];\n'
-            : ""),
+          (packBootstrap ? 'performance.mark("t3code.startup.process.entry");\n' : ""),
       },
       define: {
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),

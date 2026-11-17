@@ -1,14 +1,18 @@
-declare global {
-  // The SEA bootstrap and embedded CLI are separate bundles in the same process.
-  var __t3StartupTimings: Array<{ phase: string; at: number }> | undefined;
+const prefix = "t3code.startup.";
+if (performance.getEntriesByName(`${prefix}process.entry`).length === 0) {
+  performance.mark(`${prefix}process.entry`);
 }
 
-const timings = (globalThis.__t3StartupTimings ??= [{ phase: "process.entry", at: Date.now() }]);
-
 export function recordStartupTiming(phase: string): void {
-  timings.push({ phase, at: Date.now() });
+  performance.mark(`${prefix}${phase}`);
 }
 
 export function readStartupTimings() {
-  return [...timings];
+  return performance
+    .getEntriesByType("mark")
+    .filter((entry) => entry.name.startsWith(prefix))
+    .map((entry) => ({
+      phase: entry.name.slice(prefix.length),
+      at: performance.timeOrigin + entry.startTime,
+    }));
 }
