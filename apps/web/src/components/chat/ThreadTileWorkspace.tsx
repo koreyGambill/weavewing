@@ -15,6 +15,7 @@ import {
 } from "react";
 import {
   Columns2,
+  ArrowRightLeft,
   Ellipsis,
   Rows2,
   Maximize2,
@@ -563,7 +564,6 @@ export function ThreadTileWorkspace(props: {
     0,
     areaChoices.findIndex((choice) => !choice.openElsewhere),
   );
-  const restoreZoom = () => apply({ type: "maximize", groupId: null });
   const saveLayoutAs = () => {
     const { root, dropped } = toSavedTileNode(currentLayout());
     setSaveLayout({ dropped, tiles: root ? savedTileGroupCount(root) : 0 });
@@ -947,28 +947,9 @@ export function ThreadTileWorkspace(props: {
           ...(dropTarget.zone === "tabs" ? { height: "var(--tile-titlebar-height)" } : {}),
         }
       : undefined;
-  const zoomLabel = layout.besideGroupId ? "2 tiles" : "Maximized";
-  const zoomAccent = `var(--tile-accent-${groups.find((group) => group.id === maximized)?.colorIndex ?? 0})`;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-thread-tiling>
-      <div className="relative shrink-0">
-        {props.header}
-        {maximized && (
-          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-            <button
-              type="button"
-              className="pointer-events-auto h-6 cursor-pointer rounded-full border px-3 text-xs font-medium text-foreground outline-none [-webkit-app-region:no-drag] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              style={{
-                background: `color-mix(in srgb, ${zoomAccent} 18%, var(--background))`,
-                borderColor: `color-mix(in srgb, ${zoomAccent} 45%, transparent)`,
-              }}
-              onClick={restoreZoom}
-            >
-              {zoomLabel} · Esc to restore
-            </button>
-          </div>
-        )}
-      </div>
+      <div className="relative shrink-0">{props.header}</div>
       <div
         ref={rootRef}
         className="relative isolate min-h-0 min-w-0 flex-1 overflow-hidden bg-border/40"
@@ -1274,6 +1255,38 @@ export function ThreadTileWorkspace(props: {
                     </TooltipPopup>
                   </Tooltip>
                   <MenuPopup align="end">
+                    <MenuItem
+                      onClick={() =>
+                        apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                      }
+                    >
+                      {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                      {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                      <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
+                    </MenuItem>
+                    <MenuItem
+                      disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                      onClick={() => toggleFloat(group)}
+                    >
+                      <PictureInPicture2 />
+                      {group.floating ? "Dock tile" : "Float tile"}
+                      <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
+                    </MenuItem>
+                    <MenuItem onClick={() => split(group, "vertical")}>
+                      <Rows2 />
+                      New tile below
+                      <TileMenuShortcut keys={shortcut("workspace.tile.splitDown")} />
+                    </MenuItem>
+                    <MenuItem onClick={() => split(group, "horizontal")}>
+                      <Columns2 />
+                      New tile to the right
+                      <TileMenuShortcut keys={shortcut("workspace.tile.splitRight")} />
+                    </MenuItem>
+                    <MenuItem onClick={() => openNewTab(id)}>
+                      <Plus />
+                      New tab
+                      <TileMenuShortcut keys={shortcut("workspace.tile.newTab")} />
+                    </MenuItem>
                     {maximized === id && others.length > 0 && (
                       <MenuGroup>
                         <MenuGroupLabel>Show beside…</MenuGroupLabel>
@@ -1294,46 +1307,49 @@ export function ThreadTileWorkspace(props: {
                     )}
                     {layout.besideGroupId && zoomedIds.has(id) && (
                       <MenuItem onClick={() => apply({ type: "swap-beside" })}>
+                        <ArrowRightLeft />
                         Swap sides
                         <TileMenuShortcut keys={shortcut("workspace.tile.swap")} />
                       </MenuItem>
                     )}
-                    <MenuItem
-                      onClick={() =>
-                        apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                      }
-                    >
-                      {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                      <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
-                    </MenuItem>
-                    <MenuItem
-                      disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                      onClick={() => toggleFloat(group)}
-                    >
-                      {group.floating ? "Dock tile" : "Float tile"}
-                      <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
-                    </MenuItem>
-                    <MenuItem onClick={() => openNewTab(id)}>
-                      New tab
-                      <TileMenuShortcut keys={shortcut("workspace.tile.newTab")} />
-                    </MenuItem>
-                    <MenuItem onClick={() => split(group, "horizontal")}>
-                      New tile to the right
-                      <TileMenuShortcut keys={shortcut("workspace.tile.splitRight")} />
-                    </MenuItem>
-                    <MenuItem onClick={() => split(group, "vertical")}>
-                      New tile below
-                      <TileMenuShortcut keys={shortcut("workspace.tile.splitDown")} />
-                    </MenuItem>
+                    <MenuSub>
+                      <MenuSubTrigger disabled={others.length === 0}>
+                        <ArrowRightLeft />
+                        Move tab
+                      </MenuSubTrigger>
+                      <MenuSubPopup>
+                        {others.map((entry) => (
+                          <MenuItem
+                            key={entry.id}
+                            onClick={() =>
+                              apply({
+                                type: "move",
+                                tabId: group.activeTabId,
+                                targetGroupId: entry.id,
+                              })
+                            }
+                          >
+                            <span
+                              className="size-2 shrink-0 rounded-full"
+                              style={{ background: `var(--tile-accent-${entry.colorIndex ?? 0})` }}
+                            />
+                            {groups.indexOf(entry) + 1}. {title(entry.activeTabId)}
+                          </MenuItem>
+                        ))}
+                      </MenuSubPopup>
+                    </MenuSub>
                     <MenuSub>
                       <MenuSubTrigger disabled={group.tabs.length < 2}>
+                        <Columns2 />
                         Move tab to new tile
                       </MenuSubTrigger>
                       <MenuSubPopup>
                         <MenuItem onClick={() => moveTabToNewTile(group, "horizontal")}>
+                          <Columns2 />
                           Right
                         </MenuItem>
                         <MenuItem onClick={() => moveTabToNewTile(group, "vertical")}>
+                          <Rows2 />
                           Below
                         </MenuItem>
                       </MenuSubPopup>
@@ -1347,10 +1363,12 @@ export function ThreadTileWorkspace(props: {
                     />
                     <MenuSeparator />
                     <MenuItem disabled={lastBlankTab} onClick={() => closeTab(group.activeTabId)}>
+                      <X />
                       Close tab
                       <TileMenuShortcut keys={shortcut("workspace.tile.closeTab")} />
                     </MenuItem>
                     <MenuItem disabled={groups.length === 1 && blank} onClick={() => closeTile(id)}>
+                      <X />
                       Close tile
                     </MenuItem>
                   </MenuPopup>
