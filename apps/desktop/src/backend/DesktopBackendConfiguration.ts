@@ -666,7 +666,10 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   const runningDistro = preflight._tag === "Ready" ? preflight.runningDistro : null;
   const distroForConfig = runningDistro ?? input.distro;
 
-  const distroIp = yield* wslEnvironment.getDistroIp(distroForConfig);
+  const distroIp =
+    preflight._tag === "Ready"
+      ? yield* wslEnvironment.getDistroIp(distroForConfig)
+      : Option.none<string>();
   const usesSharedNetworkStack = Option.match(distroIp, {
     onNone: () => false,
     onSome: (ip) => isLocalHostIpv4(ip),

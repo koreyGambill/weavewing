@@ -564,6 +564,9 @@ describe("DesktopBackendConfiguration", () => {
           archiveHash: "d".repeat(64),
           forbidFallback: "Transport failures cannot be repaired by extracting server.asar",
           wsl: () => ({
+            getDistroIp: () => {
+              throw new Error("An unavailable runtime must retry without waiting for an IP probe");
+            },
             prepareRuntime: () => ({ ok: true, linuxAppRoot: "/runtime/staged" }),
             probeRuntime: () => ({
               ok: false,
@@ -843,7 +846,8 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(config.bootstrap.tailscaleServeEnabled, false);
         assert.notProperty(config.bootstrap, "desktopTelemetryFd");
         assert.notProperty(config.bootstrap, "resourceMonitorPath");
-        assert.equal(config.httpBaseUrl.href, "http://172.27.0.99:5050/");
+        assert.isTrue(Option.isSome(config.preflightFailure));
+        assert.equal(config.httpBaseUrl.href, "http://127.0.0.1:5050/");
         assert.equal(config.env.OPENAI_API_KEY, "openai-key");
         assert.equal(config.env.ANTHROPIC_API_KEY, "anthropic-key");
         assert.equal(config.env.T3CODE_OTLP_PROTOCOL, "http/protobuf");

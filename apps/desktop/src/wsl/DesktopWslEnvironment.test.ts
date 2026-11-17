@@ -700,6 +700,30 @@ describe("WSL startup probes", () => {
     );
   };
 
+  it.effect("prepares a cached runtime without waiting for Windows path translation", () =>
+    Effect.gen(function* () {
+      const translating = yield* Deferred.make<void>();
+      yield* withProbe(
+        (command) =>
+          ChildProcess.isStandardCommand(command) && command.args.includes("wslpath")
+            ? Deferred.succeed(translating, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.succeed("runtimeRoot:/cached/runtime\n"),
+        Effect.gen(function* () {
+          const wsl = yield* DesktopWslEnvironment;
+          const prepared = yield* Effect.raceFirst(
+            wsl.prepareRuntime("Ubuntu", {
+              windowsPath: "C:\\unavailable\\wsl-runtime.tar.gz",
+              runtimeId: "cached",
+              sha256: "a".repeat(64),
+            }),
+            Deferred.await(translating).pipe(Effect.as(null)),
+          );
+          assert.deepEqual(prepared, { ok: true, linuxAppRoot: "/cached/runtime" });
+        }),
+      );
+    }),
+  );
+
   it.effect("allows a healthy login-shell probe that takes four seconds", () =>
     Effect.gen(function* () {
       const attempts = yield* Queue.unbounded<Deferred.Deferred<void>>();

@@ -928,26 +928,17 @@ const installWslRuntimeFromHostCopy = Effect.fn("desktop.wsl.installRuntimeFromH
 const prepareWslRuntimeImpl = Effect.fn("desktop.wsl.prepareRuntimeImpl")(function* (
   distro: string | null,
   archive: WslRuntimeArchive,
-  windowsToWslPath: (
-    distro: string | null,
-    windowsPath: string,
-  ) => Effect.Effect<Option.Option<string>>,
 ): Effect.fn.Return<
   PrepareWslRuntimeResult,
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 > {
-  const linuxArchivePath = yield* windowsToWslPath(distro, archive.windowsPath);
-  if (Option.isNone(linuxArchivePath)) {
-    const fileSystem = yield* FileSystem.FileSystem;
-    return yield* installWslRuntimeFromHostCopy(
-      distro,
-      archive,
-      fileSystem.stream(archive.windowsPath),
-    );
-  }
-  return toPrepareWslRuntimeResult(
-    yield* runWslRuntimeInstall(distro, archive, linuxArchivePath.value),
+  const fileSystem = yield* FileSystem.FileSystem;
+  // Check the Linux cache before touching Windows mounts, which can stall even for wslpath.
+  return yield* installWslRuntimeFromHostCopy(
+    distro,
+    archive,
+    fileSystem.stream(archive.windowsPath),
   );
 });
 
@@ -1386,7 +1377,7 @@ export const layer = Layer.effect(
       getNetworkingMode,
       prepareRuntime: Effect.fn("desktop.wsl.prepareRuntime")(function (distro, archive) {
         return provideSpawner(
-          prepareWslRuntimeImpl(distro, archive, windowsToWslPath).pipe(
+          prepareWslRuntimeImpl(distro, archive).pipe(
             Effect.provideService(FileSystem.FileSystem, fileSystem),
           ),
         );
