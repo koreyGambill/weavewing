@@ -740,6 +740,7 @@ it.effect("a message the user sends after Stop releases the held queue; an agent
       threadId,
     });
     assert.deepEqual((yield* threadState(threadId)).runs, ["interrupted", "queued:held"]);
+    const held = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
 
     // An agent's message starts on the idle thread, but the hold is the user's.
     yield* agentSend("agent nudge");
@@ -789,18 +790,24 @@ it.effect("a message the user sends after Stop releases the held queue; an agent
       payload: { ...scheduled, status: "completed", completedAt: now },
     });
 
-    // The user is back: the held message follows their run, and a wake that
-    // queues behind it is not held by the old Stop.
     yield* send(threadId, "back", "start_immediately");
     yield* agentSend("task finished");
     assert.deepEqual((yield* threadState(threadId)).runs, [
       "interrupted",
-      "queued",
       "completed",
       "completed",
+      "cancelled",
       "starting",
       "queued",
     ]);
+    const resumed = yield* orchestrator.getThreadProjection(threadId);
+    const leader = resumed.runs.find((run) => run.id === held.id)!;
+    const back = resumed.runs.find(
+      (run) => run.userMessageId === MessageId.make(`message:${threadId}:back`),
+    )!;
+    assert.equal(leader.status, "starting");
+    assert.deepEqual(leader.inputMessageIds, [held.userMessageId, back.userMessageId]);
+    assert.equal(back.mergedIntoRunId, leader.id);
   }).pipe(Effect.provide(layerTest)),
 );
 
@@ -1139,7 +1146,24 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
               : { ...run, queueHeld: true },
         });
       }
-      yield* send(threadId, "restart source", "start_immediately");
+      // A client send would release the held message before queue.resume can start it.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        origin: { kind: "user" as const },
+        commandId: CommandId.make("restart-source"),
+        threadId,
+        messageId: MessageId.make("message:restart-source"),
+        text: "restart source",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "agent",
+        creationSource: "server",
+      });
+      assert.deepEqual((yield* threadState(threadId)).runs, [
+        "completed",
+        "queued:held",
+        "starting",
+      ]);
       const source = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
       yield* projections.apply({
         id: EventId.make("event:stop-resumed-queue:restart-cancelled"),
