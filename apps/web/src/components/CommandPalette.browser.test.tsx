@@ -99,7 +99,7 @@ describe("CommandPalette open intents", () => {
       .toHaveFocus();
   });
 
-  it("highlights the first project when New thread in... opens from the root list", async () => {
+  it("opens the shared project picker from the root list", async () => {
     const environmentId = EnvironmentId.make("local");
     const project = (id: string, title: string): Project => ({
       id: ProjectId.make(id),
@@ -144,6 +144,10 @@ describe("CommandPalette open intents", () => {
     await expect
       .element(page.getByRole("combobox", { name: "Project name or path" }))
       .toHaveFocus();
+    await expect
+      .element(page.getByRole("button", { name: "All machines", exact: true }))
+      .toBeVisible();
+    await userEvent.keyboard("{ArrowDown}");
     await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
     await expect.element(page.getByRole("option").nth(1)).not.toHaveAttribute("data-highlighted");
   });

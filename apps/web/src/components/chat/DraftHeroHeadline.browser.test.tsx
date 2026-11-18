@@ -74,8 +74,8 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   const search = page.getByRole("combobox", { name: "Project name or path" });
   await expect.element(search).toHaveFocus();
   const current = page.getByRole("option").first();
-  await expect.element(current).toHaveTextContent("render");
-  await expect.element(current).toHaveTextContent("Current");
+  await expect.element(current).toHaveTextContent(/render/);
+  await expect.element(current).toHaveTextContent(/Current/);
   await userEvent.type(search, "workspace/alpha");
   await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
   expect(page.getByRole("option").elements()).toHaveLength(1);
@@ -92,7 +92,7 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   );
   openCommandPalette({ open: "new-thread-in" });
   await expect.element(page.getByRole("combobox", { name: "Project name or path" })).toHaveFocus();
-  await expect.element(page.getByRole("option").first()).toHaveTextContent("alpha");
+  await expect.element(page.getByRole("option").first()).toHaveTextContent(/alpha/);
   await expect
     .element(page.getByRole("button", { name: "All machines", exact: true }))
     .toBeVisible();
