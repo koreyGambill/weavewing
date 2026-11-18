@@ -708,7 +708,7 @@ it.effect.each(["agents", "user first", "cancelled", "resumed user", "explicit s
   (scenario) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { started, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
+        const { started, steered, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
           `queued-batch-${scenario}`,
           false,
           scenario === "resumed user" || scenario === "explicit steer",
@@ -782,6 +782,7 @@ it.effect.each(["agents", "user first", "cancelled", "resumed user", "explicit s
               scenario === "explicit steer",
             );
             assert.lengthOf(started, 1);
+            assert.include(steered, "Please go forward now");
             if (scenario === "explicit steer") {
               yield* orchestrator.dispatch({
                 type: "queue.resume",
@@ -870,6 +871,79 @@ it.effect.each(["agents", "user first", "cancelled", "resumed user", "explicit s
     ),
 );
 
+it.effect("combines held human input with an agent send arriving while idle", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { started, layer, startFirstTurn } = yield* nextTurnSelectionHarness("idle-held-input");
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const sink = yield* EventSink.EventSinkV2;
+        const threadId = yield* startFirstTurn;
+        for (const text of ["human one", "human two"]) {
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(text),
+            threadId,
+            messageId: MessageId.make(`message:${text}`),
+            text,
+            origin: { kind: "user" },
+            attachments: [],
+            modelSelection: runSelection,
+            dispatchMode: { type: "queue_after_active" },
+            createdBy: "user",
+            creationSource: "web",
+          });
+        }
+        const before = yield* orchestrator.getThreadProjection(threadId);
+        const now = yield* DateTime.now;
+        yield* sink.write({
+          events: before.runs.map((run) => ({
+            id: EventId.make(`event:idle-held:${run.id}`),
+            type: "run.updated" as const,
+            threadId,
+            occurredAt: now,
+            payload:
+              run.status === "queued"
+                ? { ...run, queueHeld: true }
+                : { ...run, status: "interrupted" as const, completedAt: now },
+          })),
+        });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("agent-report"),
+          threadId,
+          messageId: MessageId.make("message:agent-report"),
+          text: "agent report",
+          origin: {
+            kind: "thread",
+            threadId: ThreadId.make("thread:lane"),
+            environmentId: EnvironmentId.make("environment:lanes"),
+            title: "Lane",
+            event: "message",
+            reply: "expected",
+          },
+          attachments: [],
+          modelSelection: runSelection,
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+        yield* worker.drain();
+        const after = yield* orchestrator.getThreadProjection(threadId);
+        assert.lengthOf(started, 2);
+        const input = started[1]!.message.text;
+        assert.include(input, "human one");
+        assert.isAbove(input.indexOf("human two"), input.indexOf("human one"));
+        assert.isAbove(input.indexOf("agent report"), input.indexOf("human two"));
+        assert.include(input, 'reply="expected"');
+        assert.isFalse(after.runs.some((run) => run.status === "queued"));
+        assert.lengthOf(after.runs.find((run) => run.status === "running")!.inputMessageIds!, 3);
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);
+
 it.effect("starts queue-after-active input immediately in an idle thread", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -925,6 +999,8 @@ it.effect.each([
   "command",
   "worktree",
   "native continuation",
+  "text cap",
+  "run cap",
 ] as const)("keeps queued messages separate across a %s boundary", (boundary) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -938,7 +1014,13 @@ it.effect.each([
         const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
         const sink = yield* EventSink.EventSinkV2;
         const threadId = yield* startFirstTurn;
-        for (const [index, text] of ["one", "boundary", "three"].entries()) {
+        const texts =
+          boundary === "run cap"
+            ? Array.from({ length: 22 }, (_, index) => `input ${index}`)
+            : boundary === "text cap"
+              ? ["é".repeat(30_000), "é".repeat(30_000), "three"]
+              : ["one", "boundary", "three"];
+        for (const [index, text] of texts.entries()) {
           yield* orchestrator.dispatch({
             type: "message.dispatch",
             origin: { kind: "user" },
@@ -1004,12 +1086,37 @@ it.effect.each([
         yield* orchestrator.resumeQueuedRuns;
         yield* worker.drain();
         const after = yield* orchestrator.getThreadProjection(threadId);
+        assert.lengthOf(started, 2);
+        const batchSize = boundary === "run cap" ? 20 : 1;
+        const running = after.runs.find((run) => run.status === "running")!;
+        assert.equal(running.inputMessageIds?.length ?? 1, batchSize);
+        assert.include(started[1]!.message.text, texts[0]!);
         assert.deepEqual(
-          started.map((turn) => turn.message.text),
-          ["first", "one"],
+          after.runs.filter((run) => run.status === "queued").map((run) => run.id),
+          queued.slice(batchSize).map((run) => run.id),
         );
-        assert.equal(after.runs.find((run) => run.id === queued[1]!.id)?.status, "queued");
-        assert.equal(after.runs.find((run) => run.id === queued[2]!.id)?.status, "queued");
+        if (boundary === "text cap" || boundary === "run cap") {
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("event:capped-batch-completed"),
+                type: "run.updated",
+                threadId,
+                occurredAt: now,
+                payload: { ...running, status: "completed", completedAt: now },
+              },
+            ],
+          });
+          yield* orchestrator.resumeQueuedRuns;
+          yield* worker.drain();
+          const remaining = yield* orchestrator.getThreadProjection(threadId);
+          assert.lengthOf(started, 3);
+          assert.isFalse(remaining.runs.some((run) => run.status === "queued"));
+          assert.lengthOf(
+            remaining.runs.find((run) => run.status === "running")!.inputMessageIds!,
+            texts.length - batchSize,
+          );
+        }
       }).pipe(Effect.provide(layer));
     }),
   ),
