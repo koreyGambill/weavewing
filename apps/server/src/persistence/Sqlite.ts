@@ -10,6 +10,8 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { hasPendingMigrations, runMigrations } from "./Migrations.ts";
 import { initializeV2Database } from "./initializeV2Database.ts";
+import { recordStartupTiming } from "../startupTiming.ts";
+
 import * as ServerConfig from "../config.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
 
@@ -67,6 +69,7 @@ const runMigrationsAsOwner = Effect.fn("SqlitePersistence.runMigrationsAsOwner")
 const makeLayerSetup = <E, R>(migrate: Effect.Effect<unknown, E, R>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
+      recordStartupTiming("sqlite.setup.start");
       const sql = yield* SqlClient.SqlClient;
       // CLI and server write from separate processes; wait rather than fail with SQLITE_BUSY.
       yield* sql`PRAGMA busy_timeout = 5000;`;
@@ -95,6 +98,7 @@ const makeLayerSetup = <E, R>(migrate: Effect.Effect<unknown, E, R>) =>
         yield* sql`DELETE FROM sqlite_stat1;`;
         yield* sql`ANALYZE sqlite_schema;`;
       }
+      recordStartupTiming("sqlite.setup.end");
     }).pipe(Effect.withSpan("Sqlite.setup")),
   );
 
@@ -145,7 +149,9 @@ const makeLayerConfig = <E, R>(
   Layer.unwrap(
     Effect.gen(function* () {
       const { dbPath } = yield* ServerConfig.ServerConfig;
+      recordStartupTiming("sqlite.initialize.start");
       yield* initializeV2Database(dbPath);
+      recordStartupTiming("sqlite.initialize.end");
       return fromPath(dbPath);
     }),
   );

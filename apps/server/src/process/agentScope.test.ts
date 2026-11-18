@@ -370,6 +370,7 @@ describe("AgentScope service", () => {
       ({ scope, calls, stateDir }) =>
         Effect.gen(function* () {
           expect(stopsOf(calls)).toEqual([["--user", "stop", ownedAgentSlice(stateDir)]]);
+          expect(calls.map(([, verb]) => verb)).toEqual(["show", "stop"]);
           const agent = yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
           expect(sliceOf(agent)).toBe(ownedAgentSlice(stateDir));
           expect(agent.args).toContain("--property=TimeoutStopSec=10s");

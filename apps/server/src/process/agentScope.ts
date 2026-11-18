@@ -16,6 +16,8 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
 
+import { recordStartupTiming } from "../startupTiming.ts";
+
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProviderProcesses from "./providerProcesses.ts";
@@ -100,6 +102,7 @@ const CLEAR_FAILED_ATTEMPTS = 120;
 const MAX_TRACKED_THREADS = 500;
 
 export const make = Effect.gen(function* () {
+  recordStartupTiming("agent-scope.start");
   const platform = yield* HostProcess.Platform;
   if (platform !== "linux") return AgentScope.defaultValue();
 
@@ -134,6 +137,7 @@ export const make = Effect.gen(function* () {
     systemctl: string,
   ) {
     if (hasOtherLiveOwner) return;
+    recordStartupTiming("agent-scope.cleanup.start");
     const shown = yield* run(systemctl, [
       "--user",
       "show",
@@ -158,14 +162,18 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  // Recovery must wait for old agents; capability probes and limits can wait for the first launch.
+  const runtimeDir = hostEnvironment.XDG_RUNTIME_DIR;
+  const systemctl = runtimeDir ? yield* resolve("systemctl", hostEnvironment) : null;
+  if (systemctl !== null) yield* stopLeftoverAgents(systemctl);
+  recordStartupTiming("agent-scope.cleanup.end");
+
   const systemd = yield* Effect.cached(
     Effect.gen(function* () {
-      const runtimeDir = hostEnvironment.XDG_RUNTIME_DIR;
-      if (runtimeDir === undefined || runtimeDir.length === 0) return undefined;
+      if (!runtimeDir || systemctl === null) return undefined;
+      recordStartupTiming("agent-scope.setup.start");
       const systemdRun = yield* resolve("systemd-run", hostEnvironment);
-      const systemctl = yield* resolve("systemctl", hostEnvironment);
-      if (systemdRun === null || systemctl === null) return undefined;
-      yield* stopLeftoverAgents(systemctl);
+      if (systemdRun === null) return undefined;
       const probe = (options: ReadonlyArray<string>) =>
         run(systemdRun, [
           "--user",
@@ -234,6 +242,7 @@ export const make = Effect.gen(function* () {
         ...agentSliceMemoryLimits(NodeOS.totalmem()),
         oomPolicy: supportsOomPolicy,
       });
+      recordStartupTiming("agent-scope.setup.end");
       return {
         systemdRun,
         systemctl,
@@ -243,10 +252,6 @@ export const make = Effect.gen(function* () {
       };
     }),
   );
-
-  // Layer acquisition is the startup barrier: recovery must not terminalize or
-  // continue old runs while a previous server's providers can still execute.
-  yield* systemd;
 
   // `shared` scopes serve other threads too: tracked only for OOM diagnosis on old systemd.
   const scopeByThread = new Map<string, { unit: string; oomKilled: boolean; shared: boolean }>();

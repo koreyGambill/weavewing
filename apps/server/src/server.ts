@@ -262,6 +262,7 @@ const layerResourceAttribution = ResourceAttribution.layer;
 const layerApplicationObservability = EventLoopMonitor.layer.pipe(
   Layer.provideMerge(Observability.layer),
   Layer.provideMerge(layerResourceAttribution),
+  Layer.tap(() => Effect.sync(() => recordStartupTiming("tracing.end"))),
 );
 
 // Share rotation state so driver loggers cannot race.
@@ -969,7 +970,9 @@ const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     // Before anything opens the database: one server per T3 home.
+    recordStartupTiming("ownership.start");
     const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
+    recordStartupTiming("ownership.end");
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const layerActivation = Layer.succeed(ServerActivation.ServerActivation, awaitActivation);
@@ -1412,6 +1415,7 @@ const layerMakeServer = Layer.unwrap(
       HeapSnapshot.layer,
     );
 
+    recordStartupTiming("layers.composed");
     return layerServerApplication.pipe(
       Layer.provide(CloudLink.layer.pipe(Layer.provideMerge(ConnectReachability.layer))),
       Layer.provideMerge(layerRuntimeServices),
@@ -1424,12 +1428,28 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(
         RelayTracing.layerServerRelayBroker.pipe(Layer.provide(ManagedPolicy.layer)),
       ),
+      Layer.provideMerge(
+        AgentScopeLive.layer.pipe(
+          Layer.tap(() => Effect.sync(() => recordStartupTiming("agent-scope.end"))),
+        ),
+      ),
       Layer.provideMerge(layerHttpServer),
       Layer.provide(layerApplicationObservability),
-      Layer.provideMerge(FetchHttpClient.layer),
-      Layer.provide(VcsProcess.layer),
-      Layer.provideMerge(AgentScopeLive.layer),
-      Layer.provideMerge(layerPlatformServices),
+      Layer.provideMerge(
+        FetchHttpClient.layer.pipe(
+          Layer.tap(() => Effect.sync(() => recordStartupTiming("fetch-client.end"))),
+        ),
+      ),
+      Layer.provide(
+        VcsProcess.layer.pipe(
+          Layer.tap(() => Effect.sync(() => recordStartupTiming("vcs-process.end"))),
+        ),
+      ),
+      Layer.provideMerge(
+        layerPlatformServices.pipe(
+          Layer.tap(() => Effect.sync(() => recordStartupTiming("platform.end"))),
+        ),
+      ),
       Layer.provide(Layer.succeed(HostProcess.InvokedAs, invokedAs)),
     );
   }),
