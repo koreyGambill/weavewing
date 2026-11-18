@@ -9,6 +9,7 @@ import {
 describe("tool sidebar", () => {
   it("keeps the rail reachable when a wide saved page meets a narrow workspace", () => {
     expect(resolveToolSidebarWidth(600, 544)).toBe(280);
+    expect(resolveToolSidebarWidth(600, 924)).toBe(568);
     expect(resolveToolSidebarWidth(600, 1024)).toBe(600);
     expect(resolveToolSidebarWidth(300, 1024)).toBe(300);
   });

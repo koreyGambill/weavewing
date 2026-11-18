@@ -1497,9 +1497,24 @@ html[data-theme-token-probe] *::after {
 /* Workspace actions use a small, separate chrome hierarchy. Keeping these
    roles explicit prevents the thread toolbar from falling back to the default
    dark-mode whites while preserving the same theme file across clients. */
+html[data-theme-id] [data-workspace-titlebar],
 html[data-theme-id] [data-chat-header] {
   background-color: var(--toolbar-background);
   color: var(--contrast-toolbar-foreground);
+}
+
+html [data-workspace-titlebar] [data-chat-header] {
+  background-color: transparent;
+}
+
+[data-workspace-titlebar]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: var(--tile-border-width);
+  background: var(--tile-frame-border);
+  pointer-events: none;
 }
 
 html[data-theme-id] [data-chat-header] [data-slot="button"],
@@ -2710,6 +2725,10 @@ code {
   .thread-glyph-ember {
     animation: none;
   }
+}
+
+.workspace-tools-panel {
+  border-top: var(--tile-border-width) solid var(--tile-frame-border);
 }
 
 .workspace-tile-frame {
