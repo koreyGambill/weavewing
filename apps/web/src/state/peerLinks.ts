@@ -9,6 +9,7 @@ import { AuthAccessReadScope, type EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { useEffect, useEffectEvent } from "react";
 
+import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironmentIdentities, useEnvironments } from "./environments";
 import { environmentPresentations } from "./presentation";
@@ -90,5 +91,15 @@ export function useLinkableMachines(environmentId: EnvironmentId, enabled: boole
     threadEnvironmentId: environmentId,
     links: links.data?.links ?? [],
     connect: discovery.environments,
+    // This desktop app's own backends; in a browser the primary has no local partner.
+    sameHost: new Set(
+      environments
+        .filter(
+          ({ entry }) =>
+            entry.target._tag === "PrimaryConnectionTarget" ||
+            isDesktopLocalConnectionTarget(entry.target),
+        )
+        .map((environment) => environment.environmentId),
+    ),
   });
 }

@@ -98,8 +98,9 @@ Unlinking on the linking side only forgets the token.
   identity.** The token goes only to an address that reports the linked id, so
   a LAN address that now reports another machine's never receives it. Anything can
   report any id, though, so only addresses from the user's client count as a
-  machine's, and never a loopback one, which names whichever machine opens
-  it. An address an agent gives is recorded alone, and
+  machine's. A loopback address names whichever machine opens it, so the
+  client offers one only between environments it knows share a host: a
+  desktop app's own backends. An address an agent gives is recorded alone, and
   [`linkRequestTarget`](../../packages/client-runtime/src/linkRequest.ts) names
   a machine for it only when the client already reaches exactly one machine
   there. An address alone never moves an unexpired link to another address.

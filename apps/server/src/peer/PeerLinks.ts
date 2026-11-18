@@ -35,11 +35,16 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
-import { isLocalLoopbackHost, isTailnetHost } from "@t3tools/shared/hostClassification";
+import {
+  isLocalLoopbackHost,
+  isSharedAddressSpaceHost,
+  isTailnetHost,
+} from "@t3tools/shared/hostClassification";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as TailscaleClient from "../tailnet/TailscaleClient.ts";
 
 const PeerHttpApi = HttpApi.make(EnvironmentHttpApi.identifier)
   .add(EnvironmentHttpApi.groups.metadata)
@@ -154,11 +159,11 @@ const failStorage = (cause: unknown) =>
   );
 
 /**
- * The base URL a peer is reached at, normalised to its origin. The pairing
- * code and then the link's token travel to it, so plain http is accepted only
- * where the network already encrypts: this machine, or a Tailscale address.
+ * The peer's origin. The pairing code and token travel there, so plain http is
+ * accepted only where the network encrypts: this machine, or a Tailscale node.
+ * Other VPNs share 100.64.0.0/10, so there it must be in `tailnetAddresses`.
  */
-const peerOrigin = (url: string) => {
+const peerOrigin = (url: string, tailnetAddresses: Effect.Effect<ReadonlySet<string>>) => {
   const parsed = URL.parse(url);
   if (parsed === null || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
     return Effect.fail(
@@ -168,19 +173,25 @@ const peerOrigin = (url: string) => {
       }),
     );
   }
-  if (
-    parsed.protocol === "http:" &&
-    !isLocalLoopbackHost(parsed.hostname) &&
-    !isTailnetHost(parsed.hostname)
-  ) {
-    return Effect.fail(
-      new PeerLinkError({
-        reason: "unreachable",
-        message: `${url} is plain http, which would send the link's credentials unencrypted. Use its https address, or its Tailscale address.`,
-      }),
-    );
-  }
-  return Effect.succeed(parsed.origin);
+  const { hostname } = parsed;
+  const encrypted =
+    parsed.protocol === "https:" || isLocalLoopbackHost(hostname) || isTailnetHost(hostname)
+      ? Effect.succeed(true)
+      : isSharedAddressSpaceHost(hostname)
+        ? tailnetAddresses.pipe(Effect.map((addresses) => addresses.has(hostname)))
+        : Effect.succeed(false);
+  return encrypted.pipe(
+    Effect.flatMap((ok) =>
+      ok
+        ? Effect.succeed(parsed.origin)
+        : Effect.fail(
+            new PeerLinkError({
+              reason: "unreachable",
+              message: `${url} is plain http, which would send the link's credentials unencrypted. Plain http is used only on this machine or to a node this machine's Tailscale knows; otherwise use https.`,
+            }),
+          ),
+    ),
+  );
 };
 
 /** The system error under a failed connection, such as ECONNREFUSED or ENOTFOUND. */
@@ -215,12 +226,6 @@ const probeFailure = (
   });
 };
 
-/** Whether a host is this machine's own loopback. Tests serve their peers there, so they narrow it. */
-export const LoopbackHost = Context.Reference<(host: string) => boolean>(
-  "t3/peer/PeerLinks/LoopbackHost",
-  { defaultValue: () => isLocalLoopbackHost },
-);
-
 /** Whether a peer holds a linked agent to its limits and keeps its work within its link. */
 const linkLimitsHold = (peer: { readonly capabilities: ExecutionEnvironmentCapabilities }) =>
   peer.capabilities.mcpModeLimitHeader === true && peer.capabilities.linkFence === true;
@@ -233,7 +238,7 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
-  const isOwnLoopback = yield* LoopbackHost;
+  const tailscale = yield* TailscaleClient.TailscaleClient;
   // Relinking revokes the earlier peer credential, so exchange and local persistence must stay ordered.
   const linking = yield* Semaphore.make(1);
   const enabled = serverSettings.getSettings.pipe(
@@ -444,6 +449,7 @@ const make = Effect.gen(function* () {
    */
   const answeringAs = Effect.fn("PeerLinks.answeringAs")(function* (
     urls: ReadonlyArray<string>,
+    tailnetAddresses: Effect.Effect<ReadonlySet<string>>,
     environmentId: EnvironmentId,
     name: string,
   ) {
@@ -451,14 +457,7 @@ const make = Effect.gen(function* () {
       urls,
       (url) =>
         Effect.gen(function* () {
-          const origin = yield* peerOrigin(url);
-          // Loopback is this machine, where anything may answer as the one picked.
-          if (isOwnLoopback(new URL(origin).hostname)) {
-            return yield* new PeerLinkError({
-              reason: "unreachable",
-              message: `${origin} is this machine, not ${name}.`,
-            });
-          }
+          const origin = yield* peerOrigin(url, tailnetAddresses);
           const descriptor = yield* probe(origin);
           if (descriptor.environmentId !== environmentId) {
             return yield* new PeerLinkError({
@@ -489,8 +488,11 @@ const make = Effect.gen(function* () {
   });
 
   /** The peer at `url`, with every address checked for credentials first. */
-  const answeringAt = Effect.fn("PeerLinks.answeringAt")(function* (urls: ReadonlyArray<string>) {
-    const origins = yield* Effect.forEach(urls, peerOrigin);
+  const answeringAt = Effect.fn("PeerLinks.answeringAt")(function* (
+    urls: ReadonlyArray<string>,
+    tailnetAddresses: Effect.Effect<ReadonlySet<string>>,
+  ) {
+    const origins = yield* Effect.forEach(urls, (url) => peerOrigin(url, tailnetAddresses));
     const primary = origins[0]!;
     return { primary, peer: yield* probe(primary), origins };
   });
@@ -500,13 +502,24 @@ const make = Effect.gen(function* () {
       return yield* new PeerLinkError({ reason: "disabled", message: LINKED_ENVIRONMENTS_OFF });
     }
     const urls = [input.url, ...(input.alternateUrls ?? [])];
+    // Asked at most once per link, and only for an address in 100.64.0.0/10.
+    const tailnetAddresses = yield* Effect.cached(
+      tailscale.peers.pipe(
+        Effect.map(
+          ({ self, peers }) =>
+            new Set([self, ...peers].flatMap((node) => node?.tailnetAddresses ?? [])),
+        ),
+        Effect.orElseSucceed(() => new Set<string>()),
+      ),
+    );
     // The user picked a machine: link through the addresses that answer as
     // it, so one that now answers as another never receives the pairing code.
     const { primary, peer, origins } =
       input.expectedEnvironmentId === undefined
-        ? yield* answeringAt(urls)
+        ? yield* answeringAt(urls, tailnetAddresses)
         : yield* answeringAs(
             urls,
+            tailnetAddresses,
             input.expectedEnvironmentId,
             input.expectedLabel ?? input.expectedEnvironmentId,
           );

@@ -948,7 +948,7 @@ const layerMakeRoutes = Layer.mergeAll(
     PeerForwarding.layer.pipe(
       Layer.provideMerge(ThreadReplies.layer),
       Layer.provideMerge(PeerMcpClient.layer),
-      Layer.provideMerge(PeerLinks.layer),
+      Layer.provideMerge(PeerLinks.layer.pipe(Layer.provide(TailscaleClient.layerCli))),
     ),
   ),
   Layer.provide(
