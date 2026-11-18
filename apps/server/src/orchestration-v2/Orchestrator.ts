@@ -8172,6 +8172,39 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         dispatchMode = { type: "queue_after_active" };
       }
     }
+    const startsOrQueuesRun =
+      dispatchMode.type === "defer_start" ||
+      dispatchMode.type === "start_immediately" ||
+      dispatchMode.type === "queue_after_active";
+    // Client messages resume held queues; server continuations and scheduled tasks do not.
+    // Provider failure or usage limits re-hold the queue.
+    const worktreeSetupUnresolved = worktreeSetupPending(projection);
+    const sentByUserFromClient =
+      command.steerFollowUpOfRunId === undefined &&
+      command.createdBy === "user" &&
+      (command.creationSource === "web" || command.creationSource === "mobile") &&
+      command.scheduledTaskId === undefined;
+    const heldRunsToRelease =
+      sentByUserFromClient &&
+      (startsOrQueuesRun ||
+        (dispatchMode.type === "steer_active" && command.deliveryIntent === "auto")) &&
+      !worktreeSetupUnresolved
+        ? projection.runs.filter((run) => run.status === "queued" && run.queueHeld === true)
+        : [];
+    const releasedAt = yield* DateTime.now;
+    for (const held of heldRunsToRelease) {
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "run.updated",
+        threadId: command.threadId,
+        runId: held.id,
+        providerInstanceId: held.providerInstanceId,
+        occurredAt: releasedAt,
+        payload: { ...held, queueHeld: false },
+      });
+    }
     if (dispatchMode.type === "steer_active" || dispatchMode.type === "restart_active") {
       yield* ensureGoalCommandSupported(command, command, modelSelection.instanceId);
       yield* dispatchSteerIntoRun({
@@ -8224,10 +8257,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : undefined;
     const queueBehindRun = activeRun ?? worktreeMissingRun;
     const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
-    const startsOrQueuesRun =
-      dispatchMode.type === "defer_start" ||
-      dispatchMode.type === "start_immediately" ||
-      dispatchMode.type === "queue_after_active";
     const shouldQueue = queueBehindRun !== undefined && startsOrQueuesRun;
     // An explicit pick queued ahead reaches the thread only when its run starts. A goal or
     // restart command that stops the active run goes first, so nothing queued applies before it.
@@ -8244,32 +8273,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       modelSelection = queueTailModelSelection(projection);
     }
     yield* ensureGoalCommandSupported(command, command, modelSelection.instanceId);
-    // Client messages resume held queues; server continuations and scheduled tasks do not.
-    // Provider failure or usage limits re-hold the queue.
-    const worktreeSetupUnresolved = worktreeSetupPending(projection);
-    const sentByUserFromClient =
-      command.steerFollowUpOfRunId === undefined &&
-      command.createdBy === "user" &&
-      (command.creationSource === "web" || command.creationSource === "mobile") &&
-      command.scheduledTaskId === undefined;
-    const heldRunsToRelease =
-      sentByUserFromClient && startsOrQueuesRun && !worktreeSetupUnresolved
-        ? projection.runs.filter((run) => run.status === "queued" && run.queueHeld === true)
-        : [];
-    const releasedAt = yield* DateTime.now;
-    for (const held of heldRunsToRelease) {
-      yield* emit(
-        events,
-        command,
-      )({
-        type: "run.updated",
-        threadId: command.threadId,
-        runId: held.id,
-        providerInstanceId: held.providerInstanceId,
-        occurredAt: releasedAt,
-        payload: { ...held, queueHeld: false },
-      });
-    }
     if (shouldQueue) {
       if (pendingMergeBackTransfers.length > 0) {
         return yield* new OrchestratorDispatchError({

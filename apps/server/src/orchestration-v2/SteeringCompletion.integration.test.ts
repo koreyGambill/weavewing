@@ -703,7 +703,7 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
   return { cwd, events, started, steered, steeredSelections, interrupted, layer, startFirstTurn };
 });
 
-it.effect.each(["agents", "user first", "cancelled"] as const)(
+it.effect.each(["agents", "user first", "cancelled", "resumed user", "explicit steer"] as const)(
   "merges waiting messages into one provider turn: %s",
   (scenario) =>
     Effect.scoped(
@@ -711,7 +711,7 @@ it.effect.each(["agents", "user first", "cancelled"] as const)(
         const { started, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
           `queued-batch-${scenario}`,
           false,
-          false,
+          scenario === "resumed user" || scenario === "explicit steer",
         );
         yield* Effect.gen(function* () {
           const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -721,7 +721,10 @@ it.effect.each(["agents", "user first", "cancelled"] as const)(
           const texts = ["lane one", "lane two", "lane three"];
           if (scenario === "user first") texts.splice(1, 0, "user direction");
           for (const [index, text] of texts.entries()) {
-            const user = text === "user direction";
+            const user =
+              scenario === "resumed user" ||
+              scenario === "explicit steer" ||
+              text === "user direction";
             yield* orchestrator.dispatch({
               type: "message.dispatch",
               commandId: CommandId.make(`queue:${index}`),
@@ -748,6 +751,45 @@ it.effect.each(["agents", "user first", "cancelled"] as const)(
           const before = yield* orchestrator.getThreadProjection(threadId);
           const queued = before.runs.filter((run) => run.status === "queued");
           assert.lengthOf(queued, texts.length);
+          if (scenario === "resumed user" || scenario === "explicit steer") {
+            const heldAt = yield* DateTime.now;
+            yield* sink.write({
+              events: queued.map((run) => ({
+                id: EventId.make(`event:held:${run.id}`),
+                type: "run.updated" as const,
+                threadId,
+                occurredAt: heldAt,
+                payload: { ...run, queueHeld: true },
+              })),
+            });
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make("resume-by-user-send"),
+              threadId,
+              messageId: MessageId.make("message:resume-by-user-send"),
+              text: "Please go forward now",
+              origin: { kind: "user" },
+              attachments: [],
+              deliveryIntent: scenario === "explicit steer" ? "steer" : "auto",
+              dispatchMode: { type: "steer_active", targetRunId: before.runs[0]!.id },
+              createdBy: "user",
+              creationSource: "web",
+            });
+            yield* worker.drain();
+            const resumed = yield* orchestrator.getThreadProjection(threadId);
+            assert.equal(
+              resumed.runs.some((run) => run.status === "queued" && run.queueHeld),
+              scenario === "explicit steer",
+            );
+            assert.lengthOf(started, 1);
+            if (scenario === "explicit steer") {
+              yield* orchestrator.dispatch({
+                type: "queue.resume",
+                commandId: CommandId.make("explicit-resume"),
+                threadId,
+              });
+            }
+          }
           if (scenario === "cancelled") {
             yield* orchestrator.dispatch({
               type: "queued-run.cancel",
@@ -810,9 +852,11 @@ it.effect.each(["agents", "user first", "cancelled"] as const)(
               );
             }
           }
-          assert.include(input, 'reply="expected"');
-          assert.include(input, 'reply="not expected"');
-          assert.equal(input.match(/<t3_origin /g)?.length, scenario === "cancelled" ? 2 : 3);
+          if (scenario !== "resumed user" && scenario !== "explicit steer") {
+            assert.include(input, 'reply="expected"');
+            assert.include(input, 'reply="not expected"');
+            assert.equal(input.match(/<t3_origin /g)?.length, scenario === "cancelled" ? 2 : 3);
+          }
           if (scenario === "user first") assert.isTrue(input.startsWith("user direction"));
           if (scenario === "cancelled") assert.notInclude(input, "lane two");
           assert.equal(
