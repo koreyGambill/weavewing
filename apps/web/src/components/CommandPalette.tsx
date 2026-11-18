@@ -3176,10 +3176,9 @@ function OpenCommandPaletteDialog(props: {
 
   function addProjectFromPicker(step: "folder" | "clone") {
     if (!pickerEnvironmentId) return;
-    setAddProjectEnvironmentId(pickerEnvironmentId);
-    const intent = openIntentView({
-      kind: "add-project",
-      start:
+    openCommandPalette({
+      open: "add-project",
+      addProjectStart:
         step === "folder"
           ? {
               step,
@@ -3187,18 +3186,10 @@ function OpenCommandPaletteDialog(props: {
               query: getAddProjectInitialQueryForEnvironment(pickerEnvironmentId),
             }
           : { step, environmentId: pickerEnvironmentId },
+      onProjectReady: async (projectRef) => {
+        await handleNewThread(projectRef);
+      },
     });
-    if (step === "clone") {
-      pushPaletteView({
-        addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
-        groups: buildAddProjectSourceGroups(
-          pickerEnvironmentId,
-          buildPaletteRemoteSourceReadiness(sourceControlDiscovery.data),
-        ),
-      });
-    } else if (intent) {
-      pushPaletteView(intent);
-    }
   }
 
   if (currentView?.groups[0]?.value === NEW_THREAD_IN_GROUP) {
