@@ -802,12 +802,6 @@ export const make = Effect.gen(function* () {
           !input.shift &&
           input.key.toLowerCase() === "w",
       );
-      // A held Cmd/Ctrl+W closes one tab or terminal, not each one behind it.
-      if (input.type !== "keyDown" || !input.isAutoRepeat) return;
-      const modifier = environment.platform === "darwin" ? input.meta : input.control;
-      if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === "w") {
-        event.preventDefault();
-      }
     });
     window.webContents.on("input-event", (_event, input) => {
       if (window.isDestroyed()) return;

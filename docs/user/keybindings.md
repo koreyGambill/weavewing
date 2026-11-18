@@ -193,8 +193,9 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 Use `workspace.tile.closeTab` (`Ctrl+Alt+W`) to close the selected tile tab.
 Focused terminals keep common shell keys, including `Ctrl+D` for EOF and
-`Ctrl+W` for word erase. Use **New tile below/right** to split the workspace;
-each terminal tab contains one shell.
+`Ctrl+W` for word erase, and `Ctrl+R` for history search. Use **New tile below/right** to split the workspace;
+each terminal tab contains one shell. On Windows and Linux desktop, reload the
+app from the application menu or use `Ctrl+Shift+R` to reload without its cache.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.
