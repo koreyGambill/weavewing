@@ -130,7 +130,7 @@ it("drills through folders with repeated Tab and opens with Enter in heading and
   ).toBeNull();
   using _columns = new DisposableStack();
   const otherColumn = document.createElement("div");
-  otherColumn.dataset.chatColumn = "";
+  otherColumn.dataset.tileContent = "terminal";
   const otherInput = document.createElement("input");
   otherColumn.append(otherInput);
   document.body.append(otherColumn);
