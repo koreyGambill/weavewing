@@ -587,6 +587,13 @@ const cancelBackgroundOnlyTask = (
             event.payload.id === "request:owned" &&
             event.payload.status === "resolved",
         );
+        const taskSettled = yield* watch(
+          (event) =>
+            event.type === "subagent.updated" &&
+            event.threadId === parentThreadId &&
+            event.payload.id === task.id &&
+            event.payload.status === "interrupted",
+        );
         const cancelled = yield* service.cancelTask(scope, {
           taskId: task.id,
           clientRequestId: "cancel-task",
@@ -638,6 +645,7 @@ const cancelBackgroundOnlyTask = (
         const after = yield* service.taskStatus(scope, task.id);
         assert.equal(after.status, "interrupted");
         assert.equal(after.workState, "result_available");
+        yield* Fiber.join(taskSettled);
         const settledTask = yield* parentTask;
         assert.equal(settledTask?.status, "interrupted");
         assert.notEqual(settledTask?.completedAt, null);
