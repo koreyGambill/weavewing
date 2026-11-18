@@ -11,6 +11,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import { recordStartupTiming } from "../startupTiming.ts";
+
 import * as ServerConfig from "../config.ts";
 
 const ProcessIdentity = Schema.Struct({
@@ -42,6 +44,7 @@ export const ProviderProcesses = Context.Reference<{
 }>("t3/process/ProviderProcesses", { defaultValue: () => ({ hasOtherLiveOwner: false }) });
 
 const make = Effect.gen(function* () {
+  recordStartupTiming("provider-processes.start");
   const platform = yield* HostProcess.Platform;
   if (platform !== "linux") return { hasOtherLiveOwner: false };
   const { stateDir } = yield* ServerConfig.ServerConfig;
@@ -123,6 +126,7 @@ const make = Effect.gen(function* () {
     NodeFS.rmSync(recordPath, { force: true });
   }
 
+  recordStartupTiming("provider-processes.end");
   return {
     hasOtherLiveOwner,
     register: (pid: number) => {

@@ -12,9 +12,12 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
+
+import { recordStartupTiming } from "../startupTiming.ts";
 
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -100,6 +103,7 @@ const CLEAR_FAILED_ATTEMPTS = 120;
 const MAX_TRACKED_THREADS = 500;
 
 export const make = Effect.gen(function* () {
+  recordStartupTiming("agent-scope.start");
   const platform = yield* HostProcess.Platform;
   if (platform !== "linux") return AgentScope.defaultValue();
 
@@ -119,8 +123,23 @@ export const make = Effect.gen(function* () {
       Effect.provideService(HostProcess.Platform, platform),
     );
 
-  const run = (command: string, args: ReadonlyArray<string>) =>
-    runner.run({ command, args, timeout: "5 seconds" }).pipe(Effect.option);
+  // Only the stop that precedes the cgroup.kill fallback is short; elsewhere a false timeout would skip cleanup or disable scopes.
+  const run = Effect.fn("AgentScope.run")(function* (
+    command: string,
+    args: ReadonlyArray<string>,
+    timeout: "2 seconds" | "5 seconds" = "5 seconds",
+  ) {
+    return yield* runner.run({ command, args, timeout }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Agent scope command failed", {
+          command: path.basename(command),
+          operation: args[1],
+          reason: error._tag,
+        }),
+      ),
+      Effect.option,
+    );
+  });
 
   const readCgroupFile = (controlGroup: string, file: string) =>
     fileSystem
@@ -134,6 +153,7 @@ export const make = Effect.gen(function* () {
     systemctl: string,
   ) {
     if (hasOtherLiveOwner) return;
+    recordStartupTiming("agent-scope.cleanup.start");
     const shown = yield* run(systemctl, [
       "--user",
       "show",
@@ -141,31 +161,56 @@ export const make = Effect.gen(function* () {
       "--property=ActiveState,ControlGroup",
     ]);
     if (shown._tag === "None") return;
+    if (shown.value.code !== 0) {
+      yield* Effect.logWarning("Could not inspect leftover agent slice", {
+        slice: ownedSlice,
+        exitCode: shown.value.code,
+      });
+      return;
+    }
     const values = parseKeyValues(shown.value.stdout);
     if (values.get("ActiveState") !== "active") return;
     const controlGroup = values.get("ControlGroup") ?? "";
     const events = controlGroup ? yield* readCgroupFile(controlGroup, "cgroup.events") : "";
     if (parseCgroupCounter(events, "populated") === 0) return;
     yield* Effect.logWarning("Stopping agents left by a previous server", { slice: ownedSlice });
-    const stopped = yield* runner
-      .run({ command: systemctl, args: ["--user", "stop", ownedSlice], timeout: "30 seconds" })
-      .pipe(Effect.option);
+    const stopped = yield* run(systemctl, ["--user", "stop", ownedSlice], "2 seconds");
     if (stopped._tag === "None" || stopped.value.code !== 0) {
-      yield* Effect.logWarning("Could not stop agents left by a previous server", {
+      // A stop job outlives its caller; kill the old cgroup before a new scope can join its slice.
+      const killed =
+        controlGroup.endsWith(`/${ownedSlice}`) &&
+        (yield* fileSystem
+          .writeFileString(path.join("/sys/fs/cgroup", controlGroup, "cgroup.kill"), "1")
+          .pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          ));
+      const confirmed = killed
+        ? yield* run(systemctl, ["--user", "stop", ownedSlice], "2 seconds")
+        : stopped;
+      yield* Effect.logWarning("Leftover agent stop needed a forced cleanup", {
         slice: ownedSlice,
-        stderr: stopped._tag === "Some" ? stopped.value.stderr.trim() : undefined,
+        killed,
+        stopped: confirmed._tag === "Some" && confirmed.value.code === 0,
       });
     }
   });
 
+  const runtimeDir = hostEnvironment.XDG_RUNTIME_DIR;
+  const systemctl = runtimeDir ? yield* resolve("systemctl", hostEnvironment) : null;
+  const cleanup = yield* (systemctl === null ? Effect.void : stopLeftoverAgents(systemctl)).pipe(
+    Effect.ensuring(Effect.sync(() => recordStartupTiming("agent-scope.cleanup.end"))),
+    Effect.forkScoped,
+  );
+  const awaitCleanup = Fiber.await(cleanup).pipe(Effect.asVoid);
+
   const systemd = yield* Effect.cached(
     Effect.gen(function* () {
-      const runtimeDir = hostEnvironment.XDG_RUNTIME_DIR;
-      if (runtimeDir === undefined || runtimeDir.length === 0) return undefined;
+      yield* awaitCleanup;
+      if (!runtimeDir || systemctl === null) return undefined;
+      recordStartupTiming("agent-scope.setup.start");
       const systemdRun = yield* resolve("systemd-run", hostEnvironment);
-      const systemctl = yield* resolve("systemctl", hostEnvironment);
-      if (systemdRun === null || systemctl === null) return undefined;
-      yield* stopLeftoverAgents(systemctl);
+      if (systemdRun === null) return undefined;
       const probe = (options: ReadonlyArray<string>) =>
         run(systemdRun, [
           "--user",
@@ -176,10 +221,15 @@ export const make = Effect.gen(function* () {
           ...options,
           "--",
           "true",
-        ]).pipe(Effect.map((result) => result._tag === "Some" && result.value.code === 0));
-      // Scopes take OOMPolicy from systemd 253; older managers still get scopes.
-      const supportsOomPolicy = yield* probe([...SCOPE_OPTIONS, "--property=OOMPolicy=stop"]);
-      if (!supportsOomPolicy && !(yield* probe(SCOPE_OPTIONS))) {
+        ]);
+      // Retry without OOMPolicy only for a rejection, not an unreachable manager.
+      const oomProbe = yield* probe([...SCOPE_OPTIONS, "--property=OOMPolicy=stop"]);
+      const supportsOomPolicy = oomProbe._tag === "Some" && oomProbe.value.code === 0;
+      const fallback =
+        !supportsOomPolicy && oomProbe._tag === "Some" ? yield* probe(SCOPE_OPTIONS) : undefined;
+      const available =
+        supportsOomPolicy || (fallback?._tag === "Some" && fallback.value.code === 0);
+      if (!available) {
         yield* Effect.logInfo("Agent scopes are off: no systemd user manager");
         return undefined;
       }
@@ -234,6 +284,7 @@ export const make = Effect.gen(function* () {
         ...agentSliceMemoryLimits(NodeOS.totalmem()),
         oomPolicy: supportsOomPolicy,
       });
+      recordStartupTiming("agent-scope.setup.end");
       return {
         systemdRun,
         systemctl,
@@ -243,10 +294,6 @@ export const make = Effect.gen(function* () {
       };
     }),
   );
-
-  // Layer acquisition is the startup barrier: recovery must not terminalize or
-  // continue old runs while a previous server's providers can still execute.
-  yield* systemd;
 
   // `shared` scopes serve other threads too: tracked only for OOM diagnosis on old systemd.
   const scopeByThread = new Map<string, { unit: string; oomKilled: boolean; shared: boolean }>();
@@ -410,12 +457,14 @@ export const make = Effect.gen(function* () {
   });
 
   const clear: AgentScopeShape["clear"] = Effect.fn("agentScope.clear")(function* (threadId) {
+    yield* awaitCleanup;
     if (!scopeByThread.has(threadId)) return;
     const scope = yield* systemd;
     if (scope !== undefined) yield* track(scope.systemctl, threadId, undefined);
   });
 
   return {
+    awaitCleanup,
     wrap: Effect.fn("AgentScope.wrap")(function* ({
       command,
       args,
@@ -425,6 +474,7 @@ export const make = Effect.gen(function* () {
       survivesRestart,
       shared,
     }) {
+      yield* awaitCleanup;
       const resolved = yield* resolve(command, env ?? hostEnvironment);
       if (resolved === null) return { command, args };
       const scope = yield* systemd;

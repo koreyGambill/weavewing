@@ -2,6 +2,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 export interface AgentScopeShape {
+  /** Waits for orphan cleanup before provider recovery or a new scope can launch an agent. */
+  readonly awaitCleanup: Effect.Effect<void>;
   readonly wrap: (input: {
     readonly command: string;
     readonly args: ReadonlyArray<string>;
@@ -45,6 +47,7 @@ export interface AgentScopeCommand {
 
 export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/AgentScope", {
   defaultValue: () => ({
+    awaitCleanup: Effect.void,
     wrap: ({ command, args }) => Effect.succeed({ command, args }),
     oomKilled: () => Effect.succeed(false),
     stop: () => Effect.void,

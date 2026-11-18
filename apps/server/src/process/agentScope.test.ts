@@ -8,9 +8,13 @@ import { assert, describe, expect, it } from "@effect/vitest";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import type * as Scope from "effect/Scope";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { vi } from "vite-plus/test";
 
@@ -60,18 +64,22 @@ const withFakeSystemd = <A, E>(
     readonly failingVerbs: Set<string>;
     readonly stateDir: string;
     readonly cgroupRoot: string;
-  }) => Effect.Effect<A, E>,
+  }) => Effect.Effect<A, E, Scope.Scope>,
   // A user manager older than systemd 253 rejects OOMPolicy on scopes.
   {
     oomPolicy = true,
     stopFails = false,
     leftovers = false,
     liveOwner = false,
+    slowCleanup = false,
+    probeTimesOut = false,
   }: {
     readonly oomPolicy?: boolean;
     readonly stopFails?: boolean;
     readonly leftovers?: boolean;
     readonly liveOwner?: boolean;
+    readonly slowCleanup?: boolean;
+    readonly probeTimesOut?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -93,9 +101,13 @@ const withFakeSystemd = <A, E>(
       stdoutInvalidUtf8: false,
       stderrInvalidUtf8: false,
     });
+    const stopping = yield* Deferred.make<void>();
     const runner = ProcessRunner.ProcessRunner.of({
-      run: ({ args }) =>
+      run: ({ args, timeout }) =>
         Effect.sync(() => {
+          expect(timeout).toBe(
+            args[1] === "stop" && args[2] === ownedAgentSlice(stateDir) ? "2 seconds" : "5 seconds",
+          );
           calls.push(args);
           if (!oomPolicy && args.some((arg) => arg.startsWith("--property=OOMPolicy="))) {
             return output("", 1);
@@ -118,14 +130,41 @@ const withFakeSystemd = <A, E>(
               : `LoadState=loaded\nActiveState=${state.activeState}\nResult=${state.result}\n` +
                   `ControlGroup=${state.controlGroup ?? ""}\n`,
           );
-        }),
+        }).pipe(
+          Effect.tap(() =>
+            slowCleanup && args[1] === "stop"
+              ? Deferred.succeed(stopping, undefined).pipe(
+                  Effect.andThen(Effect.sleep("10 seconds")),
+                )
+              : Effect.void,
+          ),
+          Effect.filterOrFail(
+            () => !probeTimesOut || args[1] !== "--scope",
+            () =>
+              new ProcessRunner.ProcessTimeoutError({
+                command: "systemd-run",
+                argumentCount: args.length,
+                timeoutMs: 2000,
+              }),
+          ),
+        ),
     });
     const fileSystem = yield* FileSystem.FileSystem;
     const { stateDir } = yield* ServerConfig.ServerConfig;
     if (leftovers) {
-      units.set(ownedAgentSlice(stateDir), { activeState: "active", result: "success" });
+      NodeFS.mkdirSync(NodePath.join(cgroupRoot, ownedAgentSlice(stateDir)), { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(cgroupRoot, ownedAgentSlice(stateDir), "cgroup.events"),
+        "populated 1",
+      );
+      units.set(ownedAgentSlice(stateDir), {
+        activeState: "active",
+        result: "success",
+        controlGroup: `/${ownedAgentSlice(stateDir)}`,
+      });
     }
-    const scope = yield* make.pipe(
+    const constructed = yield* Deferred.make<void>();
+    const construction = yield* make.pipe(
       Effect.provideService(ProviderProcesses.ProviderProcesses, { hasOtherLiveOwner: liveOwner }),
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
       Effect.provideService(HostProcess.Platform, "linux"),
@@ -137,7 +176,15 @@ const withFakeSystemd = <A, E>(
         writeFileString: (path, data, options) =>
           fileSystem.writeFileString(path.replace("/sys/fs/cgroup", cgroupRoot), data, options),
       }),
+      Effect.tap(() => Deferred.succeed(constructed, undefined)),
+      Effect.forkScoped,
     );
+    if (slowCleanup) {
+      yield* Deferred.await(stopping);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Deferred.isDone(constructed)).toBe(true);
+    }
+    const scope = yield* Fiber.join(construction);
     return yield* body({ scope, units, calls, failingVerbs, stateDir, cgroupRoot }).pipe(
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(bin, { recursive: true, force: true }))),
     );
@@ -365,25 +412,92 @@ describe("AgentScope service", () => {
     );
   });
 
-  it.effect("stops agents a killed server left before startup completes", () =>
+  it.effect("constructs while cleanup is slow and gates scope creation until it finishes", () =>
     withFakeSystemd(
-      ({ scope, calls, stateDir }) =>
+      ({ scope, calls }) =>
         Effect.gen(function* () {
-          expect(stopsOf(calls)).toEqual([["--user", "stop", ownedAgentSlice(stateDir)]]);
-          const agent = yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
-          expect(sliceOf(agent)).toBe(ownedAgentSlice(stateDir));
-          expect(agent.args).toContain("--property=TimeoutStopSec=10s");
-          const terminal = yield* scope.wrap({
-            command: "agent",
-            args: [],
-            name: "terminal",
-            survivesRestart: true,
-          });
-          expect(sliceOf(terminal)).toBe("app-t3code-agents.slice");
-          expect(stopsOf(calls)).toHaveLength(1);
+          const launched = yield* Deferred.make<void>();
+          const cleaned = yield* Deferred.make<void>();
+          const cleared = yield* Deferred.make<void>();
+          const clear = yield* scope
+            .clear("new-thread")
+            .pipe(Effect.andThen(Deferred.succeed(cleared, undefined)), Effect.forkScoped);
+          const launch = yield* scope.wrap({ command: "agent", args: [], name: "t" }).pipe(
+            Effect.tap(() => Deferred.succeed(launched, undefined)),
+            Effect.forkScoped,
+          );
+          const cleanup = yield* scope.awaitCleanup.pipe(
+            Effect.tap(() => Deferred.succeed(cleaned, undefined)),
+            Effect.forkScoped,
+          );
+          yield* TestClock.adjust("1 second");
+          expect(yield* Deferred.isDone(launched)).toBe(false);
+          expect(yield* Deferred.isDone(cleaned)).toBe(false);
+          expect(yield* Deferred.isDone(cleared)).toBe(false);
+          expect(calls.map(([, verb]) => verb)).toEqual(["show", "stop"]);
+          yield* TestClock.adjust("10 seconds");
+          yield* Fiber.join(cleanup);
+          yield* Fiber.join(clear);
+          expect((yield* Fiber.join(launch)).command).toBe("/bin/sh");
         }),
-      { leftovers: true },
+      { leftovers: true, slowCleanup: true },
     ),
+  );
+
+  it.effect("does not retry a timed-out capability probe until the server restarts", () =>
+    withFakeSystemd(
+      ({ scope, calls }) =>
+        Effect.gen(function* () {
+          for (let launch = 0; launch < 2; launch++) {
+            const command = yield* scope.wrap({ command: "agent", args: [], name: "t" });
+            expect(command.unit).toBeUndefined();
+          }
+          expect(calls.filter(([, verb]) => verb === "--scope")).toHaveLength(1);
+        }),
+      { probeTimesOut: true },
+    ),
+  );
+
+  it.effect.each([false, true])(
+    "stops agents a killed server left before an agent launches (stop fails: %s)",
+    (stopFails) =>
+      withFakeSystemd(
+        ({ scope, calls, stateDir, cgroupRoot }) =>
+          Effect.gen(function* () {
+            yield* scope.awaitCleanup;
+            expect(stopsOf(calls)).toEqual(
+              Array.from({ length: stopFails ? 2 : 1 }, () => [
+                "--user",
+                "stop",
+                ownedAgentSlice(stateDir),
+              ]),
+            );
+            if (stopFails)
+              expect(
+                NodeFS.readFileSync(
+                  NodePath.join(cgroupRoot, ownedAgentSlice(stateDir), "cgroup.kill"),
+                  "utf8",
+                ),
+              ).toBe("1");
+            const agent = yield* scope.wrap({
+              command: "agent",
+              args: [],
+              name: "t",
+              threadId: "a",
+            });
+            expect(sliceOf(agent)).toBe(ownedAgentSlice(stateDir));
+            expect(agent.args).toContain("--property=TimeoutStopSec=10s");
+            const terminal = yield* scope.wrap({
+              command: "agent",
+              args: [],
+              name: "terminal",
+              survivesRestart: true,
+            });
+            expect(sliceOf(terminal)).toBe("app-t3code-agents.slice");
+            expect(stopsOf(calls)).toHaveLength(stopFails ? 2 : 1);
+          }),
+        { leftovers: true, stopFails },
+      ),
   );
 
   it.effect("leaves the slice to another live server sharing this home", () =>
