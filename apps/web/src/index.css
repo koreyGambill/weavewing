@@ -1517,6 +1517,26 @@ html [data-workspace-titlebar] [data-chat-header] {
   pointer-events: none;
 }
 
+@media (min-width: 48rem) {
+  [data-sidebar-titlebar] {
+    background-color: var(--toolbar-background);
+    color: var(--contrast-toolbar-foreground, var(--foreground));
+    /* Cover the sidebar border so it cannot split the titlebar. */
+    box-shadow: 1px 0 var(--toolbar-background);
+  }
+
+  [data-sidebar-titlebar]::after {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+    inset-inline-end: -1px;
+    top: 100%;
+    height: var(--tile-border-width);
+    background: var(--tile-frame-border);
+    pointer-events: none;
+  }
+}
+
 html[data-theme-id] [data-chat-header] [data-slot="button"],
 html[data-theme-id] [data-chat-header] [data-slot="menu-trigger"],
 html[data-theme-id] [data-chat-header] [data-toolbar-control] {

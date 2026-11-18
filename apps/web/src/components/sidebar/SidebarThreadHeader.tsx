@@ -68,16 +68,8 @@ export function SidebarThreadHeader({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center">
-        <h2 className="flex h-7 flex-1 pl-2 text-base leading-7 font-medium tracking-tight">
-          <span className="min-w-max">
-            <span className="text-sidebar-muted-foreground">weave</span>
-            <span className="text-(--weavewing-yellow)">wing</span>
-          </span>
-          {/* "threads" wraps past the spacer onto the clipped second line unless it fits whole. */}
-          <span className="flex h-7 w-0 flex-1 flex-wrap overflow-hidden">
-            <span aria-hidden className="h-7 w-1.5" />
-            <span className="text-sidebar-muted-foreground">threads</span>
-          </span>
+        <h2 className="h-7 min-w-0 flex-1 truncate pl-2 text-base leading-7 font-medium tracking-tight text-sidebar-muted-foreground">
+          Threads
         </h2>
         <div className="flex shrink-0 items-center">
           {/* Rendered even when unavailable, so New thread never moves. */}
