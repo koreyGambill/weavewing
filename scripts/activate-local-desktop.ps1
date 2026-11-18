@@ -475,7 +475,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       $stateFile = Join-Path $root 'activation-state.json'
       $activationState = @{ windowsBackupRoot = $config.backupRootWindows; wslBackupRoot = $config.wslBackupRoot + '-' + [guid]::NewGuid().ToString() }
       $activationState | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $stateFile
-      if (Test-Path -LiteralPath (Join-Path $root 'notify-thread')) { $config.notifyThread = (Get-Content -LiteralPath (Join-Path $root 'notify-thread') -Raw).Trim() }
+      if (Test-Path -LiteralPath (Join-Path $root 'notify-thread')) { $config | Add-Member -NotePropertyName notifyThread -NotePropertyValue (Get-Content -LiteralPath (Join-Path $root 'notify-thread') -Raw).Trim() -Force }
       if ($config.updatePath -eq 'wsl-only') {
         $resources = Join-Path $install 'resources'
         $oldDigest = $baseline.'resources/wsl-runtime.tar.gz'
