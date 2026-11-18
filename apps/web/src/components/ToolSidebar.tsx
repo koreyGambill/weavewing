@@ -309,15 +309,12 @@ function StatusTool() {
   const navigate = useNavigate();
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex justify-end border-b p-2">
-        <Button variant="ghost" size="xs" render={<Link to="/settings/status-sources" />}>
-          <Settings2Icon />
-          Status source settings
-        </Button>
-      </div>
       {groups.length === 0 ? (
         <p className="p-3 text-sm text-muted-foreground">
           Connect to a server that supports status sources.
+          <Button variant="ghost" size="xs" render={<Link to="/settings/status-sources" />}>
+            <Settings2Icon /> Status source settings
+          </Button>
         </p>
       ) : (
         <StatusSourcesList
