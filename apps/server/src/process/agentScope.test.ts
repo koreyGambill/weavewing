@@ -105,7 +105,9 @@ const withFakeSystemd = <A, E>(
     const runner = ProcessRunner.ProcessRunner.of({
       run: ({ args, timeout }) =>
         Effect.sync(() => {
-          expect(timeout).toBe("2 seconds");
+          expect(timeout).toBe(
+            args[1] === "stop" && args[2] === ownedAgentSlice(stateDir) ? "2 seconds" : "5 seconds",
+          );
           calls.push(args);
           if (!oomPolicy && args.some((arg) => arg.startsWith("--property=OOMPolicy="))) {
             return output("", 1);
@@ -150,12 +152,15 @@ const withFakeSystemd = <A, E>(
     const fileSystem = yield* FileSystem.FileSystem;
     const { stateDir } = yield* ServerConfig.ServerConfig;
     if (leftovers) {
-      NodeFS.mkdirSync(NodePath.join(cgroupRoot, "owned"), { recursive: true });
-      NodeFS.writeFileSync(NodePath.join(cgroupRoot, "owned", "cgroup.events"), "populated 1");
+      NodeFS.mkdirSync(NodePath.join(cgroupRoot, ownedAgentSlice(stateDir)), { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(cgroupRoot, ownedAgentSlice(stateDir), "cgroup.events"),
+        "populated 1",
+      );
       units.set(ownedAgentSlice(stateDir), {
         activeState: "active",
         result: "success",
-        controlGroup: "/owned",
+        controlGroup: `/${ownedAgentSlice(stateDir)}`,
       });
     }
     const constructed = yield* Deferred.make<void>();
@@ -469,7 +474,10 @@ describe("AgentScope service", () => {
             );
             if (stopFails)
               expect(
-                NodeFS.readFileSync(NodePath.join(cgroupRoot, "owned", "cgroup.kill"), "utf8"),
+                NodeFS.readFileSync(
+                  NodePath.join(cgroupRoot, ownedAgentSlice(stateDir), "cgroup.kill"),
+                  "utf8",
+                ),
               ).toBe("1");
             const agent = yield* scope.wrap({
               command: "agent",

@@ -123,8 +123,13 @@ export const make = Effect.gen(function* () {
       Effect.provideService(HostProcess.Platform, platform),
     );
 
-  const run = Effect.fn("AgentScope.run")(function* (command: string, args: ReadonlyArray<string>) {
-    return yield* runner.run({ command, args, timeout: "2 seconds" }).pipe(
+  // Only the stop that precedes the cgroup.kill fallback is short; elsewhere a false timeout would skip cleanup or disable scopes.
+  const run = Effect.fn("AgentScope.run")(function* (
+    command: string,
+    args: ReadonlyArray<string>,
+    timeout: "2 seconds" | "5 seconds" = "5 seconds",
+  ) {
+    return yield* runner.run({ command, args, timeout }).pipe(
       Effect.tapError((error) =>
         Effect.logWarning("Agent scope command failed", {
           command: path.basename(command),
@@ -169,18 +174,20 @@ export const make = Effect.gen(function* () {
     const events = controlGroup ? yield* readCgroupFile(controlGroup, "cgroup.events") : "";
     if (parseCgroupCounter(events, "populated") === 0) return;
     yield* Effect.logWarning("Stopping agents left by a previous server", { slice: ownedSlice });
-    const stopped = yield* run(systemctl, ["--user", "stop", ownedSlice]);
+    const stopped = yield* run(systemctl, ["--user", "stop", ownedSlice], "2 seconds");
     if (stopped._tag === "None" || stopped.value.code !== 0) {
       // A stop job outlives its caller; kill the old cgroup before a new scope can join its slice.
       const killed =
-        controlGroup !== "" &&
+        controlGroup.endsWith(`/${ownedSlice}`) &&
         (yield* fileSystem
           .writeFileString(path.join("/sys/fs/cgroup", controlGroup, "cgroup.kill"), "1")
           .pipe(
             Effect.as(true),
             Effect.orElseSucceed(() => false),
           ));
-      const confirmed = killed ? yield* run(systemctl, ["--user", "stop", ownedSlice]) : stopped;
+      const confirmed = killed
+        ? yield* run(systemctl, ["--user", "stop", ownedSlice], "2 seconds")
+        : stopped;
       yield* Effect.logWarning("Leftover agent stop needed a forced cleanup", {
         slice: ownedSlice,
         killed,
@@ -195,7 +202,7 @@ export const make = Effect.gen(function* () {
     Effect.ensuring(Effect.sync(() => recordStartupTiming("agent-scope.cleanup.end"))),
     Effect.forkScoped,
   );
-  const awaitCleanup = Fiber.join(cleanup);
+  const awaitCleanup = Fiber.await(cleanup).pipe(Effect.asVoid);
 
   const systemd = yield* Effect.cached(
     Effect.gen(function* () {
