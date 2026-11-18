@@ -192,7 +192,6 @@ import {
   resolveSidebarThreadSection,
   resolveSidebarReorderableThreadKeys,
   searchSidebarThreads,
-  shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   sidebarListItemId,
   sidebarThreadKeyAtY,
@@ -2876,13 +2875,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
-    if (
-      shouldCreateNewThreadInCurrentProject(
-        event?.shiftKey ?? false,
-        scopeGroups.length,
-        projectGroups.length,
-      )
-    ) {
+    if (event?.shiftKey) {
       if (isMobile) setOpenMobile(false);
       // With no current or open project, such as when every project is archived, pick one.
       void startNewThreadFromContext({
@@ -2899,11 +2892,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     openCommandPalette({ open: "new-thread-in" });
   };
 
-  const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.new") ??
-    (shouldCreateNewThreadInCurrentProject(false, scopeGroups.length, projectGroups.length)
-      ? shortcutLabelForCommand(keybindings, "chat.newLocal")
-      : undefined);
+  const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new");
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   const defaultFolderFallbackEnvironmentId =
     newThreadContext.activeThread?.environmentId ??
@@ -3165,13 +3154,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   scratch.scratchEnvironmentChoice(defaultFolderFallbackEnvironmentId),
                 );
               }}
-              showNewThreadInProjectHint={
-                !shouldCreateNewThreadInCurrentProject(
-                  false,
-                  scopeGroups.length,
-                  projectGroups.length,
-                )
-              }
+              showNewThreadInProjectHint
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {

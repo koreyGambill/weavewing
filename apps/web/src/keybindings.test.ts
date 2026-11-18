@@ -627,6 +627,29 @@ describe("resolveChatShortcutCommand", () => {
 });
 
 describe("resolveShortcutCommand", () => {
+  it.each(["Linux", "Win32", "MacIntel"])(
+    "opens the project picker without taking the tile shortcut on %s",
+    (platform) => {
+      const mac = platform === "MacIntel";
+      assert.equal(
+        resolveShortcutCommand(
+          event({ key: "o", ctrlKey: !mac, metaKey: mac, altKey: true, shiftKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform },
+        ),
+        "projectPicker.open",
+      );
+      assert.equal(
+        resolveShortcutCommand(
+          event({ key: "o", ctrlKey: true, altKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform },
+        ),
+        "workspace.tile.newTab",
+      );
+    },
+  );
+
   it("routes mod+w to the terminal while focused and to the right panel otherwise", () => {
     const closeEvent = event({ key: "w", metaKey: true });
     assert.strictEqual(

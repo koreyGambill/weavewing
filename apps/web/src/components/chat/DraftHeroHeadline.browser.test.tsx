@@ -1,22 +1,25 @@
 import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { ProjectId } from "@t3tools/contracts";
+import { type FilesystemBrowseInput, ProjectId, WS_METHODS } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
+import { openCommandPalette } from "~/commandPaletteBus";
 import { AppRoot } from "~/AppRoot";
 // The draft route loads ChatView lazily; importing it here keeps its first transform out of the test's timeout.
 import "~/components/ChatView";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
-import { useUiStateStore } from "~/uiStateStore";
+import { openDraftProjectPicker } from "~/draftProjectPicker";
 import {
   ENVIRONMENT_ID,
   PROJECT_ID,
   installFakeEnvironment,
+  answerRpc,
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { render } from "../../../test/render";
@@ -39,30 +42,51 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("the new-thread project picker follows the manual sidebar project order", async () => {
+it("drills through folders with repeated Tab and opens with Enter in heading and palette", async () => {
   using _environment = installFakeEnvironment([], {
     extraProjects: [
       { id: ProjectId.make("project-alpha"), title: "alpha" },
-      { id: ProjectId.make("project-beta"), title: "beta" },
+      { id: ProjectId.make("project-code"), title: "code" },
     ],
   });
+  using _browse = answerRpc(WS_METHODS.filesystemBrowse, ({ partialPath }: FilesystemBrowseInput) =>
+    Effect.succeed({
+      parentPath:
+        partialPath === "~/"
+          ? "/workspace"
+          : partialPath === "~/code/"
+            ? "/workspace/code"
+            : "/workspace/alpha",
+      entries:
+        partialPath === "~/"
+          ? [{ name: "code", fullPath: "/workspace/code" }]
+          : partialPath === "~/code/"
+            ? [{ name: "alpha", fullPath: "/workspace/alpha" }]
+            : [],
+    }),
+  );
+  using _projectFile = answerRpc(WS_METHODS.projectsReadFile, () =>
+    Effect.succeed({
+      relativePath: "t3.json",
+      contents: "",
+      byteLength: 0,
+      truncated: false,
+      exists: false,
+    }),
+  );
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
-    sidebarProjectSortOrder: "manual",
   });
-  useUiStateStore.setState({
-    projectOrder: [
-      `${ENVIRONMENT_ID}:/workspace/beta`,
-      `${ENVIRONMENT_ID}:/workspace/render`,
-      `${ENVIRONMENT_ID}:/workspace/alpha`,
-    ],
-  });
-  using _order = { [Symbol.dispose]: () => useUiStateStore.setState({ projectOrder: [] }) };
   const draftId = DraftId.make("draft-manual-order");
   useComposerDraftStore
     .getState()
     .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId);
+  useComposerDraftStore.getState().setDraftThreadContext(draftId, {
+    environmentSelection: "auto",
+    loadBalancedEnvironmentId: ENVIRONMENT_ID,
+  });
+  useComposerDraftStore.getState().setPrompt(draftId, "Keep this unsent prompt");
 
   const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
   await router.load();
@@ -75,21 +99,81 @@ it("the new-thread project picker follows the manual sidebar project order", asy
   const trigger = document.querySelector<HTMLElement>("[data-draft-project-trigger]");
   if (!trigger) throw new Error("The draft project picker did not render.");
   await userEvent.click(page.elementLocator(trigger));
-  await expect.element(page.getByRole("option", { name: "beta" })).toBeVisible();
-
-  // The draft's own project leads; the rest keep the sidebar's order.
-  await vi.waitFor(() => {
-    expect(
-      page
-        .getByRole("option")
-        .elements()
-        .map((option) => option.textContent),
-    ).toEqual([
-      expect.stringMatching(/render$/),
-      expect.stringMatching(/beta$/),
-      expect.stringMatching(/alpha$/),
-      "Open folder…",
-      "Clone repository…",
-    ]);
-  });
+  const search = page.getByRole("combobox", { name: "Project name or path" });
+  await expect.element(search).toHaveFocus();
+  const current = page.getByRole("option").first();
+  await expect.element(current.getByText("render", { exact: true })).toBeVisible();
+  await expect.element(current.getByText("Current", { exact: true })).toBeVisible();
+  await userEvent.type(search, "workspace/alpha");
+  await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
+  expect(page.getByRole("option").elements()).toHaveLength(1);
+  await userEvent.clear(search);
+  await userEvent.type(search, "~/co");
+  await expect.element(page.getByRole("option", { name: /code/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await vi.waitFor(() => expect(search.element()).toHaveValue("~/code/alpha/"));
+  await expect.element(search).toHaveFocus();
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{Enter}");
+  await vi.waitFor(() =>
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("alpha"),
+  );
+  await expect.element(search).not.toBeInTheDocument();
+  expect(useComposerDraftStore.getState().getDraftSession(draftId)?.environmentSelection).toBe(
+    "auto",
+  );
+  expect(
+    useComposerDraftStore.getState().getDraftSession(draftId)?.loadBalancedEnvironmentId,
+  ).toBeNull();
+  using _columns = new DisposableStack();
+  const otherColumn = document.createElement("div");
+  otherColumn.dataset.tileContent = "terminal";
+  const otherInput = document.createElement("input");
+  otherColumn.append(otherInput);
+  document.body.append(otherColumn);
+  _columns.defer(() => otherColumn.remove());
+  await userEvent.click(page.elementLocator(otherInput));
+  expect(openDraftProjectPicker(null)).toBe(false);
+  openCommandPalette({ open: "new-thread-in" });
+  await expect.element(page.getByRole("combobox", { name: "Project name or path" })).toHaveFocus();
+  await expect
+    .element(page.getByRole("option").first().getByText("alpha", { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "All machines", exact: true }))
+    .toBeVisible();
+  await userEvent.type(search, "~/co");
+  await expect.element(page.getByRole("option", { name: /code/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await vi.waitFor(() => expect(search.element()).toHaveValue("~/code/alpha/"));
+  await expect.element(search).toHaveFocus();
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(search).not.toBeInTheDocument();
+  openCommandPalette({ open: "new-thread-in" });
+  await expect.element(search).toHaveFocus();
+  await userEvent.type(search, "~/co");
+  await expect.element(page.getByRole("option", { name: /code/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{ArrowDown}{ArrowUp}");
+  await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(search).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(search).not.toBeInTheDocument();
+  await vi.waitFor(() =>
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("code"),
+  );
+  expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
+    "Keep this unsent prompt",
+  );
 });

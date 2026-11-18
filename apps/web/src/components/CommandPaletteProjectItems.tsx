@@ -72,48 +72,13 @@ export function buildProjectSearchItems(input: ProjectItemsInput) {
   });
 }
 
-/** Projects as targets of the "New thread in..." submenu. */
-export function buildNewThreadInProjectItems(
-  input: ProjectItemsInput & { readonly currentProjectKey: string | null },
-) {
-  return buildProjectActionItems({
-    projects: input.projects,
-    valuePrefix: "new-thread-in",
-    searchTerms: (project) => {
-      const group = input.projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-      const location = input.locationByEnvironmentId.get(project.environmentId);
-      return [
-        ...(group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ?? []),
-        ...(location ? [location.label] : []),
-      ];
-    },
-    renderDescription: (project) => (
-      <ProjectLocationDescription
-        location={input.locationByEnvironmentId.get(project.environmentId)}
-        workspaceRoot={project.workspaceRoot}
-        current={input.currentProjectKey === `${project.environmentId}:${project.id}`}
-      />
-    ),
-    icon: projectFaviconIcon,
-    runProject: input.runProject,
-    ...(input.pin ? { pin: input.pin } : {}),
-  });
-}
-
 function ProjectLocationDescription(props: {
   readonly location: CommandPaletteProjectLocation | undefined;
   readonly workspaceRoot: string;
-  readonly current?: boolean;
 }) {
   const location = props.location ?? UNKNOWN_PROJECT_LOCATION;
   return (
     <span className="flex min-w-0 items-center gap-1">
-      {props.current ? (
-        <>
-          <span className="shrink-0">Current</span>
-          <CommandPaletteMetaDot />
-        </>
-      ) : null}
       <span className="inline-flex min-w-0 items-center gap-1">
         {location.kind === "remote" ? (
           <EnvironmentMachineIcon
