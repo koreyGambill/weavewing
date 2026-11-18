@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { StatusItem, StatusState } from "@t3tools/contracts";
 
-import { groupStatusItems, sourceDefaultExpanded, statusItemCounts } from "./statusSources.logic";
+import {
+  groupStatusItems,
+  sourceDefaultExpanded,
+  sourceExpanded,
+  statusItemCounts,
+} from "./statusSources.logic";
 
 const items: StatusItem[] = [
   { name: "disabled", state: "unknown", detail: "disabled" },
@@ -28,6 +33,25 @@ describe("status source presentation", () => {
     expect(statusItemCounts(items)).toBe("1 fail · 1 warn · 2 ok · 1 not run · 1 off");
     expect(groupStatusItems([])).toEqual({ active: [], inactive: [] });
     expect(statusItemCounts([])).toBe("");
+  });
+
+  it("reopens a collapsed source when its state or a check worsens", () => {
+    const collapsed = { expanded: false, state: "ok" as const };
+    expect(sourceExpanded({ state: "ok", items: [] }, collapsed)).toBe(false);
+    expect(sourceExpanded({ state: "warn", items: [] }, collapsed)).toBe(true);
+    expect(sourceExpanded({ state: "fail", items: [] }, { expanded: false, state: "warn" })).toBe(
+      true,
+    );
+    expect(
+      sourceExpanded({ state: "ok", items: [{ name: "check", state: "fail" }] }, collapsed),
+    ).toBe(true);
+    expect(sourceExpanded({ state: "warn", items: [] }, { expanded: false, state: "warn" })).toBe(
+      false,
+    );
+    expect(sourceExpanded({ state: "ok", items: [] }, { expanded: true, state: "fail" })).toBe(
+      true,
+    );
+    expect(sourceExpanded({ state: "unknown", items: [] }, collapsed)).toBe(false);
   });
 
   it.each<{ state: StatusState; checks: StatusState[]; expanded: boolean }>([

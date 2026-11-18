@@ -7,13 +7,14 @@ import {
 } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import {
+  BellOffIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
   MoreHorizontalIcon,
   SettingsIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 
 import { getClientSettings } from "../../hooks/useSettings";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -38,7 +39,9 @@ import { summarizeStatusSources } from "./statusSourceSummary.logic";
 import {
   groupStatusItems,
   isStatusItemDisabled,
-  sourceDefaultExpanded,
+  sourceExpanded,
+  sourceExpansionState,
+  type SourceExpansion,
   statusItemCounts,
 } from "./statusSources.logic";
 
@@ -146,7 +149,7 @@ function toolUrl(value: string | undefined): string | undefined {
   return value && /^https?:\/\//i.test(value) ? value : undefined;
 }
 
-function StatusHint({ children, text }: { children: ReactElement; text: string }) {
+function StatusHint({ children, text }: { children: ReactElement; text: ReactNode }) {
   return (
     <Tooltip>
       <TooltipTrigger render={children} />
@@ -167,7 +170,7 @@ function StatusCheck({ item }: { item: StatusItem }) {
         >
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-accent focus-visible:outline-ring"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
           >
@@ -220,21 +223,27 @@ function SourceStatus({
   const snooze = useAtomCommand(statusSourcesSnooze, { reportFailure: true });
   const [busy, setBusy] = useState(false);
   const storageKey = `status-source-expanded:${environmentId}:${source.config.id}`;
-  const [expansion, setExpansion] = useState<boolean | null>(() => {
+  const [expansion, setExpansion] = useState<SourceExpansion | null>(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      return saved === "true" ? true : saved === "false" ? false : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return typeof parsed?.expanded === "boolean" &&
+        ["fail", "warn", "ok", "unknown"].includes(parsed.state)
+        ? { expanded: parsed.expanded, state: parsed.state }
+        : null;
     } catch {
       return null;
     }
   });
-  const expanded = expansion ?? sourceDefaultExpanded(source.latest);
+  const expanded = sourceExpanded(source.latest, expansion);
   const [inactiveExpanded, setInactiveExpanded] = useState(false);
   const { active, inactive } = groupStatusItems(source.latest.items);
   const toggleExpanded = () => {
-    setExpansion(!expanded);
+    const next = { expanded: !expanded, state: sourceExpansionState(source.latest) };
+    setExpansion(next);
     try {
-      localStorage.setItem(storageKey, String(!expanded));
+      localStorage.setItem(storageKey, JSON.stringify(next));
     } catch {
       /* Storage can be unavailable in private browsers. */
     }
@@ -250,12 +259,25 @@ function SourceStatus({
     <li className="border-t border-border py-1 text-xs">
       <div className="flex min-w-0 items-center gap-0.5">
         <StatusHint
-          text={`${source.config.name}: ${source.latest.summary} · ${statusItemCounts(source.latest.items)}`}
+          text={
+            <>
+              {source.config.name}: {source.latest.summary}
+              {statusItemCounts(source.latest.items) &&
+                ` · ${statusItemCounts(source.latest.items)}`}
+              {source.lastTransition && (
+                <span className="block">
+                  {source.lastTransition.from}→{source.lastTransition.to} ·{" "}
+                  <RelativeTime timestamp={source.lastTransition.at} />
+                </span>
+              )}
+            </>
+          }
         >
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center gap-1 rounded py-1 text-left hover:bg-accent focus-visible:outline-ring"
+            className="flex min-w-0 flex-1 items-center gap-1 rounded py-1 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             aria-expanded={expanded}
+            aria-label={`${source.config.name}: ${source.latest.state}${statusItemCounts(source.latest.items) ? ` · ${statusItemCounts(source.latest.items)}` : ""}`}
             onClick={toggleExpanded}
           >
             <Chevron className="size-3 shrink-0" />
@@ -288,6 +310,17 @@ function SourceStatus({
           >
             <ExternalLinkIcon />
           </Button>
+        )}
+        {snoozed && (
+          <StatusHint
+            text={`Notifications snoozed until ${new Date(source.config.snoozedUntil!).toLocaleString()}`}
+          >
+            <BellOffIcon
+              role="img"
+              aria-label={`Notifications snoozed until ${new Date(source.config.snoozedUntil!).toLocaleString()}`}
+              className="size-3 shrink-0 text-muted-foreground"
+            />
+          </StatusHint>
         )}
         <Menu>
           <MenuTrigger
@@ -325,16 +358,24 @@ function SourceStatus({
           {active.length === 0 && inactive.length === 0 && (
             <p className="py-1 text-muted-foreground wrap-anywhere">{source.latest.summary}</p>
           )}
-          <ul>
-            {active.map((item) => (
-              <StatusCheck key={item.name} item={item} />
-            ))}
-          </ul>
+          {active.length > 0 && (
+            <ul>
+              {active.map((item) => (
+                <StatusCheck key={item.name} item={item} />
+              ))}
+            </ul>
+          )}
+          {source.lastTransition && (
+            <p className="py-1 text-muted-foreground">
+              {source.lastTransition.from}→{source.lastTransition.to} ·{" "}
+              <RelativeTime timestamp={source.lastTransition.at} />
+            </p>
+          )}
           {inactive.length > 0 && (
             <>
               <button
                 type="button"
-                className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-muted-foreground hover:bg-accent focus-visible:outline-ring"
+                className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-muted-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                 aria-expanded={inactiveExpanded}
                 onClick={() => setInactiveExpanded(!inactiveExpanded)}
               >
