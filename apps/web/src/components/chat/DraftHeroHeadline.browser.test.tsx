@@ -6,6 +6,7 @@ import type * as Context from "effect/Context";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
+import { openCommandPalette } from "~/commandPaletteBus";
 import { AppRoot } from "~/AppRoot";
 // The draft route loads ChatView lazily; importing it here keeps its first transform out of the test's timeout.
 import "~/components/ChatView";
@@ -53,6 +54,10 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   useComposerDraftStore
     .getState()
     .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId);
+  useComposerDraftStore.getState().setDraftThreadContext(draftId, {
+    environmentSelection: "auto",
+    loadBalancedEnvironmentId: ENVIRONMENT_ID,
+  });
   useComposerDraftStore.getState().setPrompt(draftId, "Keep this unsent prompt");
 
   const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
@@ -68,6 +73,9 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   await userEvent.click(page.elementLocator(trigger));
   const search = page.getByRole("combobox", { name: "Project name or path" });
   await expect.element(search).toHaveFocus();
+  const current = page.getByRole("option").first();
+  await expect.element(current).toHaveTextContent("render");
+  await expect.element(current).toHaveTextContent("Current");
   await userEvent.type(search, "workspace/alpha");
   await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
   expect(page.getByRole("option").elements()).toHaveLength(1);
@@ -76,6 +84,19 @@ it("finds a draft project by its path and selects it with Enter", async () => {
     expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("alpha"),
   );
   await expect.element(search).not.toBeInTheDocument();
+  expect(useComposerDraftStore.getState().getDraftSession(draftId)?.environmentSelection).toBe(
+    "auto",
+  );
+  expect(useComposerDraftStore.getState().getDraftSession(draftId)?.loadBalancedEnvironmentId).toBe(
+    ENVIRONMENT_ID,
+  );
+  openCommandPalette({ open: "new-thread-in" });
+  await expect.element(page.getByRole("combobox", { name: "Project name or path" })).toHaveFocus();
+  await expect.element(page.getByRole("option").first()).toHaveTextContent("alpha");
+  await expect
+    .element(page.getByRole("button", { name: "All machines", exact: true }))
+    .toBeVisible();
+  await userEvent.keyboard("{Escape}");
   expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
     "Keep this unsent prompt",
   );

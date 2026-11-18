@@ -1,3 +1,5 @@
+import { DraftProjectPicker } from "./chat/DraftProjectPicker";
+import { openDraftProjectPicker } from "~/draftProjectPicker";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { useInboxEnvironments } from "../state/inbox";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
@@ -173,7 +175,6 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
-  isScratchProject,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "@t3tools/client-runtime/state/projects";
@@ -214,8 +215,6 @@ import {
   buildRootGroups,
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
-  enumerateCommandPaletteItems,
-  newThreadNoProjectIndex,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -251,10 +250,7 @@ import {
   useProjectLookups,
   useSortedProjectGroups,
 } from "./CommandPaletteLookups";
-import {
-  buildNewThreadInProjectItems,
-  buildProjectSearchItems,
-} from "./CommandPaletteProjectItems";
+import { buildProjectSearchItems } from "./CommandPaletteProjectItems";
 import {
   CommandPaletteSubmitButton,
   NewProjectPublishHostPicker,
@@ -331,8 +327,6 @@ function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPalette
       return null;
   }
 }
-
-const NEW_THREAD_NO_PROJECT_VALUE = "new-thread-in:no-project";
 
 export function CommandPalette({ children }: { children: ReactNode }) {
   useCommandPaletteMount();
@@ -743,6 +737,9 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+  const [pickerEnvironmentId, setPickerEnvironmentId] = useState<EnvironmentId | null>(
+    currentProjectEnvironmentId ?? defaultProjectRef?.environmentId ?? primaryEnvironmentId,
+  );
   const scratchChoice = scratchEnvironmentChoice(currentProjectEnvironmentId);
   const scratchLabel =
     scratchChoice.kind === "none" ? null : scratchWorkspaceLabelFor(scratchChoice.environmentId);
@@ -911,77 +908,6 @@ function OpenCommandPaletteDialog(props: {
     }),
     rowOrderKey("project"),
     true,
-  );
-
-  const openingOrderThreadItems = useOrderWhileOpen(
-    (() => {
-      const isScratch = (project: CommandPaletteProject) =>
-        isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
-      const currentEntry =
-        currentProjectId === null
-          ? undefined
-          : projectPickerEntries.find((entry) => entry.isPreferred);
-      const projectItems = buildNewThreadInProjectItems({
-        projects: pickerProjects.filter((project) => !isScratch(project)),
-        currentProjectKey: currentEntry
-          ? `${currentEntry.targetProject.environmentId}:${currentEntry.targetProject.id}`
-          : null,
-        projectGroupByTargetKey,
-        locationByEnvironmentId: projectEnvironmentLocationById,
-        pin: projectPin,
-        runProject: async (project) => {
-          const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-          const contextualRefBelongsToGroup =
-            contextualProjectRef !== null &&
-            group?.memberProjectRefs.some(
-              (projectRef) =>
-                projectRef.environmentId === contextualProjectRef.environmentId &&
-                projectRef.projectId === contextualProjectRef.projectId,
-            );
-          await handleNewThread(
-            contextualRefBelongsToGroup
-              ? contextualProjectRef
-              : scopeProjectRef(project.environmentId, project.id),
-          );
-        },
-      });
-      if (scratchChoice.kind === "none") return projectItems;
-
-      const noProjectIndex = newThreadNoProjectIndex(
-        projectPickerEntries.map(({ group, targetProject, isPreferred }) => ({
-          isScratch: isScratchProject(
-            targetProject,
-            scratchWorkspaceRootFor(targetProject.environmentId),
-          ),
-          pinned: group.pinned,
-          isPreferred,
-        })),
-      );
-      return [
-        ...projectItems.slice(0, noProjectIndex),
-        {
-          kind: "action" as const,
-          value: NEW_THREAD_NO_PROJECT_VALUE,
-          searchTerms: ["default folder", "no project", "without project", "none"],
-          title: scratchLabel ?? "Default folder",
-          icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
-          shortcutCommand: "chat.newWithoutProject" as const,
-          ...runScratchChoice(scratchChoice),
-        },
-        ...projectItems.slice(noProjectIndex),
-      ];
-    })(),
-    rowOrderKey("new-thread-in"),
-    true,
-  );
-  // Jump shortcuts follow the rows as shown, so a pin cannot move a number to another row.
-  const projectJumpItems = new Map(
-    enumerateCommandPaletteItems(
-      openingOrderThreadItems.filter((item) => item.value !== NEW_THREAD_NO_PROJECT_VALUE),
-    ).map((item) => [item.value, item] as const),
-  );
-  const projectThreadItems = openingOrderThreadItems.map(
-    (item) => projectJumpItems.get(item.value) ?? item,
   );
 
   const {
@@ -1424,7 +1350,7 @@ function OpenCommandPaletteDialog(props: {
       title: "New thread in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: NEW_THREAD_IN_GROUP, label: "Projects", items: projectThreadItems }],
+      groups: [{ value: NEW_THREAD_IN_GROUP, label: "Projects", items: [] }],
     });
   }
 
@@ -1437,8 +1363,8 @@ function OpenCommandPaletteDialog(props: {
       icon: <FolderIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "projectPicker.open",
       run: async () => {
-        requestAnimationFrame(() =>
-          document.querySelector<HTMLButtonElement>("[data-draft-project-trigger]")?.click(),
+        openDraftProjectPicker(
+          paletteRouteTarget?.kind === "draft" ? paletteRouteTarget.draftId : null,
         );
       },
     });
@@ -2105,20 +2031,11 @@ function OpenCommandPaletteDialog(props: {
         )
       : currentView?.groups[0]?.value === ADD_PROJECT_ENTRY_GROUP
         ? addProjectEntryGroups()
-        : currentView?.groups[0]?.value === NEW_THREAD_IN_GROUP
-          ? [
-              {
-                value: NEW_THREAD_IN_GROUP,
-                label: "Projects",
-                // Every project archived and no "No project" home leaves only adding one.
-                items: projectThreadItems.length > 0 ? projectThreadItems : [addProjectAction],
-              },
-            ]
-          : currentView?.groups[0]?.value === "themes"
-            ? changeThemeItem.groups
-            : currentView?.groups[0]?.value === "appearance"
-              ? changeAppearanceItem.groups
-              : (currentView?.groups ?? rootGroups);
+        : currentView?.groups[0]?.value === "themes"
+          ? changeThemeItem.groups
+          : currentView?.groups[0]?.value === "appearance"
+            ? changeAppearanceItem.groups
+            : (currentView?.groups ?? rootGroups);
 
   const isLinkedThreadSearch =
     linkedThreadSearch?.linkedThreads !== undefined && deferredQuery === linkedThreadSearch.query;
@@ -3256,6 +3173,70 @@ function OpenCommandPaletteDialog(props: {
     // still arrive below it.
     <span className="text-muted-foreground text-xs">Searching messages…</span>
   ) : null;
+
+  function addProjectFromPicker(step: "folder" | "clone") {
+    if (!pickerEnvironmentId) return;
+    setAddProjectEnvironmentId(pickerEnvironmentId);
+    const intent = openIntentView({
+      kind: "add-project",
+      start:
+        step === "folder"
+          ? {
+              step,
+              environmentId: pickerEnvironmentId,
+              query: getAddProjectInitialQueryForEnvironment(pickerEnvironmentId),
+            }
+          : { step, environmentId: pickerEnvironmentId },
+    });
+    if (step === "clone") {
+      pushPaletteView({
+        addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
+        groups: buildAddProjectSourceGroups(
+          pickerEnvironmentId,
+          buildPaletteRemoteSourceReadiness(sourceControlDiscovery.data),
+        ),
+      });
+    } else if (intent) {
+      pushPaletteView(intent);
+    }
+  }
+
+  if (currentView?.groups[0]?.value === NEW_THREAD_IN_GROUP) {
+    return (
+      <DraftProjectPicker
+        inline
+        onBack={popView}
+        activeProjectRef={
+          currentProjectEnvironmentId && currentProjectId
+            ? scopeProjectRef(currentProjectEnvironmentId, currentProjectId)
+            : defaultProjectRef
+        }
+        environmentId={pickerEnvironmentId}
+        defaultFolderLabel={scratchWorkspaceLabelFor(pickerEnvironmentId)}
+        onStartWithoutProject={() => {
+          if (pickerEnvironmentId) void startScratchThread(pickerEnvironmentId);
+        }}
+        label="New thread"
+        truncateStart={false}
+        onEnvironmentChange={setPickerEnvironmentId}
+        onClose={() => setOpen(false)}
+        onSelect={(project) => {
+          void handleNewThread(scopeProjectRef(project.environmentId, project.id)).catch(
+            (error: unknown) => {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to open project",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            },
+          );
+        }}
+        onAddProject={addProjectFromPicker}
+      />
+    );
+  }
 
   return (
     <CommandPaletteContent

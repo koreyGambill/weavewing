@@ -94,7 +94,9 @@ describe("CommandPalette open intents", () => {
 
     openCommandPalette({ open: "new-thread-in" });
 
-    await expect.element(page.getByPlaceholder("Search...")).toHaveFocus();
+    await expect
+      .element(page.getByRole("combobox", { name: "Project name or path" }))
+      .toHaveFocus();
   });
 
   it("highlights the first project when New thread in... opens from the root list", async () => {
@@ -139,7 +141,9 @@ describe("CommandPalette open intents", () => {
       .toHaveAttribute("data-highlighted");
     await userEvent.keyboard("{Enter}");
 
-    await expect.element(page.getByPlaceholder("Search...")).toHaveFocus();
+    await expect
+      .element(page.getByRole("combobox", { name: "Project name or path" }))
+      .toHaveFocus();
     await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
     await expect.element(page.getByRole("option").nth(1)).not.toHaveAttribute("data-highlighted");
   });

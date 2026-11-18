@@ -435,10 +435,3 @@ export function buildProjectCreateCommand(input: {
     defaultModelSelection: null,
   };
 }
-
-export {
-  isProjectPickerPath,
-  pickerProjectSections,
-  projectPickerPathLabel,
-  rankPickerProjects,
-} from "../projectPicker.logic.ts";

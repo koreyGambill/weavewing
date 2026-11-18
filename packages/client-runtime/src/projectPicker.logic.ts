@@ -1,3 +1,4 @@
+import { ensureBrowseDirectoryPath, getBrowseDirectoryPath } from "./state/projects.ts";
 import { scoreQueryMatch } from "@t3tools/shared/searchRanking";
 
 interface PickerProject {
@@ -69,10 +70,21 @@ export function rankPickerProjects<T extends PickerProject>(
     .map(({ project }) => project);
 }
 
-export function pickerProjectSections<T extends PickerProject>(ranked: ReadonlyArray<T>) {
-  const unpinned = ranked.filter((project) => !project.pinned);
+export function completePickerFolder(query: string, folderName: string | null): string {
+  return folderName === null
+    ? query
+    : ensureBrowseDirectoryPath(`${getBrowseDirectoryPath(query.trim())}${folderName}`);
+}
+
+export function pickerProjectSections<T extends PickerProject>(
+  ranked: ReadonlyArray<T>,
+  currentKey: string | null = null,
+) {
+  const remaining = ranked.filter((project) => project.key !== currentKey);
+  const unpinned = remaining.filter((project) => !project.pinned);
   return {
-    pinned: ranked.filter((project) => project.pinned),
+    current: ranked.filter((project) => project.key === currentKey),
+    pinned: remaining.filter((project) => project.pinned),
     recent: unpinned.slice(0, 5),
     more: unpinned.slice(5),
   };

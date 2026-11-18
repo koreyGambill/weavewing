@@ -11,8 +11,8 @@ that still needs attention. System notifications and sounds have separate contro
 
 ## Start a thread
 
-On web and desktop, **New thread** opens the project picker when you have more than one
-open project in the default or project-grouped sidebar. Archived projects don't count. **Shift-click** to start in
+On web and desktop, **New thread** or `mod+n` opens the project and folder picker.
+**Shift-click** to start in
 the current project, or use a project's own new-thread action. A new thread carries
 your model and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. To continue in
@@ -27,8 +27,9 @@ a connected one if any is connected.
 
 On web and desktop, click the project or folder in a new thread's heading, press
 `mod+alt+shift+o`, or choose **Change project or folder…** in the command palette. Search
-by project name or path. The picker starts on the draft's machine, with pinned
-projects and five recent projects. **Show all** reveals the rest.
+by project name or path. The same picker opens from the sidebar and **New thread in…**
+in the command palette. It starts on the current machine, with the current project
+first, then pinned projects and five recent projects. **Show all** reveals the rest.
 
 Choose a machine to move the draft there, or use **All machines** to search across
 connected machines. Choosing a project on another machine moves the draft to it.

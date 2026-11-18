@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  completePickerFolder,
   isProjectPickerPath,
   projectPickerPathLabel,
   rankPickerProjects,
@@ -54,6 +55,22 @@ describe("project picker", () => {
     expect(collapsed.pinned.map((p) => p.key)).toEqual(["wsl:spark"]);
     expect(collapsed.recent.map((p) => p.activity)).toEqual([10, 7, 6, 5, 4]);
     expect(collapsed.more.map((p) => p.activity)).toEqual([3, 2, 1, 0]);
+  });
+
+  it("completes folder names against the typed directory on every machine", () => {
+    expect(completePickerFolder("~/co", "code")).toBe("~/code/");
+    expect(completePickerFolder("./co", "code")).toBe("./code/");
+    expect(completePickerFolder("../co", "code")).toBe("../code/");
+    expect(completePickerFolder("/home/me/co", "code")).toBe("/home/me/code/");
+    expect(completePickerFolder("C:\\Users\\Me\\co", "code")).toBe("C:\\Users\\Me\\code\\");
+    expect(completePickerFolder("~/code/", null)).toBe("~/code/");
+  });
+
+  it("puts the current project ahead of pinned and recent without duplicating it", () => {
+    const sections = pickerProjectSections(rankPickerProjects(projects, "wsl", ""), "wsl:other");
+    expect(sections.current.map((p) => p.key)).toEqual(["wsl:other"]);
+    expect(sections.pinned.map((p) => p.key)).toEqual(["wsl:spark"]);
+    expect(sections.recent).toEqual([]);
   });
 
   it.each([

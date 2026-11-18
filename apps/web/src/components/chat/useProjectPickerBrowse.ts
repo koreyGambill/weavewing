@@ -6,6 +6,8 @@ import { useContext, useEffect, useState } from "react";
 
 import { filesystemEnvironment } from "~/state/filesystem";
 
+const homeDirectories = new WeakMap<object, Map<EnvironmentId, string>>();
+
 const EMPTY_LISTINGS: ReadonlyArray<BrowseListing> = [];
 
 interface BrowseTarget {
@@ -33,6 +35,11 @@ export function useProjectPickerBrowse(
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to debounced filesystem queries and aborts their Effect fibers when the query or destination changes
   useEffect(() => {
+    const { targets, partialPath, open } = JSON.parse(requestKey) as {
+      targets: ReadonlyArray<BrowseTarget>;
+      partialPath: string | null;
+      open: boolean;
+    };
     if (!open || !partialPath || targets.length === 0) return;
     const abort = new AbortController();
     const timeout = setTimeout(() => {
@@ -64,7 +71,15 @@ export function useProjectPickerBrowse(
       );
       void Effect.runPromise(program, { signal: abort.signal })
         .then((listings) => {
-          if (!abort.signal.aborted) setResponse({ requestKey, listings });
+          if (abort.signal.aborted) return;
+          if (partialPath === "~/") {
+            const homes = new Map(homeDirectories.get(registry));
+            for (const listing of listings) {
+              if (listing.result) homes.set(listing.environmentId, listing.result.parentPath);
+            }
+            homeDirectories.set(registry, homes);
+          }
+          setResponse({ requestKey, listings });
         })
         .catch((cause: unknown) => {
           if (abort.signal.aborted) return;
@@ -82,11 +97,31 @@ export function useProjectPickerBrowse(
       clearTimeout(timeout);
       abort.abort();
     };
-  }, [registry, requestKey, targets, partialPath, open]);
+  }, [registry, requestKey]);
 
   return {
     listings: response?.requestKey === requestKey ? response.listings : EMPTY_LISTINGS,
     pending:
       open && partialPath !== null && targets.length > 0 && response?.requestKey !== requestKey,
   };
+}
+
+export function useProjectPickerHomes(targets: ReadonlyArray<BrowseTarget>, open: boolean) {
+  const registry = useContext(RegistryContext);
+  const [homes, setHomes] = useState<ReadonlyMap<EnvironmentId, string>>(
+    () => homeDirectories.get(registry) ?? new Map(),
+  );
+  const missing = targets.filter((target) => !homes.has(target.environmentId));
+  const response = useProjectPickerBrowse(missing, "~/", open);
+  const resolved = response.listings.filter(
+    (listing) => listing.result && !homes.has(listing.environmentId),
+  );
+  if (resolved.length > 0) {
+    const next = new Map(homes);
+    for (const listing of resolved) {
+      if (listing.result) next.set(listing.environmentId, listing.result.parentPath);
+    }
+    setHomes(next);
+  }
+  return homes;
 }

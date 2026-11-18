@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./project-picker": {
+      "types": "./src/projectPicker.logic.ts",
+      "default": "./src/projectPicker.logic.ts"
+    },
     "./thread-glyphs": {
       "types": "./src/threadGlyphs.ts",
       "default": "./src/threadGlyphs.ts"

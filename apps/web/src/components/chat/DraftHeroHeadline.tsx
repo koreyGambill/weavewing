@@ -115,10 +115,14 @@ export function DraftHeroHeadline({
       void openProjectDraft(projectRef);
       return;
     }
-    setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
-      environmentSelection: "manual",
-      loadBalancedEnvironmentId: null,
-    });
+    setLogicalProjectDraftThreadId(
+      logicalProjectKey,
+      projectRef,
+      draftId,
+      project.environmentId !== activeProjectRef?.environmentId
+        ? { environmentSelection: "manual", loadBalancedEnvironmentId: null }
+        : undefined,
+    );
     seedDraftModelSelection(draftId, projectRef);
   };
   // The folder becomes a project; this draft, typed content included, moves into it.
@@ -172,6 +176,7 @@ export function DraftHeroHeadline({
 
   const projectSelector = (
     <DraftProjectPicker
+      draftId={draftId}
       activeProjectRef={activeProjectRef}
       environmentId={activeProjectRef?.environmentId ?? scratchTargetEnvironmentId}
       label={projectTriggerLabel ?? "Choose a project"}
