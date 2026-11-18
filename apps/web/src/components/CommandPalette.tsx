@@ -1,5 +1,6 @@
 import { DraftProjectPicker } from "./chat/DraftProjectPicker";
 import { openDraftProjectPicker } from "~/draftProjectPicker";
+import { openCommandPalette } from "~/commandPaletteBus";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { useInboxEnvironments } from "../state/inbox";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
