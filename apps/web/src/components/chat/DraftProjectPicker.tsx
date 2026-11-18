@@ -404,26 +404,28 @@ export function DraftProjectPicker({
             <ArrowLeftIcon className="size-4" />
           </InlineButton>
         ) : null}
-        <Select
-          value={environmentId}
-          onValueChange={(id) => {
-            if (id) switchMachine(id);
-          }}
-        >
-          <SelectTrigger size="compact" variant="ghost" aria-label="Project machine">
-            <SelectValue>
-              {environments.find((env) => env.environmentId === environmentId)?.label ??
-                "Choose machine"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {connected.map((env) => (
-              <SelectItem key={env.environmentId} value={env.environmentId}>
-                {env.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)]">
+          <Select
+            value={environmentId}
+            onValueChange={(id) => {
+              if (id) switchMachine(id);
+            }}
+          >
+            <SelectTrigger size="compact" variant="ghost" aria-label="Project machine">
+              <SelectValue>
+                {environments.find((env) => env.environmentId === environmentId)?.label ??
+                  "Choose machine"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {connected.map((env) => (
+                <SelectItem key={env.environmentId} value={env.environmentId}>
+                  {env.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </div>
         <Button
           variant={allMachines ? "secondary" : "ghost"}
           size="xs"
