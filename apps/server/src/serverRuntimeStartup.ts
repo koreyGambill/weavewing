@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import { formatHostForUrl, isWildcardHost } from "@t3tools/shared/hostClassification";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
@@ -462,6 +463,7 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
   const random = yield* SecureRandom.SecureRandom;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
 
+  const agentScope = yield* AgentScope;
   const commandGate = yield* makeCommandGate;
   const httpListening = yield* Deferred.make<void>();
   const effectWorkerFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
@@ -558,7 +560,8 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
       startEffectWorker: runStartupPhase(
         "orchestration-v2.effect-worker.start",
         startEffectWorkerWithRelay({
-          runWorker: EffectWorker.runDaemon,
+          // Reconciliation edits stored state; provider effects wait for orphan cleanup after activation.
+          runWorker: agentScope.awaitCleanup.pipe(Effect.andThen(EffectWorker.runDaemon)),
           startRelay: agentAwarenessRelay.start(),
           workerFiberRef: effectWorkerFiber,
         }),

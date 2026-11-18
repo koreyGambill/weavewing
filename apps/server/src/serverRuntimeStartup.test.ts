@@ -9,6 +9,7 @@ import {
   EnvironmentId,
   type ServerLifecycleStreamEvent,
 } from "@t3tools/contracts";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { HttpServer } from "effect/http";
@@ -53,6 +54,7 @@ it.effect.each([
   "launch-failure",
   "project-failure",
   "project-refused",
+  "slow-cleanup",
 ] as const)("keeps bootstrap launch failures separate from project failures: %s", (scenario) =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("bootstrap-project");
@@ -60,6 +62,8 @@ it.effect.each([
       scenario === "disabled-default" ? "custom" : "codex",
     );
     const events: ServerLifecycleStreamEvent[] = [];
+    const cleanup = yield* Deferred.make<void>();
+    const workerStarted = yield* Deferred.make<void>();
     const recovery = {
       terminalizedRuns: 0,
       stoppedSessions: 0,
@@ -70,6 +74,10 @@ it.effect.each([
     const imports = { importedThreadCount: 0, importedMessageCount: 0 };
     const dependencies = Layer.mergeAll(
       NodeCrypto.layer,
+      Layer.succeed(AgentScope, {
+        ...AgentScope.defaultValue(),
+        awaitCleanup: scenario === "slow-cleanup" ? Deferred.await(cleanup) : Effect.void,
+      }),
       Path.layer,
       Layer.mock(ServerConfig.ServerConfig)({
         ...(yield* ServerConfig.deriveServerPaths("/bootstrap-project", undefined).pipe(
@@ -118,7 +126,10 @@ it.effect.each([
       Layer.mock(Orchestrator.OrchestratorV2)({ recoverDelegatedTasks: Effect.void }),
       Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ shutdown: Effect.void }),
       Layer.mock(AgentAwarenessRelay.AgentAwarenessRelay)({ start: () => Effect.void }),
-      Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: () => Effect.never }),
+      Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+        runOnce: () =>
+          Deferred.succeed(workerStarted, undefined).pipe(Effect.andThen(Effect.never)),
+      }),
       Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({
         publish: (event) =>
           Effect.sync(() => {
@@ -224,6 +235,11 @@ it.effect.each([
       yield* startup.markHttpListening;
       const ready = yield* Effect.exit(startup.awaitCommandReady);
       assert.equal(Exit.isSuccess(ready), scenario !== "project-failure");
+      if (scenario === "slow-cleanup") {
+        assert.isFalse(yield* Deferred.isDone(workerStarted));
+        yield* Deferred.succeed(cleanup, undefined);
+        yield* Deferred.await(workerStarted);
+      }
       const welcome = events.find((event) => event.type === "welcome");
       if (scenario === "project-failure") {
         assert.isUndefined(welcome);
@@ -239,7 +255,10 @@ it.effect.each([
       }
     }).pipe(
       Effect.provide(ServerRuntimeStartup.layerWithOptions().pipe(Layer.provide(dependencies))),
-      Effect.provideService(ServerActivation, Effect.never),
+      Effect.provideService(
+        ServerActivation,
+        scenario === "slow-cleanup" ? Effect.void : Effect.never,
+      ),
     );
   }),
 );
