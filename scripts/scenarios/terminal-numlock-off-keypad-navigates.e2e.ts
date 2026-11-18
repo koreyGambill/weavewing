@@ -47,7 +47,7 @@ test(
       );
     await t3.open(thread);
 
-    await screen.getByRole("button", "Toggle terminal drawer").tap();
+    await browser.keyboard.press("Control+j");
     const terminal = screen.getByLabel("Terminal input");
 
     // Input sent before the shell runs is dropped, so retype until it lands.

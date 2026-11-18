@@ -51,7 +51,7 @@ const exhaustFileDescriptors = Effect.fn("scenario.exhaustFileDescriptors")(func
 });
 
 test(
-  "A terminal whose shell cannot start says why, also after its drawer reopens",
+  "A terminal whose shell cannot start retains its error across a tile tab switch",
   WEB,
   async ({ t3, app, browser, screen }) => {
     const project = await t3.project("demo");
@@ -59,7 +59,6 @@ test(
     await t3.open(thread);
     const pid = await runPromise(scenarioServerPid);
 
-    const toggle = screen.getByRole("button", "Toggle terminal drawer");
     const terminal = screen.getByLabel("Terminal input");
     // The canvas has no DOM text: select all and read what the terminal's copy hands over.
     const terminalText = async () => {
@@ -80,20 +79,20 @@ test(
       return browser.evaluate(() => document.body.dataset.terminalCopy ?? "");
     };
 
-    await expect(toggle).toBeVisible();
+    await expect(screen.getByRole("tab", "Main chat")).toBeVisible();
     const restore = await runPromise(exhaustFileDescriptors(pid));
     try {
-      await toggle.tap();
+      await browser.keyboard.press("Control+j");
       await expect.poll(terminalText, { timeout: 15_000 }).toContain("Failed to spawn PTY process");
     } finally {
       await runPromise(restore);
     }
     await app.screenshot("startup-failure");
 
-    await toggle.tap();
+    await browser.keyboard.press("Control+Alt+o");
     await expect(terminal).toBeHidden();
-    await toggle.tap();
+    await screen.getByRole("tab", "Terminal 1").tap();
     await expect.poll(terminalText, { timeout: 15_000 }).toContain("Failed to spawn PTY process");
-    await app.screenshot("after-reopen");
+    await app.screenshot("after-return-to-tab");
   },
 );
