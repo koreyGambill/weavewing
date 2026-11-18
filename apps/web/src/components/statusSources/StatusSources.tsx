@@ -230,17 +230,25 @@ function SourceStatus({
       const parsed = JSON.parse(saved);
       return typeof parsed?.expanded === "boolean" &&
         ["fail", "warn", "ok", "unknown"].includes(parsed.state)
-        ? { expanded: parsed.expanded, state: parsed.state }
+        ? {
+            expanded: parsed.expanded,
+            state: parsed.state,
+            ...(typeof parsed.at === "string" ? { at: parsed.at } : {}),
+          }
         : null;
     } catch {
       return null;
     }
   });
-  const expanded = sourceExpanded(source.latest, expansion);
+  const expanded = sourceExpanded(source.latest, expansion, source.lastTransition?.at);
   const [inactiveExpanded, setInactiveExpanded] = useState(false);
   const { active, inactive } = groupStatusItems(source.latest.items);
   const toggleExpanded = () => {
-    const next = { expanded: !expanded, state: sourceExpansionState(source.latest) };
+    const next = {
+      expanded: !expanded,
+      state: sourceExpansionState(source.latest),
+      at: new Date().toISOString(),
+    };
     setExpansion(next);
     try {
       localStorage.setItem(storageKey, JSON.stringify(next));

@@ -52,6 +52,16 @@ describe("status source presentation", () => {
       true,
     );
     expect(sourceExpanded({ state: "unknown", items: [] }, collapsed)).toBe(false);
+    const collapsedAtWarn = { expanded: false, state: "warn" as const, at: "2026-11-18T01:00:00Z" };
+    expect(
+      sourceExpanded({ state: "warn", items: [] }, collapsedAtWarn, "2026-11-18T00:59:00Z"),
+    ).toBe(false);
+    expect(
+      sourceExpanded({ state: "warn", items: [] }, collapsedAtWarn, "2026-11-18T01:05:00Z"),
+    ).toBe(true);
+    expect(
+      sourceExpanded({ state: "ok", items: [] }, collapsedAtWarn, "2026-11-18T01:05:00Z"),
+    ).toBe(false);
   });
 
   it.each<{ state: StatusState; checks: StatusState[]; expanded: boolean }>([

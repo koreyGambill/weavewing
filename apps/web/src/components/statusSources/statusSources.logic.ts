@@ -31,7 +31,7 @@ export function statusItemCounts(items: ReadonlyArray<StatusItem>) {
   return [...counts, disabled ? `${disabled} off` : ""].filter(Boolean).join(" · ");
 }
 
-export type SourceExpansion = { expanded: boolean; state: StatusState };
+export type SourceExpansion = { expanded: boolean; state: StatusState; at?: string };
 
 export function sourceExpansionState(payload: Pick<StatusPayload, "state" | "items">) {
   return [payload.state, ...payload.items.map((item) => item.state)].reduce((worst, state) =>
@@ -39,14 +39,17 @@ export function sourceExpansionState(payload: Pick<StatusPayload, "state" | "ite
   );
 }
 
+/** A collapse holds until the source is worse than when collapsed or has transitioned since. */
 export function sourceExpanded(
   payload: Pick<StatusPayload, "state" | "items">,
   saved: SourceExpansion | null,
+  lastTransitionAt?: string,
 ) {
   if (!saved) return sourceDefaultExpanded(payload);
+  if (saved.expanded) return true;
+  if (!sourceDefaultExpanded(payload)) return false;
   return (
-    saved.expanded ||
-    (sourceDefaultExpanded(payload) &&
-      stateOrder[sourceExpansionState(payload)] < stateOrder[saved.state])
+    stateOrder[sourceExpansionState(payload)] < stateOrder[saved.state] ||
+    (saved.at !== undefined && lastTransitionAt !== undefined && lastTransitionAt > saved.at)
   );
 }
