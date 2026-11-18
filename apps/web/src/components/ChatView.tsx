@@ -1093,7 +1093,7 @@ export default function ChatView(props: ChatViewProps) {
     selectActiveRightPanel(state.byThreadKey, activeThreadRef),
   );
   const diffOpen = activeRightPanelKind === "diff";
-  const tiledWorkspace = !embedded && !prefersPlanSidebarSheet;
+  const tiledWorkspace = !embedded;
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
@@ -3360,7 +3360,9 @@ export default function ChatView(props: ChatViewProps) {
             className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
           />
         ) : null}
-        {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
+        {!tiledWorkspace && !rightPanelControlsAtRoot && !rightPanelControlsInPanel
+          ? panelLayoutControls
+          : null}
         <ChatHeader
           activeThreadEnvironmentId={activeThread.environmentId}
           activeThreadId={activeThread.id}

@@ -105,7 +105,7 @@ function TitlebarWordmark({ probe = false }: { probe?: boolean }) {
       data-titlebar-wordmark
       className={cn(
         "min-w-max shrink-0 px-1.5 text-base leading-7 font-medium tracking-tight",
-        !probe && "max-md:hidden",
+        !probe && "max-[501px]:hidden",
       )}
     >
       <span className="text-sidebar-muted-foreground">weave</span>
@@ -155,7 +155,6 @@ export function TitlebarWidthProbe({
 
 /**
  * The mark and collapser stay fixed while navigation follows the expanded sidebar.
- * `compact` keeps only the mark and collapser below md when the sheet is closed.
  */
 export function TitlebarControls({
   collapser,
@@ -183,7 +182,7 @@ export function TitlebarControls({
       </div>
       <div
         className={cn(
-          "pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]",
+          "pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag] max-[981px]:hidden",
           expanded && "ml-auto",
           compact && !expanded && "max-md:hidden",
         )}

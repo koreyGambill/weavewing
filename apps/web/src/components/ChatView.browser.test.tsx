@@ -318,6 +318,11 @@ it("opens the thread actions menu for an older settled thread the shell leaves o
 });
 
 it("retains each thread's diff selection when returning from another thread or Settings", async () => {
+  await using viewport = new AsyncDisposableStack();
+  const initialSize = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initialSize.width, initialSize.height));
+  // Both the conversation and its diff must be visible during navigation.
+  await page.viewport(1100, 800);
   const a = threadWithHistory("diff-selection-a", 1);
   const b = threadWithHistory("diff-selection-b", 1);
   using _environment = installFakeEnvironment([a, b]);
@@ -379,6 +384,37 @@ it("retains each thread's diff selection when returning from another thread or S
     kind: "turn",
     turnId: a.runs[0]!.id,
   });
+});
+
+it("overlays tools on a narrow tile and dismisses them after closing the mobile sidebar", async () => {
+  await using viewport = new AsyncDisposableStack();
+  const initialSize = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initialSize.width, initialSize.height));
+  await page.viewport(390, 800);
+  const thread = threadWithHistory("narrow-tools", 1);
+  using _environment = installFakeEnvironment([thread]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using screen = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Toggle main sidebar", exact: true }));
+  await userEvent.keyboard("{Escape}");
+  await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
+  await userEvent.click(screen.getByRole("button", { name: "Calendar", exact: true }));
+  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
+  expect(document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width).toBe(390);
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(screen.getByRole("complementary", { name: "Tools sidebar" }))
+    .not.toBeInTheDocument();
 });
 
 it("a stashed prompt ending in a file chip restores with the chip", async () => {

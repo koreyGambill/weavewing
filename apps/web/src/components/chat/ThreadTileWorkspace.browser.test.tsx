@@ -140,7 +140,7 @@ async function setup(resizeScenario = false, newThread = false) {
   // The layout owns DOM placement and has no navigation.
   const screen = resources.use(
     await render(
-      <div style={{ display: "flex", width: 900, height: 600 }}>
+      <div style={{ display: "flex", width: "min(900px, 100vw)", height: 600 }}>
         <Harness />
       </div>,
       { router: false },
@@ -596,4 +596,52 @@ it("lays out a new draft from the default layout, filling placeholders with fres
   const arranged = tabs();
   fixture.store.applySavedTileLayout(fixture.threadRef, DEFAULT_TILE_LAYOUTS[0]!.root, true);
   expect(tabs()).toEqual(arranged);
+});
+
+it("keeps the focused tile and its editors when the window becomes narrow", async () => {
+  await using fixture = await setup(true);
+  const { screen, store, threadRef, layout } = fixture;
+  await userEvent.fill(screen.getByRole("textbox", { name: "Conversation draft" }), "chat draft");
+  await userEvent.fill(
+    screen.getByRole("textbox", { name: "Editor terminal:new-terminal" }),
+    "terminal draft",
+  );
+  store.applyTileAction(threadRef, { type: "focus", groupId: "terminal-group" });
+  const tree = JSON.stringify(layout().root);
+  await page.viewport(390, 800);
+  await vi.waitFor(() =>
+    expect(document.querySelectorAll("section.workspace-tile-frame")).toHaveLength(1),
+  );
+  await expect
+    .element(screen.getByRole("textbox", { name: "Editor terminal:new-terminal" }))
+    .toHaveValue("terminal draft");
+  expect(
+    document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width,
+  ).toBeLessThanOrEqual(390);
+  await userEvent.click(screen.getByRole("button", { name: "Switch tile", exact: true }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "1: Main chat", exact: true }));
+  await expect
+    .element(screen.getByRole("textbox", { name: "Conversation draft" }))
+    .toHaveValue("chat draft");
+  await userEvent.keyboard("{Control>}{Alt>}l{/Alt}{/Control}");
+  await expect
+    .element(screen.getByRole("textbox", { name: "Editor terminal:new-terminal" }))
+    .toHaveValue("terminal draft");
+  await page.viewport(700, 800);
+  await userEvent.click(screen.getByRole("button", { name: "Previous tile", exact: true }));
+  await expect
+    .element(screen.getByRole("textbox", { name: "Conversation draft" }))
+    .toHaveValue("chat draft");
+  await userEvent.click(screen.getByRole("button", { name: "Next tile", exact: true }));
+  await expect
+    .element(screen.getByRole("textbox", { name: "Editor terminal:new-terminal" }))
+    .toHaveValue("terminal draft");
+  await page.viewport(1100, 800);
+  await vi.waitFor(() =>
+    expect(document.querySelectorAll("section.workspace-tile-frame")).toHaveLength(2),
+  );
+  expect(JSON.stringify(layout().root)).toBe(tree);
+  await expect
+    .element(screen.getByRole("textbox", { name: "Conversation draft" }))
+    .toHaveValue("chat draft");
 });

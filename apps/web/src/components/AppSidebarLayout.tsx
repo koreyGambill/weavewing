@@ -500,8 +500,8 @@ export function AppSidebarLayout({
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <ThreadToolsHost>
         <SidebarProvider
-          // Below md the fixed cluster is only the mark and collapser.
-          className="h-dvh! min-h-0! [--workspace-titlebar-control-count:2] md:[--workspace-titlebar-control-count:5] md:[--workspace-titlebar-visible-wordmark-width:var(--workspace-titlebar-wordmark-width)]"
+          // Reserve only the controls visible at each titlebar breakpoint.
+          className="h-dvh! min-h-0! [--workspace-titlebar-control-count:2] min-[981px]:[--workspace-titlebar-control-count:5] min-[501px]:[--workspace-titlebar-visible-wordmark-width:var(--workspace-titlebar-wordmark-width)]"
           data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
           storageKey="chat_thread_sidebar_open"
           style={sidebarProviderStyle}

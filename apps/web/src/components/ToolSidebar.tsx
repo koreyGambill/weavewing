@@ -35,7 +35,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const [availableWidth, setAvailableWidth] = useState(1280);
   const pageWidth = resolveToolSidebarWidth(width, availableWidth);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const isWide = useMediaQuery("(min-width: 768px)");
+  const isWide = useMediaQuery("(min-width: 981px)");
   const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
@@ -43,8 +43,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
     const stopMenu = registerMenuAction("toolSidebar.toggle", () => {
-      if (window.matchMedia("(min-width: 768px)").matches)
-        useToolSidebarStore.getState().dispatch({ type: "toggle" });
+      useToolSidebarStore.getState().dispatch({ type: "toggle" });
     });
     const stopCommands = registerCommands(
       {
@@ -57,17 +56,19 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       {
         capture: true,
         when: (event) =>
-          window.matchMedia("(min-width: 768px)").matches &&
           !(event.target instanceof Element && event.target.closest("[data-keybinding-capture]")),
         onKeyDown: (event) => {
           const state = useToolSidebarStore.getState();
           if (
             event.key !== "Escape" ||
-            !state.maximized ||
-            document.querySelector('[role="dialog"], [role="alertdialog"]')
+            (!state.maximized &&
+              (window.matchMedia("(min-width: 981px)").matches || !state.visible)) ||
+            Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]')).some(
+              (dialog) => dialog.checkVisibility({ checkVisibilityCSS: true }),
+            )
           )
             return false;
-          state.dispatch({ type: "restore" });
+          state.dispatch({ type: state.maximized ? "restore" : "toggle" });
           if (
             node.contains(document.activeElement) &&
             document.activeElement instanceof HTMLElement
@@ -92,7 +93,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       data-tool-sidebar-layout
       style={
         {
-          "--tools-sidebar-width": `${visible ? TOOL_SIDEBAR_RAIL_WIDTH + (activeTool ? pageWidth : 0) : 0}px`,
+          "--tools-sidebar-width": `${visible && isWide ? TOOL_SIDEBAR_RAIL_WIDTH + (activeTool ? pageWidth : 0) : 0}px`,
           "--tools-rail-width": `${TOOL_SIDEBAR_RAIL_WIDTH}px`,
         } as CSSProperties
       }
@@ -102,20 +103,18 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         data-workspace-titlebar
         inert={(maximized && isWide) || undefined}
         className={cn(
-          "absolute inset-x-0 top-0 z-10 hidden h-[var(--workspace-topbar-height)] bg-background md:block",
+          "absolute inset-x-0 top-0 z-10 h-[var(--workspace-topbar-height)] bg-background",
           isElectron && "drag-region",
-          maximized && "[&>*]:invisible",
+          maximized && isWide && "[&>*]:invisible",
         )}
       />
       <div
-        className={cn("flex min-h-0 min-w-0 flex-1", maximized && "md:invisible")}
+        className={cn("flex min-h-0 min-w-0 flex-1", maximized && isWide && "invisible")}
         inert={(maximized && isWide) || undefined}
       >
-        <WorkspaceTitlebarHost value={isWide ? titlebarHost : null}>
-          {children}
-        </WorkspaceTitlebarHost>
+        <WorkspaceTitlebarHost value={titlebarHost}>{children}</WorkspaceTitlebarHost>
       </div>
-      <div className="pointer-events-auto fixed top-[var(--workspace-controls-top)] right-[var(--workspace-tools-controls-right)] z-50 hidden h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag] md:flex">
+      <div className="pointer-events-auto fixed top-[var(--workspace-controls-top)] right-[var(--workspace-tools-controls-right)] z-50 flex h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag]">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -149,7 +148,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           aria-label="Tools sidebar"
           data-tool-sidebar-state={activeTool ? (maximized ? "maximized" : "expanded") : "rail"}
           className={cn(
-            "workspace-tools-panel mt-[var(--workspace-topbar-height)] hidden min-h-0 shrink-0 border-l bg-sidebar md:flex",
+            "workspace-tools-panel mt-[var(--workspace-topbar-height)] flex min-h-0 shrink-0 border-l bg-sidebar max-[981px]:absolute max-[981px]:inset-y-0 max-[981px]:right-0 max-[981px]:z-40 max-[981px]:shadow-xl",
             maximized &&
               "absolute inset-x-0 bottom-0 top-[var(--workspace-topbar-height)] z-40 mt-0",
           )}
