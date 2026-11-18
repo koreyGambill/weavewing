@@ -52,7 +52,7 @@ function useSidebarChromeStage() {
     environmentIdentificationMode,
   );
   const pillLabel =
-    environmentIdentificationMode === "pill" || (!isMobile && backdropVariant !== null)
+    environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
       : null;
   return { isMobile, backdropVariant, pillLabel };
@@ -63,7 +63,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
-  const { isMobile, backdropVariant, pillLabel } = useSidebarChromeStage();
+  const { backdropVariant, pillLabel } = useSidebarChromeStage();
 
   return (
     <div
@@ -73,7 +73,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
         isElectron && "drag-region",
       )}
     >
-      {isMobile && backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
+      {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
       {/* Wide layouts draw the cluster fixed in the window; the mobile sheet covers it. */}
       <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
         <TitlebarControls
@@ -104,7 +104,7 @@ function TitlebarWordmark({ probe = false }: { probe?: boolean }) {
     <span
       data-titlebar-wordmark
       className={cn(
-        "min-w-max shrink-0 px-1.5 text-base leading-7 font-medium tracking-tight",
+        "drag-region min-w-max shrink-0 px-1.5 text-base leading-7 font-medium tracking-tight",
         !probe && "max-[501px]:hidden",
       )}
     >

@@ -212,7 +212,7 @@ export function ComposerControlsBar(props: {
       modelOptionsByInstance={modelOptionsByInstance}
       size={controlSize}
       triggerClassName={cn(
-        "group/model-trigger",
+        "group/model-trigger max-[401px]:min-w-7 max-[401px]:[&_[data-chat-provider-model-picker-label]]:hidden max-[401px]:[&_[data-composer-control-label]]:hidden max-[401px]:[&_[data-composer-control-chevron]]:hidden",
         MODEL_TRIGGER_STATES,
         composerControlsCollapsed ? "min-w-13 shrink text-xs!" : "min-w-13",
       )}

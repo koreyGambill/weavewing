@@ -24,6 +24,7 @@ import { environmentContextRecord } from "~/lib/composerContextRecords";
 import { startWorkspaceFocus } from "~/lib/workspaceFocus";
 import { usePromptStashStore } from "~/promptStashStore";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { useToolSidebarStore } from "../toolSidebarStore";
 import { getRouter } from "~/router";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentThreadDetails } from "~/state/threads";
@@ -391,6 +392,7 @@ it("overlays tools on a narrow tile and dismisses them after closing the mobile 
   const initialSize = { width: window.innerWidth, height: window.innerHeight };
   viewport.defer(() => page.viewport(initialSize.width, initialSize.height));
   await page.viewport(390, 800);
+  useToolSidebarStore.setState({ visible: false, activeTool: null, maximized: false });
   const thread = threadWithHistory("narrow-tools", 1);
   using _environment = installFakeEnvironment([thread]);
   __setClientSettingsForTests({
@@ -408,9 +410,26 @@ it("overlays tools on a narrow tile and dismisses them after closing the mobile 
   await userEvent.click(screen.getByRole("button", { name: "Toggle main sidebar", exact: true }));
   await userEvent.keyboard("{Escape}");
   await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
-  await userEvent.click(screen.getByRole("button", { name: "Calendar", exact: true }));
   await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
   expect(document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width).toBe(390);
+  const composer = screen.getByRole("textbox", { name: `Message ${thread.title}` }).element();
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  const reachedComposer = vi.fn();
+  composer.addEventListener("keydown", reachedComposer, { once: true });
+  composer.dispatchEvent(escape);
+  expect(reachedComposer).toHaveBeenCalledOnce();
+  expect(useToolSidebarStore.getState().visible).toBe(true);
+  const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  handled.preventDefault();
+  document.body.dispatchEvent(handled);
+  expect(useToolSidebarStore.getState().visible).toBe(true);
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "collapse" }));
+  await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }));
+  await expect.element(page.getByRole("menu")).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+  expect(useToolSidebarStore.getState().visible).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
   await userEvent.keyboard("{Escape}");
   await expect
     .element(screen.getByRole("complementary", { name: "Tools sidebar" }))

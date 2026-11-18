@@ -1310,27 +1310,31 @@ export function ThreadTileWorkspace(props: {
                   >
                     <Rows2 />
                   </TileControl>
-                  <TileControl
-                    visibility={compact ? "menu" : "float"}
-                    label={group.floating ? "Dock tile" : "Float tile"}
-                    shortcut={shortcut("workspace.tile.float")}
-                    pressed={Boolean(group.floating)}
-                    disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                    onClick={() => toggleFloat(group)}
-                  >
-                    <PictureInPicture2 />
-                  </TileControl>
-                  <TileControl
-                    visibility={compact ? "menu" : "maximize"}
-                    label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                    shortcut={shortcut("workspace.tile.maximize")}
-                    pressed={zoomedIds.has(id)}
-                    onClick={() =>
-                      apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                    }
-                  >
-                    {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
-                  </TileControl>
+                  {!compact ? (
+                    <>
+                      <TileControl
+                        visibility="float"
+                        label={group.floating ? "Dock tile" : "Float tile"}
+                        shortcut={shortcut("workspace.tile.float")}
+                        pressed={Boolean(group.floating)}
+                        disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                        onClick={() => toggleFloat(group)}
+                      >
+                        <PictureInPicture2 />
+                      </TileControl>
+                      <TileControl
+                        visibility="maximize"
+                        label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                        shortcut={shortcut("workspace.tile.maximize")}
+                        pressed={zoomedIds.has(id)}
+                        onClick={() =>
+                          apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                        }
+                      >
+                        {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                      </TileControl>
+                    </>
+                  ) : null}
                   <Menu
                     open={openMenu?.kind === "actions" && openMenu.groupId === id}
                     onOpenChange={(open) =>
@@ -1354,23 +1358,27 @@ export function ThreadTileWorkspace(props: {
                       </TooltipPopup>
                     </Tooltip>
                     <MenuPopup align="end">
-                      <MenuItem
-                        onClick={() =>
-                          apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                        }
-                      >
-                        {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
-                        {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                        <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
-                      </MenuItem>
-                      <MenuItem
-                        disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                        onClick={() => toggleFloat(group)}
-                      >
-                        <PictureInPicture2 />
-                        {group.floating ? "Dock tile" : "Float tile"}
-                        <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
-                      </MenuItem>
+                      {!compact ? (
+                        <>
+                          <MenuItem
+                            onClick={() =>
+                              apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                            }
+                          >
+                            {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                            {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                            <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
+                          </MenuItem>
+                          <MenuItem
+                            disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                            onClick={() => toggleFloat(group)}
+                          >
+                            <PictureInPicture2 />
+                            {group.floating ? "Dock tile" : "Float tile"}
+                            <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
+                          </MenuItem>
+                        </>
+                      ) : null}
                       <MenuItem onClick={() => split(group, "vertical")}>
                         <Rows2 />
                         New tile below

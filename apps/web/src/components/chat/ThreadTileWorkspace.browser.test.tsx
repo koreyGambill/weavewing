@@ -618,6 +618,14 @@ it("keeps the focused tile and its editors when the window becomes narrow", asyn
   expect(
     document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width,
   ).toBeLessThanOrEqual(390);
+  await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }));
+  await expect
+    .element(screen.getByRole("menuitem", { name: /Maximize tile/ }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("menuitem", { name: /Float tile/ }))
+    .not.toBeInTheDocument();
+  await userEvent.keyboard("{Escape}");
   await userEvent.click(screen.getByRole("button", { name: "Switch tile", exact: true }));
   await userEvent.click(screen.getByRole("menuitem", { name: "1: Main chat", exact: true }));
   await expect
