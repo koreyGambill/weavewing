@@ -65,7 +65,7 @@ test(
       );
     await t3.open(thread);
 
-    await browser.keyboard.press("Control+j");
+    await browser.keyboard.press("ControlOrMeta+j");
     const terminal = screen.getByLabel("Terminal input");
 
     // Input sent before the shell runs is dropped, so retype until it lands.

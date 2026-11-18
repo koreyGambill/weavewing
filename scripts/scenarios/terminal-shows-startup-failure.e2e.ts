@@ -79,10 +79,10 @@ test(
       return browser.evaluate(() => document.body.dataset.terminalCopy ?? "");
     };
 
-    await expect(screen.getByRole("tab", "Main chat")).toBeVisible();
+    await screen.getByRole("tab", "Main chat").tap();
     const restore = await runPromise(exhaustFileDescriptors(pid));
     try {
-      await browser.keyboard.press("Control+j");
+      await browser.keyboard.press("ControlOrMeta+j");
       await expect.poll(terminalText, { timeout: 15_000 }).toContain("Failed to spawn PTY process");
     } finally {
       await runPromise(restore);
