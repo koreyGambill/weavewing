@@ -1,6 +1,11 @@
 import type { StatusSource, StatusState } from "@t3tools/contracts";
 import {
   ActivityIcon,
+  CircleCheckIcon,
+  CircleXIcon,
+  TriangleAlertIcon,
+  CircleDashedIcon,
+  ClockIcon,
   CloudIcon,
   GlobeIcon,
   HeartPulseIcon,
@@ -44,6 +49,49 @@ export function StatusSourceDot({ state }: { state: StatusState }) {
     <span
       aria-hidden
       className={cn("inline-block size-1.5 shrink-0 rounded-full", STATE_COLORS[state])}
+    />
+  );
+}
+
+export function StatusStateIcon({
+  state,
+  disabled = false,
+}: {
+  state: StatusState;
+  disabled?: boolean;
+}) {
+  const Icon = disabled
+    ? CircleDashedIcon
+    : state === "ok"
+      ? CircleCheckIcon
+      : state === "fail"
+        ? CircleXIcon
+        : state === "warn"
+          ? TriangleAlertIcon
+          : ClockIcon;
+  const label = disabled
+    ? "disabled"
+    : state === "ok"
+      ? "passing"
+      : state === "fail"
+        ? "failing"
+        : state === "warn"
+          ? "warning"
+          : "enabled, not run";
+  return (
+    <Icon
+      role="img"
+      aria-label={label}
+      className={cn(
+        "size-3 shrink-0",
+        state === "ok"
+          ? "text-success"
+          : state === "fail"
+            ? "text-destructive"
+            : state === "warn"
+              ? "text-warning"
+              : "text-muted-foreground",
+      )}
     />
   );
 }

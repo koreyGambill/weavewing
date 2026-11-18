@@ -16,7 +16,7 @@ import {
 import { useAtomCommand } from "../../state/use-atom-command";
 import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import {
-  StatusSourceDot,
+  StatusStateIcon,
   StatusSourceIcon,
   STATUS_SOURCE_ICONS,
 } from "../statusSources/StatusSourceIcon";
@@ -170,7 +170,7 @@ function StatusSourceRow({
           <span className="flex items-center gap-2">
             <StatusSourceIcon source={source} />
             {source.config.name}
-            <StatusSourceDot state={source.latest.state} />
+            <StatusStateIcon state={source.latest.state} />
           </span>
         }
         description={
