@@ -150,6 +150,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           ...removed.map((command) => ({ key: "ctrl+d", command })),
           { key: "mod+b", command: "sidebar.toggle" },
           { key: "mod+j", command: "terminal.toggle" },
+          { key: "mod+o", command: "editor.openFavorite" },
           { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
           { key: "ctrl+alt+y", command: "terminal.toggle" },
         ]),
@@ -159,9 +160,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.deepEqual(state.issues, []);
       assert.isFalse(state.keybindings.some((entry) => removed.includes(entry.command)));
       assert.isFalse(state.keybindings.some((entry) => entry.command === "terminal.close"));
-      for (const command of ["terminal.toggle", "sidebar.toggle"]) {
+      for (const command of ["terminal.toggle", "sidebar.toggle", "editor.openFavorite"]) {
         const oldDefault = state.keybindings.find(
-          (entry) => entry.command === command && ["b", "j"].includes(entry.shortcut.key),
+          (entry) => entry.command === command && ["b", "j", "o"].includes(entry.shortcut.key),
         );
         assert.deepEqual(oldDefault?.whenAst, {
           type: "not",

@@ -144,7 +144,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
-  { key: "mod+o", command: "editor.openFavorite" },
+  { key: "mod+o", command: "editor.openFavorite", when: "!terminalFocus" },
   { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
   { key: "ctrl+alt+m", command: "projectPicker.nextMachine", when: "!terminalFocus" },
   { key: "ctrl+alt+shift+m", command: "projectPicker.allMachines", when: "!terminalFocus" },

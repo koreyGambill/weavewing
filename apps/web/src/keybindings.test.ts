@@ -863,28 +863,7 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
     assert.isFalse(STATIC_KEYBINDING_COMMANDS.some((entry) => String(entry) === command));
     assert.isFalse(DEFAULT_RESOLVED_KEYBINDINGS.some((entry) => String(entry.command) === command));
   }
-  for (const key of [
-    "a",
-    "b",
-    "c",
-    "d",
-    "e",
-    "f",
-    "g",
-    "h",
-    "j",
-    "k",
-    "l",
-    "n",
-    "p",
-    "r",
-    "s",
-    "t",
-    "u",
-    "v",
-    "w",
-    "z",
-  ]) {
+  for (const key of "abcdefghijklmnopqrstuvwxyz") {
     assert.equal(
       resolveShortcutCommand(event({ key, ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
         platform: "Linux x86_64",
