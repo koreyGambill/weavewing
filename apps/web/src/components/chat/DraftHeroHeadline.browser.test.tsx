@@ -12,7 +12,6 @@ import "~/components/ChatView";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
-import { useUiStateStore } from "~/uiStateStore";
 import {
   ENVIRONMENT_ID,
   PROJECT_ID,
@@ -39,7 +38,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("the new-thread project picker follows the manual sidebar project order", async () => {
+it("finds a draft project by its path and selects it with Enter", async () => {
   using _environment = installFakeEnvironment([], {
     extraProjects: [
       { id: ProjectId.make("project-alpha"), title: "alpha" },
@@ -49,20 +48,12 @@ it("the new-thread project picker follows the manual sidebar project order", asy
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
-    sidebarProjectSortOrder: "manual",
   });
-  useUiStateStore.setState({
-    projectOrder: [
-      `${ENVIRONMENT_ID}:/workspace/beta`,
-      `${ENVIRONMENT_ID}:/workspace/render`,
-      `${ENVIRONMENT_ID}:/workspace/alpha`,
-    ],
-  });
-  using _order = { [Symbol.dispose]: () => useUiStateStore.setState({ projectOrder: [] }) };
   const draftId = DraftId.make("draft-manual-order");
   useComposerDraftStore
     .getState()
     .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId);
+  useComposerDraftStore.getState().setPrompt(draftId, "Keep this unsent prompt");
 
   const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
   await router.load();
@@ -75,21 +66,17 @@ it("the new-thread project picker follows the manual sidebar project order", asy
   const trigger = document.querySelector<HTMLElement>("[data-draft-project-trigger]");
   if (!trigger) throw new Error("The draft project picker did not render.");
   await userEvent.click(page.elementLocator(trigger));
-  await expect.element(page.getByRole("option", { name: "beta" })).toBeVisible();
-
-  // The draft's own project leads; the rest keep the sidebar's order.
-  await vi.waitFor(() => {
-    expect(
-      page
-        .getByRole("option")
-        .elements()
-        .map((option) => option.textContent),
-    ).toEqual([
-      expect.stringMatching(/render$/),
-      expect.stringMatching(/beta$/),
-      expect.stringMatching(/alpha$/),
-      "Open folder…",
-      "Clone repository…",
-    ]);
-  });
+  const search = page.getByRole("combobox", { name: "Project name or path" });
+  await expect.element(search).toHaveFocus();
+  await userEvent.type(search, "workspace/alpha");
+  await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
+  expect(page.getByRole("option").elements()).toHaveLength(1);
+  await userEvent.keyboard("{Enter}");
+  await vi.waitFor(() =>
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("alpha"),
+  );
+  await expect.element(search).not.toBeInTheDocument();
+  expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
+    "Keep this unsent prompt",
+  );
 });

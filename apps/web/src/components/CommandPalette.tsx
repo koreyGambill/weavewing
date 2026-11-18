@@ -1428,6 +1428,22 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  if (activeDraftThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:change-draft-project",
+      title: "Change project or folder…",
+      searchTerms: ["project", "folder", "machine", "switch", "draft"],
+      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "projectPicker.open",
+      run: async () => {
+        requestAnimationFrame(() =>
+          document.querySelector<HTMLButtonElement>("[data-draft-project-trigger]")?.click(),
+        );
+      },
+    });
+  }
+
   if (scratchChoice.kind !== "none") {
     actionItems.push({
       kind: "action",

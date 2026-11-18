@@ -28,6 +28,7 @@ import { draftFanoutSelectionsAtom } from "./chatViewSend";
 const resources = vi.hoisted(() => ({
   projects: [] as EnvironmentProject[],
   pickedEnvironmentId: null as EnvironmentId | null,
+  openScratchProject: vi.fn<(id: EnvironmentId) => Promise<EnvironmentProject | null>>(),
   refreshSelection: vi.fn<(ids: readonly EnvironmentId[]) => Promise<EnvironmentId | null>>(),
 }));
 vi.mock("../../hooks/useLoadBalancedEnvironment", () => ({
@@ -46,10 +47,13 @@ vi.mock("../../state/entities", () => ({
       (project) => project.environmentId === ref.environmentId && project.id === ref.projectId,
     ) ?? null,
 }));
-vi.mock("../../hooks/useScratchProject", () => ({ useScratchProject: () => ({}) }));
+vi.mock("../../hooks/useScratchProject", () => ({
+  useScratchProject: () => ({ openScratchProject: resources.openScratchProject }),
+}));
 
 function setup() {
   resources.refreshSelection.mockReset();
+  resources.openScratchProject.mockReset();
   resources.projects = [];
   resources.pickedEnvironmentId = null;
   const a = EnvironmentId.make("machine-a");
@@ -153,7 +157,7 @@ function RoutingProbe({ input, onPrepared }: HarnessProps) {
       <output>
         {selections?.map((selection) => selection.model).join(", ") ?? "single model"}
       </output>
-      {input.logicalProjectEnvironments.map(({ environmentId }) => (
+      {[...input.environmentById.keys()].map((environmentId) => (
         <button
           key={environmentId}
           onClick={() => routing.onEnvironmentChangeStable(environmentId)}
@@ -351,4 +355,32 @@ it.each([
   expect(draft?.activeProvider).toBe(codex);
   expect(draft?.modelSelectionByProvider[codex]?.model).toBe(model);
   expect(draft?.modelSelectionExplicit === true).toBe(explicit);
+});
+
+it("moves a draft to the default folder on a machine without the current project", async () => {
+  const { b, draftId, input, store } = fanoutSetup();
+  const scratch = {
+    ...resources.projects[1]!,
+    id: ProjectId.make("scratch-b"),
+    title: "No project",
+    workspaceRoot: "/code",
+  };
+  resources.projects = [resources.projects[0]!, scratch];
+  resources.openScratchProject.mockResolvedValue(scratch);
+  await using screen = await render(
+    <Harness
+      input={{
+        ...input,
+        automaticEnvironment: false,
+        draftThread: store.getDraftSession(draftId),
+        logicalProjectEnvironments: input.logicalProjectEnvironments.slice(0, 1),
+      }}
+    />,
+  );
+  await screen.getByRole("button", { name: `Switch to ${b}` }).click();
+  await expect.element(screen.getByText(b)).toBeInTheDocument();
+  expect(store.getDraftSession(draftId)?.projectId).toBe(scratch.id);
+  expect(store.getDraftSession(draftId)?.environmentSelection).toBe("manual");
+  expect(store.getComposerDraft(draftId)?.prompt).toBe("Keep this prompt");
+  await expect.element(screen.getByText("gpt-6.1-sol, gpt-6.1-luna")).toBeInTheDocument();
 });

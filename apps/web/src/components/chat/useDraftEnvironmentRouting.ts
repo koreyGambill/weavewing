@@ -299,8 +299,16 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     const target = logicalProjectEnvironments.find(
       (env) => env.environmentId === nextEnvironmentId,
     );
-    if (!target) return;
-    const request = { environmentId: target.environmentId, scope: environmentChangeScope };
+    const destination =
+      target ??
+      (() => {
+        const environment = environmentById.get(nextEnvironmentId);
+        return environment?.connection.phase === "connected"
+          ? { environmentId: nextEnvironmentId, projectId: null }
+          : null;
+      })();
+    if (!destination) return;
+    const request = { environmentId: destination.environmentId, scope: environmentChangeScope };
     environmentChangeRef.current = request;
     setBusyEnvironmentChange(null);
     // `triagePrompt` is the prompt the target machine prepared for a triage draft.
@@ -322,9 +330,9 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
         const nextPrompt = replaceTriagePlaybookLink(prompt, triagePrompt);
         if (nextPrompt !== prompt) setPrompt(draftId, nextPrompt);
       }
-      carryFanoutSelections(currentDraft, target.environmentId);
-      const projectRef = scopeProjectRef(target.environmentId, project.id);
-      if (activeProjectIsScratch) {
+      carryFanoutSelections(currentDraft, destination.environmentId);
+      const projectRef = scopeProjectRef(destination.environmentId, project.id);
+      if (activeProjectIsScratch || destination.projectId === null) {
         setLogicalProjectDraftThreadId(
           deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
           projectRef,
@@ -346,18 +354,18 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     };
     const knownProject = allProjects.find(
       (project) =>
-        project.environmentId === target.environmentId && project.id === target.projectId,
+        project.environmentId === destination.environmentId && project.id === destination.projectId,
     );
     // The playbook and context files exist only on the machine that prepared them.
     const followsTriage = isTriagePrompt(getComposerDraft(draftId)?.prompt ?? "");
-    if (target.projectId !== null && !(knownProject && followsTriage)) {
+    if (destination.projectId !== null && !(knownProject && followsTriage)) {
       if (knownProject) retarget(knownProject);
       finish();
       return;
     }
     const prepareTriagePrompt = async () => {
       const prepared = await prepareTriage({
-        environmentId: target.environmentId,
+        environmentId: destination.environmentId,
         input: { client: currentClientMetadata() },
       });
       if (prepared._tag === "Success") return prepared.value.prompt;
@@ -378,7 +386,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
       if (triagePrompt === null) return;
       const project =
         knownProject ??
-        (await openScratchProject(target.environmentId, "Could not switch machine"));
+        (await openScratchProject(destination.environmentId, "Could not switch machine"));
       if (project) retarget(project, triagePrompt);
     };
     setBusyEnvironmentChange(request);

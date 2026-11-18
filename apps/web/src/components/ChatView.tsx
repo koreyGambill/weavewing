@@ -3590,6 +3590,7 @@ export default function ChatView(props: ChatViewProps) {
                       }
                     >
                       <DraftHeroHeadline
+                        onEnvironmentChange={onEnvironmentChangeStable}
                         draftId={draftId}
                         activeProjectRef={activeProjectRef}
                         activeProjectTitle={activeProject?.title ?? null}

@@ -377,6 +377,9 @@ export function buildKeybindingCommandOptions(
 }
 
 export function commandLabel(command: KeybindingCommand): string {
+  if (command === "projectPicker.open") return "Project Picker: Change Project or Folder";
+  if (command === "projectPicker.nextMachine") return "Project Picker: Next Machine";
+  if (command === "projectPicker.allMachines") return "Project Picker: Toggle All Machines";
   if (command === "workspace.focusNext") return "Focus Next Workspace Area";
   if (command === "workspace.focusPrevious") return "Focus Previous Workspace Area";
   if (command === "workspace.tile.focusLeft") return "Focus Tile Left";
