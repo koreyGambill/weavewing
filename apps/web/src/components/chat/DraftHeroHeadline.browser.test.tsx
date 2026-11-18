@@ -87,9 +87,9 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   expect(useComposerDraftStore.getState().getDraftSession(draftId)?.environmentSelection).toBe(
     "auto",
   );
-  expect(useComposerDraftStore.getState().getDraftSession(draftId)?.loadBalancedEnvironmentId).toBe(
-    ENVIRONMENT_ID,
-  );
+  expect(
+    useComposerDraftStore.getState().getDraftSession(draftId)?.loadBalancedEnvironmentId,
+  ).toBeNull();
   openCommandPalette({ open: "new-thread-in" });
   await expect.element(page.getByRole("combobox", { name: "Project name or path" })).toHaveFocus();
   await expect
