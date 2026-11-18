@@ -26,6 +26,7 @@ import { CalendarTool } from "./CalendarTool";
 import { StatusSourcesList, useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { Button } from "./ui/button";
+import { useMobileSidebarSheetMounted } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 export function ToolSidebarLayout({ children }: { children: ReactNode }) {
@@ -35,44 +36,68 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const [availableWidth, setAvailableWidth] = useState(1280);
   const pageWidth = resolveToolSidebarWidth(width, availableWidth);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const isWide = useMediaQuery("(min-width: 768px)");
+  const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
+  const isWide = useMediaQuery("(min-width: 981px)");
   const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
+  const toggle = () => {
+    const state = useToolSidebarStore.getState();
+    state.dispatch(
+      !window.matchMedia("(min-width: 981px)").matches && !state.activeTool
+        ? { type: "select", tool: "calendar" }
+        : { type: "toggle" },
+    );
+  };
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
     const stopObserving = observeResize(node, () => setAvailableWidth(node.clientWidth));
     setAvailableWidth(node.clientWidth);
     const stopMenu = registerMenuAction("toolSidebar.toggle", () => {
-      if (window.matchMedia("(min-width: 768px)").matches)
-        useToolSidebarStore.getState().dispatch({ type: "toggle" });
+      toggle();
     });
     const stopCommands = registerCommands(
       {
         "toolSidebar.toggle": (event) => {
           event.preventDefault();
           event.stopPropagation();
-          useToolSidebarStore.getState().dispatch({ type: "toggle" });
+          toggle();
         },
       },
       {
         capture: true,
         when: (event) =>
-          window.matchMedia("(min-width: 768px)").matches &&
           !(event.target instanceof Element && event.target.closest("[data-keybinding-capture]")),
+      },
+    );
+    const stopEscape = registerCommands(
+      {},
+      {
         onKeyDown: (event) => {
           const state = useToolSidebarStore.getState();
           if (
             event.key !== "Escape" ||
-            !state.maximized ||
-            document.querySelector('[role="dialog"], [role="alertdialog"]')
+            event.defaultPrevented ||
+            !state.visible ||
+            !state.activeTool ||
+            (window.matchMedia("(min-width: 981px)").matches && !state.maximized) ||
+            (event.target instanceof Element &&
+              event.target.closest(
+                'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .monaco-editor, .cm-editor, .xterm, [role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
+              )) ||
+            Array.from(
+              document.querySelectorAll(
+                '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
+              ),
+            ).some((popup) => popup.checkVisibility({ checkVisibilityCSS: true }))
           )
             return false;
-          state.dispatch({ type: "restore" });
-          if (
-            node.contains(document.activeElement) &&
-            document.activeElement instanceof HTMLElement
-          )
-            document.activeElement.blur();
+          state.dispatch({
+            type:
+              state.maximized && window.matchMedia("(min-width: 981px)").matches
+                ? "restore"
+                : // Narrow close keeps the tools shown, so widening later still has the rail.
+                  "collapse",
+          });
           event.preventDefault();
           event.stopPropagation();
         },
@@ -81,6 +106,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
     return () => {
       stopObserving();
       stopCommands();
+      stopEscape();
       stopMenu();
     };
   });
@@ -92,7 +118,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       data-tool-sidebar-layout
       style={
         {
-          "--tools-sidebar-width": `${visible ? TOOL_SIDEBAR_RAIL_WIDTH + (activeTool ? pageWidth : 0) : 0}px`,
+          "--tools-sidebar-width": `${visible && isWide ? TOOL_SIDEBAR_RAIL_WIDTH + (activeTool ? pageWidth : 0) : 0}px`,
           "--tools-rail-width": `${TOOL_SIDEBAR_RAIL_WIDTH}px`,
         } as CSSProperties
       }
@@ -102,20 +128,23 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         data-workspace-titlebar
         inert={(maximized && isWide) || undefined}
         className={cn(
-          "absolute inset-x-0 top-0 z-10 hidden h-[var(--workspace-topbar-height)] bg-background md:block",
+          "absolute inset-x-0 top-0 z-10 h-[var(--workspace-topbar-height)] bg-background",
           isElectron && "drag-region",
-          maximized && "[&>*]:invisible",
+          maximized && isWide && "[&>*]:invisible",
         )}
       />
       <div
-        className={cn("flex min-h-0 min-w-0 flex-1", maximized && "md:invisible")}
+        className={cn("flex min-h-0 min-w-0 flex-1", maximized && isWide && "invisible")}
         inert={(maximized && isWide) || undefined}
       >
-        <WorkspaceTitlebarHost value={isWide ? titlebarHost : null}>
-          {children}
-        </WorkspaceTitlebarHost>
+        <WorkspaceTitlebarHost value={titlebarHost}>{children}</WorkspaceTitlebarHost>
       </div>
-      <div className="pointer-events-auto fixed top-[var(--workspace-controls-top)] right-[var(--workspace-tools-controls-right)] z-50 hidden h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag] md:flex">
+      <div
+        className={cn(
+          "pointer-events-auto fixed top-[var(--workspace-controls-top)] right-[var(--workspace-tools-controls-right)] z-30 flex h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag]",
+          mobileSidebarSheetMounted && "hidden",
+        )}
+      >
         <Tooltip>
           <TooltipTrigger
             render={
@@ -125,11 +154,11 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
                     ? `Toggle tools sidebar (status ${statusAlert === "fail" ? "failing" : "warning"})`
                     : "Toggle tools sidebar"
                 }
-                aria-pressed={visible}
+                aria-pressed={visible && (isWide || activeTool !== null)}
                 aria-controls="tools-sidebar"
                 size="icon-sm"
                 variant="ghost"
-                onClick={() => dispatch({ type: "toggle" })}
+                onClick={toggle}
               />
             }
           >
@@ -143,21 +172,24 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           </TooltipPopup>
         </Tooltip>
       </div>
-      {visible ? (
+      {visible && (isWide || activeTool) ? (
         <aside
           id="tools-sidebar"
           aria-label="Tools sidebar"
           data-tool-sidebar-state={activeTool ? (maximized ? "maximized" : "expanded") : "rail"}
           className={cn(
-            "workspace-tools-panel mt-[var(--workspace-topbar-height)] hidden min-h-0 shrink-0 border-l bg-sidebar md:flex",
+            "workspace-tools-panel mt-[var(--workspace-topbar-height)] flex min-h-0 shrink-0 border-l bg-sidebar max-[981px]:absolute max-[981px]:inset-y-0 max-[981px]:right-0 max-[981px]:z-30 max-[981px]:shadow-xl",
             maximized &&
+              isWide &&
               "absolute inset-x-0 bottom-0 top-[var(--workspace-topbar-height)] z-40 mt-0",
           )}
         >
-          {activeTool ? <ToolSidebarPage maximized={maximized} width={pageWidth} /> : null}
+          {activeTool ? (
+            <ToolSidebarPage maximized={isWide && maximized} width={pageWidth} />
+          ) : null}
           <nav
             aria-label="Tools"
-            className="flex w-(--tools-rail-width) shrink-0 flex-col items-center gap-2 py-2"
+            className="hidden min-[981px]:flex w-(--tools-rail-width) shrink-0 flex-col items-center gap-2 py-2"
           >
             <Tooltip>
               <TooltipTrigger
@@ -241,12 +273,12 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
         "relative flex min-h-0 min-w-0 flex-col border-r bg-background",
         maximized && "flex-1",
       )}
-      style={maximized ? undefined : { width, maxWidth: "calc(100vw - var(--tools-rail-width))" }}
+      style={maximized ? undefined : { width, maxWidth: "100vw" }}
     >
       {!maximized ? (
         <button
           aria-label="Resize tools sidebar"
-          className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none hover:bg-border focus-visible:bg-border"
+          className="hidden min-[981px]:block absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none hover:bg-border focus-visible:bg-border"
           {...resize}
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -258,9 +290,34 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
       ) : null}
       <header className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h2>
+        <nav aria-label="Tools" className="flex gap-1 min-[981px]:hidden">
+          <Button
+            size="icon-micro"
+            variant="ghost-toggle"
+            aria-label="Calendar"
+            aria-pressed={activeTool === "calendar"}
+            onClick={() => {
+              if (activeTool !== "calendar") dispatch({ type: "select", tool: "calendar" });
+            }}
+          >
+            <CalendarIcon />
+          </Button>
+          <Button
+            size="icon-micro"
+            variant="ghost-toggle"
+            aria-label="Status"
+            aria-pressed={activeTool === "status"}
+            onClick={() => {
+              if (activeTool !== "status") dispatch({ type: "select", tool: "status" });
+            }}
+          >
+            <ActivityIcon />
+          </Button>
+        </nav>
         <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
           <Tooltip>
             <TooltipTrigger
+              className="max-[981px]:hidden"
               render={
                 <Button
                   size="icon-micro"

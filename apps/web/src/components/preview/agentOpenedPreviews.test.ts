@@ -70,7 +70,7 @@ const deviceState = (input: {
     revision: 0,
   }) as unknown as DeviceServiceState;
 
-const floating = { sheetLayout: false, autoShowFloatingPreview: true };
+const floating = { autoShowFloatingPreview: true };
 
 function setup() {
   resetPreviewStateForTests();
@@ -106,16 +106,9 @@ describe("applyDeviceSnapshot", () => {
     expect(miniPlayerSource()).toMatchObject({ kind: "device", name: "Pixel 8" });
   });
 
-  it("opens a panel tab once when floating previews are off, and nothing in sheet layouts", () => {
+  it("opens a panel tab once when floating previews are off", () => {
     setup();
-    const panel = { sheetLayout: false, autoShowFloatingPreview: false };
-    applyDeviceSnapshot(ref.environmentId, deviceState({}), { ...panel, sheetLayout: true });
-    applyDeviceSnapshot(ref.environmentId, deviceState({ sessions: [session] }), {
-      ...panel,
-      sheetLayout: true,
-    });
-    expect(useRightPanelStore.getState().byThreadKey[threadKey]).toBeUndefined();
-
+    const panel = { autoShowFloatingPreview: false };
     applyDeviceSnapshot(ref.environmentId, deviceState({}), panel);
     applyDeviceSnapshot(ref.environmentId, deviceState({ sessions: [session] }), panel);
     applyDeviceSnapshot(ref.environmentId, deviceState({}), panel);

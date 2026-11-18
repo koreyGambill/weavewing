@@ -43,11 +43,8 @@ import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUp
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 
-export const SidebarChromeHeader = memo(function SidebarChromeHeader({
-  isElectron,
-}: {
-  isElectron: boolean;
-}) {
+function useSidebarChromeStage() {
+  const { isMobile } = useSidebar();
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const backdropVariant = resolveSidebarStageBackdropVariant(
@@ -58,9 +55,19 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
       : null;
+  return { isMobile, backdropVariant, pillLabel };
+}
+
+export const SidebarChromeHeader = memo(function SidebarChromeHeader({
+  isElectron,
+}: {
+  isElectron: boolean;
+}) {
+  const { backdropVariant, pillLabel } = useSidebarChromeStage();
 
   return (
     <div
+      data-sidebar-titlebar
       className={cn(
         "relative flex h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center gap-2 pr-3",
         isElectron && "drag-region",
@@ -82,7 +89,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
         />
       </div>
       {pillLabel ? (
-        <div className="relative z-10 flex h-7 items-center md:ml-[var(--workspace-titlebar-content-left)]">
+        <div className="relative z-10 flex h-7 items-center md:ml-[calc(var(--workspace-controls-left)+2*var(--workspace-titlebar-control-size)+var(--workspace-titlebar-wordmark-width)+var(--workspace-titlebar-control-gap))]">
           <Badge data-environment-identification="pill" size="sm" variant="secondary">
             {pillLabel}
           </Badge>
@@ -92,26 +99,62 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   );
 });
 
+function TitlebarWordmark({ probe = false }: { probe?: boolean }) {
+  return (
+    <span
+      data-titlebar-wordmark
+      className={cn(
+        "drag-region min-w-max shrink-0 px-1.5 text-base leading-7 font-medium tracking-tight",
+        !probe && "max-[501px]:hidden",
+      )}
+    >
+      <span className="text-sidebar-muted-foreground">weave</span>
+      <span className="text-(--weavewing-yellow)">wing</span>
+    </span>
+  );
+}
+
 /** Reports the window-left width the title bar cluster needs, so the sidebar never sits under it. */
-export function TitlebarWidthProbe({ onWidthChange }: { onWidthChange: (width: number) => void }) {
+export function TitlebarWidthProbe({
+  onWidthChange,
+  onWordmarkWidthChange,
+}: {
+  onWidthChange: (width: number) => void;
+  onWordmarkWidthChange: (width: number) => void;
+}) {
+  const { pillLabel } = useSidebarChromeStage();
   const observeWidth = (probe: HTMLDivElement) => {
     return observeResize(probe, ([entry]) => {
-      if (entry) onWidthChange(entry.borderBoxSize[0]?.inlineSize ?? probe.offsetWidth);
+      if (entry) {
+        onWidthChange(entry.borderBoxSize[0]?.inlineSize ?? probe.offsetWidth);
+        onWordmarkWidthChange(
+          probe.querySelector("[data-titlebar-wordmark]")?.getBoundingClientRect().width ?? 0,
+        );
+      }
     });
   };
 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none invisible fixed top-0 left-0 w-[calc(var(--workspace-controls-left)+5*var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap)+0.75rem+1px)]"
+      className="pointer-events-none invisible fixed top-0 left-0 flex w-max"
       ref={observeWidth}
-    />
+    >
+      <span className="w-[calc(var(--workspace-controls-left)+5*var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap)+0.75rem+1px)]" />
+      <span className="flex items-center gap-3">
+        <TitlebarWordmark probe />
+        {pillLabel ? (
+          <Badge size="sm" variant="secondary">
+            {pillLabel}
+          </Badge>
+        ) : null}
+      </span>
+    </div>
   );
 }
 
 /**
  * The mark and collapser stay fixed while navigation follows the expanded sidebar.
- * `compact` keeps only the mark and collapser below md when the sheet is closed.
  */
 export function TitlebarControls({
   collapser,
@@ -134,11 +177,12 @@ export function TitlebarControls({
     >
       <div className="pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]">
         <CommandPaletteMarkButton onBackdrop={onBackdrop} />
+        <TitlebarWordmark />
         {collapser}
       </div>
       <div
         className={cn(
-          "pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag]",
+          "pointer-events-auto flex shrink-0 items-center [-webkit-app-region:no-drag] max-[981px]:hidden",
           expanded && "ml-auto",
           compact && !expanded && "max-md:hidden",
         )}

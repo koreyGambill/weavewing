@@ -330,15 +330,14 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
   const router = useRouter();
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, isMobile } = useSidebar();
   const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
   const isSidebarVisible = useSidebarVisibility();
   const toolsAttention = useThreadToolsAttention();
   const collapsedAttention = showSidebar && !isSidebarVisible ? toolsAttention : null;
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
-  // Expanded, the cluster sits on the sidebar's title row and its stage backdrop.
-  const onBackdrop = isSidebarVisible && stageBackdropVariant !== null;
+  const onBackdrop = isMobile && isSidebarVisible && stageBackdropVariant !== null;
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen },
   });
@@ -468,6 +467,7 @@ export function AppSidebarLayout({
   // A clamped drag may not change width, so viewport changes need a separate subscription.
   const viewportWidth = useSyncExternalStore(subscribeToViewportWidth, readViewportWidth);
   const [titlebarWidth, setTitlebarWidth] = useState(0);
+  const [wordmarkWidth, setWordmarkWidth] = useState(0);
   const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(titlebarWidth);
   const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(viewportWidth, sidebarMinimumWidth);
   const resetSidebarWidth = () => {
@@ -490,8 +490,9 @@ export function AppSidebarLayout({
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
+    "--workspace-titlebar-wordmark-width": `${wordmarkWidth}px`,
     "--workspace-titlebar-content-left":
-      "calc(var(--workspace-controls-left) + var(--workspace-titlebar-control-count) * var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap))",
+      "calc(var(--workspace-controls-left) + var(--workspace-titlebar-control-count) * var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap) + var(--workspace-titlebar-visible-wordmark-width, 0px))",
     ...windowControlsInsetStyle,
   } as CSSProperties;
 
@@ -499,15 +500,18 @@ export function AppSidebarLayout({
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <ThreadToolsHost>
         <SidebarProvider
-          // Below md the fixed cluster is only the mark and collapser.
-          className="h-dvh! min-h-0! [--workspace-titlebar-control-count:2] md:[--workspace-titlebar-control-count:5]"
+          // Reserve only the controls visible at each titlebar breakpoint.
+          className="h-dvh! min-h-0! [--workspace-titlebar-control-count:2] min-[981px]:[--workspace-titlebar-control-count:5] min-[501px]:[--workspace-titlebar-visible-wordmark-width:var(--workspace-titlebar-wordmark-width)]"
           data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
           storageKey="chat_thread_sidebar_open"
           style={sidebarProviderStyle}
         >
           {showSidebar ? (
             <>
-              <TitlebarWidthProbe onWidthChange={setTitlebarWidth} />
+              <TitlebarWidthProbe
+                onWidthChange={setTitlebarWidth}
+                onWordmarkWidthChange={setWordmarkWidth}
+              />
               <Sidebar
                 side="left"
                 collapsible="offcanvas"

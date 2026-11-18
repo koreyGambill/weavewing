@@ -24,6 +24,7 @@ import { environmentContextRecord } from "~/lib/composerContextRecords";
 import { startWorkspaceFocus } from "~/lib/workspaceFocus";
 import { usePromptStashStore } from "~/promptStashStore";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { useToolSidebarStore } from "../toolSidebarStore";
 import { getRouter } from "~/router";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentThreadDetails } from "~/state/threads";
@@ -318,6 +319,11 @@ it("opens the thread actions menu for an older settled thread the shell leaves o
 });
 
 it("retains each thread's diff selection when returning from another thread or Settings", async () => {
+  await using viewport = new AsyncDisposableStack();
+  const initialSize = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initialSize.width, initialSize.height));
+  // Both the conversation and its diff must be visible during navigation.
+  await page.viewport(1100, 800);
   const a = threadWithHistory("diff-selection-a", 1);
   const b = threadWithHistory("diff-selection-b", 1);
   using _environment = installFakeEnvironment([a, b]);
@@ -379,6 +385,73 @@ it("retains each thread's diff selection when returning from another thread or S
     kind: "turn",
     turnId: a.runs[0]!.id,
   });
+});
+
+it("overlays tools on a narrow tile and dismisses them after closing the mobile sidebar", async () => {
+  await using viewport = new AsyncDisposableStack();
+  const initialSize = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initialSize.width, initialSize.height));
+  await page.viewport(390, 800);
+  useToolSidebarStore.setState({ visible: false, activeTool: null, maximized: false });
+  const thread = threadWithHistory("narrow-tools", 1);
+  using _environment = installFakeEnvironment([thread]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using screen = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Toggle main sidebar", exact: true }));
+  await userEvent.keyboard("{Escape}");
+  await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
+  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
+  await expect
+    .element(screen.getByRole("textbox", { name: `Message ${thread.title}` }))
+    .toBeVisible();
+  await vi.waitFor(() => {
+    const workspace = screen.container.querySelector("[data-thread-tiling]");
+    expect(workspace).not.toBeNull();
+    expect(workspace!.getBoundingClientRect().width).toBe(390);
+  });
+  const composer = screen.getByRole("textbox", { name: `Message ${thread.title}` }).element();
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  const reachedComposer = vi.fn();
+  composer.addEventListener("keydown", reachedComposer, { once: true });
+  composer.dispatchEvent(escape);
+  expect(reachedComposer).toHaveBeenCalledOnce();
+  expect(useToolSidebarStore.getState().visible).toBe(true);
+  const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  handled.preventDefault();
+  document.body.dispatchEvent(handled);
+  expect(useToolSidebarStore.getState().visible).toBe(true);
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "collapse" }));
+  await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }));
+  await expect.element(page.getByRole("menu")).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+  expect(useToolSidebarStore.getState().visible).toBe(true);
+  await page.viewport(700, 800);
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "select", tool: "calendar" }));
+  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
+  await userEvent.click(
+    screen.getByRole("region", { name: "Calendar", exact: true }).getByRole("button", {
+      name: "Calendar",
+      exact: true,
+    }),
+  );
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(screen.getByRole("complementary", { name: "Tools sidebar" }))
+    .not.toBeInTheDocument();
+  expect(useToolSidebarStore.getState()).toMatchObject({ visible: true, activeTool: null });
+  await page.viewport(1100, 800);
+  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
 });
 
 it("a stashed prompt ending in a file chip restores with the chip", async () => {

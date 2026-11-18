@@ -24,7 +24,6 @@ import {
   type ThreadPreviewState,
 } from "../../previewStateStore";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { deviceEnvironment } from "../../state/device";
 import { readEnvironmentSupportsServerBrowser } from "../../state/entities";
@@ -145,14 +144,14 @@ function hasLiveSession(
 
 /**
  * A device the agent opens floats over its thread's chat, or becomes a panel tab
- * when floating previews are off; sheet layouts get neither. A session without a
+ * when floating previews are off. A session without a
  * device summary yet stays out of the baseline so a later snapshot opens it.
  * Floating devices whose session ended close here.
  */
 export function applyDeviceSnapshot(
   environmentId: EnvironmentId,
   state: DeviceServiceState,
-  options: { readonly sheetLayout: boolean; readonly autoShowFloatingPreview: boolean },
+  options: { readonly autoShowFloatingPreview: boolean },
 ): void {
   const deviceFor = (session: DeviceServiceState["sessions"][number]) =>
     state.devices.find((entry) => entry.hostId === session.hostId && entry.id === session.deviceId);
@@ -170,7 +169,7 @@ export function applyDeviceSnapshot(
     environmentId,
     new Set(state.sessions.filter((session) => deviceFor(session) !== undefined).map(sessionKey)),
   );
-  if (!previous || options.sheetLayout) return;
+  if (!previous) return;
   for (const session of state.sessions) {
     if (previous.has(sessionKey(session))) continue;
     const device = deviceFor(session);
@@ -224,7 +223,6 @@ function watchEnvironmentDevices(environmentId: EnvironmentId): () => void {
       const state = AsyncResult.getOrElse(result, () => null);
       if (state === null) return;
       applyDeviceSnapshot(environmentId, state, {
-        sheetLayout: window.matchMedia(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY).matches,
         autoShowFloatingPreview: getClientSettings().browserAutoShowFloatingPreview,
       });
     },

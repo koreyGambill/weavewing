@@ -18,6 +18,8 @@ import {
   Check,
   Columns2,
   ArrowRightLeft,
+  ChevronLeft,
+  ChevronRight,
   Ellipsis,
   Rows2,
   Maximize2,
@@ -67,6 +69,8 @@ import {
   type TileRect,
 } from "../../threadTileGeometry";
 import { shortcutLabelForCommand } from "../../keybindings";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import { useTheme } from "../../hooks/useTheme";
 import { useThreadRelationshipShells } from "../../state/entities";
 import { observeResize } from "../../lib/observeResize";
@@ -226,6 +230,7 @@ export function ThreadTileWorkspace(props: {
     focused: boolean,
   ) => ReactNode;
 }) {
+  const compact = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const savedLayout = useRightPanelStore((state) =>
     selectThreadTileLayout(state.byThreadKey, props.threadRef),
   );
@@ -295,33 +300,45 @@ export function ThreadTileWorkspace(props: {
     return first && second ? { ...node, first, second } : (first ?? second);
   };
   const displayRoot = maximized ? displayTileRoot(layout) : tiled(layout.root);
-  const minimumWidth = displayRoot ? tileMinimumWidth(displayRoot) : TILE_MIN_WIDTH_PX;
+  const minimumWidth = compact
+    ? 0
+    : displayRoot
+      ? tileMinimumWidth(displayRoot)
+      : TILE_MIN_WIDTH_PX;
   const dockedRoot = displayRoot
     ? workspaceWidth > 0
       ? clampTileWidths(displayRoot, workspaceWidth)
       : displayRoot
     : null;
-  const floatingGroups = groups.filter((group) => group.floating && !zoomedIds.has(group.id));
-  const displayGroups = [...(dockedRoot ? getTileGroups(dockedRoot) : []), ...floatingGroups];
+  const floatingGroups = compact
+    ? []
+    : groups.filter((group) => group.floating && !zoomedIds.has(group.id));
+  const compactGroup = groups.find((group) => group.id === layout.focusedGroupId) ?? groups[0]!;
+  const displayGroups = compact
+    ? [compactGroup]
+    : [...(dockedRoot ? getTileGroups(dockedRoot) : []), ...floatingGroups];
   const dockedGeometry = dockedRoot ? tileGeometry(dockedRoot) : { groups: [], splits: [] };
   const [floatingOverride, setFloatingOverride] = useState<{
     groupId: string;
     rect: FloatingTileRect;
   } | null>(null);
-  const visibleGroups = [
-    ...dockedGeometry.groups,
-    ...floatingGroups.map((group) => ({
-      id: group.id,
-      rect: boundFloatingTile({
-        ...(floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!),
-        width: Math.max(
-          (floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!).width,
-          TILE_MIN_WIDTH_PX / Math.max(workspaceWidth, minimumWidth),
-        ),
-      }),
-    })),
-  ];
-  const geometry = { groups: visibleGroups, splits: dockedGeometry.splits };
+  const visibleGroups = compact
+    ? [{ id: compactGroup.id, rect: { x: 0, y: 0, width: 1, height: 1 } }]
+    : [
+        ...dockedGeometry.groups,
+        ...floatingGroups.map((group) => ({
+          id: group.id,
+          rect: boundFloatingTile({
+            ...(floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!),
+            width: Math.max(
+              (floatingOverride?.groupId === group.id ? floatingOverride.rect : group.floating!)
+                .width,
+              TILE_MIN_WIDTH_PX / Math.max(workspaceWidth, minimumWidth),
+            ),
+          }),
+        })),
+      ];
+  const geometry = { groups: visibleGroups, splits: compact ? [] : dockedGeometry.splits };
   const dockedCount = groups.filter((group) => !group.floating).length;
   // A lone tile has nothing to be distinguished from.
   const focusedGroupId = visibleGroups.length > 1 ? layout.focusedGroupId : null;
@@ -1121,9 +1138,12 @@ export function ThreadTileWorkspace(props: {
                     setDropTarget(null);
                   }}
                 >
-                  <GripVertical aria-hidden className="workspace-tile-grip size-3 shrink-0" />
+                  <GripVertical
+                    aria-hidden
+                    className="workspace-tile-grip size-3 shrink-0 max-[501px]:hidden"
+                  />
                   <span
-                    className="workspace-tile-grip shrink-0 text-2xs tabular-nums"
+                    className="workspace-tile-grip shrink-0 text-2xs tabular-nums max-[501px]:hidden"
                     aria-label={`Group ${groupNumber}`}
                   >
                     {groupNumber}
@@ -1238,8 +1258,44 @@ export function ThreadTileWorkspace(props: {
                       </TooltipPopup>
                     </Tooltip>
                   </div>
+                  {compact && groups.length > 1 ? (
+                    <div className="flex shrink-0 items-center">
+                      <span className="max-[501px]:hidden">
+                        <TileControl
+                          label="Previous tile"
+                          onClick={() =>
+                            focus(groups[(groupNumber + groups.length - 2) % groups.length]!.id)
+                          }
+                        >
+                          <ChevronLeft />
+                        </TileControl>
+                      </span>
+                      <Menu>
+                        <MenuTrigger
+                          render={<Button size="micro" variant="ghost" aria-label="Switch tile" />}
+                        >
+                          {groupNumber}/{groups.length}
+                        </MenuTrigger>
+                        <MenuPopup align="end">
+                          {groups.map((entry, index) => (
+                            <MenuItem key={entry.id} onClick={() => focus(entry.id)}>
+                              {index + 1}: {title(entry.activeTabId)}
+                            </MenuItem>
+                          ))}
+                        </MenuPopup>
+                      </Menu>
+                      <span className="max-[501px]:hidden">
+                        <TileControl
+                          label="Next tile"
+                          onClick={() => focus(groups[groupNumber % groups.length]!.id)}
+                        >
+                          <ChevronRight />
+                        </TileControl>
+                      </span>
+                    </div>
+                  ) : null}
                   <TileControl
-                    visibility="split"
+                    visibility={compact ? "menu" : "split"}
                     label="New tile to the right"
                     shortcut={shortcut("workspace.tile.splitRight")}
                     onClick={() => split(group, "horizontal")}
@@ -1247,34 +1303,38 @@ export function ThreadTileWorkspace(props: {
                     <Columns2 />
                   </TileControl>
                   <TileControl
-                    visibility="split"
+                    visibility={compact ? "menu" : "split"}
                     label="New tile below"
                     shortcut={shortcut("workspace.tile.splitDown")}
                     onClick={() => split(group, "vertical")}
                   >
                     <Rows2 />
                   </TileControl>
-                  <TileControl
-                    visibility="float"
-                    label={group.floating ? "Dock tile" : "Float tile"}
-                    shortcut={shortcut("workspace.tile.float")}
-                    pressed={Boolean(group.floating)}
-                    disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                    onClick={() => toggleFloat(group)}
-                  >
-                    <PictureInPicture2 />
-                  </TileControl>
-                  <TileControl
-                    visibility="maximize"
-                    label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                    shortcut={shortcut("workspace.tile.maximize")}
-                    pressed={zoomedIds.has(id)}
-                    onClick={() =>
-                      apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                    }
-                  >
-                    {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
-                  </TileControl>
+                  {!compact ? (
+                    <>
+                      <TileControl
+                        visibility="float"
+                        label={group.floating ? "Dock tile" : "Float tile"}
+                        shortcut={shortcut("workspace.tile.float")}
+                        pressed={Boolean(group.floating)}
+                        disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                        onClick={() => toggleFloat(group)}
+                      >
+                        <PictureInPicture2 />
+                      </TileControl>
+                      <TileControl
+                        visibility="maximize"
+                        label={zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                        shortcut={shortcut("workspace.tile.maximize")}
+                        pressed={zoomedIds.has(id)}
+                        onClick={() =>
+                          apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                        }
+                      >
+                        {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                      </TileControl>
+                    </>
+                  ) : null}
                   <Menu
                     open={openMenu?.kind === "actions" && openMenu.groupId === id}
                     onOpenChange={(open) =>
@@ -1298,23 +1358,27 @@ export function ThreadTileWorkspace(props: {
                       </TooltipPopup>
                     </Tooltip>
                     <MenuPopup align="end">
-                      <MenuItem
-                        onClick={() =>
-                          apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
-                        }
-                      >
-                        {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
-                        {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
-                        <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
-                      </MenuItem>
-                      <MenuItem
-                        disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
-                        onClick={() => toggleFloat(group)}
-                      >
-                        <PictureInPicture2 />
-                        {group.floating ? "Dock tile" : "Float tile"}
-                        <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
-                      </MenuItem>
+                      {!compact ? (
+                        <>
+                          <MenuItem
+                            onClick={() =>
+                              apply({ type: "maximize", groupId: zoomedIds.has(id) ? null : id })
+                            }
+                          >
+                            {zoomedIds.has(id) ? <Minimize2 /> : <Maximize2 />}
+                            {zoomedIds.has(id) ? "Restore tiles" : "Maximize tile"}
+                            <TileMenuShortcut keys={shortcut("workspace.tile.maximize")} />
+                          </MenuItem>
+                          <MenuItem
+                            disabled={(!group.floating && dockedCount < 2) || zoomedIds.has(id)}
+                            onClick={() => toggleFloat(group)}
+                          >
+                            <PictureInPicture2 />
+                            {group.floating ? "Dock tile" : "Float tile"}
+                            <TileMenuShortcut keys={shortcut("workspace.tile.float")} />
+                          </MenuItem>
+                        </>
+                      ) : null}
                       <MenuItem onClick={() => split(group, "vertical")}>
                         <Rows2 />
                         New tile below
@@ -1856,7 +1920,7 @@ function flashPress(button: HTMLElement) {
 }
 
 function TileControl(props: {
-  visibility?: "split" | "float" | "maximize";
+  visibility?: "split" | "float" | "maximize" | "menu";
   label: string;
   shortcut?: string | null;
   onClick: () => void;
@@ -1871,6 +1935,7 @@ function TileControl(props: {
         "hidden @min-[300px]/tile:inline-flex": props.visibility === "float",
         "hidden @min-[240px]/tile:inline-flex": props.visibility === "maximize",
         "inline-flex": !props.visibility,
+        hidden: props.visibility === "menu",
       })}
     >
       <Tooltip>
