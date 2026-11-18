@@ -247,7 +247,8 @@ function SourceStatus({
     const next = {
       expanded: !expanded,
       state: sourceExpansionState(source.latest),
-      at: new Date().toISOString(),
+      // Server time, so a client with a skewed clock compares like with like.
+      ...(source.lastTransition ? { at: source.lastTransition.at } : {}),
     };
     setExpansion(next);
     try {
