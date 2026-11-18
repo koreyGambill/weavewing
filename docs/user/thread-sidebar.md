@@ -26,7 +26,7 @@ When you pick a project that is on more than one machine, the thread starts on
 a connected one if any is connected.
 
 On web and desktop, click the project or folder in a new thread's heading, press
-`mod+alt+o`, or choose **Change project or folder…** in the command palette. Search
+`mod+alt+shift+o`, or choose **Change project or folder…** in the command palette. Search
 by project name or path. The picker starts on the draft's machine, with pinned
 projects and five recent projects. **Show all** reveals the rest.
 
