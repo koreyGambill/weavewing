@@ -411,7 +411,14 @@ it("overlays tools on a narrow tile and dismisses them after closing the mobile 
   await userEvent.keyboard("{Escape}");
   await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
   await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
-  expect(document.querySelector("[data-thread-tiling]")!.getBoundingClientRect().width).toBe(390);
+  await expect
+    .element(screen.getByRole("textbox", { name: `Message ${thread.title}` }))
+    .toBeVisible();
+  await vi.waitFor(() => {
+    const workspace = screen.container.querySelector("[data-thread-tiling]");
+    expect(workspace).not.toBeNull();
+    expect(workspace!.getBoundingClientRect().width).toBe(390);
+  });
   const composer = screen.getByRole("textbox", { name: `Message ${thread.title}` }).element();
   const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
   const reachedComposer = vi.fn();
@@ -429,11 +436,22 @@ it("overlays tools on a narrow tile and dismisses them after closing the mobile 
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
   expect(useToolSidebarStore.getState().visible).toBe(true);
-  await userEvent.click(screen.getByRole("button", { name: "Toggle tools sidebar", exact: true }));
+  await page.viewport(700, 800);
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "select", tool: "calendar" }));
+  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
+  await userEvent.click(
+    screen.getByRole("region", { name: "Calendar", exact: true }).getByRole("button", {
+      name: "Calendar",
+      exact: true,
+    }),
+  );
   await userEvent.keyboard("{Escape}");
   await expect
     .element(screen.getByRole("complementary", { name: "Tools sidebar" }))
     .not.toBeInTheDocument();
+  expect(useToolSidebarStore.getState()).toMatchObject({ visible: true, activeTool: null });
+  await page.viewport(1100, 800);
+  await expect.element(screen.getByRole("complementary", { name: "Tools sidebar" })).toBeVisible();
 });
 
 it("a stashed prompt ending in a file chip restores with the chip", async () => {

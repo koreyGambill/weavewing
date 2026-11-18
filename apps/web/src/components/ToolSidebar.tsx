@@ -95,7 +95,8 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
             type:
               state.maximized && window.matchMedia("(min-width: 981px)").matches
                 ? "restore"
-                : "toggle",
+                : // Narrow close keeps the tools shown, so widening later still has the rail.
+                  "collapse",
           });
           event.preventDefault();
           event.stopPropagation();
