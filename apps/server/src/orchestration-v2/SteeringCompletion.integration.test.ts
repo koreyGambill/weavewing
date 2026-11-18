@@ -3438,7 +3438,6 @@ it.effect("starts a restart that stops the running turn ahead of an older held q
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       const threadId = yield* startFirstTurn;
-      yield* send("queued", "queued", "queue");
       yield* orchestrator.dispatch({
         type: "thread.stop",
         commandId: CommandId.make("stop"),
@@ -3467,6 +3466,21 @@ it.effect("starts a restart that stops the running turn ahead of an older held q
       });
       yield* worker.drain();
       yield* Fiber.join(secondRunning);
+      yield* send("queued", "queued", "queue");
+      const queued = (yield* orchestrator.getThreadProjection(threadId)).runs.find(
+        (run) => run.status === "queued",
+      )!;
+      yield* (yield* EventSink.EventSinkV2).write({
+        events: [
+          {
+            id: EventId.make("event:held-before-restart"),
+            type: "run.updated",
+            threadId,
+            occurredAt: yield* DateTime.now,
+            payload: { ...queued, queueHeld: true },
+          },
+        ],
+      });
       yield* orchestrator.dispatch({
         type: "message.dispatch",
         origin: { kind: "user" as const },
