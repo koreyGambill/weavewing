@@ -55,7 +55,7 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
-  { key: "mod+b", command: "sidebar.toggle" },
+  { key: "mod+b", command: "sidebar.toggle", when: "!terminalFocus" },
   { key: "mod+alt+shift+b", command: "toolSidebar.toggle" },
   { key: "f6", command: "workspace.focusNext" },
   { key: "shift+f6", command: "workspace.focusPrevious" },
@@ -89,17 +89,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
-  { key: "mod+j", command: "terminal.toggle" },
-  { key: "mod+alt+b", command: "rightPanel.toggle" },
+  { key: "mod+j", command: "terminal.toggle", when: "!terminalFocus" },
   { key: "mod+alt+i", command: "threadContext.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
-  { key: "mod+t", command: "rightPanel.new", when: "rightPanelOpen && !terminalFocus" },
-  { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
-  { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+shift+d", command: "composer.dictation", when: "!terminalFocus" },
-  { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
-  { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
-  { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
   { key: "mod+shift+t", command: "view.reopenClosed" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },

@@ -53,7 +53,7 @@ in Settings.
 
 ## Copy pull request references
 
-With a PR open in the right panel or on the Pull requests page, use `mod+shift+c`
+With a PR open in a tile or on the Pull requests page, use `mod+shift+c`
 to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
 Both shortcuts can be changed in Settings. Search for “Copy Link or Thread”
 or “Copy Number”. They copy the selected PR and leave terminal input alone.
@@ -99,7 +99,7 @@ It is a JSON array of rules:
 ```json
 [
   { "key": "mod+g", "command": "terminal.toggle" },
-  { "key": "mod+shift+g", "command": "terminal.new", "when": "terminalFocus" }
+  { "key": "mod+shift+g", "command": "workspace.tile.newTab", "when": "terminalFocus" }
 ]
 ```
 
@@ -126,8 +126,7 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
 `previewOpen`, `rightPanelOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`,
 `draftThreadRoute`, `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
-In a thread, `rightPanelOpen` is true while its right panel is open; the default
-`mod+t` uses it to open the panel's new-tab menu.
+In a thread, `rightPanelOpen` means that a surface tab is selected.
 `draftThreadRoute` is true on a draft thread, including a restored draft, until it is first sent.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
@@ -192,10 +191,10 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 ## Reserved shortcuts
 
-In the desktop app, `mod+w` closes the focused terminal or the active right-panel
-tab. When nothing remains to close, it does nothing; it never closes the window. In a browser, `mod+w`
-closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
-shortcut such as `alt+w`.
+Use `workspace.tile.closeTab` (`Ctrl+Alt+W`) to close the selected tile tab.
+Focused terminals keep common shell keys, including `Ctrl+D` for EOF and
+`Ctrl+W` for word erase. Use **New tile below/right** to split the workspace;
+each terminal tab contains one shell.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.

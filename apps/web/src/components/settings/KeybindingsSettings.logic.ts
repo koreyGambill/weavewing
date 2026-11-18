@@ -214,7 +214,6 @@ const KEYBINDING_GROUPS = [
     title: "Navigation",
     prefixes: [
       "sidebar",
-      "rightPanel",
       "threadContext",
       "commandPalette",
       "filePicker",

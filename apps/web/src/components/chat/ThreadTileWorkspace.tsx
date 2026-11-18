@@ -74,7 +74,7 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import { useTheme } from "../../hooks/useTheme";
 import { useThreadRelationshipShells } from "../../state/entities";
 import { observeResize } from "../../lib/observeResize";
-import { SurfaceIcon, surfaceTitle, type RightPanelTabsProps } from "../RightPanelTabs";
+import { SurfaceIcon, surfaceTitle, type TileSurfaceActions } from "../SurfaceTabContent";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -117,7 +117,7 @@ const GROUP_DRAG_TYPE = "application/x-weavewing-group";
 type DropZone = "tabs" | "center" | "left" | "right" | "top" | "bottom";
 type TileDrop = { groupId: string; zone: DropZone };
 type TileDrag = { kind: "tab" | "group"; id: string };
-type PanelActions = Omit<RightPanelTabsProps, "children" | "mode" | "inlineSize">;
+type PanelActions = TileSurfaceActions;
 const rectStyle = (rect: TileRect): CSSProperties => ({
   left: `${rect.x * 100}%`,
   top: `${rect.y * 100}%`,

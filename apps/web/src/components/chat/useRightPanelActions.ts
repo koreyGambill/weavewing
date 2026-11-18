@@ -16,7 +16,6 @@ import { type ThreadPanelPresentation } from "../../rightPanelLayout";
 import {
   selectThreadPanelOpen,
   selectThreadRightPanelState,
-  selectThreadTileLayout,
   type RightPanelSurface,
   useRightPanelStore,
 } from "../../rightPanelStore";
@@ -24,10 +23,8 @@ import { requestWorkspaceContentFocus, requestWorkspaceFocus } from "../../lib/w
 import { setActivePreviewTab } from "../../previewStateStore";
 import { isBrowserSettingsReadError } from "../../browser/openFileInPreview";
 import { addBrowserSurface } from "../preview/addBrowserSurface";
-import { focusActivePanelTerminal, focusTerminal } from "../../lib/terminalFocus";
+import { focusTerminal } from "../../lib/terminalFocus";
 import { subscribePreviewAction } from "../preview/previewActionBus";
-import { floatDeviceSurface } from "../preview/agentOpenedPreviews";
-import { browserMiniPlayerSource, usePreviewMiniPlayerStore } from "../../previewMiniPlayerStore";
 import type { threadPullRequestPanelTarget } from "../pullRequest/pullRequestDetail.logic";
 import type { useDeviceState } from "../../state/device";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -36,13 +33,10 @@ import { previewEnvironment } from "../../state/preview";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { ChatShortcutCommands } from "./useChatShortcuts";
 interface RightPanelActionsInput {
-  readonly tiled?: boolean;
   readonly activeThreadRef: ScopedThreadRef | null;
   readonly activeProject: EnvironmentProject | null;
-  readonly activeRightPanelSurface: RightPanelSurface | null;
   readonly activePreviewState: ThreadPreviewState;
   readonly deviceState: ReturnType<typeof useDeviceState>["state"];
-  readonly deviceStateLoaded: boolean;
   readonly pullRequestPanelTarget: ReturnType<typeof threadPullRequestPanelTarget> | null;
   readonly threadPanelPresentation: ThreadPanelPresentation;
   readonly isServerThread: boolean;
@@ -52,16 +46,11 @@ interface RightPanelActionsInput {
   readonly browserAvailable: boolean;
   readonly canOperatePreview: boolean;
   readonly diffOpen: boolean;
-  readonly previewPanelOpen: boolean;
-  readonly rightPanelOpen: boolean;
-  readonly canMaximizeRightPanel: boolean;
-  readonly rightPanelMaximized: boolean;
   readonly supportsPullRequests: boolean;
   readonly pullRequestsSurfaceAvailable: boolean;
   readonly gitCwd: string | null;
   readonly activeProjectCwd: string | null;
   readonly onDiffPanelOpen: (() => void) | undefined;
-  readonly closeRightPanelSurface: (surface: RightPanelSurface) => void;
 }
 
 /**
@@ -70,14 +59,10 @@ interface RightPanelActionsInput {
  */
 export function useRightPanelActions(input: RightPanelActionsInput) {
   const {
-    tiled = false,
-    closeRightPanelSurface,
     activeThreadRef,
     activeProject,
-    activeRightPanelSurface,
     activePreviewState,
     deviceState,
-    deviceStateLoaded,
     pullRequestPanelTarget,
     threadPanelPresentation,
     isServerThread,
@@ -86,10 +71,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     browserAvailable,
     canOperatePreview,
     diffOpen,
-    previewPanelOpen,
-    rightPanelOpen,
-    canMaximizeRightPanel,
-    rightPanelMaximized,
     supportsPullRequests,
     pullRequestsSurfaceAvailable,
     gitCwd,
@@ -107,8 +88,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     }
     if (activeThreadRef) {
       const store = useRightPanelStore.getState();
-      if (tiled) store.open(activeThreadRef, "diff");
-      else store.toggle(activeThreadRef, "diff");
+      store.open(activeThreadRef, "diff");
     }
   };
   const onToggleDiffStable = useStableCallback(onToggleDiff);
@@ -191,31 +171,9 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     }
   };
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
-  const closePreviewPanel = () => {
-    if (activeThreadRef) {
-      if (activeRightPanelSurface?.kind === "preview" && activeRightPanelSurface.resourceId) {
-        usePreviewMiniPlayerStore
-          .getState()
-          .open(activeThreadRef, browserMiniPlayerSource(activeRightPanelSurface.resourceId));
-      } else if (activeRightPanelSurface?.kind === "device" && activeRightPanelSurface.target) {
-        floatDeviceSurface(
-          activeThreadRef,
-          { kind: "device", ...activeRightPanelSurface.target },
-          deviceStateLoaded ? deviceState : null,
-        );
-      }
-      useRightPanelStore.getState().setMaximized(activeThreadRef, false);
-      useRightPanelStore.getState().close(activeThreadRef);
-    }
-  };
-  const closePreviewPanelStable = useStableCallback(closePreviewPanel);
   const togglePreviewPanel = () => {
     if (!activeThreadRef || !browserAvailable) return;
-    if (previewPanelOpen && !tiled) {
-      closePreviewPanel();
-      return;
-    }
-    if (tiled) {
+    {
       const store = useRightPanelStore.getState();
       const panel = selectThreadRightPanelState(store.byThreadKey, activeThreadRef);
       const browser =
@@ -236,25 +194,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     }
   };
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
-  const toggleRightPanel = () => {
-    if (!activeThreadRef) return;
-    if (tiled) {
-      const store = useRightPanelStore.getState();
-      const panel = selectThreadRightPanelState(store.byThreadKey, activeThreadRef);
-      const surface =
-        panel.surfaces.find((entry) => entry.id === panel.activeSurfaceId) ?? panel.surfaces[0];
-      if (surface) activateRightPanelSurface(surface);
-      else togglePreviewPanel();
-      return;
-    }
-    if (rightPanelOpen) {
-      closePreviewPanel();
-      return;
-    }
-    useRightPanelStore.getState().toggleVisibility(activeThreadRef);
-    focusActivePanelTerminal(activeThreadRef);
-  };
-  const toggleRightPanelStable = useStableCallback(toggleRightPanel);
   const toggleThreadPanel = () => {
     if (!activeThreadRef) return;
     const store = useRightPanelStore.getState();
@@ -271,22 +210,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     store.toggleThreadPanel(activeThreadRef, threadPanelPresentation);
   };
   const toggleThreadPanelStable = useStableCallback(toggleThreadPanel);
-  const toggleRightPanelMaximized = () => {
-    if (!activeThreadRef) return;
-    if (tiled) {
-      const store = useRightPanelStore.getState();
-      const layout = selectThreadTileLayout(store.byThreadKey, activeThreadRef);
-      store.applyTileAction(activeThreadRef, {
-        type: "maximize",
-        groupId: layout.maximizedGroupId ? null : layout.focusedGroupId,
-      });
-      return;
-    }
-    if (!canMaximizeRightPanel) return;
-    if (!rightPanelMaximized) requestWorkspaceFocus({ area: "panel" });
-    useRightPanelStore.getState().setMaximized(activeThreadRef, !rightPanelMaximized);
-  };
-  const toggleRightPanelMaximizedStable = useStableCallback(toggleRightPanelMaximized);
   const moveRightPanelSurface = (surfaceId: string, toIndex: number) => {
     if (activeThreadRef)
       useRightPanelStore.getState().moveSurface(activeThreadRef, surfaceId, toIndex);
@@ -350,15 +273,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   );
 
   const shortcuts = {
-    "rightPanel.toggle": () => toggleRightPanel(),
-    "rightPanel.toggleMaximized": ({ event }) => {
-      if (!event.repeat) toggleRightPanelMaximized();
-    },
     "threadPanel.toggle": () => toggleThreadPanel(),
-    "rightPanel.close": ({ event }) => {
-      if (!activeRightPanelSurface) return false;
-      if (!event.repeat) closeRightPanelSurface(activeRightPanelSurface);
-    },
     "diff.toggle": () => onToggleDiff(),
   } satisfies ChatShortcutCommands;
 
@@ -370,7 +285,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     addFilesSurfaceStable,
     addPullRequestSurfaceStable,
     addPullRequestsSurfaceStable,
-    closePreviewPanelStable,
     copyRightPanelFilePathStable,
     createBrowserSurface,
     createBrowserSurfaceStable,
@@ -380,8 +294,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onToggleDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
-    toggleRightPanelMaximizedStable,
-    toggleRightPanelStable,
     toggleThreadPanelStable,
   };
 }

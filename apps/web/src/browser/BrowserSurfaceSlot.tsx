@@ -60,9 +60,6 @@ export function BrowserSurfaceSlot(props: {
     updateRef.current = update;
     update();
     const observed: Element[] = [element];
-    // Inline shells animate without resizing the slot, so observe the shell too.
-    const panel = element.closest('[data-preview-panel-mode="inline"]');
-    if (panel) observed.push(panel);
     // Sidebar width changes move the slot without changing its size or column offset.
     observed.push(...document.querySelectorAll('[data-slot="sidebar-gap"]'));
     const stopObserving = observeResize(observed, update);

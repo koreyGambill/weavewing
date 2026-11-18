@@ -75,7 +75,6 @@ export type RightPanelSurface =
       resourceId: string;
       terminalIds: string[];
       activeTerminalId: string;
-      splitDirection?: "horizontal" | "vertical";
       launchContext?: TerminalSurfaceLaunchContext;
     }
   | { id: "diff" | `diff:${string}`; kind: "diff" }
@@ -216,12 +215,6 @@ interface RightPanelStoreState {
     ref: ScopedThreadRef,
     terminalId: string,
     launchContext?: TerminalSurfaceLaunchContext,
-  ) => void;
-  splitTerminal: (
-    ref: ScopedThreadRef,
-    surfaceId: string,
-    terminalId: string,
-    direction?: "horizontal" | "vertical",
   ) => void;
   activateTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
   closeTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
@@ -678,22 +671,19 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                             ),
                           ]
                         : [surface.resourceId];
-                    const activeTerminalId =
-                      "activeTerminalId" in surface &&
-                      typeof surface.activeTerminalId === "string" &&
-                      terminalIds.includes(surface.activeTerminalId)
-                        ? surface.activeTerminalId
-                        : (terminalIds[0] ?? surface.resourceId);
-                    return [
-                      {
-                        ...surface,
-                        terminalIds: terminalIds.length > 0 ? terminalIds : [surface.resourceId],
-                        activeTerminalId,
-                      },
-                    ];
+                    const ids = terminalIds.length > 0 ? terminalIds : [surface.resourceId];
+                    return ids.map((terminalId) => ({
+                      ...terminalSurface(terminalId, surface.launchContext),
+                    }));
                   })
                 : [];
-              const rawActiveSurfaceId = validThreadState?.activeSurfaceId;
+              const oldActive = validThreadState?.surfaces?.find(
+                (surface) => surface.id === validThreadState.activeSurfaceId,
+              );
+              const rawActiveSurfaceId =
+                oldActive?.kind === "terminal"
+                  ? `terminal:${oldActive.activeTerminalId ?? oldActive.resourceId}`
+                  : validThreadState?.activeSurfaceId;
               const persistedActiveSurfaceId = surfaces.some(
                 (surface) => surface.id === rawActiveSurfaceId,
               )
@@ -1105,26 +1095,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           userAction(state, scopedThreadKey(ref), (current) =>
             upsertSurface(current, terminalSurface(terminalId, launchContext)),
           ),
-        ),
-      splitTerminal: (ref, surfaceId, terminalId, direction = "horizontal") =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => ({
-            ...current,
-            isOpen: true,
-            activeSurfaceId: surfaceId,
-            surfaces: current.surfaces.map((surface) => {
-              if (surface.id !== surfaceId || surface.kind !== "terminal") return surface;
-              const { splitDirection: _splitDirection, ...baseSurface } = surface;
-              return {
-                ...baseSurface,
-                terminalIds: surface.terminalIds.includes(terminalId)
-                  ? surface.terminalIds
-                  : [...surface.terminalIds, terminalId],
-                activeTerminalId: terminalId,
-                ...(direction === "vertical" ? { splitDirection: "vertical" as const } : {}),
-              };
-            }),
-          })),
         ),
       activateTerminal: (ref, surfaceId, terminalId) =>
         set((state) =>

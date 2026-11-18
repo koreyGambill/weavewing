@@ -78,12 +78,12 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     Effect.sync(() => {
       const compiled = SharedKeybindings.compileResolvedKeybindingRule({
         key: "mod+d",
-        command: "terminal.split",
+        command: "workspace.tile.splitRight",
         when: "terminalOpen && !terminalFocus",
       });
 
       assert.deepEqual(compiled, {
-        command: "terminal.split",
+        command: "workspace.tile.splitRight",
         shortcut: {
           key: "d",
           metaKey: false,
@@ -109,14 +109,14 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isNull(
         SharedKeybindings.compileResolvedKeybindingRule({
           key: "mod+shift+d+o",
-          command: "terminal.new",
+          command: "workspace.tile.newTab",
         }),
       );
 
       assert.isNull(
         SharedKeybindings.compileResolvedKeybindingRule({
           key: "mod+d",
-          command: "terminal.split",
+          command: "workspace.tile.splitRight",
           when: "terminalFocus && (",
         }),
       );
@@ -124,11 +124,56 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isNull(
         SharedKeybindings.compileResolvedKeybindingRule({
           key: "mod+d",
-          command: "terminal.split",
+          command: "workspace.tile.splitRight",
           when: `${"!".repeat(300)}terminalFocus`,
         }),
       );
     }),
+  );
+
+  it.effect("silently drops removed Weavewing commands from saved bindings", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const removed = [
+        "terminal.split",
+        "terminal.splitVertical",
+        "terminal.new",
+        "rightPanel.toggle",
+        "rightPanel.toggleMaximized",
+        "rightPanel.new",
+        "rightPanel.close",
+      ];
+      yield* fs.writeFileString(
+        keybindingsConfigPath,
+        JSON.stringify([
+          ...removed.map((command) => ({ key: "ctrl+d", command })),
+          { key: "mod+b", command: "sidebar.toggle" },
+          { key: "mod+j", command: "terminal.toggle" },
+          { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+          { key: "ctrl+alt+y", command: "terminal.toggle" },
+        ]),
+      );
+      const service = yield* Keybindings.Keybindings;
+      const state = yield* service.loadConfigState;
+      assert.deepEqual(state.issues, []);
+      assert.isFalse(state.keybindings.some((entry) => removed.includes(entry.command)));
+      assert.isFalse(state.keybindings.some((entry) => entry.command === "terminal.close"));
+      for (const command of ["terminal.toggle", "sidebar.toggle"]) {
+        const oldDefault = state.keybindings.find(
+          (entry) => entry.command === command && ["b", "j"].includes(entry.shortcut.key),
+        );
+        assert.deepEqual(oldDefault?.whenAst, {
+          type: "not",
+          node: { type: "identifier", name: "terminalFocus" },
+        });
+      }
+      assert.isTrue(
+        state.keybindings.some(
+          (entry) => entry.command === "terminal.toggle" && entry.shortcut.key === "y",
+        ),
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("bootstraps default keybindings when config file is missing", () =>
@@ -180,7 +225,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         keybindingsConfigPath,
         JSON.stringify([
           { key: "mod+j", command: "terminal.toggle" },
-          { key: "mod+shift+d+o", command: "terminal.new" },
+          { key: "mod+shift+d+o", command: "workspace.tile.newTab" },
           { key: "mod+x", command: "invalid.command" },
         ]),
       );
@@ -248,7 +293,12 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           configState.keybindings
             .filter((entry) => entry.shortcut.key === "b" && entry.shortcut.shiftKey)
             .map((entry) => entry.command),
-          ["threadPanel.toggle", "script.custom-panel.run", "script.custom-composer.run"],
+          [
+            "toolSidebar.toggle",
+            "threadPanel.toggle",
+            "script.custom-panel.run",
+            "script.custom-composer.run",
+          ],
         );
       }).pipe(Effect.provide(layerKeybindings())),
   );
@@ -361,7 +411,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     return Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+j", command: "script.custom-action.run" },
+        { key: "mod+j", command: "script.custom-action.run", when: "!terminalFocus" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -481,7 +531,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       const futureCommand = { key: "mod+shift+k", command: "command.from-a-newer-build" };
-      const badShortcut = { key: "mod+shift+d+o", command: "terminal.new" };
+      const badShortcut = { key: "mod+shift+d+o", command: "workspace.tile.newTab" };
       yield* fs.writeFileString(
         keybindingsConfigPath,
         JSON.stringify([

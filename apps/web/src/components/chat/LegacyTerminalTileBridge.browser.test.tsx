@@ -1,3 +1,4 @@
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 
@@ -17,9 +18,21 @@ it("moves drawer groups into areas, preserving existing owners and later legacy 
     suppressedTerminalIdsByThreadKey: {},
   });
   const drawer = useTerminalUiStateStore.getState();
-  drawer.newTerminal(threadRef, "shell-1");
-  drawer.splitTerminalVertical(threadRef, "shell-2");
-  drawer.newTerminal(threadRef, "shell-3");
+  useTerminalUiStateStore.setState({
+    terminalUiStateByThreadKey: {
+      [scopedThreadKey(threadRef)]: {
+        terminalOpen: true,
+        terminalHeight: 280,
+        terminalIds: ["shell-1", "shell-2", "shell-3"],
+        activeTerminalId: "shell-3",
+        terminalGroups: [
+          { id: "legacy-split", terminalIds: ["shell-1", "shell-2"], splitDirection: "vertical" },
+          { id: "legacy-tab", terminalIds: ["shell-3"] },
+        ],
+        activeTerminalGroupId: "legacy-tab",
+      },
+    },
+  });
   useRightPanelStore.getState().openTerminal(threadRef, "shell-1");
   const panelState = () =>
     selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
@@ -40,9 +53,15 @@ it("moves drawer groups into areas, preserving existing owners and later legacy 
         id: "terminal:shell-1",
         kind: "terminal",
         resourceId: "shell-1",
-        terminalIds: ["shell-1", "shell-2"],
+        terminalIds: ["shell-1"],
+        activeTerminalId: "shell-1",
+      },
+      {
+        id: "terminal:shell-2",
+        kind: "terminal",
+        resourceId: "shell-2",
+        terminalIds: ["shell-2"],
         activeTerminalId: "shell-2",
-        splitDirection: "vertical",
       },
       {
         id: "terminal:shell-3",

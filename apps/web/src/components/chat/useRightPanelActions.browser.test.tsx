@@ -18,7 +18,7 @@ vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }
 vi.mock("./ChatOverlayHosts", () => ({ openDeviceSetupDialog: vi.fn() }));
 vi.mock("../preview/agentOpenedPreviews", () => ({ floatDeviceSurface: vi.fn() }));
 
-it("routes panel commands to tiled owners while retaining the narrow panel close behavior", async () => {
+it("reveals the browser tile from the preview action bus", async () => {
   const threadRef = {
     environmentId: EnvironmentId.make("panel-tile-actions"),
     threadId: ThreadId.make("thread"),
@@ -44,15 +44,10 @@ it("routes panel commands to tiled owners while retaining the narrow panel close
     groupId: conversation.id,
     tabId: "conversation",
   });
-  function Harness({ tiled }: { tiled: boolean }) {
-    const panel = useRightPanelStore((state) =>
-      selectThreadRightPanelState(state.byThreadKey, threadRef),
-    );
-    const actions = useRightPanelActions({
-      tiled,
+  function Harness() {
+    useRightPanelActions({
       activeThreadRef: threadRef,
       activeProject: null,
-      activeRightPanelSurface: browser,
       activePreviewState: {
         ...previewTesting.EMPTY_THREAD_PREVIEW_STATE,
         activeTabId: "browser-tab",
@@ -68,7 +63,6 @@ it("routes panel commands to tiled owners while retaining the narrow panel close
         hubBasePath: "/api/device-hub",
         revision: 0,
       },
-      deviceStateLoaded: false,
       pullRequestPanelTarget: null,
       threadPanelPresentation: "inline",
       isServerThread: true,
@@ -77,49 +71,22 @@ it("routes panel commands to tiled owners while retaining the narrow panel close
       browserAvailable: true,
       canOperatePreview: true,
       diffOpen: false,
-      previewPanelOpen: panel.isOpen,
-      rightPanelOpen: panel.isOpen,
-      canMaximizeRightPanel: panel.isOpen,
-      rightPanelMaximized: panel.maximized === true,
       supportsPullRequests: false,
       pullRequestsSurfaceAvailable: false,
       gitCwd: null,
       activeProjectCwd: null,
       onDiffPanelOpen: undefined,
-      closeRightPanelSurface: (surface) => store.closeSurface(threadRef, surface.id),
     });
     return (
       <>
-        <button onClick={actions.toggleRightPanelStable}>Panel</button>
-        <button onClick={actions.toggleRightPanelMaximizedStable}>Maximize</button>
         <button onClick={() => dispatchPreviewAction("toggle-panel")}>Browser</button>
       </>
     );
   }
   // This hook drives store transitions without navigating.
-  await using screen = await render(<Harness tiled />, { router: false });
-  await userEvent.click(screen.getByRole("button", { name: "Panel", exact: true }));
-  expect(panelState().isOpen).toBe(true);
-  expect(getTileGroups(layout())[0]?.activeTabId).toBe(browser.id);
-  expect(usePreviewMiniPlayerStore.getState().byThreadKey).toEqual({});
-  await userEvent.click(screen.getByRole("button", { name: "Maximize" }));
-  expect(layout().maximizedGroupId).toBe(conversation.id);
-  await userEvent.click(screen.getByRole("button", { name: "Maximize" }));
-  expect(layout().maximizedGroupId).toBeNull();
-  store.applyTileAction(threadRef, {
-    type: "activate",
-    groupId: conversation.id,
-    tabId: "conversation",
-  });
+  await using screen = await render(<Harness />, { router: false });
   await userEvent.click(screen.getByRole("button", { name: "Browser" }));
   expect(panelState().isOpen).toBe(true);
   expect(getTileGroups(layout())[0]?.activeTabId).toBe(browser.id);
   expect(usePreviewMiniPlayerStore.getState().byThreadKey).toEqual({});
-  await screen.rerender(<Harness tiled={false} />);
-  await userEvent.click(screen.getByRole("button", { name: "Panel", exact: true }));
-  expect(panelState().isOpen).toBe(false);
-  expect(Object.values(usePreviewMiniPlayerStore.getState().byThreadKey)[0]?.source).toEqual({
-    kind: "browser",
-    tabId: "browser-tab",
-  });
 });

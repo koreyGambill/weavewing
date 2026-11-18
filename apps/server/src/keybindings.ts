@@ -198,6 +198,44 @@ function encodeWhenAst(node: KeybindingWhenNode): string {
   }
 }
 
+const removedWeavewingCommands = new Set([
+  "terminal.split",
+  "terminal.splitVertical",
+  "terminal.new",
+  "rightPanel.toggle",
+  "rightPanel.toggleMaximized",
+  "rightPanel.new",
+  "rightPanel.close",
+]);
+function isRemovedWeavewingBinding(entry: unknown): boolean {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    "command" in entry &&
+    typeof entry.command === "string" &&
+    (removedWeavewingCommands.has(entry.command) ||
+      (entry.command === "terminal.close" &&
+        "key" in entry &&
+        entry.key === "mod+w" &&
+        "when" in entry &&
+        entry.when === "terminalFocus"))
+  );
+}
+
+// These exact defaults shipped before terminals kept shell control keys.
+function migrateWeavewingBinding(entry: unknown): unknown {
+  if (typeof entry !== "object" || entry === null || !("command" in entry) || !("key" in entry))
+    return entry;
+  if (
+    ((entry.command === "terminal.toggle" && entry.key === "mod+j") ||
+      (entry.command === "sidebar.toggle" && entry.key === "mod+b")) &&
+    !("when" in entry)
+  ) {
+    return { ...entry, when: "!terminalFocus" };
+  }
+  return entry;
+}
+
 const RawKeybindingsEntries = fromLenientJson(Schema.Array(Schema.Unknown));
 const RawKeybindingsEntriesPrettyJson = fromJsonStringPretty(Schema.Array(Schema.Unknown));
 const decodeKeybindingRuleExit = Schema.decodeUnknownExit(KeybindingRule);
@@ -343,16 +381,19 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    return rawConfig.map((entry) => {
-      const decodedRule = decodeKeybindingRuleExit(entry);
-      if (
-        decodedRule._tag === "Success" &&
-        decodeResolvedKeybindingFromConfigExit(decodedRule.value)._tag === "Success"
-      ) {
-        return { value: decodedRule.value, rule: decodedRule.value };
-      }
-      return { value: entry, rule: null };
-    });
+    return rawConfig
+      .map(migrateWeavewingBinding)
+      .filter((entry) => !isRemovedWeavewingBinding(entry))
+      .map((entry) => {
+        const decodedRule = decodeKeybindingRuleExit(entry);
+        if (
+          decodedRule._tag === "Success" &&
+          decodeResolvedKeybindingFromConfigExit(decodedRule.value)._tag === "Success"
+        ) {
+          return { value: decodedRule.value, rule: decodedRule.value };
+        }
+        return { value: entry, rule: null };
+      });
   });
 
   const loadRuntimeCustomKeybindingsConfig = Effect.fn(function* (): Effect.fn.Return<
@@ -378,7 +419,9 @@ const make = Effect.gen(function* () {
 
     const keybindings: KeybindingRule[] = [];
     const issues: ServerConfigIssue[] = [];
-    for (const [index, entry] of decodedEntries.value.entries()) {
+    for (const [index, rawEntry] of decodedEntries.value.entries()) {
+      const entry = migrateWeavewingBinding(rawEntry);
+      if (isRemovedWeavewingBinding(entry)) continue;
       const decodedRule = decodeKeybindingRuleExit(entry);
       if (decodedRule._tag === "Failure") {
         const detail = Cause.pretty(decodedRule.cause);

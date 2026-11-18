@@ -10,7 +10,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 function panelWidthTransitions(element: HTMLElement) {
   const panels = element
     .closest("[data-panel-animations]")
-    ?.querySelectorAll('[data-slot="sidebar-gap"], [data-preview-panel-mode="inline"]');
+    ?.querySelectorAll('[data-slot="sidebar-gap"]');
   return Array.from(panels ?? []).flatMap((panel) =>
     panel
       .getAnimations()

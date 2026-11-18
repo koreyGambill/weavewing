@@ -1784,32 +1784,6 @@ export default function ChatView(props: ChatViewProps) {
       isGitRepo,
       showEnvironmentIndicator: showComposerEnvironmentIndicator,
     });
-  const terminalShortcutLabelOptions = {
-    context: {
-      terminalFocus: true,
-      terminalOpen: Boolean(terminalUiState.terminalOpen),
-    },
-  };
-  const splitTerminalShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "terminal.split",
-    terminalShortcutLabelOptions,
-  );
-  const splitTerminalVerticalShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "terminal.splitVertical",
-    terminalShortcutLabelOptions,
-  );
-  const newTerminalShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "terminal.new",
-    terminalShortcutLabelOptions,
-  );
-  const closeTerminalShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "terminal.close",
-    terminalShortcutLabelOptions,
-  );
 
   const {
     needsLoadBalancing,
@@ -1913,21 +1887,15 @@ export default function ChatView(props: ChatViewProps) {
   const queuedRunsControlRef = useRef<QueuedRunsControlHandle>(null);
 
   const {
-    activatePanelTerminalStable,
     addTerminalContextToDraftStable,
     addTerminalSurfaceStable,
     closePanelTerminalStable,
     lastInvokedScriptByProjectId,
     runProjectScriptStable,
     runShellCommandStable,
-    splitPanelTerminalStable,
-    splitPanelTerminalForSurfaceStable,
-    activatePanelTerminalForSurfaceStable,
-    splitPanelTerminalVerticalStable,
     toggleTerminalVisibilityStable,
     shortcuts: terminalShortcuts,
   } = useChatTerminalActions({
-    tiled: tiledWorkspace,
     environmentId,
     composerRef,
     terminalUiState,
@@ -1998,9 +1966,7 @@ export default function ChatView(props: ChatViewProps) {
   const visiblePullRequestCount = visiblePullRequests.length;
   const pullRequestsSurfaceAvailable =
     isServerThread && supportsThreadPullRequests && visiblePullRequestCount > 0;
-  const { state: deviceState, loaded: deviceStateLoaded } = useDeviceState(
-    activeThreadRef?.environmentId ?? null,
-  );
+  const { state: deviceState } = useDeviceState(activeThreadRef?.environmentId ?? null);
   // The thread's own change request, placed against the project it belongs to. Without a
   // project there is nothing to resolve it against, so the caller falls back to the browser.
   const activeProjectRepository = sourceControlClients.repositorySelector(
@@ -2391,18 +2357,13 @@ export default function ChatView(props: ChatViewProps) {
     onOpenTurnDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
-    toggleRightPanelMaximizedStable,
-    toggleRightPanelStable,
     toggleThreadPanelStable,
     shortcuts: rightPanelShortcuts,
   } = useRightPanelActions({
-    tiled: tiledWorkspace,
     activeThreadRef,
     activeProject,
-    activeRightPanelSurface,
     activePreviewState,
     deviceState,
-    deviceStateLoaded,
     pullRequestPanelTarget,
     threadPanelPresentation,
     isServerThread,
@@ -2411,16 +2372,11 @@ export default function ChatView(props: ChatViewProps) {
     browserAvailable,
     canOperatePreview,
     diffOpen,
-    previewPanelOpen,
-    rightPanelOpen,
-    canMaximizeRightPanel: false,
-    rightPanelMaximized: false,
     supportsPullRequests,
     pullRequestsSurfaceAvailable,
     gitCwd,
     activeProjectCwd,
     onDiffPanelOpen,
-    closeRightPanelSurface,
   });
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
   const {
@@ -2752,16 +2708,6 @@ export default function ChatView(props: ChatViewProps) {
       return script ? () => void runProjectScriptStable(script) : undefined;
     },
   });
-
-  // A focused desktop browser page forwards these chords as menu actions.
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to desktop bridge menu actions that toggle the right panel
-  useEffect(() => {
-    if (embedded) return;
-    return window.desktopBridge?.onMenuAction((action) => {
-      if (action === "rightPanel.toggle") toggleRightPanelStable();
-      else if (action === "rightPanel.toggleMaximized") toggleRightPanelMaximizedStable();
-    });
-  }, [embedded, toggleRightPanelStable, toggleRightPanelMaximizedStable]);
 
   usePasteToFocusComposer(embedded ? null : activeThreadId, composerRef);
   // A delegated task is a remote thread's subagent.
@@ -3210,25 +3156,7 @@ export default function ChatView(props: ChatViewProps) {
           launchContext: activeTerminalLaunchContext ?? null,
           keybindings,
           onAddTerminalContext: addTerminalContextToDraftStable,
-          onSplitTerminal:
-            tiledWorkspace && surface?.kind === "terminal"
-              ? () => splitPanelTerminalForSurfaceStable(surface.id)
-              : splitPanelTerminalStable,
-          onSplitTerminalVertical:
-            tiledWorkspace && surface?.kind === "terminal"
-              ? () => splitPanelTerminalForSurfaceStable(surface.id, "vertical")
-              : splitPanelTerminalVerticalStable,
-          onNewTerminal: addTerminalSurfaceStable,
-          onActiveTerminalChange:
-            tiledWorkspace && surface?.kind === "terminal"
-              ? (terminalId) => activatePanelTerminalForSurfaceStable(surface.id, terminalId)
-              : activatePanelTerminalStable,
           onCloseTerminal: closePanelTerminalStable,
-          splitShortcutLabel: splitTerminalShortcutLabel ?? undefined,
-          splitVerticalShortcutLabel: splitTerminalVerticalShortcutLabel ?? undefined,
-          newShortcutLabel: newTerminalShortcutLabel ?? undefined,
-          closeShortcutLabel: closeTerminalShortcutLabel ?? undefined,
-          hideSessionActions: tiledWorkspace,
         }}
         pullRequest={{
           capabilityKnown: pullRequestsCapabilityKnown,
@@ -3262,12 +3190,8 @@ export default function ChatView(props: ChatViewProps) {
     threadPanelPresentation,
     threadPanelPopoverHandle,
     threadPanelShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
-    rightPanelAvailable: activeProject !== null,
-    rightPanelOpen,
-    rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleTerminal: toggleTerminalVisibilityStable,
     onToggleThreadPanel: toggleThreadPanelStable,
-    onToggleRightPanel: toggleRightPanelStable,
   } satisfies PanelLayoutControlsProps;
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
     setDragActive: setIsWorkspaceFileDragActive,
@@ -3594,7 +3518,7 @@ export default function ChatView(props: ChatViewProps) {
                                       {...panelToggleControlProps}
                                       compact
                                       showTerminalControl={false}
-                                      showRightPanelControl={false}
+                                      showReviewsControl={false}
                                     />
                                   </div>
                                 ) : undefined

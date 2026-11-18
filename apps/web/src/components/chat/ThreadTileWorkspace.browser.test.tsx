@@ -18,7 +18,7 @@ import {
 import { getTileGroups, isNewTab, newTabId } from "../../threadTileLayout";
 import { ThreadTileWorkspace } from "./ThreadTileWorkspace";
 
-vi.mock("../RightPanelTabs", () => ({
+vi.mock("../SurfaceTabContent", () => ({
   SurfaceIcon: () => null,
   surfaceTitle: (surface: { kind: string }) => surface.kind,
 }));
