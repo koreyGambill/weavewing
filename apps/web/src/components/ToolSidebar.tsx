@@ -97,12 +97,14 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         } as CSSProperties
       }
     >
-      <header
+      <div
         ref={setTitlebarHost}
         data-workspace-titlebar
+        inert={(maximized && isWide) || undefined}
         className={cn(
           "absolute inset-x-0 top-0 z-10 hidden h-[var(--workspace-topbar-height)] bg-background md:block",
           isElectron && "drag-region",
+          maximized && "[&>*]:invisible",
         )}
       />
       <div

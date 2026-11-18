@@ -106,6 +106,21 @@ describe("workspace area focus", () => {
     remembered.remove();
     fixture.controller.move(1);
     expect(document.activeElement).toBe(composer.button);
+
+    const source = document.createElement("div");
+    source.id = "page-header-source";
+    composer.element.append(source);
+    const portal = fixture.append(
+      '<div data-workspace-focus-owner="page-header-source"><button aria-label="Page action">Page action</button></div>',
+    );
+    const action = portal.querySelector("button")!;
+    action.focus();
+    fixture.controller.move(-1);
+    fixture.controller.move(1);
+    expect(document.activeElement).toBe(action);
+    fixture.controller.move(-1);
+    expect(fixture.controller.focus("composer", false, '[aria-label="Page action"]')).toBe(true);
+    expect(document.activeElement).toBe(action);
   });
 
   it("keeps focus inside a dialog or an open popup", () => {

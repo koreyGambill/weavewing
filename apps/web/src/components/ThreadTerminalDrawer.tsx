@@ -142,7 +142,9 @@ function readDrawerLayout(column: HTMLElement | null): Omit<DrawerLayout, "compo
   return {
     viewportHeight,
     chatColumnHeight: column.clientHeight,
-    headerHeight: column.querySelector<HTMLElement>("[data-chat-header]")?.offsetHeight ?? 0,
+    headerHeight:
+      column.querySelector<HTMLElement>("[data-workspace-titlebar-placeholder], [data-chat-header]")
+        ?.offsetHeight ?? 0,
   };
 }
 
@@ -1726,7 +1728,9 @@ export default function ThreadTerminalDrawer({
     const column = isPanel ? null : chatColumnOf(drawerRef.current);
     const onWindowResize = () => updateDrawerLayout(column, "window");
     onWindowResize();
-    const header = column?.querySelector<HTMLElement>("[data-chat-header]");
+    const header = column?.querySelector<HTMLElement>(
+      "[data-workspace-titlebar-placeholder], [data-chat-header]",
+    );
     const stopObserving = column
       ? observeResize(header ? [column, header] : column, () =>
           updateDrawerLayout(column, "column"),

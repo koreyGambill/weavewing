@@ -26,10 +26,24 @@ export interface WorkspaceFocusTarget {
 }
 
 function workspaceArea(element: Element): HTMLElement | null {
+  const owner = element.closest<HTMLElement>("[data-workspace-focus-owner]");
+  if (owner?.dataset.workspaceFocusOwner) {
+    const source = element.ownerDocument.getElementById(owner.dataset.workspaceFocusOwner);
+    if (source) return workspaceArea(source);
+  }
   const area = element.closest<HTMLElement>(AREA_SELECTOR);
   if (area) return area;
   const root = element.getRootNode();
   return root instanceof ShadowRoot ? workspaceArea(root.host) : null;
+}
+
+function areaElements(area: HTMLElement, selector: string): HTMLElement[] {
+  const portals = Array.from(
+    area.ownerDocument.querySelectorAll<HTMLElement>("[data-workspace-focus-owner]"),
+  ).filter((portal) => workspaceArea(portal) === area);
+  return [area, ...portals].flatMap((root) =>
+    Array.from(root.querySelectorAll<HTMLElement>(selector)),
+  );
 }
 
 function isWorkspaceElementVisible(element: HTMLElement): boolean {
@@ -146,21 +160,20 @@ export function createWorkspaceFocusController(doc: Document) {
     // A side chat's message input sits in its own area inside the panel. Opening the
     // panel focuses it, but F6 visits that area on its own, so it moves past it here.
     // A nested timeline stands in only for its own area, never ahead of that input.
-    const preferred = Array.from(
-      area.querySelectorAll<HTMLElement>(
-        '[data-workspace-focus-default], [data-sidebar-row][aria-current="page"], [data-settings-section][aria-current="page"], .xterm-helper-textarea, [contenteditable="true"]',
-      ),
+    const preferred = areaElements(
+      area,
+      '[data-workspace-focus-default], [data-sidebar-row][aria-current="page"], [data-settings-section][aria-current="page"], .xterm-helper-textarea, [contenteditable="true"]',
     ).find((element) =>
       nested && !standsInFor(element, area) ? usable(element) : belongs(element),
     );
-    const fallback = Array.from(area.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).find(
+    const fallback = areaElements(area, FOCUSABLE_SELECTOR).find(
       (element) => element.tabIndex >= 0 && belongs(element),
     );
     // Panel surfaces may unmount when hidden. Recover the same named control when
     // it mounts again, without sharing focus history between different surface tabs.
     const restored =
       previous && !previous.isConnected
-        ? Array.from(area.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).find(
+        ? areaElements(area, FOCUSABLE_SELECTOR).find(
             (element) =>
               belongs(element) &&
               element.tagName === previous.tagName &&
@@ -236,7 +249,7 @@ export function createWorkspaceFocusController(doc: Document) {
     if (surface && !surface.hasChildNodes()) return false;
     if (!selector && surface?.contains(doc.activeElement)) return true;
     if (selector) {
-      const target = area.querySelector<HTMLElement>(selector);
+      const target = areaElements(area, selector)[0];
       if (!target || !isWorkspaceElementVisible(target)) return false;
       target.focus({ preventScroll: true });
       return doc.activeElement === target;
@@ -275,7 +288,7 @@ export function createWorkspaceFocusController(doc: Document) {
         (left, right) => Number(left.dataset.workspaceOrder) - Number(right.dataset.workspaceOrder),
       );
     if (areas.length === 0) return false;
-    const activeArea = doc.activeElement?.closest<HTMLElement>(AREA_SELECTOR);
+    const activeArea = doc.activeElement ? workspaceArea(doc.activeElement) : null;
     const currentId = fromArea ?? activeArea?.dataset.workspaceArea ?? lastArea;
     // A side chat nests areas with the main chat's names, so prefer the focused element.
     const activeIndex = fromArea || !activeArea ? -1 : areas.indexOf(activeArea);

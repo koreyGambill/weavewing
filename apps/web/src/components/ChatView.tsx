@@ -3339,7 +3339,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const conversationHeader = embedded ? null : (
     <WorkspaceTitlebar>
-      <div
+      <header
         data-chat-header
         className={cn(
           "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
@@ -3377,7 +3377,7 @@ export default function ChatView(props: ChatViewProps) {
             : {})}
           {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
         />
-      </div>
+      </header>
     </WorkspaceTitlebar>
   );
   const conversationColumn = (

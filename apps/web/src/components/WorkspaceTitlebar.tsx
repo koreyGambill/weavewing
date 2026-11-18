@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { observeResize } from "../lib/observeResize";
@@ -6,6 +6,7 @@ import { observeResize } from "../lib/observeResize";
 export const WorkspaceTitlebarHost = createContext<HTMLElement | null>(null);
 
 export function WorkspaceTitlebar({ children }: { children: ReactNode }) {
+  const sourceId = useId();
   const host = useContext(WorkspaceTitlebarHost);
   const [bounds, setBounds] = useState({ left: 0, width: 0 });
   const [measure] = useState(() => (node: HTMLDivElement | null) => {
@@ -24,9 +25,14 @@ export function WorkspaceTitlebar({ children }: { children: ReactNode }) {
   // Keep panel geometry in place while the titlebar paints outside clipped page containers.
   return (
     <>
-      <div ref={measure} className="h-[var(--workspace-topbar-height)] shrink-0" />
+      <div
+        id={sourceId}
+        ref={measure}
+        data-workspace-titlebar-placeholder
+        className="h-[var(--workspace-topbar-height)] shrink-0"
+      />
       {createPortal(
-        <div className="absolute top-0" style={bounds}>
+        <div data-workspace-focus-owner={sourceId} className="absolute top-0" style={bounds}>
           {children}
         </div>,
         host,
