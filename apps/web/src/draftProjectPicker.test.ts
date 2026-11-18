@@ -20,8 +20,12 @@ it("opens the focused draft across tiles, then falls back to the active route", 
   focusDraftProjectPicker(second);
   openDraftProjectPicker(first);
   expect(openSecond).toHaveBeenCalledOnce();
-  unregisterSecond();
+  focusDraftProjectPicker(null);
   openDraftProjectPicker(first);
   expect(openFirst).toHaveBeenCalledTimes(2);
+  focusDraftProjectPicker(second);
+  unregisterSecond();
+  openDraftProjectPicker(first);
+  expect(openFirst).toHaveBeenCalledTimes(3);
   expect(openDraftProjectPicker(null)).toBe(false);
 });

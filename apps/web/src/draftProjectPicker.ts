@@ -12,7 +12,7 @@ export function registerDraftProjectPicker(draftId: DraftId, open: () => void) {
   };
 }
 
-export function focusDraftProjectPicker(draftId: DraftId) {
+export function focusDraftProjectPicker(draftId: DraftId | null) {
   focusedDraftId = draftId;
 }
 

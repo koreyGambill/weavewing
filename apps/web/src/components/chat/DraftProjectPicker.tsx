@@ -270,12 +270,13 @@ export function DraftProjectPicker({
     if (!draftId) return;
     const unregister = registerDraftProjectPicker(draftId, openPicker);
     const rememberFocus = (event: Event) => {
-      if (
-        event.target instanceof Element &&
-        event.target.closest("[data-chat-column]") ===
-          triggerRef.current?.closest("[data-chat-column]")
-      ) {
+      if (!(event.target instanceof Element)) return;
+      const column = event.target.closest("[data-chat-column]");
+      if (!column) return;
+      if (column === triggerRef.current?.closest("[data-chat-column]")) {
         focusDraftProjectPicker(draftId);
+      } else if (!column.querySelector("[data-draft-project-trigger]")) {
+        focusDraftProjectPicker(null);
       }
     };
     document.addEventListener("focusin", rememberFocus);
@@ -294,7 +295,7 @@ export function DraftProjectPicker({
           "projectPicker.open": (event) => {
             if (
               inline ||
-              !openDraftProjectPicker(routeTarget?.kind === "draft" ? routeTarget.draftId : draftId)
+              !openDraftProjectPicker(routeTarget?.kind === "draft" ? routeTarget.draftId : null)
             )
               return false;
             event.preventDefault();
@@ -457,11 +458,27 @@ export function DraftProjectPicker({
             event.preventBaseUIHandler?.();
             return;
           }
-          const item = highlighted.current;
-          if (pathMode && event.key === "Tab" && !event.shiftKey && item?.path) {
+          const item = items.find((entry) => entry.value === highlighted.current?.value);
+          if (pathMode && event.key === "Tab" && !event.shiftKey) {
             event.preventDefault();
             event.stopPropagation();
-            setQuery(completePickerFolder(browseQuery, item.completionName ?? null));
+            event.preventBaseUIHandler?.();
+            // Programmatic query changes do not trigger Base UI's autoHighlight.
+            const target = item?.path
+              ? item
+              : items.find((entry) => entry.path && entry.completionName);
+            if (target?.completionName) {
+              highlighted.current = null;
+              setQuery(completePickerFolder(browseQuery, target.completionName));
+            }
+          } else if (pathMode && event.key === "Enter" && !item) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.preventBaseUIHandler?.();
+            const first = items.find(
+              (entry) => entry.path && entry.environmentId && operable.has(entry.environmentId),
+            );
+            if (first) choose(first);
           } else if (
             pathMode &&
             event.key === "Backspace" &&

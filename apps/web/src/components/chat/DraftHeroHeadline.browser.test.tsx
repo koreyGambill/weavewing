@@ -1,8 +1,9 @@
 import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { ProjectId } from "@t3tools/contracts";
+import { type FilesystemBrowseInput, ProjectId, WS_METHODS } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -13,10 +14,12 @@ import "~/components/ChatView";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
+import { openDraftProjectPicker } from "~/draftProjectPicker";
 import {
   ENVIRONMENT_ID,
   PROJECT_ID,
   installFakeEnvironment,
+  answerRpc,
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { render } from "../../../test/render";
@@ -39,13 +42,38 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("finds a draft project by its path and selects it with Enter", async () => {
+it("drills through folders with repeated Tab and opens with Enter in heading and palette", async () => {
   using _environment = installFakeEnvironment([], {
     extraProjects: [
       { id: ProjectId.make("project-alpha"), title: "alpha" },
-      { id: ProjectId.make("project-beta"), title: "beta" },
+      { id: ProjectId.make("project-code"), title: "code" },
     ],
   });
+  using _browse = answerRpc(WS_METHODS.filesystemBrowse, ({ partialPath }: FilesystemBrowseInput) =>
+    Effect.succeed({
+      parentPath:
+        partialPath === "~/"
+          ? "/workspace"
+          : partialPath === "~/code/"
+            ? "/workspace/code"
+            : "/workspace/alpha",
+      entries:
+        partialPath === "~/"
+          ? [{ name: "code", fullPath: "/workspace/code" }]
+          : partialPath === "~/code/"
+            ? [{ name: "alpha", fullPath: "/workspace/alpha" }]
+            : [],
+    }),
+  );
+  using _projectFile = answerRpc(WS_METHODS.projectsReadFile, () =>
+    Effect.succeed({
+      relativePath: "t3.json",
+      contents: "",
+      byteLength: 0,
+      truncated: false,
+      exists: false,
+    }),
+  );
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -79,6 +107,16 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   await userEvent.type(search, "workspace/alpha");
   await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
   expect(page.getByRole("option").elements()).toHaveLength(1);
+  await userEvent.clear(search);
+  await userEvent.type(search, "~/co");
+  await expect.element(page.getByRole("option", { name: /code/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await vi.waitFor(() => expect(search.element()).toHaveValue("~/code/alpha/"));
+  await expect.element(search).toHaveFocus();
+  await expect.element(page.getByRole("option").first()).toBeVisible();
   await userEvent.keyboard("{Enter}");
   await vi.waitFor(() =>
     expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("alpha"),
@@ -90,6 +128,15 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   expect(
     useComposerDraftStore.getState().getDraftSession(draftId)?.loadBalancedEnvironmentId,
   ).toBeNull();
+  using _columns = new DisposableStack();
+  const otherColumn = document.createElement("div");
+  otherColumn.dataset.chatColumn = "";
+  const otherInput = document.createElement("input");
+  otherColumn.append(otherInput);
+  document.body.append(otherColumn);
+  _columns.defer(() => otherColumn.remove());
+  await userEvent.click(page.elementLocator(otherInput));
+  expect(openDraftProjectPicker(null)).toBe(false);
   openCommandPalette({ open: "new-thread-in" });
   await expect.element(page.getByRole("combobox", { name: "Project name or path" })).toHaveFocus();
   await expect
@@ -98,7 +145,34 @@ it("finds a draft project by its path and selects it with Enter", async () => {
   await expect
     .element(page.getByRole("button", { name: "All machines", exact: true }))
     .toBeVisible();
-  await userEvent.keyboard("{Escape}");
+  await userEvent.type(search, "~/co");
+  await expect.element(page.getByRole("option", { name: /code/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await vi.waitFor(() => expect(search.element()).toHaveValue("~/code/alpha/"));
+  await expect.element(search).toHaveFocus();
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(search).not.toBeInTheDocument();
+  openCommandPalette({ open: "new-thread-in" });
+  await expect.element(search).toHaveFocus();
+  await userEvent.type(search, "~/co");
+  await expect.element(page.getByRole("option", { name: /code/ })).toBeVisible();
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("option").first()).toBeVisible();
+  await userEvent.keyboard("{ArrowDown}{ArrowUp}");
+  await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
+  await userEvent.keyboard("{Tab}");
+  await expect.element(search).toHaveValue("~/code/");
+  await expect.element(search).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(search).not.toBeInTheDocument();
+  await vi.waitFor(() =>
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("code"),
+  );
   expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
     "Keep this unsent prompt",
   );
