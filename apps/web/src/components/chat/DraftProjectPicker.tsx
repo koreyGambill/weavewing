@@ -271,8 +271,9 @@ export function DraftProjectPicker({
     const unregister = registerDraftProjectPicker(draftId, openPicker);
     const rememberFocus = (event: Event) => {
       if (
-        event.target instanceof Node &&
-        triggerRef.current?.closest("[data-chat-column]")?.contains(event.target)
+        event.target instanceof Element &&
+        event.target.closest("[data-chat-column]") ===
+          triggerRef.current?.closest("[data-chat-column]")
       ) {
         focusDraftProjectPicker(draftId);
       }
