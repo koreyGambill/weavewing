@@ -25,12 +25,14 @@ export type ToolSidebarAction =
   | { type: "restore" }
   | { type: "resize"; width: number };
 
+export const TOOL_SIDEBAR_RAIL_WIDTH = 36;
+
 function clampToolSidebarWidth(width: number) {
   return Number.isFinite(width) ? Math.min(600, Math.max(280, width)) : 300;
 }
 
 export function resolveToolSidebarWidth(width: number, availableWidth: number) {
-  return Math.min(width, Math.max(280, availableWidth - 364));
+  return Math.min(width, Math.max(280, availableWidth - 320 - TOOL_SIDEBAR_RAIL_WIDTH));
 }
 
 const decodePersistedToolSidebar = Schema.decodeUnknownOption(PersistedToolSidebar);

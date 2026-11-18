@@ -15,7 +15,8 @@ import { useResizeDrag } from "../hooks/useResizeDrag";
 import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "../lib/utils";
 import { observeResize } from "../lib/observeResize";
-import { resolveToolSidebarWidth } from "./ToolSidebar.logic";
+import { resolveToolSidebarWidth, TOOL_SIDEBAR_RAIL_WIDTH } from "./ToolSidebar.logic";
+import { WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
@@ -35,6 +36,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const pageWidth = resolveToolSidebarWidth(width, availableWidth);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const isWide = useMediaQuery("(min-width: 768px)");
+  const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
   const [commandsRef] = useState(() => (node: HTMLDivElement | null) => {
     if (!node) return;
@@ -90,26 +92,27 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
       data-tool-sidebar-layout
       style={
         {
-          "--tools-sidebar-width": `${visible ? 44 + (activeTool ? pageWidth : 0) : 0}px`,
+          "--tools-sidebar-width": `${visible ? TOOL_SIDEBAR_RAIL_WIDTH + (activeTool ? pageWidth : 0) : 0}px`,
+          "--tools-rail-width": `${TOOL_SIDEBAR_RAIL_WIDTH}px`,
         } as CSSProperties
       }
     >
+      <header
+        ref={setTitlebarHost}
+        data-workspace-titlebar
+        className={cn(
+          "absolute inset-x-0 top-0 z-10 hidden h-[var(--workspace-topbar-height)] bg-background md:block",
+          isElectron && "drag-region",
+        )}
+      />
       <div
         className={cn("flex min-h-0 min-w-0 flex-1", maximized && "md:invisible")}
         inert={(maximized && isWide) || undefined}
       >
-        {children}
+        <WorkspaceTitlebarHost value={isWide ? titlebarHost : null}>
+          {children}
+        </WorkspaceTitlebarHost>
       </div>
-      {visible ? (
-        <div
-          aria-hidden
-          className={cn(
-            "absolute right-0 top-0 hidden h-[var(--workspace-topbar-height)] bg-background md:block",
-            isElectron && "drag-region",
-          )}
-          style={{ width: maximized ? "100%" : "var(--tools-sidebar-width)" }}
-        />
-      ) : null}
       <div className="pointer-events-auto fixed top-[var(--workspace-controls-top)] right-[var(--workspace-tools-controls-right)] z-50 hidden h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag] md:flex">
         <Tooltip>
           <TooltipTrigger
@@ -144,7 +147,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           aria-label="Tools sidebar"
           data-tool-sidebar-state={activeTool ? (maximized ? "maximized" : "expanded") : "rail"}
           className={cn(
-            "mt-[var(--workspace-topbar-height)] hidden min-h-0 shrink-0 border-l bg-sidebar md:flex",
+            "workspace-tools-panel mt-[var(--workspace-topbar-height)] hidden min-h-0 shrink-0 border-l bg-sidebar md:flex",
             maximized &&
               "absolute inset-x-0 bottom-0 top-[var(--workspace-topbar-height)] z-40 mt-0",
           )}
@@ -152,10 +155,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           {activeTool ? <ToolSidebarPage maximized={maximized} width={pageWidth} /> : null}
           <nav
             aria-label="Tools"
-            className={cn(
-              "flex w-11 shrink-0 flex-col items-center gap-2 py-2",
-              activeTool && "border-l",
-            )}
+            className="flex w-(--tools-rail-width) shrink-0 flex-col items-center gap-2 py-2"
           >
             <Tooltip>
               <TooltipTrigger
@@ -212,9 +212,9 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     const pane = event.currentTarget.parentElement;
     if (!pane || maximized) return null;
-    const max = Math.max(
-      280,
-      Math.min(600, (pane.closest("[data-tool-sidebar-layout]")?.clientWidth ?? 924) - 364),
+    const max = resolveToolSidebarWidth(
+      600,
+      pane.closest("[data-tool-sidebar-layout]")?.clientWidth ?? 924,
     );
     return {
       width: pane.getBoundingClientRect().width,
@@ -235,8 +235,11 @@ function ToolSidebarPage({ maximized, width }: { maximized: boolean; width: numb
   return (
     <div
       {...workspaceAreaProps("tools", 5, title)}
-      className={cn("relative flex min-h-0 min-w-0 flex-col bg-background", maximized && "flex-1")}
-      style={maximized ? undefined : { width, maxWidth: "calc(100vw - 44px)" }}
+      className={cn(
+        "relative flex min-h-0 min-w-0 flex-col border-r bg-background",
+        maximized && "flex-1",
+      )}
+      style={maximized ? undefined : { width, maxWidth: "calc(100vw - var(--tools-rail-width))" }}
     >
       {!maximized ? (
         <button
