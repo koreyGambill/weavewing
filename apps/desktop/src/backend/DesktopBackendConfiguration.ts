@@ -655,6 +655,9 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     preflight._tag === "Ready"
       ? yield* wslEnvironment.getDistroIp(distroForConfig)
       : Option.none<string>();
+  // `wslinfo` reports the mode itself; a distro IP can match a host adapter by chance.
+  const networkingMode =
+    preflight._tag === "Ready" ? yield* wslEnvironment.getNetworkingMode(distroForConfig) : null;
   const usesSharedNetworkStack = Option.match(distroIp, {
     onNone: () => false,
     onSome: (ip) => isLocalHostIpv4(ip),
@@ -700,6 +703,8 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     httpBaseUrl,
     captureOutput: true,
     ...(runningDistro !== null ? { runningDistro } : {}),
+    // Not the route: an unknown distro IP falls back to loopback even under NAT.
+    sharesHostLoopback: networkingMode === "mirrored",
   };
 
   // Explicit --dev-url keeps WSL state in dev/ rather than userdata/.

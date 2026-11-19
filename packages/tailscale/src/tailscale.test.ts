@@ -472,6 +472,7 @@ describe("tailscale", () => {
     Effect.gen(function* () {
       const peers = yield* parseTailscalePeers(
         JSON.stringify({
+          BackendState: "Running",
           Self: {
             DNSName: "desk.tail.ts.net.",
             HostName: "DESK",
@@ -508,6 +509,14 @@ describe("tailscale", () => {
           },
         }),
       );
+      assert.equal(peers.running, true);
+      // `tailscale down` keeps the last netmap's nodes.
+      for (const BackendState of ["Stopped", undefined]) {
+        const down = yield* parseTailscalePeers(
+          JSON.stringify({ BackendState, Self: { TailscaleIPs: ["100.64.0.1"] } }),
+        );
+        assert.equal(down.running, false);
+      }
       assert.deepEqual(peers.self, {
         name: "desk",
         magicDnsName: "desk.tail.ts.net",

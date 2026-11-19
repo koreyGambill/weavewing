@@ -473,6 +473,7 @@ const TailscaleNodeJson = Schema.Struct({
 });
 
 const TailscalePeersJson = Schema.Struct({
+  BackendState: Schema.optional(Schema.Unknown),
   Self: Schema.optional(TailscaleNodeJson),
   Peer: Schema.optional(Schema.Record(Schema.String, TailscaleNodeJson)),
   User: Schema.optional(
@@ -497,6 +498,8 @@ export interface TailscaleNode {
 }
 
 export interface TailscalePeers {
+  /** False after `tailscale down`, which keeps the last netmap's nodes. */
+  readonly running: boolean;
   readonly self: TailscaleNode | null;
   readonly peers: ReadonlyArray<TailscaleNode>;
 }
@@ -532,6 +535,7 @@ export const parseTailscalePeers = (
         };
       };
       return {
+        running: status.BackendState === "Running",
         self: status.Self === undefined ? null : node(status.Self, true),
         peers: Object.values(status.Peer ?? {}).map((peer) => node(peer, false)),
       };

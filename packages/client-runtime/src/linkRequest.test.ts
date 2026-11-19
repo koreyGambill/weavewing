@@ -9,6 +9,7 @@ import type { EnvironmentPresentation } from "./connection/presentation.ts";
 import type { RelayDiscoveredEnvironment } from "./relay/discovery.ts";
 import {
   ANOTHER_ADDRESS,
+  type LinkableMachine,
   linkableMachines,
   linkedEnvironmentNames,
   linkRequestAnswerInput,
@@ -188,6 +189,58 @@ const discovered = (
 });
 
 describe("linkableMachines", () => {
+  it("offers loopback first only between environments on one host", () => {
+    const windows = presentation("environment-windows", "Windows", {
+      saved: ["http://127.0.0.1:3773"],
+    });
+    const wsl = presentation("environment-wsl", "WSL", {
+      saved: ["http://127.0.0.1:3774"],
+      reported: ["http://100.67.211.34:3774", "http://192.168.68.66:3774"],
+    });
+    const remote = presentation("environment-remote", "Remote", {
+      saved: ["http://localhost:3775", "https://remote.ts.net"],
+    });
+    const input = {
+      environments: [windows, wsl, remote],
+      threadEnvironmentId: windows.environmentId,
+      links: [],
+      connect: new Map(),
+    };
+    const sameHost = new Set([windows.environmentId, wsl.environmentId]);
+    const urls = (machines: ReadonlyArray<LinkableMachine>) =>
+      Object.fromEntries(machines.map((machine) => [machine.label, machine.urls]));
+
+    // The network addresses stay as fallbacks where loopback forwarding fails.
+    expect(urls(linkableMachines({ ...input, sameHost }))).toEqual({
+      WSL: ["http://127.0.0.1:3774", "http://100.67.211.34:3774", "http://192.168.68.66:3774"],
+      Remote: ["https://remote.ts.net"],
+    });
+    expect(
+      urls(linkableMachines({ ...input, sameHost, threadEnvironmentId: wsl.environmentId })),
+    ).toMatchObject({ Windows: ["http://127.0.0.1:3773"] });
+    // A remote server's loopback is not this host's, and a phone knows no host it shares.
+    expect(
+      urls(linkableMachines({ ...input, sameHost, threadEnvironmentId: remote.environmentId })),
+    ).toEqual({
+      Windows: [],
+      WSL: ["http://100.67.211.34:3774", "http://192.168.68.66:3774"],
+    });
+    expect(urls(linkableMachines(input)).WSL).toEqual([
+      "http://100.67.211.34:3774",
+      "http://192.168.68.66:3774",
+    ]);
+    // WSL under NAT has a loopback of its own, so neither direction is offered it.
+    const nat = new Set([windows.environmentId]);
+    expect(urls(linkableMachines({ ...input, sameHost: nat })).WSL).toEqual([
+      "http://100.67.211.34:3774",
+      "http://192.168.68.66:3774",
+    ]);
+    expect(
+      urls(linkableMachines({ ...input, sameHost: nat, threadEnvironmentId: wsl.environmentId }))
+        .Windows,
+    ).toEqual([]);
+  });
+
   it("lists the other machines with reported addresses before saved ones, once each", () => {
     const here = presentation("environment-here", "Here", { saved: ["http://localhost:3773"] });
     // A loopback address would name the linking server itself, so it is no address of the VPS.

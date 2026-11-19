@@ -35,11 +35,16 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
-import { isLocalLoopbackHost, isTailnetHost } from "@t3tools/shared/hostClassification";
+import {
+  isLocalLoopbackHost,
+  isSharedAddressSpaceHost,
+  isTailnetHost,
+} from "@t3tools/shared/hostClassification";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as TailscaleClient from "../tailnet/TailscaleClient.ts";
 
 const PeerHttpApi = HttpApi.make(EnvironmentHttpApi.identifier)
   .add(EnvironmentHttpApi.groups.metadata)
@@ -54,6 +59,11 @@ const LINK_REDIRECT_URI = "http://127.0.0.1/t3code-peer-link";
  */
 export const probeTimeout = (origin: string) =>
   isLocalLoopbackHost(new URL(origin).hostname) ? Duration.seconds(3) : Duration.seconds(10);
+/**
+ * How long this machine's Tailscale node list is trusted. A 100.x route is
+ * dropped within this long of Tailscale no longer listing it.
+ */
+const TAILNET_MEMBERSHIP_TTL = Duration.seconds(10);
 /** How long a listing waits on a link's addresses; a real call still gives a waking peer `probeTimeout`. */
 const LIST_PROBE_TIMEOUT = Duration.seconds(3);
 
@@ -154,11 +164,11 @@ const failStorage = (cause: unknown) =>
   );
 
 /**
- * The base URL a peer is reached at, normalised to its origin. The pairing
- * code and then the link's token travel to it, so plain http is accepted only
- * where the network already encrypts: this machine, or a Tailscale address.
+ * The peer's origin. The pairing code and token travel there, so plain http is
+ * accepted only where the network encrypts: this machine, or a Tailscale node.
+ * Other VPNs share 100.64.0.0/10, so there it must be in `tailnetAddresses`.
  */
-const peerOrigin = (url: string) => {
+const peerOrigin = (url: string, tailnetAddresses: Effect.Effect<ReadonlySet<string>>) => {
   const parsed = URL.parse(url);
   if (parsed === null || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
     return Effect.fail(
@@ -168,19 +178,25 @@ const peerOrigin = (url: string) => {
       }),
     );
   }
-  if (
-    parsed.protocol === "http:" &&
-    !isLocalLoopbackHost(parsed.hostname) &&
-    !isTailnetHost(parsed.hostname)
-  ) {
-    return Effect.fail(
-      new PeerLinkError({
-        reason: "unreachable",
-        message: `${url} is plain http, which would send the link's credentials unencrypted. Use its https address, or its Tailscale address.`,
-      }),
-    );
-  }
-  return Effect.succeed(parsed.origin);
+  const { hostname } = parsed;
+  const encrypted =
+    parsed.protocol === "https:" || isLocalLoopbackHost(hostname) || isTailnetHost(hostname)
+      ? Effect.succeed(true)
+      : isSharedAddressSpaceHost(hostname)
+        ? tailnetAddresses.pipe(Effect.map((addresses) => addresses.has(hostname)))
+        : Effect.succeed(false);
+  return encrypted.pipe(
+    Effect.flatMap((ok) =>
+      ok
+        ? Effect.succeed(parsed.origin)
+        : Effect.fail(
+            new PeerLinkError({
+              reason: "unreachable",
+              message: `${url} is plain http, which would send the link's credentials unencrypted. Plain http is used only on this machine, to a Tailscale name or IPv6 address, or to a 100.x address this machine's Tailscale lists; otherwise use https.`,
+            }),
+          ),
+    ),
+  );
 };
 
 /** The system error under a failed connection, such as ECONNREFUSED or ENOTFOUND. */
@@ -215,12 +231,6 @@ const probeFailure = (
   });
 };
 
-/** Whether a host is this machine's own loopback. Tests serve their peers there, so they narrow it. */
-export const LoopbackHost = Context.Reference<(host: string) => boolean>(
-  "t3/peer/PeerLinks/LoopbackHost",
-  { defaultValue: () => isLocalLoopbackHost },
-);
-
 /** Whether a peer holds a linked agent to its limits and keeps its work within its link. */
 const linkLimitsHold = (peer: { readonly capabilities: ExecutionEnvironmentCapabilities }) =>
   peer.capabilities.mcpModeLimitHeader === true && peer.capabilities.linkFence === true;
@@ -233,7 +243,18 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
-  const isOwnLoopback = yield* LoopbackHost;
+  const tailscale = yield* TailscaleClient.TailscaleClient;
+  // Read only for a 100.x address, shared by links and calls; a failed read confirms none.
+  const tailnetAddresses = yield* Effect.cachedWithTTL(
+    tailscale.peers.pipe(
+      Effect.map(
+        ({ running, self, peers }): ReadonlySet<string> =>
+          new Set(running ? [self, ...peers].flatMap((node) => node?.tailnetAddresses ?? []) : []),
+      ),
+      Effect.orElseSucceed((): ReadonlySet<string> => new Set()),
+    ),
+    TAILNET_MEMBERSHIP_TTL,
+  );
   // Relinking revokes the earlier peer credential, so exchange and local persistence must stay ordered.
   const linking = yield* Semaphore.make(1);
   const enabled = serverSettings.getSettings.pipe(
@@ -451,14 +472,7 @@ const make = Effect.gen(function* () {
       urls,
       (url) =>
         Effect.gen(function* () {
-          const origin = yield* peerOrigin(url);
-          // Loopback is this machine, where anything may answer as the one picked.
-          if (isOwnLoopback(new URL(origin).hostname)) {
-            return yield* new PeerLinkError({
-              reason: "unreachable",
-              message: `${origin} is this machine, not ${name}.`,
-            });
-          }
+          const origin = yield* peerOrigin(url, tailnetAddresses);
           const descriptor = yield* probe(origin);
           if (descriptor.environmentId !== environmentId) {
             return yield* new PeerLinkError({
@@ -490,7 +504,7 @@ const make = Effect.gen(function* () {
 
   /** The peer at `url`, with every address checked for credentials first. */
   const answeringAt = Effect.fn("PeerLinks.answeringAt")(function* (urls: ReadonlyArray<string>) {
-    const origins = yield* Effect.forEach(urls, peerOrigin);
+    const origins = yield* Effect.forEach(urls, (url) => peerOrigin(url, tailnetAddresses));
     const primary = origins[0]!;
     return { primary, peer: yield* probe(primary), origins };
   });
@@ -675,14 +689,24 @@ const make = Effect.gen(function* () {
           message: `The link to ${link.label} lost its credential. Link it again.`,
         });
       }
+      // A 100.x route was a tailnet node when linked; another network may route it now.
+      const urls = yield* Effect.filter(link.urls, (url) =>
+        peerOrigin(url, tailnetAddresses).pipe(Effect.isSuccess),
+      );
+      if (urls.length === 0 && link.urls.length > 0) {
+        return yield* new PeerLinkError({
+          reason: "unreachable",
+          message: `${link.label} is linked only at ${link.urls.join(", ")}, which this machine's Tailscale no longer lists.`,
+        });
+      }
       // The token goes only to an address that still answers as this peer,
       // so one that now answers as another machine never receives it. The
       // addresses race, so a silent one never delays one that answers.
       const answered =
-        link.urls.length === 0
+        urls.length === 0
           ? Option.none()
           : yield* Effect.raceAll(
-              link.urls.map((url) =>
+              urls.map((url) =>
                 answersAs(url, environmentId).pipe(
                   Effect.flatMap(Effect.fromOption),
                   Effect.map((peer) => ({ url, peer })),
@@ -692,7 +716,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(answered)) {
         return yield* new PeerLinkError({
           reason: "unreachable",
-          message: `${link.label} did not answer at ${link.urls.join(", ")}.`,
+          message: `${link.label} did not answer at ${urls.join(", ")}.`,
         });
       }
       const { url, peer } = answered.value;

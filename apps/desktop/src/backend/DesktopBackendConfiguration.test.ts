@@ -550,6 +550,35 @@ describe("DesktopBackendConfiguration", () => {
     );
   });
 
+  it.effect.each([
+    { mode: "mirrored", shares: true },
+    { mode: "nat", shares: false },
+    // `wslinfo` answering something else, failing, or missing all read as unknown.
+    { mode: null, shares: false },
+  ] as const)("resolveWsl shares host loopback only in mirrored mode: $mode", ({ mode, shares }) =>
+    withPackagedWslHarness(
+      {
+        archiveHash: "e".repeat(64),
+        wsl: () => ({
+          prepareRuntime: () => ({ ok: true, linuxAppRoot: "/runtime" }),
+          getNetworkingMode: () => mode,
+          // A NAT guest bridge can match a Windows VPN adapter; the mode decides, not the IP.
+          getDistroIp: () => Option.some("127.0.0.1"),
+        }),
+      },
+      () =>
+        Effect.gen(function* () {
+          const config =
+            yield* (yield* DesktopBackendConfiguration.DesktopBackendConfiguration).resolveWsl({
+              port: 5000,
+              distro: "Ubuntu",
+            });
+          assert.isTrue(Option.isNone(config.preflightFailure));
+          assert.equal(config.sharesHostLoopback, shares);
+        }),
+    ),
+  );
+
   it.effect("resolveWsl retries a failed preflight without waiting for an IP query", () =>
     withPackagedWslHarness(
       {
@@ -760,6 +789,8 @@ describe("DesktopBackendConfiguration", () => {
         assert.notProperty(config.bootstrap, "resourceMonitorPath");
         assert.isTrue(Option.isSome(config.preflightFailure));
         assert.equal(config.httpBaseUrl.href, "http://127.0.0.1:5050/");
+        // A loopback route without a known distro IP does not mean a shared network stack.
+        assert.isFalse(config.sharesHostLoopback);
         assert.equal(config.env.OPENAI_API_KEY, "openai-key");
         assert.equal(config.env.ANTHROPIC_API_KEY, "anthropic-key");
         assert.equal(config.env.T3CODE_OTLP_PROTOCOL, "http/protobuf");

@@ -83,10 +83,10 @@ export interface LinkableMachine {
   /** Whether the thread's environment already has a link to it. */
   readonly linked: boolean;
   /**
-   * Where the client knows it answers, most preferred first: the addresses it
-   * reports, then its saved routes, then its T3 Connect address. The server
-   * keeps only those that answer as this machine. Empty for a machine reached
-   * only over SSH or loopback, which name this client's device.
+   * Where the client knows it answers, most preferred first: loopback between
+   * environments on one host, then the addresses it reports, its saved routes
+   * and its T3 Connect address. The server keeps those that answer as this
+   * machine. Empty for one reached only over SSH or another device's loopback.
    */
   readonly urls: ReadonlyArray<string>;
 }
@@ -110,7 +110,11 @@ export function linkableMachines(input: {
   readonly threadEnvironmentId: EnvironmentId;
   readonly links: ReadonlyArray<Pick<PeerLinkSummary, "environmentId" | "status">>;
   readonly connect: ReadonlyMap<string, RelayDiscoveredEnvironment>;
+  /** Environments on one machine, such as a desktop app's own backends, sharing loopback. */
+  readonly sameHost?: ReadonlySet<EnvironmentId>;
 }): ReadonlyArray<LinkableMachine> {
+  const sharesLoopback = (environmentId: EnvironmentId) =>
+    input.sameHost?.has(input.threadEnvironmentId) === true && input.sameHost.has(environmentId);
   const linkedIds = new Set(
     input.links.flatMap((link) =>
       link.status === "expired" || link.status === "unauthorized" ? [] : [link.environmentId],
@@ -127,6 +131,14 @@ export function linkableMachines(input: {
         return url === null ? [] : [url];
       });
       const connect = input.connect.get(environment.environmentId)?.environment.endpoint;
+      const urls = [
+        ...new Set([
+          ...reported,
+          ...routes,
+          ...(connect === undefined ? [] : [connect.httpBaseUrl]),
+        ]),
+      ];
+      const network = urls.filter((url) => !isLoopbackUrl(url));
       return {
         environmentId: environment.environmentId,
         label: environment.entry.target.label,
@@ -134,13 +146,9 @@ export function linkableMachines(input: {
         connected: environment.connection.phase === "connected",
         connectOnly: false,
         linked: linkedIds.has(environment.environmentId),
-        urls: [
-          ...new Set([
-            ...reported,
-            ...routes,
-            ...(connect === undefined ? [] : [connect.httpBaseUrl]),
-          ]),
-        ].filter((url) => !isLoopbackUrl(url)),
+        urls: sharesLoopback(environment.environmentId)
+          ? [...urls.filter(isLoopbackUrl), ...network]
+          : network,
       };
     });
   const savedIds = new Set<string>(saved.map((machine) => machine.environmentId));

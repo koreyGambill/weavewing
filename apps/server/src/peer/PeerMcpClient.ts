@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -113,16 +114,19 @@ const make = Effect.gen(function* () {
   const sessions = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
 
   const post = (url: string, token: string, body: unknown, headers: Record<string, string>) =>
-    httpClient.execute(
-      HttpClientRequest.post(`${url}/mcp`).pipe(
-        HttpClientRequest.setHeaders({
-          accept: "application/json, text/event-stream",
-          authorization: `Bearer ${token}`,
-          ...headers,
-        }),
-        HttpClientRequest.setBody(HttpBody.text(JSON.stringify(body), "application/json")),
-      ),
-    );
+    httpClient
+      .execute(
+        HttpClientRequest.post(`${url}/mcp`).pipe(
+          HttpClientRequest.setHeaders({
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${token}`,
+            ...headers,
+          }),
+          HttpClientRequest.setBody(HttpBody.text(JSON.stringify(body), "application/json")),
+        ),
+      )
+      // The token goes only to the address `resolve` checked, never where a redirect points.
+      .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
 
   const openSession = Effect.fn("PeerMcpClient.openSession")(
     function* (url: string, token: string, limitHeader: Record<string, string>) {
@@ -166,9 +170,8 @@ const make = Effect.gen(function* () {
 
   const call: PeerMcpClient["Service"]["call"] = Effect.fn("PeerMcpClient.call")(
     function* (input) {
-      const resolved = yield* links
-        .resolve(input.environmentId)
-        .pipe(Effect.mapError(fromLinkError));
+      const resolve = () => links.resolve(input.environmentId).pipe(Effect.mapError(fromLinkError));
+      let resolved = yield* resolve();
       return yield* Effect.gen(function* () {
         const limitHeader = {
           [McpInvocationContext.MODE_LIMIT_HEADER]: `${input.limits.runtimeMode}/${input.limits.interactionMode}`,
@@ -187,7 +190,7 @@ const make = Effect.gen(function* () {
                   .map((part) => encodeURIComponent(part.toWellFormed()))
                   .join("/"),
               };
-        const sessionKey = `${input.environmentId} ${resolved.url}`;
+        const sessionKey = () => `${input.environmentId} ${resolved.url}`;
         const callOnce = (sessionId: string) =>
           post(
             resolved.url,
@@ -205,17 +208,19 @@ const make = Effect.gen(function* () {
               "mcp-protocol-version": PROTOCOL_VERSION,
             },
           );
-        const existing = (yield* Ref.get(sessions)).get(sessionKey);
+        const existing = (yield* Ref.get(sessions)).get(sessionKey());
         const sessionId =
           existing ?? (yield* openSession(resolved.url, resolved.token, limitHeader));
         // The initialized session outlives a tool request, including a long wait or cancellation.
         if (existing === undefined) {
-          yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey, sessionId));
+          yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey(), sessionId));
         }
         let response = yield* callOnce(sessionId);
         if (response.status === 404) {
+          // The request may have waited long past the address's check, so check it again.
+          resolved = yield* resolve();
           const renewed = yield* openSession(resolved.url, resolved.token, limitHeader);
-          yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey, renewed));
+          yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey(), renewed));
           response = yield* callOnce(renewed);
         }
         if (response.status === 401) {

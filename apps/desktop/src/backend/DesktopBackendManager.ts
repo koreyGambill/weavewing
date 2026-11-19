@@ -85,6 +85,8 @@ export interface DesktopBackendStartConfig extends BackendProcessContext {
   readonly preflightFailure: Option.Option<PreflightFailure>;
   readonly runningDistro?: string;
   readonly wslRuntimeId?: string;
+  /** A backend whose loopback is the host's, so the primary reaches it there and it the primary. */
+  readonly sharesHostLoopback?: boolean;
 }
 
 export interface PreflightFailure {

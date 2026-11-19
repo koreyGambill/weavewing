@@ -36,6 +36,7 @@ import * as PeerLinks from "./PeerLinks.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PeerMcpClient from "./PeerMcpClient.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import * as TailscaleClient from "../tailnet/TailscaleClient.ts";
 
 class PeerTestApi extends HttpApi.make("environment")
   .add(EnvironmentHttpApi.groups.metadata)
@@ -183,9 +184,15 @@ export const servePeer = <E, R>(
 
 export type ServedPeer = Effect.Success<ReturnType<typeof servePeer>>;
 
+const tailscaleAbsent = TailscaleClient.TailscaleClient.of({
+  whois: () => Effect.fail(new TailscaleClient.TailscaleUnavailableError({ cause: "absent" })),
+  peers: Effect.fail(new TailscaleClient.TailscaleUnavailableError({ cause: "absent" })),
+});
+
 /**
  * The environment that links: its own database and secret store, reaching
- * peers over plain HTTP. Provide it to anything built on its links.
+ * peers over plain HTTP, without Tailscale unless given one. Provide it to
+ * anything built on its links.
  */
 export const layerLinkingEnvironment = <E = never>(
   descriptor: ExecutionEnvironmentDescriptor,
@@ -194,14 +201,14 @@ export const layerLinkingEnvironment = <E = never>(
     SqlClient.SqlClient,
     E | Layer.Error<typeof Sqlite.layerMemory>
   > = Sqlite.layerMemory,
+  tailscale: TailscaleClient.TailscaleClient["Service"] = tailscaleAbsent,
 ) =>
   PeerMcpClient.layer.pipe(
     Layer.provideMerge(PeerLinks.layer),
     Layer.provideMerge(ServerSettings.layerTest({ linkedEnvironmentsEnabled: true })),
     Layer.provideMerge(database),
     Layer.provide(Layer.mergeAll(secrets, FetchHttpClient.layer)),
-    // Peers here are served on 127.0.0.1, so only `localhost` stands for this machine.
-    Layer.provide(Layer.succeed(PeerLinks.LoopbackHost, (host) => host === "localhost")),
+    Layer.provide(Layer.succeed(TailscaleClient.TailscaleClient, tailscale)),
     // Services that act for this environment, such as delegation, name it too.
     Layer.provideMerge(
       Layer.succeed(ServerEnvironment.ServerEnvironment, {

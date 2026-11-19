@@ -383,6 +383,8 @@ export interface DesktopEnvironmentBootstrap {
   httpBaseUrl: string | null;
   wsBaseUrl: string | null;
   bootstrapToken?: string;
+  // Its loopback is the primary's: WSL with mirrored networking, never NAT.
+  sharesHostLoopback?: boolean;
 }
 
 export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
@@ -392,6 +394,7 @@ export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   httpBaseUrl: Schema.NullOr(Schema.String),
   wsBaseUrl: Schema.NullOr(Schema.String),
   bootstrapToken: Schema.optionalKey(Schema.String),
+  sharesHostLoopback: Schema.optionalKey(Schema.Boolean),
 });
 
 export const DesktopSshEnvironmentTargetSchema = Schema.Struct({

@@ -18,6 +18,7 @@ import * as PeerLinks from "../peer/PeerLinks.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as TailscaleClient from "../tailnet/TailscaleClient.ts";
 import { authLocationFlags, type CliAuthLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 /**
@@ -40,6 +41,7 @@ const runWithPeerLinks = Effect.fn("environment.runWithPeerLinks")(function* <A,
             ServerSecretStore.layer,
             SqlitePersistence.layerCliConfig,
             FetchHttpClient.layer,
+            TailscaleClient.layerCli,
           ),
         ),
         Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),

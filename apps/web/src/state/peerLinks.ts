@@ -9,6 +9,8 @@ import { AuthAccessReadScope, type EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { useEffect, useEffectEvent } from "react";
 
+import { desktopSameHostEnvironmentIds } from "../connection/desktopLocal";
+import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironmentIdentities, useEnvironments } from "./environments";
 import { environmentPresentations } from "./presentation";
@@ -70,6 +72,7 @@ export function usePeerLinkHosts() {
  */
 export function useLinkableMachines(environmentId: EnvironmentId, enabled: boolean) {
   const { environments } = useEnvironments();
+  const desktopBootstraps = useDesktopLocalBootstraps();
   const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
   const refreshDiscovery = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
@@ -90,5 +93,6 @@ export function useLinkableMachines(environmentId: EnvironmentId, enabled: boole
     threadEnvironmentId: environmentId,
     links: links.data?.links ?? [],
     connect: discovery.environments,
+    sameHost: desktopSameHostEnvironmentIds(environments, desktopBootstraps),
   });
 }
