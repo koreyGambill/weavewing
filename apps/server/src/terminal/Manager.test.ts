@@ -631,20 +631,21 @@ it.layer(
       yield* manager.open(openInput({ threadId: "dropdown-terminal" }));
       const process = ptyAdapter.processes[0]!;
       const oldEvents = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
-      const beforeReceived = yield* Deferred.make<void>();
+      const beforeReceived = yield* Deferred.make<number | undefined>();
       const stopOld = yield* manager.attachStream(
         openInput({ threadId: "dropdown-terminal" }),
         (event) =>
           Ref.update(oldEvents, (events) => [...events, event]).pipe(
             Effect.andThen(
-              event.type === "output" ? Deferred.succeed(beforeReceived, undefined) : Effect.void,
+              event.type === "output"
+                ? Deferred.succeed(beforeReceived, event.sequence)
+                : Effect.void,
             ),
           ),
       );
       yield* Effect.addFinalizer(() => Effect.sync(stopOld));
       process.emitData("before move\n");
-      yield* Deferred.await(beforeReceived);
-      const sequenceBefore = (yield* Ref.get(oldEvents)).at(-1)?.sequence ?? 0;
+      const sequenceBefore = (yield* Deferred.await(beforeReceived)) ?? 0;
 
       const moved = yield* manager.move({
         threadId: "dropdown-terminal",
@@ -676,23 +677,25 @@ it.layer(
       );
       expect(yield* fs.readFileString(movedHistoryPath)).toBe("before move\n");
 
-      const afterReceived = yield* Deferred.make<TerminalAttachStreamEvent>();
+      const afterReceived = yield* Deferred.make<number | undefined>();
       const newEvents = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
       const stopNew = yield* manager.attachStream(
         openInput({ threadId: "thread-2", terminalId: "term-3", worktreePath: "/checkout" }),
         (event) =>
           Ref.update(newEvents, (events) => [...events, event]).pipe(
             Effect.andThen(
-              event.type === "output" ? Deferred.succeed(afterReceived, event) : Effect.void,
+              event.type === "output"
+                ? Deferred.succeed(afterReceived, event.sequence)
+                : Effect.void,
             ),
           ),
       );
       yield* Effect.addFinalizer(() => Effect.sync(stopNew));
       process.emitData("after move\n");
-      const after = yield* Deferred.await(afterReceived);
+      const sequenceAfter = yield* Deferred.await(afterReceived);
       yield* manager.write({ threadId: "thread-2", terminalId: "term-3", data: "echo hi\n" });
 
-      expect(after.sequence).toBeGreaterThan(moved.sequence!);
+      expect(sequenceAfter).toBeGreaterThan(moved.sequence!);
       expect((yield* Ref.get(newEvents))[0]).toMatchObject({
         type: "snapshot",
         snapshot: { pid: process.pid, history: "before move\n" },
