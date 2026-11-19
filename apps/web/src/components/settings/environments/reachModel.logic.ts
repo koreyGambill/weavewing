@@ -151,6 +151,9 @@ export const squareKey = (fromId: string, toId: string) => `${fromId}>${toId}`;
 
 const LINK_LABEL_PREFIX = /^(Linked environment|T3 Code) · /;
 
+// oxlint-disable-next-line t3code/no-rpc-permission-bypass -- This client is auth metadata, not an RPC transport.
+const clientOf = (session: AuthClientSession) => session.client;
+
 function grants(session: AuthClientSession, scope: AuthEnvironmentScope): boolean {
   return (session.permissions ?? session.scopes).includes(scope);
 }
@@ -170,12 +173,12 @@ export function deviceLevel(scopes: ReadonlyArray<AuthEnvironmentScope>): ReachL
 function isLinkSession(session: AuthClientSession): boolean {
   return (
     session.subject.startsWith(MCP_PEER_LINK_SUBJECT_PREFIX) ||
-    (session.subject === "mcp-client" && LINK_LABEL_PREFIX.test(session.client.label ?? ""))
+    (session.subject === "mcp-client" && LINK_LABEL_PREFIX.test(clientOf(session).label ?? ""))
   );
 }
 
 function linkSessionLabel(session: AuthClientSession): string {
-  return (session.client.label ?? "Linked environment").replace(LINK_LABEL_PREFIX, "");
+  return (clientOf(session).label ?? "Linked environment").replace(LINK_LABEL_PREFIX, "");
 }
 
 /** The machine a link session belongs to: its id when the server recorded it. */
@@ -186,7 +189,7 @@ function linkSessionEnvironmentId(session: AuthClientSession): EnvironmentId | n
 }
 
 function deviceName(session: AuthClientSession): string {
-  const client = session.client;
+  const client = clientOf(session);
   if (client.label) return client.label;
   const parts = [client.browser, client.os].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(" on ") : "Unnamed device";
@@ -318,7 +321,7 @@ function serverSquare(
     return {
       ...base,
       state: { kind: "level", level: linkSessionLevel(linkSession), broken: null },
-      arrivedVia: arrivalFromHost(linkSession.client.ipAddress ?? null),
+      arrivedVia: arrivalFromHost(clientOf(linkSession).ipAddress ?? null),
       changes: changes(true),
     };
   }
@@ -404,7 +407,7 @@ function deviceSquare(
   return {
     ...base,
     sessionIds: sessions.map((session) => session.sessionId),
-    arrivedVia: arrivalFromHost(sessions[0]?.client.ipAddress ?? null),
+    arrivedVia: arrivalFromHost((sessions[0] ? clientOf(sessions[0]).ipAddress : undefined) ?? null),
     state:
       strongest !== undefined
         ? { kind: "level", level: strongest, broken: null }

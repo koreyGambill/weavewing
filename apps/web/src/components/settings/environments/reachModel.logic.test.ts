@@ -1,5 +1,4 @@
 import {
-  AuthAccessWriteScope,
   type AuthClientSession,
   type AuthEnvironmentScope,
   AuthOrchestrationOperateScope,
@@ -12,7 +11,7 @@ import {
   type PeerLinkSummary,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   APP_PARTY_ID,
