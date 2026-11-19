@@ -199,6 +199,11 @@ confirmation only when a terminal has a running process; the prompt lists the
 running terminals that will stop. Both commands are in the command palette and
 Settings → Keybindings.
 
+In a regular web browser, the browser keeps `Ctrl+W` and `Ctrl+Shift+W` for
+closing its own tab and window, so use `Ctrl+Alt+W` there. While a terminal has
+focus in the desktop app, the app menu's shortcuts (zoom, developer tools,
+fullscreen) pass through to the terminal; click outside the terminal to use them.
+
 These close shortcuts override terminal input. On Windows and Linux, vim's
 `Ctrl+W` window prefix and the shell's word-erase shortcut therefore close the
 tile tab. Remap the close commands in Settings if you want those keys in the
