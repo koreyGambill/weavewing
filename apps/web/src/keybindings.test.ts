@@ -441,21 +441,21 @@ describe("resolveShortcutCommand", () => {
     },
   );
 
-  it("leaves mod+w available to the shell and native window", () => {
+  it("closes the selected tile tab with Cmd+W on macOS", () => {
     const closeEvent = event({ key: "w", metaKey: true });
     assert.strictEqual(
       resolveShortcutCommand(closeEvent, DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { terminalFocus: true },
       }),
-      null,
+      "workspace.tile.closeTab",
     );
     assert.strictEqual(
       resolveShortcutCommand(closeEvent, DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { terminalFocus: false },
       }),
-      null,
+      "workspace.tile.closeTab",
     );
   });
 
@@ -863,14 +863,30 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
     assert.isFalse(STATIC_KEYBINDING_COMMANDS.some((entry) => String(entry) === command));
     assert.isFalse(DEFAULT_RESOLVED_KEYBINDINGS.some((entry) => String(entry.command) === command));
   }
-  for (const key of "abcdefghijklmnopqrstuvwxyz") {
-    assert.equal(
-      resolveShortcutCommand(event({ key, ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
-        platform: "Linux x86_64",
-        context: { terminalFocus: true, terminalOpen: true },
-      }),
-      null,
-      `Ctrl+${key} belongs to the shell`,
-    );
+  for (const platform of ["Linux x86_64", "Win32", "MacIntel"]) {
+    for (const key of "abcdefghijklmnopqrstuvwxyz") {
+      assert.equal(
+        resolveShortcutCommand(event({ key, ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: true, terminalOpen: true },
+        }),
+        null,
+        `Ctrl+${key} belongs to the shell on ${platform}`,
+      );
+    }
   }
+});
+
+it.each([
+  ["b", "sidebar.toggle"],
+  ["j", "terminal.toggle"],
+  ["o", "editor.openFavorite"],
+])("keeps Cmd+%s working in a focused terminal on macOS", (key, command) => {
+  assert.equal(
+    resolveShortcutCommand(event({ key, metaKey: true }), DEFAULT_BINDINGS, {
+      platform: "MacIntel",
+      context: { terminalFocus: true },
+    }),
+    command,
+  );
 });

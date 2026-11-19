@@ -847,15 +847,11 @@ describe("rightPanelStore", () => {
         kind: "terminal",
         id: "terminal:term-1",
         resourceId: "term-1",
-        terminalIds: ["term-1"],
-        activeTerminalId: "term-1",
       },
       {
         kind: "terminal",
         id: "terminal:term-2",
         resourceId: "term-2",
-        terminalIds: ["term-2"],
-        activeTerminalId: "term-2",
       },
     ]);
     expect(panel.activeSurfaceId).toBe("terminal:term-2");
@@ -886,7 +882,7 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("upgrades saved single-session terminal surfaces to split-capable surfaces", () => {
+  it("restores saved single-session terminal surfaces", () => {
     expect(
       migratePersistedRightPanelState({
         byThreadKey: {
@@ -907,8 +903,6 @@ describe("rightPanelStore", () => {
               id: "terminal:term-1",
               kind: "terminal",
               resourceId: "term-1",
-              terminalIds: ["term-1"],
-              activeTerminalId: "term-1",
             },
           ],
         },

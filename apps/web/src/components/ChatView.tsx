@@ -1101,7 +1101,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const panelTerminalIds = new Set(
     rightPanelState.surfaces.flatMap((surface) =>
-      surface.kind === "terminal" ? surface.terminalIds : [],
+      surface.kind === "terminal" ? [surface.resourceId] : [],
     ),
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;

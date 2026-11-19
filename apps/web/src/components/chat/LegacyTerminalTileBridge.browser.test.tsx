@@ -4,7 +4,11 @@ import { expect, it, vi } from "vite-plus/test";
 
 import { render } from "../../../test/render";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../../terminalUiStateStore";
+import {
+  migratePersistedTerminalUiStateStoreState,
+  selectThreadTerminalUiState,
+  useTerminalUiStateStore,
+} from "../../terminalUiStateStore";
 import { LegacyTerminalTileBridge } from "./LegacyTerminalTileBridge";
 
 it("moves drawer groups into areas, preserving existing owners and later legacy opens", async () => {
@@ -18,21 +22,30 @@ it("moves drawer groups into areas, preserving existing owners and later legacy 
     suppressedTerminalIdsByThreadKey: {},
   });
   const drawer = useTerminalUiStateStore.getState();
-  useTerminalUiStateStore.setState({
-    terminalUiStateByThreadKey: {
-      [scopedThreadKey(threadRef)]: {
-        terminalOpen: true,
-        terminalHeight: 280,
-        terminalIds: ["shell-1", "shell-2", "shell-3"],
-        activeTerminalId: "shell-3",
-        terminalGroups: [
-          { id: "legacy-split", terminalIds: ["shell-1", "shell-2"], splitDirection: "vertical" },
-          { id: "legacy-tab", terminalIds: ["shell-3"] },
-        ],
-        activeTerminalGroupId: "legacy-tab",
+  useTerminalUiStateStore.setState(
+    migratePersistedTerminalUiStateStoreState(
+      {
+        terminalUiStateByThreadKey: {
+          [scopedThreadKey(threadRef)]: {
+            terminalOpen: true,
+            terminalHeight: 280,
+            terminalIds: ["shell-1", "shell-2", "shell-3"],
+            activeTerminalId: "shell-3",
+            terminalGroups: [
+              {
+                id: "legacy-split",
+                terminalIds: ["shell-1", "shell-2"],
+                splitDirection: "vertical",
+              },
+              { id: "legacy-tab", terminalIds: ["shell-3"] },
+            ],
+            activeTerminalGroupId: "legacy-tab",
+          },
+        },
       },
-    },
-  });
+      4,
+    ),
+  );
   useRightPanelStore.getState().openTerminal(threadRef, "shell-1");
   const panelState = () =>
     selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
@@ -53,22 +66,16 @@ it("moves drawer groups into areas, preserving existing owners and later legacy 
         id: "terminal:shell-1",
         kind: "terminal",
         resourceId: "shell-1",
-        terminalIds: ["shell-1"],
-        activeTerminalId: "shell-1",
       },
       {
         id: "terminal:shell-2",
         kind: "terminal",
         resourceId: "shell-2",
-        terminalIds: ["shell-2"],
-        activeTerminalId: "shell-2",
       },
       {
         id: "terminal:shell-3",
         kind: "terminal",
         resourceId: "shell-3",
-        terminalIds: ["shell-3"],
-        activeTerminalId: "shell-3",
       },
     ]);
     expect(panelState().activeSurfaceId).toBe("terminal:shell-3");
@@ -80,7 +87,7 @@ it("moves drawer groups into areas, preserving existing owners and later legacy 
     expect(drawerState().terminalOpen).toBe(false);
     expect(
       panelState().surfaces.flatMap((surface) =>
-        surface.kind === "terminal" ? surface.terminalIds : [],
+        surface.kind === "terminal" ? [surface.resourceId] : [],
       ),
     ).toEqual(["shell-1", "shell-2", "shell-3", "shell-4"]);
     expect(panelState().activeSurfaceId).toBe("terminal:shell-4");

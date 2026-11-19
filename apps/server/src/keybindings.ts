@@ -230,9 +230,9 @@ function migrateWeavewingBinding(entry: unknown): unknown {
     ((entry.command === "terminal.toggle" && entry.key === "mod+j") ||
       (entry.command === "sidebar.toggle" && entry.key === "mod+b") ||
       (entry.command === "editor.openFavorite" && entry.key === "mod+o")) &&
-    !("when" in entry)
+    (!("when" in entry) || entry.when === "!terminalFocus")
   ) {
-    return { ...entry, when: "!terminalFocus" };
+    return { ...entry, when: "isMac || !terminalFocus" };
   }
   return entry;
 }

@@ -55,7 +55,7 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
-  { key: "mod+b", command: "sidebar.toggle", when: "!terminalFocus" },
+  { key: "mod+b", command: "sidebar.toggle", when: "isMac || !terminalFocus" },
   { key: "mod+alt+shift+b", command: "toolSidebar.toggle" },
   { key: "f6", command: "workspace.focusNext" },
   { key: "shift+f6", command: "workspace.focusPrevious" },
@@ -82,6 +82,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Ctrl+Alt+T opens a terminal on GNOME, and mod+alt+n starts a new chat on Linux and Windows.
   { key: "ctrl+alt+o", command: "workspace.tile.newTab" },
   { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
+  { key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" },
   { key: "ctrl+alt+.", command: "workspace.tile.actions" },
   { key: "ctrl+shift+tab", command: "workspace.tile.previousTab" },
   { key: "ctrl+alt+[", command: "workspace.tile.previousTab" },
@@ -89,7 +90,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
-  { key: "mod+j", command: "terminal.toggle", when: "!terminalFocus" },
+  { key: "mod+j", command: "terminal.toggle", when: "isMac || !terminalFocus" },
   { key: "mod+alt+i", command: "threadContext.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
   { key: "mod+shift+d", command: "composer.dictation", when: "!terminalFocus" },
@@ -144,7 +145,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
-  { key: "mod+o", command: "editor.openFavorite", when: "!terminalFocus" },
+  { key: "mod+o", command: "editor.openFavorite", when: "isMac || !terminalFocus" },
   { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
   { key: "ctrl+alt+m", command: "projectPicker.nextMachine", when: "!terminalFocus" },
   { key: "ctrl+alt+shift+m", command: "projectPicker.allMachines", when: "!terminalFocus" },

@@ -50,7 +50,7 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
   });
   const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const activeSummary =
-    knownTerminalSessions?.find((session) => session.target.terminalId === surface.activeTerminalId)
+    knownTerminalSessions?.find((session) => session.target.terminalId === surface.resourceId)
       ?.state.summary ?? null;
   const worktreePath = resolveTerminalWorktreePath({
     launchContext,
@@ -74,8 +74,8 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
       cwd={cwd}
       worktreePath={worktreePath}
       runtimeEnv={runtimeEnv}
-      terminalId={surface.activeTerminalId}
-      terminalLabel={resolveTerminalSessionLabel(surface.activeTerminalId, activeSummary)}
+      terminalId={surface.resourceId}
+      terminalLabel={resolveTerminalSessionLabel(surface.resourceId, activeSummary)}
       onCloseTerminal={onCloseTerminal}
       onAddTerminalContext={onAddTerminalContext}
       keybindings={keybindings}

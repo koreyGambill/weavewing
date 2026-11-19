@@ -24,7 +24,7 @@ export function tileCloseConfirmation(input: {
 }): { title: string; description: string | null } | null {
   const running = input.surfaces
     .filter((surface) => input.tabIds.includes(surface.id))
-    .flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []))
+    .flatMap((surface) => (surface.kind === "terminal" ? [surface.resourceId] : []))
     .filter((terminalId) => input.runningTerminalIds.includes(terminalId))
     .map((terminalId) => input.terminalLabelsById.get(terminalId) ?? "A terminal process");
   const count = input.tabIds.filter((tabId) => !isNewTab(tabId)).length;

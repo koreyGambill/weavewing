@@ -28,10 +28,7 @@ it("reveals the existing terminal tab without creating another shell placement",
   ).toMatchObject({
     isOpen: true,
     activeSurfaceId: "terminal:setup-install",
-    surfaces: [
-      { terminalIds: ["terminal-1"], activeTerminalId: "terminal-1" },
-      { terminalIds: ["setup-install"], activeTerminalId: "setup-install" },
-    ],
+    surfaces: [{ resourceId: "terminal-1" }, { resourceId: "setup-install" }],
   });
   expect(
     selectThreadTerminalUiState(

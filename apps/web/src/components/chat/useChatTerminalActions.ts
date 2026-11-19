@@ -119,11 +119,10 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     if (!activeThreadRef) return;
     const store = useRightPanelStore.getState();
     const surface = selectThreadRightPanelState(store.byThreadKey, activeThreadRef).surfaces.find(
-      (entry) => entry.kind === "terminal" && entry.terminalIds.includes(terminalId),
+      (entry) => entry.kind === "terminal" && entry.resourceId === terminalId,
     );
     if (surface) {
       store.activateSurface(activeThreadRef, surface.id);
-      store.activateTerminal(activeThreadRef, surface.id, terminalId);
     } else {
       store.openTerminal(activeThreadRef, terminalId);
     }
@@ -140,7 +139,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
       surfaces.find((entry) => entry.kind === "terminal");
     const terminalId =
       surface?.kind === "terminal"
-        ? surface.activeTerminalId
+        ? surface.resourceId
         : (terminalUiState.terminalIds.find((id) => id === terminalUiState.activeTerminalId) ??
           terminalUiState.terminalIds[0] ??
           runningTerminalIds[0] ??
@@ -209,7 +208,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
             ],
             activeTerminalId:
               activeRightPanelSurface?.kind === "terminal"
-                ? activeRightPanelSurface.activeTerminalId
+                ? activeRightPanelSurface.resourceId
                 : terminalUiState.activeTerminalId,
             panelTerminalIds: new Set<string>(),
             runningTerminalIds,
@@ -309,7 +308,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     if (!target || !readEnvironmentScope(target.environmentId, AuthTerminalOperateScope)) return;
     const store = useRightPanelStore.getState();
     const surface = selectThreadRightPanelState(store.byThreadKey, target).surfaces.find(
-      (entry) => entry.kind === "terminal" && entry.terminalIds.includes(terminalId),
+      (entry) => entry.kind === "terminal" && entry.resourceId === terminalId,
     );
     if (!surface) return;
     terminalActions.closeTerminalSession(terminalId, target);
@@ -333,7 +332,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     "terminal.close": () => {
       if (!hasTerminalWriteAccess()) return false;
       if (activeRightPanelSurface?.kind === "terminal") {
-        requestClosePanelTerminal(activeRightPanelSurface.activeTerminalId);
+        requestClosePanelTerminal(activeRightPanelSurface.resourceId);
       }
     },
   } satisfies ChatShortcutCommands;

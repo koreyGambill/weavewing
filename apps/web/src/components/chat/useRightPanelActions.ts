@@ -157,7 +157,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
       setActivePreviewTab(activeThreadRef, surface.resourceId);
     }
     if (surface.kind === "terminal") {
-      focusTerminal(activeThreadRef, surface.activeTerminalId);
+      focusTerminal(activeThreadRef, surface.resourceId);
     }
     if (surface.kind === "side-chat") {
       // A side chat's tile sits in no workspace area, so the pane is found anywhere.

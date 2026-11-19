@@ -73,8 +73,6 @@ describe("terminalUiStateStore actions", () => {
           terminalHeight: 320,
           terminalIds: ["term-1"],
           activeTerminalId: "term-1",
-          terminalGroups: [{ id: "group-term-1", terminalIds: ["term-1"] }],
-          activeTerminalGroupId: "group-term-1",
         },
       },
     });
@@ -108,9 +106,6 @@ describe("terminalUiStateStore actions", () => {
     );
     expect(terminalUiState.activeTerminalId).toBe("terminal-2");
     expect(terminalUiState.terminalIds).toEqual(["terminal-2"]);
-    expect(terminalUiState.terminalGroups).toEqual([
-      { id: "group-terminal-2", terminalIds: ["terminal-2"] },
-    ]);
   });
 
   it.each([
@@ -131,7 +126,6 @@ describe("terminalUiStateStore actions", () => {
       THREAD_REF,
     );
     expect(terminalUiState.activeTerminalId).toBe(nextId);
-    expect(terminalUiState.activeTerminalGroupId).toBe(`group-${nextId}`);
   });
 
   it("does not import a closed panel terminal from stale metadata", () => {

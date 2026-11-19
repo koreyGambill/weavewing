@@ -728,6 +728,16 @@ describe("DesktopWindow", () => {
           );
           beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
           assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          const ipcMessage = fakeWindow.webContentsListeners.get("ipc-message");
+          assert.isDefined(ipcMessage);
+          ipcMessage?.({}, "desktop:terminal-focus", true);
+          beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
+          assert.equal(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], platform !== "darwin");
+          beforeInput(event, { ...input, key: "r", shift: true });
+          assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          ipcMessage?.({}, "desktop:terminal-focus", false);
+          beforeInput(event, { ...input, key: "r" });
+          assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
         }).pipe(Effect.provide(layer));
       }),
   );

@@ -123,7 +123,7 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 ## When conditions
 
-Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
+Available context keys are `isMac`, `terminalFocus`, `terminalOpen`, `previewFocus`,
 `previewOpen`, `rightPanelOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`,
 `draftThreadRoute`, `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
 In a thread, `rightPanelOpen` means that a surface tab is selected.
@@ -191,11 +191,12 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 ## Reserved shortcuts
 
-Use `workspace.tile.closeTab` (`Ctrl+Alt+W`) to close the selected tile tab.
+Use `workspace.tile.closeTab` (`Ctrl+Alt+W`, or `Cmd+W` on macOS) to close the selected tile tab.
 Focused terminals keep common shell keys, including `Ctrl+D` for EOF and
 `Ctrl+W` for word erase, and `Ctrl+R` for history search. Use **New tile below/right** to split the workspace;
-each terminal tab contains one shell. On Windows and Linux desktop, reload the
-app from the application menu or use `Ctrl+Shift+R` to reload without its cache.
+each terminal tab contains one shell. On Windows and Linux desktop, `Ctrl+R`
+reloads the app outside a terminal. Use `Ctrl+Shift+R` to reload without its cache.
+On macOS, `Cmd+B`, `Cmd+J`, and `Cmd+O` also work while a terminal has focus.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.

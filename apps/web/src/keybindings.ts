@@ -68,6 +68,7 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     isDesktop: isElectron,
     editableFocus: false,
     ...options?.context,
+    isMac: isMacPlatform(resolvePlatform(options)),
   };
 }
 

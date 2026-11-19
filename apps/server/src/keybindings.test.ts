@@ -149,7 +149,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         JSON.stringify([
           ...removed.map((command) => ({ key: "ctrl+d", command })),
           { key: "mod+b", command: "sidebar.toggle" },
-          { key: "mod+j", command: "terminal.toggle" },
+          { key: "mod+j", command: "terminal.toggle", when: "!terminalFocus" },
           { key: "mod+o", command: "editor.openFavorite" },
           { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
           { key: "ctrl+alt+y", command: "terminal.toggle" },
@@ -165,8 +165,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           (entry) => entry.command === command && ["b", "j", "o"].includes(entry.shortcut.key),
         );
         assert.deepEqual(oldDefault?.whenAst, {
-          type: "not",
-          node: { type: "identifier", name: "terminalFocus" },
+          type: "or",
+          left: { type: "identifier", name: "isMac" },
+          right: { type: "not", node: { type: "identifier", name: "terminalFocus" } },
         });
       }
       assert.isTrue(
@@ -412,7 +413,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     return Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+j", command: "script.custom-action.run", when: "!terminalFocus" },
+        { key: "mod+j", command: "script.custom-action.run", when: "isMac || !terminalFocus" },
       ]);
 
       yield* Effect.gen(function* () {

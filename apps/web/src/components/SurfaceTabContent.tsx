@@ -120,10 +120,7 @@ export function surfaceTitle(
         Math.max(surface.relativePath.lastIndexOf("/"), surface.relativePath.lastIndexOf("\\")) + 1,
       );
     case "terminal":
-      return (
-        terminalLabelsById.get(surface.activeTerminalId) ??
-        getTerminalLabel(surface.activeTerminalId)
-      );
+      return terminalLabelsById.get(surface.resourceId) ?? getTerminalLabel(surface.resourceId);
     case "pull-request":
       return `#${surface.number}`;
     case "pull-requests":

@@ -73,8 +73,6 @@ export type RightPanelSurface =
       id: `terminal:${string}`;
       kind: "terminal";
       resourceId: string;
-      terminalIds: string[];
-      activeTerminalId: string;
       launchContext?: TerminalSurfaceLaunchContext;
     }
   | { id: "diff" | `diff:${string}`; kind: "diff" }
@@ -113,7 +111,7 @@ export type RightPanelSurface =
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 16;
+const RIGHT_PANEL_STORAGE_VERSION = 17;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
@@ -216,7 +214,6 @@ interface RightPanelStoreState {
     terminalId: string,
     launchContext?: TerminalSurfaceLaunchContext,
   ) => void;
-  activateTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
   closeTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
   activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   /** Agent-driven activation. Not a user action, so it does not move keyboard focus. */
@@ -318,8 +315,6 @@ const terminalSurface = (
   id: `terminal:${terminalId}`,
   kind: "terminal",
   resourceId: terminalId,
-  terminalIds: [terminalId],
-  activeTerminalId: terminalId,
   ...(launchContext ? { launchContext } : {}),
 });
 
@@ -682,7 +677,12 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               );
               const rawActiveSurfaceId =
                 oldActive?.kind === "terminal"
-                  ? `terminal:${oldActive.activeTerminalId ?? oldActive.resourceId}`
+                  ? `terminal:${
+                      "activeTerminalId" in oldActive &&
+                      typeof oldActive.activeTerminalId === "string"
+                        ? oldActive.activeTerminalId
+                        : oldActive.resourceId
+                    }`
                   : validThreadState?.activeSurfaceId;
               const persistedActiveSurfaceId = surfaces.some(
                 (surface) => surface.id === rawActiveSurfaceId,
@@ -1096,20 +1096,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             upsertSurface(current, terminalSurface(terminalId, launchContext)),
           ),
         ),
-      activateTerminal: (ref, surfaceId, terminalId) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => ({
-            ...current,
-            activeSurfaceId: surfaceId,
-            surfaces: current.surfaces.map((surface) =>
-              surface.id === surfaceId &&
-              surface.kind === "terminal" &&
-              surface.terminalIds.includes(terminalId)
-                ? { ...surface, activeTerminalId: terminalId }
-                : surface,
-            ),
-          })),
-        ),
       closeTerminal: (ref, surfaceId, terminalId) =>
         set((state) =>
           closeAction(state, scopedThreadKey(ref), (current) => {
@@ -1117,39 +1103,22 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               (entry) => entry.id === surfaceId && entry.kind === "terminal",
             );
             if (!surface || surface.kind !== "terminal") return current;
-            const terminalIds = surface.terminalIds.filter((id) => id !== terminalId);
-            if (terminalIds.length === 0) {
-              const index = current.surfaces.findIndex((entry) => entry.id === surfaceId);
-              const surfaces = current.surfaces.filter((entry) => entry.id !== surfaceId);
-              const groupFallback = tileCloseFallback(current.tileLayout, surfaceId);
-              const fallback =
-                surfaces.find((surface) => surface.id === groupFallback) ??
-                surfaces[Math.min(index, surfaces.length - 1)] ??
-                null;
-              return {
-                ...current,
-                isOpen: surfaces.length > 0 && current.isOpen,
-                surfaces,
-                activeSurfaceId:
-                  current.activeSurfaceId === surfaceId
-                    ? (fallback?.id ?? null)
-                    : current.activeSurfaceId,
-              };
-            }
+            if (surface.resourceId !== terminalId) return current;
+            const index = current.surfaces.findIndex((entry) => entry.id === surfaceId);
+            const surfaces = current.surfaces.filter((entry) => entry.id !== surfaceId);
+            const groupFallback = tileCloseFallback(current.tileLayout, surfaceId);
+            const fallback =
+              surfaces.find((surface) => surface.id === groupFallback) ??
+              surfaces[Math.min(index, surfaces.length - 1)] ??
+              null;
             return {
               ...current,
-              surfaces: current.surfaces.map((entry) =>
-                entry.id === surfaceId && entry.kind === "terminal"
-                  ? {
-                      ...entry,
-                      terminalIds,
-                      activeTerminalId:
-                        entry.activeTerminalId === terminalId
-                          ? (terminalIds.at(-1) ?? terminalIds[0]!)
-                          : entry.activeTerminalId,
-                    }
-                  : entry,
-              ),
+              isOpen: surfaces.length > 0 && current.isOpen,
+              surfaces,
+              activeSurfaceId:
+                current.activeSurfaceId === surfaceId
+                  ? (fallback?.id ?? null)
+                  : current.activeSurfaceId,
             };
           }),
         ),

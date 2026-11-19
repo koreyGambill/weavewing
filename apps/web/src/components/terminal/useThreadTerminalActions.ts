@@ -61,7 +61,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
       ...(knownSessions ?? []).map((session) => session.target.terminalId),
       ...drawerTerminalIds,
       ...panelSurfaces.flatMap((surface) =>
-        surface.kind === "terminal" ? surface.terminalIds : [],
+        surface.kind === "terminal" ? [surface.resourceId] : [],
       ),
       ...(threadRef ? closingTerminalIds(threadRef) : []),
     ]);

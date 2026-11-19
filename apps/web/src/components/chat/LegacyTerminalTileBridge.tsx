@@ -18,7 +18,7 @@ export function LegacyTerminalTileBridge({ threadRef }: { readonly threadRef: Sc
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).surfaces;
     for (const terminalId of terminalState.terminalIds) {
       const owner = currentSurfaces().find(
-        (surface) => surface.kind === "terminal" && surface.terminalIds.includes(terminalId),
+        (surface) => surface.kind === "terminal" && surface.resourceId === terminalId,
       );
       if (!owner) panel.openTerminal(threadRef, terminalId);
     }
@@ -27,11 +27,10 @@ export function LegacyTerminalTileBridge({ threadRef }: { readonly threadRef: Sc
       threadRef,
     ).surfaces.find(
       (surface) =>
-        surface.kind === "terminal" && surface.terminalIds.includes(terminalState.activeTerminalId),
+        surface.kind === "terminal" && surface.resourceId === terminalState.activeTerminalId,
     );
     if (activeSurface) {
       panel.activateSurface(threadRef, activeSurface.id);
-      panel.activateTerminal(threadRef, activeSurface.id, terminalState.activeTerminalId);
     }
     useTerminalUiStateStore.getState().setTerminalOpen(threadRef, false);
   }, [threadRef, terminalState]);
