@@ -153,6 +153,8 @@ export const APP_PARTY_ID = "app";
 export const serverPartyId = (environmentId: EnvironmentId) => `server:${environmentId}`;
 export const squareKey = (fromId: string, toId: string) => `${fromId}>${toId}`;
 
+const T3_CONNECT_SESSION_SUBJECT = "cloud-connect";
+
 const LINK_LABEL_PREFIX = /^(Linked environment|T3 Code) · /;
 
 // oxlint-disable-next-line t3code/no-rpc-permission-bypass -- This client is auth metadata, not an RPC transport.
@@ -524,7 +526,9 @@ export function buildReachModel(input: {
     const byLinker = new Map<string, AuthClientSession[]>();
     const byDevice = new Map<string, AuthClientSession[]>();
     for (const session of server.sessions ?? []) {
-      if (session.current) continue;
+      // T3 Connect devices are managed under Privacy, where revoking one can first turn on
+      // approval; without it, a revoked device signs straight back in.
+      if (session.current || session.subject === T3_CONNECT_SESSION_SUBJECT) continue;
       if (isLinkSession(session)) {
         const label = linkSessionLabel(session);
         const linkerId =

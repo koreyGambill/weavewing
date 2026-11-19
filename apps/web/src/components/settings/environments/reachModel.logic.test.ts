@@ -341,6 +341,26 @@ describe("buildReachModel", () => {
   });
 });
 
+describe("T3 Connect sessions", () => {
+  it("never become a device, a line, a square or something to revoke here", () => {
+    const connect = session({
+      subject: "cloud-connect",
+      client: { deviceType: "mobile", label: "Connect phone", ipAddress: "127.0.0.1" },
+    });
+    const model = buildReachModel({
+      servers: [server({ environmentId: WSL, label: "WSL", sessions: [connect] })],
+    });
+
+    expect(model.rows.map((row) => row.label)).toEqual(["WSL", "This app"]);
+    expect(incomingSquares(model, model.columns[0]!).map((square) => square.from.label)).toEqual([
+      "This app",
+    ]);
+    expect([...model.squares.values()].flatMap((square) => square.sessionIds)).not.toContain(
+      connect.sessionId,
+    );
+  });
+});
+
 describe("arrival tags", () => {
   it("reads each line's tag from the address it uses and keeps that address", () => {
     const model = buildReachModel({

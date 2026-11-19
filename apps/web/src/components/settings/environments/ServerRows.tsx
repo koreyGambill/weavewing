@@ -1,19 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { useState } from "react";
 
-import { requestConfirmDialog } from "~/confirmDialog";
-import { toDesktopClientSessionRecord } from "../ConnectionsSettings.logic";
 import { cn } from "~/lib/utils";
-import { authEnvironment } from "~/state/auth";
 import { serverEnvironment } from "~/state/server";
-import { useAtomCommand } from "~/state/use-atom-command";
 import {
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
@@ -22,9 +14,7 @@ import {
 import { openUseInAnotherApp } from "../../mcp/UseInAnotherAppDialog";
 import { ServerUpdateAction, ServerUpdateProgress } from "../../ServerUpdateAction";
 import { Button } from "../../ui/button";
-import { MenuItem, Menu, MenuPopup, MenuSeparator, MenuTrigger } from "../../ui/menu";
-import { stackedThreadToast, toastManager } from "../../ui/toast";
-import { recentPeerLinkRevokeWarning } from "../ConnectionsSettings.logic";
+import { MenuItem, Menu, MenuPopup, MenuTrigger } from "../../ui/menu";
 import { EnvironmentIconMenu } from "../EnvironmentIconPicker";
 import { EnvironmentRow } from "../EnvironmentRow";
 import { accessSummary, ServerAccessDetail } from "./ServerAccessDetail";
@@ -79,54 +69,10 @@ export function ServerAccessToggle({
 
 /** Menu entries every server row offers for its access. */
 export function ServerAccessMenuItems({ server }: { readonly server: ReachServer }) {
-  const revokeOtherClients = useAtomCommand(authEnvironment.revokeOtherClients, {
-    reportFailure: false,
-  });
-  const { environmentId, label, canManage } = server.input;
-  const others = (server.access?.clientSessions ?? []).filter((session) => !session.current);
-  const signOutOthers = async () => {
-    const warning = recentPeerLinkRevokeWarning(others.map(toDesktopClientSessionRecord));
-    const confirmed = await (requestConfirmDialog(
-      warning ??
-        `Sign out every other device and link on ${label}? Each needs a new pairing link to come back.`,
-      { variant: "destructive" },
-    ) ?? Promise.resolve(false));
-    if (!confirmed) return;
-    const result = await revokeOtherClients({ environmentId, input: null });
-    if (result._tag === "Success") {
-      toastManager.add({
-        type: "success",
-        title: result.value === 1 ? "Signed out 1 other" : `Signed out ${result.value} others`,
-      });
-    } else if (!isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not sign out the others",
-          description: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  };
   return (
-    <>
-      <MenuItem onClick={() => openUseInAnotherApp(environmentId)}>
-        Use in another app (MCP)
-      </MenuItem>
-      {canManage ? (
-        <>
-          <MenuSeparator />
-          <MenuItem
-            variant="destructive"
-            disabled={others.length === 0}
-            onClick={() => void signOutOthers()}
-          >
-            Sign out everyone else…
-          </MenuItem>
-        </>
-      ) : null}
-    </>
+    <MenuItem onClick={() => openUseInAnotherApp(server.input.environmentId)}>
+      Use in another app (MCP)
+    </MenuItem>
   );
 }
 

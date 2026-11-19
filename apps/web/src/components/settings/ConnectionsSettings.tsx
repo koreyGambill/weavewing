@@ -13,7 +13,11 @@ import {
   managedCapabilityDenial,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
-import { settlePromise } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -71,6 +75,8 @@ import {
 } from "~/state/desktopNetworkAccess";
 import { useEnvironment, useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
+import { requestConfirmDialog } from "~/confirmDialog";
+import { useAtomCommand } from "~/state/use-atom-command";
 import {
   sortDesktopPairingLinks,
   toDesktopPairingLinkRecord,
@@ -78,6 +84,8 @@ import {
   isServerNetworkAccessible,
   isTailscaleHttpsEndpoint,
   endpointDefaultPreferenceKey,
+  recentPeerLinkRevokeWarning,
+  toDesktopClientSessionRecord,
 } from "./ConnectionsSettings.logic";
 import { AdvertisedEndpointListRow, NetworkAccessDescription } from "./AuthorizedClientsSettings";
 import { CloudLinkRow, CloudRemoteEnvironmentRows } from "./SavedEnvironmentRows";
@@ -400,6 +408,50 @@ function ConnectionsSettingsContent({
         { onSaved: () => resolve(true), onFailed: () => resolve(false) },
       ),
     );
+  const revokeOtherClients = useAtomCommand(authEnvironment.revokeOtherClients, {
+    reportFailure: false,
+  });
+  const [isRevokingOthers, setIsRevokingOthers] = useState(false);
+  const otherClientSessions =
+    authAccessChanges.data?.type === "snapshot"
+      ? authAccessChanges.data.payload.clientSessions
+          .filter((session) => !session.current)
+          .map(toDesktopClientSessionRecord)
+      : [];
+  const revokeOthers = async () => {
+    if (accessEnvironmentId === null) return;
+    const warning = recentPeerLinkRevokeWarning(otherClientSessions);
+    if (warning && !(await (requestConfirmDialog(warning, { variant: "destructive" }) ?? false))) {
+      return;
+    }
+    setIsRevokingOthers(true);
+    const result = await revokeOtherClients({ environmentId: accessEnvironmentId, input: null });
+    setIsRevokingOthers(false);
+    if (result._tag === "Success") {
+      toastManager.add({
+        type: "success",
+        title: result.value === 1 ? "Signed out 1 other" : `Signed out ${result.value} others`,
+      });
+    } else if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not sign out the others",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  };
+  // Signing everyone else out also ends T3 Connect devices, so it goes through the same
+  // offer to turn on approval as revoking one of them.
+  const requestRevokeOthers = () => {
+    const endsConnectDevices =
+      (connectDevices?.length ?? 0) > 0 ||
+      otherClientSessions.some((session) => session.subject === "cloud-connect");
+    if (endsConnectDevices) requestConnectRevoke("Sign out everyone else?", revokeOthers);
+    else void revokeOthers();
+  };
   const tailscaleHttpsEndpoint = desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null;
   const visibleDesktopNetworkAdvertisedEndpoints = isLocalBackendNetworkAccessible
     ? desktopAdvertisedEndpoints.filter((endpoint) => !isTailscaleHttpsEndpoint(endpoint))
@@ -590,6 +642,22 @@ function ConnectionsSettingsContent({
           />
         ) : null}
         <PrivacyDeviceRows />
+        {canReadAccess && canWriteAccess ? (
+          <SettingsRow
+            title="Sign out everyone else"
+            description="Ends every other device, app and link on this server. Each needs new access to come back."
+            control={
+              <Button
+                size="sm"
+                variant="destructive-outline"
+                disabled={isRevokingOthers || otherClientSessions.length === 0}
+                onClick={requestRevokeOthers}
+              >
+                {isRevokingOthers ? "Signing out…" : "Sign out…"}
+              </Button>
+            }
+          />
+        ) : null}
       </SettingsSection>
       {hasCloudPublicConfig() ? (
         <SettingsSection title="T3 Connect relay">
