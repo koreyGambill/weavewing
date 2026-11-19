@@ -7,7 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { migrationManifest, runMigrations } from "./Migrations.ts";
+import { migrationClassifications, migrationManifest, runMigrations } from "./Migrations.ts";
 
 const v2Migrations = migrationManifest.filter(([id]) => id >= 55);
 const newerMigrationId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
@@ -222,3 +222,12 @@ it.effect("registers every migration file", () =>
     );
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it("classifies every migration explicitly for local-update backups", () => {
+  assert.deepStrictEqual(
+    migrationClassifications.map(({ id, name }) => [id, name] as const),
+    migrationManifest,
+  );
+  for (const entry of migrationClassifications)
+    assert.strictEqual(typeof entry.destructive, "boolean");
+});

@@ -420,10 +420,15 @@ Activation installs the prepared Linux runtime, backs up state, then stops, swap
 health-checks. Preparation compares the installed runtime receipt's `commit` with the candidate's
 migration files, registry and startup migration helpers, plus the resolved Effect version. Activation
 reads the live database's recorded migrations read-only and verifies the receipt's runtime digest.
-Only matching source inputs and live migration records skip the large WSL `statev2.sqlite` copy.
-New or changed migrations, missing history, mismatched runtime provenance or unreadable migration
-records keep that copy enabled. Skipping the copy also leaves no manual-recovery database snapshot
-for that install.
+The candidate registry explicitly classifies every migration as destructive or additive. Activation
+copies the large WSL `statev2.sqlite` only when a candidate migration missing from the live ledger
+is destructive, or when migration history, classification or runtime provenance cannot be verified.
+Additive migrations preserve data and schema the previous build needs. Drops, renames, incompatible
+types and rewrites of existing data require a destructive classification. Older unreviewed migrations
+are classified conservatively. Changed historical migrations, startup helpers or the migration engine
+also require a copy. Skipping it records `additive-migrations-only` (or `migration-set-unchanged`)
+and leaves no manual-recovery database snapshot. Older builds tolerate unknown newer migration IDs
+and warn about them. Rollback then reuses the migrated database.
 Small state files, including settings, keybindings, secrets, environment identity and thread workspaces,
 are always backed up. Windows state still gets a complete backup on full updates. Activation does no
 build or archive smoke test. The Windows activation detaches so the calling thread can survive the
