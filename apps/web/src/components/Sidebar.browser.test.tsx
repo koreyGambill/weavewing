@@ -79,12 +79,36 @@ function project(id: string): Project {
 
 describe("sidebar header new thread", () => {
   it.each([
-    { mode: "normal", current: false, shift: false, opens: "default place" },
-    { mode: "boring", current: false, shift: false, opens: "default place" },
-    { mode: "boring", current: true, shift: true, opens: "current project" },
-    { mode: "boring", current: false, shift: true, opens: "default place" },
+    {
+      mode: "normal",
+      current: false,
+      button: "New thread in idle",
+      tooltip: "New thread in idle",
+      opens: "default place",
+    },
+    {
+      mode: "boring",
+      current: false,
+      button: "New thread in idle",
+      tooltip: "New thread in idle",
+      opens: "default place",
+    },
+    {
+      mode: "boring",
+      current: true,
+      button: "New thread in active",
+      tooltip: "New thread in active",
+      opens: "current project",
+    },
+    {
+      mode: "boring",
+      current: false,
+      button: "New thread in current project",
+      tooltip: "No current project, so this starts in idle",
+      opens: "default place",
+    },
   ] as const)(
-    "$mode sidebar, current=$current, shift=$shift opens the $opens",
+    "$mode sidebar, current=$current: $button opens the $opens",
     async (scenario) => {
       using stack = new DisposableStack();
       const previousSettings = getClientSettings();
@@ -132,10 +156,10 @@ describe("sidebar header new thread", () => {
         </SidebarProvider>,
       );
 
-      const button = screen.getByRole("button", { name: "New thread", exact: true });
+      const button = screen.getByRole("button", { name: scenario.button, exact: true });
       await userEvent.hover(button);
-      await expect.element(screen.getByText(/New thread in idle/)).toBeVisible();
-      await userEvent.click(button, { modifiers: scenario.shift ? ["Shift"] : [] });
+      await expect.element(screen.getByText(scenario.tooltip)).toBeVisible();
+      await userEvent.click(button);
 
       expect(openCommandPalette).not.toHaveBeenCalled();
       if (scenario.opens === "current project") {

@@ -123,7 +123,7 @@ import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
+import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -3250,23 +3250,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const startDefaultPlace = () =>
     void readScratchProjectActions(appAtomRegistry, handleNewThread).startDefaultPlace();
 
+  const currentProjectContext = {
+    activeDraftThread: newThreadContext.activeDraftThread,
+    activeThread: newThreadContext.activeThread ?? undefined,
+    defaultProjectRef: null,
+    handleNewThread,
+  };
+  const handleNewThreadInProjectClick = () => {
+    if (isMobile) setOpenMobile(false);
+    // Without a current thread or draft, this is New thread in the default place.
+    void startNewThreadFromContext(currentProjectContext).then((started) => {
+      if (!started) startDefaultPlace();
+    });
+  };
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
     if (event?.shiftKey) {
-      if (isMobile) setOpenMobile(false);
-      // Without a current thread or draft, this is New thread in the default place.
-      void startNewThreadFromContext({
-        activeDraftThread: newThreadContext.activeDraftThread,
-        activeThread: newThreadContext.activeThread ?? undefined,
-        defaultProjectRef: null,
-        handleNewThread,
-      }).then((started) => {
-        if (!started) startDefaultPlace();
-      });
+      handleNewThreadInProjectClick();
       return;
     }
     if (isMobile) setOpenMobile(false);
     startDefaultPlace();
   };
+  const currentProjectRef = resolveThreadActionProjectRef(currentProjectContext);
 
   const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new");
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
@@ -3511,11 +3516,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 </Combobox>
               }
               onNewThread={handleNewThreadClick}
+              onNewThreadInProject={handleNewThreadInProjectClick}
               newThreadDisabled={projects.length === 0 && defaultPlace.place.kind === "none"}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               defaultPlaceLabel={defaultPlace.label}
-              showNewThreadInProjectHint
+              currentProjectLabel={
+                currentProjectRef === null
+                  ? null
+                  : (projectDisplayNameByKey.get(
+                      `${currentProjectRef.environmentId}:${currentProjectRef.projectId}`,
+                    ) ?? null)
+              }
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {

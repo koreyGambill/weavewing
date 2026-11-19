@@ -1,4 +1,4 @@
-import { SquarePenIcon } from "lucide-react";
+import { MessageSquareDashedIcon, SquarePenIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -10,18 +10,21 @@ import {
 import { cn } from "~/lib/utils";
 import { SidebarMenuButton } from "../ui/sidebar";
 import { SidebarSearchField } from "./SidebarSearchField";
+import { resolveNewThreadButtons } from "./SidebarThreadHeader.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   projectScope: ReactNode;
   onNewThread: (event: ReactMouseEvent) => void;
+  onNewThreadInProject: () => void;
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
-  showNewThreadInProjectHint: boolean;
   /** Where New thread starts right now, as the default-place resolver names it. */
   defaultPlaceLabel: string | null;
+  /** The open thread's or draft's project; null when neither is open. */
+  currentProjectLabel: string | null;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -36,11 +39,12 @@ export function SidebarThreadHeader({
   hasProjects,
   projectScope,
   onNewThread,
+  onNewThreadInProject,
   newThreadDisabled,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
-  showNewThreadInProjectHint,
   defaultPlaceLabel,
+  currentProjectLabel,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
@@ -53,11 +57,12 @@ export function SidebarThreadHeader({
   const resultsVisible = isSearching && searchResultCount > 0;
   // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
-  const newThreadTitle =
-    defaultPlaceLabel === null ? "New thread" : `New thread in ${defaultPlaceLabel}`;
-  const newThreadLabel = newThreadShortcutLabel
-    ? `${newThreadTitle} (${newThreadShortcutLabel})`
-    : newThreadTitle;
+  const buttons = resolveNewThreadButtons({
+    defaultPlaceLabel,
+    currentProjectLabel,
+    newThreadShortcut: newThreadShortcutLabel,
+    newThreadInProjectShortcut: newThreadInProjectShortcutLabel,
+  });
 
   return (
     <div className="flex flex-col gap-1">
@@ -67,22 +72,18 @@ export function SidebarThreadHeader({
         </h2>
         <div className="flex shrink-0 items-center">
           <SidebarHeaderIconButton
-            label="New thread"
-            tooltip={
-              showNewThreadInProjectHint ? (
-                <span className="flex flex-col gap-0.5">
-                  <span>{newThreadLabel}</span>
-                  <span className="text-muted-foreground">
-                    New thread in current project: Shift+click
-                    {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
-                  </span>
-                </span>
-              ) : (
-                newThreadLabel
-              )
-            }
+            label={buttons.defaultPlace.label}
+            tooltip={buttons.defaultPlace.tooltip}
             disabled={newThreadDisabled}
             onClick={onNewThread}
+          >
+            <MessageSquareDashedIcon />
+          </SidebarHeaderIconButton>
+          <SidebarHeaderIconButton
+            label={buttons.currentProject.label}
+            tooltip={buttons.currentProject.tooltip}
+            disabled={newThreadDisabled}
+            onClick={onNewThreadInProject}
           >
             <SquarePenIcon />
           </SidebarHeaderIconButton>
