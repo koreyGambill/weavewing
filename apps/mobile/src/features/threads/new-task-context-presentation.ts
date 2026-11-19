@@ -18,6 +18,8 @@ export function resolveNewTaskWorkspaceSelection(input: {
     isGitRepo: input.isGitRepo,
     worktreeProvider: input.worktreeProvider,
   });
+  // A pull request draft keeps its checkout request; the screen says why it cannot start.
+  if (input.isGitRepo && selection.pullRequestReference) return selection;
   return input.isGitRepo && mode === selection.mode
     ? selection
     : { mode, branch: null, worktreePath: null };

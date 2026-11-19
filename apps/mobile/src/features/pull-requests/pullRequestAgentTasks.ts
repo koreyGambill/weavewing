@@ -21,6 +21,7 @@ export function pullRequestAgentThreadActions(
   threads: PullRequestLinkedThreadsResult["threads"],
   task: PullRequestAgentTask,
   canAsk: boolean,
+  newThreadBlockedReason: string | null = null,
 ): MenuAction[] {
   const active: MenuAction[] = [];
   const settled: MenuAction[] = [];
@@ -39,7 +40,18 @@ export function pullRequestAgentThreadActions(
     (thread.settled ? settled : active).push(action);
   }
   return [
-    ...(canAsk ? [{ id: `${task}:new`, title: "Start a new thread", image: "plus" }] : []),
+    ...(canAsk
+      ? [
+          {
+            id: `${task}:new`,
+            title: "Start a new thread",
+            image: "plus",
+            ...(newThreadBlockedReason === null
+              ? {}
+              : { subtitle: newThreadBlockedReason, attributes: { disabled: true } }),
+          },
+        ]
+      : []),
     ...active,
     ...(settled.length
       ? [{ id: `${task}:settled`, title: "Settled threads", subactions: settled }]

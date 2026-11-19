@@ -86,6 +86,11 @@ export function usePullRequestThreads(
   const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
   const canAsk = !connected || canOperate;
   const canCheckout = useEnvironmentScope(target.environmentId, AuthSourceControlWriteScope);
+  // A new PR thread needs an isolated checkout of the PR head, which "off" refuses.
+  const newThreadBlockedReason =
+    config?.settings.worktreeProvider === "off"
+      ? "New threads from a pull request need an isolated checkout, which this machine's Isolated checkouts setting turns off."
+      : null;
   const navigation = useNavigation();
   const pending = useRef(false);
   const previousPrompts = useRef(new Map<string, string>());
@@ -98,6 +103,10 @@ export function usePullRequestThreads(
   const [busy, setBusy] = useState(false);
   const ask = async (thread?: LinkedThread, task: PullRequestAgentTask = "ask") => {
     if (!pr || !canAsk || pending.current) return;
+    if (!thread && newThreadBlockedReason !== null) {
+      Dialog.alert("Can't start a thread", newThreadBlockedReason);
+      return;
+    }
     const terminology = sourceControlClients.get(pr.provider).changeRequest;
     pending.current = true;
     setBusy(true);
@@ -181,6 +190,7 @@ export function usePullRequestThreads(
     ...relations,
     threads,
     canAsk,
+    newThreadBlockedReason,
     canWatch: config?.environment.capabilities.threadPullRequestWatch === true,
     busy,
     ask,

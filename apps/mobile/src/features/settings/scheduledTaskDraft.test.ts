@@ -7,11 +7,21 @@ import {
   ProjectId,
 } from "@t3tools/contracts";
 import {
+  draftWorkspace,
   scheduledTaskDefaultModel,
   DEFAULT_SCHEDULE,
   scheduleDraftForTask,
   scheduleFromDraft,
 } from "./scheduledTaskDraft";
+
+describe("draftWorkspace", () => {
+  it("runs a new-worktree draft in the project checkout unless the machine allows T3 worktrees", () => {
+    expect(draftWorkspace({ workspace: "worktree" }, "t3")).toBe("worktree");
+    expect(draftWorkspace({ workspace: "worktree" }, "xwing")).toBe("root");
+    expect(draftWorkspace({ workspace: "worktree" }, "off")).toBe("root");
+    expect(draftWorkspace({ workspace: "existing_worktree" }, "off")).toBe("existing_worktree");
+  });
+});
 
 describe("scheduleDraftForTask", () => {
   it("opens legacy sub-minute schedules at the writable minimum", () => {

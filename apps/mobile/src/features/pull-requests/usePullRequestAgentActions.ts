@@ -33,7 +33,7 @@ export function usePullRequestAgentActions(
   const chooseThread =
     links.threads.length > 1 || links.threads.some((thread) => thread.settled || thread.archivedAt);
   const threadActions = (task: PullRequestAgentTask) =>
-    pullRequestAgentThreadActions(links.threads, task, links.canAsk);
+    pullRequestAgentThreadActions(links.threads, task, links.canAsk, links.newThreadBlockedReason);
   const menuAction = (task: PullRequestAgentTask) => {
     const action = actions.find((action) => action.task === task);
     const items = threadActions(task);

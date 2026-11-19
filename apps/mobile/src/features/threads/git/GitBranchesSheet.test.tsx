@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => ({ goBack() {} }) }));
 vi.mock("../../../components/ui/SheetHeader", () => ({ SheetHeader: () => null }));
+vi.mock("../../../components/ui/AppText", () => ({ AppText: () => null }));
+vi.mock("../../../state/entities", () => ({ useEnvironmentServerConfig: () => null }));
 vi.mock("../../../components/ui/FitSheet", () => ({
   FitSheet: ({ children }: { children: ReactNode }) => children,
 }));

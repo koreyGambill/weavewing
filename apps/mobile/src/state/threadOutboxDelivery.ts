@@ -1072,9 +1072,19 @@ export function createThreadOutboxDelivery(): {
     );
     if (!hasAccess()) return true;
     let workspace = creation;
+    // Under Xwing the PR head branch gets its own environment instead of a T3 worktree.
+    const xwingPullRequest =
+      Boolean(creation.pullRequestReference) && currentConfig.settings.worktreeProvider === "xwing";
     const launched = launchedCreations.get(persistedMessage.messageId);
     if (launched?.revision === deliveryRevision) {
       workspace = launched.workspace;
+    } else if (xwingPullRequest) {
+      workspace = {
+        ...creation,
+        workspaceMode: "worktree",
+        worktreePath: null,
+        startFromOrigin: true,
+      };
     } else if (creation.pullRequestReference) {
       const checkout = await runDeliveryCommand(gitEnvironment.preparePullRequestThread, {
         environmentId: queuedMessage.environmentId,
@@ -1132,7 +1142,10 @@ export function createThreadOutboxDelivery(): {
         branch: workspace.branch,
         worktreePath: workspace.worktreePath,
         startFromOrigin: workspace.startFromOrigin ?? false,
-        worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
+        worktreeBranchName:
+          xwingPullRequest && workspace.branch
+            ? workspace.branch
+            : buildTemporaryWorktreeBranchName(randomHex),
       }),
     });
     if (AsyncResult.isFailure(deliveryResult) && !hasAccess()) return true;

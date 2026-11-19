@@ -603,7 +603,8 @@ export function NewTaskDraftScreen(props: {
       !modelSelection ||
       (initialMessageText.length === 0 && draft.attachments.length === 0) ||
       flow.submitting ||
-      (workspaceMode === "worktree" && !selectedBranchName)
+      (workspaceMode === "worktree" && !selectedBranchName) ||
+      (workspaceSelection.pullRequestReference !== undefined && flow.worktreeProvider === "off")
     ) {
       return null;
     }
@@ -704,9 +705,12 @@ export function NewTaskDraftScreen(props: {
         ? "Wait for the project clone to finish."
         : flow.submitting
           ? "Starting the thread…"
-          : flow.workspaceMode === "worktree" && (!flow.selectedBranchName || !flow.isGitRepoKnown)
-            ? "Choose a base branch before creating a worktree."
-            : null
+          : flow.pullRequestReference !== undefined && flow.worktreeProvider === "off"
+            ? "This pull request needs an isolated checkout, which this machine's Isolated checkouts setting turns off."
+            : flow.workspaceMode === "worktree" &&
+                (!flow.selectedBranchName || !flow.isGitRepoKnown)
+              ? "Choose a base branch before creating a worktree."
+              : null
       : "Wait for shared content to finish importing.";
   const chooseProject = () => {
     if (isComposerInteractionLocked) {

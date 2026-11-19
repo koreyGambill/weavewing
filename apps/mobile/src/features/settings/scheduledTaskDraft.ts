@@ -10,6 +10,7 @@ import type {
   ScheduledTaskUpsertSchedule,
   ScheduledTaskWebhookSignature,
   ThreadId,
+  WorktreeProvider,
 } from "@t3tools/contracts";
 
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
@@ -204,6 +205,14 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
 }
 
 type Workspace = "worktree" | "root" | "existing_worktree";
+
+/** What a draft runs in on a machine with `worktreeProvider`: without T3 worktrees, the project checkout. */
+export function draftWorkspace(
+  draft: Pick<ScheduledTaskDraft, "workspace">,
+  worktreeProvider: WorktreeProvider,
+): Workspace {
+  return draft.workspace === "worktree" && worktreeProvider !== "t3" ? "root" : draft.workspace;
+}
 export type ScheduledTaskDraft = {
   readonly task: ScheduledTask | null;
   readonly title: string;

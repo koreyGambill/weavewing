@@ -52,6 +52,14 @@ describe("PR agent tasks", () => {
     expect(pullRequestAgentThreadActions([archived], "feedback", true)[1]).toMatchObject({
       attributes: { disabled: true },
     });
+    // A machine that refuses isolated checkouts keeps the choice visible but disabled with why.
+    expect(
+      pullRequestAgentThreadActions([thread], "ask", true, "No isolated checkouts here.")[0],
+    ).toMatchObject({
+      id: "ask:new",
+      subtitle: "No isolated checkouts here.",
+      attributes: { disabled: true },
+    });
   });
   it("replaces the helper's own text when switching tasks, keeping user edits", () => {
     const first = appendPullRequestAgentPrompt("My question", "explain", GITHUB);

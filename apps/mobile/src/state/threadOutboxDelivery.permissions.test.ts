@@ -40,6 +40,7 @@ const state = vi.hoisted(() => ({
     session: null,
   },
   config: {
+    settings: { worktreeProvider: "t3" as "t3" | "xwing" | "off" },
     shellThreadFamilies: false,
     providers: [{ instanceId: "codex", driver: "codex", models: [] }],
     environment: { capabilities: {} },
@@ -211,6 +212,7 @@ beforeEach(() => {
   setOperateGrant("secondary", false);
   state.draftText = "Keep this draft separate";
   state.config.shellThreadFamilies = false;
+  state.config.settings.worktreeProvider = "t3";
   state.modelUnavailable.mockReset().mockReturnValue(false);
   state.familyMount.mockReset().mockReturnValue(() => {});
   appAtomRegistry.set(state.threadShells, [state.thread]);
@@ -281,6 +283,22 @@ describe("queued PR checkout", () => {
       worktreePath: preparedCheckout.worktreePath,
     });
     expect(bootstrap.prepareWorktree).toBeUndefined();
+    expect(remaining()).toEqual([]);
+  });
+
+  it("starts a PR task in an Xwing environment of its head branch under worktreeProvider xwing", async () => {
+    setOperateGrant("secondary", true);
+    state.config.settings.worktreeProvider = "xwing";
+    await state.manager.enqueue(queuedPullRequest());
+    await runDrain();
+    expect(state.checkout).not.toHaveBeenCalled();
+    expect(state.start).toHaveBeenCalledOnce();
+    const bootstrap = state.start.mock.calls[0]?.[0].input.bootstrap;
+    expect(bootstrap.prepareWorktree).toMatchObject({
+      baseBranch: "fork/feature",
+      branch: "fork/feature",
+      startFromOrigin: true,
+    });
     expect(remaining()).toEqual([]);
   });
 

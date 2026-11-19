@@ -76,6 +76,7 @@ import { SettingsSection } from "./components/SettingsSection";
 import { useSettingsEnvironmentFilter, type SettingsTarget } from "./settings-environment-filter";
 import {
   changeDraftProject,
+  draftWorkspace,
   editDraft,
   parseIntervalMinutes,
   scheduledTaskDefaultModel,
@@ -735,6 +736,8 @@ function TaskForm({
     config?.environment.capabilities.oneTimeSchedules === true ||
     draft.task?.schedule.type === "once";
   const offersThreadModes = config?.environment.capabilities.scheduledTaskThreadModes === true;
+  const worktreeProvider = config?.settings?.worktreeProvider ?? "t3";
+  const workspace = draftWorkspace(draft, worktreeProvider);
   const save = async () => {
     const current = readEditor();
     if (!current || current.environmentId !== environmentId) return;
@@ -790,7 +793,8 @@ function TaskForm({
       !draft.projectId ||
       !draft.modelSelection ||
       !schedule ||
-      (draft.workspace === "existing_worktree" && !draft.checkoutPath.trim())
+      (draftWorkspace(draft, worktreeProvider) === "existing_worktree" &&
+        !draft.checkoutPath.trim())
     ) {
       Dialog.alert(
         "Incomplete task",
@@ -813,9 +817,9 @@ function TaskForm({
       threadId: draft.threadId,
       ...(offersThreadModes ? { threadMode: draft.threadMode } : {}),
       workspaceStrategy:
-        draft.workspace === "root"
+        draftWorkspace(draft, worktreeProvider) === "root"
           ? { type: "root" }
-          : draft.workspace === "existing_worktree"
+          : draftWorkspace(draft, worktreeProvider) === "existing_worktree"
             ? { type: "existing_worktree", worktreePath: draft.checkoutPath.trim() }
             : {
                 type: "worktree",
@@ -1005,27 +1009,31 @@ function TaskForm({
           <SelectRow
             label="Run in"
             value={
-              draft.workspace === "worktree"
+              workspace === "worktree"
                 ? "New worktree"
-                : draft.workspace === "root"
+                : workspace === "root"
                   ? "Project checkout"
                   : "Specific checkout"
             }
             actions={[
-              {
-                id: "worktree",
-                title: "New worktree",
-                state: draft.workspace === "worktree" ? "on" : undefined,
-              },
+              ...(worktreeProvider === "t3"
+                ? [
+                    {
+                      id: "worktree",
+                      title: "New worktree",
+                      state: workspace === "worktree" ? ("on" as const) : undefined,
+                    },
+                  ]
+                : []),
               {
                 id: "root",
                 title: "Project checkout",
-                state: draft.workspace === "root" ? "on" : undefined,
+                state: workspace === "root" ? "on" : undefined,
               },
               {
                 id: "existing_worktree",
                 title: "Specific checkout",
-                state: draft.workspace === "existing_worktree" ? "on" : undefined,
+                state: workspace === "existing_worktree" ? "on" : undefined,
               },
             ]}
             onSelect={(id) => {
@@ -1033,7 +1041,7 @@ function TaskForm({
                 setDraft((current) => ({ ...current, workspace: id }));
             }}
           />
-          {draft.workspace === "worktree" ? (
+          {workspace === "worktree" ? (
             <PickerRow
               label="Base branch"
               value={resolveNewTaskBranchLabel({
@@ -1046,7 +1054,7 @@ function TaskForm({
               onPress={() => navigation.navigate("SettingsScheduledTaskBranch")}
             />
           ) : null}
-          {draft.workspace === "existing_worktree" ? (
+          {workspace === "existing_worktree" ? (
             <FormField
               label="Checkout path"
               disabled={saving}

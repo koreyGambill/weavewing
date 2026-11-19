@@ -10,6 +10,7 @@ const checkout = vi.hoisted(() => ({
 
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => ({}) }));
 vi.mock("../../../components/ui/SheetHeader", () => ({ SheetHeader: () => null }));
+vi.mock("../../../components/ui/AppText", () => ({ AppText: () => null }));
 vi.mock("../../../components/ui/FitSheet", () => ({
   FitSheet: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
@@ -30,7 +31,7 @@ vi.mock("../../../components/ui/ListChoiceRow", () => ({
   ),
 }));
 vi.mock("./gitSheetComponents", () => ({ SheetActionButton: () => null }));
-vi.mock("../../../state/entities", () => ({}));
+vi.mock("../../../state/entities", () => ({ useEnvironmentServerConfig: () => null }));
 vi.mock("../../../state/threads", () => ({}));
 vi.mock("../../../state/use-thread-selection", () => ({
   useThreadSelection: () => ({

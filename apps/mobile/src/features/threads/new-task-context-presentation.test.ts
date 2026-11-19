@@ -72,6 +72,21 @@ describe("resolveNewTaskWorkspaceSelection", () => {
         worktreeProvider: "off",
       }),
     ).toEqual({ mode: "local", branch: null, worktreePath: null });
+    // A pull request draft is not quietly moved to the current checkout.
+    const pullRequest = {
+      mode: "worktree",
+      branch: "feature",
+      worktreePath: null,
+      pullRequestReference: "https://github.com/acme/app/pull/7",
+    } as const;
+    expect(
+      resolveNewTaskWorkspaceSelection({
+        selection: pullRequest,
+        fallback,
+        isGitRepo: true,
+        worktreeProvider: "off",
+      }),
+    ).toBe(pullRequest);
   });
 });
 

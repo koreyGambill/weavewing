@@ -2,11 +2,13 @@ import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
 
+import { AppText as Text } from "../../../components/ui/AppText";
 import { SheetHeader } from "../../../components/ui/SheetHeader";
 import { FitSheet } from "../../../components/ui/FitSheet";
 import { FormField, FormSection } from "../../../components/ui/FormSection";
 import { ListChoiceRow } from "../../../components/ui/ListChoiceRow";
 import { ListSection } from "../../../components/ui/ListSection";
+import { useEnvironmentServerConfig } from "../../../state/entities";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
@@ -27,6 +29,9 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const { canChangeThreadBranch } = gitActions;
+  const worktreeProvider =
+    useEnvironmentServerConfig(selectedThread?.environmentId ?? null)?.settings.worktreeProvider ??
+    "t3";
 
   const gitStatus = useEnvironmentQuery(
     selectedThread !== null && selectedThreadCwd !== null
@@ -89,6 +94,11 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
       </FormSection>
 
       <FormSection title="New worktree">
+        {worktreeProvider === "t3" ? null : (
+          <Text className="text-sm text-foreground-secondary">
+            This machine's Isolated checkouts setting does not allow T3 worktrees.
+          </Text>
+        )}
         <FormField
           label="Base branch"
           value={worktreeBaseBranch}
@@ -108,6 +118,7 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
           label="Create worktree"
           tone="primary"
           disabled={
+            worktreeProvider !== "t3" ||
             !canChangeThreadBranch ||
             busy ||
             worktreeBaseBranch.trim().length === 0 ||
