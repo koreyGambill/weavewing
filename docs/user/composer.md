@@ -438,8 +438,9 @@ choose one of these options:
   outside the workspace, from this workspace while it is open. Each worktree is a
   separate workspace.
 
-Grants are saved on the environment. The agent and every connected client
-allowed to write files and run terminals can use them. To turn editing off, select the
+Grants are saved on the environment. Every connected client allowed to write
+files and run terminals can use them. Agents edit files through their own tools,
+which these grants don't control. To turn editing off, select the
 **Editable outside workspace** badge. The badge lists every grant on the
 environment, and you can remove each one there. T3 Code never edits files in
 credential folders, git metadata, hard-linked files, or its own state.

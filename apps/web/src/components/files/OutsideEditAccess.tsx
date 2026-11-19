@@ -164,11 +164,13 @@ export function OutsideEditAccess({
                 <p>
                   <strong>Allow any file on this machine</strong> lets you edit every file on this
                   machine outside the workspace, from this workspace while it is open. Only
-                  credential folders, git metadata and T3 Code's own folders stay read-only.
+                  credential folders, git metadata, hard-linked files and T3 Code's own folders stay
+                  read-only.
                 </p>
                 <p>
-                  The agent and any client allowed to run terminals can use either grant. Turn
-                  editing off again from the file's lock badge.
+                  Clients allowed to write files and run terminals can use either grant. Agents edit
+                  through their own tools, which these grants don't control. Turn editing off again
+                  from the file's lock badge.
                 </p>
               </div>
             </AlertDialogDescription>
