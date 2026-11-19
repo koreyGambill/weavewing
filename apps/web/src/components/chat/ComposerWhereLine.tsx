@@ -14,6 +14,7 @@ import { registerCommands } from "~/shortcuts/dispatcher";
 import { useProject } from "~/state/entities";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { InlineButton } from "../ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl } from "./ComposerControl";
 import { DraftProjectPicker } from "./DraftProjectPicker";
@@ -153,9 +154,19 @@ export function ComposerWhereLine({
         {...(onComposerFocusRequest ? { onClose: onComposerFocusRequest } : {})}
       />
       {unavailable === null ? null : (
-        <span className="min-w-0 truncate text-muted-foreground text-xs">
-          Default is unavailable: {unavailable}
-        </span>
+        <Popover>
+          <PopoverTrigger
+            openOnHover
+            render={
+              <ComposerControl size="xs" aria-label={`Default is unavailable: ${unavailable}`} />
+            }
+          >
+            Default unavailable
+          </PopoverTrigger>
+          <PopoverPopup side="top" padding="compact" width="sm">
+            Default is unavailable: {unavailable}
+          </PopoverPopup>
+        </Popover>
       )}
       {atResolvedPlace || resolved.kind === "none" ? null : (
         <span className="shrink-0 text-xs">
