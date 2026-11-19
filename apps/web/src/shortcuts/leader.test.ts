@@ -3,7 +3,7 @@ import {
   compileResolvedKeybindingsConfig,
   DEFAULT_RESOLVED_KEYBINDINGS,
 } from "@t3tools/shared/keybindings";
-import { createLeaderHandler, LEADER_TIMEOUT_MS } from "./leader";
+import { createLeaderHandler } from "./leader";
 
 const event = (key: string, ctrlKey = false, repeat = false) => ({
   key,
@@ -34,13 +34,16 @@ it.each(["Linux", "Win32", "MacIntel"])(
     expect(handler.handle(event("a", true))).toBe("passthrough");
     expect(changed).toHaveBeenLastCalledWith(false);
     expect(handler.handle(event("a", true))).toBe("prefix");
+    vi.advanceTimersByTime(100);
     expect(handler.handle(event("Shift"))).toBeNull();
     expect(handler.handle({ ...event("%"), shiftKey: true })).toBe("sequence");
     expect(handler.handle(event("a", true))).toBe("prefix");
     expect(handler.handle(event("Escape"))).toBe("cancel");
     expect(handler.handle(event("h"))).toBeNull();
     expect(handler.handle(event("a", true))).toBe("prefix");
-    vi.advanceTimersByTime(LEADER_TIMEOUT_MS);
+    vi.advanceTimersByTime(199);
+    expect(changed).toHaveBeenLastCalledWith(true);
+    vi.advanceTimersByTime(1);
     expect(changed).toHaveBeenLastCalledWith(false);
     expect(handler.handle(event("h"))).toBeNull();
     keybindings = compileResolvedKeybindingsConfig([

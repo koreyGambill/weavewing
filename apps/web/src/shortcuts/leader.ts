@@ -2,13 +2,14 @@ import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { leaderEnabled, matchesKeybindingShortcut } from "@t3tools/shared/keybindings";
 import type { ShortcutEventLike } from "../keybindings";
 
-export const LEADER_TIMEOUT_MS = 1500;
+const LEADER_TIMEOUT_MS = 200;
 
 /** Owns the pending prefix; the caller resolves the second key in its current focus context. */
 export function createLeaderHandler(input: {
   keybindings: () => ResolvedKeybindingsConfig;
   platform: () => string;
   changed: (active: boolean) => void;
+  prepareDefaultTimeout?: (event: ShortcutEventLike) => (() => void) | undefined;
 }) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active = false;
@@ -40,7 +41,15 @@ export function createLeaderHandler(input: {
       if (!event.repeat) {
         active = true;
         input.changed(true);
-        timer = setTimeout(cancel, LEADER_TIMEOUT_MS);
+        const { key, ctrlKey, shiftKey, altKey, metaKey, modKey } = leader.shortcut;
+        const onTimeout =
+          key === "a" && ctrlKey && !shiftKey && !altKey && !metaKey && !modKey
+            ? input.prepareDefaultTimeout?.(event)
+            : undefined;
+        timer = setTimeout(() => {
+          cancel();
+          onTimeout?.();
+        }, LEADER_TIMEOUT_MS);
       }
       return "prefix";
     },
