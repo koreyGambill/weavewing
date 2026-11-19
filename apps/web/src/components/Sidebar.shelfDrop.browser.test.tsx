@@ -48,7 +48,9 @@ const threads = [
 
 async function renderSidebar() {
   await page.viewport(1400, 900);
-  const environment = installFakeEnvironment(threads);
+  // A failed wait below still unmounts the app and the fake environment.
+  await using stack = new AsyncDisposableStack();
+  stack.use(installFakeEnvironment(threads));
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -57,17 +59,14 @@ async function renderSidebar() {
     createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${threads[0]!.id}`] }),
   );
   await router.load();
-  const app = await render(<AppRoot router={router} />, {
-    // AppRoot brings its own router.
-    router: false,
-  });
+  stack.use(
+    await render(<AppRoot router={router} />, {
+      // AppRoot brings its own router.
+      router: false,
+    }),
+  );
   await expect.element(page.getByRole("button", { name: /^Thread second/ })).toBeVisible();
-  return {
-    async [Symbol.asyncDispose]() {
-      await app[Symbol.asyncDispose]();
-      environment[Symbol.dispose]();
-    },
-  };
+  return stack.move();
 }
 
 const row = (thread: (typeof threads)[number]) =>
