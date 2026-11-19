@@ -62,20 +62,28 @@ const sshHostSuggestionValue = (target: DesktopDiscoveredSshHost) =>
   target.port === null ? target.alias : `[${target.alias}]:${target.port}`;
 
 /**
- * The fields and Add button for one way of adding a computer: a link or address with a pairing
- * code, or SSH. With `routeTarget` set it adds another route to that saved computer instead.
- * Progress and errors show in place; `onAdded` runs once the computer is saved.
+ * The fields for one way of adding a computer: a link or address with a pairing code, or SSH.
+ * With `routeTarget` set it adds another route to that saved computer instead. Progress and
+ * errors show in place; `onAdded` runs once the computer is saved.
  */
 export function AddComputerFields({
   mode,
   routeTarget,
   savedEnvironments,
   onAdded,
+  formId,
+  onSubmitEmpty,
+  onBusyChange,
 }: {
   readonly mode: AddComputerMode;
   readonly routeTarget: EnvironmentPresentation | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
   readonly onAdded: () => void;
+  /** Set when a button outside, such as a wizard's Next, submits the fields; hides their own. */
+  readonly formId?: string;
+  /** Runs instead of an error when the fields are submitted empty; true when it moved on. */
+  readonly onSubmitEmpty?: () => boolean;
+  readonly onBusyChange?: (busy: boolean) => void;
 }) {
   const desktopBridge = window.desktopBridge;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -95,7 +103,11 @@ export function AddComputerFields({
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
   const [sshHostSuggestionsOpen, setSshHostSuggestionsOpen] = useState(false);
   const highlightedSshHostRef = useRef<DesktopDiscoveredSshHost | undefined>(undefined);
-  const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
+  const [isAddingSavedBackend, setIsAddingSavedBackendState] = useState(false);
+  const setIsAddingSavedBackend = (busy: boolean) => {
+    setIsAddingSavedBackendState(busy);
+    onBusyChange?.(busy);
+  };
   const savedBackendSessionRef = useRef(0);
   const mounted = useRef(true);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an add still running when the fields close must not report into whatever opens next
@@ -183,6 +195,20 @@ export function AddComputerFields({
   };
 
   const handleAddSavedBackend = async () => {
+    if (isAddingSavedBackend) return;
+    const empty =
+      mode === "ssh"
+        ? savedBackendSshHost.trim() === ""
+        : savedBackendHost.trim() === "" && savedBackendPairingCode.trim() === "";
+    if (empty) {
+      if (onSubmitEmpty?.()) return;
+      onErrorChange(
+        mode === "ssh"
+          ? "Enter its SSH host or alias first."
+          : "Enter its address and pairing code first, or paste its pairing link.",
+      );
+      return;
+    }
     if (mode === "ssh") {
       let target: DesktopSshEnvironmentTarget;
       try {
@@ -406,6 +432,13 @@ export function AddComputerFields({
       description: `${routeTarget.label} falls back to T3 Connect when its other routes are unreachable.`,
     });
   };
+  const submitButton =
+    formId === undefined ? (
+      <Button type="submit" variant="outline" className="w-full" disabled={isAddingSavedBackend}>
+        <PlusIcon className="size-3.5" />
+        {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add computer"}
+      </Button>
+    ) : null;
   const renderRemoteModeBody = () => (
     <div className="space-y-4">
       {relayRouteOffer !== null ? (
@@ -424,16 +457,12 @@ export function AddComputerFields({
         </div>
       ) : null}
       {renderRemoteFields()}
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      <Button
-        variant="outline"
-        className="w-full"
-        disabled={isAddingSavedBackend}
-        onClick={() => void handleAddSavedBackend()}
-      >
-        <PlusIcon className="size-3.5" />
-        {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add computer"}
-      </Button>
+      {error ? (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {submitButton}
     </div>
   );
   const renderSshFields = () => (
@@ -548,18 +577,21 @@ export function AddComputerFields({
             <AlertDescription>{error ?? discoveredSshHostsError}</AlertDescription>
           </Alert>
         ) : null}
-        <Button
-          variant="outline"
-          className="w-full"
-          disabled={isAddingSavedBackend}
-          onClick={() => void handleAddSavedBackend()}
-        >
-          <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add computer"}
-        </Button>
+        {submitButton}
       </div>
     </div>
   );
 
-  return mode === "ssh" ? renderSshFields() : renderRemoteModeBody();
+  return (
+    <form
+      id={formId}
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleAddSavedBackend();
+      }}
+    >
+      {mode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
+    </form>
+  );
 }

@@ -132,6 +132,10 @@ export function ConnectWizard({
   const saved = servers
     .map((server) => server.environment)
     .filter((environment) => environment.entry.target._tag !== "PrimaryConnectionTarget");
+  const [adding, setAdding] = useState(false);
+  // On a computer's How step, Next submits its fields, so Access opens only with one added.
+  const addsComputer = step === 1 && kind === "computer" && (how === "address" || how === "ssh");
+  const hasComputer = otherComputers(servers).length > 0;
 
   return (
     <SettingsSearchTarget {...searchableSetting("connect")} className="px-3 sm:px-4">
@@ -140,6 +144,8 @@ export function ConnectWizard({
         onOpenChange={(next) => {
           if (next) set({ open: true });
           else useWizardStore.setState(CLOSED);
+          // An add cut short by closing never reports back, so it cannot stay busy.
+          setAdding(false);
         }}
       >
         <DialogTrigger
@@ -164,7 +170,9 @@ export function ConnectWizard({
               <Tiles<Kind>
                 label="What are you connecting?"
                 value={kind}
-                onChange={(next) => set({ kind: next, how: null })}
+                onChange={(next) =>
+                  set({ kind: next, how: next === "computer" ? "address" : null })
+                }
                 options={[
                   {
                     value: "device",
@@ -183,7 +191,10 @@ export function ConnectWizard({
                 <Tiles<How>
                   label="How will it get here?"
                   value={how}
-                  onChange={(next) => set({ how: next })}
+                  onChange={(next) => {
+                    set({ how: next });
+                    setAdding(false);
+                  }}
                   options={howChoices}
                 />
                 {kind === "computer" && (how === "address" || how === "ssh") ? (
@@ -193,16 +204,31 @@ export function ConnectWizard({
                       mode={how === "ssh" ? "ssh" : "remote"}
                       routeTarget={null}
                       savedEnvironments={saved}
+                      formId={ADD_COMPUTER_FORM_ID}
                       onAdded={() => set({ step: 2 })}
+                      onSubmitEmpty={() => {
+                        if (hasComputer) set({ step: 2 });
+                        return hasComputer;
+                      }}
+                      onBusyChange={setAdding}
                     />
-                    <p className="text-xs text-muted-foreground">Already added? Go on to Access.</p>
+                    {hasComputer ? (
+                      <p className="text-xs text-muted-foreground">
+                        Already added it? Leave the fields empty and press Next.
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
             ) : kind === "device" ? (
               <PairDeviceForm servers={servers} qr={how === "qr"} />
             ) : (
-              <ConnectComputerForm model={model} servers={servers} change={change} />
+              <ConnectComputerForm
+                model={model}
+                servers={servers}
+                change={change}
+                onBack={() => set({ step: 1 })}
+              />
             )}
           </WizardPanel>
           <WizardFooter
@@ -214,7 +240,11 @@ export function ConnectWizard({
               ) : null
             }
           >
-            {step < 2 ? (
+            {addsComputer ? (
+              <Button type="submit" form={ADD_COMPUTER_FORM_ID} disabled={adding}>
+                {adding ? "Adding…" : "Next"}
+              </Button>
+            ) : step < 2 ? (
               <Button disabled={!ready} onClick={() => set({ step: step + 1 })}>
                 Next
               </Button>
@@ -229,6 +259,16 @@ export function ConnectWizard({
     </SettingsSearchTarget>
   );
 }
+
+const ADD_COMPUTER_FORM_ID = "connect-wizard-add-computer";
+
+// Saved computers this app could link, newest last; never the page's own server or this desktop's.
+const otherComputers = (servers: ReadonlyArray<ReachServer>) =>
+  servers.filter(
+    (server) =>
+      !server.input.onThisComputer &&
+      server.environment.entry.target._tag !== "PrimaryConnectionTarget",
+  );
 
 // The server that served this app comes first, as the likeliest one to pair with.
 const pairingTarget = (servers: ReadonlyArray<ReachServer>) =>
@@ -559,20 +599,16 @@ function ConnectComputerForm({
   model,
   servers,
   change,
+  onBack,
 }: {
   readonly model: ReachModel;
   readonly servers: ReadonlyArray<ReachServer>;
   readonly change: SquareChangeState;
+  readonly onBack: () => void;
 }) {
   const [computerId, setComputerId] = useState<EnvironmentId | null>(
-    // The computer just added is the last one saved; the page's own server is never it.
-    servers
-      .filter(
-        (server) =>
-          !server.input.onThisComputer &&
-          server.environment.entry.target._tag !== "PrimaryConnectionTarget",
-      )
-      .at(-1)?.input.environmentId ?? null,
+    // The computer just added is the last one saved.
+    otherComputers(servers).at(-1)?.input.environmentId ?? null,
   );
   const computer =
     computerId === null
@@ -588,7 +624,14 @@ function ConnectComputerForm({
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<ReadonlyMap<string, string | null>>(new Map());
   if (computer === null) {
-    return <p className="text-sm text-muted-foreground">Add the computer first.</p>;
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span>No computer is added yet.</span>
+        <Button size="sm" variant="outline" onClick={onBack}>
+          Add one
+        </Button>
+      </div>
+    );
   }
   const choice = {
     uses: others.filter((other) => uses.has(other.id)),
