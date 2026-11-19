@@ -603,6 +603,14 @@ const make = Effect.gen(function* () {
             }),
         )
         .map((rule) => {
+          if (
+            isSameKeybindingRule(rule, {
+              key: "mod+alt+shift+o",
+              command: "projectPicker.open",
+              when: "!terminalFocus",
+            })
+          )
+            return { ...rule, key: "mod+shift+o" };
           if (!migrateTerminalKeys) return rule;
           if (
             !closeConflict &&
@@ -631,14 +639,6 @@ const make = Effect.gen(function* () {
             rule.when === undefined
           )
             return { ...rule, when: "isMac || !terminalFocus" };
-          if (
-            isSameKeybindingRule(rule, {
-              key: "mod+alt+shift+o",
-              command: "projectPicker.open",
-              when: "!terminalFocus",
-            })
-          )
-            return { ...rule, key: "mod+shift+o" };
           return rule;
         });
       const existingCommands = new Set(customConfig.map((entry) => entry.command));

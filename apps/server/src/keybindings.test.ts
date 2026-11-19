@@ -833,13 +833,22 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         upgraded.filter((rule) => rule.key === "mod+shift+o" || rule.key === "mod+alt+shift+o"),
         [{ key: "mod+shift+o", command: "projectPicker.open", when: "!terminalFocus" }],
       );
-      yield* writeKeybindingsConfig(keybindingsConfigPath, [legacy, custom]);
+      const oldPickerKey = {
+        key: "mod+alt+shift+o",
+        command: "projectPicker.open",
+        when: "!terminalFocus",
+      } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [legacy, custom, oldPickerKey]);
       yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const later = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
-        (yield* readKeybindingsConfig(keybindingsConfigPath)).filter(
-          (rule) => rule.command === "workspace.tile.closeTab",
-        ),
+        later.filter((rule) => rule.command === "workspace.tile.closeTab"),
         [legacy],
+      );
+      // The picker key moves even after the terminal-key migration has run.
+      assert.deepEqual(
+        later.filter((rule) => rule.command === "projectPicker.open"),
+        [{ ...oldPickerKey, key: "mod+shift+o" }],
       );
     }).pipe(Effect.provide(layerKeybindings())),
   );
