@@ -272,7 +272,23 @@ const dropdownKey: KeybindingRule = { key: "mod+j", command: "terminal.dropdown"
  * Moves the untouched drop-down key to Ctrl/Cmd+J, which the thread terminal gives up for the
  * leader then j. Each rule moves only when its new key is free or held by the rule it replaces.
  */
-function moveDropdownKey(rules: readonly KeybindingRule[]): readonly KeybindingRule[] {
+function takesModJ(rule: KeybindingRule): boolean {
+  const shortcut = parseKeybindingShortcut(rule.key);
+  return (
+    shortcut !== null &&
+    shortcut.leader !== true &&
+    shortcut.key === "j" &&
+    !shortcut.altKey &&
+    !shortcut.shiftKey &&
+    (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
+  );
+}
+
+/** `focusDownElsewhere`: whether Focus Down keeps a working key once Leader then j moves. */
+function moveDropdownKey(
+  rules: readonly KeybindingRule[],
+  focusDownElsewhere: boolean,
+): readonly KeybindingRule[] {
   const oldToggle: KeybindingRule = {
     key: "mod+j",
     command: "terminal.toggle",
@@ -284,11 +300,8 @@ function moveDropdownKey(rules: readonly KeybindingRule[]): readonly KeybindingR
   let next = rules;
   if (
     rules.some((rule) => isSameKeybindingRule(rule, oldDropdown)) &&
-    !rules.some(
-      (rule) =>
-        !isSameKeybindingRule(rule, oldToggle) &&
-        encodedShortcut(rule) === encodedShortcut(dropdownKey),
-    )
+    // Ctrl+J and Meta+J are Ctrl/Cmd+J on one platform each, so either keeps the old key.
+    !rules.some((rule) => !isSameKeybindingRule(rule, oldToggle) && takesModJ(rule))
   ) {
     next = next
       .filter((rule) => !isSameKeybindingRule(rule, oldToggle))
@@ -300,7 +313,7 @@ function moveDropdownKey(rules: readonly KeybindingRule[]): readonly KeybindingR
       !isSameKeybindingRule(rule, leaderToggle) &&
       encodedShortcut(rule) === encodedShortcut(leaderToggle),
   );
-  if (!leaderKeyTaken) {
+  if (!leaderKeyTaken && focusDownElsewhere) {
     // The leader preset may already have added the new rule beside the old one.
     const hasToggle = next.some((rule) => isSameKeybindingRule(rule, leaderToggle));
     next = hasToggle
@@ -882,6 +895,20 @@ const make = Effect.gen(function* () {
             return { ...rule, when: "isMac || !terminalFocus" };
           return rule;
         });
+      const repairSearchKey = !appliedMigrationIds.has(SEARCH_KEY_REPAIR);
+      if (
+        repairSearchKey &&
+        !customConfig.some(
+          (rule) =>
+            !isSameKeybindingRule(rule, strandedFilePickerKey) &&
+            encodedShortcut(rule) === encodedShortcut(strandedFilePickerKey),
+        )
+      )
+        customConfig = customConfig.map((rule) =>
+          isSameKeybindingRule(rule, strandedFilePickerKey)
+            ? { key: "mod+k", command: "search.toggle" }
+            : rule,
+        );
       if (migrateLeader) customConfig = [...switchTilePreset(customConfig, enabled)];
       // Reached only with a clean config, so the id below records a repair or a file needing none.
       const migrateNewThreadKey = !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION);
@@ -924,14 +951,15 @@ const make = Effect.gen(function* () {
       }
       // After the late defaults, which still find the old Leader then j beside its arrow key.
       const migrateDropdownKey = !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION);
-      if (migrateDropdownKey) customConfig = [...moveDropdownKey(customConfig)];
-      const repairSearchKey = !appliedMigrationIds.has(SEARCH_KEY_REPAIR);
-      if (repairSearchKey)
-        customConfig = customConfig.map((rule) =>
-          isSameKeybindingRule(rule, strandedFilePickerKey)
-            ? { key: "mod+k", command: "search.toggle" }
-            : rule,
-        );
+      if (migrateDropdownKey)
+        customConfig = [
+          ...moveDropdownKey(
+            customConfig,
+            [...customConfig, ...missingDefaults].some(
+              (rule) => rule.command === "workspace.tile.focusDown" && rule.key !== "leader j",
+            ),
+          ),
+        ];
       for (const conflict of shortcutConflictWarnings) {
         yield* Effect.logWarning("skipping default keybinding due to shortcut conflict", {
           path: keybindingsConfigPath,

@@ -109,7 +109,11 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       leader: true,
       context: input.getShortcutContext(event.target),
     });
-    const run = command ? (input.commands[command] ?? input.fallback(command)) : undefined;
+    const run = command
+      ? (input.commands[command] ??
+        composerShortcutCommands(input.composerRef, input.branchToolbarRef)[command] ??
+        input.fallback(command))
+      : undefined;
     if (!run || run({ event, terminalFocusOwner: getTerminalFocusOwner() }) === false) return false;
     event.preventDefault();
   });

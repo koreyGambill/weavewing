@@ -665,12 +665,20 @@ export function ThreadTileWorkspace(props: {
     const moveFocus = (direction: "left" | "right" | "up" | "down") => {
       const group = currentGroup();
       if (!group) return;
-      // From a maximized tile, a move restores the layout and goes where the tiles sit there.
       const current = currentLayout();
-      const restoring = Boolean(current.maximizedGroupId) && !current.besideGroupId;
-      const next = directionalTile(visibleGeometry(restoring), group.id, direction);
+      // A pair moves within itself first; any other move from a maximized view restores the
+      // layout and goes where the tiles sit there.
+      const shown = current.besideGroupId
+        ? directionalTile(visibleGeometry(), group.id, direction)
+        : null;
+      if (shown || !current.maximizedGroupId) {
+        const next = shown ?? directionalTile(visibleGeometry(), group.id, direction);
+        if (next) focus(next);
+        return;
+      }
+      const next = directionalTile(visibleGeometry(true), group.id, direction);
       if (!next) return;
-      if (restoring) apply({ type: "maximize", groupId: null });
+      apply({ type: "maximize", groupId: null });
       focus(next);
     };
     const newTile = (direction: "left" | "right" | "up" | "down") => {

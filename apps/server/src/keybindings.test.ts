@@ -1088,6 +1088,21 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       expected: [oldDropdown, { key: "leader j", command: "terminal.toggle" }],
     },
     {
+      name: "another command on Ctrl+J spelled ctrl+j keeps both old keys",
+      saved: [oldToggle, oldDropdown, oldFocusDown, { key: "ctrl+j", command: "sidebar.toggle" }],
+      expected: [oldToggle, oldDropdown, { key: "leader j", command: "terminal.toggle" }],
+    },
+    {
+      name: "Focus Down keeps Leader then j when its arrow key does something else",
+      saved: [
+        oldToggle,
+        oldDropdown,
+        oldFocusDown,
+        { key: "leader arrowdown", command: "workspace.tile.splitDown" },
+      ],
+      expected: [{ key: "mod+j", command: "terminal.dropdown" }, oldFocusDown],
+    },
+    {
       name: "a fresh install",
       saved: null,
       expected: [
@@ -1145,6 +1160,24 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         command: "filePicker.toggle",
         when: "!terminalFocus",
       });
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("leaves a stranded Go to file key alone beside another Ctrl/Cmd+K rule", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const saved = [
+        { key: "mod+k", command: "commandPalette.toggle", when: "terminalFocus" },
+        { key: "mod+k", command: "filePicker.toggle", when: "!terminalFocus" },
+      ] as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((rule) => rule.key === "mod+k"),
+        [...saved],
+      );
     }).pipe(Effect.provide(layerKeybindings())),
   );
 

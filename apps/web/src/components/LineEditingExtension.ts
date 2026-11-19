@@ -1,6 +1,10 @@
 import { Extension } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import { deletionForKey, deletionRange, lineBoundary, lineMoveForKey } from "../lineEditing";
+
+// One character per leaf keeps text offsets equal to positions; a hard break ends a line.
+const lineLeafText = (node: ProseMirrorNode) => (node.type.name === "hardBreak" ? "\n" : "\ufffc");
 
 export const LineEditingExtension = Extension.create({
   name: "lineEditing",
@@ -15,7 +19,12 @@ export const LineEditingExtension = Extension.create({
             if (move) {
               const { selection, doc } = view.state;
               const $head = selection.$head;
-              const text = $head.parent.textBetween(0, $head.parent.content.size, "\n", "\ufffc");
+              const text = $head.parent.textBetween(
+                0,
+                $head.parent.content.size,
+                "\n",
+                lineLeafText,
+              );
               const next = $head.start() + lineBoundary(text, $head.parentOffset, move);
               view.dispatch(
                 view.state.tr
@@ -34,7 +43,7 @@ export const LineEditingExtension = Extension.create({
               return true;
             }
             const { $from } = selection;
-            const text = $from.parent.textBetween(0, $from.parent.content.size, "\n", "\ufffc");
+            const text = $from.parent.textBetween(0, $from.parent.content.size, "\n", lineLeafText);
             const [start, end] = deletionRange(
               text,
               $from.parentOffset,
