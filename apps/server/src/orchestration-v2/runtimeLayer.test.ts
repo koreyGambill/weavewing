@@ -39,6 +39,7 @@ import {
   ProviderTurnId,
   RunId,
   ScheduledTaskId,
+  type ThreadChangeFolderInput,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -3989,6 +3990,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     "moves a stopped thread between Xwing checkouts and keeps every period in replayable history",
     () =>
       Effect.gen(function* () {
+        const projectStore = yield* ProjectStore.ProjectStoreV2;
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const outbox = yield* EffectOutbox.EffectOutboxV2;
         const eventSink = yield* EventSink.EventSinkV2;
@@ -4003,6 +4005,28 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           defaultModelSelection: null,
           createdAt: "2026-11-07T00:00:00.000Z",
         });
+        const destinationProjectId = ProjectId.make("runtime-layer-destination-project");
+        yield* seedProject({
+          projectId: destinationProjectId,
+          title: "Destination",
+          workspaceRoot: "/native/worktree",
+          defaultModelSelection: null,
+          createdAt: "2026-11-07T00:00:00.000Z",
+        });
+        const nestedProjectId = ProjectId.make("runtime-layer-nested-project");
+        const scratchProjectId = ProjectId.make("runtime-layer-scratch-project");
+        for (const [id, title, workspaceRoot] of [
+          [nestedProjectId, "Nested", "/native/worktree/subdir"],
+          [scratchProjectId, "No project", "/scratch"],
+        ] as const) {
+          yield* seedProject({
+            projectId: id,
+            title,
+            workspaceRoot,
+            defaultModelSelection: null,
+            createdAt: "2026-11-07T00:00:00.000Z",
+          });
+        }
         const checkout = (id: string, number: number) => ({
           xwingEnvironmentId: id,
           repositorySource: "/workspace/xwing",
@@ -4042,10 +4066,21 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           ),
           Layer.provide(
             Layer.mock(GitVcsDriver.GitVcsDriver)({
-              execute: () =>
+              execute: ({ operation, cwd }) =>
                 Effect.succeed({
                   exitCode: ChildProcessSpawner.ExitCode(0),
-                  stdout: "feature/native\n",
+                  stdout:
+                    operation === "change-folder"
+                      ? "feature/native\n"
+                      : cwd.startsWith("/linked/")
+                        ? "/native/worktree/.git\n/linked\n"
+                        : cwd.startsWith("/native/worktree")
+                          ? "/native/worktree/.git\n/native/worktree\n"
+                          : cwd.startsWith("/xwing/")
+                            ? `/workspace/xwing/.git\n${cwd}\n`
+                            : cwd === "/workspace/xwing"
+                              ? "/workspace/xwing/.git\n/workspace/xwing\n"
+                              : "",
                   stderr: "",
                   stdoutTruncated: false,
                   stderrTruncated: false,
@@ -4071,6 +4106,12 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
               }),
               Layer.mock(ProjectService.ProjectService)({
                 getById: () => Effect.succeedSome({ workspaceRoot: "/workspace/xwing" } as never),
+                listShells: projectStore.listShells,
+              }),
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                isScratchProject: (id) => Effect.succeed(id === scratchProjectId),
+                namedProjectsRoot: "/projects",
+                ensureScratchProject: Effect.succeed({ projectId: scratchProjectId }),
               }),
               Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
                 list: () =>
@@ -4248,18 +4289,46 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           ],
         );
         yield* TestClock.adjust("1 minute");
-        const movedFolder = yield* Effect.flatMap(
-          DevelopmentEnvironments.DevelopmentEnvironments,
-          (environments) =>
-            environments.changeFolder({
-              threadId,
-              commandId: CommandId.make("runtime-layer-xwing-metadata-native"),
-              expected: inA,
-              folder: "/native/worktree",
-            }),
-        ).pipe(Effect.provide(layerEnvironments));
+        const changeFolder = (input: Omit<ThreadChangeFolderInput, "threadId">) =>
+          Effect.flatMap(DevelopmentEnvironments.DevelopmentEnvironments, (environments) =>
+            environments.changeFolder({ ...input, threadId }),
+          ).pipe(Effect.provide(layerEnvironments));
+        const move = {
+          commandId: CommandId.make("runtime-layer-xwing-metadata-native"),
+          expected: { ...inA, projectId },
+          folder: "/native/worktree",
+        };
+        const movedFolder = yield* changeFolder(move);
+        assert.deepEqual(yield* changeFolder(move), movedFolder);
+        const staleProject = yield* changeFolder({
+          ...move,
+          commandId: CommandId.make("runtime-layer-xwing-stale-project"),
+          expected: { worktreePath: move.folder, xwingEnvironmentId: null, projectId },
+        }).pipe(Effect.flip);
+        assert.instanceOf(
+          staleProject,
+          DevelopmentEnvironments.DevelopmentEnvironmentSelectionRejectedError,
+        );
+        assert.equal(staleProject.reason, "workspace-changed");
         assert.isTrue(movedFolder.changed);
         assert.equal(movedFolder.branch, "feature/native");
+        assert.equal(
+          (yield* orchestrator.getThreadProjection(threadId)).thread.projectId,
+          destinationProjectId,
+        );
+        assert.deepEqual(
+          (yield* orchestrator.getShellSnapshot({ projectId: destinationProjectId })).threads.map(
+            (thread) => thread.id,
+          ),
+          [threadId],
+        );
+        assert.deepEqual((yield* orchestrator.getShellSnapshot({ projectId })).threads, []);
+        assert.isTrue((yield* maintenance.rebuild).valid);
+        assert.equal(
+          (yield* orchestrator.getThreadProjection(threadId)).thread.projectId,
+          destinationProjectId,
+        );
+
         const cleanup = yield* Effect.flatMap(
           DevelopmentEnvironments.DevelopmentEnvironments,
           (environments) => environments.getWorktreeThreadIds({ worktreePath: "/native/worktree" }),
@@ -4276,6 +4345,23 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           )).map((effect) => effect.request),
           [{ type: "terminal.close-idle", worktreePath: checkoutA.checkoutPath }],
         );
+        for (const [command, fromProject, fromFolder, toProject, toFolder] of [
+          ["linked", destinationProjectId, move.folder, nestedProjectId, "/linked/subdir/docs"],
+          ["scratch", nestedProjectId, "/linked/subdir/docs", scratchProjectId, "/unregistered"],
+        ] as const) {
+          yield* changeFolder({
+            commandId: CommandId.make(`runtime-layer-move-${command}`),
+            expected: {
+              projectId: fromProject,
+              worktreePath: fromFolder,
+              xwingEnvironmentId: null,
+            },
+            folder: toFolder,
+          });
+          const { thread } = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(thread.projectId, toProject);
+          assert.equal(thread.worktreePath, toFolder);
+        }
         yield* orchestrator.dispatch({
           type: "thread.archive",
           commandId: CommandId.make("runtime-layer-xwing-archive"),

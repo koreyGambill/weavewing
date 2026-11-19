@@ -219,6 +219,8 @@ function run(
 }
 
 export interface FakeThread {
+  readonly projectId?: ProjectId;
+  readonly worktreePath?: string;
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
   /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
@@ -307,14 +309,14 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
   const modelSelection = thread.modelSelection ?? MODEL;
   return {
     id: thread.id,
-    projectId: PROJECT_ID,
+    projectId: thread.projectId ?? PROJECT_ID,
     title: thread.title,
     providerInstanceId: modelSelection.instanceId,
     modelSelection,
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: "main",
-    worktreePath: null,
+    worktreePath: thread.worktreePath ?? null,
     activeProviderThreadId: thread.providerThreads?.[0]?.id ?? null,
     lineage: {
       rootThreadId: thread.sideChatOf ?? thread.id,
@@ -405,6 +407,7 @@ const json = (body: unknown, status = 200) =>
 
 // Keyed by thread id: a live thread subscription's queue, for pushing events to it.
 const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStreamItem>>();
+let shellSubscriber: Queue.Queue<OrchestrationV2ShellStreamItem> | null = null;
 let terminalMetadataSubscriber: Queue.Queue<TerminalMetadataStreamEvent> | null = null;
 let threads: ReadonlyArray<FakeThread> = [];
 let dispatched: OrchestrationV2Command[] = [];
@@ -459,19 +462,27 @@ const handlers: Record<string, (input: never) => unknown> = {
       };
     }),
   [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () =>
-    subscribe<OrchestrationV2ShellStreamItem>([
-      {
-        kind: "snapshot",
-        snapshot: {
-          schemaVersion: 1,
-          snapshotSequence: sequence,
-          projects,
-          threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
-          archivedThreads: [],
+    subscribe<OrchestrationV2ShellStreamItem>(
+      [
+        {
+          kind: "snapshot",
+          snapshot: {
+            schemaVersion: 1,
+            snapshotSequence: sequence,
+            projects,
+            threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
+            archivedThreads: [],
+          },
         },
+        { kind: "synchronized" },
+      ],
+      (queue) => {
+        shellSubscriber = queue;
+        return () => {
+          if (shellSubscriber === queue) shellSubscriber = null;
+        };
       },
-      { kind: "synchronized" },
-    ]),
+    ),
   [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: { readonly threadId: ThreadId }) => {
     const thread = threads.find((candidate) => candidate.id === input.threadId);
     if (!thread) return Stream.never;
@@ -563,6 +574,7 @@ export function installFakeEnvironment(
   fixtures: ReadonlyArray<FakeThread>,
   options?: {
     readonly acceptCommands?: boolean;
+    readonly scratchWorkspaceRoot?: string;
     readonly keybindings?: ResolvedKeybindingsConfig;
     readonly extraProjects?: ReadonlyArray<Pick<OrchestrationProjectShell, "id" | "title">>;
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
@@ -574,6 +586,9 @@ export function installFakeEnvironment(
   baseServerConfig = {
     ...makeServerConfig(options?.providers ?? [CODEX_PROVIDER]),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
+    ...(options?.scratchWorkspaceRoot === undefined
+      ? {}
+      : { scratchWorkspaceRoot: options.scratchWorkspaceRoot }),
   };
   dispatched = [];
   acceptCommands = options?.acceptCommands === true;
@@ -679,6 +694,18 @@ export function isThreadSubscribed(threadId: ThreadId): boolean {
 }
 
 /** Delivers one domain event, such as a run or turn-item update, to the thread's subscription. */
+export async function emitThreadShell(thread: FakeThread): Promise<void> {
+  if (shellSubscriber === null) throw new Error("No live shell subscription");
+  await Effect.runPromise(
+    Queue.offer(shellSubscriber, {
+      kind: "thread.updated",
+      sequence: ++sequence,
+      location: "active",
+      thread: shellOf(thread),
+    }),
+  );
+}
+
 export async function emitThreadEvent(
   threadId: ThreadId,
   event: Pick<ThreadEvent, "type" | "payload">,

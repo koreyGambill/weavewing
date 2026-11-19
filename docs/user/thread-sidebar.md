@@ -80,6 +80,8 @@ Sandboxed agents can edit linked worktrees but need approval to commit.
 
 Choose **Change folder** from a thread's menu or details to work somewhere else.
 Pick a recent folder, a project, or a linked Xwing environment, or enter a path.
+The thread moves to the matching project when the folder belongs to one. Other
+folders appear under **No project**, with the current folder name in the sidebar.
 The thread keeps its history. Its next turn starts a new agent session in that
 folder with the conversation carried over. Finish or stop any work before moving.
 
