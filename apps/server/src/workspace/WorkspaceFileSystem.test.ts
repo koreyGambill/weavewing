@@ -1285,6 +1285,24 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             "[default]",
           );
 
+          // Blocks match the path as named, and letter case, which some volumes ignore.
+          yield* writeTextFile(home, "plain.md", "plain");
+          yield* fileSystem.makeDirectory(path.join(home, "notgit", ".git"), { recursive: true });
+          yield* fileSystem.symlink(
+            path.join(home, "plain.md"),
+            path.join(home, "notgit", ".git", "config"),
+          );
+          yield* writeTextFile(home, ".SSH/keys", "secret");
+          yield* writeTextFile(home, ".Config/GH/hosts.yml", "token");
+          for (const relativePath of [
+            "~/notgit/.git/config",
+            "~/.SSH/keys",
+            "~/.Config/GH/hosts.yml",
+          ]) {
+            yield* refuses(relativePath);
+          }
+          expect(yield* fileSystem.readFileString(path.join(home, "plain.md"))).toBe("plain");
+
           yield* workspaceFileSystem.revokeOutsideEdits({ grant: workspaceGrant });
           yield* refuses("~/.bashrc.md");
           expect(yield* read("~/.bashrc.md")).toMatchObject({ canGrantEdit: true });

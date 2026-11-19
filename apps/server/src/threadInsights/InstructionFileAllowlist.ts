@@ -46,19 +46,23 @@ export const providerConfigDir = Effect.fn("InstructionFileAllowlist.providerCon
 });
 
 // Credential folders under ~/.config whose files stay read-only even when an instruction file links them.
-const CREDENTIAL_CONFIG = /\/\.config\/(gh|hub|gcloud|op|rclone|sops|age|github-copilot)\//;
+const CREDENTIAL_CONFIG = /\/\.config\/(gh|hub|gcloud|op|rclone|sops|age|github-copilot)\//i;
 
 // Credential folders and files directly under the home folder.
 const HOME_CREDENTIALS =
-  /^(\.ssh|\.gnupg|\.aws|\.kube)(\/|$)|^(\.docker\/config\.json|\.netrc|\.git-credentials)$/;
+  /^(\.ssh|\.gnupg|\.aws|\.kube)(\/|$)|^(\.docker\/config\.json|\.netrc|\.git-credentials)$/i;
 
-/** Credential files stay read-only, whatever links or grants reach them. */
+/**
+ * Credential files stay read-only, whatever links or grants reach them. Letter case is ignored,
+ * which errs toward blocking on case-sensitive volumes.
+ */
 export const isCredentialPath = (filePath: string, home: string) => {
   const file = filePath.replaceAll("\\", "/");
   const root = home.replaceAll("\\", "/").replace(/\/+$/, "");
   return (
     CREDENTIAL_CONFIG.test(file) ||
-    (file.startsWith(`${root}/`) && HOME_CREDENTIALS.test(file.slice(root.length + 1)))
+    (file.toLowerCase().startsWith(`${root.toLowerCase()}/`) &&
+      HOME_CREDENTIALS.test(file.slice(root.length + 1)))
   );
 };
 

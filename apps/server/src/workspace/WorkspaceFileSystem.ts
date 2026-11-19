@@ -216,7 +216,13 @@ export const make = Effect.gen(function* () {
       isCredentialPath(realPath, realHome) ||
       (yield* isServerInternalPath(realPath)) ||
       (yield* isServerStatePath(hostPath)) ||
-      (yield* Effect.promise(() => isInGitFolder(realPath).catch(() => true)))
+      // The path as named too: a `.git/config` symlink resolves away the `.git`.
+      (yield* Effect.promise(() =>
+        Promise.all([isInGitFolder(realPath), isInGitFolder(path.resolve(hostPath))]).then(
+          ([real, named]) => real || named,
+          () => true,
+        ),
+      ))
     )
       return null;
     // A hard link aliases another file, which may be a credential.
