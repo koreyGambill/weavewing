@@ -125,13 +125,25 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       if (environmentId && canOperatePreview(environmentId)) dispatchPreviewAction(action);
     };
 
-  return registerCommands(
+  const newThreadCommands = {
+    "chat.newLocal": startNewLocal,
+    "chat.new": ((event) => {
+      claim(event);
+      startDefaultPlace();
+    }) satisfies CommandHandler,
+  };
+  const onChatRoute = () =>
+    router.state.matches.some((match) => match.routeId === CHAT_ROUTE_ID) &&
+    !isCommandPaletteOpen();
+  const onModalPage = () => router.state.matches.some((match) => isAppModalPage(match.pathname));
+  // Over Settings or Usage, New thread closes the page for the draft, unless a key there is typing
+  // into a field or another dialog is asking a question.
+  const stopModalPageNewThread = registerCommands(newThreadCommands, {
+    when: (event) => onChatRoute() && onModalPage() && !keyBelongsToModalPage(event.target),
+  });
+  const stopChatRouteCommands = registerCommands(
     {
-      "chat.newLocal": startNewLocal,
-      "chat.new": (event) => {
-        claim(event);
-        startDefaultPlace();
-      },
+      ...newThreadCommands,
       "preview.toggle": (event) => {
         claim(event);
         const threadRef = readRouteThreadRef();
@@ -158,10 +170,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "preview.find": previewCommand("find"),
     },
     {
-      when: () =>
-        router.state.matches.some((match) => match.routeId === CHAT_ROUTE_ID) &&
-        !router.state.matches.some((match) => isAppModalPage(match.pathname)) &&
-        !isCommandPaletteOpen(),
+      when: () => onChatRoute() && !onModalPage(),
       context: () => {
         const threadRef = readRouteThreadRef();
         return {
@@ -182,5 +191,22 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         selection.clearSelection();
       },
     },
+  );
+  return () => {
+    stopModalPageNewThread();
+    stopChatRouteCommands();
+  };
+}
+
+/** A field typing the key, or a dialog asking a question, keeps it on the page. */
+function keyBelongsToModalPage(target: EventTarget | null) {
+  const element = target as (Partial<HTMLElement> & Pick<Node, "ownerDocument">) | null;
+  if (element === null) return false;
+  return (
+    element.isContentEditable === true ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName ?? "") ||
+    element.ownerDocument?.querySelector(
+      '[role="alertdialog"], [data-slot="dialog-popup"]:not([data-app-modal])',
+    ) != null
   );
 }

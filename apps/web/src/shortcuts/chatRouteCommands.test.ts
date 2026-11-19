@@ -69,7 +69,7 @@ describe("new thread commands", () => {
     const router = { state: { matches: [] } } as unknown as AnyRouter;
     using stack = new DisposableStack();
     stack.defer(installChatRouteCommands(router));
-    const commands = register.mock.calls[0]![0];
+    const commands = register.mock.calls.at(-1)![0];
     const event = {
       preventDefault: vi.fn(),
       stopPropagation: vi.fn(),
@@ -91,6 +91,35 @@ describe("new thread commands", () => {
         projectId: "idle",
       });
     }
+  });
+});
+
+describe("new thread over Settings", () => {
+  it("closes Settings for a new thread unless a field or another dialog has the key", () => {
+    using register = vi.spyOn(dispatcher, "registerCommands").mockReturnValue(() => {});
+    const router = {
+      state: {
+        matches: [
+          { routeId: "/_chat", pathname: "/" },
+          { routeId: "/_chat/settings", pathname: "/settings" },
+        ],
+      },
+    } as unknown as AnyRouter;
+    using stack = new DisposableStack();
+    stack.defer(installChatRouteCommands(router));
+    const [modalCommands, modalOptions] = register.mock.calls[0]!;
+    const [, routeOptions] = register.mock.calls[1]!;
+    expect(Object.keys(modalCommands).toSorted()).toEqual(["chat.new", "chat.newLocal"]);
+    let dialogOpen = false;
+    const keyOn = (tagName: string) =>
+      ({
+        target: { tagName, ownerDocument: { querySelector: () => (dialogOpen ? {} : null) } },
+      }) as unknown as KeyboardEvent;
+    expect(routeOptions?.when?.(keyOn("BODY"))).toBe(false);
+    expect(modalOptions?.when?.(keyOn("BODY"))).toBe(true);
+    expect(modalOptions?.when?.(keyOn("INPUT"))).toBe(false);
+    dialogOpen = true;
+    expect(modalOptions?.when?.(keyOn("BODY"))).toBe(false);
   });
 });
 
@@ -118,7 +147,7 @@ describe("preview commands", () => {
     stack.defer(installChatRouteCommands(router));
     const event = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as KeyboardEvent;
 
-    register.mock.calls[0]![0][command]!(event);
+    register.mock.calls.at(-1)![0][command]!(event);
 
     expect(dispatch).toHaveBeenCalledWith(action);
   });
