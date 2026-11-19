@@ -3128,10 +3128,8 @@ function OpenCommandPaletteDialog(props: {
         }
         environmentId={pickerEnvironmentId}
         currentEnvironmentId={currentProjectEnvironmentId}
-        defaultFolderLabel={scratchWorkspaceLabelFor(pickerEnvironmentId)}
-        onStartWithoutProject={() => {
-          if (pickerEnvironmentId) void startScratchThread(pickerEnvironmentId);
-        }}
+        defaultFolderLabel={scratchWorkspaceLabelFor}
+        onStartWithoutProject={(environmentId) => void startScratchThread(environmentId)}
         label="New thread"
         truncateStart={false}
         onEnvironmentChange={setPickerEnvironmentId}

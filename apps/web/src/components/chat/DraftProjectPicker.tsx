@@ -53,8 +53,9 @@ import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { useEnvironmentsWithScope } from "~/state/session";
-import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
+import { useEnvironmentsPermittedBy, useEnvironmentsWithScope } from "~/state/session";
+import { sourceControlEnvironment } from "~/state/sourceControl";
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { isProjectPinShortcut, ProjectPinButton } from "../ProjectPinButton";
 import { Button, InlineButton } from "../ui/button";
@@ -79,7 +80,10 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { searchableSetting } from "../settings/settingsSearch";
-import { settingsScopeEnvironmentLabels } from "../settings/settingsScopeAxis";
+import {
+  settingsScopeEnvironmentLabel,
+  settingsScopeEnvironmentLabels,
+} from "../settings/settingsScopeAxis";
 import { DraftProjectName } from "./DraftProjectName";
 import { ComposerControl } from "./ComposerControl";
 import { useProjectPickerBrowse, useProjectPickerHomes } from "./useProjectPickerBrowse";
@@ -94,6 +98,7 @@ interface PickerItem {
   readonly activity?: number;
   readonly completionName?: string;
   readonly current?: boolean;
+  readonly scratchEnvironmentId?: EnvironmentId;
 }
 
 export function DraftProjectPicker({
@@ -124,8 +129,8 @@ export function DraftProjectPicker({
   readonly truncateStart: boolean;
   readonly onSelect: (project: EnvironmentProject) => void;
   readonly onEnvironmentChange: (id: EnvironmentId) => void;
-  readonly onStartWithoutProject?: () => void;
-  readonly defaultFolderLabel?: string | null;
+  readonly onStartWithoutProject?: (environmentId: EnvironmentId) => void;
+  readonly defaultFolderLabel?: (environmentId: EnvironmentId | null) => string | null;
   readonly onAddProject: (step: "folder" | "clone", environmentId: EnvironmentId) => void;
   /** Whether this draft is at the default place, and how to make its place the default. */
   readonly defaultPlace?: { readonly current: boolean; readonly makeDefault: () => void };
@@ -159,7 +164,10 @@ export function DraftProjectPicker({
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
-  const sourceControlWritable = useEnvironmentsWithScope(environments, AuthSourceControlWriteScope);
+  const cloneable = useEnvironmentsPermittedBy(
+    environments,
+    sourceControlEnvironment.startProjectClone.permissionAtom,
+  );
   const navigate = useNavigate();
   const connected = environments.filter((env) => env.connection.phase === "connected");
   const targets = (open ? connected : [])
@@ -263,7 +271,26 @@ export function DraftProjectPicker({
       : [
           ...ordered.map((entry) => projectItem(entry)),
           ...(onStartWithoutProject && defaultFolderLabel
-            ? [{ value: "scratch", label: `Start in ${defaultFolderLabel}` }]
+            ? (allMachines
+                ? connected.map((env) => env.environmentId).filter((id) => operable.has(id))
+                : environmentId
+                  ? [environmentId]
+                  : []
+              ).flatMap((id) => {
+                const folder = defaultFolderLabel(id);
+                if (!folder) return [];
+                const env = environments.find((candidate) => candidate.environmentId === id);
+                return [
+                  {
+                    value: `scratch:${id}`,
+                    scratchEnvironmentId: id,
+                    label:
+                      allMachines && env
+                        ? `Start in ${folder} on ${settingsScopeEnvironmentLabel(env, environments)}`
+                        : `Start in ${folder}`,
+                  },
+                ];
+              })
             : []),
         ];
   const changeOpen = (next: boolean) => {
@@ -292,7 +319,7 @@ export function DraftProjectPicker({
   const addMachines = connected.map((env) => ({
     environmentId: env.environmentId,
     canAddProject: operable.has(env.environmentId),
-    canWriteSourceControl: sourceControlWritable.has(env.environmentId),
+    canWriteSourceControl: cloneable.has(env.environmentId),
   }));
   const threadEnvironmentId =
     currentEnvironmentId === undefined ? environmentId : currentEnvironmentId;
@@ -422,8 +449,8 @@ export function DraftProjectPicker({
     } else if (item.project) {
       onSelect(item.project);
       changeOpen(false);
-    } else if (item.value === "scratch") {
-      onStartWithoutProject?.();
+    } else if (item.scratchEnvironmentId) {
+      onStartWithoutProject?.(item.scratchEnvironmentId);
       changeOpen(false);
     }
   };
@@ -611,7 +638,16 @@ export function DraftProjectPicker({
                       </>
                     )}
                   </TooltipTrigger>
-                  <TooltipPopup>{item.path ?? item.label}</TooltipPopup>
+                  <TooltipPopup>
+                    {projectRow && item.path ? (
+                      <>
+                        <div>{item.label}</div>
+                        <div className="font-mono text-muted-foreground">{item.path}</div>
+                      </>
+                    ) : (
+                      (item.path ?? item.label)
+                    )}
+                  </TooltipPopup>
                 </Tooltip>
                 {pathMode && item.path ? (
                   <span className="shrink-0 text-muted-foreground text-xs">

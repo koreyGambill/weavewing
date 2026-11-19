@@ -63,6 +63,29 @@ export function useEnvironmentsWithScope(
   );
 }
 
+type EnvironmentPermissionAtom = (environmentId: EnvironmentId | null) => Atom.Atom<boolean>;
+
+const environmentsPermittedAtom = Atom.family((permissionAtom: EnvironmentPermissionAtom) =>
+  Atom.family((idsKey: string) => {
+    const ids = idsKey === "" ? [] : (idsKey.split("\n") as EnvironmentId[]);
+    return Atom.make((get) => new Set(ids.filter((id) => get(permissionAtom(id))))).pipe(
+      Atom.withLabel(`web-environments-permitted:${idsKey}`),
+    );
+  }),
+);
+
+/** The environments where a command's `permissionAtom` allows it. */
+export function useEnvironmentsPermittedBy(
+  environments: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
+  permissionAtom: EnvironmentPermissionAtom,
+): ReadonlySet<EnvironmentId> {
+  return useAtomValue(
+    environmentsPermittedAtom(permissionAtom)(
+      environmentIdsKey(environments.map(({ environmentId }) => environmentId)),
+    ),
+  );
+}
+
 export function readEnvironmentScope(
   environmentId: EnvironmentId,
   scope: AuthEnvironmentScope,
