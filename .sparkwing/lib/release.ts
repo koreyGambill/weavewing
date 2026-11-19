@@ -133,9 +133,10 @@ export function verifyChecksums(dir: string, names: readonly string[], checksums
     if (parsed.get(asset.name) !== asset.sha256) throw new Error(`Checksum mismatch: ${asset.name}`);
 }
 
-export function verifyPromotionAssets(download: string, names: readonly string[], evidence: string, tag: string, commit: string) {
+export function verifyPromotionAssets(download: string, names: readonly string[], evidence: string, tag: string, commit: string, channel: ReleaseChannel = "stable") {
   const release = JSON.parse(FS.readFileSync(Path.join(evidence, "release.json"), "utf8"));
-  if (release.repository !== RELEASE_REPOSITORY || release.tag !== tag || release.target !== commit || release.ci !== "passed" || release.draft !== true)
+  const ciVerified = release.ci === "passed" || (channel !== "stable" && release.ci === `smoke: ${channel} channel`);
+  if (release.repository !== RELEASE_REPOSITORY || release.tag !== tag || release.target !== commit || (release.channel ?? "stable") !== channel || !ciVerified || release.draft !== true)
     throw new Error("Draft evidence does not match the release commit or a CI-verified draft");
   const local = Path.join(evidence, "assets");
   const checksums = FS.readFileSync(Path.join(local, "SHA256SUMS"), "utf8");

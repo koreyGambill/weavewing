@@ -4,6 +4,7 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 
 import { git, type Checkout } from "./checkout.ts";
+import type { ReleaseChannel } from "./release.ts";
 
 function inputs(co: Checkout, engine: string) {
   if (git(co.root, "status", "--porcelain")) throw new Error("Full CI reuse requires a clean committed worktree");
@@ -48,4 +49,17 @@ export async function verifiedCi(
   FS.mkdirSync(co.evidence, { recursive: true });
   FS.writeFileSync(Path.join(co.evidence, "ci-result.json"), JSON.stringify(pass, null, 2));
   return pass;
+}
+
+/** Records the build and platform smoke gate after all selected release artifacts pass. */
+export function smokeCi(co: Checkout, run: string, channel: ReleaseChannel) {
+  if (channel === "stable") throw new Error("Stable releases require full CI");
+  const result = {
+    ci: `smoke: ${channel} channel`, full: false, passed: true, channel,
+    commit: git(co.root, "rev-parse", "HEAD"), tree: git(co.root, "rev-parse", "HEAD^{tree}"),
+    run, evidence: co.evidence,
+  };
+  FS.mkdirSync(co.evidence, { recursive: true });
+  FS.writeFileSync(Path.join(co.evidence, "ci-result.json"), JSON.stringify(result, null, 2));
+  return result;
 }

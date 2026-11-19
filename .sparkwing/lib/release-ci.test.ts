@@ -5,9 +5,9 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { test } from "node:test";
 
-import { verifiedCi } from "./release-ci.ts";
+import { smokeCi, verifiedCi } from "./release-ci.ts";
 
-test("full CI reuse requires the exact clean tree and runtime, and force invalidates a failed pass", async () => {
+test("smoke evidence stays separate from exact-tree full CI reuse and forced reruns", async () => {
   const dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "release-ci-"));
   const root = Path.join(dir, "repo");
   FS.mkdirSync(root);
@@ -22,8 +22,23 @@ test("full CI reuse requires the exact clean tree and runtime, and force invalid
     const options = { records, engine: "test-engine" };
     let calls = 0;
     const run = async () => { calls++; };
+    const smoke = smokeCi(co, "smoke-run", "test");
+    assert.equal(smoke.ci, "smoke: test channel");
+    assert.equal(smoke.full, false);
+    assert.equal(smoke.tree, tree);
+    assert.equal(smoke.commit, first);
+    assert.deepEqual(JSON.parse(FS.readFileSync(Path.join(co.evidence, "ci-result.json"), "utf8")), smoke);
+    assert.equal(FS.existsSync(records), false);
+    assert.throws(() => smokeCi(co, "stable-smoke", "stable"), /full CI/);
     const pass = await verifiedCi(co, "plan-run", run, options);
     assert.equal(calls, 1);
+    const receipt = Path.join(records, FS.readdirSync(records)[0]!);
+    FS.writeFileSync(receipt, JSON.stringify({ ...pass, ...smoke }));
+    let rechecks = 0;
+    await verifiedCi(co, "reject-smoke-run", async () => { rechecks++; }, options);
+    assert.equal(rechecks, 1);
+    assert.equal(JSON.parse(FS.readFileSync(receipt, "utf8")).full, true);
+    FS.writeFileSync(receipt, JSON.stringify(pass));
     git("update-ref", "refs/heads/main", git("commit-tree", tree, "-p", first, "-m", "same tree"));
     assert.deepEqual(await verifiedCi(co, "draft-run", run, options), pass);
     assert.equal(calls, 1);
