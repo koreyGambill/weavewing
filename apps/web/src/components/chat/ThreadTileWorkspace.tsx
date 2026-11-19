@@ -109,7 +109,8 @@ import {
   TILE_LAYOUT_AREA_LABELS,
   toSavedTileNode,
 } from "../../savedTileLayouts";
-import { SaveTileLayoutDialog, TileLayoutsSubmenu } from "./TileLayoutsMenu";
+import { WorkspaceTitlebarControls } from "../WorkspaceTitlebar";
+import { SaveTileLayoutDialog, TileLayoutsMenu } from "./TileLayoutsMenu";
 import { useSavedTileLayouts } from "./useSavedTileLayouts";
 
 const TAB_DRAG_TYPE = "application/x-weavewing-tab";
@@ -498,10 +499,7 @@ export function ThreadTileWorkspace(props: {
     );
   };
   const openNewTab = (groupId: string) => {
-    const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
-    if (group && !isNewTab(group.activeTabId))
-      apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
-    else apply({ type: "focus", groupId });
+    apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
     focusChooser(groupId);
   };
   // A chooser unmounts once its area arrives or it closes. Focus left on it would drop to the
@@ -998,6 +996,14 @@ export function ThreadTileWorkspace(props: {
       : undefined;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-thread-tiling>
+      <WorkspaceTitlebarControls>
+        <TileLayoutsMenu
+          api={tileLayouts}
+          hasProject={tileLayouts.projectId !== null}
+          onSaveAs={saveLayoutAs}
+          onApply={applySavedLayout}
+        />
+      </WorkspaceTitlebarControls>
       <div className="relative shrink-0">{props.header}</div>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
         <div
@@ -1506,13 +1512,6 @@ export function ThreadTileWorkspace(props: {
                           </MenuItem>
                         </MenuSubPopup>
                       </MenuSub>
-                      <MenuSeparator />
-                      <TileLayoutsSubmenu
-                        api={tileLayouts}
-                        hasProject={tileLayouts.projectId !== null}
-                        onSaveAs={saveLayoutAs}
-                        onApply={applySavedLayout}
-                      />
                       <MenuSeparator />
                       <MenuItem disabled={lastBlankTab} onClick={() => closeTab(group.activeTabId)}>
                         <X />

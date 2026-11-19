@@ -270,6 +270,49 @@ describe("thread tile layout", () => {
       [CONVERSATION_TAB_ID, newTabId("c")],
       ["notes", "files", newTabId("b")],
     ]);
+    let blanks = syncTileLayout(undefined, [], [], null, false);
+    for (const id of ["blank-a", "blank-b", "blank-c"]) {
+      blanks = applyTileAction(blanks, {
+        type: "new-tab",
+        groupId: "conversation-group",
+        tabId: newTabId(id),
+      });
+    }
+    const blankTabs = [newTabId("blank-a"), newTabId("blank-b"), newTabId("blank-c")];
+    expect(getTileGroups(blanks)[0]?.tabs).toEqual([CONVERSATION_TAB_ID, ...blankTabs]);
+    const restoredBlanks = syncTileLayout(
+      parseTileLayout(JSON.parse(JSON.stringify(blanks))),
+      [],
+      [],
+      null,
+      false,
+    );
+    expect(restoredBlanks).toEqual(blanks);
+    const middleBlank = applyTileAction(restoredBlanks, {
+      type: "activate",
+      groupId: "conversation-group",
+      tabId: blankTabs[1]!,
+    });
+    const filledBlank = syncTileLayout(middleBlank, [], ["notes"], "notes", true);
+    expect(getTileGroups(filledBlank)[0]?.tabs).toEqual([
+      CONVERSATION_TAB_ID,
+      blankTabs[0],
+      "notes",
+      blankTabs[2],
+    ]);
+    const switchedBlank = applyTileAction(filledBlank, {
+      type: "activate",
+      groupId: "conversation-group",
+      tabId: blankTabs[0]!,
+    });
+    expect(getTileGroups(switchedBlank)[0]?.activeTabId).toBe(blankTabs[0]);
+    const closedBlank = applyTileAction(switchedBlank, { type: "close-tab", tabId: blankTabs[0]! });
+    expect(getTileGroups(closedBlank)[0]?.tabs).toEqual([
+      CONVERSATION_TAB_ID,
+      "notes",
+      blankTabs[2],
+    ]);
+
     const lone = applyTileAction(syncTileLayout(undefined, [], [], null, false), {
       type: "new-tab",
       groupId: "conversation-group",
