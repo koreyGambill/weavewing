@@ -282,7 +282,11 @@ has focus.
 
 `mod+j` opens and hides the drop-down terminal from any view, including from
 inside it. Leader then Shift+M makes it fill the window or returns it to its
-height, opening it first if it is hidden.
+height, opening it first if it is hidden. Leader then j opens or focuses the
+thread's own terminal; with the leader off it has no default key, so bind
+**Terminal: Toggle** in Settings if you use it. A saved keybindings file whose
+terminal keys were customized keeps them; rebind these in Settings to adopt
+the new defaults.
 
 On Windows and Linux, Ctrl+Left and Ctrl+Right jump to the start or end of the
 line in text fields and at a shell prompt, and Ctrl+Backspace deletes back to the

@@ -261,10 +261,6 @@ function restoreNewThreadKey(rules: readonly KeybindingRule[]): readonly Keybind
 const DROPDOWN_KEY_MIGRATION = "weavewing.dropdown-mod-j.v1";
 const dropdownKey: KeybindingRule = { key: "mod+j", command: "terminal.dropdown" };
 
-/**
- * Moves the untouched drop-down key to Ctrl/Cmd+J, which the thread terminal gives up for the
- * leader then j. Each rule moves only when its new key is free or held by the rule it replaces.
- */
 /** Whether a rule fires on plain Ctrl+<key> or Cmd+<key> on some platform, however it is spelled. */
 function takesModKey(rule: KeybindingRule, key: string): boolean {
   const shortcut = parseKeybindingShortcut(rule.key);
@@ -280,7 +276,7 @@ function takesModKey(rule: KeybindingRule, key: string): boolean {
 /**
  * Moves the drop-down to Ctrl/Cmd+J and the thread terminal to Leader then j, only for a file that
  * still holds every old default involved and nothing else on those keys. Anything else is left
- * as saved, so no command loses a working key.
+ * as saved.
  */
 function moveDropdownKey(
   rules: readonly KeybindingRule[],
