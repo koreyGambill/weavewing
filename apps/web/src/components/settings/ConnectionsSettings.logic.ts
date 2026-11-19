@@ -301,9 +301,19 @@ export function parseRemotePairingFields(input: {
   return { host, pairingCode };
 }
 
+// The remote setup script's message when the release archive for this app's version is missing.
+const MISSING_SERVER_RELEASE = /Could not download t3 (\S+) from \S+/u;
+
 export function formatDesktopSshConnectionError(error: unknown): string {
   const fallback = "Failed to connect SSH host.";
   const rawMessage = error instanceof Error ? error.message : fallback;
+  const missingRelease = MISSING_SERVER_RELEASE.exec(rawMessage);
+  if (missingRelease !== null) {
+    const notPublished = /\berror: 404\b/u.test(rawMessage);
+    return notPublished
+      ? `This build of Weavewing (${missingRelease[1]}) has no published server to install over SSH. If Weavewing is already running on that computer, connect with a link and code instead.`
+      : `That computer could not download Weavewing ${missingRelease[1]}. If Weavewing is already running there, connect with a link and code instead.`;
+  }
   const withoutIpcPrefix = rawMessage.replace(
     /^Error invoking remote method 'desktop:ensure-ssh-environment':\s*/u,
     "",

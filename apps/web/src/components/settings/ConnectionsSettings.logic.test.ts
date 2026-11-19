@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
   isServerNetworkAccessible,
+  formatDesktopSshConnectionError,
   parseManualDesktopSshTarget,
   resolveAccessEnvironmentId,
   resolveTailscaleServeBaseUrl,
@@ -96,6 +97,34 @@ describe("parseManualDesktopSshTarget", () => {
     expect(() => parseManualDesktopSshTarget({ host: "devbox", username: "", port })).toThrow(
       "SSH port must be between 1 and 65535.",
     );
+  });
+});
+
+describe("formatDesktopSshConnectionError", () => {
+  const download = (curl: string) =>
+    new Error(
+      `Could not prepare the SSH environment: Error invoking remote method 'desktop:ensure-ssh-environment': SshCommandError: ${curl} Could not download t3 0.1.9 from https://github.com/koreyGambill/weavewing/releases/download/weavewing-v0.1.9/SHA256SUMS. If this host cannot reach it, install t3 0.1.9`,
+    );
+  it.each([
+    [
+      "a version with no published server",
+      download("curl: (56) The requested URL returned error: 404"),
+      "This build of Weavewing (0.1.9) has no published server to install over SSH. If Weavewing is already running on that computer, connect with a link and code instead.",
+    ],
+    [
+      "a host that cannot reach the download",
+      download("curl: (6) Could not resolve host: github.com"),
+      "That computer could not download Weavewing 0.1.9. If Weavewing is already running there, connect with a link and code instead.",
+    ],
+    [
+      "any other failure, without the bridge's prefixes",
+      new Error(
+        "Error invoking remote method 'desktop:ensure-ssh-environment': SshCommandError: Permission denied",
+      ),
+      "Permission denied",
+    ],
+  ] as const)("explains %s", (_name, error, expected) => {
+    expect(formatDesktopSshConnectionError(error)).toBe(expected);
   });
 });
 
