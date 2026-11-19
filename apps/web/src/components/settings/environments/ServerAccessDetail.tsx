@@ -192,7 +192,7 @@ function WaitingLinks({ server }: { readonly server: ReachServer }) {
         sharedPairingLinkId={null}
         revokingPairingLinkId={revokingId}
         onRevokePairingLink={(id) => void revoke(id)}
-        canRevoke={server.input.canManage}
+        canRevoke={server.input.canManage && server.input.appScopes !== null}
       />
     </div>
   );
@@ -224,7 +224,13 @@ export function ServerAccessDetail({
     <div className="mt-2 space-y-1 rounded-lg bg-muted/40 px-3 py-2 sm:px-4">
       <Caption
         title="Coming in"
-        detail={input.canManage ? `what others may do on ${input.label}` : `set on ${input.label}`}
+        detail={
+          input.appScopes === null
+            ? `last known, ${input.label} is not answering`
+            : input.canManage
+              ? `what others may do on ${input.label}`
+              : `set on ${input.label}`
+        }
       />
       {input.sessions === null ? (
         <p className="text-xs text-muted-foreground">

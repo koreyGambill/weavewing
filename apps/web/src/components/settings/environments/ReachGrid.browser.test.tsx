@@ -110,9 +110,7 @@ describe("ReachGrid", () => {
       page.getByRole("button", { name: "From This app to Moonborn: Full access" }),
     );
     await expect
-      .element(
-        page.getByText("🔒 Moonborn decides this. This app does not have full access to it."),
-      )
+      .element(page.getByText("Moonborn decides this. This app does not have full access to it."))
       .toBeVisible();
     await expect.element(page.getByRole("button", { name: "View only" })).not.toBeInTheDocument();
   });

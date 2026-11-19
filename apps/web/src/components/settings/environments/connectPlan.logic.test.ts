@@ -76,16 +76,18 @@ describe("planConnect", () => {
 });
 
 describe("joinsTrusted", () => {
-  it("holds only for Full access both ways with the same servers", () => {
+  it("holds only for Full access both ways with the same servers, when every line can be made", () => {
     const both = {
       uses: [party(WSL)],
       usesLevel: "full-access",
       usedBy: [party(WSL)],
       usedByLevel: "full-access",
     } as const;
-    expect(joinsTrusted(both)).toBe(true);
-    expect(joinsTrusted({ ...both, usedByLevel: "approval-required" })).toBe(false);
-    expect(joinsTrusted({ ...both, usedBy: [] })).toBe(false);
+    expect(joinsTrusted(both, planConnect(model, party(RIG), both))).toBe(true);
+    expect(joinsTrusted({ ...both, usedByLevel: "approval-required" }, [])).toBe(false);
+    expect(joinsTrusted({ ...both, usedBy: [] }, [])).toBe(false);
+    const withBox = { ...both, uses: [party(BOX)], usedBy: [party(BOX)] };
+    expect(joinsTrusted(withBox, planConnect(model, party(RIG), withBox))).toBe(false);
   });
 });
 

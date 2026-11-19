@@ -341,6 +341,32 @@ describe("buildReachModel", () => {
   });
 });
 
+describe("an unreachable server", () => {
+  it("keeps its last known lines but offers no changes and says it is not answering", () => {
+    const model = buildReachModel({
+      servers: [
+        server({ environmentId: WSL, label: "WSL", links: [link(MOON, "Moonborn")] }),
+        server({
+          environmentId: MOON,
+          label: "Moonborn",
+          appScopes: null,
+          sessions: [linkSession(WSL, "WSL"), session({ subject: "browser" })],
+        }),
+      ],
+    });
+
+    const intoMoon = state(model, serverPartyId(WSL), MOON);
+    expect(intoMoon.state).toMatchObject({ level: "full-access" });
+    expect(intoMoon.changes).toMatchObject({
+      lockedReason: "Moonborn is not answering",
+      canRelink: false,
+    });
+    const phone = model.rows.find((row) => row.label === "Korey iPhone")!;
+    expect(state(model, phone.id, MOON).changes.canRemove).toBe(false);
+    expect(model.manageable.has(serverPartyId(MOON))).toBe(false);
+  });
+});
+
 describe("arrivalFromHost", () => {
   it.each([
     ["127.0.0.1", "same-computer"],

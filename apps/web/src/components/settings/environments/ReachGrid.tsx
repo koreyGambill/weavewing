@@ -1,3 +1,4 @@
+import { LockIcon } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createStore, type StoreApi, useStore } from "zustand";
 
@@ -248,9 +249,7 @@ function HeaderButton({
       </span>
       <span className="truncate">{party.label}</span>
       {locked ? (
-        <span role="img" aria-label="Set on that machine">
-          🔒
-        </span>
+        <LockIcon role="img" aria-label="Set on that machine" className="size-3 shrink-0" />
       ) : null}
     </button>
   );
@@ -383,7 +382,8 @@ function PinnedControls({
     return (
       <>
         <p className="text-muted-foreground">
-          🔒 {square.to.label} decides this. This app does not have full access to it.
+          <LockIcon aria-hidden className="mr-1 inline size-3" />
+          {square.to.label} decides this. This app does not have full access to it.
         </p>
         {changes.canRemove ? (
           <Button

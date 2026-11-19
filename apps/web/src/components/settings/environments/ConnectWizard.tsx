@@ -374,7 +374,10 @@ function PairDeviceFields({
       <label className="block space-y-1.5">
         <span className="block text-xs font-medium">It may use</span>
         <ServerSelect
-          servers={candidates.map((candidate) => candidate.environment)}
+          servers={candidates.map((candidate) => ({
+            environmentId: candidate.input.environmentId,
+            label: candidate.input.label,
+          }))}
           value={environmentId}
           onChange={onServerChange}
         />
@@ -456,7 +459,7 @@ function ServerSelect({
   onChange,
   label = "Server",
 }: {
-  readonly servers: ReadonlyArray<EnvironmentPresentation>;
+  readonly servers: ReadonlyArray<Pick<EnvironmentPresentation, "environmentId" | "label">>;
   readonly value: EnvironmentId | null;
   readonly onChange: (environmentId: EnvironmentId) => void;
   readonly label?: string;
@@ -557,7 +560,6 @@ function ConnectComputerForm({
   readonly servers: ReadonlyArray<ReachServer>;
   readonly change: SquareChangeState;
 }) {
-  const environments = servers.map((server) => server.environment);
   const [computerId, setComputerId] = useState<EnvironmentId | null>(
     servers.find((server) => !server.input.onThisComputer)?.input.environmentId ?? null,
   );
@@ -601,7 +603,11 @@ function ConnectComputerForm({
         <span className="block text-xs font-medium">Computer</span>
         <ServerSelect
           label="Computer"
-          servers={environments}
+          servers={model.columns.flatMap((column) =>
+            column.environmentId === null
+              ? []
+              : [{ environmentId: column.environmentId, label: column.label }],
+          )}
           value={computerId}
           onChange={(next) => {
             setComputerId(next);
@@ -658,7 +664,7 @@ function ConnectComputerForm({
           })
         )}
       </ul>
-      {joinsTrusted(choice) ? (
+      {joinsTrusted(choice, lines) ? (
         <p className="text-xs text-success-foreground">
           Full access both ways, so {computer.label} joins Trusted together.
         </p>

@@ -1,3 +1,6 @@
+import { LockIcon } from "lucide-react";
+import type { ReactNode } from "react";
+
 import { cn } from "~/lib/utils";
 import { Button } from "../../ui/button";
 import {
@@ -57,7 +60,7 @@ export function SquareGlyph({ state }: { readonly state: SquareState }) {
 }
 
 export const GRID_LEGEND: ReadonlyArray<{
-  readonly glyph: string;
+  readonly glyph: ReactNode;
   readonly label: string;
   readonly tone: string;
 }> = [
@@ -68,7 +71,11 @@ export const GRID_LEGEND: ReadonlyArray<{
   { glyph: "no path", label: "Nothing can reach it", tone: "text-muted-foreground" },
   { glyph: "?", label: "Unknown here", tone: "text-muted-foreground" },
   { glyph: "!", label: "Expired or refused", tone: "text-destructive" },
-  { glyph: "🔒", label: "Set on that machine", tone: "text-muted-foreground" },
+  {
+    glyph: <LockIcon className="inline size-3" />,
+    label: "Set on that machine",
+    tone: "text-muted-foreground",
+  },
 ];
 
 /** "From X to Y: level", the sentence every square and line is read as. */

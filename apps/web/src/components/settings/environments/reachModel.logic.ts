@@ -234,8 +234,16 @@ const linkBroken = (link: PeerLinkSummary) =>
 const arrivalFromUrl = (url: string | undefined) =>
   url === undefined ? null : arrivalFromHost(hostOf(url));
 
+/** This app changes a server's access only while connected to it with full access there. */
+const manages = (server: ReachServerInput | undefined): server is ReachServerInput =>
+  server !== undefined && server.canManage && server.appScopes !== null;
+
 const lockedReason = (to: ReachParty, server: ReachServerInput | undefined) =>
-  server?.canManage ? null : `Set on ${to.label}`;
+  server !== undefined && server.appScopes === null
+    ? `${to.label} is not answering`
+    : manages(server)
+      ? null
+      : `Set on ${to.label}`;
 
 interface BuildContext {
   readonly byId: ReadonlyMap<EnvironmentId, ReachServerInput>;
@@ -267,25 +275,15 @@ function serverSquare(
   const link =
     fromServer?.links?.find((candidate) => candidate.environmentId === to.environmentId) ?? null;
   const ownOutbound = from.onThisComputer && !to.onThisComputer;
-  const canRelinkBase =
-    toServer.canManage &&
-    fromServer !== undefined &&
-    fromServer.canManage &&
-    fromServer.linksOffered &&
-    toServer.linksOffered &&
-    fromServer.appScopes !== null &&
-    toServer.appScopes !== null;
-  const relinkBlockedReason = !toServer.canManage
-    ? `Set on ${to.label}`
+  const relinkBlockedReason = !manages(toServer)
+    ? lockedReason(to, toServer)
     : fromServer === undefined || fromServer.appScopes === null
       ? `This app does not reach ${from.label}`
       : !fromServer.canManage
         ? `Changing the level needs this app to manage ${from.label} too`
         : !fromServer.linksOffered || !toServer.linksOffered
           ? "Linked environments is off on one of them (Settings → Labs)"
-          : toServer.appScopes === null
-            ? `This app does not reach ${to.label}`
-            : null;
+          : null;
   const base = {
     from,
     to,
@@ -296,9 +294,8 @@ function serverSquare(
     lockedReason: lockedReason(to, toServer),
     canRemove:
       hasAccess &&
-      ((toServer.canManage && sessionsFrom.length > 0) ||
-        (link !== null && fromServer?.canManage === true)),
-    canRelink: canRelinkBase && relinkBlockedReason === null,
+      ((manages(toServer) && sessionsFrom.length > 0) || (link !== null && manages(fromServer))),
+    canRelink: relinkBlockedReason === null,
     relinkBlockedReason,
     ownOutbound,
   });
@@ -383,7 +380,7 @@ function deviceSquare(
 ): ReachSquare {
   const changes: SquareChanges = {
     lockedReason: lockedReason(to, server),
-    canRemove: server.canManage && sessions.length > 0,
+    canRemove: manages(server) && sessions.length > 0,
     canRelink: false,
     relinkBlockedReason: "A device keeps the level it paired with. Pair it again to change it.",
     ownOutbound: false,
@@ -439,7 +436,7 @@ function outsideLinkSquare(
     },
     changes: {
       lockedReason: `Set on ${to.label}`,
-      canRemove: server.canManage,
+      canRemove: manages(server),
       canRelink: false,
       relinkBlockedReason: `This app does not reach ${to.label}`,
       ownOutbound: from.onThisComputer,
@@ -628,9 +625,7 @@ export function buildReachModel(input: {
   }
 
   const manageable = new Set(
-    servers
-      .filter((server) => server.canManage)
-      .map((server) => serverPartyId(server.environmentId)),
+    servers.filter(manages).map((server) => serverPartyId(server.environmentId)),
   );
   return { columns, rows, squares, trusted, outgoing, manageable };
 }

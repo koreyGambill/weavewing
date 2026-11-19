@@ -81,14 +81,18 @@ export function planConnect(
   ];
 }
 
-/** Full access both ways with every chosen server makes the computer one of the trusted. */
-export function joinsTrusted(choice: ConnectChoice): boolean {
+/**
+ * Full access both ways with every chosen server makes the computer one of the trusted, once
+ * every line it needs can be made.
+ */
+export function joinsTrusted(choice: ConnectChoice, lines: ReadonlyArray<ConnectLine>): boolean {
   const uses = new Set(choice.uses.map((server) => server.id));
   return (
     choice.uses.length > 0 &&
     choice.usesLevel === "full-access" &&
     choice.usedByLevel === "full-access" &&
     choice.usedBy.length === uses.size &&
-    choice.usedBy.every((server) => uses.has(server.id))
+    choice.usedBy.every((server) => uses.has(server.id)) &&
+    lines.every((line) => line.blocked === null)
   );
 }

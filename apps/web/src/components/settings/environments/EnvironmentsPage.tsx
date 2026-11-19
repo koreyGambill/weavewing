@@ -422,13 +422,15 @@ function DeviceRow({
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+        <span className="min-w-0 shrink truncate text-sm font-medium">
           {device.label}
           {device.kind === "agent" ? (
             <span className="ml-1.5 text-xs font-normal text-muted-foreground">agent</span>
           ) : null}
         </span>
-        <span className="shrink-0 text-xs text-muted-foreground">{usesText(model, device)}</span>
+        <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+          {usesText(model, device)}
+        </span>
       </button>
       {open ? (
         <div className="mt-2 space-y-1 rounded-lg bg-muted/40 px-3 py-2 sm:px-4">
