@@ -193,7 +193,17 @@ export function SearchDialog(props: {
           />
           {items.length > shown ? (
             <div className="flex justify-end px-3 py-2">
-              <Button variant="ghost" size="sm" onClick={() => setShown(shown + PAGE_SIZE)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(event) => {
+                  setShown(shown + PAGE_SIZE);
+                  event.currentTarget
+                    .closest("[data-command-palette]")
+                    ?.querySelector<HTMLInputElement>('input[role="combobox"]')
+                    ?.focus();
+                }}
+              >
                 Show more ▸
               </Button>
             </div>
