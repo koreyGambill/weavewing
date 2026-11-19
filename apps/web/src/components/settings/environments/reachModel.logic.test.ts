@@ -478,8 +478,8 @@ describe("arrival tags", () => {
     expect(state(model, device("Laptop"), MOON).arrivedVia).toBe("local-network");
   });
 
-  // Korey's Windows server stores the phone, the Mac and the WSL link all at 127.0.0.1 behind
-  // Tailscale Serve, the same address a browser on that PC records, so loopback proves nothing.
+  // A Windows server behind Tailscale Serve stores a phone, a Mac and a WSL link all at 127.0.0.1,
+  // the same address a browser on that PC records, so loopback proves nothing.
   it("tags only from session evidence: a sibling server or this app, a tailnet or LAN address, never loopback", () => {
     const device = (label: string, ipAddress: string, deviceType: "mobile" | "desktop") =>
       session({
