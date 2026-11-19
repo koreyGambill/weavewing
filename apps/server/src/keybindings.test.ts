@@ -952,6 +952,119 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  // regression: BW-3828 shipped with New thread stranded on Ctrl+Alt+N in an existing install's file
+  it.effect("restores Ctrl+N for New thread in a real saved file, once", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const fixtures = path.join(import.meta.dirname, "fixtures", "keybindings");
+      const migrationsPath = path.join(
+        path.dirname(keybindingsConfigPath),
+        "keybindings-migrations",
+      );
+      // The same file was saved on the Windows and the WSL server.
+      yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+      const saved = yield* fs.readFileString(path.join(fixtures, "saved.json"));
+      yield* fs.writeFileString(keybindingsConfigPath, saved);
+      yield* fs.writeFileString(
+        migrationsPath,
+        yield* fs.readFileString(path.join(fixtures, "saved-migrations")),
+      );
+      const before = yield* decodeKeybindingsConfigJson(saved);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const stranded = before.findIndex(
+        (rule) => rule.command === "chat.new" && rule.key === "mod+alt+n",
+      );
+      assert.deepEqual(
+        first,
+        before.with(stranded, { key: "mod+n", command: "chat.new", when: "!terminalFocus" }),
+      );
+      assert.include(yield* fs.readFileString(migrationsPath), "weavewing.new-thread-mod-n.v1");
+
+      const { keybindings: resolved } = yield* keybindings.loadConfigState;
+      const commandFor = (key: string) => {
+        const shortcut = SharedKeybindings.parseKeybindingShortcut(key)!;
+        return resolved
+          .filter(
+            (binding) =>
+              binding.shortcut.key === shortcut.key &&
+              binding.shortcut.modKey === shortcut.modKey &&
+              binding.shortcut.ctrlKey === shortcut.ctrlKey &&
+              binding.shortcut.metaKey === shortcut.metaKey &&
+              binding.shortcut.altKey === shortcut.altKey &&
+              binding.shortcut.shiftKey === shortcut.shiftKey,
+          )
+          .map((binding) => binding.command);
+      };
+      assert.deepEqual(commandFor("mod+n"), ["chat.new"]);
+      assert.deepEqual(commandFor("mod+alt+n"), []);
+      assert.deepEqual(commandFor("mod+shift+n"), ["chat.newLocal"]);
+      assert.deepEqual(commandFor("mod+shift+o"), ["projectPicker.open"]);
+      assert.deepEqual(commandFor("ctrl+`"), ["terminal.dropdown"]);
+      assert.includeMembers(commandFor("ctrl+meta+["), ["thread.previous"]);
+      assert.includeMembers(commandFor("mod+shift+["), ["workspace.tile.previousTab"]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect.each<{
+    readonly name: string;
+    readonly saved: ReadonlyArray<KeybindingRule> | null;
+    readonly newThreadRules: ReadonlyArray<KeybindingRule>;
+  }>([
+    {
+      name: "a fresh install",
+      saved: null,
+      newThreadRules: [{ key: "mod+n", command: "chat.new", when: "!terminalFocus" }],
+    },
+    {
+      name: "the user's own Ctrl+N keeps the key and New thread keeps Ctrl+Alt+N",
+      saved: [
+        { key: "ctrl+n", command: "sidebar.toggle" },
+        { key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" },
+      ],
+      newThreadRules: [{ key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" }],
+    },
+    {
+      name: "New thread already on Ctrl+N drops the stranded Ctrl+Alt+N",
+      saved: [
+        { key: "mod+n", command: "chat.new" },
+        { key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" },
+      ],
+      newThreadRules: [{ key: "mod+n", command: "chat.new" }],
+    },
+    {
+      name: "a customized New thread key gains Ctrl+N and keeps its own key",
+      saved: [{ key: "mod+alt+n", command: "chat.new" }],
+      newThreadRules: [
+        { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+        { key: "mod+alt+n", command: "chat.new" },
+      ],
+    },
+  ])(
+    "New thread key migration: $name, and a second run changes nothing",
+    ({ saved, newThreadRules }) =>
+      Effect.gen(function* () {
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        const keybindings = yield* Keybindings.Keybindings;
+        if (saved) yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+        assert.deepEqual(
+          first.filter((rule) => rule.command === "chat.new"),
+          newThreadRules,
+        );
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+      }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("upgrades the old Mac close backfill once and preserves later edits", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
