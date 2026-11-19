@@ -107,6 +107,8 @@ const SETTINGS_SEARCH_TERMS = {
     "branch prefix",
     "submodules",
     "start from remote",
+    "isolated checkouts",
+    "xwing environments",
   ],
   SettingsLabs: [
     "beta",

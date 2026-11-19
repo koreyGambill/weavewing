@@ -13,7 +13,12 @@ describe("resolveNewTaskWorkspaceSelection", () => {
 
   it("falls back to the current checkout when a non-git project defaults to worktree", () => {
     expect(
-      resolveNewTaskWorkspaceSelection({ selection: undefined, fallback, isGitRepo: false }),
+      resolveNewTaskWorkspaceSelection({
+        selection: undefined,
+        fallback,
+        isGitRepo: false,
+        worktreeProvider: "t3",
+      }),
     ).toEqual({ mode: "local", branch: null, worktreePath: null });
   });
 
@@ -31,6 +36,7 @@ describe("resolveNewTaskWorkspaceSelection", () => {
           },
           fallback,
           isGitRepo: false,
+          worktreeProvider: "t3",
         }),
       ).toEqual({ mode: "local", branch: null, worktreePath: null });
     },
@@ -39,12 +45,33 @@ describe("resolveNewTaskWorkspaceSelection", () => {
   // regression: #21404 use current checkout for non-git projects
   it("preserves the selection and defaults for git projects", () => {
     const selection = { mode: "local", branch: "feature", worktreePath: "/worktree" } as const;
-    expect(resolveNewTaskWorkspaceSelection({ selection, fallback, isGitRepo: true })).toBe(
-      selection,
-    );
     expect(
-      resolveNewTaskWorkspaceSelection({ selection: undefined, fallback, isGitRepo: true }),
+      resolveNewTaskWorkspaceSelection({
+        selection,
+        fallback,
+        isGitRepo: true,
+        worktreeProvider: "t3",
+      }),
+    ).toBe(selection);
+    expect(
+      resolveNewTaskWorkspaceSelection({
+        selection: undefined,
+        fallback,
+        isGitRepo: true,
+        worktreeProvider: "xwing",
+      }),
     ).toBe(fallback);
+  });
+
+  it("starts a saved worktree selection in the checkout when worktreeProvider is off", () => {
+    expect(
+      resolveNewTaskWorkspaceSelection({
+        selection: { mode: "worktree", branch: "main", worktreePath: null },
+        fallback,
+        isGitRepo: true,
+        worktreeProvider: "off",
+      }),
+    ).toEqual({ mode: "local", branch: null, worktreePath: null });
   });
 });
 

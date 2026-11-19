@@ -3,6 +3,7 @@ import type {
   EnvironmentMachineKind,
   VcsRef,
   ProjectId,
+  WorktreeProvider,
   WorktreeSubmodules,
 } from "@t3tools/contracts";
 import type { ThreadStructureRuntime } from "@t3tools/client-runtime/state/shell";
@@ -76,8 +77,19 @@ export function resolveContextStripLabelsCompact(input: {
     : input.neededWidth > input.availableWidth;
 }
 
-export function resolveEnvModeLabel(mode: EnvMode): string {
-  return mode === "worktree" ? "New worktree" : "Current checkout";
+export function resolveEnvModeLabel(mode: EnvMode, worktreeProvider: WorktreeProvider): string {
+  if (mode === "local") return "Current checkout";
+  return worktreeProvider === "xwing" ? "Xwing environment" : "New worktree";
+}
+
+/** The new-checkout choice beside "New environment", or null when this machine allows none. */
+export function resolveNewCheckoutOptionLabel(
+  worktreeProvider: WorktreeProvider,
+  hasNewEnvironment: boolean,
+): string | null {
+  if (worktreeProvider === "off") return null;
+  if (worktreeProvider === "t3" && hasNewEnvironment) return "Native worktree";
+  return resolveEnvModeLabel("worktree", worktreeProvider);
 }
 
 export const WORKTREE_SUBMODULES_LABELS: Record<WorktreeSubmodules, string> = {
@@ -87,15 +99,18 @@ export const WORKTREE_SUBMODULES_LABELS: Record<WorktreeSubmodules, string> = {
 };
 
 export function resolveCurrentWorkspaceLabel(activeWorktreePath: string | null): string {
-  return activeWorktreePath ? "Current worktree" : resolveEnvModeLabel("local");
+  return activeWorktreePath ? "Current worktree" : "Current checkout";
 }
 
 export function resolveLockedWorkspaceLabel(
   activeWorktreePath: string | null,
   effectiveEnvMode: EnvMode,
+  worktreeProvider: WorktreeProvider,
 ): string {
   if (activeWorktreePath) return activeWorktreePath.split(/[\\/]/).findLast(Boolean) ?? "Worktree";
-  return effectiveEnvMode === "worktree" ? resolveEnvModeLabel("worktree") : "Local checkout";
+  return effectiveEnvMode === "worktree"
+    ? resolveEnvModeLabel("worktree", worktreeProvider)
+    : "Local checkout";
 }
 
 export interface PreviousWorktreeSeed {

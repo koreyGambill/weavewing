@@ -1,3 +1,4 @@
+import { useEnvironmentSettings } from "~/hooks/useSettings";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -76,6 +77,10 @@ export function PullRequestThreadDialog({
   const [reference, setReference] = useState(initialReference ?? "");
   const [referenceDirty, setReferenceDirty] = useState(false);
   const [preparingMode, setPreparingMode] = useState<"local" | "worktree" | null>(null);
+  const t3Worktrees = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.worktreeProvider === "t3",
+  );
   const [prepareErrorMessage, setPrepareErrorMessage] = useState<string | null>(null);
   const [debouncedReference, referenceDebouncer] = useDebouncedValue(
     reference,
@@ -239,7 +244,7 @@ export function PullRequestThreadDialog({
                 }
                 event.preventDefault();
                 if (!isResolving && !preparePullRequestThreadAction.isPending) {
-                  void handleConfirm("worktree");
+                  void handleConfirm(t3Worktrees ? "worktree" : "local");
                 }
               }}
             />
@@ -296,21 +301,23 @@ export function PullRequestThreadDialog({
           >
             {preparingMode === "local" ? "Preparing local..." : "Local"}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => handleConfirm("worktree")}
-            disabled={
-              !preparePullRequestThreadAction.isAllowed ||
-              !canOperateThread ||
-              !cwd ||
-              !resolvedPullRequest ||
-              isResolving ||
-              preparePullRequestThreadAction.isPending
-            }
-          >
-            {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
-          </Button>
+          {t3Worktrees ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => handleConfirm("worktree")}
+              disabled={
+                !preparePullRequestThreadAction.isAllowed ||
+                !canOperateThread ||
+                !cwd ||
+                !resolvedPullRequest ||
+                isResolving ||
+                preparePullRequestThreadAction.isPending
+              }
+            >
+              {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogPopup>
     </Dialog>

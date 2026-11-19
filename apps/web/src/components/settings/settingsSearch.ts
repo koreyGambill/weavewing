@@ -265,6 +265,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "worktree-provider",
+    title: "Isolated checkouts",
+    to: "/settings/worktrees",
+    scope: "environment-defaults",
+    searchTerms: ["worktree provider xwing environments off disable isolated checkout isolation"],
+  },
+  {
     id: "storage-worktrees-location",
     title: "Worktree location",
     to: "/settings/worktrees",

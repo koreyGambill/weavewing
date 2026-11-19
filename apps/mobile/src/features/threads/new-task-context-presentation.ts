@@ -1,6 +1,7 @@
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveSendEnvMode } from "@t3tools/shared/projectSettings";
+import type { WorktreeProvider } from "@t3tools/contracts";
 import type { ComposerDraftWorkspaceSelection } from "../../state/use-composer-drafts";
 
 type WorkspaceMode = "local" | "worktree";
@@ -9,18 +10,26 @@ export function resolveNewTaskWorkspaceSelection(input: {
   readonly selection: ComposerDraftWorkspaceSelection | undefined;
   readonly fallback: ComposerDraftWorkspaceSelection;
   readonly isGitRepo: boolean;
+  readonly worktreeProvider: WorktreeProvider;
 }): ComposerDraftWorkspaceSelection {
   const selection = input.selection ?? input.fallback;
-  const mode = resolveSendEnvMode({ requestedEnvMode: selection.mode, isGitRepo: input.isGitRepo });
-  return input.isGitRepo ? selection : { mode, branch: null, worktreePath: null };
+  const mode = resolveSendEnvMode({
+    requestedEnvMode: selection.mode,
+    isGitRepo: input.isGitRepo,
+    worktreeProvider: input.worktreeProvider,
+  });
+  return input.isGitRepo && mode === selection.mode
+    ? selection
+    : { mode, branch: null, worktreePath: null };
 }
 
 export function resolveNewTaskWorkspaceLabel(input: {
   readonly workspaceMode: WorkspaceMode;
   readonly worktreePath: string | null;
-}): "Current checkout" | "Current worktree" | "New worktree" {
+  readonly worktreeProvider: WorktreeProvider;
+}): "Current checkout" | "Current worktree" | "New worktree" | "Xwing environment" {
   if (input.workspaceMode === "worktree") {
-    return "New worktree";
+    return input.worktreeProvider === "xwing" ? "Xwing environment" : "New worktree";
   }
   return input.worktreePath ? "Current worktree" : "Current checkout";
 }
@@ -164,6 +173,7 @@ export function resolveNewTaskDraftWorkspace(input: {
   readonly defaultMode: WorkspaceMode;
   readonly defaultModeSettled: boolean;
   readonly isGitRepo: boolean;
+  readonly worktreeProvider: WorktreeProvider;
   readonly branches: Parameters<typeof fillNewTaskWorkspaceBranch>[0]["branches"];
   readonly projectCwd: string | null;
 }): ComposerDraftWorkspaceSelection {
@@ -173,6 +183,7 @@ export function resolveNewTaskDraftWorkspace(input: {
       selection,
       fallback: { mode: input.defaultMode, branch: null, worktreePath: null },
       isGitRepo: input.isGitRepo,
+      worktreeProvider: input.worktreeProvider,
     }),
     branches: input.branches,
     projectCwd: input.projectCwd,

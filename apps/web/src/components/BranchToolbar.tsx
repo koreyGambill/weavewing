@@ -4,7 +4,7 @@ import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ThreadId, WorktreeProvider } from "@t3tools/contracts";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, PlusIcon, ScaleIcon } from "lucide-react";
 import {
   type Ref,
@@ -27,6 +27,7 @@ import {
   resolveContextStripLabelsCompact,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
+  resolveNewCheckoutOptionLabel,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
@@ -39,6 +40,7 @@ import {
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { openAddProjectToMachine } from "./AddProjectToMachineDialog";
 import { type AddProjectTarget, useAddProjectTargets } from "../hooks/useAddProjectTargets";
+import { useEnvironmentSettings } from "../hooks/useSettings";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { useXwingEnvironmentsSupport } from "../state/xwingEnvironments";
@@ -159,6 +161,7 @@ interface RunContextSelectorProps {
   onUsePreviousWorktree: () => void;
   onNewEnvironment?: (() => void) | undefined;
   selectedWorkspaceLabel?: string | undefined;
+  worktreeProvider: WorktreeProvider;
   addTargets: readonly AddProjectTarget[];
   onAddToMachine: (environmentId: EnvironmentId) => void;
 }
@@ -184,9 +187,14 @@ const RunContextSelector = memo(function RunContextSelector({
   onUsePreviousWorktree,
   onNewEnvironment,
   selectedWorkspaceLabel,
+  worktreeProvider,
   addTargets,
   onAddToMachine,
 }: RunContextSelectorProps) {
+  const newCheckoutLabel = resolveNewCheckoutOptionLabel(
+    worktreeProvider,
+    Boolean(onNewEnvironment),
+  );
   const composerFloatingLayerProps = useComposerMenuProps();
   const activeEnvironment =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
@@ -199,11 +207,11 @@ const RunContextSelector = memo(function RunContextSelector({
   const workspaceLabel =
     selectedWorkspaceLabel ??
     (forceNewWorktree
-      ? resolveEnvModeLabel("worktree")
+      ? resolveEnvModeLabel("worktree", worktreeProvider)
       : envModeLocked
-        ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)
+        ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider)
         : effectiveEnvMode === "worktree"
-          ? resolveEnvModeLabel("worktree")
+          ? resolveEnvModeLabel("worktree", worktreeProvider)
           : resolveCurrentWorkspaceLabel(activeWorktreePath));
   const isPanel = displayMode === "panel";
   const isLocked = envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker));
@@ -438,14 +446,14 @@ const RunContextSelector = memo(function RunContextSelector({
                 </span>
               </MenuRadioItem>
             ) : null}
-            <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
-              <span className="flex min-w-0 items-center gap-1.5">
-                <FolderGit2Icon className="size-3" />
-                <span className="min-w-0 truncate">
-                  {onNewEnvironment ? "Native worktree" : resolveEnvModeLabel("worktree")}
+            {newCheckoutLabel !== null ? (
+              <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FolderGit2Icon className="size-3" />
+                  <span className="min-w-0 truncate">{newCheckoutLabel}</span>
                 </span>
-              </span>
-            </MenuRadioItem>
+              </MenuRadioItem>
+            ) : null}
             {previousWorktreeLabel ? (
               <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
                 <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
@@ -650,6 +658,10 @@ export const BranchToolbar = memo(function BranchToolbar({
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const [createEnvironmentOpen, setCreateEnvironmentOpen] = useState(false);
   const supportsXwing = useXwingEnvironmentsSupport(environmentId);
+  const worktreeProvider = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.worktreeProvider,
+  );
   const canCreateEnvironment = useAtomValue(
     createDevelopmentEnvironment.permissionAtom(environmentId),
   );
@@ -775,6 +787,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onUsePreviousWorktree={onUsePreviousWorktree}
             onNewEnvironment={onNewEnvironment}
             selectedWorkspaceLabel={!isServerThread ? draftXwingEnvironment?.label : undefined}
+            worktreeProvider={worktreeProvider}
             addTargets={addTargets}
             onAddToMachine={onAddToMachine}
           />
@@ -827,6 +840,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onUsePreviousWorktree={onUsePreviousWorktree}
             onNewEnvironment={onNewEnvironment}
             selectedWorkspaceLabel={!isServerThread ? draftXwingEnvironment?.label : undefined}
+            worktreeProvider={worktreeProvider}
             addTargets={addTargets}
             onAddToMachine={onAddToMachine}
           />
@@ -873,6 +887,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               onUsePreviousWorktree={onUsePreviousWorktree}
               onNewEnvironment={onNewEnvironment}
               selectedWorkspaceLabel={!isServerThread ? draftXwingEnvironment?.label : undefined}
+              worktreeProvider={worktreeProvider}
             />
           ) : null}
         </div>

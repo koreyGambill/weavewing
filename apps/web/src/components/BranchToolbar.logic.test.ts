@@ -12,6 +12,7 @@ import {
   resolveDefaultWorktreeBaseBranch,
   resolveLocalCheckoutBranchMismatch,
   resolveLockedWorkspaceLabel,
+  resolveNewCheckoutOptionLabel,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
   isBranchHoldCurrent,
@@ -121,7 +122,18 @@ describe("resolveLockedWorkspaceLabel", () => {
     ["/home/me/.t3/worktrees/app/t3-ff466c42/", "t3-ff466c42"],
     ["C:\\Users\\me\\worktrees\\feature-x", "feature-x"],
   ])("names the worktree at %s", (path, label) => {
-    expect(resolveLockedWorkspaceLabel(path, "worktree")).toBe(label);
+    expect(resolveLockedWorkspaceLabel(path, "worktree", "t3")).toBe(label);
+  });
+});
+
+describe("resolveNewCheckoutOptionLabel", () => {
+  it.each([
+    ["t3", false, "New worktree"],
+    ["t3", true, "Native worktree"],
+    ["xwing", true, "Xwing environment"],
+    ["off", false, null],
+  ] as const)("offers %s (new environment: %s) as %s", (provider, hasNewEnvironment, label) => {
+    expect(resolveNewCheckoutOptionLabel(provider, hasNewEnvironment)).toBe(label);
   });
 });
 

@@ -22,6 +22,7 @@ const localDefault: PendingDraftProjectDefaults = {
   canChooseWorkspace: true,
   defaultMode: "local",
   defaultModeSettled: true,
+  worktreeProvider: "t3",
 };
 const worktreeDefault: PendingDraftProjectDefaults = { ...localDefault, defaultMode: "worktree" };
 const resolve = (

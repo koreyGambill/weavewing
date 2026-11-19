@@ -13,6 +13,7 @@ import {
   type T3ProjectFile,
   type ThreadEnvMode,
   type WorktreeCleanupRules,
+  type WorktreeProvider,
 } from "@t3tools/contracts";
 import { readCustomModelEntries } from "./model.ts";
 import { normalizeProjectPathForComparison } from "./path.ts";
@@ -176,7 +177,8 @@ export function resolveNewThreadEnvMode(input: {
   readonly newProjectsRoot: string | null | undefined;
   readonly projectHasThreads: boolean;
 }): ThreadEnvMode {
-  const configured = input.projectSettings.settings.defaultThreadEnvMode;
+  const { defaultThreadEnvMode, worktreeProvider } = input.projectSettings.settings;
+  const configured = worktreeProvider === "off" ? "local" : defaultThreadEnvMode;
   if (
     configured === "local" ||
     input.projectHasThreads ||
@@ -197,11 +199,13 @@ export function resolveNewThreadEnvMode(input: {
   return isNewProjectFolder ? "local" : configured;
 }
 
+/** `off` sends an isolated request from the checkout; `xwing` sends it for the server to route. */
 export function resolveSendEnvMode(input: {
   readonly requestedEnvMode: ThreadEnvMode;
   readonly isGitRepo: boolean;
+  readonly worktreeProvider: WorktreeProvider;
 }): ThreadEnvMode {
-  return input.isGitRepo ? input.requestedEnvMode : "local";
+  return input.isGitRepo && input.worktreeProvider !== "off" ? input.requestedEnvMode : "local";
 }
 
 export function clearProjectSettingsOverrides(

@@ -234,7 +234,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             <SelectValue>
               {(value: string | null) =>
                 value === "local" || value === "worktree"
-                  ? resolveEnvModeLabel(value)
+                  ? resolveEnvModeLabel(value, settings.worktreeProvider)
                   : unavailable
                     ? "Unavailable"
                     : "Mixed"
@@ -242,8 +242,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             </SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
-            <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
+            <SelectItem value="local">
+              {resolveEnvModeLabel("local", settings.worktreeProvider)}
+            </SelectItem>
+            {settings.worktreeProvider !== "off" ? (
+              <SelectItem value="worktree">
+                {resolveEnvModeLabel("worktree", settings.worktreeProvider)}
+              </SelectItem>
+            ) : null}
           </SelectPopup>
         </Select>
       }

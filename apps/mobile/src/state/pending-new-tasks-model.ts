@@ -1,5 +1,5 @@
 import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, MessageId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, MessageId, ProjectId, WorktreeProvider } from "@t3tools/contracts";
 
 import { deriveThreadTitleFromPrompt } from "../lib/projectThreadStartTurn";
 import {
@@ -58,6 +58,7 @@ export interface PendingDraftProjectDefaults {
   readonly canChooseWorkspace: boolean;
   readonly defaultMode: "local" | "worktree";
   readonly defaultModeSettled: boolean;
+  readonly worktreeProvider: WorktreeProvider;
 }
 
 /**
@@ -86,6 +87,7 @@ export function resolvePendingDraftBranch(input: {
     defaultMode: input.defaults.defaultMode,
     defaultModeSettled: input.defaults.defaultModeSettled,
     isGitRepo: input.isGitRepo,
+    worktreeProvider: input.defaults.worktreeProvider,
     branches: input.branches,
     projectCwd: input.projectCwd,
   }).branch;

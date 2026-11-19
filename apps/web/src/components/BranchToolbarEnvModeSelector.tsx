@@ -7,8 +7,10 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveLockedWorkspaceLabel,
+  resolveNewCheckoutOptionLabel,
   type EnvMode,
 } from "./BranchToolbar.logic";
+import type { WorktreeProvider } from "@t3tools/contracts";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import {
@@ -37,6 +39,7 @@ interface BranchToolbarEnvModeSelectorProps {
   onUsePreviousWorktree?: () => void;
   onNewEnvironment?: (() => void) | undefined;
   selectedWorkspaceLabel?: string | undefined;
+  worktreeProvider: WorktreeProvider;
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
@@ -50,7 +53,12 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   onUsePreviousWorktree,
   onNewEnvironment,
   selectedWorkspaceLabel,
+  worktreeProvider,
 }: BranchToolbarEnvModeSelectorProps) {
+  const newCheckoutLabel = resolveNewCheckoutOptionLabel(
+    worktreeProvider,
+    Boolean(onNewEnvironment),
+  );
   const composerFloatingLayerProps = useComposerMenuProps();
   const shortcutLabel = shortcutLabelForCommand(
     useAtomValue(primaryServerKeybindingsAtom),
@@ -63,10 +71,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       label: resolveCurrentWorkspaceLabel(activeWorktreePath),
     },
     ...(onNewEnvironment ? [{ value: "new-environment", label: "New environment" }] : []),
-    {
-      value: "worktree",
-      label: onNewEnvironment ? "Native worktree" : resolveEnvModeLabel("worktree"),
-    },
+    ...(newCheckoutLabel !== null ? [{ value: "worktree", label: newCheckoutLabel }] : []),
     ...(showPreviousWorktree && previousWorktreeLabel
       ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
       : []),
@@ -93,8 +98,8 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         )}
         <ComposerContextLabel>
           {forceNewWorktree
-            ? resolveEnvModeLabel("worktree")
-            : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)}
+            ? resolveEnvModeLabel("worktree", worktreeProvider)
+            : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider)}
         </ComposerContextLabel>
       </span>
     );
@@ -106,7 +111,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           {forceNewWorktree
             ? "Each model starts in its own worktree."
             : (activeWorktreePath ??
-              resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode))}
+              resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider))}
         </TooltipPopup>
       </Tooltip>
     );
@@ -153,7 +158,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         </TooltipTrigger>
         <TooltipPopup>
           {effectiveEnvMode === "worktree"
-            ? resolveEnvModeLabel("worktree")
+            ? resolveEnvModeLabel("worktree", worktreeProvider)
             : resolveCurrentWorkspaceLabel(activeWorktreePath)}
           {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
@@ -182,12 +187,14 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               </span>
             </SelectItem>
           ) : null}
-          <SelectItem value="worktree">
-            <span className="inline-flex items-center gap-1.5">
-              <FolderGit2Icon className="size-3" />
-              {onNewEnvironment ? "Native worktree" : resolveEnvModeLabel("worktree")}
-            </span>
-          </SelectItem>
+          {newCheckoutLabel !== null ? (
+            <SelectItem value="worktree">
+              <span className="inline-flex items-center gap-1.5">
+                <FolderGit2Icon className="size-3" />
+                {newCheckoutLabel}
+              </span>
+            </SelectItem>
+          ) : null}
           {showPreviousWorktree && previousWorktreeLabel ? (
             <SelectItem value={PREVIOUS_WORKTREE_SELECT_VALUE}>
               <PreviousWorktreeItemContent branch={previousWorktreeBranch} />

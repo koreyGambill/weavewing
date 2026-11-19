@@ -550,6 +550,7 @@ export function NewTaskDraftScreen(props: {
   const workspaceLabel = resolveNewTaskWorkspaceLabel({
     workspaceMode: flow.workspaceMode,
     worktreePath: flow.selectedWorktreePath,
+    worktreeProvider: flow.worktreeProvider,
   });
   const showBranchLoading =
     environmentConnected && flow.branchesLoading && flow.availableBranches.length === 0;
@@ -870,9 +871,9 @@ export function NewTaskDraftScreen(props: {
   const workspaceControls = (
     <View className="flex-row items-center gap-1 px-2">
       <ComposerInlineControl
-        accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`}
+        accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? (flow.worktreeProvider === "xwing" ? "an Xwing environment" : "a new worktree") : "the current checkout"}`}
         accessibilityLabel={workspaceLabel}
-        disabled={isComposerInteractionLocked || !flow.isGitRepo}
+        disabled={isComposerInteractionLocked || !flow.isGitRepo || flow.worktreeProvider === "off"}
         renderIcon={(size) => (
           <NewTaskWorkspaceIcon
             workspaceMode={flow.workspaceMode}

@@ -9,6 +9,7 @@ import {
   type ServerSettings,
   type ServerSettingsPatch,
   type ThreadEnvMode,
+  type WorktreeProvider,
   type WorktreeSubmodules,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
@@ -74,6 +75,20 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
   ],
   maintenance: ["continueThreadsAfterServerUpdate"],
 };
+
+const WORKTREE_PROVIDER_CHOICES: ReadonlyArray<{
+  readonly provider: WorktreeProvider;
+  readonly label: string;
+  readonly description: string;
+}> = [
+  { provider: "t3", label: "T3 worktrees", description: "T3 creates a worktree for each one." },
+  {
+    provider: "xwing",
+    label: "Xwing environments",
+    description: "Each new isolated thread gets its own Xwing environment.",
+  },
+  { provider: "off", label: "Off", description: "Threads stay in an existing checkout." },
+];
 
 const SUBMODULE_CHOICES: ReadonlyArray<{
   readonly mode: WorktreeSubmodules | null;
@@ -323,11 +338,17 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                   }
                 >
                   {WORKSPACE_CHOICES.filter(
-                    (choice) => choice.mode !== null || !projectSelected,
+                    (choice) =>
+                      (choice.mode !== null || !projectSelected) &&
+                      (choice.mode !== "worktree" || uniform("worktreeProvider") !== "off"),
                   ).map((choice, index) => (
                     <SettingsChoiceRow
                       key={choice.mode ?? "inherit"}
-                      label={choice.label}
+                      label={
+                        choice.mode === "worktree" && uniform("worktreeProvider") === "xwing"
+                          ? "Xwing environment"
+                          : choice.label
+                      }
                       description={choice.description}
                       selected={
                         !isMixed("defaultThreadEnvMode") &&
@@ -474,6 +495,32 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
 
             {props.page === "worktrees" ? (
               <>
+                {projectSelected ? null : (
+                  <SettingsSection
+                    title="Isolated checkouts"
+                    footer={managed("worktreeProvider")}
+                    trailing={
+                      pendingWrites === 0 && isMixed("worktreeProvider") ? (
+                        <MixedValuesLabel projectSelected={projectSelected} />
+                      ) : null
+                    }
+                  >
+                    {WORKTREE_PROVIDER_CHOICES.map((choice, index) => (
+                      <SettingsChoiceRow
+                        key={choice.provider}
+                        label={choice.label}
+                        description={choice.description}
+                        selected={
+                          !isMixed("worktreeProvider") &&
+                          uniform("worktreeProvider") === choice.provider
+                        }
+                        separated={index > 0}
+                        disabled={disabledFor("worktreeProvider")}
+                        onPress={() => write({ worktreeProvider: choice.provider })}
+                      />
+                    ))}
+                  </SettingsSection>
+                )}
                 <SettingsSection title="New worktrees">
                   <SettingsSwitchRow
                     icon="arrow.triangle.branch"

@@ -1,4 +1,7 @@
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import type { WorktreeProvider } from "@t3tools/contracts";
+
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
 import { AdvancedSettings } from "./AdvancedSettings";
 import { BranchNamingSettings } from "./BranchNamingSettings";
@@ -13,7 +16,67 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { WorktreeCleanupSection, WorktreesDirectoryRow } from "./StorageSettings";
-import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
+
+const WORKTREE_PROVIDER_LABELS: Record<WorktreeProvider, string> = {
+  t3: "T3 worktrees",
+  xwing: "Xwing environments",
+  off: "Off",
+};
+
+function WorktreeProviderRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const mixed = useScopedSettingsMixed(["worktreeProvider"]);
+  return (
+    <SettingsRow
+      serverScoped
+      settingKeys={["worktreeProvider"]}
+      {...searchableSetting("worktree-provider")}
+      description="Who makes a separate checkout when a thread, task or pull request asks for one. Xwing gives each new isolated thread its own Xwing environment. Off keeps threads in existing checkouts."
+      resetAction={
+        mixed || settings.worktreeProvider !== DEFAULT_UNIFIED_SETTINGS.worktreeProvider ? (
+          <SettingResetButton
+            label="isolated checkouts"
+            onClick={() =>
+              updateSettings({ worktreeProvider: DEFAULT_UNIFIED_SETTINGS.worktreeProvider })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={mixed ? null : settings.worktreeProvider}
+          onValueChange={(value) => {
+            if (value === "t3" || value === "xwing" || value === "off")
+              updateSettings({ worktreeProvider: value });
+          }}
+        >
+          <SelectTrigger size="sm" aria-label="Isolated checkouts">
+            <SelectValue>
+              {(value: string | null) =>
+                value === "t3" || value === "xwing" || value === "off"
+                  ? WORKTREE_PROVIDER_LABELS[value]
+                  : "Mixed"
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {(Object.keys(WORKTREE_PROVIDER_LABELS) as WorktreeProvider[]).map((provider) => (
+              <SelectItem key={provider} value={provider}>
+                {WORKTREE_PROVIDER_LABELS[provider]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
 
 function StartFromRemoteRow() {
   const settings = useScopedSettings();
@@ -58,6 +121,7 @@ export function WorktreesSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection id="worktree-creation" title="Creation">
+        {!isProjectScope && <WorktreeProviderRow />}
         {!isProjectScope && <WorktreesDirectoryRow />}
         <StartFromRemoteRow />
         <AdvancedSettings targetIds={[searchableSetting("worktree-submodules").id]}>

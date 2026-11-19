@@ -24,12 +24,29 @@ describe("resolveSendEnvMode", () => {
   it.each(["local", "worktree"] as const)(
     "uses local for non-git projects requesting %s",
     (mode) => {
-      expect(resolveSendEnvMode({ requestedEnvMode: mode, isGitRepo: false })).toBe("local");
+      expect(
+        resolveSendEnvMode({ requestedEnvMode: mode, isGitRepo: false, worktreeProvider: "t3" }),
+      ).toBe("local");
     },
   );
 
   it.each(["local", "worktree"] as const)("preserves %s for git repositories", (mode) => {
-    expect(resolveSendEnvMode({ requestedEnvMode: mode, isGitRepo: true })).toBe(mode);
+    expect(
+      resolveSendEnvMode({ requestedEnvMode: mode, isGitRepo: true, worktreeProvider: "t3" }),
+    ).toBe(mode);
+    expect(
+      resolveSendEnvMode({ requestedEnvMode: mode, isGitRepo: true, worktreeProvider: "xwing" }),
+    ).toBe(mode);
+  });
+
+  it("sends from the checkout when worktreeProvider is off", () => {
+    expect(
+      resolveSendEnvMode({
+        requestedEnvMode: "worktree",
+        isGitRepo: true,
+        worktreeProvider: "off",
+      }),
+    ).toBe("local");
   });
 });
 
@@ -230,6 +247,18 @@ describe("resolveNewThreadEnvMode", () => {
         workspaceRoot: "C:\\Data\\Projects\\Pinball-Stats",
         newProjectsRoot: "c:/data/projects",
       }),
+    ).toBe("local");
+  });
+
+  it("starts in the checkout when a saved worktree default meets worktreeProvider off", () => {
+    const off = resolveProjectSettings(
+      { ...DEFAULT_SERVER_SETTINGS, defaultThreadEnvMode: "worktree", worktreeProvider: "off" },
+      projectId,
+      null,
+      null,
+    );
+    expect(
+      resolveNewThreadEnvMode({ ...newProject, projectSettings: off, projectHasThreads: true }),
     ).toBe("local");
   });
 

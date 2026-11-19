@@ -37,6 +37,12 @@ vi.mock("react", async (importOriginal) => ({
   useRef: (current: unknown) => ({ current }),
   useEffect: () => {},
 }));
+vi.mock("~/hooks/useSettings", () => ({
+  useEnvironmentSettings: (
+    _environmentId: unknown,
+    select: (settings: { readonly worktreeProvider: "t3" }) => unknown,
+  ) => select({ worktreeProvider: "t3" }),
+}));
 vi.mock("@tanstack/react-pacer", () => ({
   useDebouncedValue: (value: unknown) => [value, { state: { isPending: false } }],
 }));

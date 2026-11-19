@@ -389,6 +389,10 @@ export function PullRequestDetailPanel({
   const [selectedTab, setTab] = useState<PullRequestDetailTab>(
     () => linkedTab(revealAnchor) ?? initialTab,
   );
+  const t3Worktrees = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.worktreeProvider === "t3",
+  );
   const reviewGuidesEnabled = useEnvironmentSettings(
     environmentId,
     (settings) => settings.reviewGuidesEnabled,
@@ -855,7 +859,7 @@ export function PullRequestDetailPanel({
   };
 
   const attachTarget = composerDraftTarget ?? null;
-  const canPrepareWorktree = prepareThread.isAllowed && canOperateThread;
+  const canPrepareWorktree = prepareThread.isAllowed && canOperateThread && t3Worktrees;
   const canFixFindings = attachTarget !== null || canPrepareWorktree;
   const handoffLabels = pullRequestHandoffLabels(attachTarget !== null);
   const guideWriter = useReviewGuideWriter({

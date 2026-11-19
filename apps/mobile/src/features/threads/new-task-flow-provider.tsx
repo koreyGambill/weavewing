@@ -10,6 +10,7 @@ import type {
   ProviderOptionSelection,
   RuntimeMode,
   ServerProvider,
+  WorktreeProvider,
 } from "@t3tools/contracts";
 import {
   CommandId,
@@ -137,6 +138,7 @@ type NewTaskFlowContextValue = {
   readonly workspaceMode: WorkspaceMode;
   readonly isGitRepo: boolean;
   readonly isGitRepoKnown: boolean;
+  readonly worktreeProvider: WorktreeProvider;
   readonly canChooseWorkspace: boolean;
   readonly selectedBranchName: string | null;
   readonly selectedWorktreePath: string | null;
@@ -401,6 +403,7 @@ export function NewTaskFlowProvider(
       defaultMode: defaultWorkspaceMode,
       defaultModeSettled: projectDefaults.defaultWorkspaceModeSettled,
       isGitRepo,
+      worktreeProvider: projectSettings.settings.worktreeProvider,
       branches: allBranchRefs,
       projectCwd: selectedProject?.workspaceRoot ?? null,
     });
@@ -868,6 +871,7 @@ export function NewTaskFlowProvider(
     workspaceMode,
     isGitRepo,
     isGitRepoKnown: knownIsGitRepo !== null,
+    worktreeProvider: projectSettings.settings.worktreeProvider,
     canChooseWorkspace,
     selectedBranchName,
     selectedWorktreePath,
