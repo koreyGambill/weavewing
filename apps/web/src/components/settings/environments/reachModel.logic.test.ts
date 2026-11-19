@@ -49,7 +49,6 @@ function server(
     route: "direct",
     routeUrl: null,
     reachableFromOthers: true,
-    servedByTailscale: false,
     linksOffered: true,
     canManage: true,
     appScopes: [...AuthStandardClientScopes],
@@ -479,11 +478,17 @@ describe("arrival tags", () => {
     expect(state(model, device("Laptop"), MOON).arrivedVia).toBe("local-network");
   });
 
-  // Korey's Windows server stores the phone, the Mac and the WSL link all at 127.0.0.1, because
-  // Tailscale Serve proxies to its loopback.
-  it("says same computer only for this app and a sibling server, never for a loopback address behind a proxy", () => {
-    const loopbackDevice = (label: string, deviceType: "mobile" | "desktop") =>
-      session({ subject: "one-time-token", client: { deviceType, label, ipAddress: "127.0.0.1" } });
+  // Korey's Windows server stores the phone, the Mac and the WSL link all at 127.0.0.1 behind
+  // Tailscale Serve, the same address a browser on that PC records, so loopback proves nothing.
+  it("tags only from session evidence: a sibling server or this app, a tailnet or LAN address, never loopback", () => {
+    const device = (label: string, ipAddress: string, deviceType: "mobile" | "desktop") =>
+      session({
+        subject: "one-time-token",
+        connected: false,
+        lastConnectedAt: DateTime.makeUnsafe(0),
+        client: { deviceType, label, ipAddress, ...(deviceType === "mobile" ? { os: "iOS" } : {}) },
+      });
+    const tailnetPaired = device("Tailnet: iphone171", "127.0.0.1", "mobile");
     const model = buildReachModel({
       servers: [
         server({
@@ -491,11 +496,12 @@ describe("arrival tags", () => {
           label: "Windows",
           onThisComputer: true,
           route: "local",
-          servedByTailscale: true,
           links: null,
           sessions: [
-            loopbackDevice("Korey Iphone", "mobile"),
-            loopbackDevice("Moonborn", "desktop"),
+            device("Korey Iphone", "127.0.0.1", "mobile"),
+            device("Chrome on Windows", "127.0.0.1", "desktop"),
+            device("Moonborn", "100.101.1.2", "desktop"),
+            device("Laptop", "192.168.68.20", "desktop"),
             linkSession(WSL, "WSL"),
           ],
         }),
@@ -505,10 +511,7 @@ describe("arrival tags", () => {
           onThisComputer: true,
           route: "local",
           links: null,
-          sessions: [
-            loopbackDevice("Tailnet: iphone171", "mobile"),
-            loopbackDevice("Chrome on Windows", "desktop"),
-          ],
+          sessions: [tailnetPaired],
         }),
         server({
           environmentId: VPS,
@@ -518,24 +521,18 @@ describe("arrival tags", () => {
         }),
       ],
     });
-    const device = (label: string) => model.rows.find((row) => row.label === label)!.id;
+    const row = (label: string) => model.rows.find((candidate) => candidate.label === label)!.id;
+    const tag = (from: string, to: EnvironmentId) => state(model, from, to).arrivedVia;
 
-    expect(state(model, device("Korey Iphone"), WINDOWS)).toMatchObject({
-      arrivedVia: "tailscale",
-      arrivedFrom: "Through Tailscale Serve on Windows",
-    });
-    expect(state(model, device("Moonborn"), WINDOWS).arrivedVia).toBe("tailscale");
-    expect(state(model, device("Tailnet: iphone171"), WSL)).toMatchObject({
-      arrivedVia: "tailscale",
-      arrivedFrom: "Admitted by tailnet pairing",
-    });
-    expect(state(model, device("Chrome on Windows"), WSL)).toMatchObject({
-      arrivedVia: null,
-      arrivedFrom: null,
-    });
-    expect(state(model, serverPartyId(WSL), WINDOWS).arrivedVia).toBe("same-computer");
-    expect(state(model, serverPartyId(WINDOWS), VPS).arrivedVia).toBeNull();
-    expect(state(model, APP_PARTY_ID, WINDOWS).arrivedVia).toBe("same-computer");
+    expect(tag(row("Korey Iphone"), WINDOWS)).toBeNull();
+    expect(tag(row("Chrome on Windows"), WINDOWS)).toBeNull();
+    expect(tag(row("Tailnet: iphone171"), WSL)).toBeNull();
+    expect(describeDevice(tailnetPaired, 0)).toMatch(/^admitted automatically over Tailscale · /);
+    expect(tag(row("Moonborn"), WINDOWS)).toBe("tailscale");
+    expect(tag(row("Laptop"), WINDOWS)).toBe("local-network");
+    expect(tag(serverPartyId(WSL), WINDOWS)).toBe("same-computer");
+    expect(tag(serverPartyId(WINDOWS), VPS)).toBeNull();
+    expect(tag(APP_PARTY_ID, WINDOWS)).toBe("same-computer");
   });
 });
 

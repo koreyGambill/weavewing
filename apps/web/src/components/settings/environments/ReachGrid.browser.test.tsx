@@ -25,7 +25,6 @@ const server = (
   route: "direct",
   routeUrl: null,
   reachableFromOthers: true,
-  servedByTailscale: false,
   linksOffered: true,
   canManage: true,
   appScopes: [...AuthStandardClientScopes],

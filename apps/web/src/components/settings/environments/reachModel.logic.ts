@@ -27,8 +27,6 @@ export interface ReachServerInput {
   readonly routeUrl: string | null;
   /** Other machines have an address for it. Null while unknown. */
   readonly reachableFromOthers: boolean | null;
-  /** Published through Tailscale Serve, whose local proxy makes tailnet clients look like 127.0.0.1. */
-  readonly servedByTailscale: boolean;
   /** Linked environments is on, so its agents may link to other servers. */
   readonly linksOffered: boolean;
   readonly canManage: boolean;
@@ -282,24 +280,18 @@ export function arrivalFromHost(host: string | null): Arrival | null {
 }
 
 /**
- * How a session on `server` arrived. A loopback address proves nothing behind a local proxy
- * such as Tailscale Serve, so only a neighbour this app knows shares the computer counts as one.
+ * How a session arrived, from its own recorded address. Loopback is what a browser on that
+ * computer and any local proxy, such as Tailscale Serve, both record, so it earns a tag only
+ * when this app knows the other side shares the computer.
  */
 function sessionArrival(
   session: AuthClientSession,
-  server: ReachServerInput,
   knownSameComputer: boolean,
 ): Pick<ReachSquare, "arrivedVia" | "arrivedFrom"> {
   const address = clientOf(session).ipAddress ?? null;
   const arrival = arrivalFromHost(address);
-  if (arrival !== "same-computer" || knownSameComputer) {
-    return { arrivedVia: arrival, arrivedFrom: address };
-  }
-  if (admittedOverTailnet(session)) {
-    return { arrivedVia: "tailscale", arrivedFrom: "Admitted by tailnet pairing" };
-  }
-  return server.servedByTailscale
-    ? { arrivedVia: "tailscale", arrivedFrom: `Through Tailscale Serve on ${server.label}` }
+  return arrival !== "same-computer" || knownSameComputer
+    ? { arrivedVia: arrival, arrivedFrom: address }
     : { arrivedVia: null, arrivedFrom: null };
 }
 
@@ -395,7 +387,7 @@ function serverSquare(
       ...base,
       state: { kind: "level", level: linkSessionLevel(linkSession), broken: null },
       // Two servers of this desktop share its loopback; any other loopback address is a proxy.
-      ...sessionArrival(linkSession, toServer, from.onThisComputer && to.onThisComputer),
+      ...sessionArrival(linkSession, from.onThisComputer && to.onThisComputer),
       changes: changes(true),
     };
   }
@@ -486,9 +478,7 @@ function deviceSquare(
     ...base,
     sessionIds: sessions.map((session) => session.sessionId),
     // This app's own session is the current one and never a device, so no device is known local.
-    ...(sessions[0]
-      ? sessionArrival(sessions[0], server, false)
-      : { arrivedVia: null, arrivedFrom: null }),
+    ...(sessions[0] ? sessionArrival(sessions[0], false) : { arrivedVia: null, arrivedFrom: null }),
     state:
       strongest !== undefined
         ? { kind: "level", level: strongest, broken: null }
