@@ -456,8 +456,48 @@ function outsideLinkSquare(
   };
 }
 
-function deviceKey(session: AuthClientSession, kind: PartyKind): string {
-  return `${kind}:${deviceName(session).toLowerCase()}`;
+/**
+ * Device names, told apart where two match: first by address, then by server, then by
+ * session. Every entry is one session on one server.
+ */
+function deviceLabels(
+  entries: ReadonlyArray<{
+    readonly key: string;
+    readonly kind: PartyKind;
+    readonly session: AuthClientSession;
+    readonly serverLabel: string;
+  }>,
+): ReadonlyArray<{ readonly key: string; readonly kind: PartyKind; readonly label: string }> {
+  // A detail is added to a group of matching names only when it tells them apart.
+  const disambiguate = (
+    labels: ReadonlyArray<string>,
+    detail: (index: number) => string | undefined,
+  ) => {
+    const groups = new Map<string, number[]>();
+    labels.forEach((label, index) => groups.set(label, [...(groups.get(label) ?? []), index]));
+    const next = [...labels];
+    for (const [label, indexes] of groups) {
+      if (indexes.length < 2) continue;
+      const details = indexes.map(detail);
+      if (new Set(details).size < 2) continue;
+      indexes.forEach((index, position) => {
+        const extra = details[position];
+        if (extra) next[index] = `${label} · ${extra}`;
+      });
+    }
+    return next;
+  };
+  const named = entries.map((entry) => deviceName(entry.session));
+  const byAddress = disambiguate(named, (index) => clientOf(entries[index]!.session).ipAddress);
+  const byServer = disambiguate(byAddress, (index) => entries[index]!.serverLabel);
+  const bySession = disambiguate(byServer, (index) =>
+    entries[index]!.session.sessionId.slice(0, 6),
+  );
+  return entries.map((entry, index) => ({
+    key: entry.key,
+    kind: entry.kind,
+    label: bySession[index]!,
+  }));
 }
 
 /** Bron–Kerbosch: every largest group in which each pair has an edge. */
@@ -520,7 +560,12 @@ export function buildReachModel(input: {
 
   // Link sessions by linking environment, and device sessions by device, on each server.
   const linkSessions = new Map<EnvironmentId, Map<string, AuthClientSession[]>>();
-  const devices = new Map<string, ReachParty>();
+  const deviceEntries: Array<{
+    readonly key: string;
+    readonly kind: PartyKind;
+    readonly session: AuthClientSession;
+    readonly serverLabel: string;
+  }> = [];
   const deviceSessions = new Map<EnvironmentId, Map<string, AuthClientSession[]>>();
   for (const server of servers) {
     const byLinker = new Map<string, AuthClientSession[]>();
@@ -541,18 +586,16 @@ export function buildReachModel(input: {
         byLinker.set(partyId, [...(byLinker.get(partyId) ?? []), session]);
         continue;
       }
-      const kind: PartyKind = session.subject === "mcp-client" ? "agent" : "device";
-      const key = deviceKey(session, kind);
-      if (!devices.has(key)) {
-        devices.set(key, {
-          id: key,
-          kind,
-          label: deviceName(session),
-          environmentId: null,
-          onThisComputer: false,
-        });
-      }
-      byDevice.set(key, [...(byDevice.get(key) ?? []), session]);
+      // Each session is its own entry: names are not identities, so merging two sessions would
+      // make one Remove revoke both.
+      const key = `device:${server.environmentId}:${session.sessionId}`;
+      deviceEntries.push({
+        key,
+        kind: session.subject === "mcp-client" ? "agent" : "device",
+        session,
+        serverLabel: server.label,
+      });
+      byDevice.set(key, [session]);
     }
     linkSessions.set(server.environmentId, byLinker);
     deviceSessions.set(server.environmentId, byDevice);
@@ -571,9 +614,15 @@ export function buildReachModel(input: {
     onThisComputer: true,
   };
   const serverRows = [...columns, ...outsideServers.values()];
-  const deviceRows = [...devices.values()].toSorted((left, right) =>
-    left.label.localeCompare(right.label),
-  );
+  const deviceRows = deviceLabels(deviceEntries)
+    .map(({ key, kind, label }): ReachParty => ({
+      id: key,
+      kind,
+      label,
+      environmentId: null,
+      onThisComputer: false,
+    }))
+    .toSorted((left, right) => left.label.localeCompare(right.label));
   const rows = [...serverRows, app, ...deviceRows];
 
   const squares = new Map<string, ReachSquare>();

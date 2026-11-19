@@ -196,10 +196,19 @@ describe("buildReachModel", () => {
     expect(state(model, APP_PARTY_ID, BUILD).arrivedVia).toBe("ssh");
   });
 
-  it("groups a device's sessions across servers by its name and reads its level from its permissions", () => {
+  it("keeps every device session its own entry, so one Remove revokes exactly one session", () => {
+    const chrome = (ipAddress: string) =>
+      session({
+        subject: "browser",
+        client: { deviceType: "desktop", label: "Chrome on Linux", ipAddress },
+      });
     const model = buildReachModel({
       servers: [
-        server({ environmentId: WSL, label: "WSL", sessions: [session({ subject: "browser" })] }),
+        server({
+          environmentId: WSL,
+          label: "WSL",
+          sessions: [chrome("192.168.1.5"), chrome("192.168.1.6"), session({ subject: "browser" })],
+        }),
         server({
           environmentId: MOON,
           label: "Moonborn",
@@ -209,17 +218,27 @@ describe("buildReachModel", () => {
       ],
     });
 
-    const phone = model.rows.find((row) => row.label === "Korey iPhone")!;
-    expect(phone.kind).toBe("device");
-    expect(model.rows.filter((row) => row.label === "Korey iPhone")).toHaveLength(1);
-    expect(state(model, phone.id, WSL).state).toMatchObject({ level: "full-access" });
-    expect(state(model, phone.id, WSL).arrivedVia).toBe("tailscale");
-    expect(state(model, phone.id, MOON).state).toMatchObject({ level: "read-only" });
-    expect(state(model, phone.id, VPS).state.kind).toBe("unknown");
-    expect(state(model, phone.id, WSL).changes).toMatchObject({
-      canRemove: true,
-      canRelink: false,
-    });
+    const devices = model.rows.filter((row) => row.kind === "device");
+    expect(devices.map((row) => row.label)).toEqual([
+      "Chrome on Linux · 192.168.1.5",
+      "Chrome on Linux · 192.168.1.6",
+      "Korey iPhone · Moonborn",
+      "Korey iPhone · WSL",
+    ]);
+    for (const device of devices) {
+      const removable = model.columns.flatMap((column) => {
+        const square = model.squares.get(squareKey(device.id, column.id))!;
+        return square.changes.canRemove ? [square.sessionIds] : [];
+      });
+      expect(removable).toHaveLength(1);
+      expect(removable[0]).toHaveLength(1);
+    }
+    const phoneOnMoon = devices.find((row) => row.label === "Korey iPhone · Moonborn")!;
+    expect(state(model, phoneOnMoon.id, MOON).state).toMatchObject({ level: "read-only" });
+    expect(state(model, phoneOnMoon.id, MOON).arrivedVia).toBe("tailscale");
+    expect(state(model, phoneOnMoon.id, WSL).state.kind).toBe("none");
+    expect(state(model, phoneOnMoon.id, VPS).state.kind).toBe("unknown");
+    expect(state(model, phoneOnMoon.id, MOON).changes).toMatchObject({ canRelink: false });
   });
 
   it("keeps this app and link sessions out of the devices", () => {
@@ -524,7 +543,8 @@ describe("planSquareChange", () => {
         server({ environmentId: WSL, label: "WSL", sessions: [session({ subject: "browser" })] }),
       ],
     });
-    const square = phone.squares.get(squareKey("device:korey iphone", serverPartyId(WSL)))!;
+    const device = phone.rows.find((row) => row.kind === "device")!;
+    const square = phone.squares.get(squareKey(device.id, serverPartyId(WSL)))!;
     expect(planSquareChange(square, "read-only")).toEqual({
       kind: "blocked",
       reason: "A device keeps the level it paired with. Pair it again to change it.",
