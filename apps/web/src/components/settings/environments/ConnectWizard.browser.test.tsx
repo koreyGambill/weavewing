@@ -1,13 +1,15 @@
 import {
+  AuthStandardClientScopes,
   EnvironmentId,
   managedCapabilityDenial,
   type ManagedPolicySummary,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-
 import "~/index.css";
-import { render } from "../../../test/render";
-import { AuthorizedClientsHeaderAction } from "./AuthorizedClientsSettings";
+
+import { render } from "../../../../test/render";
+import { PairDeviceForm } from "./ConnectWizard";
+import type { ReachServer } from "./useReachModel";
 
 const localId = EnvironmentId.make("local");
 const serviceId = EnvironmentId.make("service");
@@ -17,11 +19,11 @@ const state = vi.hoisted(() => ({
   policies: new Map<string, unknown>(),
 }));
 
-vi.mock(import("../../state/environments"), async (original) => ({
+vi.mock(import("../../../state/environments"), async (original) => ({
   ...(await original()),
   usePrimaryEnvironmentId: (() => state.primaryEnvironmentId) as never,
 }));
-vi.mock(import("../../state/entities"), async (original) => ({
+vi.mock(import("../../../state/entities"), async (original) => ({
   ...(await original()),
   useServerConfigs: (() =>
     new Map(
@@ -31,7 +33,15 @@ vi.mock(import("../../state/entities"), async (original) => ({
       ]),
     )) as never,
 }));
-vi.mock(import("../../state/use-atom-command"), async (original) => ({
+vi.mock(import("../../../state/session"), async (original) => ({
+  ...(await original()),
+  useEnvironmentSessionState: (() => ({
+    data: { authenticated: true, scopes: [...AuthStandardClientScopes] },
+    hasError: false,
+    isPending: false,
+  })) as never,
+}));
+vi.mock(import("../../../state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: (() => vi.fn()) as never,
 }));
@@ -47,32 +57,30 @@ function setup(policies: ReadonlyArray<readonly [EnvironmentId, ManagedPolicySum
   state.policies = new Map(policies);
 }
 
-const renderHeader = (environmentId: EnvironmentId) =>
-  render(
-    <AuthorizedClientsHeaderAction
-      environmentId={environmentId}
-      onPairingLinkCreated={() => {}}
-      clientSessions={null}
-      isRevokingOtherClients={false}
-      onRevokeOtherClients={() => {}}
-      delegatableScopes={[]}
-    />,
-  );
+const service = {
+  environment: {
+    environmentId: serviceId,
+    label: "Service",
+    serverConfig: null,
+    entry: { target: { _tag: "BearerConnectionTarget", connectionId: "remote:service" } },
+  },
+  input: { environmentId: serviceId, label: "Service", canManage: true },
+} as unknown as ReachServer;
 
-describe("AuthorizedClientsHeaderAction", () => {
+describe("PairDeviceForm", () => {
   const denial = managedCapabilityDenial(remoteClientsOff, "remoteClients")!;
 
-  it("follows the selected service's policy, not the primary's", async () => {
+  it("follows the chosen server's policy, not the primary's", async () => {
     setup([[serviceId, remoteClientsOff]]);
-    await using screen = await renderHeader(serviceId);
+    await using screen = await render(<PairDeviceForm servers={[service]} qr />);
 
     await expect.element(screen.getByRole("group", { name: denial })).toBeVisible();
-    await expect.element(screen.getByRole("button", { name: "Create link" })).toBeDisabled();
+    await expect.element(screen.getByRole("button", { name: "Create QR code" })).toBeDisabled();
   });
 
-  it("leaves pairing open on an unmanaged service when the primary is managed", async () => {
+  it("leaves pairing open on an unmanaged server when the primary is managed", async () => {
     setup([[localId, remoteClientsOff]]);
-    await using screen = await renderHeader(serviceId);
+    await using screen = await render(<PairDeviceForm servers={[service]} qr={false} />);
 
     await expect.element(screen.getByRole("button", { name: "Create link" })).toBeEnabled();
     expect(screen.getByRole("group", { name: denial }).query()).toBeNull();

@@ -1,8 +1,10 @@
 import { MAX_SAVED_TILE_GROUPS, type SavedTileLayout } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { LayoutTemplate } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useContext, useId, useState, type ReactNode } from "react";
 
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { BackgroundThreadContext } from "./backgroundThread";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -16,6 +18,9 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import {
+  Menu,
+  MenuPopup,
+  MenuTrigger,
   MenuItem,
   MenuRadioGroup,
   MenuRadioItem,
@@ -25,6 +30,7 @@ import {
   MenuSubPopup,
   MenuSubTrigger,
 } from "../ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { useSavedTileLayouts } from "./useSavedTileLayouts";
 
 const NONE = "none";
@@ -55,22 +61,31 @@ function LayoutRadios(props: { layouts: readonly SavedTileLayout[] }) {
   ));
 }
 
-export function TileLayoutsSubmenu(props: {
+export function TileLayoutsMenu(props: {
   api: ReturnType<typeof useSavedTileLayouts>;
   hasProject: boolean;
   onSaveAs: () => void;
   onApply: (layout: SavedTileLayout) => void;
 }) {
   const navigate = useNavigate();
+  const background = useContext(BackgroundThreadContext);
+  const hasRoom = useMediaQuery("(min-width: 480px)");
   const { api } = props;
   const globalName = api.layouts.find((layout) => layout.id === api.globalDefaultId)?.name;
+  if (background || !hasRoom) return null;
   return (
-    <MenuSub>
-      <MenuSubTrigger>
-        <LayoutTemplate />
-        Layouts
-      </MenuSubTrigger>
-      <MenuSubPopup>
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Layouts" />} />
+          }
+        >
+          <LayoutTemplate className="size-4" />
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">Layouts</TooltipPopup>
+      </Tooltip>
+      <MenuPopup align="end">
         <MenuItem onClick={props.onSaveAs}>Save layout as…</MenuItem>
         <MenuSub>
           <MenuSubTrigger disabled={!api.layouts.length}>Apply layout</MenuSubTrigger>
@@ -124,8 +139,8 @@ export function TileLayoutsSubmenu(props: {
         <MenuItem onClick={() => void navigate(TILE_LAYOUTS_SETTINGS_TARGET)}>
           Manage layouts…
         </MenuItem>
-      </MenuSubPopup>
-    </MenuSub>
+      </MenuPopup>
+    </Menu>
   );
 }
 

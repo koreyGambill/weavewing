@@ -7,6 +7,9 @@ export const newTabId = (id: string) => `${NEW_TAB_PREFIX}${id}`;
 export const isNewTab = (tabId: string) => tabId.startsWith(NEW_TAB_PREFIX);
 
 const SURFACE_AREAS: Record<string, TileLayoutArea> = {
+  device: "device",
+  "side-chat": "side-chat",
+  "pull-request": "pull-request",
   browser: "browser",
   terminal: "terminal",
   files: "files",
@@ -144,6 +147,7 @@ export type TileAction =
   | { type: "restore-group"; groupId: string }
   | { type: "show-beside"; groupId: string | null }
   | { type: "swap-beside" }
+  | { type: "rotate" }
   | { type: "resize-focus-pair"; ratio: number }
   | { type: "activate"; groupId: string; tabId: string }
   | { type: "focus"; groupId: string }
@@ -168,6 +172,7 @@ export type TileAction =
   | { type: "close-group"; groupId: string }
   | { type: "close-tab"; tabId: string }
   | { type: "new-tab"; groupId: string; tabId: string }
+  | { type: "pending-area"; tabId: string; area: TileLayoutArea }
   | { type: "merge-groups"; groupId: string; targetGroupId: string }
   | { type: "swap-groups"; firstGroupId: string; secondGroupId: string }
   | {
@@ -457,6 +462,17 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
       return layout;
     return { ...layout, besideGroupId: action.groupId, focusedGroupId: action.groupId };
   }
+  if (action.type === "rotate") {
+    const docked = groups.filter((group) => !group.floating);
+    if (docked.length < 2) return layout;
+    return {
+      ...layout,
+      root: mapNode(layout.root, (node) => {
+        const index = docked.findIndex((group) => group.id === node.id);
+        return index === -1 ? node : docked[(index + docked.length - 1) % docked.length]!;
+      }),
+    };
+  }
   if (action.type === "swap-beside")
     return layout.maximizedGroupId && layout.besideGroupId
       ? {
@@ -516,6 +532,11 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
       focusedGroupId: root ? layout.focusedGroupId : group.id,
       maximizedGroupId: null,
     });
+  }
+  if (action.type === "pending-area") {
+    if (!groups.some((group) => group.tabs.includes(action.tabId)) || !isNewTab(action.tabId))
+      return layout;
+    return { ...layout, pendingAreas: { ...layout.pendingAreas, [action.tabId]: action.area } };
   }
   if (action.type === "new-tab") {
     const group = groups.find((entry) => entry.id === action.groupId);

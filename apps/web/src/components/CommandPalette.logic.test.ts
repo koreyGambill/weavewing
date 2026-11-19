@@ -11,6 +11,7 @@ import {
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
+  searchTabForKey,
   resolveAddProjectEntry,
   buildEnvironmentChoice,
   createCommandPaletteSearchState,
@@ -71,7 +72,7 @@ describe("reduceCommandPaletteUiState", () => {
     );
     expect(first).toEqual({
       open: true,
-      mode: "command",
+      mode: "search",
       openIntent: { kind: "search", query: "https://github.com/acme/web/pull/7" },
       session: 1,
     });
@@ -1023,4 +1024,13 @@ it("resolves project metadata and browse roots within the active environment", (
   );
   expect(resolveCommandPaletteProject(projects, null, sharedId)).toBeUndefined();
   expect(resolveCommandPaletteProject(projects, EnvironmentId.make("local"), null)).toBeUndefined();
+});
+
+it("switches search tabs in both directions without changing the query", () => {
+  expect(searchTabForKey("threads", { key: "Tab", shiftKey: false, ctrlKey: false })).toBe(
+    "projects",
+  );
+  expect(searchTabForKey("threads", { key: "Tab", shiftKey: true, ctrlKey: false })).toBe("files");
+  expect(searchTabForKey("files", { key: "2", shiftKey: false, ctrlKey: true })).toBe("projects");
+  expect(searchTabForKey("files", { key: "x", shiftKey: false, ctrlKey: true })).toBe(null);
 });

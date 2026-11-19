@@ -41,11 +41,15 @@ live in the maintainer's private notes. See
    If the install or prepared content changed, prepare again. Preparation compares the installed runtime
    commit's migration files, registry and startup migration helpers with the candidate, plus the
    resolved Effect version. Activation reads the live database's migration records read-only and
-   verifies the receipt's runtime digest. It skips the large WSL database copy only when both the
-   source inputs and live migration records match. New or changed migrations, unknown history,
-   mismatched runtime provenance or unreadable migration records require the copy. Skipping it also
-   leaves no manual-recovery database snapshot for that install. Small state files such as settings,
-   secrets, environment identity and thread workspaces are always backed up. Full updates also back up Windows state.
+   verifies the receipt's runtime digest. Each candidate migration has an explicit destructive or
+   additive classification. It copies the large WSL database when a migration absent from the live
+   ledger is destructive, or history, classification or provenance cannot be verified. Changed
+   historical migrations, startup helpers and the migration engine also require a copy. Additive
+   migrations preserve the schema and data the previous build needs. Skipping the copy records
+   `additive-migrations-only` (or `migration-set-unchanged`) and leaves no manual-recovery snapshot.
+   Older builds warn about unknown newer migration IDs and reuse the database during rollback.
+   Small state files such as settings, secrets, environment identity and thread workspaces are always
+   backed up. Full updates also back up Windows state.
    Activation uses the staged files without rebuilding. `prepare-timing.json` records preparation time
    and cache reuse.
    `receipt.json` records activation's `durationMilliseconds` and the database copy's result and reason

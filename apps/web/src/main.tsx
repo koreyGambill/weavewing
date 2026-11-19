@@ -1,3 +1,4 @@
+import { installInputLineEditing } from "./lineEditing";
 import React from "react";
 import ReactDOM from "react-dom/client";
 
@@ -13,6 +14,7 @@ import { reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 import { installWebFramePolicy } from "./weavewingFramePolicy";
 
 if (!isElectron) installWebFramePolicy();
+installInputLineEditing();
 const router = startAppServices();
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;

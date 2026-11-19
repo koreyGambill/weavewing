@@ -48,8 +48,8 @@ Connect account cannot reach the machine from a new device without your
 approval. Review the devices that are already approved, described below.
 
 A new device waits and shows a code such as `K7QM-2XFD`. Approve it from a
-device that is already connected, using the prompt or **Settings → Sharing &
-access**. Check that the code matches the one on the waiting device. On a
+device that is already connected, using the prompt or **Settings → Privacy**.
+Check that the code matches the one on the waiting device. On a
 headless host, run `t3 auth connect-device list` and then
 `t3 auth connect-device approve K7QM-2XFD`. A request expires after 10 minutes,
 and the device asks again when it retries. Deny keeps that device out until its
@@ -112,10 +112,11 @@ If a server is already running, generate a fresh link without restarting it:
 t3 pair
 ```
 
-Scan the QR code on your phone or paste the pairing URL into **Add environment**
-in the receiving app. Connection settings are under **Settings → Environments**
-on web and desktop and **Settings → Environments** on mobile. A loopback address
-such as `127.0.0.1` reaches only the device opening the link.
+Scan the QR code on your phone or paste the pairing URL into the receiving app:
+on web and desktop, **Settings → Environments → Connect a device or computer**,
+then **Another computer** and **Link or address**; on mobile, **Settings →
+Environments**. A loopback address such as `127.0.0.1` reaches only the device
+opening the link.
 
 On a computer with the desktop app, you can open the printed `t3code://pair`
 app link instead. The desktop app asks you to confirm the server address, then
@@ -126,10 +127,9 @@ install that CA on Android as a **CA certificate** in its security settings; the
 Android app then trusts it.
 
 Pairing authorizes that device for future connections. Use a fresh one-time link
-for each new device; you do not need the original token to reconnect. Links
-created in Settings can only be copied from the client that created them while
-its Sharing & access page stays open. If you leave or reload that page, create
-another link to share.
+for each new device; you do not need the original token to reconnect. A link
+created in Settings can be copied only while the window that created it stays
+open. If you close it, create another link to share.
 
 ### Reach one machine several ways
 
@@ -267,11 +267,12 @@ page is not served over Tailscale HTTPS, T3 Connect, or a LAN address. A server 
 ### Connect to a Windows desktop's WSL environment
 
 Windows and WSL are separate environments with their own projects, threads, and
-pairing links. In the Windows desktop app, open **Settings → Sharing & access**
-and choose the WSL environment at the top of the page. Create a pairing link
-under **Authorized clients** and choose its Tailscale address.
-On the other laptop or phone, paste that link into **Settings → Environments →
-Add environment**. Both devices must be connected to the same Tailscale network.
+pairing links. In the Windows desktop app, open **Settings → Environments →
+Connect a device or computer**, choose a phone, tablet or browser, pick the WSL
+server under **It may use**, and create a link. Choose its Tailscale address.
+On the other laptop or phone, add that link as described in
+[Pair over a LAN or private network](#pair-over-a-lan-or-private-network). Both
+devices must be connected to the same Tailscale network.
 
 Use the WSL environment's port and pairing link. A link for Windows connects to
 Windows even when both environments run on the same computer. Windows' Tailscale
@@ -295,9 +296,10 @@ scheme uses HTTP, so include `https://` when your server uses HTTPS.
 
 ## Desktop-managed SSH
 
-In the desktop app, open **Settings → Environments → Add environment**, choose
-**SSH**, and enter a host or SSH alias such as `user@example.com`. T3 Code starts
-or reuses a server there and opens the port forward for you. Projects, provider
+In the desktop app, open **Settings → Environments → Connect a device or
+computer**, choose **Another computer** and **SSH**, and enter a host or SSH alias
+such as `user@example.com`. T3 Code starts or reuses a server there and opens
+the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
 The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
@@ -316,10 +318,10 @@ the connection stops a server that T3 Code launched; a server that was already
 running is left alone.
 
 Each desktop app keeps one session on the host for its SSH connection and reuses
-it when it reconnects. Revoke sessions you no longer use in **Settings →
-Sharing & access** on the host, or on a headless host with `t3 auth session list` and
-`t3 auth session revoke <id>`. A desktop that can still sign in over SSH pairs
-again on its next connect.
+it when it reconnects. Remove sessions you no longer use from the host's
+**Coming in** lines in **Settings → Environments**, or on a headless host with
+`t3 auth session list` and `t3 auth session revoke <id>`. A desktop that can
+still sign in over SSH pairs again on its next connect.
 
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
@@ -420,14 +422,25 @@ off on either machine, agents start nothing over a link between them. A task
 already running on the other machine still finishes, and if that machine has it
 off, its result arrives once it is back on.
 
-On the machine you will work from, open **Settings → Environments → Linked environments**,
-choose **Link**, and pick the other machine or enter its address. The list
-holds the machines this app knows and those on your T3 Connect account. If this
-app has an address for that machine and is connected to it with a session that
-manages access there, it makes the pairing code itself; otherwise paste one
-from that machine's **Settings → Sharing & access**. An address you type always
-needs a pasted code. From a terminal, use
-`t3 environment link <address> --pairing-code <code> --access <mode>`.
+Open **Settings → Environments** on a device that reaches both machines.
+**Who can reach what** has one square for each direction, such as from your
+laptop to the VPS. Click a square to see both directions, then pick **View only**,
+**Ask before changes**, **Full access** or **No access**. Lowering or removing
+access applies at once. A new link or a higher level first says what will
+happen; this app then gets a pairing code from the receiving machine and links
+again with it. That takes full access to both machines from this app. A lock on a
+column means this app does not have full access to that machine; change it from
+a device that does. **Connect a device or computer → Another computer** links a
+new machine both ways in one step.
+
+Without full access to the receiving machine, create a link there under
+**Settings → Environments → Connect a device or computer** and use its code from
+a terminal: `t3 environment link <address> --pairing-code <code> --access <mode>`.
+
+Machines with Full access to each other in both directions are listed under
+**Trusted together**. Lowering any one of those links takes that machine off the
+list. **No path** means the receiving machine has no address the other one can
+reach, for example a server this app reaches only over SSH.
 
 You can also ask an agent to link a machine by name, such as "delegate this to
 my vps". It shows a card in the thread where you pick the machine the same way
@@ -442,16 +455,16 @@ an address you trust: the code is sent there.
   access, the link's agents can change only threads it started, not that
   machine's own threads, projects or settings, and they skip its project setup
   scripts.
-- The link shows up in that machine's **Settings → Sharing & access** as
-  **Linked environment ·** this machine's name. Revoke it there to end it.
-  Linking again replaces this machine's previous session there. Recently used
-  links show their last use and ask for confirmation before you revoke them.
-  Older sessions may remain listed after an upgrade; revoke those you no longer use.
-  **Forget** on this machine only removes it here.
-- Once the other machine refuses the link, after a revoke, it shows here as no
-  longer accepted, even though that machine still answers.
-- Links last 30 days. Choose **Link again** on an expired or refused link to
-  renew it with a new pairing code.
+- The link shows up under the other machine's **Coming in** lines in
+  **Settings → Environments**. Remove it there to end it. Linking again replaces
+  this machine's previous session there.
+- Removing a link from a server's **Going out** lines forgets it there. When a
+  server on this computer gives up its own access to another machine, the app
+  asks first, because getting it back needs approval on that machine, or SSH.
+- Once the other machine refuses the link, after a removal, its square shows it
+  as refused, even though that machine still answers.
+- Links last 30 days. Pick a level again on an expired or refused link to renew
+  it with a new pairing code.
 
 An agent can also hand a task to a linked machine with `delegate_task`: it runs
 there as an ordinary thread, in the project with the same repository (or the
@@ -462,14 +475,16 @@ fails with that reason.
 
 ## Manage or revoke access
 
-On the host, **Settings → Sharing & access** lets authorized administrators create
-pairing links and revoke client sessions. Revoking an unused link prevents new
-pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `t3 auth --help`.
+**Settings → Environments** lists who comes in to each server, the pairing
+links it has handed out, and what it reaches elsewhere. With full access to a
+server, remove a device or link there, or revoke an unused pairing link to
+prevent new pairings. **Devices** lists your phones, browsers and outside agents
+with the servers each one uses. A device keeps the level it paired with; pair it
+again to change it. Command-line management is available through
+`t3 auth --help`.
 
-When the app connects to more than one environment, choose one at the top of the
-page. A desktop app with **Local environment** off can manage a background
-service on the same machine this way, including its T3 Connect link.
+A desktop app with **Local environment** off manages a background service on the
+same machine the same way. Its T3 Connect link is under **Settings → Privacy**.
 
 A session with an open connection stays listed after its access credential
 expires.

@@ -25,7 +25,13 @@ it.each([
     label: "remote environment",
     desktopLocal: false,
     hasTailnet: true,
-    expected: [],
+    expected: ["lan", "lan", "private-network"],
+  },
+  {
+    label: "remote environment without Tailscale",
+    desktopLocal: false,
+    hasTailnet: false,
+    expected: ["lan", "lan"],
   },
 ] as const)("builds pairing routes for $label", ({ desktopLocal, hasTailnet, expected }) => {
   const directEndpoints = [
@@ -39,9 +45,9 @@ it.each([
   );
   expect(endpoints.map((endpoint) => endpoint.reachability)).toEqual(expected);
   const selected = selectPairingEndpoint(endpoints);
-  if (!desktopLocal || !hasTailnet) {
+  if (expected.length === 0) {
     expect(selected).toBeNull();
-  } else {
+  } else if (desktopLocal) {
     expect(resolveAdvertisedEndpointPairingUrl(selected!, "test-token")).toBe(
       "http://100.84.12.7:3774/pair#token=test-token",
     );

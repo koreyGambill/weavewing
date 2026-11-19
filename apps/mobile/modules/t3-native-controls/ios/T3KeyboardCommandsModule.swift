@@ -38,9 +38,10 @@ public final class T3KeyboardCommandsView: ExpoView {
     var commands = [
       enabledCommand("newTask", input: "n", modifiers: .command, action: #selector(newTask), title: "New Task"),
       enabledCommand("focusSearch", input: "f", modifiers: .command, action: #selector(focusSearch), title: "Find"),
-      isPad
-        ? enabledCommand("commandPalette", input: "k", modifiers: .command, action: #selector(openCommandPalette), title: "Command Palette")
-        : enabledCommand("focusSearch", input: "k", modifiers: .command, action: #selector(focusSearch), title: "Focus Search"),
+      enabledCommand("search", input: "k", modifiers: .command, action: #selector(openSearch), title: "Search"),
+      enabledCommand("commandPalette", input: "p", modifiers: .command, action: #selector(openCommandPalette), title: "Command Palette"),
+      enabledCommand("searchNextTab", input: "\t", modifiers: [], action: #selector(searchNextTab), title: "Next Search Tab"),
+      enabledCommand("searchPreviousTab", input: "\t", modifiers: .shift, action: #selector(searchPreviousTab), title: "Previous Search Tab"),
       enabledCommand("paletteNext", input: UIKeyCommand.inputDownArrow, modifiers: [], action: #selector(paletteNext), title: "Next Result"),
       enabledCommand("palettePrevious", input: UIKeyCommand.inputUpArrow, modifiers: [], action: #selector(palettePrevious), title: "Previous Result"),
       enabledCommand("paletteDismiss", input: UIKeyCommand.inputEscape, modifiers: [], action: #selector(paletteDismiss), title: "Close Command Palette"),
@@ -142,6 +143,9 @@ public final class T3KeyboardCommandsView: ExpoView {
   }
 
   @objc private func newTask() { emit("newTask") }
+  @objc private func openSearch() { emit("search") }
+  @objc private func searchNextTab() { emit("searchNextTab") }
+  @objc private func searchPreviousTab() { emit("searchPreviousTab") }
   @objc private func openCommandPalette() { emit("commandPalette") }
   @objc private func paletteNext() { emit("paletteNext") }
   @objc private func palettePrevious() { emit("palettePrevious") }

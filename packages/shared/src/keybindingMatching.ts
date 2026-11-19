@@ -95,17 +95,35 @@ export function matchesKeybindingShortcutModifiers(
   );
 }
 
+/** The wire prefix keeps older clients from treating a sequence as ordinary typing. */
+export function leaderShortcutKey(shortcut: KeybindingShortcut): string {
+  return shortcut.leader ? shortcut.key.slice(7) : shortcut.key;
+}
+
 export function matchesKeybindingShortcut(
   event: ShortcutEventLike,
   shortcut: KeybindingShortcut,
   platform: string,
+  leader = false,
 ): boolean {
+  if (shortcut.leader && !leader) return false;
   if (
     !isMacPlatform(platform) &&
     event.getModifierState?.("AltGraph") &&
     !/^[a-z0-9]$/i.test(event.key)
   )
     return false;
+  if (shortcut.leader) {
+    // Shift is part of the typed punctuation (%, ") across keyboard layouts.
+    const key = leaderShortcutKey(shortcut);
+    return (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      (!event.shiftKey || !/^[a-z0-9 ]$/i.test(key)) &&
+      normalizeEventKey(event.key) === key
+    );
+  }
   if (!matchesKeybindingShortcutModifiers(event, shortcut, platform)) return false;
   return resolveEventKeys(event).has(shortcut.key);
 }

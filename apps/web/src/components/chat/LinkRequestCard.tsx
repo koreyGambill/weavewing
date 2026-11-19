@@ -297,7 +297,7 @@ function LinkRequestDialog(props: {
       <WizardPopup>
         <WizardHeader
           title={pickMachine ? "Link a machine" : `Link ${targetName}`}
-          description="Agents here can then launch, message and wait on threads there. Revoke it in that machine's Sharing & access."
+          description="Agents here can then launch, message and wait on threads there. Remove it in that machine's Settings → Environments."
         >
           {steps.length > 1 && !useExisting ? (
             <WizardSteps
@@ -380,8 +380,8 @@ function LinkRequestDialog(props: {
                           spellCheck={false}
                         />
                         <span className="block text-xs text-muted-foreground">
-                          Create a link on {targetName}: Settings → Sharing & access → Authorized
-                          clients → Create link, then paste its code here.
+                          On {targetName}, open Settings → Environments → Connect a device or
+                          computer and create a link, then paste its code here.
                         </span>
                       </label>
                     )}

@@ -76,7 +76,7 @@ export function browseInputEndPaddingClass(input: {
   return "*:data-[slot=autocomplete-input]:pe-24!";
 }
 
-export type SearchOverlayMode = "command" | "files" | "content";
+export type SearchOverlayMode = "command" | "search" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "new-thread-in" | "change-theme" }
@@ -131,7 +131,7 @@ export function reduceCommandPaletteUiState(
   const { session } = state;
   const openWithIntent = (openIntent: CommandPaletteOpenIntent): CommandPaletteUiState => ({
     open: true,
-    mode: "command",
+    mode: openIntent.kind === "search" && !openIntent.linkedThreads ? "search" : "command",
     openIntent,
     session: session + 1,
   });
@@ -356,57 +356,6 @@ export function findHighlightedCommandPaletteItem(
 }
 
 export type CommandPaletteMode = "root" | "root-browse" | "submenu" | "submenu-browse";
-
-export type CommandPaletteProject = Project & { readonly displayName: string };
-
-export function buildCommandPaletteProjectMetadata(input: {
-  readonly projects: ReadonlyArray<Pick<Project, "environmentId" | "title" | "workspaceRoot">>;
-  readonly locationByEnvironmentId: ReadonlyMap<EnvironmentId, { readonly label: string }>;
-}) {
-  const searchTerms: string[] = [];
-  const environmentLabels = new Set<string>();
-
-  for (const project of input.projects) {
-    const label = input.locationByEnvironmentId.get(project.environmentId)?.label ?? "Remote";
-    searchTerms.push(project.title, project.workspaceRoot, label);
-    environmentLabels.add(label);
-  }
-
-  return { searchTerms, environmentLabels: [...environmentLabels] };
-}
-
-export function buildProjectActionItems(input: {
-  projects: ReadonlyArray<CommandPaletteProject>;
-  valuePrefix: string;
-  icon: (project: CommandPaletteProject) => ReactNode;
-  runProject: (project: CommandPaletteProject) => Promise<void>;
-  searchTerms?: (project: CommandPaletteProject) => ReadonlyArray<string>;
-  renderDescription?: (project: CommandPaletteProject) => ReactNode;
-  shortcutCommand?: KeybindingCommand;
-  pin?: (project: CommandPaletteProject) => CommandPaletteItemPin | null;
-}): CommandPaletteActionItem[] {
-  return input.projects.map((project) => {
-    const pin = input.pin?.(project) ?? null;
-    return {
-      kind: "action",
-      value: `${input.valuePrefix}:${project.environmentId}:${project.id}`,
-      searchTerms: [
-        project.displayName,
-        project.title,
-        project.workspaceRoot,
-        ...(input.searchTerms?.(project) ?? []),
-      ],
-      title: project.displayName,
-      description: input.renderDescription?.(project) ?? project.workspaceRoot,
-      icon: input.icon(project),
-      ...(input.shortcutCommand !== undefined ? { shortcutCommand: input.shortcutCommand } : {}),
-      ...(pin ? { pin } : {}),
-      run: async () => {
-        await input.runProject(project);
-      },
-    };
-  });
-}
 
 export type BuildThreadActionItemsThread = Pick<
   SidebarThreadSummary,
@@ -807,7 +756,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search commands...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":
@@ -923,6 +872,7 @@ export function errorMessage(error: unknown): string {
 
 const OVERLAY_MODE_BY_COMMAND = {
   "commandPalette.toggle": "command",
+  "search.toggle": "search",
   "filePicker.toggle": "files",
   "projectSearch.toggle": "content",
 } as const satisfies Partial<Record<string, SearchOverlayMode>>;
@@ -940,4 +890,24 @@ export function resolveCommandPaletteProject<TProject>(
   projectId: ProjectId | null,
 ) {
   return environmentId && projectId ? projects.get(`${environmentId}:${projectId}`) : undefined;
+}
+
+export type SearchTab = "threads" | "projects" | "files";
+
+export function searchTabForKey(
+  tab: SearchTab,
+  event: {
+    readonly key: string;
+    readonly shiftKey: boolean;
+    readonly ctrlKey: boolean;
+    readonly altKey?: boolean;
+    readonly metaKey?: boolean;
+  },
+): SearchTab | null {
+  const tabs: ReadonlyArray<SearchTab> = ["threads", "projects", "files"];
+  if (event.altKey || event.metaKey) return null;
+  if (event.key === "Tab" && !event.ctrlKey) {
+    return tabs[(tabs.indexOf(tab) + (event.shiftKey ? 2 : 1)) % 3] ?? null;
+  }
+  return event.ctrlKey && !event.shiftKey ? (tabs[Number(event.key) - 1] ?? null) : null;
 }

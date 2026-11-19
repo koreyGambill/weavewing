@@ -78,6 +78,8 @@ export function AddEnvironmentDialog({
   savedEnvironments,
   onOpenChange,
   onErrorChange,
+  initialMode = "remote",
+  showTrigger = true,
 }: {
   readonly open: boolean;
   readonly routeTarget: EnvironmentPresentation | null;
@@ -85,6 +87,9 @@ export function AddEnvironmentDialog({
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
   readonly onOpenChange: (open: boolean) => void;
   readonly onErrorChange: (error: string | null) => void;
+  readonly initialMode?: "remote" | "ssh";
+  /** Off when another control opens it, such as the Connect wizard or a row's Add route. */
+  readonly showTrigger?: boolean;
 }) {
   const desktopBridge = window.desktopBridge;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -113,7 +118,7 @@ export function AddEnvironmentDialog({
     }
     return keys;
   })();
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
+  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">(initialMode);
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
@@ -154,7 +159,7 @@ export function AddEnvironmentDialog({
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       savedBackendSessionRef.current += 1;
-      setSavedBackendMode("remote");
+      setSavedBackendMode(initialMode);
       setSavedBackendHost("");
       setSavedBackendPairingCode("");
       setSavedBackendSshHost("");
@@ -615,21 +620,23 @@ export function AddEnvironmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <DialogTrigger
-              render={
-                <Button size="xs" variant="ghost-muted" aria-label="Add environment">
-                  <PlusIcon className="size-3" />
-                  <span>Add environment</span>
-                </Button>
-              }
-            />
-          }
-        />
-        <TooltipPopup side="top">Add environment</TooltipPopup>
-      </Tooltip>
+      {showTrigger ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DialogTrigger
+                render={
+                  <Button size="xs" variant="ghost-muted" aria-label="Add environment">
+                    <PlusIcon className="size-3" />
+                    <span>Add environment</span>
+                  </Button>
+                }
+              />
+            }
+          />
+          <TooltipPopup side="top">Add environment</TooltipPopup>
+        </Tooltip>
+      ) : null}
       <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>

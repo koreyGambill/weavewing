@@ -21,7 +21,7 @@ import { RemoteMediaSettingsRow } from "./RemoteMediaSettingsRow";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
-export function PrivacyDeviceRows({ environmentId }: { environmentId: EnvironmentId }) {
+export function PrivacyDeviceRows() {
   return (
     <>
       <SettingsRow title="Before you pair the T3 Code app">
@@ -50,13 +50,7 @@ export function PrivacyDeviceRows({ environmentId }: { environmentId: Environmen
           <Button
             variant="outline"
             size="sm"
-            render={
-              <Link
-                to="/settings/access"
-                search={{ machine: environmentId }}
-                hash="authorized-clients"
-              />
-            }
+            render={<Link to="/settings/connections" hash="connect" />}
           >
             Open pairing
           </Button>
