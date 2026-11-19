@@ -64,12 +64,6 @@ export function ComposerWhereLine({
   // A fallback place is not the default: it is lit, and says why the default could not be used.
   const unavailable = atResolvedPlace && resolved.kind !== "none" ? resolved.unavailable : null;
   const atDefaultPlace = atResolvedPlace && unavailable === null;
-  const resolvedEnvironmentId =
-    resolved.kind === "project"
-      ? resolved.projectRef.environmentId
-      : resolved.kind === "scratch"
-        ? resolved.environmentId
-        : null;
   const shortcut = shortcutLabelForCommand(keybindings, "projectPicker.open");
   const threadRef = scopeThreadRef(environmentId, threadId);
   const started = draftId === null;
@@ -138,7 +132,6 @@ export function ComposerWhereLine({
         environmentId={environmentId}
         label={isScratch ? folderLabel : project.title}
         truncateStart={isScratch}
-        defaultEnvironmentId={resolvedEnvironmentId}
         defaultPlace={{
           current: atDefaultPlace,
           makeDefault: () => selection.makeDefault({ projectRef, isScratch }),

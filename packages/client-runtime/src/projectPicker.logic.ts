@@ -76,16 +76,18 @@ export function completePickerFolder(query: string, folderName: string | null): 
     : ensureBrowseDirectoryPath(`${getBrowseDirectoryPath(query.trim())}${folderName}`);
 }
 
-export function pickerProjectSections<T extends PickerProject>(
-  ranked: ReadonlyArray<T>,
-  currentKey: string | null = null,
-) {
-  const remaining = ranked.filter((project) => project.key !== currentKey);
-  const unpinned = remaining.filter((project) => !project.pinned);
-  return {
-    current: ranked.filter((project) => project.key === currentKey),
-    pinned: remaining.filter((project) => project.pinned),
-    recent: unpinned.slice(0, 5),
-    more: unpinned.slice(5),
-  };
+/**
+ * The picker's list before anything is typed: places with past work, pinned first, then by
+ * recency. A project with no threads stays out unless it is pinned or current, so it is found by
+ * typing. `environmentId` null lists every machine.
+ */
+export function pickerRecentProjects<T extends PickerProject>(
+  projects: ReadonlyArray<T>,
+  environmentId: string | null,
+  currentKey: string | null,
+): T[] {
+  const worked = rankPickerProjects(projects, environmentId, "").filter(
+    (project) => project.pinned || project.activity > 0 || project.key === currentKey,
+  );
+  return [...worked.filter((project) => project.pinned), ...worked.filter((p) => !p.pinned)];
 }

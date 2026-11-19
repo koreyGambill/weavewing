@@ -4,6 +4,7 @@ import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/envir
 import {
   completePickerFolder,
   isProjectPickerPath,
+  pickerRecentProjects,
   projectPickerPathLabel,
   rankPickerProjects,
 } from "@t3tools/client-runtime/project-picker";
@@ -18,7 +19,15 @@ import {
 } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { ArrowLeftIcon, FolderGit2Icon, FolderOpenIcon, StarIcon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  ArrowLeftIcon,
+  CircleHelpIcon,
+  FolderGit2Icon,
+  FolderOpenIcon,
+  GlobeIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
@@ -41,7 +50,6 @@ import { useEnvironments } from "~/state/environments";
 import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
 import { primaryServerKeybindingsAtom } from "~/state/server";
-import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentsWithScope } from "~/state/session";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
@@ -56,8 +64,9 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../ui/combobox";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { searchableSetting } from "../settings/settingsSearch";
 import { DraftProjectName } from "./DraftProjectName";
 import { ComposerControl } from "./ComposerControl";
 import { useProjectPickerBrowse, useProjectPickerHomes } from "./useProjectPickerBrowse";
@@ -88,7 +97,6 @@ export function DraftProjectPicker({
   onAddProject,
   onStartWithoutProject,
   defaultFolderLabel,
-  defaultEnvironmentId = null,
   defaultPlace,
   trigger,
 }: {
@@ -107,8 +115,6 @@ export function DraftProjectPicker({
   readonly onAddProject: (step: "folder" | "clone") => void;
   /** Whether this draft is at the default place, and how to make its place the default. */
   readonly defaultPlace?: { readonly current: boolean; readonly makeDefault: () => void };
-  /** The machine new threads start on when no preference names one. */
-  readonly defaultEnvironmentId?: EnvironmentId | null;
   /** Replaces the project-name trigger, as the where-line under the composer does. */
   readonly trigger?: {
     readonly content: ReactNode;
@@ -137,7 +143,7 @@ export function DraftProjectPicker({
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
-  const preferredEnvironmentId = usePreferredEnvironmentId() ?? defaultEnvironmentId;
+  const navigate = useNavigate();
   const connected = environments.filter((env) => env.connection.phase === "connected");
   const targets = (open ? connected : [])
     .filter((env) => allMachines || env.environmentId === environmentId)
@@ -192,22 +198,15 @@ export function DraftProjectPicker({
       project,
     }));
   const available = metadata.filter((project) => connectedIds.has(project.environmentId));
-  const ranked = rankPickerProjects(available, allMachines ? null : (environmentId ?? ""), query);
-  const defaultRanked = rankPickerProjects(
-    available,
-    allMachines ? null : (environmentId ?? ""),
-    "",
-  );
-  // Pinned first, then by recency; frozen while open so pinning never moves a row under the pointer.
+  const scope = allMachines ? null : (environmentId ?? "");
+  const ranked = rankPickerProjects(available, scope, query);
+  const currentKey = activeProjectRef ? scopedProjectKey(activeProjectRef) : null;
+  // Frozen while open so pinning never moves a row under the pointer.
   const ordered = useOrderWhileOpen(
-    [
-      ...defaultRanked.filter((entry) => entry.pinned),
-      ...defaultRanked.filter((entry) => !entry.pinned),
-    ],
+    pickerRecentProjects(available, scope, currentKey),
     (item) => item.key,
     open,
   );
-  const currentKey = activeProjectRef ? scopedProjectKey(activeProjectRef) : null;
   const projectItem = (entry: (typeof metadata)[number], section?: string): PickerItem => ({
     value: entry.key,
     label: entry.title,
@@ -249,8 +248,6 @@ export function DraftProjectPicker({
           ...(onStartWithoutProject && defaultFolderLabel
             ? [{ value: "scratch", label: `Start in ${defaultFolderLabel}` }]
             : []),
-          { value: "open-folder", label: "Open folder…" },
-          { value: "clone", label: "Clone repository…" },
         ];
   const changeOpen = (next: boolean) => {
     requestRef.current = null;
@@ -262,16 +259,19 @@ export function DraftProjectPicker({
       setQuery("");
     }
   };
-  const switchMachine = (id: EnvironmentId) => {
-    setAllMachines(false);
-    onEnvironmentChange(id);
-    inputRef.current?.focus();
-  };
   const cycleMachine = useStableCallback(() => {
     const index = connected.findIndex((env) => env.environmentId === environmentId);
     const next = connected[(index + 1) % connected.length];
-    if (next) switchMachine(next.environmentId);
+    if (!next) return;
+    setAllMachines(false);
+    onEnvironmentChange(next.environmentId);
+    inputRef.current?.focus();
   });
+  const addProject = (step: "folder" | "clone") => {
+    if (busy) return;
+    if (!inline) changeOpen(false);
+    onAddProject(step);
+  };
   const openPicker = useStableCallback(() => changeOpen(true));
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this draft's picker and remembers composer focus across opening the command palette
   useEffect(() => {
@@ -394,9 +394,6 @@ export function DraftProjectPicker({
     } else if (item.value === "scratch") {
       onStartWithoutProject?.();
       changeOpen(false);
-    } else {
-      if (!inline) changeOpen(false);
-      onAddProject(item.value === "clone" ? "clone" : "folder");
     }
   };
   const selected = activeProjectRef
@@ -404,7 +401,6 @@ export function DraftProjectPicker({
     : null;
   const content = (
     <>
-      {/* One line: search takes the width, the machine controls sit at its right. */}
       <div className="flex shrink-0 items-end gap-1 pe-2">
         {onBack ? (
           <div className="ps-2 pb-1">
@@ -489,54 +485,6 @@ export function DraftProjectPicker({
             }}
           />
         </div>
-        {/* A one-column grid lets the select shrink, so a long machine name truncates. */}
-        <div className="grid w-24 min-w-0 shrink grid-cols-[minmax(0,1fr)] pb-1 sm:w-36">
-          <Select
-            value={environmentId}
-            onValueChange={(id) => {
-              if (id) switchMachine(id);
-            }}
-          >
-            <SelectTrigger size="compact" variant="ghost" aria-label="Project machine">
-              <SelectValue>
-                {environments.find((env) => env.environmentId === environmentId)?.label ??
-                  "Choose machine"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup>
-              {environments.map((env) => (
-                <SelectItem
-                  key={env.environmentId}
-                  value={env.environmentId}
-                  disabled={!connectedIds.has(env.environmentId)}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    {env.label}
-                    {env.environmentId === preferredEnvironmentId ? (
-                      <StarIcon aria-label="Default" className="size-3" />
-                    ) : null}
-                    {connectedIds.has(env.environmentId) ? null : (
-                      <span className="text-muted-foreground">offline</span>
-                    )}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
-        <div className="shrink-0 pb-1">
-          <Button
-            variant={allMachines ? "secondary" : "ghost"}
-            size="xs"
-            aria-pressed={allMachines}
-            onClick={() => {
-              setAllMachines((all) => !all);
-              inputRef.current?.focus();
-            }}
-          >
-            All machines
-          </Button>
-        </div>
       </div>
       <div role="status" className="shrink-0 px-3 text-muted-foreground text-xs">
         {busy ? "Opening project…" : folders.pending && pathMode ? "Loading folders…" : null}
@@ -558,7 +506,13 @@ export function DraftProjectPicker({
         ) : items.length === 0 &&
           !folders.pending &&
           !folders.listings.some((listing) => listing.error) ? (
-          <p className="py-2">{pathMode ? "No matching folders." : "No matching projects."}</p>
+          <p className="py-2">
+            {pathMode
+              ? "No matching folders."
+              : query.trim()
+                ? "No matching projects."
+                : "No recent projects. Type to search, or open a folder."}
+          </p>
         ) : null}
       </div>
       <ComboboxList>
@@ -593,10 +547,8 @@ export function DraftProjectPicker({
                     !operable.has(item.environmentId))
                 }
               >
-                {pathMode || item.value === "open-folder" ? (
+                {pathMode ? (
                   <FolderOpenIcon className="size-4 shrink-0" />
-                ) : item.value === "clone" ? (
-                  <FolderGit2Icon className="size-4 shrink-0" />
                 ) : item.project ? (
                   <ProjectFavicon project={item.project} className="size-4 shrink-0" />
                 ) : null}
@@ -664,22 +616,82 @@ export function DraftProjectPicker({
           );
         }}
       </ComboboxList>
-      {defaultPlace !== undefined ? (
-        <div className="flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-muted-foreground text-xs">
-          <StarIcon className="size-3 shrink-0" aria-hidden="true" />
-          {defaultPlace.current ? (
-            <span className="min-w-0 truncate">This is your default place for new threads</span>
-          ) : (
-            <InlineButton tone="muted" onClick={defaultPlace.makeDefault}>
-              Make this the default place
-            </InlineButton>
-          )}
+      <div className="flex shrink-0 items-center gap-1 border-t px-2 py-1.5">
+        <Button variant="ghost" size="xs" onClick={() => addProject("folder")}>
+          <FolderOpenIcon />
+          Open folder
+        </Button>
+        <Button variant="ghost" size="xs" onClick={() => addProject("clone")}>
+          <FolderGit2Icon />
+          Clone repo
+        </Button>
+        <div className="ms-auto">
+          <Button
+            variant="ghost-toggle"
+            size="xs"
+            aria-pressed={allMachines}
+            onClick={() => {
+              setAllMachines((all) => !all);
+              inputRef.current?.focus();
+            }}
+          >
+            <GlobeIcon />
+            All machines
+          </Button>
         </div>
-      ) : null}
-      <div className="shrink-0 truncate border-t px-3 py-2 text-muted-foreground text-3xs">
-        Tab complete · ↵ open · ⌫ up ·{" "}
-        {shortcutLabelForCommand(keybindings, "projectPicker.nextMachine")} machine ·{" "}
-        {shortcutLabelForCommand(keybindings, "projectPicker.allMachines")} all
+        <Popover>
+          <PopoverTrigger
+            render={<Button variant="ghost" size="icon-xs" aria-label="Picker help" />}
+          >
+            <CircleHelpIcon />
+          </PopoverTrigger>
+          <PopoverPopup side="top" padding="compact" width="md">
+            <PickerHelp
+              keys={[
+                ["↑ ↓", "Move"],
+                ["↵", "Open"],
+                ["Tab", "Complete a folder"],
+                ["⌫", "Go up a folder"],
+                [shortcutLabelForCommand(keybindings, "thread.pin"), "Pin or unpin"],
+                [shortcutLabelForCommand(keybindings, "projectPicker.nextMachine"), "Next machine"],
+                [shortcutLabelForCommand(keybindings, "projectPicker.allMachines"), "All machines"],
+              ]}
+            />
+          </PopoverPopup>
+        </Popover>
+        <Popover>
+          <PopoverTrigger
+            render={<Button variant="ghost" size="icon-xs" aria-label="Picker settings" />}
+          >
+            <SettingsIcon />
+          </PopoverTrigger>
+          <PopoverPopup side="top" align="end" padding="compact" width="sm">
+            <div className="flex flex-col items-start gap-1 text-sm">
+              {defaultPlace === undefined ? null : defaultPlace.current ? (
+                <p className="px-2 py-1 text-muted-foreground text-xs">
+                  New threads start here by default.
+                </p>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={defaultPlace.makeDefault}>
+                  Make this the default place
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  changeOpen(false);
+                  void navigate({
+                    to: "/settings/threads",
+                    hash: searchableSetting("default-folder").id,
+                  });
+                }}
+              >
+                Default folder settings…
+              </Button>
+            </div>
+          </PopoverPopup>
+        </Popover>
       </div>
     </>
   );
@@ -746,6 +758,7 @@ export function DraftProjectPicker({
             align={trigger ? "start" : "center"}
             // The where-line returns the keyboard to the composer instead of its trigger.
             {...(trigger ? { finalFocus: false } : {})}
+            size="tall"
             className="w-[min(28rem,calc(100vw-2rem))] overflow-hidden"
           >
             {content}
@@ -766,5 +779,31 @@ function PickerPath({ path }: { readonly path: string }) {
         <span dir="ltr">{path.slice(split)}</span>
       </span>
     </>
+  );
+}
+
+function PickerHelp({
+  keys,
+}: {
+  readonly keys: ReadonlyArray<readonly [string | null | undefined, string]>;
+}) {
+  return (
+    <div className="flex flex-col gap-2 text-xs">
+      <p>
+        Type a name to search projects on this machine, or turn on All machines to search every
+        machine. Start with ~ or / to browse folders. Change the machine with the machine button
+        beside the folder.
+      </p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        {keys.map(([key, action]) =>
+          key ? (
+            <div key={action} className="contents">
+              <dt className="font-mono text-muted-foreground">{key}</dt>
+              <dd>{action}</dd>
+            </div>
+          ) : null,
+        )}
+      </dl>
+    </div>
   );
 }

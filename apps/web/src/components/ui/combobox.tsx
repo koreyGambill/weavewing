@@ -145,8 +145,11 @@ function ComboboxPopup({
   align = "start",
   collisionAvoidance,
   anchor: anchorProp,
+  size = "default",
   ...props
 }: ComboboxPrimitive.Popup.Props & {
+  /** `tall` fits a long list, such as the project picker's. */
+  size?: "default" | "tall";
   align?: ComboboxPrimitive.Positioner.Props["align"];
   sideOffset?: ComboboxPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: ComboboxPrimitive.Positioner.Props["alignOffset"];
@@ -177,7 +180,12 @@ function ComboboxPopup({
         >
           <ComboboxPrimitive.Popup
             // Electron drag hit-testing ignores z-index; items over a drag region would swallow clicks.
-            className="flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-1 flex-col overflow-hidden text-foreground [-webkit-app-region:no-drag]"
+            className={cn(
+              "flex min-w-0 flex-1 flex-col overflow-hidden text-foreground [-webkit-app-region:no-drag]",
+              size === "tall"
+                ? "max-h-[min(var(--available-height),34rem)]"
+                : "max-h-[min(var(--available-height),23rem)]",
+            )}
             data-slot="combobox-popup"
             {...props}
           >

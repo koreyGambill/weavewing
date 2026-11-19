@@ -22,6 +22,7 @@ vi.mock("../state/entities", async (original) => ({
   ...(await original<typeof import("../state/entities")>()),
   useProjects: () => entities.projects,
   useVisibleThreadShells: () => entities.threads,
+  useThreadShells: () => entities.threads,
   useDelegatedUnderParent: () => entities.delegatedUnderParent,
 }));
 
@@ -146,8 +147,25 @@ describe("CommandPalette open intents", () => {
       LAST_USED_PROJECT_STORAGE_KEY,
       JSON.stringify(scopedProjectKey({ environmentId, projectId: acme.id })),
     );
+    const worked = (id: string, updatedAt: string) =>
+      makeThreadFixture({
+        environmentId,
+        id: ThreadId.make(`thread-${id}`),
+        projectId: ProjectId.make(id),
+        updatedAt,
+      });
     setup({
-      projects: [acme, project("beta", "Beta"), project("gamma", "Gamma")],
+      projects: [
+        acme,
+        project("beta", "Beta"),
+        project("gamma", "Gamma"),
+        project("delta", "Delta"),
+      ],
+      threads: [
+        worked("acme", "2026-03-04T00:00:00.000Z"),
+        worked("beta", "2026-03-02T00:00:00.000Z"),
+        worked("gamma", "2026-03-03T00:00:00.000Z"),
+      ],
     });
     // New thread's place comes from the default-place resolver; here it resolves to Acme.
     const actualScratch = await vi.importActual<typeof scratchProject>(
@@ -186,11 +204,23 @@ describe("CommandPalette open intents", () => {
     await expect
       .element(page.getByRole("button", { name: "All machines", exact: true }))
       .toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Open folder" })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Clone repo" })).toBeVisible();
+    // Before typing, only places with past work are listed, most recent first.
+    expect(
+      page
+        .getByRole("option")
+        .elements()
+        .map((option) => option.textContent?.match(/Acme|Beta|Gamma|Delta/)?.[0]),
+    ).toEqual(["Acme", "Gamma", "Beta"]);
     // The first row is highlighted as the picker opens, so Enter alone accepts it.
     await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
     await expect.element(page.getByRole("option").nth(1)).not.toHaveAttribute("data-highlighted");
     await userEvent.keyboard("{ArrowDown}");
     await expect.element(page.getByRole("option").nth(1)).toHaveAttribute("data-highlighted");
+    // A project with no threads yet is still found by typing.
+    await userEvent.type(page.getByRole("combobox", { name: "Project name or path" }), "delt");
+    await expect.element(page.getByRole("option", { name: /Delta/ })).toBeVisible();
   });
 
   it("separates commands from thread search and focuses its query", async () => {
