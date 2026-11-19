@@ -581,11 +581,16 @@ const make = Effect.gen(function* () {
       const migrateTerminalKeys = pendingLateDefaults.some(
         (late) => late.id === "weavewing.terminal-keys.v1",
       );
-      const closeConflict = runtimeConfig.keybindings.some(
-        (rule) =>
+      const closeConflict = runtimeConfig.keybindings.some((rule) => {
+        const shortcut = parseKeybindingShortcut(rule.key);
+        return (
           rule.command !== "workspace.tile.closeTab" &&
-          hasSameShortcutContext(rule, { key: "mod+w", command: "workspace.tile.closeTab" }),
-      );
+          shortcut?.key === "w" &&
+          !shortcut.altKey &&
+          !shortcut.shiftKey &&
+          (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
+        );
+      });
       const customConfig = runtimeConfig.keybindings.map((rule) => {
         if (!migrateTerminalKeys) return rule;
         if (
@@ -643,7 +648,8 @@ const make = Effect.gen(function* () {
         }
         missingDefaults.push(defaultRule);
       }
-      for (const { alongside, rule } of pendingLateDefaults) {
+      for (const { id, alongside, rule } of pendingLateDefaults) {
+        if (id === "weavewing.terminal-keys.v1" && closeConflict) continue;
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
           !customConfig.some((entry) => hasSameShortcutContext(entry, rule))

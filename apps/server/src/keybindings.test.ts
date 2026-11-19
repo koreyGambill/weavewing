@@ -396,6 +396,30 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect.each(["mod+w", "ctrl+w", "meta+w"])(
+    "preserves a conditional customized %s during the terminal migration",
+    (key) =>
+      Effect.gen(function* () {
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        const keybindings = yield* Keybindings.Keybindings;
+        const legacy = {
+          key: "meta+w",
+          command: "workspace.tile.closeTab",
+          when: "isMac",
+        } as const;
+        const alias = { key: "ctrl+alt+w", command: "workspace.tile.closeTab" } as const;
+        const custom = { key, command: "script.custom-close.run", when: "terminalFocus" } as const;
+        yield* writeKeybindingsConfig(keybindingsConfigPath, [custom, legacy, alias]);
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
+        assert.deepEqual(
+          upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
+          [legacy, alias],
+        );
+        assert.deepInclude(upgraded, custom);
+      }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("keeps a late default pending while the config is full", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
