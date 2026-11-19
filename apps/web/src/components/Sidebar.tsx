@@ -1957,7 +1957,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const anchor =
       (target.beforeKey === null
         ? null
-        : list.querySelector<HTMLElement>(`li[data-thread-item="${CSS.escape(target.beforeKey)}"]`)) ??
+        : list.querySelector<HTMLElement>(
+            `li[data-thread-item="${CSS.escape(target.beforeKey)}"]`,
+          )) ??
       list.querySelector<HTMLElement>(
         `li[data-sidebar-group-end="${CSS.escape(target.groupId ?? "")}"]`,
       );
@@ -3789,7 +3791,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 name={group.name}
                                 count={group.count}
                                 collapsed={group.collapsed}
-                                renaming={renamingGroupId !== null && renamingGroupId === group.groupId}
+                                renaming={
+                                  renamingGroupId !== null && renamingGroupId === group.groupId
+                                }
                                 hiddenThreads={group.hiddenThreads}
                                 onToggle={toggleThreadGroup}
                                 onContextMenu={handleThreadGroupContextMenu}

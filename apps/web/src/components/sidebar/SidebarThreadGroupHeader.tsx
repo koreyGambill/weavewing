@@ -1,7 +1,12 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ChevronDownIcon, EllipsisIcon } from "lucide-react";
-import { memo, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  memo,
+  useRef,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "../../uiStateStore";
