@@ -2,7 +2,10 @@
 
 The manual Sparkwing `release` pipeline builds Linux x64 AppImage/deb, Windows
 x64 NSIS, macOS arm64 DMG/zip, and the matching CLI archives. Linux and Windows
-build here. macOS builds on `ssh moonborn`. Keep that Mac awake and reachable.
+build here. macOS builds on `ssh moonborn`, alongside local source bundling
+and packaging after CI passes. Keep that Mac awake and reachable.
+Linux and Windows packaging share mutable source assets and run in sequence;
+Windows also embeds the Linux CLI archive as its WSL runtime.
 
 Use a clean release worktree with no `.env` or `.env.local`. For draft and
 promote, its commit must already be pushed to `origin/main`. Version alignment

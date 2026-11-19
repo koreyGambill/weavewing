@@ -77,7 +77,7 @@ async function assertInput(ctx: Context, co: Checkout) {
   return { commit, tag, platforms, channel: input(ctx).channel };
 }
 
-definePipeline({
+export const releasePipeline = definePipeline({
   name: "Release",
   short: "Build Weavewing desktop and CLI archives, then draft or promote a GitHub release",
   help: "Manual only. plan builds and records the release without GitHub writes. draft creates a private draft. promote verifies uploaded checksums and needs --allow-risk prod.",
@@ -135,7 +135,7 @@ definePipeline({
     const preflight = p.job("preflight", async (ctx) => {
       const co = checkout(ctx);
       const result = await assertInput(ctx, co);
-      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts"]);
+      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts", ".sparkwing/lib/release-ci.test.ts", ".sparkwing/jobs/release.test.ts"]);
       FS.writeFileSync(Path.join(co.evidence, "release-input.json"), JSON.stringify({ ...result, version, stage: ctx.args.stage, buildOnly, run: ctx.run.id }, null, 2));
       return result;
     }).inline().cores(0.25);
@@ -208,7 +208,7 @@ definePipeline({
       const { commit } = (await ctx.output(preflight))!;
       await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--channel", channel, "--run", ctx.run.id, "--evidence", co.evidence], Object.fromEntries(await Promise.all(["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map(async (key) => [key, (await ctx.secret(key)) ?? ""]))));
       return { platform: "mac" };
-    }).inline().cores(1).needs(preflight, clean).skipIf(() => !platforms.includes("mac"))
+    }).inline().cores(1).needs(preflight, ci).skipIf(() => !platforms.includes("mac"))
       .concurrency(new ConcurrencyGroup("weavewing-release-moonborn", { capacity: 1 }));
 
     p.job("publish-draft", async (ctx) => {
