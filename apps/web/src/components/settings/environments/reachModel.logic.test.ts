@@ -359,6 +359,65 @@ describe("buildReachModel", () => {
   });
 });
 
+describe("links to a server this app is not connected to", () => {
+  const withLink = (links: ReadonlyArray<PeerLinkSummary>, vpsLinksIn = false) =>
+    buildReachModel({
+      servers: [
+        server({
+          environmentId: WSL,
+          label: "WSL",
+          links,
+          sessions: vpsLinksIn ? [linkSession(VPS, "vps")] : [],
+        }),
+        server({ environmentId: MOON, label: "Moonborn" }),
+      ],
+    });
+
+  it("shows the link target as a locked column with the linking side's exact level and ? elsewhere", () => {
+    const model = withLink([link(VPS, "vps", { access: "approval-required" })]);
+    const vps = serverPartyId(VPS);
+
+    expect(model.columns.map((column) => column.label)).toEqual(["WSL", "Moonborn", "vps"]);
+    expect(model.rows.map((row) => row.label)).not.toContain("vps");
+    expect(model.unconnected).toEqual(new Set([vps]));
+    expect(model.manageable.has(vps)).toBe(false);
+    expect(state(model, serverPartyId(WSL), VPS)).toMatchObject({
+      state: { kind: "level", level: "approval-required", broken: null },
+      changes: { lockedReason: "vps is not connected to this app", canRemove: true },
+    });
+    for (const from of [serverPartyId(MOON), APP_PARTY_ID]) {
+      expect(state(model, from, VPS).state).toEqual({
+        kind: "unknown",
+        reason: "vps is not connected to this app, so it cannot read who uses it.",
+      });
+    }
+  });
+
+  it("gives the link up only after asking, renews nothing from here, and drops the column once gone", () => {
+    const model = withLink([link(VPS, "vps", { status: "expired" })]);
+    const square = state(model, serverPartyId(WSL), VPS);
+
+    expect(planSquareChange(square, "none")).toMatchObject({
+      kind: "confirm",
+      action: "remove",
+      sentence: "WSL gives up its access to vps. Getting it back needs approval on vps, or SSH.",
+    });
+    expect(planSquareChange(square, "full-access")).toEqual({
+      kind: "blocked",
+      reason: "Renewing needs a new code from vps, which this app is not connected to",
+    });
+    expect(withLink([]).columns.map((column) => column.label)).toEqual(["WSL", "Moonborn"]);
+  });
+
+  it("never counts the link target as trusted, even when it links back in with full access", () => {
+    const model = withLink([link(VPS, "vps")], true);
+
+    expect(state(model, serverPartyId(VPS), WSL).state).toMatchObject({ level: "full-access" });
+    expect(state(model, serverPartyId(WSL), VPS).state).toMatchObject({ level: "full-access" });
+    expect(model.trusted).toEqual([]);
+  });
+});
+
 describe("T3 Connect sessions", () => {
   it("never become a device, a line, a square or something to revoke here", () => {
     const connect = session({

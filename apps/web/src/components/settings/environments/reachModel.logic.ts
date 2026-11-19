@@ -144,6 +144,8 @@ export interface ReachModel {
   readonly trusted: ReadonlyArray<ReadonlyArray<ReachParty>>;
   /** Columns whose access this app may change; the rest show a lock. */
   readonly manageable: ReadonlySet<string>;
+  /** Columns for servers this app is not connected to, known only as a server's link target. */
+  readonly unconnected: ReadonlySet<string>;
   /** The one session behind each device or agent row. */
   readonly deviceSessions: ReadonlyMap<string, AuthClientSession>;
 }
@@ -496,6 +498,59 @@ function deviceSquare(
   };
 }
 
+const notConnected = (to: ReachParty) => `${to.label} is not connected to this app`;
+
+/**
+ * A known server's link to a server this app is not connected to: its level comes from the
+ * linking side's own list, and only that side can give it up.
+ */
+function unconnectedLinkSquare(
+  from: ReachParty,
+  to: ReachParty,
+  link: PeerLinkSummary,
+  server: ReachServerInput,
+): ReachSquare {
+  return {
+    from,
+    to,
+    link,
+    sessionIds: [],
+    arrivedVia: arrivalFromUrl(link.urls[0]),
+    arrivedFrom: link.urls[0] ?? null,
+    state: { kind: "level", level: link.access, broken: linkBroken(link) },
+    changes: {
+      lockedReason: notConnected(to),
+      canRemove: manages(server),
+      canRelink: false,
+      relinkBlockedReason: `Renewing needs a new code from ${to.label}, which this app is not connected to`,
+      // This app cannot reach the target to get it back, so giving it up always asks first.
+      ownOutbound: true,
+    },
+  };
+}
+
+function unconnectedUnknownSquare(from: ReachParty, to: ReachParty): ReachSquare {
+  return {
+    from,
+    to,
+    link: null,
+    sessionIds: [],
+    arrivedVia: null,
+    arrivedFrom: null,
+    state: {
+      kind: "unknown",
+      reason: `${notConnected(to)}, so it cannot read who uses it.`,
+    },
+    changes: {
+      lockedReason: notConnected(to),
+      canRemove: false,
+      canRelink: false,
+      relinkBlockedReason: notConnected(to),
+      ownOutbound: false,
+    },
+  };
+}
+
 /**
  * Device names, told apart where two match: first by address, then by server, then by
  * session. Every entry is one session on one server.
@@ -582,21 +637,20 @@ export function buildReachModel(input: {
     onThisComputer: server.onThisComputer,
   }));
 
-  // Servers known only because they link in or are linked to.
+  // Servers this app is not connected to: a row when they link in, a column when linked to.
   const outsideServers = new Map<EnvironmentId, ReachParty>();
-  const outsideServer = (environmentId: EnvironmentId, label: string) => {
-    const known = outsideServers.get(environmentId);
-    if (known) return known;
-    const party: ReachParty = {
+  const linkTargets = new Map<EnvironmentId, ReachParty>();
+  const outsideParty = (environmentId: EnvironmentId, label: string): ReachParty =>
+    outsideServers.get(environmentId) ??
+    linkTargets.get(environmentId) ?? {
       id: serverPartyId(environmentId),
       kind: "server",
       label,
       environmentId,
       onThisComputer: false,
     };
-    outsideServers.set(environmentId, party);
-    return party;
-  };
+  const outsideServer = (environmentId: EnvironmentId, label: string) =>
+    outsideServers.set(environmentId, outsideParty(environmentId, label));
 
   // Link sessions by linking environment, and device sessions by device, on each server.
   const linkSessions = new Map<EnvironmentId, Map<string, AuthClientSession[]>>();
@@ -642,7 +696,9 @@ export function buildReachModel(input: {
   }
   for (const server of servers) {
     for (const link of server.links ?? []) {
-      if (!byId.has(link.environmentId)) outsideServer(link.environmentId, link.label);
+      if (!byId.has(link.environmentId)) {
+        linkTargets.set(link.environmentId, outsideParty(link.environmentId, link.label));
+      }
     }
   }
 
@@ -699,6 +755,24 @@ export function buildReachModel(input: {
     }
   }
 
+  // This app reads nothing on a link target, so only its linking servers' own lists speak for it.
+  for (const to of linkTargets.values()) {
+    for (const from of rows) {
+      const fromServer = from.environmentId === null ? undefined : byId.get(from.environmentId);
+      const link = fromServer?.links?.find(
+        (candidate) => candidate.environmentId === to.environmentId,
+      );
+      squares.set(
+        squareKey(from.id, to.id),
+        from.id === to.id
+          ? { ...unconnectedUnknownSquare(from, to), state: { kind: "self" } }
+          : fromServer !== undefined && link !== undefined
+            ? unconnectedLinkSquare(from, to, link, fromServer)
+            : unconnectedUnknownSquare(from, to),
+      );
+    }
+  }
+
   const isFull = (fromId: string, toId: string) => {
     const state = squares.get(squareKey(fromId, toId))?.state;
     return state?.kind === "level" && state.level === "full-access" && state.broken === null;
@@ -713,7 +787,9 @@ export function buildReachModel(input: {
   );
   const deviceSessionByParty = new Map(deviceEntries.map((entry) => [entry.key, entry.session]));
   return {
-    columns,
+    // The reverse of a link target is unknown, so it never joins a trusted group above.
+    columns: [...columns, ...linkTargets.values()],
+    unconnected: new Set([...linkTargets.values()].map((party) => party.id)),
     rows,
     squares,
     trusted,

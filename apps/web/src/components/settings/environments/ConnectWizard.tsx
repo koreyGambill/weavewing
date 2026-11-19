@@ -578,7 +578,9 @@ function ConnectComputerForm({
     computerId === null
       ? null
       : (model.columns.find((column) => column.id === serverPartyId(computerId)) ?? null);
-  const others = model.columns.filter((column) => column.id !== computer?.id);
+  // Servers this app is not connected to cannot be linked from here.
+  const connected = model.columns.filter((column) => !model.unconnected.has(column.id));
+  const others = connected.filter((column) => column.id !== computer?.id);
   const [uses, setUses] = useState<ReadonlySet<string>>(() => new Set(others.map((o) => o.id)));
   const [usedBy, setUsedBy] = useState<ReadonlySet<string>>(() => new Set(others.map((o) => o.id)));
   const [usesLevel, setUsesLevel] = useState<LinkLevelChoice>("full-access");
@@ -614,7 +616,7 @@ function ConnectComputerForm({
         <span className="block text-xs font-medium">Computer</span>
         <ServerSelect
           label="Computer"
-          servers={model.columns.flatMap((column) =>
+          servers={connected.flatMap((column) =>
             column.environmentId === null
               ? []
               : [{ environmentId: column.environmentId, label: column.label }],

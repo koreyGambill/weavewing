@@ -141,6 +141,7 @@ export function ReachGrid({
                       party={column}
                       focus={{ kind: "column", id: column.id }}
                       locked={!model.manageable.has(column.id)}
+                      unconnected={model.unconnected.has(column.id)}
                     />
                   </th>
                 ))}
@@ -156,6 +157,7 @@ export function ReachGrid({
                       party={row}
                       focus={{ kind: "row", id: row.id }}
                       locked={false}
+                      unconnected={false}
                     />
                   </th>
                   {columns.map((column, columnIndex) => {
@@ -253,12 +255,15 @@ function HeaderButton({
   party,
   focus,
   locked,
+  unconnected,
   ...cell
 }: GridCellProps & {
   readonly store: PopupStore;
   readonly party: ReachParty;
   readonly focus: Extract<Focus, { readonly kind: "row" | "column" }>;
   readonly locked: boolean;
+  /** Known only as a link target, so this app reads nothing there. */
+  readonly unconnected: boolean;
 }) {
   const hot = useStore(
     store,
@@ -268,7 +273,7 @@ function HeaderButton({
     <button
       {...gridCellAttributes(cell)}
       type="button"
-      aria-label={`${focus.kind === "column" ? "To" : "From"} ${party.label}${party.kind === "app" ? " (you)" : ""}`}
+      aria-label={`${focus.kind === "column" ? "To" : "From"} ${party.label}${party.kind === "app" ? " (you)" : ""}${unconnected ? ", not connected to this app" : ""}`}
       className={cn(
         "flex w-full min-w-0 items-center gap-1 px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         focus.kind === "column" ? "justify-center" : "justify-start",
@@ -284,6 +289,11 @@ function HeaderButton({
       </span>
       <PartyName label={party.label} />
       {party.kind === "app" ? <span className="shrink-0 text-muted-foreground">(you)</span> : null}
+      {unconnected ? (
+        <span className="shrink-0 rounded-sm border border-border px-1 text-2xs text-muted-foreground">
+          not connected
+        </span>
+      ) : null}
       {locked ? (
         <LockIcon role="img" aria-label="Set on that machine" className="size-3 shrink-0" />
       ) : null}
@@ -400,7 +410,13 @@ function PopupBody({
         </p>
       </div>
       {state.kind === "unknown" ? <p className="text-muted-foreground">{state.reason}</p> : null}
-      {popup.pinned ? <PinnedControls square={square} change={change} /> : null}
+      {popup.pinned ? (
+        <PinnedControls
+          square={square}
+          change={change}
+          unconnected={model.unconnected.has(square.to.id)}
+        />
+      ) : null}
       {popup.pinned &&
       square.from.kind === "server" &&
       state.kind !== "no-path" &&
@@ -415,9 +431,11 @@ function PopupBody({
 function PinnedControls({
   square,
   change,
+  unconnected,
 }: {
   readonly square: ReachSquare;
   readonly change: SquareChangeState;
+  readonly unconnected: boolean;
 }) {
   const { state, changes } = square;
   if (state.kind === "no-path") {
@@ -451,8 +469,15 @@ function PinnedControls({
       <>
         <p className="text-muted-foreground">
           <LockIcon aria-hidden className="mr-1 inline size-3" />
-          {square.to.label} decides this. This app does not have full access to it.
+          {unconnected
+            ? `${square.to.label} is not connected to this app, so only ${square.from.label}'s side of the link shows here.`
+            : `${square.to.label} decides this. This app does not have full access to it.`}
         </p>
+        {unconnected && state.kind === "level" && state.broken !== null ? (
+          <p className="text-muted-foreground">
+            Renew it from a device connected to {square.to.label}.
+          </p>
+        ) : null}
         {changes.canRemove ? (
           <Button
             size="xs"
