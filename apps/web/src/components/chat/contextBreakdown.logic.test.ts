@@ -57,6 +57,18 @@ describe("contextBreakdown", () => {
     });
   });
 
+  it.each([
+    [100_000, 900_000, "normal"],
+    [820_000, 900_000, "warning"],
+    [905_000, 900_000, "critical"],
+    [850_000, null, "warning"],
+    [950_000, null, "critical"],
+  ] as const)("marks %i used of a %s threshold as %s", (usedTokens, autoCompactThreshold, tone) => {
+    expect(
+      contextBreakdown(usage({ usedTokens, maxTokens: 1_000_000, autoCompactThreshold })).tone,
+    ).toBe(tone);
+  });
+
   it("lists only the token kinds the provider reported", () => {
     expect(
       contextBreakdown(

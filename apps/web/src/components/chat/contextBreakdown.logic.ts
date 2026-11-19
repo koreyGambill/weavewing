@@ -57,7 +57,18 @@ export function contextBreakdown(usage: BreakdownInput) {
       ["Reasoning", usage.reasoningOutputTokens],
     ] as const
   ).flatMap(([label, tokens]) => (tokens == null ? [] : [{ label, tokens }]));
+  // Warn on the way to auto-compaction; without a threshold, fall back to how full the window is.
+  const limit = threshold ?? max;
+  const tone: "normal" | "warning" | "critical" =
+    limit === null
+      ? "normal"
+      : used >= (threshold ?? limit * 0.9)
+        ? "critical"
+        : used >= (threshold === null ? limit * 0.8 : threshold * 0.9)
+          ? "warning"
+          : "normal";
   return {
+    tone,
     usedTokens: used,
     maxTokens: max,
     usedPercent: max === null ? null : percentOf(Math.min(used, max), max),
