@@ -98,6 +98,21 @@ describe("reopenClosedView", () => {
     },
   );
 
+  it("reopens a closed Files tab at its own root", async () => {
+    const panels = useRightPanelStore.getState();
+    panels.openFilesAt(threadRef, "/repo/src");
+    const [surface] = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      threadRef,
+    ).surfaces;
+    panels.closeSurface(threadRef, surface!.id);
+    const [entry] = useClosedViewStore.getState().entries;
+    await reopenClosedView(entry!, { openPreview: vi.fn(), workspaceAvailable: true });
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).surfaces,
+    ).toEqual([surface]);
+  });
+
   it.each([
     { hosted: false, folderTrail: "packages/contracts/src" },
     { hosted: false, folderTrail: undefined },

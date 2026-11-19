@@ -73,7 +73,7 @@ import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import type { ChatFileAttachment } from "~/types";
-import { isHostPath } from "@t3tools/shared/path";
+import { isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -96,6 +96,7 @@ import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import { PreviewImage } from "./PreviewImage";
 import FileBrowserPanel from "./FileBrowserPanel";
 import { FileExplorerPane } from "./FileExplorerPane";
+import { workspacePathOf } from "./filesRoot";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
@@ -163,6 +164,11 @@ interface FilePreviewPanelProps {
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
+  /** A Files tab's own root; absent at the workspace root. */
+  filesRoot?: string | undefined;
+  /** Present only on Files tabs, which can change their root. */
+  onChangeFilesRoot?: ((root: string | null) => void) | undefined;
+  onOpenFilesTab: (root: string | null) => void;
 }
 
 const MermaidFilePreview = lazy(() =>
@@ -1176,6 +1182,9 @@ export default function FilePreviewPanel({
   onPendingChange,
   selectedFilePending,
   workspaceMutationId,
+  filesRoot,
+  onChangeFilesRoot,
+  onOpenFilesTab,
 }: FilePreviewPanelProps) {
   const relativePath =
     attachment === undefined ? resolveFilePreviewPath(requestedPath, cwd) : requestedPath;
@@ -1233,6 +1242,8 @@ export default function FilePreviewPanel({
     attachment === undefined &&
     (file.isNotFile || (folderTrail !== undefined && file.data === null && file.error === null));
   const hostFolderPath = isFolder && isHostFile ? relativePath : null;
+  const treeRoot = hostFolderPath ?? filesRoot ?? cwd;
+  const rootedTree = treeRoot !== cwd;
   // The server marks the host files a workspace may edit: instruction files it loads.
   const readOnlyHost = isHostFile && file.data?.writable !== true;
   // A chat-linked folder reads as a file until its read settles, and revealing a
@@ -1790,18 +1801,24 @@ export default function FilePreviewPanel({
               }}
             >
               <FileBrowserPanel
-                key={`${environmentId}:${hostFolderPath ?? cwd}`}
+                key={`${environmentId}:${treeRoot}`}
                 environmentId={environmentId}
-                cwd={hostFolderPath ?? cwd}
-                projectName={hostFolderPath ?? projectName}
-                hostFolder={hostFolderPath !== null}
+                cwd={treeRoot}
+                projectName={rootedTree ? treeRoot : projectName}
+                hostFolder={rootedTree}
                 selectedPath={
                   hostFolderPath === null
                     ? relativePath
                     : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
                 }
                 selectedPathRevealId={revealRequestId}
-                onOpenFile={onOpenFile}
+                onOpenFile={(path) => onOpenFile(workspacePathOf(path, cwd))}
+                rootControls={{
+                  workspaceRoot: cwd,
+                  outsideWorkspace: workspaceRelativeFilePath(treeRoot, cwd) === null,
+                  ...(onChangeFilesRoot ? { onChangeRoot: onChangeFilesRoot } : {}),
+                  onOpenFilesTab,
+                }}
                 answersPanelFind={!previewPath}
                 workspaceMutationId={workspaceMutationId}
                 {...(previewPath && !isMedia && !isPdf

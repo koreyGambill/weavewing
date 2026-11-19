@@ -60,8 +60,10 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
   const surface = view.surface;
   if (!surface || typeof surface.id !== "string") return false;
   switch (surface.kind) {
-    case "diff":
     case "files":
+      if (surface.root !== undefined && typeof surface.root !== "string") return false;
+      return surface.id === surface.kind || surface.id.startsWith(`${surface.kind}:`);
+    case "diff":
     case "notes":
     case "pull-requests":
       return surface.id === surface.kind || surface.id.startsWith(`${surface.kind}:`);

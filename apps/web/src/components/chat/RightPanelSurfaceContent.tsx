@@ -251,6 +251,14 @@ export function RightPanelSurfaceContent(props: {
                 .navigateFolder(threadRef, surface.id, relativePath, folderTrail, keepSource)
             }
             folderTrail={surface.folderTrail}
+            {...(surface.kind === "files"
+              ? {
+                  filesRoot: surface.root,
+                  onChangeFilesRoot: (root: string | null) =>
+                    useRightPanelStore.getState().setFilesRoot(threadRef, surface.id, root),
+                }
+              : {})}
+            onOpenFilesTab={(root) => useRightPanelStore.getState().openFilesAt(threadRef, root)}
             onPendingChange={files.onPendingChange}
             selectedFilePending={surface.kind === "file" && files.pendingSurfaceIds.has(surface.id)}
             workspaceMutationId={props.workspaceMutationId}

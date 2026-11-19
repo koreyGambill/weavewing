@@ -81,6 +81,8 @@ export type RightPanelSurface =
       kind: "files";
       /** Set when breadcrumbs moved a folder browser up to the workspace root. */
       folderTrail?: string;
+      /** Absolute folder this tab's tree starts at instead of the workspace root. */
+      root?: string;
     }
   | {
       id: `file:${string}` | `attachment:${string}`;
@@ -178,6 +180,10 @@ interface RightPanelStoreState {
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  /** Re-roots one Files tab; null returns it to the workspace root. */
+  setFilesRoot: (ref: ScopedThreadRef, surfaceId: string, root: string | null) => void;
+  /** Opens a new Files tab beside the active one; null starts it at the workspace root. */
+  openFilesAt: (ref: ScopedThreadRef, root: string | null) => void;
   /** Moves in place; "" opens the root explorer. folderTrail keeps the return path; keepSource opens beside the source. */
   navigateFolder: (
     ref: ScopedThreadRef,
@@ -278,6 +284,10 @@ const instanceSurface = (kind: AddableRightPanelKind): RightPanelSurface => {
   const surface = singletonSurface(kind);
   return { ...surface, id: `${kind}:${randomUUID()}` } as RightPanelSurface;
 };
+
+/** The unrooted singleton explorer gives way to the first file opened from it. */
+const isStandaloneExplorer = (surface: RightPanelSurface) =>
+  surface.kind === "files" && surface.id === "files" && surface.root === undefined;
 
 const validAreaId = (id: string, kind: string) =>
   id === kind || (id.startsWith(`${kind}:`) && id.length > kind.length + 1);
@@ -1024,7 +1034,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? requestedPath
               : requestedPath.replace(/\/+$/, "") || requestedPath;
             const withoutStandaloneExplorer = current.surfaces.filter(
-              (surface) => surface.kind !== "files" || surface.id !== "files",
+              (surface) => !isStandaloneExplorer(surface),
             );
             const surfaceId = `file:${relativePath}` as const;
             const existing = withoutStandaloneExplorer.find(
@@ -1068,21 +1078,41 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 const kept = keepSource ? [source] : [];
                 return existing ? kept : [...kept, target];
               }
-              return !existing &&
-                target.kind === "file" &&
-                surface.kind === "files" &&
-                surface.id === "files"
+              return !existing && target.kind === "file" && isStandaloneExplorer(surface)
                 ? []
                 : [surface];
             });
             return activated({ ...current, surfaces }, target.id);
           }),
         ),
+      setFilesRoot: (ref, surfaceId, root) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const existing = current.surfaces.find((surface) => surface.id === surfaceId);
+            if (existing?.kind !== "files" || (existing.root ?? null) === root) return current;
+            // The breadcrumb trail is relative to the old root.
+            const { root: _previous, folderTrail: _trail, ...rest } = existing;
+            const surface: RightPanelSurface = root === null ? rest : { ...rest, root };
+            return {
+              ...current,
+              surfaces: current.surfaces.map((entry) => (entry.id === surfaceId ? surface : entry)),
+            };
+          }),
+        ),
+      openFilesAt: (ref, root) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, {
+              ...instanceSurface("files"),
+              ...(root === null ? {} : { root }),
+            } as RightPanelSurface),
+          ),
+        ),
       openAttachment: (ref, attachment) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const withoutStandaloneExplorer = current.surfaces.filter(
-              (surface) => surface.kind !== "files" || surface.id !== "files",
+              (surface) => !isStandaloneExplorer(surface),
             );
             return upsertSurface(
               { ...current, surfaces: withoutStandaloneExplorer },

@@ -114,7 +114,9 @@ export function surfaceTitle(
     case "diff":
       return "Diff";
     case "files":
-      return "Files";
+      return surface.root === undefined
+        ? "Files"
+        : surface.root.split(/[\\/]/).findLast(Boolean) || surface.root;
     case "file":
       return surface.relativePath.slice(
         Math.max(surface.relativePath.lastIndexOf("/"), surface.relativePath.lastIndexOf("\\")) + 1,

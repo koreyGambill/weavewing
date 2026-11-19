@@ -161,6 +161,7 @@ function filePreview(relativePath: string, workspaceMutationId: string | null = 
       revealRequestId={0}
       onOpenFile={vi.fn()}
       onNavigateFolder={vi.fn()}
+      onOpenFilesTab={vi.fn()}
       folderTrail={undefined}
       onPendingChange={vi.fn()}
       selectedFilePending={false}

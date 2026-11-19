@@ -139,6 +139,10 @@ export async function reopenClosedView(
       }
       break;
     case "files": {
+      if (surface.root !== undefined) {
+        panels.restoreSurface(ref, surface);
+        break;
+      }
       const rootAlreadyExists = selectThreadRightPanelState(
         panels.byThreadKey,
         rightPanelHostRef(ref),

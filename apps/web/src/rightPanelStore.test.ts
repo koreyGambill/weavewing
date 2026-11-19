@@ -1211,6 +1211,37 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps each Files tab's root through file opens and reloads", async () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "files");
+    store.add(refA, "files");
+    const other = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      refA,
+    ).activeSurfaceId!;
+    store.navigateFolder(refA, "files", "", "src/app");
+    store.setFilesRoot(refA, "files", "/repo/src");
+    store.openFile(refA, "README.md");
+    store.openFilesAt(refA, "/repo/src/lib");
+    await reloadRightPanelStore();
+
+    const { surfaces, activeSurfaceId } = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      refA,
+    );
+    expect(surfaces).toEqual([
+      { id: "files", kind: "files", root: "/repo/src" },
+      { id: other, kind: "files" },
+      expect.objectContaining({ id: "file:README.md" }),
+      { id: activeSurfaceId, kind: "files", root: "/repo/src/lib" },
+    ]);
+
+    useRightPanelStore.getState().setFilesRoot(refA, "files", null);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces[0],
+    ).toEqual({ id: "files", kind: "files" });
+  });
+
   it.each([
     ["generated\\", "generated"],
     ["notes/meeting ", "notes/meeting"],

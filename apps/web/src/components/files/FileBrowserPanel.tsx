@@ -27,6 +27,8 @@ import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { joinHostPath } from "./filePath";
+import { filesTabRoot, newFilesTabRoot } from "./filesRoot";
+import { FilesRootBar } from "./FilesRootBar";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import {
   areAllDirectoriesExpanded,
@@ -55,6 +57,13 @@ interface FileBrowserPanelProps {
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
   answersPanelFind?: boolean;
+  /** Folder actions; with onChangeRoot the panel is a Files tab and shows its root bar. */
+  rootControls?: {
+    workspaceRoot: string;
+    outsideWorkspace: boolean;
+    onChangeRoot?: (root: string | null) => void;
+    onOpenFilesTab: (root: string | null) => void;
+  };
 }
 
 function treePath(entry: ProjectEntry): string {
@@ -157,6 +166,7 @@ export default function FileBrowserPanel({
   workspaceMutationId,
   hostFolder = false,
   answersPanelFind = false,
+  rootControls,
 }: FileBrowserPanelProps) {
   const panelPath = (relativePath: string) =>
     hostFolder ? joinHostPath(cwd, relativePath) : relativePath;
@@ -206,6 +216,10 @@ export default function FileBrowserPanel({
         : { x: anchorRect.left, y: anchorRect.bottom };
       const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
       const fileMenuItems = fileContextMenu.buildItems(fileTarget);
+      const folderPath =
+        rootControls && entryKindsRef.current.get(relativePath) === "directory"
+          ? filesTabRoot(joinHostPath(cwd, relativePath), rootControls.workspaceRoot)
+          : undefined;
       // The app menu owns focus; the tree's outside-click handler would dismiss it before click.
       context.close({ restoreFocus: !pointerIsFresh });
       void settlePromise(async () => {
@@ -214,10 +228,26 @@ export default function FileBrowserPanel({
             ...fileMenuItems,
             { id: "copy-mention", label: "Copy mention" },
             { id: "add-to-chat", label: "Add to chat" },
+            ...(folderPath === undefined
+              ? []
+              : [
+                  { id: "open-files-tab", label: "Open in new Files tab" },
+                  ...(rootControls?.onChangeRoot
+                    ? [{ id: "set-files-root", label: "Use as Files root" }]
+                    : []),
+                ]),
           ],
           position,
         );
         if (clicked === null) return;
+        if (folderPath !== undefined && clicked === "open-files-tab") {
+          rootControls?.onOpenFilesTab(folderPath);
+          return;
+        }
+        if (folderPath !== undefined && clicked === "set-files-root") {
+          rootControls?.onChangeRoot?.(folderPath);
+          return;
+        }
         // Open-with submenu ids are absent from the top-level item list.
         const isFileMenuAction =
           fileMenuItems.some((entry) => entry.id === clicked) || clicked.startsWith("editor:");
@@ -329,6 +359,16 @@ export default function FileBrowserPanel({
   const closeSearch = () => {
     setQuery("");
     search.close();
+  };
+  const openFilesTabHere = () => {
+    if (!rootControls) return;
+    const root = newFilesTabRoot({
+      treeRoot: cwd,
+      selectedPaths: model.getSelectedPaths(),
+      focusedPath: model.getFocusedPath(),
+      entryKinds: entryKindsRef.current,
+    });
+    rootControls.onOpenFilesTab(filesTabRoot(root, rootControls.workspaceRoot));
   };
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusSearch = () => {
@@ -537,6 +577,15 @@ export default function FileBrowserPanel({
         focusSearch();
       }}
     >
+      {rootControls?.onChangeRoot ? (
+        <FilesRootBar
+          treeRoot={cwd}
+          workspaceRoot={rootControls.workspaceRoot}
+          outsideWorkspace={rootControls.outsideWorkspace}
+          onChangeRoot={rootControls.onChangeRoot}
+          onOpenTabHere={openFilesTabHere}
+        />
+      ) : null}
       <div
         className="flex h-7 min-h-7 shrink-0 items-center gap-0.5 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader

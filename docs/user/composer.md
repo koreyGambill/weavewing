@@ -418,8 +418,14 @@ can break the preview, so save a copy if you need to keep it.
 
 ## Files outside the workspace
 
-Follow an agent's file link to read a report or other file outside the workspace.
-These files open read-only. An HTML file outside the workspace cannot load scripts,
+On web and desktop, each Files tab can start at its own folder. The bar under the tab
+goes up one folder, returns to the workspace root, or takes a typed path. Right-click
+a folder and choose **Use as Files root** to start the tab there, or **Open in new
+Files tab** to keep this tab as it is. **New Files tab from here** opens a tab at the
+selected folder. Each tab keeps its folder; a new Files tab starts at the workspace root.
+
+Follow an agent's file link, or move a Files tab above the workspace, to read files
+outside it. These files open read-only. An HTML file outside the workspace cannot load scripts,
 styles, or images from neighboring files.
 
 ## HTML and PDF files in the file viewer
