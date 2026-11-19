@@ -30,9 +30,9 @@ export function serverPairingEndpoints(
   endpoints: ReadonlyArray<ServerDirectEndpoint>,
   desktopLocal: boolean,
 ): ReadonlyArray<AdvertisedEndpoint> {
-  if (!desktopLocal) return [];
+  // A desktop's WSL backend reports its VM's own LAN address, which other devices cannot open.
   return endpoints
-    .filter((endpoint) => endpoint.kind === "tailnet")
+    .filter((endpoint) => !desktopLocal || endpoint.kind === "tailnet")
     .map((endpoint) => {
       const tailnet = endpoint.kind === "tailnet";
       return createAdvertisedEndpoint({

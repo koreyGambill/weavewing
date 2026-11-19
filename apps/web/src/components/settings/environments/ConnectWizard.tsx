@@ -33,7 +33,8 @@ import { AddEnvironmentDialog } from "../AddEnvironmentDialog";
 import { SettingsSearchTarget } from "../settingsLayout";
 import { searchableSetting } from "../settingsSearch";
 import { PairingClientsList } from "../AuthorizedClientsSettings";
-import { togglePairingScopeSelection } from "../ConnectionsSettings.logic";
+import { isQrShareableEndpoint, togglePairingScopeSelection } from "../ConnectionsSettings.logic";
+import { isLoopbackHostname } from "~/environments/primary";
 import { type DeviceLevel, deviceScopes, joinsTrusted, planConnect } from "./connectPlan.logic";
 import {
   LINK_LEVEL_CHOICES,
@@ -308,6 +309,17 @@ function PairDeviceFields({
   const revokePairingLink = useAtomCommand(authEnvironment.revokePairingLink);
   const [revoking, setRevoking] = useState(false);
   const endpoints = usePairingEndpoints(server);
+  // A page served by this server can share its own address unless that is loopback.
+  const servedHere =
+    server.environment.entry.target._tag === "PrimaryConnectionTarget" &&
+    !isLoopbackHostname(window.location.hostname);
+  const noShareableAddress = !servedHere && !endpoints.some(isQrShareableEndpoint);
+  const noAddressNote = noShareableAddress ? (
+    <p className="text-xs text-warning-foreground">
+      {server.input.label} has no address another device can reach, so there is no QR code or link
+      to open. The device types the code instead, at an address it can reach.
+    </p>
+  ) : null;
   const defaultEndpointKey = useUiStateStore((state) => state.defaultAdvertisedEndpointKey);
   const [name, setName] = useState("");
   const [level, setLevel] = useState<DeviceLevel>("full-access");
@@ -339,34 +351,37 @@ function PairDeviceFields({
 
   if (created !== null) {
     return (
-      <div className="-mx-6 border-y border-border/60">
-        <PairingClientsList
-          servedByEnvironment={server.environment.entry.target._tag === "PrimaryConnectionTarget"}
-          endpointUrl={null}
-          endpoints={endpoints}
-          defaultEndpointKey={defaultEndpointKey}
-          pairingLinks={[
-            {
-              id: created.id,
-              scopes,
-              subject: "",
-              ...(created.label ? { label: created.label } : {}),
-              createdAt: created.createdAt,
-              expiresAt: DateTime.formatIso(created.expiresAt),
-            },
-          ]}
-          createdPairingCredentials={new Map([[created.id, created.credential]])}
-          sharedPairingLinkId={qr ? created.id : null}
-          revokingPairingLinkId={revoking ? created.id : null}
-          onRevokePairingLink={(id) => {
-            setRevoking(true);
-            void revokePairingLink({ environmentId, input: { id } }).then((result) => {
-              setRevoking(false);
-              if (result._tag === "Success") setCreated(null);
-            });
-          }}
-          canRevoke
-        />
+      <div className="space-y-3">
+        {noAddressNote}
+        <div className="-mx-6 border-y border-border/60">
+          <PairingClientsList
+            servedByEnvironment={server.environment.entry.target._tag === "PrimaryConnectionTarget"}
+            endpointUrl={null}
+            endpoints={endpoints}
+            defaultEndpointKey={defaultEndpointKey}
+            pairingLinks={[
+              {
+                id: created.id,
+                scopes,
+                subject: "",
+                ...(created.label ? { label: created.label } : {}),
+                createdAt: created.createdAt,
+                expiresAt: DateTime.formatIso(created.expiresAt),
+              },
+            ]}
+            createdPairingCredentials={new Map([[created.id, created.credential]])}
+            sharedPairingLinkId={qr ? created.id : null}
+            revokingPairingLinkId={revoking ? created.id : null}
+            onRevokePairingLink={(id) => {
+              setRevoking(true);
+              void revokePairingLink({ environmentId, input: { id } }).then((result) => {
+                setRevoking(false);
+                if (result._tag === "Success") setCreated(null);
+              });
+            }}
+            canRevoke
+          />
+        </div>
       </div>
     );
   }
@@ -441,6 +456,7 @@ function PairDeviceFields({
           </p>
         ) : null}
       </div>
+      {qr ? noAddressNote : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       {denial !== undefined ? (
         <ManagedControl reason={denial}>
