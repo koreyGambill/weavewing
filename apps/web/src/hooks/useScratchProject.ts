@@ -160,14 +160,11 @@ export function createScratchProjectActions(
    * Opens a new thread in the default place and says so whenever it had to fall back, so no
    * entry point lands somewhere else silently. Resolves false when nothing usable is left.
    */
-  const startDefaultPlace = async (
-    fallback: EnvironmentId | null,
-    options?: { readonly replace?: boolean },
-  ): Promise<boolean> => {
+  const defaultPlace = (fallback: EnvironmentId | null) => {
     const projects = readProjects();
     const isConnected = (environmentId: EnvironmentId) =>
       lookup.environmentFor(environmentId)?.connection.phase === "connected";
-    const place = resolveDefaultPlace({
+    return resolveDefaultPlace({
       defaultProject: getClientSettings().defaultProject,
       projects,
       isConnected,
@@ -184,6 +181,13 @@ export function createScratchProjectActions(
       environmentLabel: (environmentId) =>
         lookup.environmentFor(environmentId)?.label ?? "Your default machine",
     });
+  };
+
+  const startDefaultPlace = async (
+    fallback: EnvironmentId | null,
+    options?: { readonly replace?: boolean },
+  ): Promise<boolean> => {
+    const place = defaultPlace(fallback);
     if (place.kind === "none") {
       openCommandPalette({ open: "new-thread-in" });
       return false;
@@ -211,6 +215,7 @@ export function createScratchProjectActions(
     ...lookup,
     openScratchProject,
     startScratchThread,
+    defaultPlace,
     startDefaultPlace,
   };
 }
