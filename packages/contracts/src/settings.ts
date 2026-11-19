@@ -1240,6 +1240,13 @@ export const WorktreeCleanup = Schema.NullOr(
 );
 export type WorktreeCleanup = typeof WorktreeCleanup.Type;
 
+/**
+ * Who may create isolated checkouts on this machine. `t3` creates T3 worktrees; `xwing` routes new
+ * isolated threads to Xwing environments; `off` refuses isolation. The server enforces it.
+ */
+export const WorktreeProvider = Schema.Literals(["t3", "xwing", "off"]);
+export type WorktreeProvider = typeof WorktreeProvider.Type;
+
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "worktreeCleanup",
   "defaultModelSelection",
@@ -1471,6 +1478,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
   ),
 
+  worktreeProvider: WorktreeProvider.pipe(Schema.withDecodingDefault(Effect.succeed("t3"))),
   worktreesDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /** macOS only, Labs beta: clone new worktrees from a cached checkout instead of writing every file. */
   fastWorktreeCheckout: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1957,6 +1965,7 @@ export const ServerSettingsPatch = Schema.Struct({
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
+  worktreeProvider: Schema.optionalKey(WorktreeProvider),
   worktreesDirectory: Schema.optionalKey(TrimmedString),
   fastWorktreeCheckout: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),

@@ -65,6 +65,17 @@ it("drops theme defaults from a client's settings patch", () => {
   ).toEqual({ newWorktreesStartFromOrigin: false });
 });
 
+describe("worktree provider setting", () => {
+  it("keeps T3 worktrees for existing installations and rejects unknown providers", () => {
+    expect(decodeServerSettings({}).worktreeProvider).toBe("t3");
+    expect(decodeServerSettings({ worktreeProvider: "xwing" }).worktreeProvider).toBe("xwing");
+    expect(decodeServerSettingsPatch({ worktreeProvider: "off" })).toEqual({
+      worktreeProvider: "off",
+    });
+    expect(() => decodeServerSettingsPatch({ worktreeProvider: "docker" })).toThrow();
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();

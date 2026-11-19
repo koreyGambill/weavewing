@@ -1,4 +1,6 @@
 import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
+import { sanitizeBranchFragment, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { appendUserInputAttachmentPaths } from "../provider/userInputAttachments.ts";
 import type { ChatAttachment, OrchestrationV2Command } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -8,7 +10,10 @@ import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
+import { readWorktreeProvider } from "../git/worktreeProvider.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as AttachmentClaims from "./AttachmentClaims.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
@@ -242,10 +247,65 @@ export type ThreadLaunchRequest = Omit<
     | { readonly type: "xwing_environment"; readonly xwingEnvironmentId: string };
 };
 
+/**
+ * Under `worktreeProvider: "xwing"` an isolated launch gets an Xwing environment of its own. A
+ * retried launch reuses the environment its thread was bound to instead of creating another.
+ */
+const xwingEnvironmentForWorktreeLaunch = Effect.fn(
+  "ThreadMessageIntake.xwingEnvironmentForWorktreeLaunch",
+)(function* (
+  request: ThreadLaunchRequest,
+  strategy: Extract<ThreadLaunch.ThreadLaunchWorkspaceStrategy, { readonly type: "worktree" }>,
+) {
+  if (request.threadId !== undefined) {
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const existing = yield* threads.getThreadShell(request.threadId).pipe(
+      Effect.mapError(
+        () =>
+          new DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycleError({
+            operation: "create",
+            reason: "state-unreadable",
+          }),
+      ),
+    );
+    if (existing?.developmentEnvironment != null) {
+      return existing.developmentEnvironment.xwingEnvironmentId;
+    }
+  }
+  const lifecycle = yield* DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle;
+  const suffix = (yield* randomUuidV4).replaceAll("-", "").slice(0, 6);
+  const name = request.title.replace(/\s+/g, " ").trim().slice(0, 200);
+  const created = yield* lifecycle.create({
+    projectId: request.projectId,
+    name: name === "" ? "T3 thread" : name,
+    branch:
+      strategy.branch ??
+      `${WORKTREE_BRANCH_PREFIX}/${sanitizeBranchFragment(request.title).slice(0, 48)}-${suffix}`,
+    base: strategy.baseRef,
+  });
+  if (created.failure !== null) {
+    return yield* new DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycleError({
+      operation: "attach",
+      reason: created.failure.reason,
+      xwingEnvironmentId: created.xwingEnvironmentId,
+    });
+  }
+  return created.xwingEnvironmentId;
+});
+
 export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(function* (
   request: ThreadLaunchRequest,
 ) {
-  const strategy = request.workspaceStrategy;
+  const requested = request.workspaceStrategy;
+  const strategy =
+    requested.type === "worktree" &&
+    (yield* ServerSettings.ServerSettingsService.pipe(Effect.flatMap(readWorktreeProvider))) ===
+      "xwing"
+      ? {
+          type: "xwing_environment" as const,
+          xwingEnvironmentId: yield* xwingEnvironmentForWorktreeLaunch(request, requested),
+        }
+      : requested;
   const input: ThreadLaunch.ThreadLaunchInput =
     strategy.type === "xwing_environment"
       ? {
@@ -315,7 +375,10 @@ const launchResolved = Effect.fnUntraced(function* (input: ThreadLaunch.ThreadLa
         ),
       ),
       Effect.tapError((error) => {
-        if (error._tag === "ThreadManagementProviderInstanceDisabledError") {
+        if (
+          error._tag === "ThreadManagementProviderInstanceDisabledError" ||
+          error._tag === "ThreadLaunchWorktreeProviderError"
+        ) {
           return AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths);
         }
         // Project/receipt reads precede dispatch; create-thread errors can wrap post-message reads and prove nothing alone.

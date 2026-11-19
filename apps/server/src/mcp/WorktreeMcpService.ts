@@ -27,6 +27,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import type { McpInvocationScope, McpThreadInvocationScope } from "./McpInvocationContext.ts";
 
@@ -398,6 +399,10 @@ const make = Effect.gen(function* () {
     function* (callerScope, input) {
       yield* requireCapability(callerScope);
       const scope = yield* requireThreadScope(callerScope);
+      const worktreeProvider = yield* readWorktreeProvider(serverSettings);
+      if (worktreeProvider !== "t3") {
+        return yield* failure("invalid_request", worktreeProviderRefusal(worktreeProvider));
+      }
       // Acquire and register cleanup atomically so cancellation cannot strand the guard until restart.
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.suspend(() => {

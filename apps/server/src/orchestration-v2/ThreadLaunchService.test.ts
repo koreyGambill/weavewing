@@ -11,6 +11,7 @@ import * as ServerConfig from "../config.ts";
 import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as DevelopmentEnvironmentHolds from "../developmentEnvironments/DevelopmentEnvironmentHolds.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
@@ -145,6 +146,7 @@ interface HarnessOptions {
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly git?: Partial<GitWorkflow.GitWorkflowService["Service"]>;
   readonly isGitRepository?: CheckpointStore.CheckpointStore["Service"]["isGitRepository"];
+  readonly createXwingEnvironment?: DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["create"];
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -312,6 +314,11 @@ function makeHarness(options: HarnessOptions = {}) {
       layerOutbox,
       layerDatabase,
       layerExternalServices,
+      Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)(
+        options.createXwingEnvironment === undefined
+          ? {}
+          : { create: options.createXwingEnvironment },
+      ),
     ),
     createWorktree,
     removeWorktree,
@@ -980,7 +987,13 @@ it.effect("a rejected initial message leaves no title change and no new thread",
 // Stands `projectId` in for a plain folder, not a Git repository, so Git fails
 // there with the error a real one raises. It is the Scratch project unless
 // `scratch` is false.
-function scratchHarness({ scratch = true }: { readonly scratch?: boolean } = {}) {
+function scratchHarness({
+  scratch = true,
+  ...options
+}: { readonly scratch?: boolean } & Pick<
+  HarnessOptions,
+  "serverSettings" | "createXwingEnvironment"
+> = {}) {
   const claimed: Array<ThreadId> = [];
   const scratchRoot = project.workspaceRoot;
   const notARepository = (operation: string, cwd: string) =>
@@ -991,6 +1004,7 @@ function scratchHarness({ scratch = true }: { readonly scratch?: boolean } = {})
       detail: "Failed to resolve the VCS driver for this Git command.",
     });
   const harness = makeHarness({
+    ...options,
     managedFolders: Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
       namedProjectsRoot: "/projects",
       isScratchProject: (id) => Effect.succeed(scratch && id === projectId),
@@ -1243,6 +1257,33 @@ it.effect("launches a worktree request for Scratch at the root, in its own folde
   }).pipe(Effect.provide(harness.layer));
 });
 
+it.effect.each(["xwing", "off"] as const)(
+  "refuses a T3 worktree launch when worktreeProvider is %s",
+  (worktreeProvider) => {
+    const harness = makeHarness({ serverSettings: { worktreeProvider } });
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const refused = yield* launches
+        .launch(
+          launchInput({
+            command: `command:launch:refused-${worktreeProvider}`,
+            thread: `thread:launch:refused-${worktreeProvider}`,
+            message: "Build the feature",
+            workspace: worktreeStrategy,
+          }),
+        )
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "ThreadLaunchWorktreeProviderError");
+      assert.include(refused.message, `\`worktreeProvider\` server setting (${worktreeProvider})`);
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      assert.isNull(
+        yield* threads.getThreadShell(ThreadId.make(`thread:launch:refused-${worktreeProvider}`)),
+      );
+      assert.equal(harness.createWorktree.mock.calls.length, 0);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
 it.effect("launches into a resolved Xwing checkout without creating or setting it up", () => {
   const harness = scratchHarness();
   return Effect.gen(function* () {
@@ -1292,10 +1333,22 @@ it.effect("launches into a resolved Xwing checkout without creating or setting i
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect(
-  "launches a request naming an Xwing environment in the checkout this host resolves",
-  () => {
-    const harness = scratchHarness();
+it.effect.each(["named", "worktreeProvider"] as const)(
+  "launches a request for an Xwing environment in the checkout this host resolves (%s)",
+  (request) => {
+    const created: Array<
+      Parameters<
+        DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["create"]
+      >[0]
+    > = [];
+    const harness = scratchHarness({
+      serverSettings: { worktreeProvider: "xwing" },
+      createXwingEnvironment: (input) =>
+        Effect.sync(() => {
+          created.push(input);
+          return { xwingEnvironmentId: "0123abcd", repository: null, failure: null } as never;
+        }),
+    });
     const resolved: Array<{ readonly xwingEnvironmentId: string; readonly workspaceRoot: string }> =
       [];
     const holds: Array<{ readonly id: string; readonly key: string }> = [];
@@ -1346,14 +1399,40 @@ it.effect(
           thread: "thread:launch:xwing-request",
           message: "Work in my environment",
         }),
+        title: "Fix the checkout total",
         projectId: otherProjectId,
-        workspaceStrategy: { type: "xwing_environment", xwingEnvironmentId: "0123abcd" },
+        workspaceStrategy:
+          request === "named"
+            ? { type: "xwing_environment", xwingEnvironmentId: "0123abcd" }
+            : { type: "worktree", baseRef: "main", startFromOrigin: true },
       });
-      assert.deepEqual(resolved, [
+      if (request === "worktreeProvider") {
+        assert.equal(created.length, 1);
+        assert.equal(created[0]?.projectId, otherProjectId);
+        assert.equal(created[0]?.name, "Fix the checkout total");
+        assert.equal(created[0]?.base, "main");
+        assert.match(created[0]?.branch ?? "", /^t3\/fix-the-checkout-total-[0-9a-f]{6}$/);
+        // A retried launch finds its thread bound and makes no second environment.
+        yield* ThreadMessageIntake.launchThread({
+          ...launchInput({
+            command: "command:launch:xwing-request",
+            thread: "thread:launch:xwing-request",
+            message: "Work in my environment",
+          }),
+          title: "Fix the checkout total",
+          projectId: otherProjectId,
+          workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
+        });
+        assert.equal(created.length, 1);
+      } else {
+        assert.equal(created.length, 0);
+      }
+      assert.deepEqual(resolved.slice(0, 1), [
         { xwingEnvironmentId: "0123abcd", workspaceRoot: otherProject.workspaceRoot },
       ]);
+      // A retry registers the same hold key again; Xwing keys holds idempotently.
       assert.deepEqual(
-        holds.map((hold) => [hold.id, hold.key]),
+        [...new Set(holds.map((hold) => `${hold.id} ${hold.key}`))].map((hold) => hold.split(" ")),
         [
           [
             "0123abcd",

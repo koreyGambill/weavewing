@@ -1,3 +1,4 @@
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -333,6 +334,7 @@ const layerRecordingTools = (calls: Array<unknown>) => {
         McpToolAccessTestkit.liveThreadsLayer,
         Layer.mock(OrchestratorMcpService.OrchestratorMcpService)({}),
         Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+        Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(PreviewManager.PreviewManager)({}),
         Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),

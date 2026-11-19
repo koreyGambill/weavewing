@@ -36,6 +36,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -195,6 +196,7 @@ const layerTools = Layer.mergeAll(
     Layer.mergeAll(
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/p" }),
       Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+      Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
     ),
   ),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),

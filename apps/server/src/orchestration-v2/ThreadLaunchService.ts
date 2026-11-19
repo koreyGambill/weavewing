@@ -52,6 +52,7 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EventSink from "./EventSink.ts";
@@ -212,6 +213,19 @@ export class ThreadLaunchNotRepositoryError extends Schema.TaggedError<ThreadLau
   }
 }
 
+/** The `worktreeProvider` server setting forbids the T3 worktree this launch asked for. */
+export class ThreadLaunchWorktreeProviderError extends Schema.TaggedError<ThreadLaunchWorktreeProviderError>()(
+  "ThreadLaunchWorktreeProviderError",
+  {
+    projectId: ProjectId,
+    worktreeProvider: Schema.Literals(["xwing", "off"]),
+  },
+) {
+  override get message(): string {
+    return worktreeProviderRefusal(this.worktreeProvider);
+  }
+}
+
 export class ThreadLaunchService extends Context.Service<
   ThreadLaunchService,
   {
@@ -219,7 +233,9 @@ export class ThreadLaunchService extends Context.Service<
       input: ThreadLaunchInput,
     ) => Effect.Effect<
       ThreadLaunchResult,
-      ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | ThreadLaunchError
+      | ThreadLaunchWorktreeProviderError
+      | ThreadManagement.ThreadManagementProviderInstanceDisabledError
     >;
     /** Check a new worktree's base ref and branch name before creation for early errors; launch otherwise accepts and reports these failures inside the thread. */
     readonly checkWorktreeBase: (
@@ -1202,6 +1218,15 @@ const make = Effect.gen(function* () {
         (yield* managedFolders.isScratchProject(request.projectId))
           ? { ...request, workspaceStrategy: { type: "root" } }
           : request;
+      if (input.workspaceStrategy.type === "worktree") {
+        const worktreeProvider = yield* readWorktreeProvider(serverSettings);
+        if (worktreeProvider !== "t3") {
+          return yield* new ThreadLaunchWorktreeProviderError({
+            projectId: input.projectId,
+            worktreeProvider,
+          });
+        }
+      }
       yield* ProjectCloneTracker.rejectCommandsDuringClone(cloneTracker, {
         type: "thread.create",
         projectId: input.projectId,

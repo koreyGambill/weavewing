@@ -313,10 +313,19 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 message: error.message,
               });
             }
-            if (error._tag === "ThreadManagementProviderInstanceDisabledError") {
+            if (
+              error._tag === "ThreadManagementProviderInstanceDisabledError" ||
+              error._tag === "ThreadLaunchWorktreeProviderError"
+            ) {
               return new OrchestratorMcpFailure({
                 code: "invalid_request",
                 message: error.message,
+              });
+            }
+            if (error._tag === "DevelopmentEnvironmentLifecycleError") {
+              return new OrchestratorMcpFailure({
+                code: "invalid_request",
+                message: `The \`worktreeProvider\` server setting routes worktree launches to Xwing, and creating the Xwing environment failed: ${error.message} No thread was created. Pick an existing environment from \`t3_xwing_environment_list\` and pass \`workspaceStrategy: {type: 'xwing_environment', xwingEnvironmentId}\`.`,
               });
             }
             // The administrator's ceiling refuses the mode; say so rather than "unavailable".

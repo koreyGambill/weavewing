@@ -86,6 +86,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { detachStackFrame } from "./detachStackFrame.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { requireT3Worktrees } from "./worktreeProvider.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isNonRepositoryGitStderr } from "../vcs/GitVcsDriverCore.ts";
@@ -871,6 +872,7 @@ export const make = Effect.gen(function* () {
   const createWorktree: GitManager["Service"]["createWorktree"] = Effect.fn(
     "GitManager.createWorktree",
   )(function* (input, options) {
+    yield* requireT3Worktrees(serverSettingsService, "GitManager.createWorktree", input.cwd);
     const submodules =
       options?.submodules !== undefined
         ? options.submodules
@@ -3087,6 +3089,13 @@ export const make = Effect.gen(function* () {
           ),
         );
     };
+    if (input.mode === "worktree") {
+      yield* requireT3Worktrees(
+        serverSettingsService,
+        "GitManager.preparePullRequestThread",
+        input.cwd,
+      );
+    }
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
       const rootWorktreePath = yield* canonicalizeExistingPath(input.cwd);

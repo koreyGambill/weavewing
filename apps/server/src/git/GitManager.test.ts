@@ -5644,6 +5644,52 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       }),
   );
 
+  it.effect.each(["xwing", "off"] as const)(
+    "refuses T3 worktrees when worktreeProvider is %s",
+    (worktreeProvider) =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(repoDir, ["push", "origin", "main:feature/refused"]);
+        const { manager } = yield* makeManager({
+          serverSettings: { worktreeProvider },
+          providerScenario: {
+            pullRequest: {
+              number: 80,
+              title: "Refused PR",
+              url: "https://github.com/owner/base/pull/80",
+              baseRefName: "main",
+              headRefName: "feature/refused",
+              state: "open",
+              isCrossRepository: false,
+            },
+          },
+        });
+
+        const created = yield* Effect.flip(
+          manager.createWorktree({
+            cwd: repoDir,
+            refName: "main",
+            newRefName: "feature/new",
+            path: null,
+          }),
+        );
+        expect(created._tag).toBe("GitCommandError");
+        expect(created.message).toContain(
+          `\`worktreeProvider\` server setting (${worktreeProvider})`,
+        );
+        const prepared = yield* Effect.flip(
+          preparePullRequestThread(manager, { cwd: repoDir, reference: "80", mode: "worktree" }),
+        );
+        expect(prepared.message).toContain("`worktreeProvider` server setting");
+        const worktrees = (yield* runGit(repoDir, ["worktree", "list", "--porcelain"])).stdout;
+        expect(worktrees.match(/^worktree /gm)).toHaveLength(1);
+      }),
+  );
+
   it.effect("prepares a worktree from the head branch when the host has no pull ref", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

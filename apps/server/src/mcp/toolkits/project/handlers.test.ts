@@ -37,6 +37,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
+import * as DevelopmentEnvironmentLifecycle from "../../../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../../../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as SourceControlProviderRegistry from "../../../sourceControl/SourceControlProviderRegistry.ts";
@@ -176,6 +177,7 @@ const clientLaunchHarness = (input: {
       isScratchProject: () => Effect.succeed(false),
     }),
     Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+    Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
   ).pipe(
     Layer.provideMerge(GitVcsDriver.layer),

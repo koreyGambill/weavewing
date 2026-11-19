@@ -1455,6 +1455,7 @@ export const layerWsRpc = (
         | ThreadManagementService.ThreadManagementService
         | ThreadLaunchService.ThreadLaunchService
         | DevelopmentEnvironments.DevelopmentEnvironments
+        | DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle
         | FileSystem.FileSystem
         | ServerConfig.ServerConfig
         | ServerSettings.ServerSettingsService
@@ -2322,6 +2323,20 @@ export const layerWsRpc = (
                         commandId: input.commandId,
                         projectId: input.projectId,
                         message: cause.message,
+                        cause,
+                      }),
+                    ThreadLaunchWorktreeProviderError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: cause.message,
+                        cause,
+                      }),
+                    DevelopmentEnvironmentLifecycleError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: `Could not create an Xwing environment for this thread: ${cause.message}`,
                         cause,
                       }),
                     ThreadLaunchBaseRefError: (cause) =>

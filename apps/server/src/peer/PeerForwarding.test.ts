@@ -43,6 +43,7 @@ import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
 import * as DevelopmentEnvironments from "../developmentEnvironments/DevelopmentEnvironments.ts";
 import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -279,6 +280,7 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
             namedProjectsRoot: "/projects",
           }),
           Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+          Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
         ),
       ),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
@@ -360,6 +362,7 @@ const makeLaptop = Effect.fn(function* (
           namedProjectsRoot: "/projects",
         }),
         Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+        Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)({}),
       ),
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),

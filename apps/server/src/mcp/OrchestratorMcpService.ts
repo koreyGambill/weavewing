@@ -134,6 +134,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as AutomationLimits from "../scheduledTasks/AutomationLimits.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
 import {
   clientModeCeiling,
   type McpInvocationScope,
@@ -3272,6 +3273,13 @@ const make = Effect.gen(function* () {
       }
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
+        const worktreeProvider = yield* readWorktreeProvider(serverSettings);
+        if (worktreeProvider !== "t3") {
+          return yield* failure(
+            "invalid_request",
+            `Isolation "worktree" is unavailable: ${worktreeProviderRefusal(worktreeProvider)} For a delegated task, use isolation "shared".`,
+          );
+        }
         const project = yield* requireProject(parent.thread.projectId);
         const base = yield* gitDriver
           .resolveCommit({

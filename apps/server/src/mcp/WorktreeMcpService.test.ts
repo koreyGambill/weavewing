@@ -116,6 +116,7 @@ interface HarnessOptions {
   readonly deleteLocalBranchFails?: boolean;
   readonly createWorktreeGate?: Effect.Effect<void>;
   readonly existsFails?: boolean;
+  readonly worktreeProvider?: "t3" | "xwing" | "off";
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
@@ -286,6 +287,9 @@ const makeHarness = (options: HarnessOptions = {}) => {
           getById,
         } satisfies Partial<ProjectService.ProjectService["Service"]>),
         ServerSettings.layerTest({
+          ...(options.worktreeProvider === undefined
+            ? {}
+            : { worktreeProvider: options.worktreeProvider }),
           newWorktreesStartFromOrigin: options.newWorktreesStartFromOrigin ?? false,
           ...(options.projectNewWorktreesStartFromOrigin === undefined
             ? {}
@@ -466,6 +470,25 @@ describe("t3_worktree_handoff", () => {
       expect(harness.createWorktree).not.toHaveBeenCalled();
     });
   });
+
+  it.effect.each(["xwing", "off"] as const)(
+    "refuses a handoff when worktreeProvider is %s",
+    (worktreeProvider) => {
+      const harness = makeHarness({ worktreeProvider });
+      return Effect.gen(function* () {
+        const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/refused" }));
+        expectTypedFailure(exit, {
+          _tag: "WorktreeMcpFailure",
+          code: "invalid_request",
+          message: expect.stringContaining(
+            `\`worktreeProvider\` server setting (${worktreeProvider})`,
+          ),
+        });
+        expect(harness.createWorktree).not.toHaveBeenCalled();
+        expect(harness.fetchWorktreeBaseCommit).not.toHaveBeenCalled();
+      });
+    },
+  );
 
   it.effect("rejects an existing branch with an actionable error naming its checkout", () => {
     const harness = makeHarness({ existingBranchWorktreePath: "/elsewhere/checkout" });

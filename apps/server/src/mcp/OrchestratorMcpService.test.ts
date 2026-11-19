@@ -2715,6 +2715,52 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  it.effect.each(["xwing", "off"] as const)(
+    "refuses worktree isolation when worktreeProvider is %s",
+    (worktreeProvider) =>
+      Effect.gen(function* () {
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(false),
+            getThreadRecords: () => Effect.succeed(parentProjection([])),
+          }),
+          ServerSettings.layerTest({ worktreeProvider }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const refused = yield* service
+            .delegateTask(scope, {
+              task: "Build it in isolation.",
+              isolation: "worktree",
+              mode: "async",
+              clientRequestId: `delegate-isolated-${worktreeProvider}`,
+            })
+            .pipe(Effect.flip);
+          assert.equal(refused.code, "invalid_request");
+          assert.include(
+            refused.message,
+            `\`worktreeProvider\` server setting (${worktreeProvider})`,
+          );
+          assert.include(refused.message, 'use isolation "shared"');
+        }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+      }),
+  );
+
   it.effect("reports the dispatch cause instead of the generic wrapper when delegating fails", () =>
     Effect.gen(function* () {
       const layerDependencies = Layer.mergeAll(
