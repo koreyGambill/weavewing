@@ -199,18 +199,29 @@ export function claudeRateLimitEventToUpdate(
   return windows.length > 0 ? { windows } : undefined;
 }
 
+type ClaudeUsageResponse = Pick<
+  SDKControlGetUsageResponse,
+  "rate_limits_available" | "rate_limits"
+>;
+
+/** An SDK reply that advertises limits without values is a failed sample. */
+export function isIncompleteClaudeUsageResponse(response: ClaudeUsageResponse): boolean {
+  return response.rate_limits_available && !response.rate_limits;
+}
+
 /** get_usage percentages are already 0-100. */
 export function claudeUsageResponseToLimits(input: {
-  readonly response: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
+  readonly response: ClaudeUsageResponse;
   readonly checkedAt: string;
 }): { readonly limits: ServerProviderUsageLimits; readonly names: ClaudeScopedLimitNames } {
   const { response, checkedAt } = input;
   if (!response.rate_limits_available || !response.rate_limits) {
+    const incomplete = isIncompleteClaudeUsageResponse(response);
     return {
       limits: makeUnavailableUsageLimits({
         checkedAt,
-        reason: response.rate_limits_available ? "probeFailed" : "unsupported",
-        ...(response.rate_limits_available
+        reason: incomplete ? "probeFailed" : "unsupported",
+        ...(incomplete
           ? { message: "Claude Code reported plan limits but returned no values." }
           : {}),
       }),

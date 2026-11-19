@@ -27,7 +27,10 @@ import {
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { claudeUsageReader } from "./claudeUsage.ts";
-import { makeClaudeScopedLimitNames } from "../claudeUsageLimits.ts";
+import {
+  isIncompleteClaudeUsageResponse,
+  makeClaudeScopedLimitNames,
+} from "../claudeUsageLimits.ts";
 import * as ClaudeResetCredits from "../claudeResetCredits.ts";
 import * as ResetCreditCoordinator from "../resetCreditCoordinator.ts";
 import {
@@ -260,13 +263,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         ),
       {
         capacity: 1,
-        timeToLive: (exit) =>
-          // Only fresh usage earns the TTL; failures, fallbacks and usage-less probes retry.
-          Exit.isSuccess(exit) &&
-          exit.value._tag === "fresh" &&
-          exit.value.capabilities.usage !== undefined
+        timeToLive: (exit) => {
+          if (!Exit.isSuccess(exit) || exit.value._tag !== "fresh") return Duration.zero;
+          const { usage } = exit.value.capabilities;
+          return usage !== undefined && !isIncompleteClaudeUsageResponse(usage)
             ? CAPABILITIES_PROBE_TTL
-            : Duration.zero,
+            : Duration.zero;
+        },
       },
     );
     const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(

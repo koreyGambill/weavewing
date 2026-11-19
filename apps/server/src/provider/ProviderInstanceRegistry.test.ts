@@ -586,6 +586,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       let probeCount = 0;
       let successfulProbeCount = 0;
       let failProbe = false;
+      let emptyUsage = false;
       const query = vi.spyOn(ClaudeSdk, "query").mockImplementation(
         () =>
           ({
@@ -611,9 +612,9 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
             },
             usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
               rate_limits_available: true,
-              rate_limits: {
-                five_hour: { utilization: 12, resets_at: "2026-07-18T14:39:00Z" },
-              },
+              rate_limits: emptyUsage
+                ? null
+                : { five_hour: { utilization: 12, resets_at: "2026-07-18T14:39:00Z" } },
             }),
           }) as ReturnType<typeof ClaudeSdk.query>,
       );
@@ -668,6 +669,11 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       expect(failedProbeCount).toBeGreaterThan(1);
 
       failProbe = false;
+      emptyUsage = true;
+      const emptyUsageSnapshot = yield* claude!.snapshot.refresh;
+      expect(emptyUsageSnapshot.usageLimits?.unavailable?.reason).toBe("probeFailed");
+
+      emptyUsage = false;
       const recovered = yield* claude!.snapshot.refresh;
       expect(recovered).toMatchObject({
         status: "ready",
@@ -675,6 +681,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
         slashCommands: expect.arrayContaining([expect.objectContaining({ name: "recovered" })]),
       });
       expect(recovered.usageLimits?.unavailable).toBeUndefined();
+      expect(recovered.usageLimits?.windows[0]?.usedPercent).toBe(12);
       const recoveredProbeCount = probeCount;
       expect(recoveredProbeCount).toBeGreaterThan(failedProbeCount);
 
