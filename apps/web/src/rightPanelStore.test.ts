@@ -346,14 +346,20 @@ describe("rightPanelStore", () => {
   it("opens a hosted side chat's panel actions in its parent's panel until unhosted", () => {
     const store = useRightPanelStore.getState();
     const unhost = hostRightPanel(refB, refA);
-    store.openFile(refB, "src/app.ts");
+    const nested = scopeThreadRef(refB.environmentId, ThreadId.make("nested"));
+    const unhostNested = hostRightPanel(nested, refB);
+    try {
+      store.openFile(nested, "src/app.ts");
+    } finally {
+      unhostNested();
+      unhost();
+    }
     expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)?.id).toBe(
       "file:src/app.ts",
     );
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
     ).toEqual([]);
-    unhost();
     store.openFile(refB, "src/app.ts");
     expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB)?.id).toBe(
       "file:src/app.ts",

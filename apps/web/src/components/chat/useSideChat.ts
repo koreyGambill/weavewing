@@ -1,4 +1,10 @@
-import type { ModelSelection, RuntimeMode, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  RuntimeMode,
+  ScopedThreadRef,
+  SideChatAnchor,
+  ThreadId,
+} from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
@@ -18,17 +24,18 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 
 /**
- * Starts side chats from `threadRef`, or offers none when it is null. `open` forks the
- * thread's latest stable point, sends `prompt` there with `readSettings()`, the parent
- * composer's settings, and shows the tab. It resolves false when the side chat did not
- * start, or another one is still starting.
+ * Starts a side chat from a selected reply or the latest stable point. It applies the
+ * parent composer's settings and sends the optional first prompt before opening the chat.
+ * `open` resolves false when a side chat could not start or another is still starting.
  */
 export function useSideChat(input: {
   readonly threadRef: ScopedThreadRef | null;
+  readonly anchoredThreadRef: ScopedThreadRef | null;
   readonly readSettings: () => {
     readonly runtimeMode: RuntimeMode;
     readonly modelSelection: ModelSelection | undefined;
   };
+  readonly onOpenAnchored: (threadId: ThreadId) => void;
   readonly onError: (message: string) => void;
 }) {
   const pendingRef = useRef(false);
@@ -48,12 +55,21 @@ export function useSideChat(input: {
     const error = squashAtomCommandFailure(failure);
     input.onError(error instanceof Error ? error.message : fallback);
   };
-  const start = async (threadRef: ScopedThreadRef, prompt: string | undefined) => {
+  const start = async (
+    threadRef: ScopedThreadRef,
+    prompt: string | undefined,
+    anchor: SideChatAnchor | undefined,
+  ) => {
     const { runtimeMode, modelSelection } = input.readSettings();
     const targetThreadId = newThreadId();
     const fork = await forkSideChat({
       environmentId: threadRef.environmentId,
-      input: { sourceThreadId: threadRef.threadId, targetThreadId, title: "Side chat" },
+      input: {
+        sourceThreadId: threadRef.threadId,
+        targetThreadId,
+        title: "Side chat",
+        ...(anchor === undefined ? {} : { anchor }),
+      },
     });
     if (fork._tag === "Failure") {
       reportFailure(fork, "Could not start a side chat.");
@@ -117,14 +133,18 @@ export function useSideChat(input: {
     } else if (modelSelection !== undefined) {
       useComposerDraftStore.getState().setModelSelection(targetRef, modelSelection);
     }
-    useRightPanelStore.getState().openSideChat(threadRef, targetThreadId);
+    if (anchor === undefined) {
+      useRightPanelStore.getState().openSideChat(threadRef, targetThreadId);
+    } else {
+      input.onOpenAnchored(targetThreadId);
+    }
     return true;
   };
-  const open = async (prompt?: string) => {
-    const { threadRef } = input;
+  const open = async (prompt?: string, anchor?: SideChatAnchor) => {
+    const threadRef = anchor === undefined ? input.threadRef : input.anchoredThreadRef;
     if (!threadRef || pendingRef.current) return false;
     pendingRef.current = true;
-    return start(threadRef, prompt).finally(() => {
+    return start(threadRef, prompt, anchor).finally(() => {
       pendingRef.current = false;
     });
   };

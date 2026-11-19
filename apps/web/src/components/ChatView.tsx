@@ -79,6 +79,7 @@ import {
   type PreviewAnnotationPayload,
   type ServerProvider,
   type ScopedThreadRef,
+  type SideChatAnchor,
   type ThreadId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -281,6 +282,7 @@ import {
   useEnvironmentSupportsServerBrowser,
   useProject,
   useQuietThreadProjection,
+  useSideChatShells,
   useThreadUpdatedAt,
   useThreadLastVisitedAt,
   useQuietThreadVisibleTurnItems,
@@ -312,6 +314,9 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { InlineSideChat } from "./chat/InlineSideChat";
+import { useSideChatSource } from "./chat/useSideChatSource";
+import { useThreadFollowUpList } from "./reviews/FollowUps";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -596,6 +601,32 @@ export default function ChatView(props: ChatViewProps) {
   const citationLocation = { href: citationHref, key: citationKey };
   const locationCitation = assistantCitationFromLocation(citationLocation.href);
   const citationActivation = citationLocation.key ?? citationLocation.href;
+  const inlineReveal = useLocation({ select: (location) => location.state.openInlineSideChat });
+  const revealKey =
+    inlineReveal !== undefined &&
+    locationCitation?.threadId === threadId &&
+    locationCitation.environmentId === environmentId
+      ? citationActivation
+      : null;
+  const [inlineOpen, setInlineOpen] = useState({
+    revealKey: null as string | null,
+    children: new Set<ThreadId>(),
+  });
+  const inlineOpenChildren =
+    inlineReveal !== undefined && revealKey !== null && inlineOpen.revealKey !== revealKey
+      ? new Set(inlineOpen.children).add(inlineReveal)
+      : inlineOpen.children;
+  if (inlineOpen.revealKey !== revealKey) {
+    setInlineOpen({ revealKey, children: inlineOpenChildren });
+  }
+  const setInlineChildOpen = (id: ThreadId, open: boolean) => {
+    setInlineOpen((current) => {
+      const children = new Set(current.children);
+      if (open) children.add(id);
+      else children.delete(id);
+      return { ...current, children };
+    });
+  };
   const locationReveal = messageRevealFromLocation(citationLocation.href);
   const citationRequest = (
     locationCitation &&
@@ -912,6 +943,11 @@ export default function ChatView(props: ChatViewProps) {
       ? scopeThreadRef(activeThread.environmentId, activeThread.lineage.parentThreadId)
       : null;
   const sideChatParent = useQuietThreadShell(sideChatParentRef);
+  const sideChatSource = useSideChatSource(
+    routeThreadRef,
+    embedded ? null : (serverThread?.source ?? null),
+    embedded,
+  );
   const parentThreadLink = (() => {
     if (sideChatParentRef !== null) {
       const title = sideChatParent?.title ?? "Parent thread";
@@ -920,12 +956,7 @@ export default function ChatView(props: ChatViewProps) {
       return {
         title,
         sideChat: true,
-        open: (): void => {
-          void navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(sideChatParentRef),
-          });
-        },
+        ...(sideChatSource ? { open: sideChatSource.open, actionLabel: sideChatSource.label } : {}),
       };
     }
     if (parentSubagentThreadRef !== null) {
@@ -961,12 +992,19 @@ export default function ChatView(props: ChatViewProps) {
   })();
   // The header's breadcrumb opens a parent in this environment only.
   const headerParentThreadLink =
-    parentSubagentThreadRef === null
-      ? null
-      : {
-          threadId: parentSubagentThreadRef.threadId,
-          title: parentSubagentThread?.title ?? "Parent thread",
-        };
+    sideChatParentRef && sideChatSource
+      ? {
+          threadId: sideChatParentRef.threadId,
+          title: sideChatParent?.title ?? "Parent thread",
+          actionLabel: sideChatSource.label,
+          open: sideChatSource.open,
+        }
+      : parentSubagentThreadRef === null
+        ? null
+        : {
+            threadId: parentSubagentThreadRef.threadId,
+            title: parentSubagentThread?.title ?? "Parent thread",
+          };
   const threadError = isServerThread
     ? (localServerError ?? serverRuntime?.lastError ?? null)
     : localDraftError;
@@ -1586,6 +1624,19 @@ export default function ChatView(props: ChatViewProps) {
   const displayedTimelineKey = activeThreadKey ?? routeThreadKey;
   const displayedThreadRef = parseScopedThreadKey(displayedTimelineKey);
   const canReadTurns = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
+  const sideChatShells = useSideChatShells(isServerThread ? displayedThreadRef : null);
+  const followUps = useThreadFollowUpList(isServerThread ? displayedThreadRef : null);
+  const followUpMessageIds = new Set(followUps.map((item) => item.messageId));
+  const branchRunIds = new Set(
+    sideChatShells.flatMap((shell) =>
+      shell.forkedFrom?.type === "run" && shell.forkedFrom.threadId === displayedThreadRef?.threadId
+        ? [shell.forkedFrom.runId]
+        : [],
+    ),
+  );
+  const branchOriginMessageIds = new Set(
+    serverProjection?.runs.flatMap((run) => (branchRunIds.has(run.id) ? [run.userMessageId] : [])),
+  );
   const userTurnsRef = isServerThread && canReadTurns ? displayedThreadRef : null;
   const userTurns = useEnvironmentQuery(
     userTurnsRef === null
@@ -2700,15 +2751,24 @@ export default function ChatView(props: ChatViewProps) {
   // A delegated task is a remote thread's subagent.
   const isSubagentThread =
     activeThread?.lineage.relationshipToParent === "subagent" || delegatedFrom !== null;
-  // Side chats do not nest or start from subagents, and older servers would fork a listed thread.
+  // The legacy side chat command opens a top-level tab.
   const sideChatsOffered =
     !embedded &&
     canOperateThread &&
     activeThread?.lineage.sideChat !== true &&
     !isSubagentThread &&
     serverConfig?.environment.capabilities.sideChats === true;
+  const canBranchAssistantText =
+    isServerThread &&
+    canOperateThread &&
+    !isSubagentThread &&
+    serverConfig?.environment.capabilities.anchoredSideChats === true;
   const sideChat = useSideChat({
     threadRef: sideChatsOffered && isServerThread ? activeThreadRef : null,
+    anchoredThreadRef: canBranchAssistantText ? activeThreadRef : null,
+    onOpenAnchored: (id) => {
+      if (currentRouteThreadKeyRef.current === routeThreadKey) setInlineChildOpen(id, true);
+    },
     readSettings: () => ({
       runtimeMode,
       modelSelection: composerRef.current?.getSendContext().selectedModelSelection,
@@ -2741,6 +2801,9 @@ export default function ChatView(props: ChatViewProps) {
                   )
                 ? "Available once the thread's worktree is set up."
                 : null;
+  const branchAssistantText = useStableCallback((anchor: SideChatAnchor) =>
+    sideChat.open(undefined, anchor),
+  );
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
   const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
@@ -3112,6 +3175,33 @@ export default function ChatView(props: ChatViewProps) {
     runShellCommand: runSideChatShellCommandStable,
   };
 
+  const inlineSideChats = new Map<MessageId, Array<(typeof sideChatShells)[number]>>();
+  for (const child of sideChatShells) {
+    const anchor = child.lineage.sideChatAnchor;
+    if (!anchor) continue;
+    const branches = inlineSideChats.get(anchor.messageId);
+    if (branches) branches.push(child);
+    else inlineSideChats.set(anchor.messageId, [child]);
+  }
+  const renderInlineSideChats = (messageId: MessageId) => {
+    const branches = inlineSideChats.get(messageId);
+    if (!displayedThreadRef || !branches?.length) return null;
+    return (
+      <div className="mt-1.5 flex flex-col gap-1">
+        {branches.map((child) => (
+          <InlineSideChat
+            key={child.id}
+            child={child}
+            parentRef={displayedThreadRef}
+            parentPanel={parentPanel ?? sideChatParentPanel}
+            expanded={inlineOpenChildren.has(child.id)}
+            onToggle={() => setInlineChildOpen(child.id, !inlineOpenChildren.has(child.id))}
+          />
+        ))}
+      </div>
+    );
+  };
+
   if (!activeThread) {
     return embedded ? null : <NoActiveThreadState />;
   }
@@ -3296,6 +3386,10 @@ export default function ChatView(props: ChatViewProps) {
                 citationRequest={citationRequest}
                 citationHistory={citationHistory}
                 onCiteAssistantText={citeAssistantTextStable}
+                onBranchAssistantText={canBranchAssistantText ? branchAssistantText : undefined}
+                renderInlineSideChats={inlineSideChats.size > 0 ? renderInlineSideChats : undefined}
+                branchOriginMessageIds={branchOriginMessageIds}
+                followUpMessageIds={followUpMessageIds}
                 onReplyToResponse={replyToResponseStable}
                 {...(activeProject
                   ? { onRunShellCommand: parentPanel?.runShellCommand ?? runShellCommandStable }

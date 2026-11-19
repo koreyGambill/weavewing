@@ -48,7 +48,7 @@ const followUpsOf = (result: AsyncResult.AsyncResult<ReadonlyArray<MessageFollow
   AsyncResult.getOrElse(result, () => NO_FOLLOW_UPS);
 
 /** One thread's follow-ups, for per-message lookups that render on every timeline row. */
-function useThreadFollowUpList(threadRef: ScopedThreadRef | null) {
+export function useThreadFollowUpList(threadRef: ScopedThreadRef | null) {
   return useEnvironmentQuerySelector(
     useFollowUpsAtom(threadRef?.environmentId ?? null, threadRef?.threadId),
     followUpsOf,

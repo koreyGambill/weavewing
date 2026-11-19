@@ -15,6 +15,8 @@ export interface TimelineMinimapItem {
   readonly rowIndex: number;
   readonly userText: string | null;
   readonly assistantText: string | null;
+  readonly branchOrigin?: boolean | undefined;
+  readonly followUp?: boolean | undefined;
 }
 
 export function deriveTimelineMinimapItems(

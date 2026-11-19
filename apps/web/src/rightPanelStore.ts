@@ -486,7 +486,12 @@ export function hostRightPanel(guest: ScopedThreadRef, host: ScopedThreadRef): (
 
 /** The thread whose panel shows `ref`'s panel actions, so it also owns their browser tabs. */
 export function rightPanelHostRef(ref: ScopedThreadRef): ScopedThreadRef {
-  return panelHosts.get(scopedThreadKey(ref)) ?? ref;
+  let host = panelHosts.get(scopedThreadKey(ref));
+  while (host !== undefined) {
+    ref = host;
+    host = panelHosts.get(scopedThreadKey(ref));
+  }
+  return ref;
 }
 
 const userAction = (
@@ -496,7 +501,7 @@ const userAction = (
   closesView = false,
 ): Partial<RightPanelStoreState> => {
   const host = panelHosts.get(guestKey);
-  const threadKey = host === undefined ? guestKey : scopedThreadKey(host);
+  const threadKey = host === undefined ? guestKey : scopedThreadKey(rightPanelHostRef(host));
   return userActionOnThread(state, threadKey, updater, closesView);
 };
 
