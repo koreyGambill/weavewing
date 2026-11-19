@@ -234,9 +234,9 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
-const NEW_THREAD_KEY_MIGRATION = "weavewing.new-thread-mod-n.v1";
+const NEW_THREAD_KEY_MIGRATION = "weavewing.new-thread-mod-n.v2";
 const newThreadKey: KeybindingRule = { key: "mod+n", command: "chat.new", when: "!terminalFocus" };
-// Saved files that swapped New thread with the removed default-folder command kept it here.
+// What a saved file that swapped New thread with the removed default-folder command kept.
 const strandedNewThreadKey: KeybindingRule = { ...newThreadKey, key: "mod+alt+n" };
 
 function takesNewThreadKey(rule: KeybindingRule): boolean {
@@ -251,17 +251,11 @@ function takesNewThreadKey(rule: KeybindingRule): boolean {
   );
 }
 
-/**
- * Gives New thread Ctrl/Cmd+N back in a saved file that lost it. A user's own binding on that key
- * wins, and only the exact stranded Ctrl+Alt+N rule is removed.
- */
+/** Moves the exact stranded New thread rule back to Ctrl/Cmd+N when nothing holds that key. */
 function restoreNewThreadKey(rules: readonly KeybindingRule[]): readonly KeybindingRule[] {
-  if (rules.some((rule) => rule.command !== "chat.new" && takesNewThreadKey(rule))) return rules;
   const stranded = rules.findIndex((rule) => isSameKeybindingRule(rule, strandedNewThreadKey));
-  if (rules.some((rule) => rule.command === "chat.new" && takesNewThreadKey(rule))) {
-    return stranded === -1 ? rules : rules.filter((_, index) => index !== stranded);
-  }
-  return stranded === -1 ? [newThreadKey, ...rules] : rules.with(stranded, newThreadKey);
+  if (stranded === -1 || rules.some(takesNewThreadKey)) return rules;
+  return rules.with(stranded, newThreadKey);
 }
 
 function encodedShortcut(rule: KeybindingRule): string | null {
@@ -332,6 +326,40 @@ const removedWeavewingCommands = new Set([
   "rightPanel.close",
   "chat.newWithoutProject",
 ]);
+// A removed command with an exact replacement keeps the user's key and condition. The others
+// have none: terminal splits and the right panel drawer went away with their surfaces.
+const removedWeavewingCommandReplacements: ReadonlyMap<string, KeybindingRule["command"]> = new Map(
+  [["chat.newWithoutProject", "chat.new"]],
+);
+
+function decodedRule(entry: unknown): KeybindingRule | null {
+  const decoded = decodeKeybindingRuleExit(entry);
+  return decoded._tag === "Success" ? decoded.value : null;
+}
+
+/** Same length as `entries`; a remap that would repeat an existing rule stays removed. */
+function remapRemovedWeavewingBindings(entries: ReadonlyArray<unknown>): ReadonlyArray<unknown> {
+  const remapped = entries.map((entry) => {
+    if (typeof entry !== "object" || entry === null || !("command" in entry)) return entry;
+    const replacement =
+      typeof entry.command === "string"
+        ? removedWeavewingCommandReplacements.get(entry.command)
+        : undefined;
+    return replacement ? { ...entry, command: replacement } : entry;
+  });
+  return remapped.map((entry, index) => {
+    if (entry === entries[index]) return entry;
+    const rule = decodedRule(entry);
+    const repeats = remapped.some((other, otherIndex) => {
+      if (otherIndex === index || (otherIndex > index && other !== entries[otherIndex]))
+        return false;
+      const otherRule = decodedRule(other);
+      return rule !== null && otherRule !== null && isSameKeybindingRule(rule, otherRule);
+    });
+    return repeats ? entries[index] : entry;
+  });
+}
+
 function isRemovedWeavewingBinding(entry: unknown): boolean {
   return (
     typeof entry === "object" &&
@@ -507,7 +535,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    return rawConfig
+    return remapRemovedWeavewingBindings(rawConfig)
       .map(migrateWeavewingBinding)
       .filter((entry) => !isRemovedWeavewingBinding(entry))
       .map((entry) => {
@@ -526,11 +554,13 @@ const make = Effect.gen(function* () {
     {
       readonly keybindings: readonly KeybindingRule[];
       readonly issues: readonly ServerConfigIssue[];
+      /** The file still names removed commands, so writing it back changes it. */
+      readonly hasRemovedCommands: boolean;
     },
     KeybindingsConfigError
   > {
     if (!(yield* readConfigExists)) {
-      return { keybindings: [], issues: [] };
+      return { keybindings: [], issues: [], hasRemovedCommands: false };
     }
 
     const rawConfig = yield* readRawConfig;
@@ -540,12 +570,13 @@ const make = Effect.gen(function* () {
       return {
         keybindings: [],
         issues: [malformedConfigIssue(detail)],
+        hasRemovedCommands: false,
       };
     }
 
     const keybindings: KeybindingRule[] = [];
     const issues: ServerConfigIssue[] = [];
-    for (const [index, rawEntry] of decodedEntries.value.entries()) {
+    for (const [index, rawEntry] of remapRemovedWeavewingBindings(decodedEntries.value).entries()) {
       const entry = migrateWeavewingBinding(rawEntry);
       if (isRemovedWeavewingBinding(entry)) continue;
       const decodedRule = decodeKeybindingRuleExit(entry);
@@ -576,7 +607,10 @@ const make = Effect.gen(function* () {
       keybindings.push(decodedRule.value);
     }
 
-    return { keybindings, issues };
+    const hasRemovedCommands = decodedEntries.value.some((entry) =>
+      isRemovedWeavewingBinding(migrateWeavewingBinding(entry)),
+    );
+    return { keybindings, issues, hasRemovedCommands };
   });
 
   const appliedMigrationsPath = path.join(
@@ -790,10 +824,8 @@ const make = Effect.gen(function* () {
           return rule;
         });
       if (migrateLeader) customConfig = [...switchTilePreset(customConfig, enabled)];
-      // A full file keeps the migration pending until a rule is removed.
-      const migrateNewThreadKey =
-        !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION) &&
-        customConfig.length < MAX_KEYBINDINGS_COUNT;
+      // Reached only with a clean config, so the id below records a repair or a file needing none.
+      const migrateNewThreadKey = !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION);
       if (migrateNewThreadKey) customConfig = [...restoreNewThreadKey(customConfig)];
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
@@ -868,6 +900,7 @@ const make = Effect.gen(function* () {
       }
       if (
         defaultsToAppend.length > 0 ||
+        runtimeConfig.hasRemovedCommands ||
         customConfig.length !== runtimeConfig.keybindings.length ||
         customConfig.some((rule, index) => rule !== runtimeConfig.keybindings[index])
       ) {

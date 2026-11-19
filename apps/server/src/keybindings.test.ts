@@ -239,7 +239,6 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         "rightPanel.toggleMaximized",
         "rightPanel.new",
         "rightPanel.close",
-        "chat.newWithoutProject",
       ];
       yield* fs.writeFileString(
         keybindingsConfigPath,
@@ -952,117 +951,175 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
-  // regression: BW-3828 shipped with New thread stranded on Ctrl+Alt+N in an existing install's file
-  it.effect("restores Ctrl+N for New thread in a real saved file, once", () =>
-    Effect.gen(function* () {
-      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      const keybindings = yield* Keybindings.Keybindings;
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const fixtures = path.join(import.meta.dirname, "fixtures", "keybindings");
-      const migrationsPath = path.join(
-        path.dirname(keybindingsConfigPath),
-        "keybindings-migrations",
-      );
-      // The same file was saved on the Windows and the WSL server.
-      yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
-      const saved = yield* fs.readFileString(path.join(fixtures, "saved.json"));
-      yield* fs.writeFileString(keybindingsConfigPath, saved);
-      yield* fs.writeFileString(
-        migrationsPath,
-        yield* fs.readFileString(path.join(fixtures, "saved-migrations")),
-      );
-      const before = yield* decodeKeybindingsConfigJson(saved);
-
-      yield* keybindings.syncDefaultKeybindingsOnStartup;
-      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
-      const stranded = before.findIndex(
-        (rule) => rule.command === "chat.new" && rule.key === "mod+alt+n",
-      );
-      assert.deepEqual(
-        first,
-        before.with(stranded, { key: "mod+n", command: "chat.new", when: "!terminalFocus" }),
-      );
-      assert.include(yield* fs.readFileString(migrationsPath), "weavewing.new-thread-mod-n.v1");
-
-      const { keybindings: resolved } = yield* keybindings.loadConfigState;
-      const commandFor = (key: string) => {
-        const shortcut = SharedKeybindings.parseKeybindingShortcut(key)!;
-        return resolved
-          .filter(
-            (binding) =>
-              binding.shortcut.key === shortcut.key &&
-              binding.shortcut.modKey === shortcut.modKey &&
-              binding.shortcut.ctrlKey === shortcut.ctrlKey &&
-              binding.shortcut.metaKey === shortcut.metaKey &&
-              binding.shortcut.altKey === shortcut.altKey &&
-              binding.shortcut.shiftKey === shortcut.shiftKey,
-          )
-          .map((binding) => binding.command);
-      };
-      assert.deepEqual(commandFor("mod+n"), ["chat.new"]);
-      assert.deepEqual(commandFor("mod+alt+n"), []);
-      assert.deepEqual(commandFor("mod+shift+n"), ["chat.newLocal"]);
-      assert.deepEqual(commandFor("mod+shift+o"), ["projectPicker.open"]);
-      assert.deepEqual(commandFor("ctrl+`"), ["terminal.dropdown"]);
-      assert.includeMembers(commandFor("ctrl+meta+["), ["thread.previous"]);
-      assert.includeMembers(commandFor("mod+shift+["), ["workspace.tile.previousTab"]);
-
-      yield* keybindings.syncDefaultKeybindingsOnStartup;
-      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
-    }).pipe(Effect.provide(layerKeybindings())),
-  );
+  const NEW_THREAD_KEY_MIGRATION = "weavewing.new-thread-mod-n.v2";
+  const stranded = { key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" } as const;
+  const restored = { key: "mod+n", command: "chat.new", when: "!terminalFocus" } as const;
+  // The shape of a real saved file: New thread and the removed default-folder command swapped keys.
+  const swappedSaved = [
+    { key: "ctrl+`", command: "terminal.dropdown" },
+    { key: "mod+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+    { key: "mod+n", command: "chat.newWithoutProject", when: "!terminalFocus" },
+    { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+    stranded,
+    { key: "mod+f", command: "chat.find", when: "!terminalFocus && !previewFocus" },
+  ] as const;
+  const fullFile = (extra: ReadonlyArray<KeybindingRule>) => [
+    ...extra,
+    ...Array.from({ length: MAX_KEYBINDINGS_COUNT - extra.length }, (_, index) => ({
+      key: "mod+alt+f1",
+      command: `script.filler-${index}.run` as const,
+    })),
+  ];
 
   it.effect.each<{
     readonly name: string;
-    readonly saved: ReadonlyArray<KeybindingRule> | null;
+    readonly saved: ReadonlyArray<unknown> | null;
     readonly newThreadRules: ReadonlyArray<KeybindingRule>;
   }>([
     {
+      name: "stranded on Ctrl+Alt+N with Ctrl+N free: moved in place",
+      saved: [
+        { key: "mod+b", command: "sidebar.toggle" },
+        stranded,
+        { key: "mod+f", command: "chat.find" },
+      ],
+      newThreadRules: [restored],
+    },
+    {
+      name: "the swapped pair keeps both keys on New thread",
+      saved: swappedSaved,
+      newThreadRules: [restored, stranded],
+    },
+    {
+      name: "a conditional Ctrl+N keeps the Ctrl+Alt+N alternate",
+      saved: [{ key: "mod+n", command: "chat.new", when: "terminalFocus" }, stranded],
+      newThreadRules: [{ key: "mod+n", command: "chat.new", when: "terminalFocus" }, stranded],
+    },
+    {
+      name: "a customized New thread key gains nothing",
+      saved: [{ key: "mod+x", command: "chat.new" }],
+      newThreadRules: [{ key: "mod+x", command: "chat.new" }],
+    },
+    {
+      name: "the user's own Ctrl+N keeps the key",
+      saved: [{ key: "ctrl+n", command: "sidebar.toggle", when: "terminalFocus" }, stranded],
+      newThreadRules: [stranded],
+    },
+    {
+      name: "a full file is repaired in place",
+      saved: fullFile([stranded]),
+      newThreadRules: [restored],
+    },
+    {
+      name: "a full file with New thread elsewhere gains nothing",
+      saved: fullFile([{ key: "ctrl+alt+f1", command: "chat.new" }]),
+      newThreadRules: [{ key: "ctrl+alt+f1", command: "chat.new" }],
+    },
+    {
       name: "a fresh install",
       saved: null,
-      newThreadRules: [{ key: "mod+n", command: "chat.new", when: "!terminalFocus" }],
-    },
-    {
-      name: "the user's own Ctrl+N keeps the key and New thread keeps Ctrl+Alt+N",
-      saved: [
-        { key: "ctrl+n", command: "sidebar.toggle" },
-        { key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" },
-      ],
-      newThreadRules: [{ key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" }],
-    },
-    {
-      name: "New thread already on Ctrl+N drops the stranded Ctrl+Alt+N",
-      saved: [
-        { key: "mod+n", command: "chat.new" },
-        { key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" },
-      ],
-      newThreadRules: [{ key: "mod+n", command: "chat.new" }],
-    },
-    {
-      name: "a customized New thread key gains Ctrl+N and keeps its own key",
-      saved: [{ key: "mod+alt+n", command: "chat.new" }],
-      newThreadRules: [
-        { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
-        { key: "mod+alt+n", command: "chat.new" },
-      ],
+      newThreadRules: [restored],
     },
   ])(
-    "New thread key migration: $name, and a second run changes nothing",
+    "New thread key migration: $name, recorded once, second run unchanged",
     ({ saved, newThreadRules }) =>
       Effect.gen(function* () {
         const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
         const keybindings = yield* Keybindings.Keybindings;
-        if (saved) yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const ledger = path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations");
+        if (saved) {
+          yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+          yield* fs.writeFileString(keybindingsConfigPath, JSON.stringify(saved));
+        }
         yield* keybindings.syncDefaultKeybindingsOnStartup;
         const first = yield* readKeybindingsConfig(keybindingsConfigPath);
         assert.deepEqual(
           first.filter((rule) => rule.command === "chat.new"),
           newThreadRules,
         );
+        assert.include(yield* fs.readFileString(ledger), NEW_THREAD_KEY_MIGRATION);
         yield* keybindings.syncDefaultKeybindingsOnStartup;
         assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
       }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("keeps the New thread key migration pending while the file has issues", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const ledger = path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations");
+      yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+      yield* fs.writeFileString(
+        keybindingsConfigPath,
+        JSON.stringify([stranded, { key: "ctrl+q", command: "not.a.command" }]),
+      );
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const pending = yield* fs.readFileString(ledger).pipe(Effect.orElseSucceed(() => ""));
+      assert.notInclude(pending, NEW_THREAD_KEY_MIGRATION);
+
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [stranded]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(
+        (yield* readKeybindingsConfig(keybindingsConfigPath)).filter(
+          (rule) => rule.command === "chat.new",
+        ),
+        [restored],
+      );
+      assert.include(yield* fs.readFileString(ledger), NEW_THREAD_KEY_MIGRATION);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect.each<{
+    readonly name: string;
+    readonly saved: ReadonlyArray<unknown>;
+    readonly expected: ReadonlyArray<KeybindingRule>;
+  }>([
+    {
+      name: "a removed command with a replacement keeps the user's key and condition",
+      saved: [{ key: "ctrl+d", command: "chat.newWithoutProject", when: "!terminalFocus" }],
+      expected: [{ key: "ctrl+d", command: "chat.new", when: "!terminalFocus" }],
+    },
+    {
+      name: "a remap that would repeat an existing rule is dropped",
+      saved: [
+        { key: "mod+alt+n", command: "chat.newWithoutProject", when: "!terminalFocus" },
+        stranded,
+      ],
+      expected: [stranded],
+    },
+    {
+      name: "a removed command without a replacement is dropped",
+      saved: [{ key: "ctrl+alt+shift+f9", command: "terminal.split", when: "terminalFocus" }],
+      expected: [],
+    },
+  ])("removed commands: $name", ({ saved, expected }) =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const unrelated = { key: "alt+q", command: "workspace.tile.closeAllTabs" } as const;
+      const ledger = path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations");
+      yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+      // Keeps the New thread key migration out of the way of the remap under test.
+      yield* fs.writeFileString(ledger, `${NEW_THREAD_KEY_MIGRATION}\n`);
+      yield* fs.writeFileString(keybindingsConfigPath, JSON.stringify([...saved, unrelated]));
+      const runtime = yield* keybindings.loadConfigState;
+      assert.deepEqual(runtime.issues, []);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const savedKeys = new Set(saved.map((entry) => (entry as KeybindingRule).key));
+      const touched = (rules: ReadonlyArray<KeybindingRule>) =>
+        rules.filter((rule) => savedKeys.has(rule.key));
+      assert.deepEqual(touched(first), expected);
+      assert.deepInclude(first, unrelated);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("upgrades the old Mac close backfill once and preserves later edits", () =>
