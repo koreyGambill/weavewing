@@ -184,10 +184,10 @@ field gets its own undo back. Terminals always keep their native shortcut.
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
 
-`chat.new` may ask you to choose a project when there is more than one.
-`chat.newLocal` skips that chooser. Both use your
-[new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
-(`mod+alt+n`) starts a thread [in the default folder](./thread-sidebar.md#start-in-the-default-folder).
+`chat.new` (`mod+n`) starts a thread [in the default folder](./thread-sidebar.md#start-in-the-default-folder).
+`chat.newLocal` (`mod+shift+n`) starts one in the current thread's project. Both use your
+[new-thread defaults](./thread-sidebar.md#start-a-thread). `projectPicker.open`
+(`mod+shift+o`) changes where the current thread runs.
 
 ## Reserved shortcuts
 

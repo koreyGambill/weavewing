@@ -1,4 +1,4 @@
-import { MessageSquareDashedIcon, SquarePenIcon } from "lucide-react";
+import { SquarePenIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -20,10 +20,8 @@ export interface SidebarThreadHeaderProps {
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
   showNewThreadInProjectHint: boolean;
-  /** Null when no connected machine offers a default folder. */
+  /** The default folder New thread starts in; null when no connected machine offers one. */
   defaultFolderLabel: string | null;
-  defaultFolderShortcutLabel: string | null | undefined;
-  onNewDefaultFolderThread: () => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -43,8 +41,6 @@ export function SidebarThreadHeader({
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
   defaultFolderLabel,
-  defaultFolderShortcutLabel,
-  onNewDefaultFolderThread,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
@@ -57,13 +53,11 @@ export function SidebarThreadHeader({
   const resultsVisible = isSearching && searchResultCount > 0;
   // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
+  const newThreadTitle =
+    defaultFolderLabel === null ? "New thread" : `New thread in ${defaultFolderLabel}`;
   const newThreadLabel = newThreadShortcutLabel
-    ? `New thread (${newThreadShortcutLabel})`
-    : "New thread";
-  const defaultFolderThreadLabel =
-    defaultFolderLabel === null
-      ? "No default folder available"
-      : `New thread in ${defaultFolderLabel}`;
+    ? `${newThreadTitle} (${newThreadShortcutLabel})`
+    : newThreadTitle;
 
   return (
     <div className="flex flex-col gap-1">
@@ -72,19 +66,6 @@ export function SidebarThreadHeader({
           Threads
         </h2>
         <div className="flex shrink-0 items-center">
-          {/* Rendered even when unavailable, so New thread never moves. */}
-          <SidebarHeaderIconButton
-            label={defaultFolderThreadLabel}
-            tooltip={
-              defaultFolderShortcutLabel && defaultFolderLabel !== null
-                ? `${defaultFolderThreadLabel} (${defaultFolderShortcutLabel})`
-                : defaultFolderThreadLabel
-            }
-            disabled={defaultFolderLabel === null}
-            onClick={onNewDefaultFolderThread}
-          >
-            <MessageSquareDashedIcon />
-          </SidebarHeaderIconButton>
           <SidebarHeaderIconButton
             label="New thread"
             tooltip={

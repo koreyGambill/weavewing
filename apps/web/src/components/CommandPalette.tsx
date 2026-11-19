@@ -1378,7 +1378,7 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["new thread", "default folder", "no project", "without project", "chat"],
       title: `New thread in ${scratchLabel ?? "the default folder"}`,
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "chat.newWithoutProject",
+      shortcutCommand: "chat.new",
       ...runScratchChoice(scratchChoice),
     });
   }
@@ -2808,9 +2808,7 @@ function OpenCommandPaletteDialog(props: {
     const isNewThread =
       !event.nativeEvent.isComposing &&
       event.keyCode !== 229 &&
-      (command === "chat.new" ||
-        command === "chat.newLocal" ||
-        command === "chat.newWithoutProject");
+      (command === "chat.new" || command === "chat.newLocal");
     const matchingItem =
       isJump || isNewThread
         ? displayedGroups

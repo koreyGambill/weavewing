@@ -122,7 +122,6 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.branch",
   "chat.new",
   "chat.newLocal",
-  "chat.newWithoutProject",
   "projectPicker.open",
   "projectPicker.nextMachine",
   "projectPicker.allMachines",

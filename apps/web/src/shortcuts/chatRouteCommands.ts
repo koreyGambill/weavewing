@@ -128,15 +128,6 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
   return registerCommands(
     {
       "chat.newLocal": startNewLocal,
-      "chat.newWithoutProject": (event) => {
-        const { activeThread, activeDraftThread } = readThreadContext();
-        const choice = scratch.scratchEnvironmentChoice(
-          activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null,
-        );
-        if (choice.kind === "none") return;
-        claim(event);
-        startDefaultPlace();
-      },
       "chat.new": (event) => {
         claim(event);
         startDefaultPlace();

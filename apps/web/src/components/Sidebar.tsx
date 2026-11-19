@@ -3150,14 +3150,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               defaultFolderLabel={defaultFolderLabel}
-              defaultFolderShortcutLabel={shortcutLabelForCommand(
-                keybindings,
-                "chat.newWithoutProject",
-              )}
-              onNewDefaultFolderThread={() => {
-                if (isMobile) setOpenMobile(false);
-                startDefaultPlace();
-              }}
               showNewThreadInProjectHint
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}

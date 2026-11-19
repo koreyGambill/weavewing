@@ -11,9 +11,9 @@ that still needs attention. System notifications and sounds have separate contro
 
 ## Start a thread
 
-On web and desktop, **New thread** or `mod+n` opens the project and folder picker.
-**Shift-click** to start in
-the current project, or use a project's own new-thread action. A new thread carries
+On web and desktop, **New thread** or `mod+n` opens a new thread in the default folder
+on your preferred machine, ready to type. **Shift-click** or `mod+shift+n` starts in
+the current thread's project instead, or use a project's own new-thread action. A new thread carries
 your model and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. To continue in
 an existing worktree, use **New thread in this worktree** from the branch toolbar.
@@ -25,14 +25,19 @@ off **Settings → General → Use last project** to choose a project every time
 When you pick a project that is on more than one machine, the thread starts on
 a connected one if any is connected.
 
-On web and desktop, click the project or folder in a new thread's heading, press
-`mod+alt+shift+o`, or choose **Change project or folder…** in the command palette. Search
-by project name or path. The same picker opens from the sidebar and **New thread in…**
-in the command palette. It starts on the current machine, with the current project
-first, then pinned projects and five recent projects. **Show all** reveals the rest.
+The line under the composer shows where the thread runs: the machine, the project and
+folder, and the branch. To change it before the first message, click the folder, press
+`mod+shift+o`, or choose **Change project or folder…** in the command palette. After
+the first message, the same click or key opens **Change folder**. Search
+by project name or path. The same picker opens from **New thread in…** in the command
+palette. It starts on the current machine, with the current project first, then pinned
+projects and five recent projects, and Enter accepts the highlighted first row. **Show
+all** reveals the rest.
 
 Choose a machine to move the draft there, or use **All machines** to search across
-connected machines. Choosing a project on another machine moves the draft to it.
+connected machines. A machine that is offline stays listed but cannot be chosen. The
+footer marks your default place; **Make this the default place** saves the current
+machine and folder as the default. Choosing a project on another machine moves the draft to it.
 Inside the picker, `ctrl+alt+m` cycles machines and `ctrl+alt+shift+m` toggles All machines.
 
 Type a path such as `~/code/` to browse folders on the selected machine. In All
@@ -43,12 +48,11 @@ draft when you change its project.
 
 ### Start in the default folder
 
-A thread does not need a project. To start one in the default folder (`~/code` unless
-you change it), click the second new-thread button at the top of the sidebar, click **or
-start in ~/code** under a new thread's heading, pick the folder from **New thread in...**
-in the command palette, or press `mod+alt+n`. On mobile, pick **No project** from the
-project list. The heading shows the folder, and the machine when more than one is
-connected. Before sending, click the folder in the heading to pick a project, **Open
+A thread does not need a project. **New thread** and `mod+n` start in the default folder
+(`~/code` unless you change it). While the preferred machine is offline, the thread starts
+on another connected machine and a notice says so. **Use default place** under the
+composer moves a draft back there. On mobile, pick **No project** from the
+project list. Before sending, click the folder under the composer to pick a project, **Open
 folder…** for any folder on that machine, or **Clone repository…**; the draft moves there
 with what you typed. Pick another machine from the machine menu to move it there.
 
