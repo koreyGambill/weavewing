@@ -700,6 +700,8 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     httpBaseUrl,
     captureOutput: true,
     ...(runningDistro !== null ? { runningDistro } : {}),
+    // Not the route: an unknown distro IP falls back to loopback even under NAT.
+    sharesHostLoopback: usesSharedNetworkStack,
   };
 
   // Explicit --dev-url keeps WSL state in dev/ rather than userdata/.

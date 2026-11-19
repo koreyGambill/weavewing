@@ -81,7 +81,11 @@ const layerTailnet = (input: {
           TailscaleClient.TailscaleClient,
           TailscaleClient.TailscaleClient.of({
             whois: (address) => Effect.succeed(WHOIS[address] ?? null),
-            peers: Effect.succeed({ self: input.self ?? SELF, peers: input.peers ?? [] }),
+            peers: Effect.succeed({
+              running: true,
+              self: input.self ?? SELF,
+              peers: input.peers ?? [],
+            }),
           }),
         ),
         ServerSettingsService.layerTest({ tailnetConnect: { enabled: true, ...input.settings } }),

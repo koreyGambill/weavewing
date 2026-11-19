@@ -644,6 +644,8 @@ describe("DesktopBackendConfiguration", () => {
         assert.notInclude(config.args, "/bin/sh");
         assert.notInclude(config.args, "-c");
         assert.isTrue(Option.isNone(config.preflightFailure));
+        // A NAT distro IP is never one of the host's own addresses.
+        assert.isFalse(config.sharesHostLoopback);
       }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
@@ -760,6 +762,8 @@ describe("DesktopBackendConfiguration", () => {
         assert.notProperty(config.bootstrap, "resourceMonitorPath");
         assert.isTrue(Option.isSome(config.preflightFailure));
         assert.equal(config.httpBaseUrl.href, "http://127.0.0.1:5050/");
+        // A loopback route without a known distro IP does not mean a shared network stack.
+        assert.isFalse(config.sharesHostLoopback);
         assert.equal(config.env.OPENAI_API_KEY, "openai-key");
         assert.equal(config.env.ANTHROPIC_API_KEY, "anthropic-key");
         assert.equal(config.env.T3CODE_OTLP_PROTOCOL, "http/protobuf");

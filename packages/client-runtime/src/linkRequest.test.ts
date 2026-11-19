@@ -229,6 +229,16 @@ describe("linkableMachines", () => {
       "http://100.67.211.34:3774",
       "http://192.168.68.66:3774",
     ]);
+    // WSL under NAT has a loopback of its own, so neither direction is offered it.
+    const nat = new Set([windows.environmentId]);
+    expect(urls(linkableMachines({ ...input, sameHost: nat })).WSL).toEqual([
+      "http://100.67.211.34:3774",
+      "http://192.168.68.66:3774",
+    ]);
+    expect(
+      urls(linkableMachines({ ...input, sameHost: nat, threadEnvironmentId: wsl.environmentId }))
+        .Windows,
+    ).toEqual([]);
   });
 
   it("lists the other machines with reported addresses before saved ones, once each", () => {

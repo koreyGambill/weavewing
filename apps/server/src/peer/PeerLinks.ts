@@ -248,8 +248,8 @@ const make = Effect.gen(function* () {
   const tailnetAddresses = yield* Effect.cachedWithTTL(
     tailscale.peers.pipe(
       Effect.map(
-        ({ self, peers }): ReadonlySet<string> =>
-          new Set([self, ...peers].flatMap((node) => node?.tailnetAddresses ?? [])),
+        ({ running, self, peers }): ReadonlySet<string> =>
+          new Set(running ? [self, ...peers].flatMap((node) => node?.tailnetAddresses ?? []) : []),
       ),
       Effect.orElseSucceed((): ReadonlySet<string> => new Set()),
     ),

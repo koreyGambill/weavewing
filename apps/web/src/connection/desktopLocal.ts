@@ -6,6 +6,7 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   type DesktopBridge,
   type DesktopEnvironmentBootstrap,
+  type EnvironmentId,
 } from "@t3tools/contracts";
 
 const DESKTOP_LOCAL_CONNECTION_ID_PREFIX = "local:";
@@ -20,6 +21,33 @@ export function isDesktopLocalConnectionTarget(
   return (
     target._tag === "BearerConnectionTarget" &&
     target.connectionId.startsWith(DESKTOP_LOCAL_CONNECTION_ID_PREFIX)
+  );
+}
+
+/**
+ * The environments on this desktop's host loopback: its primary, and the local
+ * backends that share the host's network stack. A NAT WSL backend's loopback is its VM's.
+ */
+export function desktopSameHostEnvironmentIds(
+  environments: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly entry: { readonly target: ConnectionTarget };
+  }>,
+  bootstraps: ReadonlyArray<Pick<DesktopEnvironmentBootstrap, "id" | "sharesHostLoopback">>,
+): ReadonlySet<EnvironmentId> {
+  const sharing = new Set(
+    bootstraps.flatMap((bootstrap) =>
+      bootstrap.sharesHostLoopback === true ? [bootstrap.id] : [],
+    ),
+  );
+  return new Set(
+    environments.flatMap(({ environmentId, entry }) => {
+      const backendId = desktopLocalBackendId(entry.target);
+      return entry.target._tag === "PrimaryConnectionTarget" ||
+        (backendId !== null && sharing.has(backendId))
+        ? [environmentId]
+        : [];
+    }),
   );
 }
 
@@ -71,7 +99,8 @@ export function createDesktopSecondaryBootstrapsReader(
             entry.runningDistro !== previous.runningDistro ||
             entry.httpBaseUrl !== previous.httpBaseUrl ||
             entry.wsBaseUrl !== previous.wsBaseUrl ||
-            entry.bootstrapToken !== previous.bootstrapToken
+            entry.bootstrapToken !== previous.bootstrapToken ||
+            entry.sharesHostLoopback !== previous.sharesHostLoopback
           );
         })
       ) {

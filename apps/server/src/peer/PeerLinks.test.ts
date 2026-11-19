@@ -874,19 +874,17 @@ it.effect(
           shared: false,
         });
         const peersRead = yield* Ref.make(0);
-        const connected = yield* Ref.make(true);
+        const running = yield* Ref.make(true);
         const tailscale = TailscaleClient.TailscaleClient.of({
           whois: () => Effect.succeed(null),
+          // `tailscale down` still lists the last netmap's nodes.
           peers: Ref.update(peersRead, (count) => count + 1).pipe(
-            Effect.andThen(Ref.get(connected)),
-            Effect.flatMap((up) =>
-              up
-                ? Effect.succeed({
-                    self: node(["100.67.211.34", "fd7a:115c:a1e0::1"]),
-                    peers: [node(["100.101.102.103"])],
-                  })
-                : Effect.fail(new TailscaleClient.TailscaleUnavailableError({ cause: "down" })),
-            ),
+            Effect.andThen(Ref.get(running)),
+            Effect.map((up) => ({
+              running: up,
+              self: node(["100.67.211.34", "fd7a:115c:a1e0::1"]),
+              peers: [node(["100.101.102.103"])],
+            })),
           ),
         });
         const b = yield* serveB(box);
@@ -920,11 +918,11 @@ it.effect(
         // Both links read Tailscale once between them.
         expect(yield* Ref.get(peersRead)).toBe(1);
 
-        // Once Tailscale stops listing it, another network may route that address:
+        // Once Tailscale is down, another network may route that address:
         // a call never sends the token there.
         const sql = Context.get(knownContext, SqlClient.SqlClient);
         yield* sql`UPDATE peer_environment_links SET urls_json = '["http://100.101.102.103:3773"]'`;
-        yield* Ref.set(connected, false);
+        yield* Ref.set(running, false);
         yield* TestClock.adjust("1 minute");
         const dropped = yield* known.resolve(box.environmentId).pipe(Effect.flip);
         expect(dropped.message).toContain("Tailscale no longer lists");

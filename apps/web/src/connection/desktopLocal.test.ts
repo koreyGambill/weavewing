@@ -3,10 +3,62 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import { type DesktopEnvironmentBootstrap, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import {
+  BearerConnectionTarget,
+  PrimaryConnectionTarget,
+} from "@t3tools/client-runtime/connection";
+import {
+  type DesktopEnvironmentBootstrap,
+  EnvironmentId,
+  PRIMARY_LOCAL_ENVIRONMENT_ID,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createDesktopSecondaryBootstrapsReader, desktopLocalRefreshes } from "./desktopLocal";
+import {
+  createDesktopSecondaryBootstrapsReader,
+  desktopLocalConnectionId,
+  desktopLocalRefreshes,
+  desktopSameHostEnvironmentIds,
+} from "./desktopLocal";
+
+describe("desktopSameHostEnvironmentIds", () => {
+  it("counts a local backend on the host's loopback only when it shares the network stack", () => {
+    const windows = EnvironmentId.make("environment-windows");
+    const wsl = EnvironmentId.make("environment-wsl");
+    const environments = [
+      {
+        environmentId: windows,
+        entry: {
+          target: new PrimaryConnectionTarget({
+            environmentId: windows,
+            label: "Windows",
+            httpBaseUrl: "http://127.0.0.1:3773",
+            wsBaseUrl: "ws://127.0.0.1:3773",
+          }),
+        },
+      },
+      {
+        environmentId: wsl,
+        entry: {
+          target: new BearerConnectionTarget({
+            environmentId: wsl,
+            label: "WSL",
+            connectionId: desktopLocalConnectionId("wsl:default"),
+          }),
+        },
+      },
+    ];
+    expect(
+      desktopSameHostEnvironmentIds(environments, [
+        { id: "wsl:default", sharesHostLoopback: true },
+      ]),
+    ).toEqual(new Set([windows, wsl]));
+    // NAT: the WSL VM's loopback is its own, even when the desktop reaches it at 127.0.0.1.
+    expect(desktopSameHostEnvironmentIds(environments, [{ id: "wsl:default" }])).toEqual(
+      new Set([windows]),
+    );
+  });
+});
 
 describe("desktop local topology reads", () => {
   it("reuses snapshots when polling returns fresh objects for the same topology", () => {
@@ -41,6 +93,7 @@ describe("desktop local topology reads", () => {
     { httpBaseUrl: "http://127.0.0.1:4001" },
     { wsBaseUrl: "ws://127.0.0.1:4001" },
     { bootstrapToken: "bootstrap-2" },
+    { sharesHostLoopback: true },
   ])("publishes bootstrap changes: %j", (change) => {
     let secondary: DesktopEnvironmentBootstrap = {
       id: "wsl:default",
