@@ -1,8 +1,6 @@
 import { DownloadIcon, CopyIcon, CheckIcon, Code2Icon, EyeIcon, Table2Icon } from "lucide-react";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { Badge } from "~/components/ui/badge";
 import { Spinner } from "~/components/ui/spinner";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import {
   AuthPreviewOperateScope,
   type EditorId,
@@ -47,7 +45,8 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
-import { FolderTree, Globe2, LockIcon, WrapTextIcon } from "lucide-react";
+import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
+import { OutsideEditAccess } from "./OutsideEditAccess";
 import * as Schema from "effect/Schema";
 import {
   lazy,
@@ -1292,7 +1291,7 @@ export default function FilePreviewPanel({
       if (root !== undefined) onOpenFilesTab(root);
     }, showRootError);
   };
-  // The server marks the host files a workspace may edit: instruction files it loads.
+  // The server marks the host files a workspace may edit: instruction files it loads, and grants.
   const readOnlyHost = isHostFile && file.data?.writable !== true;
   // A chat-linked folder reads as a file until its read settles, and revealing a
   // folder selects it in its parent instead of opening it, so reveal waits.
@@ -1552,21 +1551,19 @@ export default function FilePreviewPanel({
               />
             </div>
           </ScrollArea>
-          {readOnlyHost && attachment === undefined && file.data !== null && !isFolder ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Badge variant="outline" size="sm" tabIndex={0}>
-                    <LockIcon aria-hidden="true" />
-                    Read-only
-                  </Badge>
-                }
-              />
-              <TooltipPopup>
-                Outside this workspace, only instruction files under a provider's config folder or
-                ~/.config can be edited.
-              </TooltipPopup>
-            </Tooltip>
+          {isHostFile &&
+          attachment === undefined &&
+          relativePath !== null &&
+          file.data !== null &&
+          !isFolder &&
+          (readOnlyHost || file.data.editGrant !== undefined) ? (
+            <OutsideEditAccess
+              environmentId={environmentId}
+              cwd={cwd}
+              relativePath={relativePath}
+              file={file.data}
+              onChange={file.refresh}
+            />
           ) : null}
           {absolutePath &&
           (environmentId === primaryEnvironmentId ||

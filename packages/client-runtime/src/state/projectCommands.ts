@@ -217,6 +217,14 @@ export function createProjectEnvironmentAtoms<R, E>(
       scheduler: projectScheduler,
       concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
     }),
+    allowOutsideEdits: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:allow-outside-edits",
+      tag: WS_METHODS.projectsAllowOutsideEdits,
+    }),
+    revokeOutsideEdits: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:revoke-outside-edits",
+      tag: WS_METHODS.projectsRevokeOutsideEdits,
+    }),
     writeFile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:write-file",
       tag: WS_METHODS.projectsWriteFile,
