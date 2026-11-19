@@ -499,10 +499,7 @@ export function ThreadTileWorkspace(props: {
     );
   };
   const openNewTab = (groupId: string) => {
-    const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
-    if (group && !isNewTab(group.activeTabId))
-      apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
-    else apply({ type: "focus", groupId });
+    apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
     focusChooser(groupId);
   };
   // A chooser unmounts once its area arrives or it closes. Focus left on it would drop to the

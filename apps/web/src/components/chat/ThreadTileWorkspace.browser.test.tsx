@@ -515,6 +515,17 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
   expect(getTileGroups(layout()).find((group) => group.id === "chooser")?.tabs).toEqual([
     newTabId("chooser"),
   ]);
+  await userEvent.click(
+    screen
+      .getByRole("region", { name: "Tile: New tab", exact: true })
+      .getByRole("button", { name: "New tab", exact: true }),
+  );
+  await userEvent.keyboard("{Control>}{Alt>}o{/Alt}{/Control}");
+  const blanks = getTileGroups(layout()).find((group) => group.id === "chooser")!.tabs;
+  expect(blanks).toHaveLength(3);
+  expect(new Set(blanks).size).toBe(3);
+  for (const tabId of blanks.slice(1))
+    store.applyTileAction(threadRef, { type: "close-tab", tabId });
   await userEvent.click(screen.getByText("Choose an area", { exact: true }));
   await userEvent.keyboard("c");
   expect(layout().focusedGroupId).toBe(
