@@ -1141,6 +1141,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
+  const [activeOutlineColor, setActiveOutlineColor] = useState<"green" | "yellow" | null>(null);
   const connectedEnvironmentIds = useConnectedEnvironmentIds();
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
   const clearPendingFileDrop = useSidebarPendingFileDropStore((s) => s.clearPendingFileDrop);
@@ -1861,6 +1862,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     }
     if (isTrailingDoubleClick(event.detail)) {
       return;
+    }
+    if (event.detail === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      setActiveOutlineColor((color) => (color === "green" ? "yellow" : "green"));
     }
     navigateToThread(threadRef);
   };
@@ -3963,6 +3967,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                             isActive={routeRowThreadKey === threadKey}
+                            activeOutlineColor={
+                              routeRowThreadKey === threadKey
+                                ? (activeOutlineColor ?? "green")
+                                : undefined
+                            }
                             revealRef={
                               routeRowThreadKey === threadKey ? revealActiveRow : undefined
                             }

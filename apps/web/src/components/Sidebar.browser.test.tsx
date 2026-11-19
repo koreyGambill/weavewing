@@ -32,7 +32,7 @@ import type { Project } from "../types";
 import Sidebar from "./Sidebar";
 import { THREAD_JUMP_HINT_SHOW_DELAY_MS } from "./Sidebar.logic";
 import { SortableThreadRow } from "./sidebar/SidebarThreadRow";
-import { SidebarProvider } from "./ui/sidebar";
+import { Sidebar as SidebarFrame, SidebarProvider } from "./ui/sidebar";
 
 vi.mock(import("../state/olderSettledShelf"), async (original) => {
   const actual = await original();
@@ -181,6 +181,64 @@ function threadShell(projectId: ProjectId, index: number): EnvironmentThreadShel
     title: `Thread ${index}`,
   });
 }
+
+it("alternates the current thread outline only on ordinary row clicks", async () => {
+  await page.viewport(1280, 800);
+  const activeProject = project("active");
+  const threads = [threadShell(activeProject.id, 0), threadShell(activeProject.id, 1)];
+  vi.mocked(useProjects).mockReturnValue([activeProject]);
+  vi.mocked(useQuietThreadShells).mockReturnValue(threads);
+  const setRoute = (threadId: ThreadId) =>
+    vi.mocked(useThreadRouteTarget).mockReturnValue({
+      kind: "server",
+      threadRef: { environmentId: activeProject.environmentId, threadId },
+    });
+  setRoute(threads[0]!.id);
+  const sidebar = () => (
+    <>
+      <style>{appCss}</style>
+      <SidebarProvider>
+        <SidebarFrame collapsible="none" className="h-80">
+          <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+        </SidebarFrame>
+      </SidebarProvider>
+    </>
+  );
+  await using screen = await render(sidebar());
+  using navigate = vi.spyOn(screen.router!, "navigate").mockResolvedValue(undefined);
+  const first = screen.getByRole("button", { name: /^Thread 0/ });
+  const second = screen.getByRole("button", { name: /^Thread 1/ });
+  const expectOutline = async (active: typeof first, color: "green" | "yellow") => {
+    const tint = getComputedStyle(document.documentElement)
+      .getPropertyValue(`--weavewing-${color}`)
+      .trim();
+    await expect.element(active).toHaveStyle(`outline: 2px solid ${tint}`);
+    await expect.element(active === first ? second : first).toHaveStyle("outline-style: none");
+  };
+
+  await userEvent.click(first);
+  await expectOutline(first, "green");
+  await userEvent.click(first);
+  await expectOutline(first, "yellow");
+
+  await userEvent.click(second, {
+    modifiers: [isMacPlatform(navigator.platform) ? "Meta" : "Control"],
+  });
+  expect(navigate).toHaveBeenCalledTimes(2);
+  await expectOutline(first, "yellow");
+
+  await act(() => second.element().focus());
+  await userEvent.keyboard("{Enter}");
+  expect(navigate).toHaveBeenCalledTimes(3);
+  setRoute(threads[1]!.id);
+  await screen.rerender(sidebar());
+  await expect.element(second).toHaveAttribute("aria-current", "page");
+  await expect.element(second).toHaveFocus();
+  await expectOutline(second, "yellow");
+
+  await userEvent.click(second);
+  await expectOutline(second, "green");
+});
 
 describe("sidebar render isolation", () => {
   // regression: #33100 Cmd+J re-rendered every sidebar row, which took hundreds of ms with many threads
