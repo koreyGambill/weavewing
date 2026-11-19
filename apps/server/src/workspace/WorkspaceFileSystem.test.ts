@@ -1301,6 +1301,21 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             "[default]",
           );
 
+          // A credential folder linked out of the home folder, as ~/.aws to /mnt/c/... on WSL.
+          const outside = yield* fileSystem.realPath(yield* makeTempDir);
+          yield* writeTextFile(outside, "kube/config", "token");
+          yield* fileSystem.symlink(path.join(outside, "kube"), path.join(home, ".kube"));
+          yield* fileSystem.makeDirectory(path.join(home, "x"));
+          for (const relativePath of [
+            path.join(outside, "kube", "config"),
+            "~/x/../.kube/config",
+          ]) {
+            yield* refuses(relativePath);
+          }
+          expect(yield* fileSystem.readFileString(path.join(outside, "kube", "config"))).toBe(
+            "token",
+          );
+
           // Blocks match the path as named, and letter case, which some volumes ignore.
           yield* writeTextFile(home, "plain.md", "plain");
           yield* fileSystem.makeDirectory(path.join(home, "notgit", ".git"), { recursive: true });

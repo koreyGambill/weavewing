@@ -45,12 +45,42 @@ export const providerConfigDir = Effect.fn("InstructionFileAllowlist.providerCon
   return layout.effectiveHomePath ?? layout.sharedHomePath;
 });
 
-// Credential folders under ~/.config whose files stay read-only even when an instruction file links them.
-const CREDENTIAL_CONFIG = /\/\.config\/(gh|hub|gcloud|op|rclone|sops|age|github-copilot)\//i;
+// Credential folders under ~/.config, and credential folders and files under the home folder.
+const CONFIG_CREDENTIAL_FOLDERS = [
+  "gh",
+  "hub",
+  "gcloud",
+  "op",
+  "rclone",
+  "sops",
+  "age",
+  "github-copilot",
+];
+const HOME_CREDENTIAL_LOCATIONS = [
+  ".ssh",
+  ".gnupg",
+  ".aws",
+  ".kube",
+  ".docker/config.json",
+  ".netrc",
+  ".git-credentials",
+];
 
-// Credential folders and files directly under the home folder.
-const HOME_CREDENTIALS =
-  /^(\.ssh|\.gnupg|\.aws|\.kube)(\/|$)|^(\.docker\/config\.json|\.netrc|\.git-credentials)$/i;
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+const CREDENTIAL_CONFIG = new RegExp(
+  `/\\.config/(${CONFIG_CREDENTIAL_FOLDERS.map(escapeRegExp).join("|")})/`,
+  "i",
+);
+const HOME_CREDENTIALS = new RegExp(
+  `^(${HOME_CREDENTIAL_LOCATIONS.map(escapeRegExp).join("|")})(/|$)`,
+  "i",
+);
+
+/** The credential locations `isCredentialPath` names, for resolving where links lead. */
+export const credentialLocations = (home: string) => [
+  ...HOME_CREDENTIAL_LOCATIONS.map((location) => `${home}/${location}`),
+  ...CONFIG_CREDENTIAL_FOLDERS.map((folder) => `${home}/.config/${folder}`),
+];
 
 /**
  * Credential files stay read-only, whatever links or grants reach them. Letter case is ignored,

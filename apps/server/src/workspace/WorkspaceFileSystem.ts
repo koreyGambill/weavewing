@@ -32,6 +32,7 @@ import { makeIsServerInternalPath, makeIsServerStatePath } from "../auth/serverI
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   InstructionFileAllowlist,
+  credentialLocations,
   isCredentialPath,
 } from "../threadInsights/InstructionFileAllowlist.ts";
 import * as KnownWorkspaces from "./KnownWorkspaces.ts";
@@ -225,9 +226,26 @@ export const make = Effect.gen(function* () {
     const realPath = yield* Effect.promise(() => NodeFSP.realpath(hostPath).catch(() => null));
     // A symlinked home folder resolves away the prefix the real path is checked against.
     const realHome = yield* Effect.promise(() => NodeFSP.realpath(home).catch(() => home));
+    // Where credential locations lead, such as a ~/.aws linked to /mnt/c/Users/<user>/.aws.
+    const realCredentials = yield* Effect.promise(() =>
+      Promise.all(
+        credentialLocations(home).map((location) => NodeFSP.realpath(location).catch(() => null)),
+      ),
+    );
+    const inRealCredential = (file: string) =>
+      realCredentials.some((location) => {
+        if (location === null) return false;
+        const relative = path.relative(location.toLowerCase(), file.toLowerCase());
+        return (
+          relative === "" ||
+          (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+        );
+      });
     if (
       realPath === null ||
       isCredentialPath(hostPath, home) ||
+      isCredentialPath(path.resolve(hostPath), home) ||
+      inRealCredential(realPath) ||
       isCredentialPath(realPath, home) ||
       isCredentialPath(realPath, realHome) ||
       (yield* isServerInternalPath(realPath)) ||
