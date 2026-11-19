@@ -26,6 +26,31 @@ describe("hostEditState", () => {
   });
 });
 
+describe("hostEditState with a grant target", () => {
+  it("becomes editable as soon as another client adds a matching grant", () => {
+    const readOnly = {
+      relativePath: "~/notes.md",
+      contents: "old",
+      byteLength: 3,
+      truncated: false,
+      canGrantEdit: true,
+      grantTarget: { path: grant.path, workspaceRoot: "/home/user/repo" },
+    };
+    expect(hostEditState(readOnly, [])).toEqual({ writable: false, editGrant: undefined });
+    expect(hostEditState(readOnly, [grant])).toEqual({ writable: true, editGrant: grant });
+    const workspace = { kind: "workspace" as const, path: "/home/user/repo" };
+    expect(hostEditState(readOnly, [workspace])).toEqual({ writable: true, editGrant: workspace });
+    // A file grant wins over a workspace grant, as on the server.
+    expect(hostEditState(readOnly, [workspace, grant])).toEqual({
+      writable: true,
+      editGrant: grant,
+    });
+    expect(
+      hostEditState(readOnly, [{ kind: "workspace" as const, path: "/home/user/other" }]),
+    ).toEqual({ writable: false, editGrant: undefined });
+  });
+});
+
 describe("editedHostFileData", () => {
   it("keeps the grant on unsaved edits so the badge can still revoke it", () => {
     expect(editedHostFileData("~/notes.md", "new", read)).toEqual({

@@ -781,10 +781,14 @@ export const make = Effect.gen(function* () {
       options?.grantedEdits === true,
     );
     if (access === null || access.realPath !== realTargetPath) return result;
-    if (access.grant === null) return { ...result, canGrantEdit: true };
-    return access.grant === "allowlist"
-      ? { ...result, writable: true }
-      : { ...result, writable: true, editGrant: access.grant };
+    if (access.grant === "allowlist") return { ...result, writable: true };
+    const grantTarget =
+      options?.grantedEdits === true
+        ? { grantTarget: { path: access.realPath, workspaceRoot: access.workspaceRoot } }
+        : {};
+    return access.grant === null
+      ? { ...result, canGrantEdit: true, ...grantTarget }
+      : { ...result, writable: true, editGrant: access.grant, ...grantTarget };
   });
 
   // Resolve existing ancestors and reject dangling links so creation cannot follow symlinks outside root.

@@ -1194,7 +1194,14 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             yield* write(relativePath, workspace).pipe(Effect.flip);
           });
 
-          expect(yield* read(skill)).toMatchObject({ canGrantEdit: true });
+          // The real paths a grant would name, so clients can match grants made elsewhere.
+          expect(yield* read(skill)).toMatchObject({
+            canGrantEdit: true,
+            grantTarget: {
+              path: path.join(home, "ink", "skills", "choices", "SKILL.md"),
+              workspaceRoot: cwd,
+            },
+          });
           yield* refuses(skill);
 
           const fileGrant = yield* inHome(

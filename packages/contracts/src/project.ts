@@ -448,14 +448,16 @@ export const ProjectReadFileInput = Schema.Struct({
 });
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
 
+// Untrimmed: a grant authorizes these exact bytes, and POSIX names may end in whitespace.
+const GrantPath = Schema.NonEmptyString.check(Schema.isMaxLength(4096));
+
 /**
  * Lets the Files tile edit files outside a workspace: one file by its real path, or every
  * file outside a workspace root while that root is open.
  */
 export const OutsideWorkspaceEditGrant = Schema.Struct({
   kind: Schema.Literals(["file", "workspace"]),
-  // Untrimmed: the grant authorizes these exact bytes, and POSIX names may end in whitespace.
-  path: Schema.NonEmptyString.check(Schema.isMaxLength(4096)),
+  path: GrantPath,
 });
 export type OutsideWorkspaceEditGrant = typeof OutsideWorkspaceEditGrant.Type;
 
@@ -472,6 +474,8 @@ export const ProjectReadFileResult = Schema.Struct({
   editGrant: Schema.optional(OutsideWorkspaceEditGrant),
   // A read-only host file that a grant could make writable.
   canGrantEdit: Schema.optional(Schema.Boolean),
+  // The real paths a file or workspace grant would name, for sessions that may use grants.
+  grantTarget: Schema.optional(Schema.Struct({ path: GrantPath, workspaceRoot: GrantPath })),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
