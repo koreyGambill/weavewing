@@ -536,7 +536,7 @@ if ! t3_runtime_ready; then
     elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=1 "$1" -O "$2"
     else printf 'Remote host needs curl or wget to download %s.\\n' "$T3_ARCHIVE" >&2; exit 1
     fi || {
-      printf 'Could not download t3 %s from %s. If this host cannot reach it, install t3 %s from https://github.com/koreyGambill/weavewing/releases (T3CODE_RELEASE_BASE_URL selects a mirror).\\n' "$T3_ARCHIVE_VERSION" "$1" "$T3_ARCHIVE_VERSION" >&2
+      printf 'Could not download t3 %s from %s. If this host cannot reach it, install t3 %s from https://github.com/koreyGambill/weavewing/releases.\\n' "$T3_ARCHIVE_VERSION" "$1" "$T3_ARCHIVE_VERSION" >&2
       exit 1
     }
   }
@@ -599,6 +599,9 @@ desktop_server_answers() {
   DESKTOP_RUNTIME_INFO="$("$DESKTOP_CLI" __ssh-helper runtime-port "$DEFAULT_SERVER_HOME/userdata/server-runtime.json" 2>/dev/null)" || return 1
   ! managed_server_running "\${DESKTOP_RUNTIME_INFO%% *}" &&
     "$DESKTOP_CLI" __ssh-helper wait-ready "\${DESKTOP_RUNTIME_INFO#* }" "${REMOTE_REUSE_READY_TIMEOUT_MS}" "${SSH_READY_PROBE_TIMEOUT_MS}" >/dev/null 2>&1
+}
+explain_no_desktop_server() {
+  printf 'No running T3 Code desktop app was found in %s to connect to instead. Open the app on this host and retry.\\n' "$DEFAULT_SERVER_HOME" >&2
 }`;
 
 const REMOTE_LAUNCH_SCRIPT = `set -eu
@@ -644,7 +647,7 @@ if [ "$T3_ARCHIVE_MODE" = "1" ]; then
   if desktop_server_answers; then
     USE_DESKTOP_CLI=1
   elif ! "$RUNNER_NEXT" --version >/dev/null; then
-    printf 'No running T3 Code desktop app was found in %s to connect to instead. Open the app on this host and retry.\\n' "$DEFAULT_SERVER_HOME" >&2
+    explain_no_desktop_server
     exit 1
   fi
 elif ! ensure_remote_node_path; then
@@ -1042,11 +1045,12 @@ SH
 chmod 700 "$RUNNER_FILE"
 @@T3_MANAGED_SERVER_RUNNING_SCRIPT@@
 @@T3_DESKTOP_SERVER_SCRIPT@@
-PAIRING_CLI="$RUNNER_FILE"
 if desktop_server_answers; then
-  PAIRING_CLI="$DESKTOP_CLI"
+  "$DESKTOP_CLI" auth pairing create --base-dir "$DEFAULT_SERVER_HOME" --json
+elif ! "$RUNNER_FILE" auth pairing create --base-dir "$DEFAULT_SERVER_HOME" --json; then
+  explain_no_desktop_server
+  exit 1
 fi
-"$PAIRING_CLI" auth pairing create --base-dir "$DEFAULT_SERVER_HOME" --json
 `;
 
 const REMOTE_STOP_SCRIPT = `set -eu

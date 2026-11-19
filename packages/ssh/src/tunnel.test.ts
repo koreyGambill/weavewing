@@ -1637,4 +1637,21 @@ describe("SSH launch on a host running the desktop app", () => {
       assert.include(result.stderr, "No running T3 Code desktop app was found");
     }),
   );
+
+  it.effect(
+    "pairs with this version, and explains its failure, once the app's server is gone",
+    () =>
+      Effect.gen(function* () {
+        const result = runLauncher(yield* capturePairingFor(unpublished), {
+          archive: true,
+          archiveMissing: true,
+          allowFailure: true,
+          desktopApp: "installed",
+        });
+        assert.equal(result.status, 1);
+        assert.include(result.events, "download");
+        assert.include(result.stderr, "Could not download t3 1.2.3");
+        assert.include(result.stderr, "No running T3 Code desktop app was found");
+      }),
+  );
 });
