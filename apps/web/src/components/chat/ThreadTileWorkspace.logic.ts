@@ -40,30 +40,20 @@ export function tileCloseConfirmation(input: {
   };
 }
 
-// Menus and listboxes render in portals outside the workspace that opened them.
-const PORTALED_CONTROL = '[role="menu"], [role="listbox"]';
-let lastTileOwner: Element | null = null;
-let trackingTileFocus = false;
-
+// A portaled menu or listbox belongs to the workspace of the trigger whose aria-controls names
+// it or its popup; submenus chain through their parent menu's trigger, a few levels at most.
 function tileOwnerOf(focused: EventTarget | null): Element | null {
-  if (!(focused instanceof Element)) return null;
-  const workspace = focused.closest("[data-thread-tiling]");
-  if (workspace) return workspace;
-  return focused.closest(PORTALED_CONTROL) && lastTileOwner?.isConnected ? lastTileOwner : null;
-}
-
-/** Remembers the workspace focus was last in, so a menu it opened still acts on it. */
-export function trackTileFocus() {
-  if (trackingTileFocus || typeof document === "undefined") return;
-  trackingTileFocus = true;
-  lastTileOwner = tileOwnerOf(document.activeElement);
-  document.addEventListener(
-    "focusin",
-    (event) => {
-      lastTileOwner = tileOwnerOf(event.target);
-    },
-    true,
-  );
+  let element = focused instanceof Element ? focused : null;
+  for (let hops = 0; element && hops < 8; hops += 1) {
+    const workspace = element.closest("[data-thread-tiling]");
+    if (workspace) return workspace;
+    let popup = element.closest('[role="menu"], [role="listbox"]');
+    element = null;
+    for (; popup && !element; popup = popup.parentElement) {
+      if (popup.id) element = document.querySelector(`[aria-controls="${CSS.escape(popup.id)}"]`);
+    }
+  }
+  return null;
 }
 
 /**

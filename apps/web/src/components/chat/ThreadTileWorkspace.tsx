@@ -107,7 +107,6 @@ import { cn, randomUUID } from "../../lib/utils";
 import { ThreadPaneAttention } from "../ThreadAttentionOverlay";
 import {
   ownsTileInput,
-  trackTileFocus,
   TILE_AREAS,
   tileCloseConfirmation,
   type TileAreaLabel,
@@ -844,7 +843,6 @@ export function ThreadTileWorkspace(props: {
         focus(current.focusedGroupId);
       }
     };
-    trackTileFocus();
     window.addEventListener("keydown", onKeyDown);
     const disposers = [
       () => window.removeEventListener("keydown", onKeyDown),
