@@ -35,6 +35,7 @@ import * as PullRequestReviewGuides from "../persistence/PullRequestReviewGuides
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { PATCH_RENDER_PREFIX_ARGS } from "../vcs/GitVcsDriverCore.ts";
@@ -461,6 +462,14 @@ const make = Effect.gen(function* () {
       return yield* new PullRequestOperationError({
         operation: "generateReviewGuide",
         detail: "Review guides are off. Turn them on in Settings → Source Control.",
+      });
+    }
+    // The guide's agent reads a scratch T3 worktree of the head.
+    const worktreeProvider = yield* readWorktreeProvider(serverSettings);
+    if (worktreeProvider !== "t3") {
+      return yield* new PullRequestOperationError({
+        operation: "generateReviewGuide",
+        detail: `Review guides need a T3 worktree of the pull request. ${worktreeProviderRefusal(worktreeProvider)}`,
       });
     }
     // A supplied thread that cannot be read fails the request: guessing a model could send the

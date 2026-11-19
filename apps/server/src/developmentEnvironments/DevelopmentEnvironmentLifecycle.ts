@@ -50,6 +50,8 @@ import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as XwingEnvironments from "../xwing/XwingEnvironments.ts";
 import * as XwingOperations from "../xwing/XwingOperations.ts";
 import * as DevelopmentEnvironmentHolds from "./DevelopmentEnvironmentHolds.ts";
+import { holdKey } from "./DevelopmentEnvironmentHolds.ts";
+import { sanitizeBranchFragment, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 
 export { DevelopmentEnvironmentLifecycleError };
 
@@ -87,6 +89,24 @@ export class DevelopmentEnvironmentLifecycle extends Context.Service<
     readonly cleanUp: (
       input: DevelopmentEnvironmentCleanUpInput,
     ) => Failure<DevelopmentEnvironmentCleanUpResult>;
+    /**
+     * The environment for one isolated thread launch, named from its stable launch key: a retry
+     * finds the environment an earlier attempt made, and separate launches each get their own.
+     * `startFromOrigin` bases a new branch on the base branch's remote-tracking ref.
+     */
+    readonly prepareLaunch: (input: {
+      readonly projectId: ProjectId;
+      readonly launchKey: string;
+      readonly title: string;
+      readonly branch?: string | undefined;
+      readonly baseRef: string;
+      readonly startFromOrigin: boolean;
+    }) => Failure<{ readonly xwingEnvironmentId: XwingEnvironmentId; readonly created: boolean }>;
+    /** Releases a launch's hold and deletes the environment `prepareLaunch` made for it. */
+    readonly discardLaunch: (input: {
+      readonly xwingEnvironmentId: XwingEnvironmentId;
+      readonly hold: { readonly threadId: string; readonly period: string };
+    }) => Effect.Effect<void>;
   }
 >()("t3/developmentEnvironments/DevelopmentEnvironmentLifecycle") {}
 
@@ -602,7 +622,104 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const gitStdout = (operation: string, cwd: string, args: ReadonlyArray<string>) =>
+    git.execute({ operation, cwd, args, allowNonZeroExit: true, timeoutMs: 5_000 }).pipe(
+      Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() : "")),
+      Effect.orElseSucceed(() => ""),
+    );
+
+  // Matches ThreadLaunchService: the base branch's upstream, else the same name on origin.
+  const launchBase = Effect.fn("DevelopmentEnvironmentLifecycle.launchBase")(function* (
+    sourcePath: string,
+    baseRef: string,
+    startFromOrigin: boolean,
+  ) {
+    // An option-like ref goes on unchanged; Xwing's base validation refuses it.
+    if (!startFromOrigin || baseRef.startsWith("-")) return baseRef;
+    const upstream = yield* gitStdout(
+      "DevelopmentEnvironmentLifecycle.launchBase.upstream",
+      sourcePath,
+      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${baseRef}@{upstream}`],
+    );
+    if (upstream !== "") return upstream;
+    const onOrigin = yield* gitStdout(
+      "DevelopmentEnvironmentLifecycle.launchBase.origin",
+      sourcePath,
+      ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${baseRef}`],
+    );
+    return onOrigin === "" ? baseRef : `origin/${baseRef}`;
+  });
+
+  const prepareLaunch: DevelopmentEnvironmentLifecycle["Service"]["prepareLaunch"] = Effect.fn(
+    "DevelopmentEnvironmentLifecycle.prepareLaunch",
+  )(function* (input) {
+    const sourcePath = yield* projectSource("create", input.projectId);
+    const key = NodeCrypto.createHash("sha256").update(input.launchKey).digest("hex").slice(0, 8);
+    const marker = `[t3 ${key}]`;
+    const attachLaunch = (id: XwingEnvironmentId) =>
+      launchBase(sourcePath, input.baseRef, input.startFromOrigin).pipe(
+        Effect.flatMap((base) =>
+          attachProject(id, sourcePath, {
+            branch:
+              input.branch ??
+              `${WORKTREE_BRANCH_PREFIX}/${sanitizeBranchFragment(input.title).slice(0, 40)}-${key}`,
+            base,
+          }),
+        ),
+      );
+    const existing = yield* catalog.list().pipe(
+      Effect.map((environments) =>
+        environments.find(
+          (environment) => environment.status === "active" && environment.name.endsWith(marker),
+        ),
+      ),
+      Effect.catch((cause) => Effect.flip(unreadable("create", "")(cause))),
+    );
+    if (existing !== undefined) {
+      const attached = existing.repositories.some(
+        (repository) => path.resolve(repository.sourcePath) === path.resolve(sourcePath),
+      );
+      const result = attached ? null : yield* attachLaunch(existing.id);
+      if (result?.failure != null)
+        return yield* lifecycleError("attach", result.failure.reason, existing.id);
+      return { xwingEnvironmentId: existing.id, created: false };
+    }
+    const title = input.title.replace(/\s+/g, " ").trim() || "T3 thread";
+    const created = yield* operations
+      .create({ name: `${title.slice(0, 180)} ${marker}` })
+      .pipe(Effect.catch((error) => Effect.flip(sanitized("create")(error))));
+    const result = yield* attachLaunch(created.id);
+    if (result.failure !== null) {
+      yield* operations
+        .delete({ id: created.id, confirmId: created.id })
+        .pipe(Effect.ignore({ log: true }));
+      return yield* lifecycleError("attach", result.failure.reason, created.id);
+    }
+    return { xwingEnvironmentId: created.id, created: true };
+  });
+
+  const discardLaunch: DevelopmentEnvironmentLifecycle["Service"]["discardLaunch"] = Effect.fn(
+    "DevelopmentEnvironmentLifecycle.discardLaunch",
+  )(function* (input) {
+    const id = input.xwingEnvironmentId;
+    const owner = yield* holds.owner;
+    yield* holds.exclusive(
+      id,
+      operations.releaseHold({ id, owner, key: holdKey(input.hold) }).pipe(
+        Effect.andThen(operations.delete({ id, confirmId: id })),
+        Effect.catch((error) =>
+          Effect.logWarning(
+            "Could not remove the Xwing environment of a failed launch",
+            error,
+          ).pipe(Effect.annotateLogs({ xwingEnvironmentId: id })),
+        ),
+      ),
+    );
+  });
+
   return DevelopmentEnvironmentLifecycle.of({
+    prepareLaunch,
+    discardLaunch,
     create,
     attach,
     repair,

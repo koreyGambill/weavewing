@@ -37,6 +37,8 @@ import {
   TextGenerationError,
   ServerSettingsError,
   VcsProcessExitError,
+  XwingEnvironmentId,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -143,10 +145,15 @@ interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly getLaunchSettings?: ServerSettings.ServerSettingsService["Service"]["getSettings"];
+  /** What the settings service reports as the worktree policy alongside `getLaunchSettings`. */
+  readonly launchWorktreeProvider?: "t3" | "xwing" | "off";
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly git?: Partial<GitWorkflow.GitWorkflowService["Service"]>;
   readonly isGitRepository?: CheckpointStore.CheckpointStore["Service"]["isGitRepository"];
-  readonly createXwingEnvironment?: DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["create"];
+  readonly xwingLaunch?: Pick<
+    DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"],
+    "prepareLaunch" | "discardLaunch"
+  >;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -267,6 +274,7 @@ function makeHarness(options: HarnessOptions = {}) {
           ? Layer.empty
           : Layer.mock(ServerSettings.ServerSettingsService)({
               getSettings: options.getLaunchSettings,
+              worktreeProvider: Effect.succeed(options.launchWorktreeProvider ?? "t3"),
             }),
       ),
     ),
@@ -315,9 +323,7 @@ function makeHarness(options: HarnessOptions = {}) {
       layerDatabase,
       layerExternalServices,
       Layer.mock(DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle)(
-        options.createXwingEnvironment === undefined
-          ? {}
-          : { create: options.createXwingEnvironment },
+        options.xwingLaunch ?? {},
       ),
     ),
     createWorktree,
@@ -990,10 +996,7 @@ it.effect("a rejected initial message leaves no title change and no new thread",
 function scratchHarness({
   scratch = true,
   ...options
-}: { readonly scratch?: boolean } & Pick<
-  HarnessOptions,
-  "serverSettings" | "createXwingEnvironment"
-> = {}) {
+}: { readonly scratch?: boolean } & Pick<HarnessOptions, "serverSettings" | "xwingLaunch"> = {}) {
   const claimed: Array<ThreadId> = [];
   const scratchRoot = project.workspaceRoot;
   const notARepository = (operation: string, cwd: string) =>
@@ -1128,6 +1131,7 @@ it.effect.each([
 it.effect(
   "starts a worktree with the default temporary name when settings secrets cannot be read",
   () => {
+    // The worktree policy is read without secrets, so it stays readable here.
     const harness = makeHarness({
       getLaunchSettings: Effect.fail(
         new ServerSettingsError({ settingsPath: "/settings.json", operation: "read-secret" }),
@@ -1153,6 +1157,41 @@ it.effect(
     }).pipe(Effect.provide(harness.layer));
   },
 );
+
+it.effect("keeps checkout launches working while an unreadable policy refuses worktrees", () => {
+  // An unreadable settings file reports "off" until a policy has been read.
+  const harness = makeHarness({
+    getLaunchSettings: Effect.fail(
+      new ServerSettingsError({ settingsPath: "/settings.json", operation: "read-file" }),
+    ),
+    launchWorktreeProvider: "off",
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const refused = yield* launches
+      .launch(
+        launchInput({
+          command: "unreadable-policy-worktree",
+          thread: "unreadable-policy-worktree-thread",
+          message: "Fix the parser",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      )
+      .pipe(Effect.flip);
+    assert.equal(refused._tag, "ThreadLaunchWorktreeProviderError");
+    const launched = yield* launches.launch(
+      launchInput({
+        command: "unreadable-policy-root",
+        thread: "unreadable-policy-root-thread",
+        message: "Fix the parser",
+        workspace: { type: "root" },
+      }),
+    );
+    const projection = yield* preparationSettled(launched.threadId);
+    assert.equal(projection.runs[0]?.status, "starting");
+    assert.equal(harness.createWorktree.mock.calls.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
 
 it.effect("renames a temporary branch with a configured prefix when generation succeeds", () => {
   const harness = makeHarness({
@@ -1333,106 +1372,153 @@ it.effect("launches into a resolved Xwing checkout without creating or setting i
   }).pipe(Effect.provide(harness.layer));
 });
 
+type XwingLaunchInput = Parameters<
+  DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["prepareLaunch"]
+>[0];
+type XwingDiscardInput = Parameters<
+  DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["discardLaunch"]
+>[0];
+
+/** Intake under `worktreeProvider: "xwing"`, with Xwing and the checkout lookup faked. */
+function xwingIntake(options: { readonly checkoutUnavailable?: boolean } = {}) {
+  const prepared: Array<XwingLaunchInput> = [];
+  const discarded: Array<XwingDiscardInput> = [];
+  const harness = scratchHarness({
+    serverSettings: { worktreeProvider: "xwing" },
+    xwingLaunch: {
+      prepareLaunch: (input) =>
+        Effect.sync(() => {
+          prepared.push(input);
+          return {
+            xwingEnvironmentId: XwingEnvironmentId.make("0123abcd"),
+            created: prepared.filter((entry) => entry.launchKey === input.launchKey).length === 1,
+          };
+        }),
+      discardLaunch: (input) => Effect.sync(() => void discarded.push(input)),
+    },
+  });
+  const resolved: Array<{ readonly xwingEnvironmentId: string; readonly workspaceRoot: string }> =
+    [];
+  const holds: Array<{ readonly id: string; readonly key: string }> = [];
+  const layerEnvironments = DevelopmentEnvironments.layer.pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-xwing-intake-checkouts-" })),
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.mock(WorkspacePaths.WorkspacePaths)({})),
+    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+    Layer.provide(DevelopmentEnvironmentHolds.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        harness.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+        Layer.mock(ServerEnvironmentIdentity)({
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("server-environment")),
+        }),
+        Layer.mock(XwingOperations.XwingOperations)({
+          registerHold: (hold) =>
+            Effect.sync(() => {
+              holds.push(hold);
+              return {} as never;
+            }),
+        }),
+        Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
+          resolve: (input) =>
+            options.checkoutUnavailable === true
+              ? Effect.fail(
+                  new DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckoutUnavailableError(
+                    { xwingEnvironmentId: input.xwingEnvironmentId, reason: "checkout-missing" },
+                  ),
+                )
+              : Effect.sync(() => {
+                  resolved.push(input);
+                  return {
+                    xwingEnvironmentId: input.xwingEnvironmentId,
+                    repositorySource: "/other-repo",
+                    checkoutPath: "/xwing/envs/4/other-repo",
+                    number: 4,
+                    name: "feature",
+                    branch: "feature/xwing",
+                  };
+                }),
+        }),
+      ),
+    ),
+  );
+  return {
+    harness,
+    prepared,
+    discarded,
+    resolved,
+    holds,
+    layer: Layer.mergeAll(
+      harness.layer,
+      layerEnvironments,
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-xwing-intake-" }).pipe(
+        Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+      ),
+    ),
+  };
+}
+
+const xwingLaunchRequest = (
+  workspaceStrategy: ThreadMessageIntake.ThreadLaunchRequest["workspaceStrategy"],
+) => ({
+  ...launchInput({
+    command: "command:launch:xwing-request",
+    thread: "thread:launch:xwing-request",
+    message: "Work in my environment",
+  }),
+  title: "Fix the checkout total",
+  projectId: otherProjectId,
+  workspaceStrategy,
+});
+
 it.effect.each(["named", "worktreeProvider"] as const)(
   "launches a request for an Xwing environment in the checkout this host resolves (%s)",
   (request) => {
-    const created: Array<
-      Parameters<
-        DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle["Service"]["create"]
-      >[0]
-    > = [];
-    const harness = scratchHarness({
-      serverSettings: { worktreeProvider: "xwing" },
-      createXwingEnvironment: (input) =>
-        Effect.sync(() => {
-          created.push(input);
-          return { xwingEnvironmentId: "0123abcd", repository: null, failure: null } as never;
-        }),
-    });
-    const resolved: Array<{ readonly xwingEnvironmentId: string; readonly workspaceRoot: string }> =
-      [];
-    const holds: Array<{ readonly id: string; readonly key: string }> = [];
-    const layerEnvironments = DevelopmentEnvironments.layer.pipe(
-      Layer.provide(
-        ServerConfig.layerTest(process.cwd(), { prefix: "t3-xwing-intake-checkouts-" }),
-      ),
-      Layer.provide(ServerSettings.layerTest()),
-      Layer.provide(NodeServices.layer),
-      Layer.provide(Layer.mock(WorkspacePaths.WorkspacePaths)({})),
-      Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-      Layer.provide(DevelopmentEnvironmentHolds.layer),
-      Layer.provide(
-        Layer.mergeAll(
-          harness.layer,
-          Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
-          Layer.mock(ServerEnvironmentIdentity)({
-            getEnvironmentId: Effect.succeed(EnvironmentId.make("server-environment")),
-          }),
-          Layer.mock(XwingOperations.XwingOperations)({
-            registerHold: (hold) =>
-              Effect.sync(() => {
-                holds.push(hold);
-                return {} as never;
-              }),
-          }),
-          Layer.mock(DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts)({
-            resolve: (input) =>
-              Effect.sync(() => {
-                resolved.push(input);
-                return {
-                  xwingEnvironmentId: input.xwingEnvironmentId,
-                  repositorySource: "/other-repo",
-                  checkoutPath: "/xwing/envs/4/other-repo",
-                  number: 4,
-                  name: "feature",
-                  branch: "feature/xwing",
-                };
-              }),
-          }),
-        ),
-      ),
-    );
+    const intake = xwingIntake();
+    const worktree = { type: "worktree", baseRef: "main", startFromOrigin: true } as const;
     return Effect.gen(function* () {
-      const launched = yield* ThreadMessageIntake.launchThread({
-        ...launchInput({
-          command: "command:launch:xwing-request",
-          thread: "thread:launch:xwing-request",
-          message: "Work in my environment",
-        }),
-        title: "Fix the checkout total",
-        projectId: otherProjectId,
-        workspaceStrategy:
+      const launched = yield* ThreadMessageIntake.launchThread(
+        xwingLaunchRequest(
           request === "named"
             ? { type: "xwing_environment", xwingEnvironmentId: "0123abcd" }
-            : { type: "worktree", baseRef: "main", startFromOrigin: true },
-      });
+            : worktree,
+        ),
+      );
       if (request === "worktreeProvider") {
-        assert.equal(created.length, 1);
-        assert.equal(created[0]?.projectId, otherProjectId);
-        assert.equal(created[0]?.name, "Fix the checkout total");
-        assert.equal(created[0]?.base, "main");
-        assert.match(created[0]?.branch ?? "", /^t3\/fix-the-checkout-total-[0-9a-f]{6}$/);
-        // A retried launch finds its thread bound and makes no second environment.
-        yield* ThreadMessageIntake.launchThread({
-          ...launchInput({
-            command: "command:launch:xwing-request",
-            thread: "thread:launch:xwing-request",
-            message: "Work in my environment",
-          }),
-          title: "Fix the checkout total",
-          projectId: otherProjectId,
-          workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
-        });
-        assert.equal(created.length, 1);
+        // A retried launch carries the same launch key, which finds the same environment.
+        yield* ThreadMessageIntake.launchThread(xwingLaunchRequest(worktree));
+        assert.deepEqual(intake.prepared, [
+          {
+            projectId: otherProjectId,
+            launchKey: "thread:launch:xwing-request",
+            title: "Fix the checkout total",
+            branch: undefined,
+            baseRef: "main",
+            startFromOrigin: true,
+          },
+          {
+            projectId: otherProjectId,
+            launchKey: "thread:launch:xwing-request",
+            title: "Fix the checkout total",
+            branch: undefined,
+            baseRef: "main",
+            startFromOrigin: true,
+          },
+        ]);
       } else {
-        assert.equal(created.length, 0);
+        assert.deepEqual(intake.prepared, []);
       }
-      assert.deepEqual(resolved.slice(0, 1), [
+      assert.deepEqual(intake.discarded, []);
+      assert.deepEqual(intake.resolved.slice(0, 1), [
         { xwingEnvironmentId: "0123abcd", workspaceRoot: otherProject.workspaceRoot },
       ]);
       // A retry registers the same hold key again; Xwing keys holds idempotently.
       assert.deepEqual(
-        [...new Set(holds.map((hold) => `${hold.id} ${hold.key}`))].map((hold) => hold.split(" ")),
+        [...new Set(intake.holds.map((hold) => `${hold.id} ${hold.key}`))].map((hold) =>
+          hold.split(" "),
+        ),
         [
           [
             "0123abcd",
@@ -1448,21 +1534,51 @@ it.effect.each(["named", "worktreeProvider"] as const)(
       assert.equal(projection.thread.worktreePath, "/xwing/envs/4/other-repo");
       assert.equal(projection.thread.branch, "feature/xwing");
       assert.equal(projection.thread.developmentEnvironment?.xwingEnvironmentId, "0123abcd");
-      assert.equal(harness.createWorktree.mock.calls.length, 0);
-      assert.equal(harness.runSetup.mock.calls.length, 0);
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          harness.layer,
-          layerEnvironments,
-          ServerConfig.layerTest(process.cwd(), { prefix: "t3-xwing-intake-" }).pipe(
-            Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
-          ),
-        ),
-      ),
-    );
+      assert.equal(intake.harness.createWorktree.mock.calls.length, 0);
+      assert.equal(intake.harness.runSetup.mock.calls.length, 0);
+    }).pipe(Effect.provide(intake.layer));
   },
 );
+
+it.effect("checks attachment limits before making an Xwing environment", () => {
+  const intake = xwingIntake();
+  return Effect.gen(function* () {
+    const request = xwingLaunchRequest({ type: "worktree", baseRef: "main" });
+    const attachments = Array.from(
+      { length: PROVIDER_SEND_TURN_MAX_ATTACHMENTS + 1 },
+      (_, index) =>
+        ({
+          type: "file",
+          id: `attachment-${index}`,
+          name: `note-${index}.txt`,
+          mimeType: "text/plain",
+          sizeBytes: 1,
+        }) as never,
+    );
+    const failure = yield* ThreadMessageIntake.launchThread({
+      ...request,
+      initialMessage: { ...request.initialMessage!, attachments },
+    }).pipe(Effect.flip);
+    assert.equal(failure._tag, "AttachmentClaimError");
+    assert.deepEqual(intake.prepared, []);
+  }).pipe(Effect.provide(intake.layer));
+});
+
+it.effect("removes the Xwing environment it made when the launch is not accepted", () => {
+  const intake = xwingIntake({ checkoutUnavailable: true });
+  return Effect.gen(function* () {
+    const failure = yield* ThreadMessageIntake.launchThread(
+      xwingLaunchRequest({ type: "worktree", baseRef: "main" }),
+    ).pipe(Effect.flip);
+    assert.equal(failure._tag, "DevelopmentEnvironmentCheckoutUnavailableError");
+    assert.deepEqual(intake.discarded, [
+      {
+        xwingEnvironmentId: XwingEnvironmentId.make("0123abcd"),
+        hold: { threadId: "thread:launch:xwing-request", period: "command:launch:xwing-request" },
+      },
+    ]);
+  }).pipe(Effect.provide(intake.layer));
+});
 
 it.effect.each([true, false])(
   "stores a non-Git scheduled task at the root and keeps worktrees elsewhere (Scratch: %s)",
@@ -1478,6 +1594,26 @@ it.effect.each([true, false])(
         scheduledTaskInput("scheduled-task:git-upsert", otherProjectId),
       );
       assert.deepEqual(git.task.workspaceStrategy, worktreeStrategy);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect.each(["xwing", "off"] as const)(
+  "refuses to save a scheduled task that starts a new worktree under worktreeProvider %s",
+  (worktreeProvider) => {
+    const harness = scratchHarness({ scratch: false, serverSettings: { worktreeProvider } });
+    return Effect.gen(function* () {
+      const tasks = yield* ScheduledTasks.ScheduledTaskService;
+      const refused = yield* tasks
+        .upsert(scheduledTaskInput("scheduled-task:refused-worktree", otherProjectId))
+        .pipe(Effect.flip);
+      assert.include(refused.message, `\`worktreeProvider\` server setting (${worktreeProvider})`);
+      assert.deepEqual((yield* tasks.list()).tasks, []);
+      const root = yield* tasks.upsert({
+        ...scheduledTaskInput("scheduled-task:root-checkout", otherProjectId),
+        workspaceStrategy: { type: "root" },
+      });
+      assert.deepEqual(root.task.workspaceStrategy, { type: "root" });
     }).pipe(Effect.provide(harness.layer));
   },
 );

@@ -1,4 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- fixture repositories need plain git.
+import * as NodeChildProcess from "node:child_process";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- fixture repositories need a temp folder.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- fixture repositories need a temp folder.
+import * as NodePath from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import {
   DevelopmentEnvironmentLifecycleError,
@@ -65,6 +72,8 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
     calls: [] as Array<string>,
     attachFailures: 0,
     refuseDelete: false,
+    environments: [] as Array<{ name: string; sourcePaths: Array<string> }>,
+    attachBases: [] as Array<string | undefined>,
   };
   const blockers = () => [
     ...state.holds.map(
@@ -97,6 +106,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
     create: (input) =>
       Effect.sync(() => {
         state.calls.push(`create ${input.name}`);
+        state.environments.push({ name: input.name, sourcePaths: [] });
         return {
           id: ID,
           number: 7,
@@ -108,10 +118,12 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
     attachRepository: (input) =>
       Effect.suspend(() => {
         state.calls.push(`attach ${input.sourcePath} ${input.branch}`);
+        state.attachBases.push(input.base);
         if (state.attachFailures > 0) {
           state.attachFailures -= 1;
           return Effect.fail(failed("attachRepository", "baseNotFound"));
         }
+        state.environments.at(-1)?.sourcePaths.push(input.sourcePath);
         return Effect.succeed({
           environmentId: ID,
           name: "app",
@@ -198,6 +210,7 @@ const makeXwing = (initial: { readonly dirty?: boolean; readonly holds?: Array<X
           return Effect.fail(failed("delete", "blocked"));
         }
         state.deleted = true;
+        state.environments.pop();
         return Effect.succeed({
           environmentId: ID,
           outcome: "deleted" as const,
@@ -298,6 +311,8 @@ const makeLayer = (input: {
   readonly threads?: ReadonlyArray<ThreadFixture>;
   readonly usage?: ReadonlyArray<OrchestrationV2DevelopmentEnvironmentUsage>;
   readonly schedules?: ReadonlyArray<ScheduledTask>;
+  readonly git?: GitVcsDriver.GitVcsDriver["Service"]["execute"];
+  readonly workspaceRoot?: string;
 }) => {
   const threads = new Map((input.threads ?? []).map((thread) => [thread.id, thread]));
   const holds = DevelopmentEnvironmentHolds.layer.pipe(
@@ -348,17 +363,43 @@ const makeLayer = (input: {
         }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () =>
-            Effect.succeed(Option.some({ workspaceRoot: "/home/dev/src/app/web" }) as never),
+            Effect.succeed(
+              Option.some({
+                workspaceRoot: input.workspaceRoot ?? "/home/dev/src/app/web",
+              }) as never,
+            ),
         }),
         Layer.mock(GitVcsDriver.GitVcsDriver)({
-          execute: () =>
-            Effect.succeed({
-              exitCode: 0,
-              stdout: "/home/dev/src/app\n",
-            } as never),
+          execute:
+            input.git ??
+            ((request) =>
+              Effect.succeed(
+                (request.args[0] === "rev-parse" && request.args[1] === "--show-toplevel"
+                  ? { exitCode: 0, stdout: "/home/dev/src/app\n" }
+                  : { exitCode: 1, stdout: "" }) as never,
+              )),
         }),
         Layer.mock(XwingEnvironments.XwingEnvironments)({
           inspect: () => Effect.fail(new XwingEnvironmentNotFoundError({ environmentId: ID })),
+          list: () =>
+            Effect.sync(
+              () =>
+                input.xwing.state.environments.map((environment) => ({
+                  id: ID,
+                  name: environment.name,
+                  status: "active" as const,
+                  rootPath: ROOT,
+                  createdAt: "now",
+                  updatedAt: "now",
+                  repositories: environment.sourcePaths.map((sourcePath) => ({
+                    name: "app",
+                    sourcePath,
+                    path: `${ROOT}/app`,
+                    branch: "b",
+                    exists: true,
+                  })),
+                })) as never,
+            ),
         }),
         input.xwing.operations,
         NodeServices.layer,
@@ -370,6 +411,49 @@ const makeLayer = (input: {
 const lifecycle = DevelopmentEnvironmentLifecycle.DevelopmentEnvironmentLifecycle;
 
 const encodeError = Schema.encodeSync(Schema.fromJsonString(DevelopmentEnvironmentLifecycleError));
+
+const runGit = (cwd: string, args: ReadonlyArray<string>) =>
+  NodeChildProcess.execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
+
+const realGit: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (request) =>
+  Effect.sync(() => {
+    try {
+      return { exitCode: 0, stdout: `${runGit(request.cwd, request.args)}\n` } as never;
+    } catch {
+      return { exitCode: 1, stdout: "" } as never;
+    }
+  });
+
+/** A clone whose `main` is one commit behind `origin/main`. */
+const cloneBehindOrigin = () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-xwing-launch-"));
+  const remote = NodePath.join(root, "remote.git");
+  const seed = NodePath.join(root, "seed");
+  const clone = NodePath.join(root, "clone");
+  const identity = ["-c", "user.email=t@example.com", "-c", "user.name=t"];
+  runGit(root, ["init", "--quiet", "--bare", "-b", "main", remote]);
+  runGit(root, ["clone", "--quiet", remote, seed]);
+  runGit(seed, [...identity, "commit", "--quiet", "--allow-empty", "-m", "one"]);
+  runGit(seed, ["push", "--quiet", "origin", "HEAD:main"]);
+  runGit(root, ["clone", "--quiet", remote, clone]);
+  runGit(seed, [...identity, "commit", "--quiet", "--allow-empty", "-m", "two"]);
+  runGit(seed, ["push", "--quiet", "origin", "HEAD:main"]);
+  runGit(clone, ["fetch", "--quiet", "origin"]);
+  return {
+    root,
+    clone,
+    localHead: runGit(clone, ["rev-parse", "main"]),
+    remoteHead: runGit(seed, ["rev-parse", "HEAD"]),
+  };
+};
+
+const launch = (launchKey: string, overrides: { readonly startFromOrigin?: boolean } = {}) => ({
+  projectId: PROJECT,
+  launchKey,
+  title: "Fix the parser",
+  baseRef: "main",
+  startFromOrigin: overrides.startFromOrigin ?? false,
+});
 
 describe("DevelopmentEnvironmentLifecycle", () => {
   it.effect("forwards app-start diagnostics through the client error", () => {
@@ -417,6 +501,77 @@ describe("DevelopmentEnvironmentLifecycle", () => {
       ]);
     }).pipe(Effect.provide(makeLayer({ xwing })));
   });
+
+  it.effect("gives each launch its own environment and lets a retry reuse it", () => {
+    const xwing = makeXwing({});
+    return Effect.gen(function* () {
+      const service = yield* lifecycle;
+      const first = yield* service.prepareLaunch(launch("thread-a"));
+      const second = yield* service.prepareLaunch(launch("thread-b"));
+      const retried = yield* service.prepareLaunch(launch("thread-a"));
+      assert.isTrue(first.created);
+      assert.isTrue(second.created);
+      assert.isFalse(retried.created);
+      const created = xwing.state.calls.filter((call) => call.startsWith("create "));
+      assert.lengthOf(created, 2);
+      assert.notEqual(created[0], created[1]);
+      for (const call of created) assert.match(call, /^create Fix the parser \[t3 [0-9a-f]{8}\]$/);
+      const branches = xwing.state.calls.filter((call) => call.startsWith("attach "));
+      assert.lengthOf(branches, 2);
+      assert.notEqual(branches[0], branches[1]);
+      for (const call of branches) assert.match(call, / t3\/fix-the-parser-[0-9a-f]{8}$/);
+    }).pipe(Effect.provide(makeLayer({ xwing })));
+  });
+
+  it.effect.each([false, true])(
+    "bases a launch on the remote-tracking branch only when startFromOrigin is %s",
+    (startFromOrigin) => {
+      const repository = cloneBehindOrigin();
+      const xwing = makeXwing({});
+      return Effect.gen(function* () {
+        const service = yield* lifecycle;
+        yield* service.prepareLaunch(launch("thread-origin", { startFromOrigin }));
+        const base = xwing.state.attachBases[0];
+        assert.equal(base, startFromOrigin ? "origin/main" : "main");
+        assert.equal(
+          runGit(repository.clone, ["rev-parse", `${base}^{commit}`]),
+          startFromOrigin ? repository.remoteHead : repository.localHead,
+        );
+        assert.notEqual(repository.remoteHead, repository.localHead);
+      }).pipe(
+        Effect.provide(makeLayer({ xwing, git: realGit, workspaceRoot: repository.clone })),
+        Effect.ensuring(
+          Effect.sync(() => NodeFS.rmSync(repository.root, { recursive: true, force: true })),
+        ),
+      );
+    },
+  );
+
+  it.effect("removes a launch's new environment when its checkout fails", () => {
+    const xwing = makeXwing({});
+    xwing.state.attachFailures = 1;
+    return Effect.gen(function* () {
+      const service = yield* lifecycle;
+      const error = yield* Effect.flip(service.prepareLaunch(launch("thread-attach")));
+      assert.equal(error.reason, "baseNotFound");
+      assert.isTrue(xwing.state.deleted);
+      assert.deepEqual(xwing.state.environments, []);
+    }).pipe(Effect.provide(makeLayer({ xwing })));
+  });
+
+  it.effect(
+    "releases the hold and deletes the environment of a launch that was not accepted",
+    () => {
+      const binding = { threadId: "thread-discard", period: "command-discard" };
+      const xwing = makeXwing({ holds: [bindingHold(binding.threadId, binding.period)] });
+      return Effect.gen(function* () {
+        const service = yield* lifecycle;
+        yield* service.discardLaunch({ xwingEnvironmentId: ID, hold: binding });
+        assert.deepEqual(xwing.state.holds, []);
+        assert.isTrue(xwing.state.deleted);
+      }).pipe(Effect.provide(makeLayer({ xwing })));
+    },
+  );
 
   it.effect("names every thread, schedule and hold that keeps the environment", () => {
     const xwing = makeXwing({

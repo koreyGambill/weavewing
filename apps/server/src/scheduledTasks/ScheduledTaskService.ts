@@ -78,6 +78,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { forkParked } from "../serverActivation.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -564,6 +566,7 @@ export const layer = Layer.effect(
     const notifications = yield* NotificationService.NotificationService;
     const serviceScope = yield* Effect.scope;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const scheduler = yield* Scheduler.Scheduler;
     const readWebhookOrigin = yield* ScheduledTaskWebhookOrigin;
@@ -2397,6 +2400,16 @@ export const layer = Layer.effect(
           (yield* threadLaunch.isNonGitProject(input.projectId)))
           ? { type: "root" }
           : input.workspaceStrategy;
+      // Scheduled runs launch outside the composer's Xwing routing, so they need T3 worktrees.
+      if (workspaceStrategy.type === "worktree") {
+        const worktreeProvider = yield* readWorktreeProvider(serverSettings);
+        if (worktreeProvider !== "t3") {
+          return yield* taskError(
+            `Scheduled tasks cannot start in a new worktree on this machine. ${worktreeProviderRefusal(worktreeProvider)} Run the task in the project checkout or an existing checkout, or bind it to a thread.`,
+            { taskId: id },
+          );
+        }
+      }
       const scheduleUnchanged =
         existingTask !== null &&
         existingTask.enabled === input.enabled &&

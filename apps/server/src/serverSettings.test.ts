@@ -495,7 +495,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       const config = yield* ServerConfig.ServerConfig;
       const fs = yield* FileSystem.FileSystem;
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      yield* serverSettings.getSettings;
+      yield* serverSettings.updateSettings({ worktreeProvider: "xwing" });
       const raw = `{ "responseStreamingMode": "turn", `;
       yield* fs.writeFileString(config.settingsPath, raw);
 
@@ -509,6 +509,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       assert.equal(error.settingsPath, config.settingsPath);
       assert.instanceOf(error.cause, Error);
       assert.equal(yield* fs.readFileString(config.settingsPath), raw);
+      // The unreadable file keeps the worktree policy last read from it.
+      assert.equal(yield* serverSettings.worktreeProvider, "xwing");
+      assert.equal((yield* serverSettings.getSettings).worktreeProvider, "xwing");
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -938,6 +941,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       });
 
       assert.isFalse(settings.continueThreadsAfterServerUpdate);
+      // With no earlier read to fall back on, an unreadable policy refuses T3 worktrees.
+      assert.equal(settings.worktreeProvider, "off");
+      assert.equal(yield* serverSettings.worktreeProvider, "off");
       assert.equal(yield* fileSystem.readFileString(serverConfig.settingsPath), raw);
     }).pipe(Effect.provide(layerServerSettings())),
   );

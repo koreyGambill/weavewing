@@ -533,6 +533,36 @@ it.layer(layerBase, { excludeTestServices: true })("PullRequestReviewGuideServic
     }),
   );
 
+  it.effect.each(["xwing", "off"] as const)(
+    "refuses a guide before checking anything out when worktreeProvider is %s",
+    (worktreeProvider) =>
+      Effect.gen(function* () {
+        const repositories = yield* makeRepositories;
+        const generated = yield* Ref.make(0);
+        const context = yield* Layer.build(
+          makeLayer({
+            ...repositories,
+            stored: yield* Deferred.make<void>(),
+            serverSettings: { worktreeProvider },
+            generate: () =>
+              Ref.update(generated, (count) => count + 1).pipe(Effect.as({ stops: [] })),
+          }),
+        );
+        const service = Context.get(
+          context,
+          PullRequestReviewGuideService.PullRequestReviewGuideService,
+        );
+        const failure = yield* Effect.flip(service.generate(reference));
+        assert.include(
+          failure.message,
+          `\`worktreeProvider\` server setting (${worktreeProvider})`,
+        );
+        assert.strictEqual(yield* Ref.get(generated), 0);
+        const worktrees = yield* git(repositories.workspace, ["worktree", "list", "--porcelain"]);
+        assert.strictEqual(worktrees.match(/^worktree /gm)?.length, 1);
+      }),
+  );
+
   it.effect("measures only the PR change using the renamed verified remote's fetch URL", () =>
     Effect.gen(function* () {
       const repositories = yield* makeRepositories;

@@ -16,6 +16,7 @@ import {
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
+  type WorktreeProvider,
   type ManagedPolicySummary,
   globalIdleCompaction,
   isSecretReference,
@@ -260,6 +261,12 @@ export class ServerSettingsService extends Context.Service<
 
     readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /**
+     * Who may create isolated checkouts, read without secrets. A settings file that cannot be read
+     * or decoded keeps the last value read, and refuses T3 worktrees ("off") before any was read.
+     */
+    readonly worktreeProvider: Effect.Effect<WorktreeProvider>;
+
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
@@ -321,6 +328,7 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
     start: Effect.void,
     ready: Effect.void,
     getSettings,
+    worktreeProvider: getSettings.pipe(Effect.map((settings) => settings.worktreeProvider)),
     updateSettings: (patch) =>
       updateTestSettings((currentSettings) =>
         Effect.succeed(applyServerSettingsPatch(currentSettings, patch)),
@@ -733,6 +741,7 @@ const make = Effect.gen(function* () {
     },
   );
 
+  let lastKnownWorktreeProvider: WorktreeProvider | null = null;
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = managed.defaults;
     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
@@ -756,7 +765,12 @@ const make = Effect.gen(function* () {
       if (decoded._tag === "Failure" || legacySettings._tag === "Failure") {
         const failure = decoded._tag === "Failure" ? decoded : legacySettings;
         // The file may hold an opt-out we can no longer read; never resume threads on a guess.
-        settings = { ...managed.defaults, continueThreadsAfterServerUpdate: false };
+        settings = {
+          ...managed.defaults,
+          continueThreadsAfterServerUpdate: false,
+          // Nor create T3 worktrees on a guess when the file may forbid them.
+          worktreeProvider: lastKnownWorktreeProvider ?? "off",
+        };
         if (failure._tag === "Failure") {
           parseFailure = Option.some(Cause.squash(failure.cause));
           yield* Effect.logWarning("failed to parse settings.json, using defaults", {
@@ -769,6 +783,7 @@ const make = Effect.gen(function* () {
         settings = decoded.value;
       }
     }
+    lastKnownWorktreeProvider = settings.worktreeProvider;
     // Settings saved by a server that kept the mode in `compactIdleThreads` move
     // it to `idleCompaction`, so that switch goes to clients as a boolean. The
     // defaults gain the field too, which tells clients this server reads modes.
@@ -1202,6 +1217,7 @@ const make = Effect.gen(function* () {
           }).pipe(Effect.ensuring(invalidateMaterialized)),
         );
         yield* Cache.set(settingsCache, cacheKey, { settings: next, parseFailure: Option.none() });
+        lastKnownWorktreeProvider = next.worktreeProvider;
         const resolved = toEffective(materializedNext);
         materialized = { source: next, value: resolved };
         yield* emitChange(next);
@@ -1317,6 +1333,10 @@ const make = Effect.gen(function* () {
     start,
     ready: Deferred.await(startedDeferred),
     getSettings: getMaterializedSettings,
+    worktreeProvider: getSettingsFromCache.pipe(
+      Effect.map((settings) => settings.worktreeProvider),
+      Effect.orElseSucceed((): WorktreeProvider => lastKnownWorktreeProvider ?? "off"),
+    ),
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(

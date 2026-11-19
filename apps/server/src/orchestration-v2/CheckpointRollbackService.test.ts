@@ -179,9 +179,17 @@ it.effect.each([
   { order: "cleanup-first", restoreFiles: false, leavesFolder: true },
   { order: "cleanup-first", restoreFiles: true, leavesFolder: true, shared: true },
   { order: "cleanup-first", restoreFiles: true, leavesFolder: true, createFails: true },
-])("locks rollback with %s", (row) =>
+  { order: "cleanup-first", restoreFiles: true, leavesFolder: true, worktreeProvider: "off" },
+  { order: "cleanup-first", restoreFiles: false, worktreeProvider: "xwing" },
+] as const)("locks rollback with %s", (row) =>
   Effect.gen(function* () {
-    const { order, restoreFiles, unmanaged, leavesFolder, shared, createFails, xwing } = row;
+    const { order, restoreFiles } = row;
+    const unmanaged = "unmanaged" in row && row.unmanaged;
+    const leavesFolder = "leavesFolder" in row && row.leavesFolder;
+    const shared = "shared" in row && row.shared;
+    const createFails = "createFails" in row && row.createFails;
+    const xwing = "xwing" in row && row.xwing;
+    const worktreeProvider = "worktreeProvider" in row ? row.worktreeProvider : undefined;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const workspaceRoot = yield* fileSystem.realPath(
@@ -241,7 +249,7 @@ it.effect.each([
           ThreadCommandExecutor.layer,
           NodeServices.layer,
           Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as never),
-          ServerSettings.layerTest(),
+          ServerSettings.layerTest(worktreeProvider === undefined ? {} : { worktreeProvider }),
           Layer.mock(ProjectStore.ProjectStoreV2)({
             get: (id) => {
               assert.equal(id, projectId);
@@ -366,10 +374,26 @@ it.effect.each([
       if (order === "rollback-first") assert.isFalse(cleanupEntered);
       yield* Deferred.succeed(release, undefined);
       if (cleanup !== undefined) yield* Fiber.join(cleanup);
-      if (unmanaged || xwing || shared) {
+      if (unmanaged || xwing || shared || worktreeProvider !== undefined) {
         const error = yield* Fiber.join(rollback).pipe(Effect.flip);
         assert.equal(error._tag, "CheckpointRollbackExecutionError");
         assert.deepEqual(calls, ["cleanup"]);
+        if (worktreeProvider !== undefined) {
+          assert.equal(
+            (error.cause as { readonly _tag?: string } | undefined)?._tag,
+            "WorktreeProviderDisabledError",
+          );
+          assert.include(
+            CheckpointRollbackService.rollbackFailureClientMessage(error),
+            `\`worktreeProvider\` server setting (${worktreeProvider})`,
+          );
+          if (leavesFolder) {
+            assert.isTrue(yield* fileSystem.exists(path.join(worktreePath, "unsaved.txt")));
+            assert.deepEqual(yield* fileSystem.readDirectory(path.dirname(worktreePath)), [
+              "feature",
+            ]);
+          }
+        }
         if (shared) {
           assert.equal(error.reason, "shared-workspace");
           assert.isTrue(yield* fileSystem.exists(path.join(worktreePath, "unsaved.txt")));

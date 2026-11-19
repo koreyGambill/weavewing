@@ -26,6 +26,7 @@ import * as Tracer from "effect/Tracer";
 
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -263,6 +264,7 @@ const withService = <A, E>(
         Effect.succeed({ relayHookBaseUrl: options.relayHookBaseUrl ?? null }),
       ),
       ManagedPolicy.layerTest(options.policy),
+      ServerSettings.layerTest(),
     );
     return yield* Effect.gen(function* () {
       const service = yield* ScheduledTaskService.ScheduledTaskService;

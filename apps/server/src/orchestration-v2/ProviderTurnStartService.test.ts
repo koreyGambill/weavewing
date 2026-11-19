@@ -98,11 +98,14 @@ const normalize = (target: string) => {
   }
   return `/${parts.join("/")}`;
 };
-const layerWorktreeLocation = (worktreesDir = managedWorktreesDir) =>
+const layerWorktreeLocation = (
+  worktreesDir = managedWorktreesDir,
+  worktreeProvider: "t3" | "xwing" | "off" = "t3",
+) =>
   Layer.mergeAll(
     Path.layer,
     Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as ServerConfig.ServerConfig["Service"]),
-    ServerSettings.layerTest(),
+    ServerSettings.layerTest({ worktreeProvider }),
   );
 
 function startWithMissingWorktree(
@@ -112,6 +115,7 @@ function startWithMissingWorktree(
     [`${managedWorktreesDir}/project`]: `${managedWorktreesDir}/project`,
   },
   xwingEnvironmentId?: string,
+  worktreeProvider: "t3" | "xwing" | "off" = "t3",
 ) {
   const threadId = ThreadId.make("thread_provider_turn_start_projection_failure");
   const runId = RunId.make("run_provider_turn_start_projection_failure");
@@ -198,7 +202,7 @@ function startWithMissingWorktree(
                   }),
                 ),
         } as never),
-        layerWorktreeLocation(),
+        layerWorktreeLocation(managedWorktreesDir, worktreeProvider),
         Layer.mock(GitWorkflow.GitWorkflowService)({
           pruneWorktrees,
           createWorktree,
@@ -323,6 +327,29 @@ it.each([
   await harness.start;
   expect(harness.createWorktree).toHaveBeenCalledTimes(input.recreated ? 1 : 0);
 });
+
+it.each(["xwing", "off"] as const)(
+  "refuses to recreate a missing T3 worktree under worktreeProvider %s, naming the setting",
+  async (worktreeProvider) => {
+    const harness = startWithMissingWorktree(
+      `${managedWorktreesDir}/project/feature-restore`,
+      undefined,
+      undefined,
+      worktreeProvider,
+    );
+    const failure = await harness.start;
+    // A retrying start keeps the refusal itself as the cause, so the final attempt shows its text.
+    expect(failure).toMatchObject({
+      _tag: "ProviderTurnStartError",
+      cause: { _tag: "WorktreeProviderDisabledError", worktreeProvider },
+    });
+    expect((failure.cause as Error).message).toContain(
+      `\`worktreeProvider\` server setting (${worktreeProvider})`,
+    );
+    expect(harness.pruneWorktrees).not.toHaveBeenCalled();
+    expect(harness.createWorktree).not.toHaveBeenCalled();
+  },
+);
 
 const restoreLeaseExists = vi.fn(() => Effect.succeed(false));
 const restoreLeaseCreateWorktree = vi.fn(() => Effect.succeed({} as never));

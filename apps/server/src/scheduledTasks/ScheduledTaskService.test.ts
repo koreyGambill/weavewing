@@ -39,6 +39,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 
@@ -210,6 +211,7 @@ it.effect(
               ScheduledTaskService.layer,
               Layer.mergeAll(
                 ManagedPolicy.layerTest(),
+                ServerSettings.layerTest(),
                 Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                   launch: () =>
                     Ref.updateAndGet(dispatched, (n) => n + 1).pipe(
@@ -324,6 +326,7 @@ it.effect(
               ScheduledTaskService.layer,
               Layer.mergeAll(
                 ManagedPolicy.layerTest(),
+                ServerSettings.layerTest(),
                 Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                   launch: () =>
                     Ref.updateAndGet(dispatched, (n) => n + 1).pipe(
@@ -393,6 +396,7 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             streamDomainEvents: Stream.empty,
@@ -471,6 +475,7 @@ it.effect.each([
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             sendToThread: (input) =>
@@ -600,6 +605,7 @@ it.effect("a completed run closes its history as quiet with its tokens and cost"
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
             launch: (input) =>
               Ref.set(launchedMessage, input.initialMessage?.messageId ?? "").pipe(
@@ -699,6 +705,7 @@ const followerLayer = (input: {
     Layer.provide(
       Layer.mergeAll(
         ManagedPolicy.layerTest(),
+        ServerSettings.layerTest(),
         Layer.mock(ThreadLaunchService.ThreadLaunchService)(
           input.launch === undefined ? {} : { launch: input.launch },
         ),
@@ -825,6 +832,7 @@ it.effect("a run whose dispatch fails is recorded as failed without a thread", (
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
             launch: (input) =>
               Ref.set(launchedText, input.initialMessage?.text ?? "").pipe(
@@ -885,6 +893,7 @@ it.effect("a bound run follows its thread when promotion moves it mid-send", () 
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             streamDomainEvents: Stream.empty,
@@ -960,6 +969,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
             launch: () =>
               Ref.update(launches, (n) => n + 1).pipe(
@@ -1049,6 +1059,7 @@ it.effect("caps runs per hour for every trigger but the user's Run now, and keep
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
             launch: (input) =>
               Ref.update(launchedIds, (all) => [...all, input.threadId]).pipe(
@@ -1143,6 +1154,7 @@ it.effect("a limited automation's runs use its model only in threads it started"
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             streamDomainEvents: Stream.empty,
@@ -1231,6 +1243,7 @@ it.effect("a refused dispatch records its refusal, and opaque causes stay generi
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadShell: () => Effect.succeed(threadShell(ProjectId.make("project:test"))),
@@ -1278,6 +1291,7 @@ it.effect("a first run whose thread was deleted before it bound removes the task
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
             launch: () =>
               Effect.succeed({
@@ -1334,6 +1348,7 @@ it.effect.each(["recreated under the same id", "moved to another project"] as co
         Layer.provide(
           Layer.mergeAll(
             ManagedPolicy.layerTest(),
+            ServerSettings.layerTest(),
             Layer.mock(ThreadLaunchService.ThreadLaunchService)({
               launch: () =>
                 Deferred.succeed(launching, undefined).pipe(
@@ -1411,6 +1426,7 @@ it.effect("refuses saving an enabled task above the policy ceiling", () =>
             getThreadShell: () => Effect.succeed(threadShell(ProjectId.make("project:test"))),
           }),
           Layer.mock(SecretRequests.SecretRequests)({}),
+          ServerSettings.layerTest(),
           Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
             namedProjectsRoot: "/projects",
             isScratchProject: () => Effect.succeed(false),
@@ -1485,6 +1501,7 @@ it.effect("checks a task's destination thread only when the destination changes"
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             streamDomainEvents: Stream.empty,
@@ -1566,6 +1583,7 @@ it.effect("a run interrupted right after it reserves the task does not block the
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
             launch: () =>
               Ref.update(launches, (n) => n + 1).pipe(
@@ -1648,6 +1666,7 @@ it.effect("idle check-ins persist their cadence, skip busy ticks, and pause with
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
+          ServerSettings.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             streamDomainEvents: Stream.empty,

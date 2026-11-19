@@ -19,8 +19,9 @@ import * as Schema from "effect/Schema";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import type * as ServerConfig from "../config.ts";
-import type * as ServerSettings from "../serverSettings.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
+import { refuseUnlessT3Worktrees, WorktreeProviderDisabledError } from "../git/worktreeProvider.ts";
 import {
   withCheckpointRestoreReservation,
   withWorkspaceLease,
@@ -79,6 +80,7 @@ const isCheckpointRollbackExecutionError = Schema.is(CheckpointRollbackExecution
 const isVcsProcessExitError = Schema.is(VcsProcessExitError);
 const isCheckpointRestoreError = Schema.is(CheckpointRestoreError);
 const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingError);
+const isWorktreeProviderDisabledError = Schema.is(WorktreeProviderDisabledError);
 
 /**
  * The message clients see when a rollback fails. Only a held Git index lock
@@ -86,7 +88,8 @@ const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingErro
  * output, so they fall back to the generic message.
  */
 export function rollbackFailureClientMessage(error: CheckpointRollbackExecutionError): string {
-  if (isRuntimePolicyAboveCeilingError(error.cause)) return error.cause.message;
+  if (isRuntimePolicyAboveCeilingError(error.cause) || isWorktreeProviderDisabledError(error.cause))
+    return error.cause.message;
   const restoreCause = isCheckpointRestoreError(error.cause) ? error.cause.cause : undefined;
   return isVcsProcessExitError(restoreCause) && restoreCause.detail === GIT_INDEX_LOCKED_DETAIL
     ? GIT_INDEX_LOCKED_DETAIL
@@ -139,6 +142,7 @@ export const layer: Layer.Layer<
     const path = yield* Path.Path;
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
 
     const execute = Effect.fn("orchestrationV2.checkpointRollback.execute")(function* (input: {
       readonly threadId: ThreadId;
@@ -250,6 +254,7 @@ export const layer: Layer.Layer<
         ) {
           const project = yield* projects.get(context.thread.projectId);
           if (Option.isSome(project)) {
+            yield* refuseUnlessT3Worktrees(serverSettings, "checkpointRollback.recreateWorktree");
             const recreate = gitWorkflow.pruneWorktrees({ cwd: project.value.workspaceRoot }).pipe(
               Effect.andThen(
                 gitWorkflow.createWorktree({

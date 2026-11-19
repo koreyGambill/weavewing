@@ -12,6 +12,11 @@ import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import { scratchFolderRoot } from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
+import {
+  refuseUnlessT3Worktrees,
+  type WorktreeProviderDisabledError,
+} from "../git/worktreeProvider.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { isWithinRoot } from "./KnownWorkspaces.ts";
 import { withWorkspaceLease } from "./workspaceLease.ts";
 import { TerminalCwdRecovery } from "../terminal/Manager.ts";
@@ -56,6 +61,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
 
   // Storage cleanup prunes idle No project folders, which have no branch to restore from.
   // An empty folder, only directly inside the No project's own root, lets the thread run again.
@@ -180,6 +186,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
       Effect.orElseSucceed(() => undefined),
     );
     if (project === undefined) return;
+    yield* refuseUnlessT3Worktrees(serverSettings, "restoreMissingWorktree");
     yield* Effect.logWarning("recreating missing worktree", {
       threadId: thread.id,
       worktreePath,
@@ -202,7 +209,10 @@ export class ThreadWorktreeRestore extends Context.Service<
   {
     readonly restore: (
       thread: WorktreeThread,
-    ) => Effect.Effect<void, WorktreeRecreateError | WorktreeRecreateNoBaseError>;
+    ) => Effect.Effect<
+      void,
+      WorktreeRecreateError | WorktreeRecreateNoBaseError | WorktreeProviderDisabledError
+    >;
   }
 >()("t3/workspace/restoreMissingWorktree/ThreadWorktreeRestore") {}
 
