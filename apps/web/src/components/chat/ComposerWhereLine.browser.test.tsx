@@ -14,7 +14,8 @@ import "~/components/ChatView";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
-import { openDraftProjectPicker } from "~/draftProjectPicker";
+import { openDraftProjectPicker, projectPickerAllMachinesAtom } from "~/draftProjectPicker";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 import {
   ENVIRONMENT_ID,
   PROJECT_ID,
@@ -202,9 +203,20 @@ it("hands the keyboard back to the composer when the picker closes without a cho
   await userEvent.click(page.elementLocator(trigger));
   const search = page.getByRole("combobox", { name: "Project name or path" });
   await expect.element(search).toHaveFocus();
+  using _allMachines = new DisposableStack();
+  _allMachines.defer(() => appAtomRegistry.set(projectPickerAllMachinesAtom, false));
+  // The unstyled test page sizes the favicon to the frame, so the button never settles for a pointer.
+  (
+    page.getByRole("button", { name: "All machines", exact: true }).element() as HTMLElement
+  ).click();
   await userEvent.keyboard("{Escape}");
   await expect.element(search).not.toBeInTheDocument();
   await vi.waitFor(() =>
     expect(document.activeElement?.getAttribute("data-testid")).toBe("composer-editor"),
   );
+  // All machines lasts the session, so the palette's own picker opens with it still on.
+  openCommandPalette({ open: "new-thread-in" });
+  await expect
+    .element(page.getByRole("button", { name: "All machines", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
 });

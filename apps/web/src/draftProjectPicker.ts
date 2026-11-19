@@ -1,3 +1,4 @@
+import { Atom } from "effect/reactivity";
 import type { DraftId } from "./composerDraftStore";
 
 const handlers = new Map<DraftId, () => void>();
@@ -23,3 +24,6 @@ export function openDraftProjectPicker(fallbackDraftId: DraftId | null): boolean
   open();
   return true;
 }
+
+/** "All machines" in the project picker, kept for the app session across remounts. */
+export const projectPickerAllMachinesAtom = Atom.make(false).pipe(Atom.keepAlive);

@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
@@ -25,6 +25,7 @@ import type { DraftId } from "~/composerDraftStore";
 import {
   focusDraftProjectPicker,
   openDraftProjectPicker,
+  projectPickerAllMachinesAtom,
   registerDraftProjectPicker,
 } from "~/draftProjectPicker";
 import { useThreadRouteTarget } from "~/hooks/useThreadRouteTarget";
@@ -123,7 +124,8 @@ export function DraftProjectPicker({
   const routeTarget = useThreadRouteTarget();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
-  const [allMachines, setAllMachines] = useState(false);
+  const allMachines = useAtomValue(projectPickerAllMachinesAtom);
+  const setAllMachines = useAtomSet(projectPickerAllMachinesAtom);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const highlighted = useRef<PickerItem | null>(null);
