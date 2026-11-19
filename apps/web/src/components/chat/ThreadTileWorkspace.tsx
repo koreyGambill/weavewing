@@ -646,17 +646,18 @@ export function ThreadTileWorkspace(props: {
       const current = currentLayout();
       return getTileGroups(current).find((entry) => entry.id === current.focusedGroupId);
     };
-    const visibleGeometry = () => {
+    const visibleGeometry = (restored = false) => {
       const current = currentLayout();
-      const root = current.maximizedGroupId ? displayTileRoot(current) : tiled(current.root);
+      const root =
+        current.maximizedGroupId && !restored ? displayTileRoot(current) : tiled(current.root);
       return [
         ...(root ? tileGeometry(root).groups : []),
         ...getTileGroups(current)
           .filter(
             (group) =>
               group.floating &&
-              group.id !== current.maximizedGroupId &&
-              group.id !== current.besideGroupId,
+              (restored ||
+                (group.id !== current.maximizedGroupId && group.id !== current.besideGroupId)),
           )
           .map((group) => ({ id: group.id, rect: group.floating! })),
       ];
@@ -664,8 +665,13 @@ export function ThreadTileWorkspace(props: {
     const moveFocus = (direction: "left" | "right" | "up" | "down") => {
       const group = currentGroup();
       if (!group) return;
-      const next = directionalTile(visibleGeometry(), group.id, direction);
-      if (next) focus(next);
+      // From a maximized tile, a move restores the layout and goes where the tiles sit there.
+      const current = currentLayout();
+      const restoring = Boolean(current.maximizedGroupId) && !current.besideGroupId;
+      const next = directionalTile(visibleGeometry(restoring), group.id, direction);
+      if (!next) return;
+      if (restoring) apply({ type: "maximize", groupId: null });
+      focus(next);
     };
     const newTile = (direction: "left" | "right" | "up" | "down") => {
       const group = currentGroup();

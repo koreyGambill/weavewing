@@ -95,6 +95,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "terminal.toggle",
   "terminal.close",
   "terminal.dropdown",
+  "terminal.dropdownExpand",
   "threadContext.toggle",
   "threadPanel.toggle",
   "view.reopenClosed",
@@ -166,7 +167,7 @@ export const KeybindingValue = TrimmedString.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(MAX_KEYBINDING_VALUE_LENGTH),
   Schema.isPattern(
-    /^(?!leader(?:$|\s)).+$|^leader (?:[^\s+]|space|escape|enter|tab|arrowleft|arrowright|arrowup|arrowdown)$/,
+    /^(?!leader(?:$|\s)).+$|^leader (?:[^\s+]|shift\+[a-zA-Z]|space|escape|enter|tab|arrowleft|arrowright|arrowup|arrowdown)$/,
   ),
 );
 

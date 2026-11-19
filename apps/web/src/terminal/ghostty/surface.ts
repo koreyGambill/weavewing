@@ -1006,6 +1006,10 @@ export class GhosttyTerminalSurface {
     void this.pasteFromClipboard(() => Promise.resolve(selection));
   }
 
+  isAlternateScreen(): boolean {
+    return this.core.isAlternateScreen();
+  }
+
   hasSelection(): boolean {
     return this.core.selectionText().length > 0;
   }
@@ -1383,6 +1387,13 @@ export class GhosttyTerminalSurface {
       return;
     }
     if (event.button !== 0) return;
+    if (event.shiftKey && this.selectionAnchorScreen !== null && this.hasSelection()) {
+      this.selectionClickSequence = null;
+      this.clearHoveredLink();
+      this.extendSelectionTo(event.clientX, event.clientY);
+      this.canvas.setPointerCapture(event.pointerId);
+      return;
+    }
     const clickCount = this.recordSelectionClick(event);
     const link = this.linkAt(event.clientX, event.clientY, true);
     if (link && !event.shiftKey && clickCount === 1) {

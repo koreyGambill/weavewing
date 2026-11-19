@@ -11,19 +11,20 @@ Escape cancels it. Change **Use leader key** or **Leader Key** in
 **Settings → Keybindings**. Turning the leader off restores the classic
 Ctrl+Alt tile shortcuts. Custom bindings survive either choice.
 
-| After the leader      | Action                                                      |
-| --------------------- | ----------------------------------------------------------- |
-| `%` / `"`             | New tile right / below                                      |
-| `h` / `j` / `k` / `l` | Focus left / down / up / right                              |
-| `x`                   | Close tab; confirm if a terminal has a running process      |
-| `m`                   | Maximize or restore tile                                    |
-| `0` / Space           | Swap tiles / rotate docked tiles                            |
-| `t`                   | New tab                                                     |
-| `n` / `p`             | Next / previous tab                                         |
-| `1`–`9`               | Jump to tab N in the focused tile                           |
-| `f`                   | Float or dock tile                                          |
-| `r`                   | Resize mode: h/j/k/l or arrows; Enter keeps, Escape cancels |
-| `.`                   | Tile actions                                                |
+| After the leader | Action                                                      |
+| ---------------- | ----------------------------------------------------------- |
+| `%` / `"`        | New tile right / below                                      |
+| `h` / `k` / `l`  | Focus left / up / right; arrow keys also move down          |
+| `j`              | Open or focus the thread's terminal                         |
+| `x`              | Close tab; confirm if a terminal has a running process      |
+| `m`              | Maximize or restore tile; a focus move also restores it     |
+| `0` / Space      | Swap tiles / rotate docked tiles                            |
+| `t`              | New tab                                                     |
+| `n` / `p`        | Next / previous tab                                         |
+| `1`–`9`          | Jump to tab N in the focused tile                           |
+| `f`              | Float or dock tile                                          |
+| `r`              | Resize mode: h/j/k/l or arrows; Enter keeps, Escape cancels |
+| `.`              | Tile actions                                                |
 
 The leader works in a focused terminal or editor. **Ctrl+A, Ctrl+A** sends one
 literal Ctrl+A through, so a shell can still move to the start of its input.
@@ -276,8 +277,16 @@ Use **New tile below/right** to split the workspace; each terminal tab contains
 one shell. On Windows and Linux desktop, reload the app through **View → Reload**
 or **Reload App** in the command palette. `Ctrl+R` has no app-reload accelerator.
 Use `Ctrl+Shift+R` to reload without its cache outside a focused terminal.
-On macOS, `Cmd+R` reloads, and `Cmd+B`, `Cmd+J`, and `Cmd+O` also work while a
-terminal has focus.
+On macOS, `Cmd+R` reloads, and `Cmd+B` and `Cmd+O` also work while a terminal
+has focus.
+
+`mod+j` opens and hides the drop-down terminal from any view, including from
+inside it. Leader then Shift+M makes it fill the window or returns it to its
+height, opening it first if it is hidden.
+
+On Windows and Linux, Ctrl+Left and Ctrl+Right jump to the start or end of the
+line in text fields and at a shell prompt, and Ctrl+Backspace deletes back to the
+line's start. Full-screen terminal apps such as vim still receive Ctrl+arrows.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.

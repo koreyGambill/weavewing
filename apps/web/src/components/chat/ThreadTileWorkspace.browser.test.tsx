@@ -729,6 +729,11 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
   await userEvent.keyboard("{Control>}a{/Control}");
   await userEvent.keyboard("h");
   expect(layout().focusedGroupId).toBe("conversation-group");
+  await userEvent.keyboard("{Control>}a{/Control}m");
+  expect(layout().maximizedGroupId).toBe("conversation-group");
+  await userEvent.keyboard("{Control>}a{/Control}l");
+  expect(layout().maximizedGroupId).toBeNull();
+  expect(layout().focusedGroupId).not.toBe("conversation-group");
   await userEvent.click(terminal);
   const before = JSON.stringify(layout().root);
   await userEvent.keyboard("{Control>}a{/Control}r");

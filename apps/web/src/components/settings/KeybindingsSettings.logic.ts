@@ -82,6 +82,14 @@ export const DEFAULT_WHEN_VARIABLE =
   ) ?? "terminalFocus";
 const KNOWN_WHEN_VARIABLES = new Set(DEFAULT_WHEN_VARIABLES);
 
+/** The key after the leader as config text; Shift is recorded only with a letter. */
+export function leaderKeyInput(event: Pick<KeyboardEvent, "key" | "shiftKey">): string {
+  if (event.key === " ") return "leader space";
+  if (event.shiftKey && /^[a-z]$/i.test(event.key))
+    return `leader shift+${event.key.toLowerCase()}`;
+  return `leader ${event.key.toLowerCase()}`;
+}
+
 export function shortcutToKeybindingInput(shortcut: KeybindingShortcut): string {
   if (shortcut.leader)
     return `leader ${leaderShortcutKey(shortcut) === " " ? "space" : leaderShortcutKey(shortcut)}`;
@@ -403,6 +411,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "workspace.focusPrevious") return "Focus Previous Workspace Area";
   if (command === "keybindings.leader") return "Leader Key";
   if (command === "terminal.dropdown") return "Toggle Drop-down Terminal";
+  if (command === "terminal.dropdownExpand") return "Fill Window with Drop-down Terminal";
   if (command === "workspace.tile.rotate") return "Rotate Tiles";
   if (/^workspace\.tile\.tab\.[1-9]$/.test(command)) return `Jump to Tab ${command.at(-1)}`;
   if (command === "workspace.tile.resizeLeft") return "Resize Tile Left";

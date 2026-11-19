@@ -116,6 +116,14 @@ export function matchesKeybindingShortcut(
   if (shortcut.leader) {
     // Shift is part of the typed punctuation (%, ") across keyboard layouts.
     const key = leaderShortcutKey(shortcut);
+    if (key.startsWith("shift+"))
+      return (
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        event.shiftKey &&
+        normalizeEventKey(event.key) === key.slice(6)
+      );
     return (
       !event.ctrlKey &&
       !event.metaKey &&

@@ -3,7 +3,7 @@ import { selectRunningSubprocessTerminalIds } from "@t3tools/client-runtime/stat
 import { AuthTerminalOperateScope } from "@t3tools/contracts";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
-import { ChevronUp, Maximize2, Minimize2, SquareTerminal } from "lucide-react";
+import { Maximize2, Minimize2, SquareTerminal } from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
@@ -39,7 +39,7 @@ import { registerCommands } from "../shortcuts/dispatcher";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentScope } from "../state/session";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
-import { CONVERSATION_TAB_ID, getTileGroups } from "../threadTileLayout";
+import { CONVERSATION_TAB_ID } from "../threadTileLayout";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
 import type { TileSurfaceActions } from "./SurfaceTabContent";
 import { useThreadTerminalActions } from "./terminal/useThreadTerminalActions";
@@ -62,6 +62,21 @@ export function DropdownTerminalHost() {
           "terminal.dropdown": (event) => {
             event.preventDefault();
             useDropdownTerminalStore.getState().toggle();
+          },
+          "terminal.dropdownExpand": (event) => {
+            event.preventDefault();
+            const store = useDropdownTerminalStore.getState();
+            if (store.open) {
+              store.toggleExpanded();
+              return;
+            }
+            if (!store.expanded) store.toggleExpanded();
+            store.toggle();
+          },
+          // The thread's terminal sits under the panel, so the panel gives way to it.
+          "terminal.toggle": () => {
+            useDropdownTerminalStore.getState().close();
+            return false;
           },
         },
         { capture: true },
@@ -209,10 +224,6 @@ function DropdownTerminalWorkspace({
 }) {
   const ref = dropdownTerminalRef(folder.environmentId);
   const expanded = useDropdownTerminalStore((state) => state.expanded);
-  // The maximize key fills the window only while a single tile has nothing else to maximize.
-  const singleTile = useRightPanelStore(
-    (state) => getTileGroups(selectThreadTileLayout(state.byThreadKey, ref)).length === 1,
-  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const canOperate = useEnvironmentScope(folder.environmentId, AuthTerminalOperateScope);
   const panelState = useRightPanelStore((state) =>
@@ -329,17 +340,10 @@ function DropdownTerminalWorkspace({
       <div className="ml-auto flex shrink-0 items-center">
         <HeaderControl
           label={expanded ? "Restore drop-down height" : "Fill the window"}
-          keys={singleTile ? shortcutLabelForCommand(keybindings, "workspace.tile.maximize") : null}
+          keys={shortcutLabelForCommand(keybindings, "terminal.dropdownExpand")}
           onClick={() => useDropdownTerminalStore.getState().toggleExpanded()}
         >
           {expanded ? <Minimize2 /> : <Maximize2 />}
-        </HeaderControl>
-        <HeaderControl
-          label="Hide drop-down terminal"
-          keys={shortcutLabelForCommand(keybindings, "terminal.dropdown")}
-          onClick={() => useDropdownTerminalStore.getState().close()}
-        >
-          <ChevronUp />
         </HeaderControl>
       </div>
     </header>

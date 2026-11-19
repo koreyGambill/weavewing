@@ -52,10 +52,21 @@ describe("terminal word navigation", () => {
     );
   });
   it.each(["Win32", "Linux x86_64"])(
-    "leaves Ctrl+Arrow to the terminal encoder on %s",
+    "moves to the line's ends with Ctrl+Arrow at a shell, leaving full-screen apps the encoded key, on %s",
     (platform) => {
+      assert.equal(
+        terminalNavigationShortcutData(event({ key: "ArrowLeft", ctrlKey: true }), platform),
+        "\u0001",
+      );
+      assert.equal(
+        terminalNavigationShortcutData(event({ key: "ArrowRight", ctrlKey: true }), platform),
+        "\u0005",
+      );
       for (const key of ["ArrowLeft", "ArrowRight"]) {
-        assert.equal(terminalNavigationShortcutData(event({ key, ctrlKey: true }), platform), null);
+        assert.equal(
+          terminalNavigationShortcutData(event({ key, ctrlKey: true }), platform, true),
+          null,
+        );
       }
     },
   );
@@ -212,6 +223,10 @@ describe("shortcutLabelForCommand", () => {
         context: { terminalFocus: true },
       }),
       "Ctrl+D",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.dropdownExpand", "Linux"),
+      "Ctrl+A then Shift+M",
     );
   });
 });
@@ -956,7 +971,9 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
               ? "search.toggle"
               : !shiftKey && platform !== "MacIntel" && key === "p"
                 ? "commandPalette.toggle"
-                : null,
+                : !shiftKey && platform !== "MacIntel" && key === "j"
+                  ? "terminal.dropdown"
+                  : null,
           `Ctrl+${shiftKey ? "Shift+" : ""}${key} resolves to the documented terminal action on ${platform}`,
         );
       }
@@ -966,7 +983,7 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
 
 it.each([
   ["b", "sidebar.toggle"],
-  ["j", "terminal.toggle"],
+  ["j", "terminal.dropdown"],
   ["o", "editor.openFavorite"],
 ])("keeps Cmd+%s working in a focused terminal on macOS", (key, command) => {
   assert.equal(
@@ -1034,11 +1051,12 @@ it.each(["Linux", "Win32", "MacIntel"])(
       ["ArrowDown", "workspace.tile.focusDown"],
       ["ArrowUp", "workspace.tile.focusUp"],
       ["ArrowRight", "workspace.tile.focusRight"],
-      ["j", "workspace.tile.focusDown"],
+      ["j", "terminal.toggle"],
       ["k", "workspace.tile.focusUp"],
       ["l", "workspace.tile.focusRight"],
       ["x", "workspace.tile.closeTab"],
       ["m", "workspace.tile.maximize"],
+      ["M", "terminal.dropdownExpand"],
       ["0", "workspace.tile.swap"],
       [" ", "workspace.tile.rotate"],
       ["t", "workspace.tile.newTab"],
@@ -1052,7 +1070,10 @@ it.each(["Linux", "Win32", "MacIntel"])(
       ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [`${n}`, `workspace.tile.tab.${n}`]),
     ];
     for (const [key, command] of sequences) {
-      const input = event({ key: key!, shiftKey: key === "%" || key === '"' || key === ":" });
+      const input = event({
+        key: key!,
+        shiftKey: key === "%" || key === '"' || key === ":" || key === "M",
+      });
       for (const terminalFocus of [false, true]) {
         const options = {
           platform,

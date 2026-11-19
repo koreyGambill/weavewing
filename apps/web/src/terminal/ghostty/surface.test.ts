@@ -580,6 +580,24 @@ describe("GhosttyTerminalSurface visibility", () => {
     expect(surface.getSelectionPosition()?.start.y).toBe(before!.start.y - 2);
   });
 
+  it("extends an existing selection to a Shift-click, backward too", async () => {
+    const harness = createHarness();
+    const surface = await harness.create();
+    surface.write("alpha beta gamma");
+    harness.flushFrame();
+    harness.pointer("pointerdown", 45, 1);
+    harness.pointer("pointermove", 85, 1);
+    harness.pointer("pointerup", 85, 0);
+    expect(surface.getSelection()).toBe(" beta");
+    harness.pointer("pointerdown", 125, 1, { shiftKey: true });
+    harness.pointer("pointerup", 125, 0, { shiftKey: true });
+    expect(surface.getSelection()).toBe(" beta gamma");
+    // The drag's start stays the anchor.
+    harness.pointer("pointerdown", 5, 1, { shiftKey: true });
+    harness.pointer("pointerup", 5, 0, { shiftKey: true });
+    expect(surface.getSelection()).toBe("alpha");
+  });
+
   it("keeps a drag anchored to its text when output scrolls it mid-drag", async () => {
     const harness = createHarness();
     const surface = await harness.create();

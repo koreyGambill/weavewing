@@ -8,6 +8,7 @@ import {
   preventTerminalCloseShortcut,
 } from "../../lib/terminalCloseShortcut";
 import { isInSideChatPane } from "../../lib/sideChatPane";
+import { isLeaderSequenceEvent, registerCommands } from "../../shortcuts/dispatcher";
 import { getTerminalFocusOwner, type TerminalFocusOwner } from "../../lib/terminalFocus";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { BranchToolbarHandle } from "../BranchToolbar";
@@ -101,6 +102,17 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     event.preventDefault();
     event.stopPropagation();
   });
+  // The leader dispatcher consumes a sequence's second key before the window listener sees it.
+  const handleLeaderShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (!input.enabled || isCommandPaletteOpen() || isInSideChatPane(event.target)) return false;
+    const command = resolveChatShortcutCommand(event, input.keybindings, input.scriptKeybindings, {
+      leader: true,
+      context: input.getShortcutContext(event.target),
+    });
+    const run = command ? (input.commands[command] ?? input.fallback(command)) : undefined;
+    if (!run || run({ event, terminalFocusOwner: getTerminalFocusOwner() }) === false) return false;
+    event.preventDefault();
+  });
   const dismissFind = useEffectEvent((event: KeyboardEvent) => {
     if (
       event.key !== "Escape" ||
@@ -141,9 +153,14 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     const onKeyDown = (event: KeyboardEvent) => dismissFind(event);
     window.addEventListener("keydown", onKeyDownCapture, true);
     window.addEventListener("keydown", onKeyDown);
+    const unregisterLeader = registerCommands(
+      {},
+      { when: isLeaderSequenceEvent, onKeyDown: (event) => handleLeaderShortcut(event) },
+    );
     return () => {
       window.removeEventListener("keydown", onKeyDownCapture, true);
       window.removeEventListener("keydown", onKeyDown);
+      unregisterLeader();
     };
   }, [composerElement, embedded]);
 }

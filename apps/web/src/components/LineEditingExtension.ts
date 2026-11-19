@@ -1,6 +1,6 @@
 import { Extension } from "@tiptap/core";
-import { Plugin } from "@tiptap/pm/state";
-import { deletionForKey, deletionRange } from "../lineEditing";
+import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { deletionForKey, deletionRange, lineBoundary, lineMoveForKey } from "../lineEditing";
 
 export const LineEditingExtension = Extension.create({
   name: "lineEditing",
@@ -10,10 +10,23 @@ export const LineEditingExtension = Extension.create({
       new Plugin({
         props: {
           handleKeyDown(view, event) {
-            const deletion = deletionForKey(
-              event,
-              navigator.platform.toLowerCase().includes("mac"),
-            );
+            const mac = navigator.platform.toLowerCase().includes("mac");
+            const move = lineMoveForKey(event, mac);
+            if (move) {
+              const { selection, doc } = view.state;
+              const $head = selection.$head;
+              const text = $head.parent.textBetween(0, $head.parent.content.size, "\n", "\ufffc");
+              const next = $head.start() + lineBoundary(text, $head.parentOffset, move);
+              view.dispatch(
+                view.state.tr
+                  .setSelection(
+                    TextSelection.create(doc, event.shiftKey ? selection.anchor : next, next),
+                  )
+                  .scrollIntoView(),
+              );
+              return true;
+            }
+            const deletion = deletionForKey(event, mac);
             if (!deletion) return false;
             const { selection } = view.state;
             if (!selection.empty) {

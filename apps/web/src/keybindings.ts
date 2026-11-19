@@ -233,6 +233,7 @@ export function resolveChatShortcutCommand(
 
 export function formatShortcutKeyLabel(key: string): string {
   if (key === " ") return "Space";
+  if (/^shift\+.$/.test(key)) return `Shift+${key.slice(6).toUpperCase()}`;
   if (key.length === 1) return key.toUpperCase();
   if (key === "escape") return "Esc";
   if (key === "arrowup") return "Up";
@@ -473,6 +474,7 @@ export function terminalDeleteShortcutData(
 export function terminalNavigationShortcutData(
   event: ShortcutEventLike,
   platform = navigator.platform,
+  alternateScreen = false,
 ): string | null {
   if (event.type !== undefined && event.type !== "keydown") {
     return null;
@@ -511,6 +513,10 @@ export function terminalNavigationShortcutData(
 
   if (event.altKey && !event.metaKey && !event.ctrlKey) {
     return moveWord;
+  }
+  // Full-screen apps such as vim read Ctrl+A and Ctrl+E as commands; they keep the encoded arrow.
+  if (event.ctrlKey && !event.altKey && !event.metaKey && !alternateScreen) {
+    return moveLine;
   }
 
   return null;

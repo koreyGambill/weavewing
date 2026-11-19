@@ -92,8 +92,7 @@ export const CLASSIC_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
-  { key: "mod+j", command: "terminal.toggle", when: "isMac || !terminalFocus" },
-  { key: "ctrl+`", command: "terminal.dropdown" },
+  { key: "mod+j", command: "terminal.dropdown" },
   { key: "mod+alt+i", command: "threadContext.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
   { key: "mod+shift+d", command: "composer.dictation", when: "!terminalFocus" },
@@ -185,7 +184,7 @@ const LEADER_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: 'leader "', command: "workspace.tile.splitDown" },
   { key: "leader h", command: "workspace.tile.focusLeft" },
   { key: "leader arrowleft", command: "workspace.tile.focusLeft" },
-  { key: "leader j", command: "workspace.tile.focusDown" },
+  { key: "leader j", command: "terminal.toggle" },
   { key: "leader arrowdown", command: "workspace.tile.focusDown" },
   { key: "leader k", command: "workspace.tile.focusUp" },
   { key: "leader arrowup", command: "workspace.tile.focusUp" },
@@ -193,6 +192,7 @@ const LEADER_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "leader arrowright", command: "workspace.tile.focusRight" },
   { key: "leader x", command: "workspace.tile.closeTab" },
   { key: "leader m", command: "workspace.tile.maximize" },
+  { key: "leader shift+m", command: "terminal.dropdownExpand" },
   { key: "leader 0", command: "workspace.tile.swap" },
   { key: "leader space", command: "workspace.tile.rotate" },
   { key: "leader t", command: "workspace.tile.newTab" },
@@ -264,14 +264,17 @@ function normalizeKeyToken(token: string): string {
 
 export function parseKeybindingShortcut(value: string): KeybindingShortcut | null {
   if (value.startsWith("leader ")) {
-    const key = value.slice(7);
+    const raw = value.slice(7);
+    // Shift with a letter is the only modified key after the leader; punctuation already carries it.
+    const shifted = /^shift\+[a-z]$/i.test(raw);
+    const key = shifted ? raw.slice(6) : raw;
     if (
       !(key.length === 1 && !/\s|\+/.test(key)) &&
       !/^(space|escape|enter|tab|arrowleft|arrowright|arrowup|arrowdown)$/.test(key)
     )
       return null;
     return {
-      key: `leader ${normalizeKeyToken(key.toLowerCase())}`,
+      key: `leader ${shifted ? "shift+" : ""}${normalizeKeyToken(key.toLowerCase())}`,
       leader: true,
       metaKey: false,
       ctrlKey: false,

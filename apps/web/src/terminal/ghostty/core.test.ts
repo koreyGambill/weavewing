@@ -119,7 +119,9 @@ describe("GhosttyTerminalCore snapshots", () => {
       getModifierState: () => false,
     } as unknown as KeyboardEvent;
 
-    expect(terminalNavigationShortcutData(event, "Win32") ?? core.encodeKey(event)).toBe(expected);
+    expect(terminalNavigationShortcutData(event, "Win32", true) ?? core.encodeKey(event)).toBe(
+      expected,
+    );
   });
 
   it("keeps a leading U+FEFF in an unbracketed paste", async () => {

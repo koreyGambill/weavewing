@@ -573,7 +573,6 @@ it("passes EOF and common shell control keys through a terminal tile", async () 
     "f",
     "g",
     "h",
-    "j",
     "k",
     "n",
     "p",

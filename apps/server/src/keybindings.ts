@@ -258,6 +258,58 @@ function restoreNewThreadKey(rules: readonly KeybindingRule[]): readonly Keybind
   return rules.with(stranded, newThreadKey);
 }
 
+const DROPDOWN_KEY_MIGRATION = "weavewing.dropdown-mod-j.v1";
+const SEARCH_KEY_REPAIR = "weavewing.search-key-repair.v1";
+// An earlier build left Go to file on Ctrl/Cmd+K, which the search migration did not expect.
+const strandedFilePickerKey: KeybindingRule = {
+  key: "mod+k",
+  command: "filePicker.toggle",
+  when: "!terminalFocus",
+};
+const dropdownKey: KeybindingRule = { key: "mod+j", command: "terminal.dropdown" };
+
+/**
+ * Moves the untouched drop-down key to Ctrl/Cmd+J, which the thread terminal gives up for the
+ * leader then j. Each rule moves only when its new key is free or held by the rule it replaces.
+ */
+function moveDropdownKey(rules: readonly KeybindingRule[]): readonly KeybindingRule[] {
+  const oldToggle: KeybindingRule = {
+    key: "mod+j",
+    command: "terminal.toggle",
+    when: "isMac || !terminalFocus",
+  };
+  const oldDropdown: KeybindingRule = { key: "ctrl+`", command: "terminal.dropdown" };
+  const oldFocusDown: KeybindingRule = { key: "leader j", command: "workspace.tile.focusDown" };
+  const leaderToggle: KeybindingRule = { key: "leader j", command: "terminal.toggle" };
+  let next = rules;
+  if (
+    rules.some((rule) => isSameKeybindingRule(rule, oldDropdown)) &&
+    !rules.some(
+      (rule) =>
+        !isSameKeybindingRule(rule, oldToggle) &&
+        encodedShortcut(rule) === encodedShortcut(dropdownKey),
+    )
+  ) {
+    next = next
+      .filter((rule) => !isSameKeybindingRule(rule, oldToggle))
+      .map((rule) => (isSameKeybindingRule(rule, oldDropdown) ? dropdownKey : rule));
+  }
+  const leaderKeyTaken = rules.some(
+    (rule) =>
+      !isSameKeybindingRule(rule, oldFocusDown) &&
+      !isSameKeybindingRule(rule, leaderToggle) &&
+      encodedShortcut(rule) === encodedShortcut(leaderToggle),
+  );
+  if (!leaderKeyTaken) {
+    // The leader preset may already have added the new rule beside the old one.
+    const hasToggle = next.some((rule) => isSameKeybindingRule(rule, leaderToggle));
+    next = hasToggle
+      ? next.filter((rule) => !isSameKeybindingRule(rule, oldFocusDown))
+      : next.map((rule) => (isSameKeybindingRule(rule, oldFocusDown) ? leaderToggle : rule));
+  }
+  return next;
+}
+
 function encodedShortcut(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
   return parsed ? encodeShortcut(parsed) || null : null;
@@ -710,12 +762,19 @@ const make = Effect.gen(function* () {
       const configExists = yield* readConfigExists;
       if (!configExists) {
         yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
-        if (pendingLateDefaults.length > 0 || !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION)) {
+        if (
+          pendingLateDefaults.length > 0 ||
+          !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION) ||
+          !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION) ||
+          !appliedMigrationIds.has(SEARCH_KEY_REPAIR)
+        ) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
             ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
             "weavewing.leader.v1",
             NEW_THREAD_KEY_MIGRATION,
+            DROPDOWN_KEY_MIGRATION,
+            SEARCH_KEY_REPAIR,
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -863,6 +922,16 @@ const make = Effect.gen(function* () {
           missingDefaults.push(rule);
         }
       }
+      // After the late defaults, which still find the old Leader then j beside its arrow key.
+      const migrateDropdownKey = !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION);
+      if (migrateDropdownKey) customConfig = [...moveDropdownKey(customConfig)];
+      const repairSearchKey = !appliedMigrationIds.has(SEARCH_KEY_REPAIR);
+      if (repairSearchKey)
+        customConfig = customConfig.map((rule) =>
+          isSameKeybindingRule(rule, strandedFilePickerKey)
+            ? { key: "mod+k", command: "search.toggle" }
+            : rule,
+        );
       for (const conflict of shortcutConflictWarnings) {
         yield* Effect.logWarning("skipping default keybinding due to shortcut conflict", {
           path: keybindingsConfigPath,
@@ -909,12 +978,20 @@ const make = Effect.gen(function* () {
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),
       );
-      if (settledLateDefaults.length > 0 || migrateLeader || migrateNewThreadKey) {
+      if (
+        settledLateDefaults.length > 0 ||
+        migrateLeader ||
+        migrateNewThreadKey ||
+        migrateDropdownKey ||
+        repairSearchKey
+      ) {
         yield* recordAppliedMigrations([
           ...appliedMigrationIds,
           ...settledLateDefaults.map((late) => late.id),
           "weavewing.leader.v1",
           NEW_THREAD_KEY_MIGRATION,
+          DROPDOWN_KEY_MIGRATION,
+          SEARCH_KEY_REPAIR,
         ]);
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);

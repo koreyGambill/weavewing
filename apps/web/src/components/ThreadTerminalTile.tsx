@@ -933,7 +933,11 @@ function TerminalSessionViewport({
           return false;
         }
 
-        const navigationData = terminalNavigationShortcutData(event);
+        const navigationData = terminalNavigationShortcutData(
+          event,
+          navigator.platform,
+          terminalRef.current?.isAlternateScreen() ?? false,
+        );
         if (navigationData !== null) {
           event.preventDefault();
           event.stopPropagation();

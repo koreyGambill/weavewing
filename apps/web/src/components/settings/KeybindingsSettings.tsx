@@ -75,6 +75,7 @@ import {
   unknownWhenVariables,
   whenAstToExpression,
   whenNodeRemoveLabel,
+  leaderKeyInput,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -786,7 +787,7 @@ function useKeybindingRowEditor({
     if (keyDraft === "leader ") {
       if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
       setDraft({
-        keyDraft: `leader ${event.key === " " ? "space" : event.key.toLowerCase()}`,
+        keyDraft: leaderKeyInput(event),
         isRecording: false,
       });
       return;
@@ -796,9 +797,7 @@ function useKeybindingRowEditor({
     });
     if (!next) return;
     setDraft({
-      keyDraft: row.binding.shortcut.leader
-        ? `leader ${event.key === " " ? "space" : event.key.toLowerCase()}`
-        : next,
+      keyDraft: row.binding.shortcut.leader ? leaderKeyInput(event) : next,
       isRecording: false,
     });
   };
@@ -1149,7 +1148,7 @@ function useNewKeybindingDraft({
     if (keyDraft === "leader ") {
       if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
       setDraft({
-        keyDraft: `leader ${event.key === " " ? "space" : event.key.toLowerCase()}`,
+        keyDraft: leaderKeyInput(event),
         isRecording: false,
       });
       return;

@@ -426,7 +426,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
       for (const [command, key] of [
         ["workspace.tile.focusLeft", "leader h"],
-        ["workspace.tile.focusDown", "leader j"],
+        ["workspace.tile.focusDown", "leader arrowdown"],
         ["workspace.tile.focusUp", "leader k"],
         ["workspace.tile.focusRight", "leader l"],
         ["workspace.tile.previousTab", "ctrl+shift+tab"],
@@ -564,7 +564,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     return Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+j", command: "script.custom-action.run", when: "isMac || !terminalFocus" },
+        { key: "mod+j", command: "script.custom-action.run" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -573,7 +573,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
-      assert.isFalse(persisted.some((entry) => entry.command === "terminal.toggle"));
+      assert.isFalse(persisted.some((entry) => entry.command === "terminal.dropdown"));
       assert.isTrue(persisted.some((entry) => entry.command === "script.custom-action.run"));
 
       assert.isTrue(
@@ -1043,6 +1043,109 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         yield* keybindings.syncDefaultKeybindingsOnStartup;
         assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
       }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  const oldToggle = {
+    key: "mod+j",
+    command: "terminal.toggle",
+    when: "isMac || !terminalFocus",
+  } as const;
+  const oldDropdown = { key: "ctrl+`", command: "terminal.dropdown" } as const;
+  const oldFocusDown = { key: "leader j", command: "workspace.tile.focusDown" } as const;
+  const onTerminalKeys = (rules: ReadonlyArray<KeybindingRule>) =>
+    rules.filter(
+      (rule) =>
+        rule.command === "terminal.toggle" ||
+        rule.command === "terminal.dropdown" ||
+        rule.key === "leader j",
+    );
+
+  it.effect.each<{
+    readonly name: string;
+    readonly saved: ReadonlyArray<KeybindingRule> | null;
+    readonly expected: ReadonlyArray<KeybindingRule>;
+  }>([
+    {
+      name: "untouched defaults move",
+      saved: [oldToggle, oldDropdown, oldFocusDown],
+      expected: [
+        { key: "mod+j", command: "terminal.dropdown" },
+        { key: "leader j", command: "terminal.toggle" },
+      ],
+    },
+    {
+      name: "a custom drop-down key keeps Ctrl+J on the thread terminal",
+      saved: [oldToggle, { key: "f12", command: "terminal.dropdown" }, oldFocusDown],
+      expected: [
+        oldToggle,
+        { key: "f12", command: "terminal.dropdown" },
+        { key: "leader j", command: "terminal.toggle" },
+      ],
+    },
+    {
+      name: "another command on Ctrl+J keeps the old drop-down key",
+      saved: [{ key: "mod+j", command: "sidebar.toggle" }, oldDropdown, oldFocusDown],
+      expected: [oldDropdown, { key: "leader j", command: "terminal.toggle" }],
+    },
+    {
+      name: "a fresh install",
+      saved: null,
+      expected: [
+        { key: "mod+j", command: "terminal.dropdown" },
+        { key: "leader j", command: "terminal.toggle" },
+      ],
+    },
+  ])("drop-down key migration: $name, recorded once", ({ saved, expected }) =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      if (saved) yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.sameDeepMembers(onTerminalKeys(first), [...expected]);
+      assert.include(
+        yield* fs.readFileString(
+          path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
+        ),
+        "weavewing.dropdown-mod-j.v1",
+      );
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("moves a stranded Go to file key back to Search once", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const palette = {
+        key: "mod+p",
+        command: "commandPalette.toggle",
+        when: "!terminalFocus",
+      } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+k", command: "filePicker.toggle", when: "!terminalFocus" },
+        palette,
+      ]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        first.filter((rule) => rule.key === "mod+k"),
+        [{ key: "mod+k", command: "search.toggle" }],
+      );
+      assert.deepInclude(first, palette);
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+k", command: "filePicker.toggle", when: "!terminalFocus" },
+      ]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepInclude(yield* readKeybindingsConfig(keybindingsConfigPath), {
+        key: "mod+k",
+        command: "filePicker.toggle",
+        when: "!terminalFocus",
+      });
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps the New thread key migration pending while the file has issues", () =>
