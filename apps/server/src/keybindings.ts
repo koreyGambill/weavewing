@@ -272,23 +272,20 @@ const dropdownKey: KeybindingRule = { key: "mod+j", command: "terminal.dropdown"
  * Moves the untouched drop-down key to Ctrl/Cmd+J, which the thread terminal gives up for the
  * leader then j. Each rule moves only when its new key is free or held by the rule it replaces.
  */
-function takesModJ(rule: KeybindingRule): boolean {
+/** Whether a rule holds Ctrl+<key> or Cmd+<key> on some platform, however it is spelled. */
+function takesModKey(rule: KeybindingRule, key: string): boolean {
   const shortcut = parseKeybindingShortcut(rule.key);
   return (
     shortcut !== null &&
     shortcut.leader !== true &&
-    shortcut.key === "j" &&
+    shortcut.key === key &&
     !shortcut.altKey &&
     !shortcut.shiftKey &&
-    (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
+    [shortcut.modKey, shortcut.ctrlKey, shortcut.metaKey].filter(Boolean).length === 1
   );
 }
 
-/** `focusDownElsewhere`: whether Focus Down keeps a working key once Leader then j moves. */
-function moveDropdownKey(
-  rules: readonly KeybindingRule[],
-  focusDownElsewhere: boolean,
-): readonly KeybindingRule[] {
+function moveDropdownKey(rules: readonly KeybindingRule[]): readonly KeybindingRule[] {
   const oldToggle: KeybindingRule = {
     key: "mod+j",
     command: "terminal.toggle",
@@ -301,19 +298,28 @@ function moveDropdownKey(
   if (
     rules.some((rule) => isSameKeybindingRule(rule, oldDropdown)) &&
     // Ctrl+J and Meta+J are Ctrl/Cmd+J on one platform each, so either keeps the old key.
-    !rules.some((rule) => !isSameKeybindingRule(rule, oldToggle) && takesModJ(rule))
+    !rules.some((rule) => !isSameKeybindingRule(rule, oldToggle) && takesModKey(rule, "j"))
   ) {
     next = next
       .filter((rule) => !isSameKeybindingRule(rule, oldToggle))
       .map((rule) => (isSameKeybindingRule(rule, oldDropdown) ? dropdownKey : rule));
   }
-  const leaderKeyTaken = rules.some(
-    (rule) =>
-      !isSameKeybindingRule(rule, oldFocusDown) &&
-      !isSameKeybindingRule(rule, leaderToggle) &&
-      encodedShortcut(rule) === encodedShortcut(leaderToggle),
-  );
-  if (!leaderKeyTaken && focusDownElsewhere) {
+  const leaderArrowDown: KeybindingRule = {
+    key: "leader arrowdown",
+    command: "workspace.tile.focusDown",
+  };
+  const onlyRuleOn = (target: KeybindingRule, allowed: readonly KeybindingRule[]) =>
+    rules.some((rule) => isSameKeybindingRule(rule, target)) &&
+    !rules.some(
+      (rule) =>
+        !allowed.some((entry) => isSameKeybindingRule(rule, entry)) &&
+        encodedShortcut(rule) === encodedShortcut(target),
+    );
+  // Leader then j moves only while Focus Down keeps the saved, unshadowed Leader then Down.
+  if (
+    onlyRuleOn(leaderArrowDown, [leaderArrowDown]) &&
+    onlyRuleOn(oldFocusDown, [oldFocusDown, leaderToggle])
+  ) {
     // The leader preset may already have added the new rule beside the old one.
     const hasToggle = next.some((rule) => isSameKeybindingRule(rule, leaderToggle));
     next = hasToggle
@@ -898,11 +904,8 @@ const make = Effect.gen(function* () {
       const repairSearchKey = !appliedMigrationIds.has(SEARCH_KEY_REPAIR);
       if (
         repairSearchKey &&
-        !customConfig.some(
-          (rule) =>
-            !isSameKeybindingRule(rule, strandedFilePickerKey) &&
-            encodedShortcut(rule) === encodedShortcut(strandedFilePickerKey),
-        )
+        customConfig.filter((rule) => takesModKey(rule, "k")).length === 1 &&
+        customConfig.some((rule) => isSameKeybindingRule(rule, strandedFilePickerKey))
       )
         customConfig = customConfig.map((rule) =>
           isSameKeybindingRule(rule, strandedFilePickerKey)
@@ -951,15 +954,7 @@ const make = Effect.gen(function* () {
       }
       // After the late defaults, which still find the old Leader then j beside its arrow key.
       const migrateDropdownKey = !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION);
-      if (migrateDropdownKey)
-        customConfig = [
-          ...moveDropdownKey(
-            customConfig,
-            [...customConfig, ...missingDefaults].some(
-              (rule) => rule.command === "workspace.tile.focusDown" && rule.key !== "leader j",
-            ),
-          ),
-        ];
+      if (migrateDropdownKey) customConfig = [...moveDropdownKey(customConfig)];
       for (const conflict of shortcutConflictWarnings) {
         yield* Effect.logWarning("skipping default keybinding due to shortcut conflict", {
           path: keybindingsConfigPath,

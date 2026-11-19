@@ -406,6 +406,18 @@ it("resizes, shows tiles beside a maximized one and opens independent area views
   await userEvent.click(screen.getByRole("menuitem", { name: /terminal$/ }));
   expect(layout().besideGroupId).toBe("terminal-group");
   expect(document.querySelectorAll("section.workspace-tile-frame")).toHaveLength(2);
+  // Nothing in the pair lies left of notes, so the move restores the layout to reach the chat.
+  store.applyTileAction(threadRef, { type: "focus", groupId: notesChooser.id });
+  await userEvent.keyboard("{Control>}{Alt>}h{/Alt}{/Control}");
+  expect([layout().maximizedGroupId, layout().focusedGroupId]).toEqual([
+    null,
+    "conversation-group",
+  ]);
+  store.applyTileAction(threadRef, { type: "focus", groupId: notesChooser.id });
+  await userEvent.keyboard("{Control>}{Alt>}f{/Alt}{/Control}");
+  await userEvent.keyboard("{Control>}{Alt>}f{/Alt}{/Control}");
+  await userEvent.click(screen.getByRole("menuitem", { name: /terminal$/ }));
+  expect(layout().besideGroupId).toBe("terminal-group");
   await userEvent.keyboard("{Control>}{Alt>}s{/Alt}{/Control}");
   expect([layout().maximizedGroupId, layout().besideGroupId]).toEqual([
     "terminal-group",

@@ -133,15 +133,16 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     event.preventDefault();
     input.closeThreadFind();
   });
-  const handleComposerShortcut = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || isCommandPaletteOpen()) return;
+  const handleComposerShortcut = useEffectEvent((event: KeyboardEvent, leader = false) => {
+    if (event.defaultPrevented || isCommandPaletteOpen()) return false;
     const command = resolveChatShortcutCommand(event, input.keybindings, input.scriptKeybindings, {
+      leader,
       context: input.getShortcutContext(event.target),
     });
     const run = command
       ? composerShortcutCommands(input.composerRef, input.branchToolbarRef)[command]
       : undefined;
-    if (!run || run({ event, terminalFocusOwner: null }) === false) return;
+    if (!run || run({ event, terminalFocusOwner: null }) === false) return false;
     event.preventDefault();
     event.stopPropagation();
   });
@@ -149,9 +150,22 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
   useEffect(() => {
     if (embedded) {
       if (composerElement === null) return;
-      const onComposerKeyDown = (event: KeyboardEvent) => handleComposerShortcut(event);
+      const onComposerKeyDown = (event: KeyboardEvent) => void handleComposerShortcut(event);
       composerElement.addEventListener("keydown", onComposerKeyDown, true);
-      return () => composerElement.removeEventListener("keydown", onComposerKeyDown, true);
+      const unregisterLeader = registerCommands(
+        {},
+        {
+          when: (event) =>
+            isLeaderSequenceEvent(event) &&
+            event.target instanceof Node &&
+            composerElement.contains(event.target),
+          onKeyDown: (event) => handleComposerShortcut(event, true),
+        },
+      );
+      return () => {
+        composerElement.removeEventListener("keydown", onComposerKeyDown, true);
+        unregisterLeader();
+      };
     }
     const onKeyDownCapture = (event: KeyboardEvent) => handleShortcut(event);
     const onKeyDown = (event: KeyboardEvent) => dismissFind(event);

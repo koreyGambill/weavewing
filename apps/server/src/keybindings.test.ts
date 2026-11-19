@@ -1052,6 +1052,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   } as const;
   const oldDropdown = { key: "ctrl+`", command: "terminal.dropdown" } as const;
   const oldFocusDown = { key: "leader j", command: "workspace.tile.focusDown" } as const;
+  const arrowDown = { key: "leader arrowdown", command: "workspace.tile.focusDown" } as const;
   const onTerminalKeys = (rules: ReadonlyArray<KeybindingRule>) =>
     rules.filter(
       (rule) =>
@@ -1067,7 +1068,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   }>([
     {
       name: "untouched defaults move",
-      saved: [oldToggle, oldDropdown, oldFocusDown],
+      saved: [oldToggle, oldDropdown, oldFocusDown, arrowDown],
       expected: [
         { key: "mod+j", command: "terminal.dropdown" },
         { key: "leader j", command: "terminal.toggle" },
@@ -1075,7 +1076,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     },
     {
       name: "a custom drop-down key keeps Ctrl+J on the thread terminal",
-      saved: [oldToggle, { key: "f12", command: "terminal.dropdown" }, oldFocusDown],
+      saved: [oldToggle, { key: "f12", command: "terminal.dropdown" }, oldFocusDown, arrowDown],
       expected: [
         oldToggle,
         { key: "f12", command: "terminal.dropdown" },
@@ -1084,12 +1085,18 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     },
     {
       name: "another command on Ctrl+J keeps the old drop-down key",
-      saved: [{ key: "mod+j", command: "sidebar.toggle" }, oldDropdown, oldFocusDown],
+      saved: [{ key: "mod+j", command: "sidebar.toggle" }, oldDropdown, oldFocusDown, arrowDown],
       expected: [oldDropdown, { key: "leader j", command: "terminal.toggle" }],
     },
     {
       name: "another command on Ctrl+J spelled ctrl+j keeps both old keys",
-      saved: [oldToggle, oldDropdown, oldFocusDown, { key: "ctrl+j", command: "sidebar.toggle" }],
+      saved: [
+        oldToggle,
+        oldDropdown,
+        oldFocusDown,
+        arrowDown,
+        { key: "ctrl+j", command: "sidebar.toggle" },
+      ],
       expected: [oldToggle, oldDropdown, { key: "leader j", command: "terminal.toggle" }],
     },
     {
@@ -1099,6 +1106,17 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         oldDropdown,
         oldFocusDown,
         { key: "leader arrowdown", command: "workspace.tile.splitDown" },
+      ],
+      expected: [{ key: "mod+j", command: "terminal.dropdown" }, oldFocusDown],
+    },
+    {
+      name: "Focus Down keeps Leader then j when a scoped rule shadows its arrow key",
+      saved: [
+        oldToggle,
+        oldDropdown,
+        oldFocusDown,
+        arrowDown,
+        { key: "leader arrowdown", command: "workspace.tile.splitDown", when: "terminalFocus" },
       ],
       expected: [{ key: "mod+j", command: "terminal.dropdown" }, oldFocusDown],
     },
@@ -1116,7 +1134,14 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const keybindings = yield* Keybindings.Keybindings;
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      if (saved) yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
+      if (saved) {
+        yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
+        // A current saved file has already taken the leader preset.
+        yield* fs.writeFileString(
+          path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
+          `weavewing.leader.v1\n${NEW_THREAD_KEY_MIGRATION}\n`,
+        );
+      }
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       const first = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.sameDeepMembers(onTerminalKeys(first), [...expected]);
@@ -1168,14 +1193,14 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       const keybindings = yield* Keybindings.Keybindings;
       const saved = [
-        { key: "mod+k", command: "commandPalette.toggle", when: "terminalFocus" },
+        { key: "ctrl+k", command: "sidebar.toggle", when: "terminalFocus" },
         { key: "mod+k", command: "filePicker.toggle", when: "!terminalFocus" },
       ] as const;
       yield* writeKeybindingsConfig(keybindingsConfigPath, saved);
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
-        persisted.filter((rule) => rule.key === "mod+k"),
+        persisted.filter((rule) => rule.key === "mod+k" || rule.key === "ctrl+k"),
         [...saved],
       );
     }).pipe(Effect.provide(layerKeybindings())),
