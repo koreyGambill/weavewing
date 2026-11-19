@@ -1226,18 +1226,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     diff === null &&
     runningTerminalIds.length === 0;
   // The marker is a button, so it sits outside the decorative, non-interactive icons.
-  const trailingIcons = (className?: string, decorationClassName?: string) => (
+  const trailingIcons = (
+    className?: string,
+    decorationClassName?: string,
+    decorationCollapseClassName?: string,
+  ) => (
     <span className={cn("inline-flex shrink-0 items-center gap-1", className)}>
       {automationMarker}
       <span
         aria-hidden
         className={cn("pointer-events-none inline-flex items-center gap-1", decorationClassName)}
       >
-        {remoteMachineIcon}
-        <SidebarProviderStack
-          thread={thread}
-          providerEntryByInstanceId={props.providerEntryByInstanceId}
-        />
+        <span className={cn("contents", decorationCollapseClassName)}>
+          {remoteMachineIcon}
+          <SidebarProviderStack
+            thread={thread}
+            providerEntryByInstanceId={props.providerEntryByInstanceId}
+          />
+        </span>
       </span>
       {externalMarker}
     </span>
@@ -1278,6 +1284,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const hasTerminal = runningTerminalIds.length > 0;
   const prNumberCollapse = CARD_PR_NUMBER_COLLAPSE[Number(hasTerminal) + Number(isExternal)];
   const terminalCollapse = CARD_TERMINAL_COLLAPSE[Number(prBadge !== null) + Number(isExternal)];
+  const decorationCollapse =
+    hasTerminal || prBadge !== null
+      ? resolveCardProvidersCollapse({
+          hasTerminal,
+          hasPr: prBadge !== null,
+          isExternal,
+          providerCount: resolveThreadProviderStack(thread).length,
+        })
+      : null;
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
@@ -1676,9 +1691,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <span className={cn("contents", terminalCollapse)}>{terminalStatusIcon}</span>
               ) : null}
               {prBadge ? <span className={cn("contents", prNumberCollapse)}>{prBadge}</span> : null}
-              {/* Below the title's minimum, the provider icons and then the machine wrap onto a
-                  clipped second line, so they give way before anything else. */}
-              {trailingIcons("min-w-0 shrink", "h-4 min-w-0 flex-wrap justify-end overflow-hidden")}
+              {/* Past the container query, anything still too wide wraps onto a clipped second line. */}
+              {trailingIcons(
+                "min-w-0 shrink",
+                "h-4 min-w-0 flex-wrap justify-end overflow-hidden",
+                decorationCollapse ?? undefined,
+              )}
             </div>
           </div>
         </TooltipTrigger>
@@ -1696,6 +1714,51 @@ const CARD_PR_NUMBER_COLLAPSE = [
   "@max-[10rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
   "@max-[11.25rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
 ] as const;
+// Half-rem steps from 7.5rem, covering every card that shows a terminal or PR.
+const CARD_PROVIDERS_COLLAPSE = [
+  "@max-[7.5rem]/title-line:hidden",
+  "@max-[8rem]/title-line:hidden",
+  "@max-[8.5rem]/title-line:hidden",
+  "@max-[9rem]/title-line:hidden",
+  "@max-[9.5rem]/title-line:hidden",
+  "@max-[10rem]/title-line:hidden",
+  "@max-[10.5rem]/title-line:hidden",
+  "@max-[11rem]/title-line:hidden",
+  "@max-[11.5rem]/title-line:hidden",
+  "@max-[12rem]/title-line:hidden",
+  "@max-[12.5rem]/title-line:hidden",
+  "@max-[13rem]/title-line:hidden",
+  "@max-[13.5rem]/title-line:hidden",
+  "@max-[14rem]/title-line:hidden",
+  "@max-[14.5rem]/title-line:hidden",
+  "@max-[15rem]/title-line:hidden",
+  "@max-[15.5rem]/title-line:hidden",
+] as const;
+
+// Wrapping the machine and provider icons away would leave their width blank beside a 3rem title,
+// so a card whose terminal or PR crowds the line hides them once everything stops fitting.
+function resolveCardProvidersCollapse(input: {
+  hasTerminal: boolean;
+  hasPr: boolean;
+  isExternal: boolean;
+  providerCount: number;
+}) {
+  // Glyph, title and their gaps; then terminal, PR, the provider stack, and machine plus arrow.
+  const width =
+    74 +
+    (input.hasTerminal ? 20 : 0) +
+    (input.hasPr ? 60 : 0) +
+    6 +
+    14 +
+    18 * (Math.max(input.providerCount, 1) - 1) +
+    (input.isExternal ? 36 : 0);
+  const index = Math.min(
+    Math.max(Math.ceil(width / 8) - 15, 0),
+    CARD_PROVIDERS_COLLAPSE.length - 1,
+  );
+  return CARD_PROVIDERS_COLLAPSE[index];
+}
+
 const CARD_TERMINAL_COLLAPSE = [
   "@max-[6.25rem]/title-line:hidden",
   "@max-[7.5rem]/title-line:hidden",
