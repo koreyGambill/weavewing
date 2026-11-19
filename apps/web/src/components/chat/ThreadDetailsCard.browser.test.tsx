@@ -22,6 +22,7 @@ const placement = { x: 908, y: 0, right: 12, width: 280, height: 400 } as const;
 
 function setup() {
   useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
+  useRightPanelStore.getState().setThreadPanelOpen(threadB, "inline", true);
   const anchor = document.createElement("div");
   document.body.append(anchor);
   return {

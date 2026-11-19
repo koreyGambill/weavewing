@@ -116,6 +116,7 @@ function setup(input: {
   state.folder = input.folder;
   state.pullRequests = input.pullRequests ?? [];
   useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
+  useRightPanelStore.getState().setThreadPanelOpen(threadRef, "inline", true);
   const anchor = document.createElement("div");
   document.body.append(anchor);
   return {

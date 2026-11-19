@@ -391,15 +391,22 @@ Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
 finishes; the call's own result shows its status.
 
-On web and desktop, the thread details card lists the local servers that the
-thread's terminals or its Claude agent started, with their ports. Not every one
+On web and desktop, open **Workspace actions** in the thread header to see the
+local servers that the thread's terminals or its Claude agent started, with their ports. Not every one
 serves a web page. A server the agent started stays listed after the agent's
 turn ends.
 Select a server to open it in the browser panel. **Stop** ends the server's job
 and keeps the agent, the terminal, and T3 Code running. Stop needs terminal
 access to the environment and is not available on Windows.
 
-To choose what the thread details card shows, right-click the card or open
+Use **Workspace actions** to open the working folder in an editor, run project
+scripts, manage Git, or work with thread automations. Open **Changes** from the
+thread title menu, or select the line counts beside the branch when there are
+changes.
+
+The thread details card starts closed. Use **Toggle thread details panel** in
+the composer to show it.
+To choose what it shows, right-click the card or open
 **Settings → Appearance → Thread details**. Hidden rows keep their keyboard
 shortcuts, such as Open in editor and project scripts. **Reset to default** brings
 back the standard rows.
@@ -412,7 +419,7 @@ with what the thread knows, and the thread keeps working while you ask.
 On web and desktop, start a message with `/side` or `/btw`, then your question.
 You can also choose **Side chat** from a tile’s **+** menu. The side
 chat opens as a tab there, with its own composer. Side chats do not show in the
-sidebar. Find one again under **Side chats** in thread details.
+sidebar. Open **Lineage** in the thread header to find its side chats and subagents.
 
 A side chat works in the same folder as the thread and starts with the permissions,
 model, and reasoning level shown in the thread's composer, including for its first

@@ -312,6 +312,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ComposerChangesControl } from "./chat/ComposerChangesControl";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -1111,6 +1112,8 @@ export default function ChatView(props: ChatViewProps) {
     activeRightPanelSurface,
   );
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
+  const [threadActionsHandle] = useState(PopoverCreateHandle);
+  const [threadLineageHandle] = useState(PopoverCreateHandle);
   const [chatCanvasStore] = useState(createChatCanvasStore);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
@@ -3211,6 +3214,17 @@ export default function ChatView(props: ChatViewProps) {
           parentThreadLink={headerParentThreadLink}
           onOpenThread={onOpenRelatedThreadStable}
           rightPanelOpen={false}
+          actionsHandle={threadActionsHandle}
+          {...(isServerThread
+            ? {
+                lineageHandle: threadLineageHandle,
+                runningAgents:
+                  serverProjection?.subagents.filter((agent) => agent.status === "running")
+                    .length ?? 0,
+              }
+            : {})}
+          onOpenSideChat={sideChatsOffered && sideChat.available ? openSideChatStable : undefined}
+          onOpenChanges={isServerThread && isGitRepo ? openChangesFromThreadPanelStable : undefined}
           onNewThreadInProject={handleNewThreadInActiveProjectStable}
           {...(activeDraftLogicalProjectKey
             ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
@@ -3260,6 +3274,13 @@ export default function ChatView(props: ChatViewProps) {
               <ThreadDetailsPanel
                 anchor={threadPanelPopoverAnchorRef}
                 handle={threadPanelPopoverHandle}
+                {...(!embedded
+                  ? {
+                      actionsHandle: threadActionsHandle,
+                      composerContextAvailable: showComposerContextStrip,
+                      ...(isServerThread ? { lineageHandle: threadLineageHandle } : {}),
+                    }
+                  : {})}
                 forceNewWorktree={multipleModelSelections !== null}
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}
@@ -3808,20 +3829,25 @@ export default function ChatView(props: ChatViewProps) {
                                     onComposerFocusRequest={scheduleComposerFocusStable}
                                   />
                                 }
-                                {...(isServerThread
-                                  ? {}
-                                  : {
-                                      trailing: (
-                                        <ComposerContextPermissions
-                                          environmentId={environmentId}
-                                          runtimeMode={runtimeMode}
-                                          supportedRuntimeModes={
-                                            activeProviderStatus?.supportedRuntimeModes
-                                          }
-                                          onRuntimeModeChange={handleRuntimeModeChangeStable}
-                                        />
-                                      ),
-                                    })}
+                                trailing={
+                                  isServerThread ? (
+                                    isGitRepo && gitStatusAtom ? (
+                                      <ComposerChangesControl
+                                        status={gitStatusAtom}
+                                        onOpen={openChangesFromThreadPanelStable}
+                                      />
+                                    ) : null
+                                  ) : (
+                                    <ComposerContextPermissions
+                                      environmentId={environmentId}
+                                      runtimeMode={runtimeMode}
+                                      supportedRuntimeModes={
+                                        activeProviderStatus?.supportedRuntimeModes
+                                      }
+                                      onRuntimeModeChange={handleRuntimeModeChangeStable}
+                                    />
+                                  )
+                                }
                               />
                             </div>
                           )}

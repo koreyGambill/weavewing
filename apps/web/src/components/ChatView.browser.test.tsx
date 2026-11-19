@@ -36,6 +36,7 @@ import {
   assistantItem,
   dispatchedCommands,
   emitThreadEvent,
+  emitVcsStatus,
   hasPendingAssetUrl,
   installFakeEnvironment,
   rejectPendingCommand,
@@ -706,6 +707,9 @@ it("preserves chat width, details visibility and focus as the tile resizes", asy
   await page.viewport(1560, 860);
   const thread = threadWithHistory("responsive-details", 3);
   using _environment = installFakeEnvironment([thread]);
+  useRightPanelStore
+    .getState()
+    .setThreadPanelOpen(scopeThreadRef(ENVIRONMENT_ID, thread.id), "inline", true);
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -760,4 +764,99 @@ it("preserves chat width, details visibility and focus as the tile resizes", asy
     expect(tile.querySelector("[data-thread-details-panel]")).toBeNull();
     expect(composer.clientWidth).toBe(736);
   });
+});
+
+it("opens workspace actions, lineage and changes with the card closed", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1560, 860);
+
+  const thread = threadWithHistory("workspace-actions", 1);
+  const child = {
+    ...threadWithHistory("workspace-side-chat", 1),
+    sideChatOf: thread.id,
+    olderSettled: true as const,
+  };
+  const threadRef = scopeThreadRef(ENVIRONMENT_ID, thread.id);
+  using _environment = installFakeEnvironment([thread, child]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  const card = page.getByRole("region", { name: "Thread details" });
+  await expect.element(card).not.toBeInTheDocument();
+
+  const actions = page.getByRole("button", { name: "Workspace actions", exact: true });
+  const commands = page.getByRole("dialog", { name: "Workspace actions" });
+  await actions.click();
+  await expect.element(commands.getByText("Add project script")).toBeVisible();
+  await expect.element(commands.getByText("Commit", { exact: true })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(commands, { timeout: 2500 }).not.toBeInTheDocument();
+
+  await page.getByRole("button", { name: "Lineage", exact: true }).click();
+  const lineage = page.getByRole("dialog", { name: "Thread lineage" });
+  await expect.element(lineage.getByText(child.title), { timeout: 2500 }).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+
+  await expect.element(lineage, { timeout: 2500 }).not.toBeInTheDocument();
+  await page.viewport(690, 860);
+  await actions.click();
+  await expect.element(commands.getByText("Add project script")).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+
+  const actionMenu = page.getByRole("button", { name: `Thread actions for ${thread.title}` });
+  await actionMenu.click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Todos", exact: true }), { timeout: 3000 })
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Automations", exact: true }))
+    .toBeVisible();
+  await page.getByRole("menuitem", { name: "Changes", exact: true }).click();
+  await vi.waitFor(() =>
+    expect(
+      useRightPanelStore.getState().byThreadKey[`${ENVIRONMENT_ID}:${thread.id}`]?.surfaces,
+    ).toContainEqual(expect.objectContaining({ kind: "diff" })),
+  );
+  useRightPanelStore.getState().close(threadRef);
+  await page.viewport(1300, 860);
+  await act(() =>
+    emitVcsStatus({
+      _tag: "snapshot",
+      local: {
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: true,
+        refName: "main",
+        hasWorkingTreeChanges: true,
+        workingTree: {
+          files: [{ path: "src/app.ts", insertions: 12, deletions: 3 }],
+          insertions: 12,
+          deletions: 3,
+        },
+      },
+      remote: null,
+    }),
+  );
+  const counts = page.getByRole("button", { name: "Changes: 12 additions, 3 deletions" });
+  await expect.element(counts, { timeout: 3000 }).toBeVisible();
+  await counts.click();
+  await expect.element(page.getByRole("tab", { name: "Diff", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  const hosted = page.getByRole("navigation", { name: "Threads" });
+  await expect.element(hosted.getByText("Add project script")).toBeVisible();
+  await expect.element(card).not.toBeInTheDocument();
 });

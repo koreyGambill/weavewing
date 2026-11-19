@@ -67,6 +67,22 @@ describe("chat canvas model", () => {
     expect(model.detailsCardMode).toBe("popover");
   });
 
+  it("keeps a dragged preview below the compact bar and find controls", () => {
+    const model = resolveChatCanvasModel({
+      measurements: {
+        ...measurements(900),
+        findBar: { left: 608, right: 888, bottom: 48 },
+        detailsBar: { left: 12, right: 888, bottom: 94 },
+      },
+      detailsCardMeasurement: null,
+      threadRef,
+      preview: { ...preview, position: { x: 568, y: 12 }, lastInteraction: "drag" },
+      detailsCardInlineOpen: true,
+    });
+    expect(model.detailsCardTopInset).toBe(48);
+    expect(model.layout.frame?.y).toBeGreaterThan(94);
+  });
+
   it("ignores a details card measured for another thread", () => {
     const model = resolveChatCanvasModel({
       measurements: { ...measurements(1100, 300), maxChatWidth: 728 },
