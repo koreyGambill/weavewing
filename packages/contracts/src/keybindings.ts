@@ -62,6 +62,7 @@ export const WORKSPACE_TILE_KEYBINDING_COMMANDS = [
   "workspace.tile.resizeUp",
   "workspace.tile.resizeRight",
   ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => `workspace.tile.tab.${n}` as const),
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => `workspace.tile.focus.${n}` as const),
   "workspace.tile.focusLeft",
   "workspace.tile.focusRight",
   "workspace.tile.focusUp",

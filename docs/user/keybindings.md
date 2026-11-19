@@ -11,20 +11,19 @@ Escape cancels it. Change **Use leader key** or **Leader Key** in
 **Settings → Keybindings**. Turning the leader off restores the classic
 Ctrl+Alt tile shortcuts. Custom bindings survive either choice.
 
-| After the leader | Action                                                      |
-| ---------------- | ----------------------------------------------------------- |
-| `%` / `"`        | New tile right / below                                      |
-| `h` / `k` / `l`  | Focus left / up / right; arrow keys also move down          |
-| `j`              | Open or focus the thread's terminal                         |
-| `x`              | Close tab; confirm if a terminal has a running process      |
-| `m`              | Maximize or restore tile; a focus move also restores it     |
-| `0` / Space      | Swap tiles / rotate docked tiles                            |
-| `t`              | New tab                                                     |
-| `n` / `p`        | Next / previous tab                                         |
-| `1`–`9`          | Jump to tab N in the focused tile                           |
-| `f`              | Float or dock tile                                          |
-| `r`              | Resize mode: h/j/k/l or arrows; Enter keeps, Escape cancels |
-| `.`              | Tile actions                                                |
+| After the leader      | Action                                                      |
+| --------------------- | ----------------------------------------------------------- |
+| `%` / `"`             | New tile right / below                                      |
+| `h` / `j` / `k` / `l` | Focus left / down / up / right. Arrow keys also work.       |
+| `x`                   | Close tab; confirm if a terminal has a running process      |
+| `m`                   | Maximize or restore tile                                    |
+| `0` / Space           | Swap tiles / rotate docked tiles                            |
+| `t`                   | New tab                                                     |
+| `n` / `p`             | Next / previous tab                                         |
+| `1`–`9`               | Focus a tile in layout order and keep its selected tab      |
+| `f`                   | Float or dock tile                                          |
+| `r`                   | Resize mode: h/j/k/l or arrows; Enter keeps, Escape cancels |
+| `.`                   | Tile actions                                                |
 
 The leader works in a focused terminal or editor. **Ctrl+A, Ctrl+A** sends one
 literal Ctrl+A through, so a shell can still move to the start of its input.
@@ -32,6 +31,8 @@ Other Control-letter keys retain their shell behavior, except Search, the comman
 palette, and the close commands below. **Alt+H/J/K/L** always resizes the focused tile by a step, including in a
 terminal; terminal applications lose those four Alt shortcuts.
 
+Number shortcuts target the drop-down terminal's tiles when it has focus.
+Focusing a hidden tile restores the layout. A number with no matching tile does nothing.
 Ctrl+Tab and Ctrl+Shift+Tab cycle tile tabs directly. The existing close,
 command palette, new-thread, and sidebar shortcuts remain available in their
 usual focus contexts. These tile bindings apply to web and desktop; native
@@ -282,11 +283,8 @@ has focus.
 
 `mod+j` opens and hides the drop-down terminal from any view, including from
 inside it. Leader then Shift+M makes it fill the window or returns it to its
-height, opening it first if it is hidden. Leader then j opens or focuses the
-thread's own terminal; with the leader off it has no default key, so bind
-**Terminal: Toggle** in Settings if you use it. A saved keybindings file whose
-terminal keys were customized keeps them; rebind these in Settings to adopt
-the new defaults.
+height, opening it first if it is hidden. To open or focus the thread's own
+terminal with a shortcut, assign **Terminal: Toggle** in Settings.
 
 On Windows and Linux, Ctrl+Left and Ctrl+Right jump to the start or end of the
 line in text fields and at a shell prompt, and Ctrl+Backspace deletes back to the

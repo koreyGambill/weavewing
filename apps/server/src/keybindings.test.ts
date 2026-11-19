@@ -1069,10 +1069,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     {
       name: "untouched defaults move",
       saved: [oldToggle, oldDropdown, oldFocusDown, arrowDown],
-      expected: [
-        { key: "mod+j", command: "terminal.dropdown" },
-        { key: "leader j", command: "terminal.toggle" },
-      ],
+      expected: [{ key: "mod+j", command: "terminal.dropdown" }, oldFocusDown],
     },
     {
       name: "a custom drop-down key leaves every old key",
@@ -1125,10 +1122,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     {
       name: "a fresh install",
       saved: null,
-      expected: [
-        { key: "mod+j", command: "terminal.dropdown" },
-        { key: "leader j", command: "terminal.toggle" },
-      ],
+      expected: [{ key: "mod+j", command: "terminal.dropdown" }, oldFocusDown],
     },
   ])("drop-down key migration: $name, recorded once", ({ saved, expected }) =>
     Effect.gen(function* () {
@@ -1152,6 +1146,60 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
         ),
         "weavewing.dropdown-mod-j.v1",
+      );
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("upgrades installed leader defaults while keeping custom terminal and tab rules", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const keybindings = yield* Keybindings.Keybindings;
+      const dropdown = { key: "mod+j", command: "terminal.dropdown" } as const;
+      const custom = [
+        { key: "leader T", command: "terminal.toggle" },
+        { key: "leader 2", command: "workspace.tile.tab.1", when: "terminalFocus" },
+        { key: "leader 3", command: "workspace.tile.actions" },
+      ] as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        dropdown,
+        arrowDown,
+        { key: "leader j", command: "terminal.toggle" },
+        { key: "leader 1", command: "workspace.tile.tab.1" },
+        { key: "leader 2", command: "workspace.tile.tab.2" },
+        { key: "leader 3", command: "workspace.tile.tab.3" },
+        ...custom,
+      ]);
+      yield* fs.writeFileString(
+        path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
+        `weavewing.leader.v1\n${NEW_THREAD_KEY_MIGRATION}\nweavewing.dropdown-mod-j.v1\n`,
+      );
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.sameDeepMembers(
+        first.filter((rule) =>
+          [
+            "leader j",
+            "leader arrowdown",
+            "mod+j",
+            "leader T",
+            "leader 1",
+            "leader 2",
+            "leader 3",
+          ].includes(rule.key),
+        ),
+        [
+          dropdown,
+          arrowDown,
+          oldFocusDown,
+          { key: "leader 1", command: "workspace.tile.focus.1" },
+          { key: "leader 2", command: "workspace.tile.focus.2" },
+          ...custom,
+        ],
       );
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);

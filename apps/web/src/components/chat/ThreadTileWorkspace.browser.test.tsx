@@ -915,7 +915,7 @@ it("opens layout actions from the title bar and saves the current workspace", as
 
 it("runs leader commands from terminal focus and keeps keyboard resize active until Enter", async () => {
   await using fixture = await setup(true, false, true);
-  const { screen, layout } = fixture;
+  const { screen, layout, selectTab } = fixture;
   const terminal = screen.getByRole("textbox", { name: "Editor terminal:new-terminal" });
   await userEvent.click(terminal);
   await userEvent.keyboard("{Control>}a{/Control}");
@@ -923,9 +923,22 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
   expect(layout().focusedGroupId).toBe("conversation-group");
   await userEvent.keyboard("{Control>}a{/Control}m");
   expect(layout().maximizedGroupId).toBe("conversation-group");
-  await userEvent.keyboard("{Control>}a{/Control}l");
+  await userEvent.keyboard("{Control>}a{/Control}9");
+  expect(layout().maximizedGroupId).toBe("conversation-group");
+  expect(layout().focusedGroupId).toBe("conversation-group");
+  await userEvent.keyboard("{Control>}a{/Control}2");
   expect(layout().maximizedGroupId).toBeNull();
-  expect(layout().focusedGroupId).not.toBe("conversation-group");
+  expect(layout().focusedGroupId).toBe("terminal-group");
+  await selectTab("diff");
+  await userEvent.click(terminal);
+  await userEvent.keyboard("{Control>}a{/Control}1");
+  expect(layout().focusedGroupId).toBe("conversation-group");
+  expect(getTileGroups(layout())[0]!.activeTabId).toBe("diff");
+  await vi.waitFor(() =>
+    expect(document.activeElement?.closest('[data-tile-content="diff"]')).not.toBeNull(),
+  );
+  dispatchMenuAction("workspace.tile.tab.1");
+  expect(getTileGroups(layout())[0]!.activeTabId).toBe("conversation");
   await userEvent.click(terminal);
   const before = JSON.stringify(layout().root);
   await userEvent.keyboard("{Control>}a{/Control}r");
@@ -961,7 +974,11 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
 });
 
 it("sends tile keys and menu actions only to the workspace that owns focus, else the one underneath", async () => {
-  const keybindings = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
+  const keybindings = compileResolvedKeybindingsConfig([
+    ...defaultKeybindingsForMode(true),
+    { key: "ctrl+alt+shift+arrowdown", command: "workspace.tile.splitDown" },
+    { key: "ctrl+alt+enter", command: "workspace.tile.maximize" },
+  ]);
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   await page.viewport(1100, 900);
   await using _viewport = {
@@ -1081,6 +1098,17 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
   focus("Editor terminal:term-1");
   dispatchMenuAction("workspace.tile.splitDown");
   expect(groups()).toEqual([2, 3]);
+  focus("Editor terminal:term-1");
+  const readLayout = (ref: typeof threadRef) =>
+    selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, ref);
+  const threadBefore = readLayout(threadRef);
+  const overlayTiles = getTileGroups(readLayout(overlayRef));
+  store.applyTileAction(overlayRef, { type: "focus", groupId: overlayTiles[0]!.id });
+  await userEvent.keyboard("{Control>}a{/Control}j");
+  expect(readLayout(overlayRef).focusedGroupId).toBe(overlayTiles[1]!.id);
+  await userEvent.keyboard("{Control>}a{/Control}3");
+  expect(readLayout(overlayRef).focusedGroupId).toBe(overlayTiles[2]!.id);
+  expect(readLayout(threadRef)).toEqual(threadBefore);
 
   // The overlay re-rendered last, so its registrations are the newest.
   focus("Thread composer");

@@ -259,6 +259,7 @@ function restoreNewThreadKey(rules: readonly KeybindingRule[]): readonly Keybind
 }
 
 const DROPDOWN_KEY_MIGRATION = "weavewing.dropdown-mod-j.v1";
+const LEADER_TILE_FOCUS_MIGRATION = "weavewing.leader-tile-focus.v1";
 const dropdownKey: KeybindingRule = { key: "mod+j", command: "terminal.dropdown" };
 
 /** Whether a rule fires on plain Ctrl+<key> or Cmd+<key> on some platform, however it is spelled. */
@@ -325,6 +326,25 @@ function moveDropdownKey(
           ? leaderToggle
           : rule,
     );
+}
+
+function migrateLeaderTileFocus(
+  rules: readonly KeybindingRule[],
+  enabled: boolean,
+): KeybindingRule[] {
+  const oldToggle: KeybindingRule = { key: "leader j", command: "terminal.toggle" };
+  const focusDown: KeybindingRule = { key: "leader j", command: "workspace.tile.focusDown" };
+  const canRestoreFocusDown =
+    enabled &&
+    !rules.some(
+      (rule) => !isSameKeybindingRule(rule, oldToggle) && hasSameShortcutContext(rule, focusDown),
+    );
+  return rules.flatMap((rule) => {
+    if (isSameKeybindingRule(rule, oldToggle)) return canRestoreFocusDown ? [focusDown] : [];
+    const tab = /^workspace\.tile\.tab\.([1-9])$/.exec(rule.command)?.[1];
+    if (tab && rule.when === undefined && encodedShortcut(rule) === `leader ${tab}`) return [];
+    return [rule];
+  });
 }
 
 function encodedShortcut(rule: KeybindingRule): string | null {
@@ -782,7 +802,8 @@ const make = Effect.gen(function* () {
         if (
           pendingLateDefaults.length > 0 ||
           !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION) ||
-          !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION)
+          !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION) ||
+          !appliedMigrationIds.has(LEADER_TILE_FOCUS_MIGRATION)
         ) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
@@ -790,6 +811,7 @@ const make = Effect.gen(function* () {
             "weavewing.leader.v1",
             NEW_THREAD_KEY_MIGRATION,
             DROPDOWN_KEY_MIGRATION,
+            LEADER_TILE_FOCUS_MIGRATION,
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -901,6 +923,10 @@ const make = Effect.gen(function* () {
       // Reached only with a clean config, so the id below records a repair or a file needing none.
       const migrateNewThreadKey = !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION);
       if (migrateNewThreadKey) customConfig = [...restoreNewThreadKey(customConfig)];
+      const migrateDropdownKey = !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION);
+      if (migrateDropdownKey) customConfig = [...moveDropdownKey(customConfig, enabled)];
+      const migrateTileFocus = !appliedMigrationIds.has(LEADER_TILE_FOCUS_MIGRATION);
+      if (migrateTileFocus) customConfig = migrateLeaderTileFocus(customConfig, enabled);
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -937,9 +963,6 @@ const make = Effect.gen(function* () {
           missingDefaults.push(rule);
         }
       }
-      // After the late defaults, which still find the old Leader then j beside its arrow key.
-      const migrateDropdownKey = !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION);
-      if (migrateDropdownKey) customConfig = [...moveDropdownKey(customConfig, enabled)];
       for (const conflict of shortcutConflictWarnings) {
         yield* Effect.logWarning("skipping default keybinding due to shortcut conflict", {
           path: keybindingsConfigPath,
@@ -990,7 +1013,8 @@ const make = Effect.gen(function* () {
         settledLateDefaults.length > 0 ||
         migrateLeader ||
         migrateNewThreadKey ||
-        migrateDropdownKey
+        migrateDropdownKey ||
+        migrateTileFocus
       ) {
         yield* recordAppliedMigrations([
           ...appliedMigrationIds,
@@ -998,6 +1022,7 @@ const make = Effect.gen(function* () {
           "weavewing.leader.v1",
           NEW_THREAD_KEY_MIGRATION,
           DROPDOWN_KEY_MIGRATION,
+          LEADER_TILE_FOCUS_MIGRATION,
         ]);
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
