@@ -104,7 +104,7 @@ import { CodexSetupSection } from "../settings/CodexSetupSection";
 import { searchableSetting } from "../settings/settingsSearch";
 import { useTextGenerationWarnings } from "../settings/TextGenerationWarnings";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
-import { TerminalViewport } from "../ThreadTerminalDrawer";
+import { TerminalViewport } from "../ThreadTerminalTile";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ACPRegistryIcon } from "../Icons";
 import { Button } from "../ui/button";

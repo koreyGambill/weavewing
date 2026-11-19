@@ -11,7 +11,7 @@ import {
   shouldHandleTerminalExit,
   synchronizeTerminalOutput,
   synchronizeTerminalSession,
-} from "./ThreadTerminalDrawer";
+} from "./ThreadTerminalTile";
 
 describe("terminal selection actions", () => {
   it("handles an exit that lands while the terminal surface is still loading", () => {

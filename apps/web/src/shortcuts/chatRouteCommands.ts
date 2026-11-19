@@ -25,6 +25,7 @@ import { readEnvironmentScope } from "../state/session";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
+import { isTerminalFocused } from "../lib/terminalFocus";
 import { useUiStateStore } from "../uiStateStore";
 import { type CommandHandler, registerCommands } from "./dispatcher";
 
@@ -174,7 +175,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         };
       },
       onKeyDown: (event) => {
-        if (event.key !== "Escape") return false;
+        if (event.key !== "Escape" || isTerminalFocused()) return false;
         const selection = useThreadSelectionStore.getState();
         if (selection.selectedThreadKeys.size === 0) return false;
         event.preventDefault();

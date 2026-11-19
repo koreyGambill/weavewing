@@ -10,38 +10,27 @@ export function LegacyTerminalTileBridge({ threadRef }: { readonly threadRef: Sc
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, threadRef),
   );
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Migrates persisted drawer placements when the tiled client mounts or a legacy entry point opens it.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Migrates persisted drawer placements when the tiled client mounts.
   useEffect(() => {
     if (!terminalState.terminalOpen) return;
     const panel = useRightPanelStore.getState();
     const currentSurfaces = () =>
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).surfaces;
-    for (const group of terminalState.terminalGroups) {
-      let surfaceId: string | null = null;
-      for (const terminalId of group.terminalIds) {
-        const owner = currentSurfaces().find(
-          (surface) => surface.kind === "terminal" && surface.terminalIds.includes(terminalId),
-        );
-        if (owner) {
-          if (surfaceId === null) surfaceId = owner.id;
-        } else if (surfaceId) {
-          panel.splitTerminal(threadRef, surfaceId, terminalId, group.splitDirection);
-        } else {
-          panel.openTerminal(threadRef, terminalId);
-          surfaceId = `terminal:${terminalId}`;
-        }
-      }
+    for (const terminalId of terminalState.terminalIds) {
+      const owner = currentSurfaces().find(
+        (surface) => surface.kind === "terminal" && surface.resourceId === terminalId,
+      );
+      if (!owner) panel.openTerminal(threadRef, terminalId);
     }
     const activeSurface = selectThreadRightPanelState(
       useRightPanelStore.getState().byThreadKey,
       threadRef,
     ).surfaces.find(
       (surface) =>
-        surface.kind === "terminal" && surface.terminalIds.includes(terminalState.activeTerminalId),
+        surface.kind === "terminal" && surface.resourceId === terminalState.activeTerminalId,
     );
     if (activeSurface) {
       panel.activateSurface(threadRef, activeSurface.id);
-      panel.activateTerminal(threadRef, activeSurface.id, terminalState.activeTerminalId);
     }
     useTerminalUiStateStore.getState().setTerminalOpen(threadRef, false);
   }, [threadRef, terminalState]);

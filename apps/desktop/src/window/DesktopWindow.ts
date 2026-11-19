@@ -25,6 +25,7 @@ import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
   MENU_ACTION_CHANNEL,
+  TERMINAL_FOCUS_CHANNEL,
   QUIT_SHORTCUT_CHANNEL,
   SNAP_SHOT_EVENT_CHANNEL,
   TRACKPAD_SCROLL_BEGIN_CHANNEL,
@@ -769,7 +770,9 @@ export const make = Effect.gen(function* () {
       }
     });
 
+    let terminalFocused = false;
     const quitShortcutHandler = makeQuitShortcutHandler({
+      isTerminalFocused: () => terminalFocused,
       platform: environment.platform,
       getMode: () =>
         runPromise(
@@ -792,22 +795,22 @@ export const make = Effect.gen(function* () {
         void runPromise(electronApp.quit);
       },
     });
+    window.webContents.on("ipc-message", (_event, channel, focused) => {
+      if (channel === TERMINAL_FOCUS_CHANNEL) terminalFocused = focused === true;
+    });
+    window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) terminalFocused = false;
+    });
     window.webContents.on("before-input-event", (event, input) => {
       quitShortcutHandler(event, input);
       if (window.isDestroyed()) return;
-      // Cmd/Ctrl+W reaches the renderer; DevTools uses the native menu shortcut.
+      // Native edit, quit and function-key accelerators must yield to terminal input.
       window.webContents.setIgnoreMenuShortcuts(
-        (environment.platform === "darwin" ? input.meta : input.control) &&
-          !input.alt &&
-          !input.shift &&
-          input.key.toLowerCase() === "w",
+        (terminalFocused && !input.meta) ||
+          ((environment.platform === "darwin" ? input.meta : input.control) &&
+            !input.alt &&
+            input.key.toLowerCase() === "w"),
       );
-      // A held Cmd/Ctrl+W closes one tab or terminal, not each one behind it.
-      if (input.type !== "keyDown" || !input.isAutoRepeat) return;
-      const modifier = environment.platform === "darwin" ? input.meta : input.control;
-      if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === "w") {
-        event.preventDefault();
-      }
     });
     window.webContents.on("input-event", (_event, input) => {
       if (window.isDestroyed()) return;

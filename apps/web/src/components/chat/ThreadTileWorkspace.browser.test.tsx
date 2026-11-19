@@ -18,7 +18,7 @@ import {
 import { getTileGroups, isNewTab, newTabId } from "../../threadTileLayout";
 import { ThreadTileWorkspace } from "./ThreadTileWorkspace";
 
-vi.mock("../RightPanelTabs", () => ({
+vi.mock("../SurfaceTabContent", () => ({
   SurfaceIcon: () => null,
   surfaceTitle: (surface: { kind: string }) => surface.kind,
 }));
@@ -130,6 +130,7 @@ async function setup(resizeScenario = false, newThread = false) {
         }}
         renderSurface={(surface) => (
           <textarea
+            data-terminal-owner={surface.kind === "terminal" ? "right-panel" : undefined}
             aria-label={surface.kind === "notes" ? "Editor notes" : `Editor ${surface.id}`}
             defaultValue=""
           />
@@ -564,10 +565,7 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
       .getByRole("region", { name: "Tile: terminal", exact: true })
       .getByRole("button", { name: "Close tile", exact: true }),
   );
-  await expect
-    .element(screen.getByRole("alertdialog", { name: "Close all 3 tabs in this tile?" }))
-    .toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Close tile", exact: true }).last());
+  await expect.element(screen.getByRole("alertdialog")).not.toBeInTheDocument();
   expect(getTileGroups(layout()).some((group) => group.tabs.includes("conversation"))).toBe(false);
   expect(
     selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).surfaces.map(
@@ -652,4 +650,14 @@ it("keeps the focused tile and its editors when the window becomes narrow", asyn
   await expect
     .element(screen.getByRole("textbox", { name: "Conversation draft" }))
     .toHaveValue("chat draft");
+});
+
+it("leaves Escape in a maximized terminal even when the shortcut context is stale", async () => {
+  await using fixture = await setup(true);
+  const { store, threadRef, layout, screen } = fixture;
+  store.applyTileAction(threadRef, { type: "maximize", groupId: "terminal-group" });
+  const terminal = screen.getByRole("textbox", { name: "Editor terminal:new-terminal" });
+  await userEvent.click(terminal);
+  await userEvent.keyboard("{Escape}");
+  expect(layout().maximizedGroupId).toBe("terminal-group");
 });

@@ -8,20 +8,14 @@ import type { TerminalContextSelection } from "../lib/terminalContext";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { useProject, useQuietThreadShell } from "../state/entities";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import ThreadTerminalTile from "./ThreadTerminalTile";
 import { resolveTerminalWorktreePath } from "./ChatView.logic";
 
-/** Where a drawer or panel opens new terminals when a script run overrides the thread's own. */
+/** Launch location when a script overrides the thread's checkout. */
 export type PersistentTerminalLaunchContext = {
   readonly cwd: string;
   readonly worktreePath: string | null;
 };
-
-interface TerminalLaunchLocationWithEnv {
-  readonly cwd: string;
-  readonly worktreePath: string | null;
-  readonly runtimeEnv: Record<string, string>;
-}
 
 export interface PersistentThreadTerminalPanelProps {
   visible: boolean;
@@ -30,17 +24,7 @@ export interface PersistentThreadTerminalPanelProps {
   launchContext: PersistentTerminalLaunchContext | null;
   keybindings: ResolvedKeybindingsConfig;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
-  onSplitTerminal: () => void;
-  onSplitTerminalVertical: () => void;
-  onNewTerminal: () => void;
-  onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string, threadRef?: ScopedThreadRef) => void;
-  splitShortcutLabel?: string | undefined;
-  splitVerticalShortcutLabel?: string | undefined;
-  newShortcutLabel?: string | undefined;
-  closeShortcutLabel?: string | undefined;
-  /** A tile already offers new-tab and close controls for its terminal. */
-  hideSessionActions?: boolean | undefined;
 }
 
 export const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPanel({
@@ -50,16 +34,7 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
   launchContext,
   keybindings,
   onAddTerminalContext,
-  onSplitTerminal,
-  onSplitTerminalVertical,
-  onNewTerminal,
-  onActiveTerminalChange,
   onCloseTerminal,
-  splitShortcutLabel,
-  splitVerticalShortcutLabel,
-  newShortcutLabel,
-  closeShortcutLabel,
-  hideSessionActions,
 }: PersistentThreadTerminalPanelProps) {
   const serverThread = useQuietThreadShell(threadRef);
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
@@ -75,7 +50,7 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
   });
   const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const activeSummary =
-    knownTerminalSessions?.find((session) => session.target.terminalId === surface.activeTerminalId)
+    knownTerminalSessions?.find((session) => session.target.terminalId === surface.resourceId)
       ?.state.summary ?? null;
   const worktreePath = resolveTerminalWorktreePath({
     launchContext,
@@ -89,71 +64,20 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
   const runtimeEnv = project
     ? projectScriptRuntimeEnv({ project: { cwd: project.workspaceRoot }, worktreePath })
     : {};
-  const terminalLabelsById = new Map<string, string>();
-  const terminalLaunchLocationsById = new Map<string, TerminalLaunchLocationWithEnv>();
-  for (const terminalId of surface.terminalIds) {
-    const summary =
-      knownTerminalSessions?.find((session) => session.target.terminalId === terminalId)?.state
-        .summary ?? null;
-    terminalLabelsById.set(terminalId, resolveTerminalSessionLabel(terminalId, summary));
-    if (!project) continue;
-    const terminalWorktreePath = resolveTerminalWorktreePath({
-      launchContext,
-      summary,
-      threadWorktreePath,
-    });
-    terminalLaunchLocationsById.set(terminalId, {
-      cwd:
-        launchContext?.cwd ??
-        summary?.cwd ??
-        projectScriptCwd({
-          project: { cwd: project.workspaceRoot },
-          worktreePath: terminalWorktreePath,
-        }),
-      worktreePath: terminalWorktreePath,
-      runtimeEnv: projectScriptRuntimeEnv({
-        project: { cwd: project.workspaceRoot },
-        worktreePath: terminalWorktreePath,
-      }),
-    });
-  }
-
   if (!project || !cwd) return null;
 
   return (
-    <ThreadTerminalDrawer
-      mode="panel"
-      hideSessionActions={hideSessionActions}
+    <ThreadTerminalTile
       visible={visible}
       threadRef={threadRef}
       threadId={threadRef.threadId}
       cwd={cwd}
       worktreePath={worktreePath}
       runtimeEnv={runtimeEnv}
-      height={0}
-      terminalIds={surface.terminalIds}
-      activeTerminalId={surface.activeTerminalId}
-      terminalGroups={[
-        {
-          id: surface.id,
-          terminalIds: surface.terminalIds,
-          ...(surface.splitDirection === "vertical" ? { splitDirection: "vertical" as const } : {}),
-        },
-      ]}
-      activeTerminalGroupId={surface.id}
-      onSplitTerminal={onSplitTerminal}
-      onSplitTerminalVertical={onSplitTerminalVertical}
-      onNewTerminal={onNewTerminal}
-      splitShortcutLabel={splitShortcutLabel}
-      splitVerticalShortcutLabel={splitVerticalShortcutLabel}
-      newShortcutLabel={newShortcutLabel}
-      closeShortcutLabel={closeShortcutLabel}
-      onActiveTerminalChange={onActiveTerminalChange}
+      terminalId={surface.resourceId}
+      terminalLabel={resolveTerminalSessionLabel(surface.resourceId, activeSummary)}
       onCloseTerminal={onCloseTerminal}
-      onHeightChange={() => undefined}
       onAddTerminalContext={onAddTerminalContext}
-      terminalLabelsById={terminalLabelsById}
-      terminalLaunchLocationsById={terminalLaunchLocationsById}
       keybindings={keybindings}
     />
   );

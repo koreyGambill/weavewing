@@ -68,6 +68,7 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     isDesktop: isElectron,
     editableFocus: false,
     ...options?.context,
+    isMac: isMacPlatform(resolvePlatform(options)),
   };
 }
 
@@ -339,36 +340,17 @@ export function isTerminalToggleShortcut(
   return matchesCommandShortcut(event, keybindings, "terminal.toggle", options);
 }
 
-export function isTerminalSplitShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return matchesCommandShortcut(event, keybindings, "terminal.split", options);
-}
-
-export function isTerminalSplitVerticalShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return matchesCommandShortcut(event, keybindings, "terminal.splitVertical", options);
-}
-
-export function isTerminalNewShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return matchesCommandShortcut(event, keybindings, "terminal.new", options);
-}
-
 export function isTerminalCloseShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
-  return matchesCommandShortcut(event, keybindings, "terminal.close", options);
+  const command = resolveShortcutCommand(event, keybindings, options);
+  return (
+    command === "terminal.close" ||
+    command === "workspace.tile.closeTab" ||
+    command === "workspace.tile.closeAllTabs"
+  );
 }
 
 export function isDiffToggleShortcut(

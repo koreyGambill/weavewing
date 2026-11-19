@@ -142,6 +142,11 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     alongside: { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
     rule: { key: "ctrl+tab", command: "workspace.tile.nextTab" },
   },
+  {
+    id: "weavewing.terminal-keys.v1",
+    alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
+    rule: { key: "mod+w", command: "workspace.tile.closeTab" },
+  },
 ];
 
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
@@ -196,6 +201,45 @@ function encodeWhenAst(node: KeybindingWhenNode): string {
     case "or":
       return `(${encodeWhenAst(node.left)} || ${encodeWhenAst(node.right)})`;
   }
+}
+
+const removedWeavewingCommands = new Set([
+  "terminal.split",
+  "terminal.splitVertical",
+  "terminal.new",
+  "rightPanel.toggle",
+  "rightPanel.toggleMaximized",
+  "rightPanel.new",
+  "rightPanel.close",
+]);
+function isRemovedWeavewingBinding(entry: unknown): boolean {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    "command" in entry &&
+    typeof entry.command === "string" &&
+    (removedWeavewingCommands.has(entry.command) ||
+      (entry.command === "terminal.close" &&
+        "key" in entry &&
+        entry.key === "mod+w" &&
+        "when" in entry &&
+        entry.when === "terminalFocus"))
+  );
+}
+
+// These exact defaults shipped before terminals kept shell control keys.
+function migrateWeavewingBinding(entry: unknown): unknown {
+  if (typeof entry !== "object" || entry === null || !("command" in entry) || !("key" in entry))
+    return entry;
+  if (
+    ((entry.command === "terminal.toggle" && entry.key === "mod+j") ||
+      (entry.command === "sidebar.toggle" && entry.key === "mod+b") ||
+      (entry.command === "editor.openFavorite" && entry.key === "mod+o")) &&
+    (!("when" in entry) || entry.when === "!terminalFocus")
+  ) {
+    return { ...entry, when: "isMac || !terminalFocus" };
+  }
+  return entry;
 }
 
 const RawKeybindingsEntries = fromLenientJson(Schema.Array(Schema.Unknown));
@@ -343,16 +387,19 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    return rawConfig.map((entry) => {
-      const decodedRule = decodeKeybindingRuleExit(entry);
-      if (
-        decodedRule._tag === "Success" &&
-        decodeResolvedKeybindingFromConfigExit(decodedRule.value)._tag === "Success"
-      ) {
-        return { value: decodedRule.value, rule: decodedRule.value };
-      }
-      return { value: entry, rule: null };
-    });
+    return rawConfig
+      .map(migrateWeavewingBinding)
+      .filter((entry) => !isRemovedWeavewingBinding(entry))
+      .map((entry) => {
+        const decodedRule = decodeKeybindingRuleExit(entry);
+        if (
+          decodedRule._tag === "Success" &&
+          decodeResolvedKeybindingFromConfigExit(decodedRule.value)._tag === "Success"
+        ) {
+          return { value: decodedRule.value, rule: decodedRule.value };
+        }
+        return { value: entry, rule: null };
+      });
   });
 
   const loadRuntimeCustomKeybindingsConfig = Effect.fn(function* (): Effect.fn.Return<
@@ -378,7 +425,9 @@ const make = Effect.gen(function* () {
 
     const keybindings: KeybindingRule[] = [];
     const issues: ServerConfigIssue[] = [];
-    for (const [index, entry] of decodedEntries.value.entries()) {
+    for (const [index, rawEntry] of decodedEntries.value.entries()) {
+      const entry = migrateWeavewingBinding(rawEntry);
+      if (isRemovedWeavewingBinding(entry)) continue;
       const decodedRule = decodeKeybindingRuleExit(entry);
       if (decodedRule._tag === "Failure") {
         const detail = Cause.pretty(decodedRule.cause);
@@ -529,7 +578,50 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      const migrateTerminalKeys = pendingLateDefaults.some(
+        (late) => late.id === "weavewing.terminal-keys.v1",
+      );
+      const closeConflict = runtimeConfig.keybindings.some((rule) => {
+        const shortcut = parseKeybindingShortcut(rule.key);
+        return (
+          rule.command !== "workspace.tile.closeTab" &&
+          shortcut?.key === "w" &&
+          !shortcut.altKey &&
+          !shortcut.shiftKey &&
+          (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
+        );
+      });
+      const customConfig = runtimeConfig.keybindings.map((rule) => {
+        if (!migrateTerminalKeys) return rule;
+        if (
+          !closeConflict &&
+          isSameKeybindingRule(rule, {
+            key: "meta+w",
+            command: "workspace.tile.closeTab",
+            when: "isMac",
+          })
+        )
+          return { key: "mod+w", command: rule.command };
+        if (
+          ((rule.command === "workspace.focusNext" && rule.key === "f6") ||
+            (rule.command === "workspace.focusPrevious" && rule.key === "shift+f6")) &&
+          rule.when === undefined
+        )
+          return { ...rule, when: "!terminalFocus" };
+        if (
+          /^thread\.jump\.[1-9]$/.test(rule.command) &&
+          rule.key === `mod+${rule.command.at(-1)}` &&
+          rule.when === "!modelPickerOpen && isDesktop"
+        )
+          return { ...rule, when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)" };
+        if (
+          ((rule.command === "view.reopenClosed" && rule.key === "mod+shift+t") ||
+            (rule.command === "preview.toggle" && rule.key === "mod+shift+j")) &&
+          rule.when === undefined
+        )
+          return { ...rule, when: "isMac || !terminalFocus" };
+        return rule;
+      });
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -556,7 +648,8 @@ const make = Effect.gen(function* () {
         }
         missingDefaults.push(defaultRule);
       }
-      for (const { alongside, rule } of pendingLateDefaults) {
+      for (const { id, alongside, rule } of pendingLateDefaults) {
+        if (id === "weavewing.terminal-keys.v1" && closeConflict) continue;
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
           !customConfig.some((entry) => hasSameShortcutContext(entry, rule))
@@ -599,7 +692,10 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length > 0) {
+      if (
+        defaultsToAppend.length > 0 ||
+        customConfig.some((rule, index) => rule !== runtimeConfig.keybindings[index])
+      ) {
         yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
       }
       const settledLateDefaults = pendingLateDefaults.filter(

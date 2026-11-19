@@ -17,29 +17,18 @@ beforeEach(() => {
   useRightPanelStore.setState({ byThreadKey: {} });
 });
 
-it("reopens the existing panel and selects a running terminal in its split", () => {
+it("reveals the existing terminal tab without creating another shell placement", () => {
   const panels = useRightPanelStore.getState();
   panels.openTerminal(threadRef, "terminal-1");
-  const surfaceId = selectThreadRightPanelState(
-    useRightPanelStore.getState().byThreadKey,
-    threadRef,
-  ).activeSurfaceId!;
-  panels.splitTerminal(threadRef, surfaceId, "setup-install");
-  panels.activateTerminal(threadRef, surfaceId, "terminal-1");
-  panels.close(threadRef);
-
+  panels.openTerminal(threadRef, "setup-install");
+  panels.activateSurface(threadRef, "terminal:terminal-1");
   revealThreadTerminal(threadRef, "setup-install");
   expect(
     selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef),
   ).toMatchObject({
     isOpen: true,
-    activeSurfaceId: surfaceId,
-    surfaces: [
-      {
-        terminalIds: ["terminal-1", "setup-install"],
-        activeTerminalId: "setup-install",
-      },
-    ],
+    activeSurfaceId: "terminal:setup-install",
+    surfaces: [{ resourceId: "terminal-1" }, { resourceId: "setup-install" }],
   });
   expect(
     selectThreadTerminalUiState(

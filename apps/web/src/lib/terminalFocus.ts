@@ -97,7 +97,7 @@ export function focusActivePanelTerminal(threadRef: ScopedThreadRef): void {
     threadRef,
   );
   const surface = isOpen ? surfaces.find((candidate) => candidate.id === activeSurfaceId) : null;
-  if (surface?.kind === "terminal") focusTerminal(threadRef, surface.activeTerminalId);
+  if (surface?.kind === "terminal") focusTerminal(threadRef, surface.resourceId);
 }
 
 /**
@@ -169,12 +169,8 @@ export function restoreFocusOnThreadEnter(
       content.focusComposer();
     } else if (
       previous &&
-      ((drawer.terminalOpen &&
-        drawer.terminalGroups
-          .find((group) => group.id === drawer.activeTerminalGroupId)
-          ?.terminalIds.includes(previous.terminalId)) ||
-        (panelTerminal?.kind === "terminal" &&
-          panelTerminal.terminalIds.includes(previous.terminalId)))
+      ((drawer.terminalOpen && drawer.terminalIds.includes(previous.terminalId)) ||
+        (panelTerminal?.kind === "terminal" && panelTerminal.resourceId === previous.terminalId))
     ) {
       focusTerminal(threadRef, previous.terminalId);
     } else if (drawer.terminalOpen && drawer.activeTerminalId) {

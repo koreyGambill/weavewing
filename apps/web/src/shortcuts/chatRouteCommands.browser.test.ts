@@ -46,6 +46,14 @@ describe("chat route commands", () => {
     expect(useThreadSelectionStore.getState().selectedThreadKeys.size).toBe(0);
     // With nothing selected, Escape is left for other handlers.
     expect(pressEscape().defaultPrevented).toBe(false);
+    const terminal = document.createElement("textarea");
+    terminal.dataset.terminalOwner = "right-panel";
+    document.body.append(terminal);
+    stack.defer(() => terminal.remove());
+    terminal.focus();
+    selectThread("env:thread-1");
+    expect(pressEscape().defaultPrevented).toBe(false);
+    expect(useThreadSelectionStore.getState().selectedThreadKeys.size).toBe(1);
   });
 
   it("stays out of the way off the chat route and under modal pages", () => {
