@@ -32,6 +32,7 @@ import { searchableSetting } from "../settingsSearch";
 import { type ReachModel, type ReachParty, squareKey } from "./reachModel.logic";
 import { AccessLine, ServerAccessDetail } from "./ServerAccessDetail";
 import { LocalServerRow, ServerAccessMenuItems, ServerAccessToggle } from "./ServerRows";
+import { ConnectWizard } from "./ConnectWizard";
 import { ReachGrid } from "./ReachGrid";
 import { type ReachServer, useReachModel } from "./useReachModel";
 import { type SquareChangeState, useSquareChange } from "./useSquareChange";
@@ -55,6 +56,7 @@ export function EnvironmentsPage() {
 
   return (
     <SettingsPageContainer>
+      <ConnectWizard model={data.model} servers={data.servers} change={change} />
       {data.servers.length > 1 ? <TrustedTogether model={data.model} /> : null}
       {data.thisComputer !== null ? (
         <SettingsSection
@@ -311,24 +313,7 @@ function OtherServers({
         Number(left.environment.entry.target._tag === "PrimaryConnectionTarget"),
     );
   return (
-    <SettingsSection
-      {...searchableSetting("remote-environments")}
-      title={title}
-      headerAction={
-        <AddEnvironmentDialog
-          open={addOpen}
-          routeTarget={routeTarget}
-          error={addError}
-          savedEnvironments={savedEnvironments}
-          onOpenChange={(open) => {
-            setAddOpen(open);
-            if (open) setRouteTarget(null);
-            else setAddError(null);
-          }}
-          onErrorChange={setAddError}
-        />
-      }
-    >
+    <SettingsSection {...searchableSetting("remote-environments")} title={title}>
       {visible.length === 0 ? (
         <SettingsRow title="None yet" />
       ) : (
@@ -359,6 +344,18 @@ function OtherServers({
           ),
         )
       )}
+      <AddEnvironmentDialog
+        open={addOpen}
+        routeTarget={routeTarget}
+        error={addError}
+        savedEnvironments={savedEnvironments}
+        showTrigger={false}
+        onOpenChange={(open) => {
+          setAddOpen(open);
+          if (!open) setAddError(null);
+        }}
+        onErrorChange={setAddError}
+      />
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
           environmentLabel={pendingT3ConnectRemoval?.label ?? null}

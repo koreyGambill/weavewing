@@ -70,12 +70,6 @@ export function togglePairingScopeSelection(
     : next;
 }
 
-export function canRevokeOtherClients(
-  clientSessions: ReadonlyArray<{ readonly current: boolean }> | null,
-): boolean {
-  return clientSessions === null || clientSessions.some((session) => !session.current);
-}
-
 export function recentPeerLinkRevokeWarning(
   sessions: ReadonlyArray<ServerClientSessionRecord>,
   nowMs: number = Date.now(),

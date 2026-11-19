@@ -55,6 +55,7 @@ function setup() {
     request,
     confirm: vi.fn(),
     cancel: vi.fn(),
+    applyNow: vi.fn(),
   };
   const model = buildReachModel({
     servers: [

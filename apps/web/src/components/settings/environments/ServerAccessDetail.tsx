@@ -35,7 +35,6 @@ import type { SquareChangeState } from "./useSquareChange";
 
 const EMPTY_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
 const EMPTY_CREDENTIALS: ReadonlyMap<string, string> = new Map();
-const noop = () => undefined;
 
 /** "4 come in · goes out to 2", or where that is managed when this app cannot read it. */
 export function accessSummary(model: ReachModel, server: ReachServer): string {
@@ -126,7 +125,7 @@ export function AccessLine({
   );
 }
 
-function usePairingEndpoints(server: ReachServer): ReadonlyArray<AdvertisedEndpoint> {
+export function usePairingEndpoints(server: ReachServer): ReadonlyArray<AdvertisedEndpoint> {
   const target = server.environment.entry.target;
   const isPrimaryDesktop =
     window.desktopBridge !== undefined &&
@@ -188,15 +187,11 @@ function WaitingLinks({ server }: { readonly server: ReachServer }) {
         endpointUrl={null}
         endpoints={endpoints}
         defaultEndpointKey={defaultEndpointKey}
-        isLoading={false}
         pairingLinks={links}
         createdPairingCredentials={EMPTY_CREDENTIALS}
         sharedPairingLinkId={null}
-        clientSessions={[]}
         revokingPairingLinkId={revokingId}
-        revokingClientSessionId={null}
         onRevokePairingLink={(id) => void revoke(id)}
-        onRevokeClientSession={noop}
         canRevoke={server.input.canManage}
       />
     </div>

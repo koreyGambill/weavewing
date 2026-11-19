@@ -32,6 +32,8 @@ export interface SquareChangeState {
   readonly request: (square: ReachSquare, target: SquareTarget) => void;
   readonly confirm: () => void;
   readonly cancel: () => void;
+  /** Applies at once and settles to the failure, or null. */
+  readonly applyNow: (square: ReachSquare, target: SquareTarget) => Promise<string | null>;
 }
 
 const failureText = (result: Parameters<typeof squashAtomCommandFailure>[0]) => {
@@ -130,6 +132,7 @@ export function useSquareChange(): SquareChangeState {
       plan.action === "remove" ? await remove(square) : await relink(square, plan.target);
     setBusyKey(null);
     setError(key, failure);
+    return failure;
   };
 
   // The square stays in hand until its confirm click, so the confirm acts on what was shown.
@@ -162,5 +165,13 @@ export function useSquareChange(): SquareChangeState {
     setPendingSquare(null);
   };
 
-  return { pending, busyKey, errors, request, confirm, cancel };
+  // For a caller that already showed what will happen, such as the Connect wizard's summary.
+  const applyNow = async (square: ReachSquare, target: SquareTarget) => {
+    const plan = planSquareChange(square, target);
+    if (plan.kind !== "blocked") return run(square, plan);
+    setError(keyOf(square), plan.reason);
+    return plan.reason;
+  };
+
+  return { pending, busyKey, errors, request, confirm, cancel, applyNow };
 }

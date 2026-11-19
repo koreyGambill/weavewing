@@ -1,42 +1,17 @@
-import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
-import { PlugIcon, PlusIcon, QrCodeIcon } from "lucide-react";
+import { QrCodeIcon } from "lucide-react";
 import { type ReactNode, memo, useId, useState } from "react";
 import {
-  AuthAccessWriteScope,
-  AuthDiagnosticsReadScope,
-  AuthOrchestrationReadScope,
-  AuthFilesystemReadScope,
-  AuthStandardClientScopes,
-  AuthTerminalReadScope,
   managedCapabilityDenial,
   type AuthEnvironmentScope,
-  type AuthGrantScope,
-  type AuthPairingCredentialResult,
   type AdvertisedEndpoint,
-  type EnvironmentId,
 } from "@t3tools/contracts";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
-import {
-  formatElapsedDurationLabel,
-  formatExpiresInLabel,
-  formatRelativeTimeLabel,
-} from "../../timestampFormat";
+import { formatExpiresInLabel } from "../../timestampFormat";
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
-import {
-  canRevokeOtherClients,
-  isQrShareableEndpoint,
-  selectQrEndpointOption,
-  togglePairingScopeSelection,
-} from "./ConnectionsSettings.logic";
+import { isQrShareableEndpoint, selectQrEndpointOption } from "./ConnectionsSettings.logic";
 import { useNowSecond } from "../../hooks/useNowSecond";
-import { Input } from "../ui/input";
-import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogFooter,
@@ -53,17 +28,9 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
-import {
-  isLoopbackHostname,
-  type ServerClientSessionRecord,
-  type ServerPairingLinkRecord,
-} from "~/environments/primary";
-import { authEnvironment } from "~/state/auth";
-import { readEnvironmentScope } from "~/state/session";
-import { useManagedPolicy, usePrimaryManagedPolicy } from "~/state/managedPolicy";
-import { useAtomCommand } from "~/state/use-atom-command";
+import { isLoopbackHostname, type ServerPairingLinkRecord } from "~/environments/primary";
+import { usePrimaryManagedPolicy } from "~/state/managedPolicy";
 import { ManagedControl } from "../ManagedPolicy";
-import { openUseInAnotherApp } from "../mcp/UseInAnotherAppDialog";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import {
@@ -480,360 +447,30 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   );
 });
 
-type ConnectedClientListRowProps = {
-  clientSession: ServerClientSessionRecord;
-  revokingClientSessionId: string | null;
-  onRevokeSession: (sessionId: ServerClientSessionRecord["sessionId"]) => void;
-  canRevoke: boolean;
-};
-
-const ConnectedClientListRow = memo(function ConnectedClientListRow({
-  clientSession,
-  revokingClientSessionId,
-  onRevokeSession,
-  canRevoke,
-}: ConnectedClientListRowProps) {
-  const nowMs = useNowSecond();
-  const isLive = clientSession.current || clientSession.connected;
-  const lastConnectedAt = clientSession.lastConnectedAt;
-  const tracksLastUse = clientSession.method !== "browser-session-cookie";
-  const statusTooltip = tracksLastUse
-    ? lastConnectedAt
-      ? `Last used at ${formatAccessTimestamp(lastConnectedAt)}`
-      : "Not used yet."
-    : isLive
-      ? lastConnectedAt
-        ? `Connected for ${formatElapsedDurationLabel(lastConnectedAt, nowMs)}`
-        : "Connected"
-      : lastConnectedAt
-        ? `Last connected at ${formatAccessTimestamp(lastConnectedAt)}`
-        : "Not connected yet.";
-  const deviceInfoBits = [
-    clientSession.client.deviceType !== "unknown"
-      ? clientSession.client.deviceType[0]?.toUpperCase() + clientSession.client.deviceType.slice(1)
-      : null,
-    clientSession.client.os ?? null,
-    clientSession.client.browser ?? null,
-    clientSession.client.ipAddress ?? null,
-  ].filter((value): value is string => value !== null);
-  const primaryLabel =
-    clientSession.client.label ??
-    ([clientSession.client.os, clientSession.client.browser].filter(Boolean).join(" · ") ||
-      clientSession.subject);
-
-  return (
-    <div className={ITEM_ROW_CLASSNAME}>
-      <div className={ITEM_ROW_INNER_CLASSNAME}>
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <ConnectionStatusDot
-              tooltipText={statusTooltip}
-              dotClassName={isLive ? "bg-success" : "bg-muted-foreground/30"}
-              pingClassName={isLive ? "bg-success/60 duration-2000" : null}
-            />
-            <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
-            {clientSession.current ? (
-              <span className="text-3xs text-muted-foreground/80 rounded-md border border-border/50 bg-muted/50 px-1 py-0.5">
-                This device
-              </span>
-            ) : null}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {deviceInfoBits.length > 0 ? (
-              <>
-                {deviceInfoBits.join(" · ")}
-                <span aria-hidden> · </span>
-              </>
-            ) : null}
-            <AccessScopeSummary scopes={clientSession.scopes} label="Client scopes" />
-            {tracksLastUse && lastConnectedAt ? (
-              <>
-                <span aria-hidden> · </span>
-                <Tooltip>
-                  <TooltipTrigger render={<span />}>
-                    Last used {formatRelativeTimeLabel(lastConnectedAt, nowMs)}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">{formatAccessTimestamp(lastConnectedAt)}</TooltipPopup>
-                </Tooltip>
-              </>
-            ) : null}
-          </p>
-        </div>
-        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          {!clientSession.current ? (
-            <Button
-              size="xs"
-              variant="destructive-outline"
-              disabled={!canRevoke || revokingClientSessionId === clientSession.sessionId}
-              onClick={() => void onRevokeSession(clientSession.sessionId)}
-            >
-              {revokingClientSessionId === clientSession.sessionId ? "Revoking…" : "Revoke"}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-type AuthorizedClientsHeaderActionProps = {
-  environmentId: EnvironmentId;
-  onPairingLinkCreated: (result: AuthPairingCredentialResult) => void;
-  clientSessions: ReadonlyArray<ServerClientSessionRecord> | null;
-  isRevokingOtherClients: boolean;
-  onRevokeOtherClients: () => void;
-  delegatableScopes: ReadonlyArray<AuthEnvironmentScope>;
-};
-
-export const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderAction({
-  environmentId,
-  onPairingLinkCreated,
-  clientSessions,
-  isRevokingOtherClients,
-  onRevokeOtherClients,
-  delegatableScopes,
-}: AuthorizedClientsHeaderActionProps) {
-  const pairingDenial = managedCapabilityDenial(useManagedPolicy(environmentId), "remoteClients");
-  const createPairingCredential = useAtomCommand(authEnvironment.createPairingCredential, {
-    reportFailure: false,
-  });
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [pairingLabel, setPairingLabel] = useState("");
-  const [pairingScopes, setPairingScopes] = useState<ReadonlyArray<AuthGrantScope>>([
-    ...AuthStandardClientScopes,
-  ]);
-  const selectedScopes = pairingScopes.filter((scope) => delegatableScopes.includes(scope));
-  const [isCreatingPairingLink, setIsCreatingPairingLink] = useState(false);
-
-  const handleCreatePairingLink = async () => {
-    if (
-      selectedScopes.length === 0 ||
-      !readEnvironmentScope(environmentId, AuthAccessWriteScope) ||
-      !selectedScopes.every((scope) => readEnvironmentScope(environmentId, scope))
-    )
-      return;
-    setIsCreatingPairingLink(true);
-    const trimmedLabel = pairingLabel.trim();
-    const result = await createPairingCredential({
-      environmentId,
-      input: { ...(trimmedLabel ? { label: trimmedLabel } : {}), scopes: selectedScopes },
-    });
-    if (result._tag === "Success") {
-      onPairingLinkCreated(result.value);
-      setPairingLabel("");
-      setPairingScopes(
-        AuthStandardClientScopes.filter((scope) => delegatableScopes.includes(scope)),
-      );
-      setDialogOpen(false);
-    } else if (!isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      const message = error instanceof Error ? error.message : "Failed to create pairing URL.";
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not create pairing URL",
-          description: message,
-        }),
-      );
-    }
-    setIsCreatingPairingLink(false);
-  };
-
-  const togglePairingScope = (scope: AuthGrantScope, checked: boolean) => {
-    setPairingScopes((current) => togglePairingScopeSelection(current, scope, checked));
-  };
-
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <Button size="xs" variant="outline" onClick={() => openUseInAnotherApp(environmentId)}>
-        <PlugIcon className="size-3" />
-        Use in another app (MCP)
-      </Button>
-      <Button
-        size="xs"
-        variant="destructive-outline"
-        disabled={isRevokingOtherClients || !canRevokeOtherClients(clientSessions)}
-        onClick={() => void onRevokeOtherClients()}
-      >
-        {isRevokingOtherClients ? "Revoking…" : "Revoke others"}
-      </Button>
-      {pairingDenial !== undefined ? (
-        <ManagedControl reason={pairingDenial}>
-          <Button size="xs" variant="default" disabled>
-            <PlusIcon className="size-3" />
-            Create link
-          </Button>
-        </ManagedControl>
-      ) : null}
-      <Dialog
-        open={dialogOpen && pairingDenial === undefined}
-        onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setPairingLabel("");
-            setPairingScopes(
-              AuthStandardClientScopes.filter((scope) => delegatableScopes.includes(scope)),
-            );
-          }
-        }}
-      >
-        {pairingDenial === undefined ? (
-          <DialogTrigger
-            render={
-              <Button size="xs" variant="default">
-                <PlusIcon className="size-3" />
-                Create link
-              </Button>
-            }
-          />
-        ) : null}
-        <DialogPopup className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Create pairing link</DialogTitle>
-            <DialogDescription>
-              Generate a one-time link that another device can use to pair with this backend as an
-              authorized client.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-medium text-foreground">
-                Client label (optional)
-              </span>
-              <Input
-                value={pairingLabel}
-                onChange={(event) => setPairingLabel(event.target.value)}
-                placeholder="e.g. Living room iPad"
-                disabled={isCreatingPairingLink}
-                autoFocus
-              />
-            </label>
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-xs font-medium text-foreground">Permissions</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Limit what the paired client can do.
-                  </p>
-                </div>
-                <div className="flex gap-1">
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={isCreatingPairingLink}
-                    onClick={() =>
-                      setPairingScopes(
-                        [
-                          AuthOrchestrationReadScope,
-                          AuthFilesystemReadScope,
-                          AuthDiagnosticsReadScope,
-                          AuthTerminalReadScope,
-                        ].filter((scope) => delegatableScopes.includes(scope)),
-                      )
-                    }
-                  >
-                    Read only
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={isCreatingPairingLink}
-                    onClick={() =>
-                      setPairingScopes(
-                        AuthStandardClientScopes.filter((scope) =>
-                          delegatableScopes.includes(scope),
-                        ),
-                      )
-                    }
-                  >
-                    Standard
-                  </Button>
-                </div>
-              </div>
-              <div className="divide-y divide-border/60 rounded-lg border border-input bg-muted/25">
-                {PAIRING_SCOPE_OPTIONS.filter(({ scope }) => delegatableScopes.includes(scope)).map(
-                  ({ scope, title, description }) => (
-                    <label
-                      key={scope}
-                      className="flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
-                    >
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={pairingScopes.includes(scope)}
-                        disabled={isCreatingPairingLink}
-                        onCheckedChange={(checked) => togglePairingScope(scope, checked === true)}
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium text-foreground">{title}</span>
-                        <span className="block text-xs leading-snug text-muted-foreground">
-                          {description}
-                        </span>
-                      </span>
-                    </label>
-                  ),
-                )}
-              </div>
-              {selectedScopes.length === 0 ? (
-                <p className="text-xs text-destructive">Select at least one permission.</p>
-              ) : selectedScopes.includes(AuthAccessWriteScope) ? (
-                <p className="text-xs text-warning">
-                  This client can create or revoke access for other devices.
-                </p>
-              ) : null}
-            </section>
-          </DialogPanel>
-          <DialogFooter variant="bare">
-            <Button
-              variant="outline"
-              disabled={isCreatingPairingLink}
-              onClick={() => setDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={isCreatingPairingLink || selectedScopes.length === 0}
-              onClick={() => void handleCreatePairingLink()}
-            >
-              {isCreatingPairingLink ? "Creating…" : "Create link"}
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
-    </div>
-  );
-});
-
 type PairingClientsListProps = {
   servedByEnvironment: boolean;
   endpointUrl: string | null | undefined;
   endpoints: ReadonlyArray<AdvertisedEndpoint>;
   defaultEndpointKey: string | null;
-  isLoading: boolean;
   pairingLinks: ReadonlyArray<ServerPairingLinkRecord>;
   createdPairingCredentials: ReadonlyMap<string, string>;
   sharedPairingLinkId: string | null;
-  clientSessions: ReadonlyArray<ServerClientSessionRecord>;
   revokingPairingLinkId: string | null;
-  revokingClientSessionId: string | null;
   onRevokePairingLink: (id: string) => void;
-  onRevokeClientSession: (sessionId: ServerClientSessionRecord["sessionId"]) => void;
   canRevoke: boolean;
 };
 
+/** Pairing links handed out and not used yet, each with its QR code and copy actions. */
 export const PairingClientsList = memo(function PairingClientsList({
   servedByEnvironment,
   endpointUrl,
   endpoints,
   defaultEndpointKey,
-  isLoading,
   pairingLinks,
   createdPairingCredentials,
   sharedPairingLinkId,
-  clientSessions,
   revokingPairingLinkId,
-  revokingClientSessionId,
   onRevokePairingLink,
-  onRevokeClientSession,
   canRevoke,
 }: PairingClientsListProps) {
   return (
@@ -853,22 +490,6 @@ export const PairingClientsList = memo(function PairingClientsList({
           canRevoke={canRevoke}
         />
       ))}
-
-      {clientSessions.map((clientSession) => (
-        <ConnectedClientListRow
-          key={clientSession.sessionId}
-          clientSession={clientSession}
-          revokingClientSessionId={revokingClientSessionId}
-          onRevokeSession={onRevokeClientSession}
-          canRevoke={canRevoke}
-        />
-      ))}
-
-      {pairingLinks.length === 0 && clientSessions.length === 0 && !isLoading ? (
-        <div className={ITEM_ROW_CLASSNAME}>
-          <p className="text-xs text-muted-foreground/60">No pairing links or client sessions.</p>
-        </div>
-      ) : null}
     </>
   );
 });
