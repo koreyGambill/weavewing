@@ -42,6 +42,7 @@ import {
 } from "../../questionAttachments";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { readComposerImageBytes } from "../chat/composerAttachmentFiles";
+import { useScratchProject } from "../../hooks/useScratchProject";
 
 type CaptureTarget = DraftId | ScopedThreadRef;
 type CaptureFailure = "missing-project" | "delivery";
@@ -233,12 +234,13 @@ export function SnapShotCoordinator() {
   const {
     activeDraftThread,
     activeThread,
-    defaultProjectRef,
     defaultProjectFallbackReady,
     handleNewThread,
     routeDraftId,
     routeThreadRef,
   } = useHandleNewThread();
+  // Without a current thread a capture starts a new one where New thread would.
+  const scratch = useScratchProject();
   const [lastUsedProjectKey, setLastUsedProjectKey] = useLocalStorage(
     LAST_USED_PROJECT_STORAGE_KEY,
     null,
@@ -310,11 +312,12 @@ export function SnapShotCoordinator() {
     const projectRef = resolveThreadActionProjectRef({
       activeDraftThread,
       activeThread: activeThread ?? undefined,
-      defaultProjectRef,
+      defaultProjectRef: null,
       handleNewThread,
     });
-    if (!projectRef) return null;
-    const created = await handleNewThread(projectRef);
+    const created = projectRef
+      ? await handleNewThread(projectRef)
+      : await scratch.openDefaultPlace();
     if (!created) return null;
     settleTarget(routeTarget, created.draftId);
     return created.draftId;
@@ -429,7 +432,7 @@ export function SnapShotCoordinator() {
   };
 
   const drainPending = useEffectEvent(() => drain());
-  const hasDefaultProject = defaultProjectRef !== null;
+  const hasDefaultProject = scratch.defaultPlace().kind !== "none";
   const handleSnapShotEvent = useEffectEvent(
     (bridge: DesktopBridge, event: DesktopSnapShotEvent) => {
       if (!getClientSettings().snapShotEnabled) return;

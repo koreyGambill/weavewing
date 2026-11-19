@@ -14,7 +14,6 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-  type WorkEnvironmentChoice,
 } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -481,11 +480,15 @@ function OpenCommandPaletteDialog(props: {
   const onProjectReady =
     props.openIntent?.kind === "add-project" ? props.openIntent.onProjectReady : undefined;
   const {
-    scratchEnvironmentChoice,
-    scratchWorkspaceRootFor,
     scratchWorkspaceLabelFor,
     startScratchThread,
+    defaultPlace: readDefaultPlace,
+    defaultPlaceLabel,
+    startDefaultPlace,
   } = useScratchProject();
+  // New thread's own place, from the one default-place resolver.
+  const defaultPlace = readDefaultPlace();
+  const defaultProjectRef = defaultPlace.kind === "project" ? defaultPlace.projectRef : null;
   const startTriage = useStartTriage();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
@@ -510,8 +513,7 @@ function OpenCommandPaletteDialog(props: {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const preferredEnvironmentId = usePreferredEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
-    useHandleNewThread();
+  const { activeDraftThread, activeThread, handleNewThread } = useHandleNewThread();
   const tileLayouts = usePrimarySettings((settings) => settings.tileLayouts);
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
@@ -741,27 +743,6 @@ function OpenCommandPaletteDialog(props: {
   const [pickerEnvironmentId, setPickerEnvironmentId] = useState<EnvironmentId | null>(
     currentProjectEnvironmentId ?? defaultProjectRef?.environmentId ?? primaryEnvironmentId,
   );
-  const scratchChoice = scratchEnvironmentChoice(currentProjectEnvironmentId);
-  const scratchLabel =
-    scratchChoice.kind === "none" ? null : scratchWorkspaceLabelFor(scratchChoice.environmentId);
-  // An unreachable preferred machine turns the row into a machine choice instead of
-  // quietly starting the thread somewhere else.
-  const runScratchChoice = (
-    choice: Exclude<WorkEnvironmentChoice<EnvironmentId>, { readonly kind: "none" }>,
-  ) =>
-    choice.kind === "chosen"
-      ? { run: () => startScratchThread(choice.environmentId) }
-      : {
-          description: `${environmentLabelById.get(choice.environmentId) ?? "Preferred machine"} is unavailable`,
-          keepOpen: true,
-          run: async () => openScratchEnvironmentChoice(),
-        };
-  const openScratchEnvironmentChoice = () => {
-    pushPaletteView({
-      addonIcon: <MessageSquareDashedIcon className={ADDON_ICON_CLASS} />,
-      groups: scratchEnvironmentGroups(),
-    });
-  };
   const supportsTriage = (environmentId: EnvironmentId | null) =>
     environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
       ?.environment.capabilities.triage === true;
@@ -1216,32 +1197,6 @@ function OpenCommandPaletteDialog(props: {
       items: addProjectEnvironmentItems,
     },
   ];
-  const scratchEnvironmentGroups = () => [
-    {
-      value: "environments",
-      label: "Environments",
-      items: buildEnvironmentChoice(
-        addProjectEnvironmentInputs.map((environment) => {
-          const offersScratch = scratchWorkspaceRootFor(environment.environmentId) !== null;
-          return {
-            ...environment,
-            isConnected: offersScratch,
-            status:
-              !offersScratch && environment.isConnected ? "No default folder" : environment.status,
-          };
-        }),
-        preferredEnvironmentId,
-      ).options.map((option) => ({
-        ...buildEnvironmentItem(
-          option,
-          `action:new-thread-without-project:environment:${option.environmentId}`,
-          (environmentId) => void startScratchThread(environmentId),
-        ),
-        keepOpen: false,
-      })),
-    },
-  ];
-
   const openConnectionSettings = () => {
     setOpen(false);
     void navigate({ to: "/settings/connections" });
@@ -1315,10 +1270,12 @@ function OpenCommandPaletteDialog(props: {
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
+    // Without a current project this would repeat New thread's own entry below.
     const activeProjectTitle =
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
-      currentProject?.title ??
-      null;
+      currentProject === undefined
+        ? null
+        : (projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
+          currentProject.title);
 
     if (activeProjectTitle) {
       actionItems.push({
@@ -1371,15 +1328,20 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (scratchChoice.kind !== "none") {
+  if (defaultPlace.kind !== "none") {
     actionItems.push({
       kind: "action",
-      value: "action:new-thread-without-project",
-      searchTerms: ["new thread", "default folder", "no project", "without project", "chat"],
-      title: `New thread in ${scratchLabel ?? "the default folder"}`,
+      value: "action:new-thread-default-place",
+      searchTerms: ["new thread", "default folder", "default place", "no project", "chat"],
+      title: `New thread in ${defaultPlaceLabel(defaultPlace) ?? "the default place"}`,
+      ...(defaultPlace.unavailable === null
+        ? {}
+        : { description: `Default is unavailable: ${defaultPlace.unavailable}` }),
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.new",
-      ...runScratchChoice(scratchChoice),
+      run: async () => {
+        await startDefaultPlace();
+      },
     });
   }
 

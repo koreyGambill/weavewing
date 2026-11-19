@@ -5,12 +5,13 @@ export type DefaultPlace =
   | {
       readonly kind: "project";
       readonly projectRef: ScopedProjectRef;
-      readonly notice: string | null;
+      /** Why the stored default could not be used; null when this is the stored default. */
+      readonly unavailable: string | null;
     }
   | {
       readonly kind: "scratch";
       readonly environmentId: EnvironmentId;
-      readonly notice: string | null;
+      readonly unavailable: string | null;
     }
   | { readonly kind: "none" };
 
@@ -41,8 +42,8 @@ export function defaultPlaceUpdate(place: {
 
 /**
  * Where a new thread starts: the default project, else the default folder on the preferred
- * machine, else another machine's default folder, else a recent project. Every step past the
- * first usable choice says why, so no entry point falls back silently.
+ * machine, else another machine's default folder, else a recent project. `unavailable` says why
+ * the stored default could not be used, so every place that shows the result can say so.
  */
 export function resolveDefaultPlace(input: {
   readonly defaultProject: ScopedProjectRef | null;
@@ -53,7 +54,7 @@ export function resolveDefaultPlace(input: {
   readonly fallbackProject: ScopedProjectRef | null;
   readonly environmentLabel: (environmentId: EnvironmentId) => string;
 }): DefaultPlace {
-  let reason: string | null = null;
+  let unavailable: string | null = null;
   if (input.defaultProject !== null) {
     const ref = input.defaultProject;
     const project = input.projects.find(
@@ -65,51 +66,39 @@ export function resolveDefaultPlace(input: {
       project.archivedAt == null &&
       input.isConnected(ref.environmentId)
     ) {
-      return { kind: "project", projectRef: ref, notice: null };
+      return { kind: "project", projectRef: ref, unavailable: null };
     }
-    reason =
+    unavailable =
       project === undefined
-        ? "Your default project no longer exists"
+        ? "the default project no longer exists"
         : project.archivedAt != null
-          ? "Your default project is archived"
+          ? "the default project is archived"
           : `${input.environmentLabel(ref.environmentId)} is offline`;
   }
   const choice = input.scratchChoice;
   if (choice.kind === "chosen") {
-    return {
-      kind: "scratch",
-      environmentId: choice.environmentId,
-      notice: reason === null ? null : `${reason}, so this thread starts in the default folder.`,
-    };
+    return { kind: "scratch", environmentId: choice.environmentId, unavailable };
   }
   if (choice.kind === "preferred-unavailable") {
-    reason ??= `${input.environmentLabel(choice.environmentId)} has no usable default folder`;
+    const machine = input.environmentLabel(choice.environmentId);
+    unavailable ??= input.isConnected(choice.environmentId)
+      ? `the default folder on ${machine} can't be used`
+      : `${machine} is offline`;
     if (input.fallbackScratchEnvironmentId !== null) {
-      return {
-        kind: "scratch",
-        environmentId: input.fallbackScratchEnvironmentId,
-        notice: `${reason}, so this thread starts on ${input.environmentLabel(input.fallbackScratchEnvironmentId)}.`,
-      };
+      return { kind: "scratch", environmentId: input.fallbackScratchEnvironmentId, unavailable };
     }
   }
   const fallback = input.fallbackProject;
-  const fallbackProject =
-    fallback === null
-      ? undefined
-      : input.projects.find(
-          (candidate) =>
-            candidate.environmentId === fallback.environmentId &&
-            candidate.id === fallback.projectId &&
-            candidate.archivedAt == null &&
-            input.isConnected(candidate.environmentId),
-        );
-  if (fallback !== null && fallbackProject !== undefined) {
-    return {
-      kind: "project",
-      projectRef: fallback,
-      notice:
-        reason === null ? null : `${reason}, so this thread starts in ${fallbackProject.title}.`,
-    };
-  }
-  return { kind: "none" };
+  const usable =
+    fallback !== null &&
+    input.projects.some(
+      (candidate) =>
+        candidate.environmentId === fallback.environmentId &&
+        candidate.id === fallback.projectId &&
+        candidate.archivedAt == null &&
+        input.isConnected(candidate.environmentId),
+    );
+  return fallback !== null && usable
+    ? { kind: "project", projectRef: fallback, unavailable }
+    : { kind: "none" };
 }

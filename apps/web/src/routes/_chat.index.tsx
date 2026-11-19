@@ -11,7 +11,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useScratchProject } from "../hooks/useScratchProject";
-import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
+import { useAllEnvironmentShellsBootstrapped } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 
 function ChatIndexRouteView() {
@@ -27,8 +27,6 @@ function ChatIndexRouteView() {
 }
 
 function IndexDraftLanding() {
-  // The default place reads projects when asked; subscribing re-renders as they load.
-  useProjects();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const router = useRouter();
   // Read at effect time; this page can stay mounted while the router is already navigating away.
@@ -37,9 +35,9 @@ function IndexDraftLanding() {
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
   const scratch = useScratchProject();
   // The same resolver and notice as New thread, so the start page never falls back silently.
-  const hasStartTarget = scratch.defaultPlace(null).kind !== "none";
+  const hasStartTarget = scratch.defaultPlace().kind !== "none";
   const attempt = startState.retryRequest;
-  const startDraft = useEffectEvent(() => scratch.startDefaultPlace(null, { replace: true }));
+  const startDraft = useEffectEvent(() => scratch.startDefaultPlace({ replace: true }));
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts a draft thread in the default place and navigates to it while still on the index
   useEffect(() => {

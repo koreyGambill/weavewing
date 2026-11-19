@@ -31,7 +31,6 @@ import {
   readProjects,
   readThreadShell,
   readThreadShells,
-  useProjects,
   useQuietThreadShell,
 } from "../state/entities";
 import {
@@ -44,11 +43,10 @@ import {
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { usePreferredEnvironmentId } from "../state/preferredEnvironment";
 import { environmentSummaries } from "../state/presentation";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import { legacyProjectCwdPreferenceKey } from "../uiStateStore";
 import { getClientSettings } from "./useSettings";
 import { getLocalStorageItem, useLocalStorage } from "./useLocalStorage";
 import * as Schema from "effect/Schema";
@@ -490,7 +488,6 @@ export function resolveDefaultProjectRef(
 }
 
 export function useHandleNewThread() {
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
   const [lastUsedProjectKey] = useLocalStorage(
     LAST_USED_PROJECT_STORAGE_KEY,
     null,
@@ -511,23 +508,11 @@ export function useHandleNewThread() {
         : useComposerDraftStore.getState().getDraftSession(routeTarget.draftId)
       : null,
   );
-  const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
-  const preferredEnvironmentId = usePreferredEnvironmentId();
-  const connectedEnvironmentIds = useAtomValue(environmentSummaries.connectedEnvironmentIdsAtom);
-  const defaultProjectRef = resolveDefaultProjectRef(
-    projects,
-    projectOrder,
-    lastUsedProjectKey,
-    defaultProjectFallbackReady,
-    preferredEnvironmentId,
-    (environmentId) => connectedEnvironmentIds.includes(environmentId),
-  );
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef,
     defaultProjectFallbackReady,
     handleNewThread,
     routeDraftId,

@@ -6,10 +6,10 @@ import { defaultPlaceUpdate, resolveDefaultPlace } from "./defaultPlace.logic";
 const WSL = EnvironmentId.make("wsl");
 const WIN = EnvironmentId.make("win");
 const repo = { environmentId: WSL, projectId: ProjectId.make("repo") };
-const other = { environmentId: WIN, projectId: ProjectId.make("other") };
+const recent = { environmentId: WIN, projectId: ProjectId.make("recent") };
 const projects = [
   { environmentId: WSL, id: repo.projectId, title: "weavewing", archivedAt: null },
-  { environmentId: WIN, id: other.projectId, title: "other", archivedAt: null },
+  { environmentId: WIN, id: recent.projectId, title: "recent", archivedAt: null },
 ];
 const base = {
   defaultProject: null,
@@ -22,7 +22,74 @@ const base = {
 };
 
 describe("default place", () => {
-  it("makes a project inside a Git repository the default project, never the default folder", () => {
+  it.each([
+    {
+      state: "stored default project usable",
+      input: { defaultProject: repo },
+      expected: { kind: "project", projectRef: repo, unavailable: null },
+    },
+    {
+      state: "default folder usable",
+      input: {},
+      expected: { kind: "scratch", environmentId: WSL, unavailable: null },
+    },
+    {
+      state: "default project's machine offline",
+      input: { defaultProject: repo, isConnected: (id: EnvironmentId) => id !== WSL },
+      expected: { kind: "scratch", environmentId: WSL, unavailable: "WSL is offline" },
+    },
+    {
+      state: "default project deleted",
+      input: { defaultProject: repo, projects: [projects[1]!] },
+      expected: {
+        kind: "scratch",
+        environmentId: WSL,
+        unavailable: "the default project no longer exists",
+      },
+    },
+    {
+      state: "default project archived",
+      input: {
+        defaultProject: repo,
+        projects: [{ ...projects[0]!, archivedAt: "2026-11-01T00:00:00.000Z" }, projects[1]!],
+      },
+      expected: {
+        kind: "scratch",
+        environmentId: WSL,
+        unavailable: "the default project is archived",
+      },
+    },
+    {
+      state: "default folder refused",
+      input: {
+        scratchChoice: { kind: "preferred-unavailable", environmentId: WSL } as const,
+        fallbackProject: recent,
+      },
+      expected: {
+        kind: "project",
+        projectRef: recent,
+        unavailable: "the default folder on WSL can't be used",
+      },
+    },
+    {
+      state: "preferred machine offline",
+      input: {
+        isConnected: (id: EnvironmentId) => id !== WSL,
+        scratchChoice: { kind: "preferred-unavailable", environmentId: WSL } as const,
+        fallbackScratchEnvironmentId: WIN,
+      },
+      expected: { kind: "scratch", environmentId: WIN, unavailable: "WSL is offline" },
+    },
+    {
+      state: "nothing usable",
+      input: { scratchChoice: { kind: "none" } as const },
+      expected: { kind: "none" },
+    },
+  ])("$state", ({ input, expected }) => {
+    expect(resolveDefaultPlace({ ...base, ...input })).toEqual(expected);
+  });
+
+  it("saves a project as the default project and a default folder as just its machine", () => {
     expect(defaultPlaceUpdate({ projectRef: repo, isScratch: false })).toEqual({
       preferredEnvironmentId: WSL,
       defaultProject: repo,
@@ -30,52 +97,6 @@ describe("default place", () => {
     expect(defaultPlaceUpdate({ projectRef: repo, isScratch: true })).toEqual({
       preferredEnvironmentId: WSL,
       defaultProject: null,
-    });
-    // Ctrl+N then opens that project.
-    expect(resolveDefaultPlace({ ...base, defaultProject: repo })).toEqual({
-      kind: "project",
-      projectRef: repo,
-      notice: null,
-    });
-  });
-
-  it("starts in the next usable place when the default folder is refused", () => {
-    expect(
-      resolveDefaultPlace({
-        ...base,
-        scratchChoice: { kind: "preferred-unavailable", environmentId: WSL },
-        fallbackProject: other,
-      }),
-    ).toEqual({
-      kind: "project",
-      projectRef: other,
-      notice: "WSL has no usable default folder, so this thread starts in other.",
-    });
-  });
-
-  it("falls back to the default folder when the default project was archived", () => {
-    expect(
-      resolveDefaultPlace({
-        ...base,
-        defaultProject: repo,
-        projects: [{ ...projects[0]!, archivedAt: "2026-11-01T00:00:00.000Z" }, projects[1]!],
-      }),
-    ).toEqual({
-      kind: "scratch",
-      environmentId: WSL,
-      notice: "Your default project is archived, so this thread starts in the default folder.",
-    });
-  });
-
-  it("names an offline default project and its machine", () => {
-    expect(
-      resolveDefaultPlace({ ...base, defaultProject: repo, isConnected: (id) => id !== WSL }),
-    ).toMatchObject({ kind: "scratch", notice: expect.stringContaining("WSL is offline") });
-  });
-
-  it("reports nothing usable rather than guessing", () => {
-    expect(resolveDefaultPlace({ ...base, scratchChoice: { kind: "none" } })).toEqual({
-      kind: "none",
     });
   });
 });

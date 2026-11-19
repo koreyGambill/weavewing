@@ -18,6 +18,7 @@ import { act, fakeTimers, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
 import { makeThreadFixture } from "../test-fixtures";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import * as scratchProject from "../hooks/useScratchProject";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
@@ -37,6 +38,7 @@ vi.mock(import("../state/olderSettledShelf"), async (original) => {
 });
 vi.mock("../state/entities", { spy: true });
 vi.mock("../hooks/useHandleNewThread", { spy: true });
+vi.mock("../hooks/useScratchProject", { spy: true });
 vi.mock("../hooks/useNowMinute", { spy: true });
 vi.mock("../hooks/useThreadRouteTarget", { spy: true });
 vi.mock("./sidebar/SidebarThreadRow", { spy: true });
@@ -77,53 +79,74 @@ function project(id: string): Project {
 
 describe("sidebar header new thread", () => {
   it.each([
-    { mode: "normal", count: 2, shift: false, picker: true },
-    { mode: "boring", count: 2, shift: false, picker: true },
-    { mode: "boring", count: 2, shift: true, picker: false },
-    { mode: "boring", count: 1, shift: false, picker: true },
-  ] as const)("$mode sidebar, $count projects, shift=$shift: picker=$picker", async (scenario) => {
-    using stack = new DisposableStack();
-    const previousSettings = getClientSettings();
-    stack.defer(() => __setClientSettingsForTests(previousSettings));
-    __setClientSettingsForTests({
-      ...DEFAULT_CLIENT_SETTINGS,
-      boringSidebarEnabled: scenario.mode === "boring",
-    });
-    const projects = [project("active"), project("idle")].slice(0, scenario.count);
-    const currentProjectRef = {
-      environmentId: projects[0]!.environmentId,
-      projectId: projects[0]!.id,
-    };
-    const startThread = vi.fn().mockResolvedValue(null);
-    vi.mocked(useProjects).mockReturnValue(projects);
-    vi.mocked(useHandleNewThread).mockReturnValue({
-      activeDraftThread: null,
-      activeThread: null,
-      defaultProjectRef: currentProjectRef,
-      defaultProjectFallbackReady: true,
-      handleNewThread: startThread,
-      routeDraftId: null,
-      routeThreadRef: null,
-    });
-    vi.mocked(openCommandPalette).mockClear();
-    await using screen = await render(
-      <SidebarProvider>
-        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
-      </SidebarProvider>,
-    );
+    { mode: "normal", current: false, shift: false, opens: "default place" },
+    { mode: "boring", current: false, shift: false, opens: "default place" },
+    { mode: "boring", current: true, shift: true, opens: "current project" },
+    { mode: "boring", current: false, shift: true, opens: "default place" },
+  ] as const)(
+    "$mode sidebar, current=$current, shift=$shift opens the $opens",
+    async (scenario) => {
+      using stack = new DisposableStack();
+      const previousSettings = getClientSettings();
+      stack.defer(() => __setClientSettingsForTests(previousSettings));
+      __setClientSettingsForTests({
+        ...DEFAULT_CLIENT_SETTINGS,
+        boringSidebarEnabled: scenario.mode === "boring",
+      });
+      const projects = [project("active"), project("idle")];
+      const currentProjectRef = {
+        environmentId: projects[0]!.environmentId,
+        projectId: projects[0]!.id,
+      };
+      const startThread = vi.fn().mockResolvedValue(null);
+      const startDefaultPlace = vi.fn().mockResolvedValue(true);
+      vi.mocked(useProjects).mockReturnValue(projects);
+      vi.mocked(useHandleNewThread).mockReturnValue({
+        activeDraftThread: null,
+        activeThread: scenario.current
+          ? (makeThreadFixture({
+              environmentId: currentProjectRef.environmentId,
+              projectId: currentProjectRef.projectId,
+            }) as never)
+          : null,
+        defaultProjectFallbackReady: true,
+        handleNewThread: startThread,
+        routeDraftId: null,
+        routeThreadRef: null,
+      });
+      // The resolver says New thread goes to "idle"; the tooltip and the click must agree.
+      vi.mocked(scratchProject.useDefaultPlace).mockReturnValue({
+        place: {
+          kind: "project",
+          projectRef: { environmentId: projects[1]!.environmentId, projectId: projects[1]!.id },
+          unavailable: null,
+        },
+        label: "idle",
+      });
+      vi.mocked(scratchProject.readScratchProjectActions).mockReturnValue({
+        startDefaultPlace,
+      } as never);
+      await using screen = await render(
+        <SidebarProvider>
+          <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+        </SidebarProvider>,
+      );
 
-    await userEvent.click(screen.getByRole("button", { name: "New thread", exact: true }), {
-      modifiers: scenario.shift ? ["Shift"] : [],
-    });
+      const button = screen.getByRole("button", { name: "New thread", exact: true });
+      await userEvent.hover(button);
+      await expect.element(screen.getByText(/New thread in idle/)).toBeVisible();
+      await userEvent.click(button, { modifiers: scenario.shift ? ["Shift"] : [] });
 
-    if (scenario.picker) {
-      expect(openCommandPalette).toHaveBeenCalledExactlyOnceWith({ open: "new-thread-in" });
-      expect(startThread).not.toHaveBeenCalled();
-    } else {
       expect(openCommandPalette).not.toHaveBeenCalled();
-      expect(startThread).toHaveBeenCalledExactlyOnceWith(currentProjectRef);
-    }
-  });
+      if (scenario.opens === "current project") {
+        expect(startThread).toHaveBeenCalledExactlyOnceWith(currentProjectRef);
+        expect(startDefaultPlace).not.toHaveBeenCalled();
+      } else {
+        await vi.waitFor(() => expect(startDefaultPlace).toHaveBeenCalledOnce());
+        expect(startThread).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 function threadShell(projectId: ProjectId, index: number): EnvironmentThreadShell {
@@ -154,10 +177,6 @@ describe("sidebar render isolation", () => {
     vi.mocked(useHandleNewThread).mockReturnValue({
       activeDraftThread: null,
       activeThread: null,
-      defaultProjectRef: {
-        environmentId: activeProject.environmentId,
-        projectId: activeProject.id,
-      },
       defaultProjectFallbackReady: true,
       handleNewThread: vi.fn().mockResolvedValue(null),
       routeDraftId: null,
@@ -232,10 +251,6 @@ describe("sidebar thread rename", () => {
       vi.mocked(useHandleNewThread).mockReturnValue({
         activeDraftThread: null,
         activeThread: null,
-        defaultProjectRef: {
-          environmentId: activeProject.environmentId,
-          projectId: activeProject.id,
-        },
         defaultProjectFallbackReady: true,
         handleNewThread: vi.fn().mockResolvedValue(null),
         routeDraftId: null,
@@ -300,10 +315,6 @@ describe("sidebar settled pagination", () => {
     vi.mocked(useHandleNewThread).mockReturnValue({
       activeDraftThread: null,
       activeThread: null,
-      defaultProjectRef: {
-        environmentId: activeProject.environmentId,
-        projectId: activeProject.id,
-      },
       defaultProjectFallbackReady: true,
       handleNewThread: vi.fn().mockResolvedValue(null),
       routeDraftId: null,

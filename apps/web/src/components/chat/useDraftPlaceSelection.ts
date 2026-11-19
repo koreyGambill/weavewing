@@ -96,32 +96,26 @@ export function useDraftPlaceSelection(input: {
     });
   };
 
-  /** The default folder on the default machine, for "Use default place". */
-  const defaultEnvironmentId = scratch.scratchEnvironmentId(
-    activeProjectRef?.environmentId ?? null,
-  );
-  const defaultProjectRef = useClientSettings((settings) => settings.defaultProject);
-  const defaultProject =
-    defaultProjectRef === null
-      ? undefined
-      : allProjects.find(
-          (project) =>
-            project.environmentId === defaultProjectRef.environmentId &&
-            project.id === defaultProjectRef.projectId &&
-            project.archivedAt == null,
-        );
+  // Read from the one default-place resolver, so this agrees with Ctrl+N and the indicators.
+  const defaultPlace = scratch.defaultPlace();
   const makeDefault = (place: Parameters<typeof defaultPlaceUpdate>[0]) =>
     void updateClientSettings(defaultPlaceUpdate(place));
   const moveToDefaultPlace = async () => {
-    if (defaultProject !== undefined) {
-      selectProject(defaultProject);
+    const place = scratch.defaultPlace();
+    if (place.kind === "none") return;
+    if (place.kind === "project") {
+      const project = allProjects.find(
+        (candidate) =>
+          candidate.environmentId === place.projectRef.environmentId &&
+          candidate.id === place.projectRef.projectId,
+      );
+      if (project !== undefined) selectProject(project);
       return;
     }
-    if (defaultEnvironmentId === null) return;
     const request = Symbol("default-place");
     pendingScratchRef.current = request;
     const requestedTarget = draftTargetKey();
-    const project = await scratch.openScratchProject(defaultEnvironmentId);
+    const project = await scratch.openScratchProject(place.environmentId);
     if (!project || pendingScratchRef.current !== request || draftTargetKey() !== requestedTarget) {
       return;
     }
@@ -129,12 +123,11 @@ export function useDraftPlaceSelection(input: {
   };
 
   return {
-    defaultProjectRef: defaultProject === undefined ? null : defaultProjectRef,
+    defaultPlace,
     makeDefault,
     selectProject,
     openAddProject,
     moveToDefaultPlace,
-    defaultEnvironmentId,
     scratchWorkspaceRootFor: scratch.scratchWorkspaceRootFor,
   };
 }

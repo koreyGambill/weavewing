@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -31,6 +31,10 @@ function actions(
     environments: () => environments,
     primaryEnvironmentId: () => primary,
     preferredEnvironmentId: () => preferred,
+    defaultProject: () => null,
+    projects: () => [],
+    projectOrder: () => [],
+    lastUsedProjectKey: () => null,
     registry: AtomRegistry.make(),
     handleNewThread: async () => null,
   });
@@ -73,5 +77,49 @@ describe("scratchEnvironmentId", () => {
         "removed" as EnvironmentId,
       ).scratchEnvironmentId(remote),
     ).toBe(local);
+  });
+});
+
+describe("default place consumers", () => {
+  it("New thread opens, and its tooltip names, the place the resolver gives", async () => {
+    const repo = { environmentId: remote, projectId: "repo" as ProjectId };
+    const recent = { environmentId: local, projectId: "recent" as ProjectId };
+    const opened: unknown[] = [];
+    const scratch = createScratchProjectActions({
+      // The default project's machine is offline and no machine offers a default folder.
+      environments: () =>
+        [
+          { ...(scratchEnvironment(local, null) as object), label: "Local" },
+          {
+            ...(scratchEnvironment(remote, null) as object),
+            label: "Remote",
+            connection: { phase: "disconnected" },
+          },
+        ] as never,
+      primaryEnvironmentId: () => local,
+      preferredEnvironmentId: () => null,
+      defaultProject: () => repo,
+      projects: () =>
+        [
+          { environmentId: remote, id: repo.projectId, title: "repo", workspaceRoot: "/repo" },
+          { environmentId: local, id: recent.projectId, title: "recent", workspaceRoot: "/recent" },
+        ] as never,
+      projectOrder: () => [],
+      lastUsedProjectKey: () => null,
+      registry: AtomRegistry.make(),
+      handleNewThread: async (projectRef) => {
+        opened.push(projectRef);
+        return null;
+      },
+    });
+    const place = scratch.defaultPlace();
+    expect(place).toEqual({
+      kind: "project",
+      projectRef: recent,
+      unavailable: "Remote is offline",
+    });
+    expect(scratch.defaultPlaceLabel(place)).toBe("recent");
+    await scratch.startDefaultPlace();
+    expect(opened).toEqual([recent]);
   });
 });

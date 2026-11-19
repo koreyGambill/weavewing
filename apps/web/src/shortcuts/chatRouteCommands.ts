@@ -7,27 +7,17 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { dispatchPreviewAction, type PreviewAction } from "../components/preview/previewActionBus";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
-import {
-  createNewThreadHandler,
-  readLastUsedProjectKey,
-  resolveDefaultProjectRef,
-} from "../hooks/useHandleNewThread";
-import { createScratchProjectActions } from "../hooks/useScratchProject";
+import { createNewThreadHandler } from "../hooks/useHandleNewThread";
+import { readScratchProjectActions } from "../hooks/useScratchProject";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { readProjects, readThreadShell } from "../state/entities";
-import { readEnvironments } from "../state/environments";
-import { defaultProjectFallbackReadyAtom } from "../state/projects";
-import { environmentSummaries } from "../state/presentation";
-import { readPreferredEnvironmentId } from "../state/preferredEnvironment";
-import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
+import { readThreadShell } from "../state/entities";
 import { readEnvironmentScope } from "../state/session";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { useUiStateStore } from "../uiStateStore";
 import { type CommandHandler, registerCommands } from "./dispatcher";
 
 const CHAT_ROUTE_ID = "/_chat";
@@ -39,13 +29,7 @@ const CHAT_ROUTE_ID = "/_chat";
  */
 export function installChatRouteCommands(router: AnyRouter): () => void {
   const handleNewThread = createNewThreadHandler(router);
-  const scratch = createScratchProjectActions({
-    environments: readEnvironments,
-    primaryEnvironmentId: () => appAtomRegistry.get(primaryEnvironmentIdAtom),
-    preferredEnvironmentId: readPreferredEnvironmentId,
-    registry: appAtomRegistry,
-    handleNewThread,
-  });
+  const scratch = readScratchProjectActions(appAtomRegistry, handleNewThread);
 
   const readRouteTarget = () => resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
   const readRouteThreadRef = () => {
@@ -67,8 +51,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       ? selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, threadRef) === "preview"
       : false;
   };
+  // The current thread or draft only: without one, New thread in this project falls back to the
+  // default place, which the resolver alone decides.
   const readThreadContext = () => {
-    const lastUsedProjectKey = readLastUsedProjectKey();
     const target = readRouteTarget();
     const drafts = useComposerDraftStore.getState();
     const activeThread = target?.kind === "server" ? readThreadShell(target.threadRef) : null;
@@ -80,17 +65,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     return {
       activeDraftThread,
       activeThread: activeThread ?? undefined,
-      defaultProjectRef: resolveDefaultProjectRef(
-        readProjects(),
-        useUiStateStore.getState().projectOrder,
-        lastUsedProjectKey,
-        appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
-        readPreferredEnvironmentId(),
-        (environmentId) =>
-          appAtomRegistry
-            .get(environmentSummaries.connectedEnvironmentIdsAtom)
-            .includes(environmentId),
-      ),
+      defaultProjectRef: null,
       handleNewThread,
     };
   };
@@ -102,16 +77,10 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     event.stopPropagation();
   };
 
-  const startDefaultPlace = () => {
-    const { activeThread, activeDraftThread } = readThreadContext();
-    void scratch.startDefaultPlace(
-      activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null,
-    );
-  };
+  const startDefaultPlace = () => void scratch.startDefaultPlace();
 
   const startNewLocal: CommandHandler = (event) => {
     claim(event);
-    // With no current or open project, such as when every project is archived, start in the default place.
     void startNewThreadFromContext(readThreadContext()).then((started) => {
       if (!started) startDefaultPlace();
     });

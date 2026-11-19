@@ -20,8 +20,8 @@ export interface SidebarThreadHeaderProps {
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
   showNewThreadInProjectHint: boolean;
-  /** The default folder New thread starts in; null when no connected machine offers one. */
-  defaultFolderLabel: string | null;
+  /** Where New thread starts right now, as the default-place resolver names it. */
+  defaultPlaceLabel: string | null;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -40,7 +40,7 @@ export function SidebarThreadHeader({
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
-  defaultFolderLabel,
+  defaultPlaceLabel,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
@@ -54,7 +54,7 @@ export function SidebarThreadHeader({
   // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
   const newThreadTitle =
-    defaultFolderLabel === null ? "New thread" : `New thread in ${defaultFolderLabel}`;
+    defaultPlaceLabel === null ? "New thread" : `New thread in ${defaultPlaceLabel}`;
   const newThreadLabel = newThreadShortcutLabel
     ? `${newThreadTitle} (${newThreadShortcutLabel})`
     : newThreadTitle;

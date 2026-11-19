@@ -1,4 +1,4 @@
-import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { RegistryContext } from "@effect/atom-react";
 import {
   chooseWorkEnvironment,
   chosenEnvironmentId,
@@ -15,35 +15,36 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
-import { Atom, type AtomRegistry } from "effect/reactivity";
+import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
+import type { AtomRegistry } from "effect/reactivity";
 import { useContext } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import {
   type EnvironmentPresentation,
-  environmentsAtom,
   readEnvironments,
   readPrimaryEnvironmentId,
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
-import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import {
   readPreferredEnvironmentId,
   usePreferredEnvironmentId,
 } from "~/state/preferredEnvironment";
 import { projectEnvironment } from "~/state/projects";
 import {
+  LAST_USED_PROJECT_STORAGE_KEY,
+  lastUsedProjectKeySchema,
   type NewThreadHandler,
   readLastUsedProjectKey,
   resolveDefaultProjectRef,
   useNewThreadHandler,
 } from "./useHandleNewThread";
-import { getClientSettings } from "./useSettings";
-import { resolveDefaultPlace } from "~/lib/defaultPlace.logic";
-import { readProjects } from "~/state/entities";
+import { useLocalStorage } from "./useLocalStorage";
+import { getClientSettings, useClientSettings } from "./useSettings";
+import { type DefaultPlace, resolveDefaultPlace } from "~/lib/defaultPlace.logic";
+import { readProjects, useProjects } from "~/state/entities";
 import { useUiStateStore } from "~/uiStateStore";
 
 function reportScratchFailure(title: string, error: unknown) {
@@ -64,6 +65,14 @@ interface ScratchLookupInput {
   readonly environments: () => Iterable<ScratchEnvironment>;
   readonly primaryEnvironmentId: () => EnvironmentId | null;
   readonly preferredEnvironmentId: () => EnvironmentId | null;
+}
+
+/** What the default place is worked out from, read when it is asked for. */
+interface DefaultPlaceSources {
+  readonly defaultProject: () => ScopedProjectRef | null;
+  readonly projects: () => ReadonlyArray<EnvironmentProject>;
+  readonly projectOrder: () => readonly string[];
+  readonly lastUsedProjectKey: () => string | null;
 }
 
 function createScratchLookup(input: ScratchLookupInput) {
@@ -120,10 +129,11 @@ function createScratchLookup(input: ScratchLookupInput) {
 }
 
 export function createScratchProjectActions(
-  input: ScratchLookupInput & {
-    readonly registry: AtomRegistry.AtomRegistry;
-    readonly handleNewThread: NewThreadHandler;
-  },
+  input: ScratchLookupInput &
+    DefaultPlaceSources & {
+      readonly registry: AtomRegistry.AtomRegistry;
+      readonly handleNewThread: NewThreadHandler;
+    },
 ) {
   const lookup = createScratchLookup(input);
 
@@ -160,20 +170,21 @@ export function createScratchProjectActions(
    * Opens a new thread in the default place and says so whenever it had to fall back, so no
    * entry point lands somewhere else silently. Resolves false when nothing usable is left.
    */
-  const defaultPlace = (fallback: EnvironmentId | null) => {
-    const projects = readProjects();
+  // The one place the default place is worked out; every entry point and indicator reads it.
+  const defaultPlace = (): DefaultPlace => {
+    const projects = input.projects();
     const isConnected = (environmentId: EnvironmentId) =>
       lookup.environmentFor(environmentId)?.connection.phase === "connected";
     return resolveDefaultPlace({
-      defaultProject: getClientSettings().defaultProject,
+      defaultProject: input.defaultProject(),
       projects,
       isConnected,
-      scratchChoice: lookup.scratchEnvironmentChoice(fallback),
-      fallbackScratchEnvironmentId: lookup.fallbackScratchEnvironmentId(fallback),
+      scratchChoice: lookup.scratchEnvironmentChoice(null),
+      fallbackScratchEnvironmentId: lookup.fallbackScratchEnvironmentId(null),
       fallbackProject: resolveDefaultProjectRef(
         projects.filter((project) => project.isScratch !== true),
-        useUiStateStore.getState().projectOrder,
-        readLastUsedProjectKey(),
+        input.projectOrder(),
+        input.lastUsedProjectKey(),
         true,
         null,
         isConnected,
@@ -183,32 +194,46 @@ export function createScratchProjectActions(
     });
   };
 
-  const startDefaultPlace = async (
-    fallback: EnvironmentId | null,
-    options?: { readonly replace?: boolean },
-  ): Promise<boolean> => {
-    const place = defaultPlace(fallback);
-    if (place.kind === "none") {
-      openCommandPalette({ open: "new-thread-in" });
-      return false;
-    }
-    if (place.notice !== null) {
-      toastManager.add(stackedThreadToast({ type: "info", title: place.notice }));
-    }
+  /** How to name a resolved place: its project, or its machine's default folder. */
+  const defaultPlaceLabel = (place: DefaultPlace): string | null =>
+    place.kind === "project"
+      ? (input
+          .projects()
+          .find(
+            (project) =>
+              project.environmentId === place.projectRef.environmentId &&
+              project.id === place.projectRef.projectId,
+          )?.title ?? null)
+      : place.kind === "scratch"
+        ? (lookup.scratchWorkspaceLabelFor(place.environmentId) ?? "the default folder")
+        : null;
+
+  /** Opens a new thread in the default place: the opened draft, or null when nothing usable is left. */
+  const openDefaultPlace = async (options?: { readonly replace?: boolean }) => {
+    const place = defaultPlace();
+    if (place.kind === "none") return null;
     const projectRef =
       place.kind === "project"
         ? place.projectRef
         : await openScratchProject(place.environmentId).then((project) =>
             project ? scopeProjectRef(project.environmentId, project.id) : null,
           );
-    if (projectRef === null) return false;
-    const opened = await input
+    if (projectRef === null) return null;
+    return input
       .handleNewThread(projectRef, options?.replace ? { replace: true } : undefined)
       .catch((error: unknown) => {
         reportScratchFailure("Could not start a new thread", error);
         return null;
       });
-    return opened !== null;
+  };
+
+  /** New thread: opens the default place, or the project picker when nothing usable is left. */
+  const startDefaultPlace = async (options?: { readonly replace?: boolean }): Promise<boolean> => {
+    if (defaultPlace().kind === "none") {
+      openCommandPalette({ open: "new-thread-in" });
+      return false;
+    }
+    return (await openDefaultPlace(options)) !== null;
   };
 
   return {
@@ -216,32 +241,10 @@ export function createScratchProjectActions(
     openScratchProject,
     startScratchThread,
     defaultPlace,
+    defaultPlaceLabel,
+    openDefaultPlace,
     startDefaultPlace,
   };
-}
-
-// A string, so components re-render only when the label itself changes.
-const defaultFolderLabelAtom = Atom.family((key: string) => {
-  const [fallback, preferred] = JSON.parse(key) as [EnvironmentId | null, EnvironmentId | null];
-  return Atom.make((get) => {
-    const environments = get(environmentsAtom);
-    const primary = get(primaryEnvironmentIdAtom);
-    const lookup = createScratchLookup({
-      environments: () => environments,
-      primaryEnvironmentId: () => primary,
-      preferredEnvironmentId: () => preferred,
-    });
-    const choice = lookup.scratchEnvironmentChoice(fallback);
-    return choice.kind === "none"
-      ? null
-      : (lookup.scratchWorkspaceLabelFor(choice.environmentId) ?? "the default folder");
-  });
-});
-
-/** Null when no machine offers a default folder. */
-export function useDefaultFolderLabel(fallback: EnvironmentId | null): string | null {
-  const preferred = usePreferredEnvironmentId();
-  return useAtomValue(defaultFolderLabelAtom(JSON.stringify([fallback, preferred])));
 }
 
 /** Scratch actions that read environments when called, for handlers outside render. */
@@ -253,6 +256,10 @@ export function readScratchProjectActions(
     environments: readEnvironments,
     primaryEnvironmentId: readPrimaryEnvironmentId,
     preferredEnvironmentId: readPreferredEnvironmentId,
+    defaultProject: () => getClientSettings().defaultProject,
+    projects: readProjects,
+    projectOrder: () => useUiStateStore.getState().projectOrder,
+    lastUsedProjectKey: readLastUsedProjectKey,
     registry,
     handleNewThread,
   });
@@ -262,13 +269,32 @@ export function useScratchProject() {
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const preferredEnvironmentId = usePreferredEnvironmentId();
+  const defaultProject = useClientSettings((settings) => settings.defaultProject);
+  const projects = useProjects();
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const [lastUsedProjectKey] = useLocalStorage(
+    LAST_USED_PROJECT_STORAGE_KEY,
+    null,
+    lastUsedProjectKeySchema,
+  );
   const registry = useContext(RegistryContext);
   const handleNewThread = useNewThreadHandler();
   return createScratchProjectActions({
     environments: () => environments,
     primaryEnvironmentId: () => primaryEnvironmentId,
     preferredEnvironmentId: () => preferredEnvironmentId,
+    defaultProject: () => defaultProject,
+    projects: () => projects,
+    projectOrder: () => projectOrder,
+    lastUsedProjectKey: () => lastUsedProjectKey,
     registry,
     handleNewThread,
   });
+}
+
+/** The default place right now, and how to name it, for indicators that show it. */
+export function useDefaultPlace() {
+  const scratch = useScratchProject();
+  const place = scratch.defaultPlace();
+  return { place, label: scratch.defaultPlaceLabel(place) };
 }

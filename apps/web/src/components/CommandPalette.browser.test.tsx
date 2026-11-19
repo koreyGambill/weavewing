@@ -11,6 +11,7 @@ import { LAST_USED_PROJECT_STORAGE_KEY } from "../hooks/useHandleNewThread";
 import { removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { makeThreadFixture } from "../test-fixtures";
 import type { Project, Thread } from "../types";
+import * as scratchProject from "../hooks/useScratchProject";
 import { CommandPalette } from "./CommandPalette";
 
 const entities = vi.hoisted(() => ({
@@ -25,18 +26,7 @@ vi.mock("../state/entities", async (original) => ({
   useDelegatedUnderParent: () => entities.delegatedUnderParent,
 }));
 
-// The default project must be on a connected machine.
-vi.mock("../state/presentation", async (original) => {
-  const actual = await original<typeof import("../state/presentation")>();
-  const { Atom } = await import("effect/reactivity");
-  return {
-    ...actual,
-    environmentSummaries: {
-      ...actual.environmentSummaries,
-      connectedEnvironmentIdsAtom: Atom.make([EnvironmentId.make("local")]),
-    },
-  };
-});
+vi.mock("../hooks/useScratchProject", { spy: true });
 
 function setup(state: Partial<typeof entities> = {}) {
   // Earlier browser test files share this origin's localStorage; a remembered project
@@ -139,16 +129,34 @@ describe("CommandPalette open intents", () => {
     setup({
       projects: [acme, project("beta", "Beta"), project("gamma", "Gamma")],
     });
+    // New thread's place comes from the default-place resolver; here it resolves to Acme.
+    const actualScratch = await vi.importActual<typeof scratchProject>(
+      "../hooks/useScratchProject",
+    );
+    storage.defer(() =>
+      vi
+        .mocked(scratchProject.useScratchProject)
+        .mockImplementation(actualScratch.useScratchProject),
+    );
+    vi.mocked(scratchProject.useScratchProject).mockReturnValue({
+      scratchWorkspaceLabelFor: () => null,
+      startScratchThread: vi.fn(),
+      defaultPlace: () => ({
+        kind: "project",
+        projectRef: { environmentId, projectId: acme.id },
+        unavailable: null,
+      }),
+      defaultPlaceLabel: () => "Acme",
+      startDefaultPlace: vi.fn(),
+    } as never);
     await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
 
     openCommandPalette({});
     await expect
       .element(page.getByPlaceholder("Search commands, projects, and threads..."))
       .toHaveFocus();
-    await expect
-      .element(page.getByRole("option", { name: /^New thread in Acme/ }))
-      .toHaveAttribute("data-highlighted");
-    await userEvent.keyboard("{ArrowDown}");
+    // With no current project, New thread's entry names the resolved place once.
+    expect(page.getByRole("option", { name: /^New thread in Acme/ }).elements()).toHaveLength(1);
     await expect
       .element(page.getByRole("option", { name: /^New thread in\.\.\./ }))
       .toHaveAttribute("data-highlighted");

@@ -243,7 +243,7 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
-import { readScratchProjectActions, useDefaultFolderLabel } from "../hooks/useScratchProject";
+import { readScratchProjectActions, useDefaultPlace } from "../hooks/useScratchProject";
 import { TooltipProvider } from "./ui/tooltip";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import {
@@ -2875,20 +2875,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);
 
   const startDefaultPlace = () =>
-    void readScratchProjectActions(appAtomRegistry, handleNewThread).startDefaultPlace(
-      newThreadContext.activeThread?.environmentId ??
-        newThreadContext.activeDraftThread?.environmentId ??
-        null,
-    );
+    void readScratchProjectActions(appAtomRegistry, handleNewThread).startDefaultPlace();
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
     if (event?.shiftKey) {
       if (isMobile) setOpenMobile(false);
-      // With no current or open project, such as when every project is archived, pick one.
+      // Without a current thread or draft, this is New thread in the default place.
       void startNewThreadFromContext({
         activeDraftThread: newThreadContext.activeDraftThread,
         activeThread: newThreadContext.activeThread ?? undefined,
-        defaultProjectRef: newThreadContext.defaultProjectRef,
+        defaultProjectRef: null,
         handleNewThread,
       }).then((started) => {
         if (!started) startDefaultPlace();
@@ -2901,11 +2897,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new");
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
-  const defaultFolderFallbackEnvironmentId =
-    newThreadContext.activeThread?.environmentId ??
-    newThreadContext.activeDraftThread?.environmentId ??
-    null;
-  const defaultFolderLabel = useDefaultFolderLabel(defaultFolderFallbackEnvironmentId);
+  const defaultPlace = useDefaultPlace();
   return (
     <>
       <SidebarContent
@@ -3146,10 +3138,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 </Combobox>
               }
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0 && defaultFolderLabel === null}
+              newThreadDisabled={projects.length === 0 && defaultPlace.place.kind === "none"}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              defaultFolderLabel={defaultFolderLabel}
+              defaultPlaceLabel={defaultPlace.label}
               showNewThreadInProjectHint
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}

@@ -4,7 +4,6 @@ import { MessageSquareDashedIcon, PlusIcon } from "lucide-react";
 import { openCommandPalette } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { useScratchProject } from "../hooks/useScratchProject";
-import { usePrimaryEnvironmentId } from "../state/environments";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
@@ -12,11 +11,10 @@ import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
 export function NoProjectsHero() {
   const contentArea = workspaceAreaProps("home", 1, "Home");
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { scratchEnvironmentId, scratchWorkspaceLabelFor, startScratchThread } =
-    useScratchProject();
-  const scratchTargetEnvironmentId = scratchEnvironmentId(primaryEnvironmentId);
-  const scratchLabel = scratchWorkspaceLabelFor(scratchTargetEnvironmentId);
+  // New thread's place, from the one default-place resolver.
+  const { defaultPlace, defaultPlaceLabel, startDefaultPlace } = useScratchProject();
+  const place = defaultPlace();
+  const placeLabel = defaultPlaceLabel(place);
 
   return (
     <SidebarInset
@@ -32,23 +30,19 @@ export function NoProjectsHero() {
             <EmptyHeader className="max-w-none">
               <EmptyTitle>What should we work on?</EmptyTitle>
               <EmptyDescription>
-                {scratchTargetEnvironmentId === null
+                {place.kind === "none"
                   ? "Add a project to start your first thread."
-                  : `Add a project, or start in ${scratchLabel ?? "the default folder"}.`}
+                  : `Add a project, or start in ${placeLabel ?? "the default folder"}.`}
               </EmptyDescription>
               <div className="mt-6 flex justify-center gap-2">
                 <Button size="sm" onClick={() => openCommandPalette({ open: "add-project" })}>
                   <PlusIcon className="size-4" />
                   Add project
                 </Button>
-                {scratchTargetEnvironmentId === null ? null : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void startScratchThread(scratchTargetEnvironmentId)}
-                  >
+                {place.kind === "none" ? null : (
+                  <Button size="sm" variant="outline" onClick={() => void startDefaultPlace()}>
                     <MessageSquareDashedIcon className="size-4" />
-                    Start in {scratchLabel ?? "the default folder"}
+                    Start in {placeLabel ?? "the default folder"}
                   </Button>
                 )}
               </div>

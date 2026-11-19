@@ -52,12 +52,23 @@ export function ComposerWhereLine({
   const scratchRoot = selection.scratchWorkspaceRootFor(environmentId);
   const folder = worktreePath ?? project?.workspaceRoot ?? null;
   const isScratch = project !== null && isScratchProject(project, scratchRoot);
-  const defaultProject = selection.defaultProjectRef;
-  const atDefaultPlace =
+  // Where New thread would start right now, from the one default-place resolver.
+  const resolved = selection.defaultPlace;
+  const atResolvedPlace =
     worktreePath === null &&
-    (defaultProject !== null
-      ? defaultProject.environmentId === environmentId && defaultProject.projectId === projectId
-      : isScratch && environmentId === selection.defaultEnvironmentId);
+    (resolved.kind === "project"
+      ? resolved.projectRef.environmentId === environmentId &&
+        resolved.projectRef.projectId === projectId
+      : resolved.kind === "scratch" && isScratch && resolved.environmentId === environmentId);
+  // A fallback place is not the default: it is lit, and says why the default could not be used.
+  const unavailable = atResolvedPlace && resolved.kind !== "none" ? resolved.unavailable : null;
+  const atDefaultPlace = atResolvedPlace && unavailable === null;
+  const resolvedEnvironmentId =
+    resolved.kind === "project"
+      ? resolved.projectRef.environmentId
+      : resolved.kind === "scratch"
+        ? resolved.environmentId
+        : null;
   const shortcut = shortcutLabelForCommand(keybindings, "projectPicker.open");
   const threadRef = scopeThreadRef(environmentId, threadId);
   const started = draftId === null;
@@ -126,7 +137,7 @@ export function ComposerWhereLine({
         environmentId={environmentId}
         label={isScratch ? folderLabel : project.title}
         truncateStart={isScratch}
-        defaultEnvironmentId={selection.defaultEnvironmentId}
+        defaultEnvironmentId={resolvedEnvironmentId}
         defaultPlace={{
           current: atDefaultPlace,
           makeDefault: () => selection.makeDefault({ projectRef, isScratch }),
@@ -141,8 +152,12 @@ export function ComposerWhereLine({
         onAddProject={selection.openAddProject}
         {...(onComposerFocusRequest ? { onClose: onComposerFocusRequest } : {})}
       />
-      {atDefaultPlace ||
-      (defaultProject === null && selection.defaultEnvironmentId === null) ? null : (
+      {unavailable === null ? null : (
+        <span className="min-w-0 truncate text-muted-foreground text-xs">
+          Default is unavailable: {unavailable}
+        </span>
+      )}
+      {atResolvedPlace || resolved.kind === "none" ? null : (
         <span className="shrink-0 text-xs">
           <InlineButton
             tone="muted"

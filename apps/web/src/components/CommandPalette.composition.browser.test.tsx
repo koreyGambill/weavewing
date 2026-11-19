@@ -53,14 +53,17 @@ vi.mock("../hooks/useSettings", async (original) => ({
   useUpdateEnvironmentSettings: () => () => undefined,
 }));
 vi.mock("../hooks/useScratchProject", () => ({
-  useScratchProject: () => ({ scratchEnvironmentChoice: () => ({ kind: "none" }) }),
+  useScratchProject: () => ({
+    defaultPlace: () => ({ kind: "none" }),
+    defaultPlaceLabel: () => null,
+    startDefaultPlace: async () => false,
+  }),
 }));
 vi.mock("../hooks/useNewProject", () => ({ useNewProject: () => async () => undefined }));
 vi.mock("../hooks/useHandleNewThread", () => ({
   useHandleNewThread: () => ({
     activeDraftThread: null,
     activeThread: null,
-    defaultProjectRef: null,
     handleNewThread: async () => undefined,
   }),
   useNewThreadHandler: () => async () => undefined,
