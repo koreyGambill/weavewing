@@ -24,12 +24,12 @@ export function tileCloseConfirmation(input: {
 }): { title: string; description: string | null } | null {
   const running = input.surfaces
     .filter((surface) => input.tabIds.includes(surface.id))
-    .flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []))
+    .flatMap((surface) => (surface.kind === "terminal" ? [surface.resourceId] : []))
     .filter((terminalId) => input.runningTerminalIds.includes(terminalId))
     .map((terminalId) => input.terminalLabelsById.get(terminalId) ?? "A terminal process");
   const count = input.tabIds.filter((tabId) => !isNewTab(tabId)).length;
   const title = count > 1 ? `Close all ${count} tabs in this tile?` : "Close this tile?";
-  if (running.length === 0) return count > 1 ? { title, description: null } : null;
+  if (running.length === 0) return null;
   const names =
     running.length === 1
       ? running[0]!

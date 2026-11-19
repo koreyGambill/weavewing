@@ -19,7 +19,7 @@ import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { extractTerminalLinks } from "../terminal-links";
 import { expect, it, vi } from "vite-plus/test";
 import { act, fakeTimers, render } from "../../test/render";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import ThreadTerminalTile from "./ThreadTerminalTile";
 
 const fixture = vi.hoisted(() => ({
   statusByThreadId: new Map<string, "starting" | "running" | "exited">(),
@@ -225,21 +225,12 @@ function Drawer(props: {
   keybindings?: ResolvedKeybindingsConfig;
 }) {
   return (
-    <ThreadTerminalDrawer
+    <ThreadTerminalTile
       threadRef={props.threadRef}
       threadId={props.threadRef.threadId}
       cwd={props.cwd ?? "/repo"}
-      height={240}
-      terminalIds={["term-1"]}
-      activeTerminalId="term-1"
-      terminalGroups={[{ id: "group-1", terminalIds: ["term-1"] }]}
-      activeTerminalGroupId="group-1"
-      onSplitTerminal={() => {}}
-      onSplitTerminalVertical={() => {}}
-      onNewTerminal={() => {}}
-      onActiveTerminalChange={() => {}}
+      terminalId="term-1"
       onCloseTerminal={props.onCloseTerminal}
-      onHeightChange={() => {}}
       onAddTerminalContext={() => {}}
       keybindings={props.keybindings ?? []}
     />
@@ -558,4 +549,50 @@ it("resends a failed resize once in each writable session", async () => {
     input: { threadId: threadRef.threadId, terminalId: "term-1", cols: 57, rows: 41 },
   };
   expect(resizes).toEqual([resize, resize, resize]);
+});
+
+it("passes EOF and common shell control keys through a terminal tile", async () => {
+  const { other: threadRef } = setup();
+  using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  await using screen = await render(
+    <Drawer
+      threadRef={threadRef}
+      onCloseTerminal={() => {}}
+      keybindings={compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS)}
+    />,
+  );
+  await act(async () => {
+    fixture.pendingSurfaces.shift()?.();
+  });
+  for (const key of [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "j",
+    "k",
+    "n",
+    "p",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "z",
+  ]) {
+    expect(
+      fixture.pressKey?.(
+        new KeyboardEvent("keydown", { key, code: `Key${key.toUpperCase()}`, ctrlKey: true }),
+      ),
+    ).toBe(true);
+  }
+  fixture.typeIntoSurface?.("\u0004");
+  expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\u0004" }]);
+  expect(screen.container.querySelectorAll("[data-terminal-owner]")).toHaveLength(1);
+  expect(screen.container.textContent).not.toContain("Side by side");
 });

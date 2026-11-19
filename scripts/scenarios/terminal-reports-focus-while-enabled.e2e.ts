@@ -54,7 +54,7 @@ test(
     });
     await t3.open(thread);
 
-    await screen.getByRole("button", "Toggle terminal drawer").tap();
+    await browser.keyboard.press("ControlOrMeta+j");
     const terminal = screen.getByLabel("Terminal input");
     const composer = screen.getByRole("textbox", "Message Focus");
 

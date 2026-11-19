@@ -7,7 +7,7 @@ yourself. Agents get the same device through `device_*` tools and the
 
 ## Open a device
 
-Open the right panel in a project thread and choose **Device**. On first use,
+Open a new tile tab in a project thread and choose **Device**. On first use,
 the panel walks through three steps: starting the device hub, checking iOS and
 Android support, and choosing whether agents may control devices. Opening the
 panel alone does not download or start anything. If the hub is already
@@ -19,8 +19,8 @@ Each device opens in its own tab. Use **+ → Device** to open another, and
 double-click a tab name or choose **Rename** from its context menu to rename it.
 Only the visible tab streams video; switching tabs keeps both devices running.
 Choose **Float device over chat** in the toolbar to keep watching and tapping the
-device in a small window while the right panel shows something else; drag the
-window by its handle, resize it from any edge, and use **Open in right panel**
+device in a small window while another tab is selected; drag the
+window by its handle, resize it from any edge, and use **Open in tile**
 to bring it back.
 Turn off **Use devices** in **Settings → Devices** to stop the
 helper processes; simulators and emulators keep running until you power them

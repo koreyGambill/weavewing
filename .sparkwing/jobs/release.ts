@@ -2,10 +2,12 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import { ConcurrencyGroup, type Context, definePipeline, memoKey } from "@sparkwing/sdk";
+import { ConcurrencyGroup, type Context, definePipeline } from "@sparkwing/sdk";
 
 import { checkout, checkoutArgs, git, logged, type Checkout } from "../lib/checkout.ts";
 import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseFlags, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
+
+import { smokeCi, verifiedCi } from "../lib/release-ci.ts";
 
 interface Release {
   id: number;
@@ -75,7 +77,7 @@ async function assertInput(ctx: Context, co: Checkout) {
   return { commit, tag, platforms, channel: input(ctx).channel };
 }
 
-definePipeline({
+export const releasePipeline = definePipeline({
   name: "Release",
   short: "Build Weavewing desktop and CLI archives, then draft or promote a GitHub release",
   help: "Manual only. plan builds and records the release without GitHub writes. draft creates a private draft. promote verifies uploaded checksums and needs --allow-risk prod.",
@@ -85,6 +87,7 @@ definePipeline({
     { name: "channel", type: "string", default: "stable", enum: ["stable", "test"], description: "Stable release or nightly test prerelease" },
     { name: "platforms", type: "string", default: "linux,win,mac", description: "Comma-separated linux,win,mac subset" },
     { name: "stage", type: "string", default: "draft", enum: ["draft", "plan", "promote"], description: "draft, plan or promote" },
+    { name: "force-ci", type: "bool", description: "Force full CI on any channel, bypassing passing evidence (plan/draft only)" },
     { name: "build-only", type: "bool", description: "Only with --stage plan: skip CI for artifact proof" },
     { name: "notes-file", type: "string", description: "Absolute path to release notes to use instead of generated notes" },
     { name: "draft-evidence", type: "string", description: "Required for promote: absolute evidence directory of the draft run" },
@@ -95,16 +98,16 @@ definePipeline({
     const { platforms, channel } = releaseInputs(version || (run.args.channel === "test" ? "0.0.0-nightly.20000101.0" : "0.0.0"), run.args.platforms || "linux,win,mac", run.args.channel);
     const buildOnly = run.args["build-only"] === "true";
     if (buildOnly && run.args.stage !== "plan") throw new Error("--build-only is restricted to --stage plan");
+    if (run.args["force-ci"] === "true" && (buildOnly || run.args.stage === "promote")) throw new Error("--force-ci requires a plan or draft with CI enabled");
     p.concurrency(new ConcurrencyGroup("weavewing-release", { capacity: 1 }));
 
     if (run.args.stage === "promote") {
-      const promote = p.job("promote").inline().cores(0.25).startsChildren("ci");
+      const promote = p.job("promote").inline().cores(0.25);
       promote.step("publish", async (ctx) => {
         const co = checkout(ctx);
         const { tag, commit } = await assertInput(ctx, co);
         const draftEvidence = ctx.args["draft-evidence"];
         if (!draftEvidence || !Path.isAbsolute(draftEvidence)) throw new Error("Promote requires --draft-evidence <absolute draft run directory>");
-        await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
         const release = await findRelease(ctx, co);
         if (!release?.draft) throw new Error("Promote requires an existing draft");
         if (release.target_commitish !== commit) throw new Error("The draft target does not match this checkout's commit");
@@ -114,7 +117,7 @@ definePipeline({
         const download = Path.join(co.evidence, "promote-assets");
         FS.mkdirSync(download, { recursive: true });
         await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", download, "--clobber");
-        verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit);
+        verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit, channel);
         await assertNoTag(ctx, co);
         await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft=false", ...releaseFlags(channel, "promote"));
         const ref = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/ref/tags/${tag}`));
@@ -132,18 +135,20 @@ definePipeline({
     const preflight = p.job("preflight", async (ctx) => {
       const co = checkout(ctx);
       const result = await assertInput(ctx, co);
-      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts"]);
+      await logged(ctx, co, "release-tests", ["node", "--test", ".sparkwing/lib/release.test.ts", ".sparkwing/lib/release-ci.test.ts", ".sparkwing/jobs/release.test.ts"]);
       FS.writeFileSync(Path.join(co.evidence, "release-input.json"), JSON.stringify({ ...result, version, stage: ctx.args.stage, buildOnly, run: ctx.run.id }, null, 2));
       return result;
     }).inline().cores(0.25);
 
-    const ci = p.job("ci", async (ctx) => {
+    const ci = !buildOnly && (channel === "stable" || run.args["force-ci"] === "true") ? p.job("ci", async (ctx) => {
       const co = checkout(ctx);
-      await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
-      return { commit: git(co.root, "rev-parse", "HEAD"), passed: true };
-    }).inline().cores(0.25).needs(preflight).startsChildren("ci")
-      .skipIf(() => buildOnly)
-      .memo((ctx) => memoKey("release-ci/v1", checkout(ctx).root, git(checkout(ctx).root, "rev-parse", "HEAD"), checkout(ctx).nodeVersion));
+      const pass = await verifiedCi(co, ctx.run.id, async () => {
+        await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
+      }, { force: ctx.args["force-ci"] === "true" });
+      ctx.log.info(`Full CI passed for tree ${pass.tree}; evidence from ${pass.run}: ${pass.evidence}`);
+      return pass;
+    }).inline().cores(0.25).needs(preflight).startsChildren("ci") : undefined;
+    const ciDeps = ci ? [ci] : [];
 
     const bundle = p.job("bundle", async (ctx) => {
       const co = checkout(ctx);
@@ -155,7 +160,7 @@ definePipeline({
       await build(ctx, co, "align-version", ["node", "scripts/update-release-package-versions.ts", version]);
       await build(ctx, co, "bundle", ["vp", "run", "build:desktop:bundle"]);
       return { commit };
-    }).inline().cores(8).needs(preflight, ci);
+    }).inline().cores(8).needs(preflight, ...ciDeps);
 
     const clean = p.job("assert-clean-bundle", (ctx) => {
       assertCleanBundle(source(checkout(ctx)));
@@ -203,7 +208,7 @@ definePipeline({
       const { commit } = (await ctx.output(preflight))!;
       await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--channel", channel, "--run", ctx.run.id, "--evidence", co.evidence], Object.fromEntries(await Promise.all(["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map(async (key) => [key, (await ctx.secret(key)) ?? ""]))));
       return { platform: "mac" };
-    }).inline().cores(1).needs(preflight, clean).skipIf(() => !platforms.includes("mac"))
+    }).inline().cores(1).needs(preflight, ...ciDeps).skipIf(() => !platforms.includes("mac"))
       .concurrency(new ConcurrencyGroup("weavewing-release-moonborn", { capacity: 1 }));
 
     p.job("publish-draft", async (ctx) => {
@@ -232,11 +237,14 @@ definePipeline({
       FS.copyFileSync(Path.join(co.evidence, "launcher/t3/package.json"), Path.join(dir, "release-metadata.json"));
       const inventory = assetInventory(dir, names);
       FS.writeFileSync(Path.join(dir, "SHA256SUMS"), inventory.map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
-      const notes = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
+      const generated = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
+      const smokeNotice = "Smoke-tested build: full test suites run only before stable releases.";
+      const notes = ci || buildOnly || generated.includes(smokeNotice) ? generated : `${smokeNotice}\n\n${generated}`;
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
-      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
+      const ciEvidence = buildOnly ? undefined : ci ? await ctx.output(ci) : smokeCi(co, ctx.run.id, channel);
+      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : ci ? "passed" : `smoke: ${channel} channel`, ciEvidence, tree: git(co.root, "rev-parse", `${commit}^{tree}`), assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
       if (ctx.args.stage === "plan") {
         ctx.log.info(`Plan complete. No GitHub writes. Evidence: ${co.evidence}`);
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };
@@ -252,6 +260,6 @@ definePipeline({
       }
       await gh(ctx, co, "release", "upload", tag, "--repo", RELEASE_REPOSITORY, "--clobber", ...[...names, "SHA256SUMS"].map((name) => Path.join(dir, name)));
       return { commit, evidence: co.evidence };
-    }).inline().cores(0.25).needs(preflight, linux, win, mac);
+    }).inline().cores(0.25).needs(preflight, ...ciDeps, linux, win, mac);
   },
 });

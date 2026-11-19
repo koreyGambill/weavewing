@@ -4,7 +4,7 @@ import {
   INITIAL_TERMINAL_OUTPUT_CURSOR,
   nextTerminalAttachSeedState,
 } from "@t3tools/client-runtime/state/terminal";
-import { synchronizeTerminalSession } from "../../components/ThreadTerminalDrawer";
+import { synchronizeTerminalSession } from "../../components/ThreadTerminalTile";
 
 import { GhosttyTerminalCore, type GhosttyCell, type GhosttyRow } from "./core";
 import {
@@ -985,10 +985,18 @@ describe("isTerminalCopyShortcut", () => {
     ...overrides,
   });
 
-  it("keeps Ctrl+C available for SIGINT on macOS", () => {
-    expect(isTerminalCopyShortcut(event({ ctrlKey: true }), "MacIntel")).toBe(false);
-    expect(isTerminalCopyShortcut(event({ metaKey: true }), "MacIntel")).toBe(true);
-  });
+  it.each(["Linux x86_64", "Win32", "MacIntel"])(
+    "keeps Ctrl+C available for SIGINT on %s",
+    (platform) => {
+      expect(isTerminalCopyShortcut(event({ ctrlKey: true }), platform)).toBe(false);
+      expect(isTerminalCopyShortcut(event({ ctrlKey: true, shiftKey: true }), platform)).toBe(
+        platform !== "MacIntel",
+      );
+      expect(isTerminalCopyShortcut(event({ metaKey: true }), platform)).toBe(
+        platform === "MacIntel",
+      );
+    },
+  );
 
   it("uses the produced character instead of the physical key position", () => {
     expect(isTerminalCopyShortcut(event({ key: "C", metaKey: true }), "MacIntel")).toBe(true);

@@ -296,6 +296,8 @@ describe("DesktopApplicationMenu", () => {
           items.find((item) => item.role === "windowMenu" && item.submenu === undefined),
           platform,
         );
+        const reload = items.find((item) => item.label === "Reload");
+        assert.equal(reload?.accelerator, platform === "darwin" ? "Cmd+R" : undefined);
         const closeTools = items.find((item) => item.accelerator === "CmdOrCtrl+W");
         assert.equal(closeTools?.label, "Close Developer Tools", platform);
         assert.isFunction(closeTools?.click);
@@ -340,7 +342,7 @@ describe("DesktopApplicationMenu", () => {
         throw new Error("Expected View menu submenu to be an array.");
       }
       const reload = viewMenu.submenu.find((item) => item.label === "Reload");
-      assert.equal(reload?.accelerator, "CmdOrCtrl+R");
+      assert.isUndefined(reload?.accelerator);
       if (typeof reload?.click !== "function") {
         throw new Error("Expected Reload menu item to have a click handler.");
       }

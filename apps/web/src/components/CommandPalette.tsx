@@ -1756,6 +1756,15 @@ function OpenCommandPaletteDialog(props: {
       },
     });
 
+  actionItems.push({
+    kind: "action",
+    value: "action:reload-app",
+    title: "Reload App",
+    searchTerms: ["reload", "refresh", "app"],
+    icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+    run: async () => window.location.reload(),
+  });
+
   if (activeThread) actionItems.push(...tilePaletteItems(ITEM_ICON_CLASS));
   if (activeThread || activeDraftThread)
     actionItems.push(...tileLayoutPaletteItems(ITEM_ICON_CLASS, tileLayouts));

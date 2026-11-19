@@ -10,6 +10,7 @@ const TILE_PALETTE_COMMANDS = [
   { command: "workspace.tile.float", title: "Float or Dock Tile" },
   { command: "workspace.tile.newTab", title: "New Tab in Tile" },
   { command: "workspace.tile.closeTab", title: "Close Tab in Tile" },
+  { command: "workspace.tile.closeAllTabs", title: "Close All Tabs in Tile" },
   { command: "workspace.tile.actions", title: "Tile Actions" },
 ] as const satisfies ReadonlyArray<{ command: KeybindingCommand; title: string }>;
 

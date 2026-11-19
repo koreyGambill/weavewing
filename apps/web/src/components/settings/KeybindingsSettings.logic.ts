@@ -214,7 +214,6 @@ const KEYBINDING_GROUPS = [
     title: "Navigation",
     prefixes: [
       "sidebar",
-      "rightPanel",
       "threadContext",
       "commandPalette",
       "filePicker",
@@ -396,6 +395,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "workspace.tile.swap") return "Swap Side-by-Side Tiles";
   if (command === "workspace.tile.float") return "Float or Dock Tile";
   if (command === "workspace.tile.newTab") return "New Tab in Tile";
+  if (command === "workspace.tile.closeAllTabs") return "Close All Tabs in Tile";
   if (command === "workspace.tile.closeTab") return "Close Tab in Tile";
   if (command === "workspace.tile.actions") return "Tile Actions Menu";
   if (command === "workspace.tile.resize") return "Resize Focused Tile (Hold)";
