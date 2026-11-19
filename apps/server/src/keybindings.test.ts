@@ -782,6 +782,67 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       }).pipe(Effect.scoped, Effect.provide(layerKeybindings())),
   );
 
+  it.effect.each<{
+    readonly name: string;
+    readonly saved: ReadonlyArray<KeybindingRule>;
+    readonly expected: ReadonlyArray<KeybindingRule>;
+  }>([
+    {
+      name: "keeps a custom binding on the new picker key",
+      saved: [
+        { key: "mod+shift+o", command: "chat.find", when: "!terminalFocus" },
+        { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+      ],
+      expected: [
+        { key: "mod+shift+o", command: "chat.find", when: "!terminalFocus" },
+        { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+      ],
+    },
+    {
+      name: "moves the picker when only the untouched old New thread default held the key",
+      saved: [
+        { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
+        { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+      ],
+      expected: [{ key: "mod+shift+o", command: "projectPicker.open", when: "!terminalFocus" }],
+    },
+    {
+      name: "keeps a customized New thread binding on the key",
+      saved: [
+        { key: "mod+shift+o", command: "chat.new" },
+        { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+      ],
+      expected: [
+        { key: "mod+shift+o", command: "chat.new" },
+        { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+      ],
+    },
+    {
+      name: "leaves a customized picker key alone",
+      saved: [{ key: "ctrl+p", command: "projectPicker.open" }],
+      expected: [{ key: "ctrl+p", command: "projectPicker.open" }],
+    },
+  ])("picker key migration: $name, and a second run changes nothing", ({ saved, expected }) =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const unrelated = { key: "alt+q", command: "workspace.tile.closeAllTabs" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [...saved, unrelated]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const onPickerKeys = (rules: typeof first) =>
+        rules.filter(
+          (rule) =>
+            rule.command === "projectPicker.open" ||
+            ["mod+shift+o", "mod+alt+shift+o"].includes(rule.key),
+        );
+      assert.deepEqual(onPickerKeys(first), expected);
+      assert.deepInclude(first, unrelated);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("upgrades the old Mac close backfill once and preserves later edits", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

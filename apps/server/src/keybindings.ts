@@ -149,12 +149,14 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
-function keybindingShortcutContext(rule: KeybindingRule): string | null {
+function encodedShortcut(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
-  if (!parsed) return null;
-  const encoded = encodeShortcut(parsed);
-  if (!encoded) return null;
-  return `${encoded}\u0000${rule.when ?? ""}`;
+  return parsed ? encodeShortcut(parsed) || null : null;
+}
+
+function keybindingShortcutContext(rule: KeybindingRule): string | null {
+  const encoded = encodedShortcut(rule);
+  return encoded === null ? null : `${encoded}\u0000${rule.when ?? ""}`;
 }
 
 function hasSameShortcutContext(left: KeybindingRule, right: KeybindingRule): boolean {
@@ -592,25 +594,29 @@ const make = Effect.gen(function* () {
           (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
         );
       });
+      const oldNewThreadKey: KeybindingRule = {
+        key: "mod+shift+o",
+        command: "chat.new",
+        when: "!terminalFocus",
+      };
+      const oldPickerKey: KeybindingRule = {
+        key: "mod+alt+shift+o",
+        command: "projectPicker.open",
+        when: "!terminalFocus",
+      };
+      const pickerKey: KeybindingRule = { ...oldPickerKey, key: "mod+shift+o" };
+      // A user's own binding on the new key wins, whatever its condition: the picker keeps its old key.
+      const pickerKeyTaken = runtimeConfig.keybindings.some(
+        (rule) =>
+          !isSameKeybindingRule(rule, oldNewThreadKey) &&
+          !isSameKeybindingRule(rule, oldPickerKey) &&
+          encodedShortcut(rule) === encodedShortcut(pickerKey),
+      );
       const customConfig = runtimeConfig.keybindings
-        // The old second New thread key now opens the project picker.
-        .filter(
-          (rule) =>
-            !isSameKeybindingRule(rule, {
-              key: "mod+shift+o",
-              command: "chat.new",
-              when: "!terminalFocus",
-            }),
-        )
+        // The untouched old second New thread key gives way to the project picker.
+        .filter((rule) => !isSameKeybindingRule(rule, oldNewThreadKey))
         .map((rule) => {
-          if (
-            isSameKeybindingRule(rule, {
-              key: "mod+alt+shift+o",
-              command: "projectPicker.open",
-              when: "!terminalFocus",
-            })
-          )
-            return { ...rule, key: "mod+shift+o" };
+          if (!pickerKeyTaken && isSameKeybindingRule(rule, oldPickerKey)) return pickerKey;
           if (!migrateTerminalKeys) return rule;
           if (
             !closeConflict &&
