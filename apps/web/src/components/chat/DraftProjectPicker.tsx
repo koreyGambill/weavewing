@@ -430,19 +430,19 @@ export function DraftProjectPicker({
                 return;
               }
               const item = items.find((entry) => entry.value === highlighted.current?.value);
-              if (pathMode && event.key === "Tab" && !event.shiftKey) {
+              // Programmatic query changes do not trigger Base UI's autoHighlight.
+              const completion =
+                pathMode && event.key === "Tab" && !event.shiftKey
+                  ? item?.path && (item.completionName || highlightChosen.current)
+                    ? item.completionName
+                    : items.find((entry) => entry.path && entry.completionName)?.completionName
+                  : undefined;
+              if (completion) {
                 event.preventDefault();
                 event.stopPropagation();
                 event.preventBaseUIHandler?.();
-                // Programmatic query changes do not trigger Base UI's autoHighlight.
-                const target =
-                  item?.path && (item.completionName || highlightChosen.current)
-                    ? item
-                    : items.find((entry) => entry.path && entry.completionName);
-                if (target?.completionName) {
-                  highlighted.current = null;
-                  setQuery(completePickerFolder(browseQuery, target.completionName));
-                }
+                highlighted.current = null;
+                setQuery(completePickerFolder(browseQuery, completion));
               } else if (pathMode && event.key === "Enter" && !item) {
                 event.preventDefault();
                 event.stopPropagation();

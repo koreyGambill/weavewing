@@ -170,9 +170,13 @@ it("drills through folders with repeated Tab and opens with Enter in the where-l
   await expect.element(page.getByRole("option").first()).toBeVisible();
   await userEvent.keyboard("{ArrowDown}{ArrowUp}");
   await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
+  // With no folder to complete, Tab leaves the search for the bottom row.
   await userEvent.keyboard("{Tab}");
   await expect.element(search).toHaveValue("~/code/");
+  await expect.element(page.getByRole("button", { name: "Open folder" })).toHaveFocus();
+  await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
   await expect.element(search).toHaveFocus();
+  await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
   await userEvent.keyboard("{Enter}");
   await expect.element(search).not.toBeInTheDocument();
   await vi.waitFor(() =>
