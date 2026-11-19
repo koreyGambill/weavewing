@@ -12,10 +12,12 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 const scopes = vi.hoisted(() => ({
   denied: undefined as string | undefined,
   sourceControl: undefined as unknown,
+  composerFocus: undefined as (() => void) | undefined,
 }));
 const setup = (deniedScope?: string, sourceControl?: unknown) => {
   scopes.denied = deniedScope;
   scopes.sourceControl = sourceControl;
+  scopes.composerFocus = undefined;
 };
 const githubAvailable = {
   versionControlSystems: [],
@@ -42,6 +44,16 @@ vi.mock("@effect/atom-react", async (original) => ({
   useAtomValue: (atom: unknown) =>
     atom === primaryServerKeybindingsAtom ? DEFAULT_RESOLVED_KEYBINDINGS : [],
 }));
+vi.mock("../composerHandleContext", async (original) => {
+  const actual = await original<typeof import("../composerHandleContext")>();
+  return {
+    ...actual,
+    useComposerHandleContext: () => {
+      const ref = actual.useComposerHandleContext();
+      return scopes.composerFocus ? { current: { focusAtEnd: scopes.composerFocus } } : ref;
+    },
+  };
+});
 vi.mock("../hooks/useTheme", () => ({
   useRenderedAppearance: () => "light",
   useTheme: () => ({ theme: "t3-chat", resolvedTheme: "light", appearanceMode: "light" }),
@@ -278,4 +290,27 @@ it("keeps the query across search tabs and restores input focus", async () => {
   await expect
     .element(page.getByRole("dialog", { name: "Search", exact: true }))
     .not.toBeInTheDocument();
+});
+
+it("returns focus to the terminal after dismissing search or commands", async () => {
+  setup();
+  scopes.composerFocus = () => {
+    document.querySelector<HTMLButtonElement>("[data-composer-fixture]")?.focus();
+  };
+  await using _screen = await render(
+    <CommandPalette>
+      <div data-terminal-owner>
+        <textarea aria-label="Terminal input" />
+      </div>
+      <button data-composer-fixture>Composer</button>
+    </CommandPalette>,
+  );
+  const terminal = page.getByRole("textbox", { name: "Terminal input" });
+  for (const mode of ["search", "command"] as const) {
+    await terminal.click();
+    await act(() => dispatchCommandPalette({ _tag: "ToggleMode", mode }));
+    await expect.element(page.getByRole("combobox")).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(terminal).toHaveFocus();
+  }
 });
