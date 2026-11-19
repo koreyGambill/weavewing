@@ -1,9 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type {
-  EnvironmentId,
-  OutsideWorkspaceEditGrant,
-  ProjectReadFileResult,
-} from "@t3tools/contracts";
+import type { EnvironmentId, OutsideWorkspaceEditGrant } from "@t3tools/contracts";
 import { LockIcon, LockOpenIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -37,13 +33,17 @@ export function OutsideEditAccess({
   environmentId,
   cwd,
   relativePath,
-  file,
+  editGrant,
+  canGrantEdit,
   onChange,
 }: {
   readonly environmentId: EnvironmentId;
   readonly cwd: string;
   readonly relativePath: string;
-  readonly file: ProjectReadFileResult;
+  /** The grant that makes the file writable now; undefined when none does. */
+  readonly editGrant: OutsideWorkspaceEditGrant | undefined;
+  /** Whether a grant could make the file writable. */
+  readonly canGrantEdit: boolean;
   readonly onChange: () => void;
 }) {
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
@@ -68,13 +68,12 @@ export function OutsideEditAccess({
   const revokeGrant = (grant: OutsideWorkspaceEditGrant) =>
     void run(() => revoke({ environmentId, input: { grant } }));
 
-  const editGrant = file.editGrant;
   const granted = editGrant !== undefined;
   const status = granted
     ? editGrant.kind === "file"
       ? "You allowed editing this file outside the workspace."
       : "You allowed editing any file outside this workspace while it is open."
-    : file.canGrantEdit
+    : canGrantEdit
       ? canGrant
         ? "This file is outside the workspace, so it opens read-only until you allow editing."
         : "This file is outside the workspace, and this connection cannot write files."
@@ -109,7 +108,7 @@ export function OutsideEditAccess({
                 Turn off editing
               </Button>
             ) : null}
-            {!granted && file.canGrantEdit && canGrant ? (
+            {!granted && canGrantEdit && canGrant ? (
               <Button
                 size="compact"
                 disabled={busy}

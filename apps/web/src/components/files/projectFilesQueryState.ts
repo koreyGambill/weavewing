@@ -17,6 +17,8 @@ import { projectEnvironment } from "~/state/projects";
 import { useProjectPathSearch } from "~/state/queries";
 import { revisionedQuery } from "~/state/revisionedQuery";
 
+import { editedHostFileData } from "./OutsideEditAccess.logic";
+
 const EMPTY_PROJECT_FILE_PATH = "";
 const EMPTY_PROJECT_ENTRIES_QUERY_ATOM = Atom.make(
   AsyncResult.initial<ProjectListEntriesResult, never>(false),
@@ -98,13 +100,7 @@ export function setProjectFileQueryData(
   );
   appAtomRegistry.set(atom, {
     saved: false,
-    data: {
-      relativePath,
-      contents,
-      byteLength: new TextEncoder().encode(contents).byteLength,
-      truncated: false,
-      ...(read?.writable === true ? { writable: true } : {}),
-    },
+    data: editedHostFileData(relativePath, contents, read),
   });
 }
 

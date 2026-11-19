@@ -47,6 +47,7 @@ import {
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
 import { OutsideEditAccess } from "./OutsideEditAccess";
+import { hostEditState } from "./OutsideEditAccess.logic";
 import * as Schema from "effect/Schema";
 import {
   lazy,
@@ -1292,7 +1293,12 @@ export default function FilePreviewPanel({
     }, showRootError);
   };
   // The server marks the host files a workspace may edit: instruction files it loads, and grants.
-  const readOnlyHost = isHostFile && file.data?.writable !== true;
+  // A grant revoked elsewhere arrives through settings before this read refreshes.
+  const hostEdit = hostEditState(
+    file.data ?? {},
+    serverConfig?.settings.outsideWorkspaceEditGrants,
+  );
+  const readOnlyHost = isHostFile && !hostEdit.writable;
   // A chat-linked folder reads as a file until its read settles, and revealing a
   // folder selects it in its parent instead of opening it, so reveal waits.
   const revealsInFileManager =
@@ -1556,12 +1562,13 @@ export default function FilePreviewPanel({
           relativePath !== null &&
           file.data !== null &&
           !isFolder &&
-          (readOnlyHost || file.data.editGrant !== undefined) ? (
+          (readOnlyHost || hostEdit.editGrant !== undefined) ? (
             <OutsideEditAccess
               environmentId={environmentId}
               cwd={cwd}
               relativePath={relativePath}
-              file={file.data}
+              editGrant={hostEdit.editGrant}
+              canGrantEdit={file.data.canGrantEdit === true || file.data.editGrant !== undefined}
               onChange={file.refresh}
             />
           ) : null}
