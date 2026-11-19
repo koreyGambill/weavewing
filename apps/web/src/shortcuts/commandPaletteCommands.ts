@@ -52,7 +52,7 @@ export function installCommandPaletteCommands(
       onKeyDown: (event) => {
         if (event.isComposing || event.keyCode === 229 || event.key !== "Escape") return false;
         const { open, mode } = useCommandPaletteStore.getState();
-        if (!open || mode === "command") return false;
+        if (!open || mode === "command" || mode === "search") return false;
         consume(event);
         dispatchCommandPalette({ _tag: "BackToCommand" });
       },
@@ -92,12 +92,14 @@ export function installCommandPaletteCommands(
         dispatchCommandPalette({ _tag: "SetOpen", open: false });
         void router.navigate({ to: "/usage" });
       },
+      "search.toggle": toggleOverlay("search.toggle"),
       "commandPalette.toggle": toggleOverlay("commandPalette.toggle"),
       "filePicker.toggle": toggleOverlay("filePicker.toggle"),
       "projectSearch.toggle": toggleOverlay("projectSearch.toggle"),
     },
     {
       ...options,
+      capture: true,
       when: isCommandPaletteMounted,
       context: () => {
         const threadRef = readRouteThreadRef();

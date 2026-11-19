@@ -17,6 +17,8 @@ import {
 import { useProjectFilePickerQuery } from "./projectFilesQueryState";
 
 interface ProjectFilePickerProps {
+  readonly query?: string;
+  readonly onQueryChange?: (query: string) => void;
   readonly setOpen: (open: boolean) => void;
 }
 
@@ -50,16 +52,17 @@ function getEmptyStateMessage(query: string, error: string | null, isPending: bo
   return isSearching ? "No matching files." : "No files found.";
 }
 
-function EmptyProjectFilePicker() {
+function EmptyProjectFilePicker(props: ProjectFilePickerProps) {
   return (
     <CommandPaletteContent
       aria-label="File picker"
-      escapeLabel="Back"
+      escapeLabel="Close"
       footerActionLabel="Open file"
-      inputProps={{ disabled: true, placeholder: "Search files…" }}
+      inputProps={{ placeholder: "Search files…" }}
       mode="none"
       testId="project-file-picker"
-      value=""
+      value={props.query ?? ""}
+      onValueChange={props.onQueryChange}
     >
       <div className="py-10 text-center text-sm text-muted-foreground">
         Open a project to search its files.
@@ -70,7 +73,9 @@ function EmptyProjectFilePicker() {
 
 function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveProjectTarget }) {
   const { target } = props;
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
+  const query = props.query ?? localQuery;
+  const setQuery = props.onQueryChange ?? setLocalQuery;
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const result = useProjectFilePickerQuery(
     target.environmentId,
@@ -112,7 +117,7 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
     <CommandPaletteContent
       aria-label="File picker"
       autoHighlight="always"
-      escapeLabel="Back"
+      escapeLabel="Close"
       footerActionLabel="Open file"
       inputProps={{ placeholder: "Search files…" }}
       mode="none"
@@ -149,8 +154,8 @@ export function ProjectFilePicker(props: ProjectFilePickerProps) {
   const target = useActiveProjectTarget();
 
   if (!target) {
-    return <EmptyProjectFilePicker />;
+    return <EmptyProjectFilePicker {...props} />;
   }
 
-  return <OpenProjectFilePicker setOpen={props.setOpen} target={target} />;
+  return <OpenProjectFilePicker {...props} target={target} />;
 }

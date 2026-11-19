@@ -1,8 +1,10 @@
+import { createLeaderHandler } from "./shortcuts/leader";
 import { assert, describe, it } from "vite-plus/test";
 import {
   compileResolvedKeybindingsConfig,
   DEFAULT_RESOLVED_KEYBINDINGS,
   mergeWithDefaultKeybindings,
+  defaultKeybindingsForMode,
 } from "@t3tools/shared/keybindings";
 
 import {
@@ -433,7 +435,7 @@ describe("resolveShortcutCommand", () => {
       assert.equal(
         resolveShortcutCommand(
           event({ key: "o", ctrlKey: true, altKey: true }),
-          DEFAULT_RESOLVED_KEYBINDINGS,
+          compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false)),
           { platform },
         ),
         "workspace.tile.newTab",
@@ -485,10 +487,14 @@ describe("resolveShortcutCommand", () => {
         const input = event({ key, ctrlKey: true, altKey: true, shiftKey });
         for (const terminalFocus of [false, true]) {
           assert.strictEqual(
-            resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
-              platform,
-              context: { terminalFocus, editableFocus: !terminalFocus },
-            }),
+            resolveShortcutCommand(
+              input,
+              compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false)),
+              {
+                platform,
+                context: { terminalFocus, editableFocus: !terminalFocus },
+              },
+            ),
             command,
           );
         }
@@ -502,7 +508,7 @@ describe("resolveShortcutCommand", () => {
         assert.isNull(
           resolveShortcutCommand(
             event({ key, code, ctrlKey: true, altKey: true, getModifierState: () => true }),
-            DEFAULT_RESOLVED_KEYBINDINGS,
+            compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false)),
             { platform: "Win32" },
           ),
         );
@@ -866,6 +872,16 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
   for (const platform of ["Linux x86_64", "Win32", "MacIntel"]) {
     for (const key of "abcdefghijklmnopqrstuvwxyz") {
       for (const shiftKey of [false, true]) {
+        const leader = createLeaderHandler({
+          keybindings: () => DEFAULT_RESOLVED_KEYBINDINGS,
+          platform: () => platform,
+          changed: () => {},
+        });
+        assert.equal(
+          leader.handle(event({ key, ctrlKey: true, shiftKey })),
+          key === "a" && !shiftKey ? "prefix" : null,
+        );
+        leader.cancel();
         assert.equal(
           resolveShortcutCommand(
             event({ key, ctrlKey: true, shiftKey }),
@@ -879,7 +895,11 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
             ? shiftKey
               ? "workspace.tile.closeAllTabs"
               : "workspace.tile.closeTab"
-            : null,
+            : !shiftKey && platform !== "MacIntel" && key === "k"
+              ? "search.toggle"
+              : !shiftKey && platform !== "MacIntel" && key === "p"
+                ? "commandPalette.toggle"
+                : null,
           `Ctrl+${shiftKey ? "Shift+" : ""}${key} resolves to the documented terminal action on ${platform}`,
         );
       }
@@ -915,7 +935,7 @@ it.each(["Linux x86_64", "Win32", "MacIntel"])(
       event({ key: "Tab" }),
       event({ key: "Tab", shiftKey: true }),
       ...Array.from({ length: 24 }, (_, i) => event({ key: `F${i + 1}` })),
-      ...[..."abcdefghijklmnopqrstuvwxyz"].map((key) => event({ key, altKey: true })),
+      ...[..."abcdefgimnopqrstuvwxyz"].map((key) => event({ key, altKey: true })),
     ];
     for (const input of passthrough) {
       assert.equal(
@@ -944,3 +964,122 @@ it.each(["Linux x86_64", "Win32", "MacIntel"])(
     }
   },
 );
+
+it.each(["Linux", "Win32", "MacIntel"])(
+  "resolves leader sequences and classic defaults separately on %s",
+  (platform) => {
+    const classic = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
+    const sequences = [
+      ["%", "workspace.tile.splitRight"],
+      ['"', "workspace.tile.splitDown"],
+      ["h", "workspace.tile.focusLeft"],
+      ["j", "workspace.tile.focusDown"],
+      ["k", "workspace.tile.focusUp"],
+      ["l", "workspace.tile.focusRight"],
+      ["x", "workspace.tile.closeTab"],
+      ["m", "workspace.tile.maximize"],
+      ["0", "workspace.tile.swap"],
+      [" ", "workspace.tile.rotate"],
+      ["t", "workspace.tile.newTab"],
+      ["n", "workspace.tile.nextTab"],
+      ["p", "workspace.tile.previousTab"],
+      ["f", "workspace.tile.float"],
+      ["r", "workspace.tile.resize"],
+      [".", "workspace.tile.actions"],
+      ["/", "search.toggle"],
+      [":", "commandPalette.toggle"],
+      ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [`${n}`, `workspace.tile.tab.${n}`]),
+    ];
+    for (const [key, command] of sequences) {
+      const input = event({ key: key!, shiftKey: key === "%" || key === '"' || key === ":" });
+      for (const terminalFocus of [false, true]) {
+        const options = {
+          platform,
+          context: { terminalFocus, editableFocus: !terminalFocus },
+          leader: true,
+        };
+        assert.equal(resolveShortcutCommand(input, DEFAULT_BINDINGS, options), command);
+        assert.isNull(resolveShortcutCommand(input, classic, options));
+        assert.isNull(
+          resolveShortcutCommand(input, DEFAULT_BINDINGS, { ...options, leader: false }),
+        );
+      }
+    }
+    for (const [key, command] of [
+      ["h", "workspace.tile.resizeLeft"],
+      ["j", "workspace.tile.resizeDown"],
+      ["k", "workspace.tile.resizeUp"],
+      ["l", "workspace.tile.resizeRight"],
+    ]) {
+      assert.equal(
+        resolveShortcutCommand(event({ key: key!, altKey: true }), DEFAULT_BINDINGS, {
+          platform,
+          context: { terminalFocus: true },
+        }),
+        command,
+      );
+    }
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "h", ctrlKey: true, altKey: true }), DEFAULT_BINDINGS, {
+        platform,
+      }),
+    );
+    assert.equal(
+      resolveShortcutCommand(event({ key: "h", ctrlKey: true, altKey: true }), classic, {
+        platform,
+      }),
+      "workspace.tile.focusLeft",
+    );
+    const [sequence] = compileResolvedKeybindingsConfig([
+      { key: "leader h", command: "workspace.tile.focusLeft" },
+    ]);
+    assert.isDefined(sequence);
+    const { leader: _leader, ...legacyShortcut } = sequence!.shortcut;
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "h" }), [{ ...sequence!, shortcut: legacyShortcut }], {
+        platform,
+      }),
+    );
+    const conditional = compileResolvedKeybindingsConfig([
+      { key: "leader H", command: "workspace.tile.focusLeft", when: "terminalFocus" },
+    ]);
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "h" }), conditional, { platform, leader: true }),
+    );
+    assert.equal(
+      resolveShortcutCommand(event({ key: "h" }), conditional, {
+        platform,
+        leader: true,
+        context: { terminalFocus: true },
+      }),
+      "workspace.tile.focusLeft",
+    );
+  },
+);
+
+describe("search and palette defaults", () => {
+  it.each(["Linux", "Win32", "MacIntel"])(
+    "opens both dialogs even with terminal focus on %s",
+    (platform) => {
+      for (const leaderEnabled of [false, true]) {
+        const bindings = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(leaderEnabled));
+        assert.isFalse(bindings.some((rule) => rule.command === "filePicker.toggle"));
+        for (const terminalFocus of [false, true]) {
+          const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+          for (const [key, command] of [
+            ["k", "search.toggle"],
+            ["p", "commandPalette.toggle"],
+          ] as const) {
+            assert.equal(
+              resolveShortcutCommand(event({ key, ...modifier }), bindings, {
+                platform,
+                context: { terminalFocus },
+              }),
+              command,
+            );
+          }
+        }
+      }
+    },
+  );
+});

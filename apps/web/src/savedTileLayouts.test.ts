@@ -40,7 +40,12 @@ describe("saved tile layouts", () => {
         first: {
           kind: "group",
           id: "a",
-          tabs: [CONVERSATION_TAB_ID],
+          tabs: [
+            CONVERSATION_TAB_ID,
+            newTabId("blank-a"),
+            newTabId("blank-b"),
+            newTabId("blank-c"),
+          ],
           activeTabId: CONVERSATION_TAB_ID,
         },
         second: {

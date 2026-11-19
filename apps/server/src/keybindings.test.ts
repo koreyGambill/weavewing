@@ -18,6 +18,8 @@ import { KeybindingsConfigError, MAX_KEYBINDINGS_COUNT } from "@t3tools/contract
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const encodeKeybindingsConfigJson = Schema.encodeEffect(KeybindingsConfigJson);
 const decodeKeybindingsConfigJson = Schema.decodeUnknownEffect(KeybindingsConfigJson);
+const decodeResolvedBinding = Schema.decodeEffect(Keybindings.ResolvedKeybindingFromConfig);
+const encodeResolvedBinding = Schema.encodeEffect(Keybindings.ResolvedKeybindingFromConfig);
 const layerKeybindings = () => {
   return Keybindings.layer.pipe(
     Layer.provideMerge(
@@ -53,6 +55,100 @@ const readKeybindingsConfig = (configPath: string) =>
   });
 
 it.layer(NodeServices.layer)("keybindings", (it) => {
+  it.effect(
+    "migrates saved tile defaults once and switches presets without losing custom rules",
+    () =>
+      Effect.gen(function* () {
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        const custom: KeybindingRule = {
+          key: "ctrl+alt+v",
+          command: "workspace.tile.focusLeft",
+          when: "terminalFocus",
+        };
+        yield* writeKeybindingsConfig(keybindingsConfigPath, [
+          ...SharedKeybindings.CLASSIC_KEYBINDINGS.filter(
+            (rule) => rule.command !== custom.command,
+          ),
+          custom,
+        ]);
+        const service = yield* Keybindings.Keybindings;
+        yield* service.syncDefaultKeybindingsOnStartup;
+        const first = yield* readKeybindingsConfig(keybindingsConfigPath);
+        assert.isFalse(first.some(SharedKeybindings.isClassicTileDefault));
+        assert.isTrue(first.some((rule) => rule.key === "leader %"));
+        assert.isTrue(first.some((rule) => rule.key === custom.key && rule.when === custom.when));
+        yield* service.syncDefaultKeybindingsOnStartup;
+        assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), first);
+        const classic = yield* service.upsertKeybindingRule({
+          command: "keybindings.leader",
+          key: "ctrl+a",
+          when: "false",
+        });
+        assert.isFalse(classic.keybindings.some((rule) => rule.shortcut.leader));
+        for (const key of ["w", "[", "]"])
+          assert.isTrue(
+            classic.keybindings.some(
+              (rule) => rule.shortcut.key === key && rule.shortcut.ctrlKey && rule.shortcut.altKey,
+            ),
+          );
+        assert.isTrue(
+          classic.keybindings.some(
+            (rule) =>
+              rule.command === "workspace.tile.splitRight" &&
+              rule.shortcut.ctrlKey &&
+              rule.shortcut.altKey,
+          ),
+        );
+        assert.isTrue(
+          classic.keybindings.some(
+            (rule) => rule.shortcut.key === "v" && rule.command === custom.command,
+          ),
+        );
+        yield* service.syncDefaultKeybindingsOnStartup;
+        const persistedClassic = yield* readKeybindingsConfig(keybindingsConfigPath);
+        yield* service.syncDefaultKeybindingsOnStartup;
+        assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), persistedClassic);
+        const leader = yield* service.upsertKeybindingRule({
+          command: "keybindings.leader",
+          key: "ctrl+b",
+        });
+        assert.isTrue(
+          leader.keybindings.some(
+            (rule) => rule.shortcut.leader && rule.shortcut.key === "leader %",
+          ),
+        );
+        assert.isFalse(
+          leader.keybindings.some(
+            (rule) =>
+              rule.command.startsWith("workspace.tile.") &&
+              rule.shortcut.key !== "v" &&
+              rule.shortcut.ctrlKey &&
+              rule.shortcut.altKey,
+          ),
+        );
+        assert.isTrue(
+          leader.keybindings.some(
+            (rule) => rule.shortcut.key === "v" && rule.command === custom.command,
+          ),
+        );
+        const rule: KeybindingRule = {
+          key: 'leader "',
+          command: "workspace.tile.splitDown",
+          when: "terminalFocus",
+        };
+        const resolved = yield* decodeResolvedBinding(rule);
+        const encoded = yield* encodeResolvedBinding(resolved);
+        assert.equal(encoded.key, rule.key);
+        assert.equal(encoded.when, rule.when);
+        yield* service.upsertKeybindingRule(rule);
+        assert.isTrue(
+          (yield* readKeybindingsConfig(keybindingsConfigPath)).some(
+            (entry) => entry.key === rule.key && entry.when === rule.when,
+          ),
+        );
+      }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("parses shortcuts including plus key", () =>
     Effect.sync(() => {
       assert.deepEqual(SharedKeybindings.parseKeybindingShortcut("mod+j"), {
@@ -329,10 +425,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
       for (const [command, key] of [
-        ["workspace.tile.focusLeft", "ctrl+alt+h"],
-        ["workspace.tile.focusDown", "ctrl+alt+j"],
-        ["workspace.tile.focusUp", "ctrl+alt+k"],
-        ["workspace.tile.focusRight", "ctrl+alt+l"],
+        ["workspace.tile.focusLeft", "leader h"],
+        ["workspace.tile.focusDown", "leader j"],
+        ["workspace.tile.focusUp", "leader k"],
+        ["workspace.tile.focusRight", "leader l"],
         ["workspace.tile.previousTab", "ctrl+shift+tab"],
         ["workspace.tile.nextTab", "ctrl+tab"],
       ])
@@ -346,7 +442,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       ]);
       assert.deepStrictEqual(
         upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
-        [{ key: "mod+w", command: "workspace.tile.closeTab" }, closeTab],
+        [
+          { key: "mod+w", command: "workspace.tile.closeTab" },
+          { key: "leader x", command: "workspace.tile.closeTab" },
+        ],
       );
 
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
@@ -414,7 +513,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
         assert.deepEqual(
           upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
-          [legacy, alias],
+          [legacy],
         );
         assert.deepInclude(upgraded, custom);
       }).pipe(Effect.provide(layerKeybindings())),
@@ -439,6 +538,16 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       yield* writeKeybindingsConfig(keybindingsConfigPath, [existing, ...fillers]);
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       assert.isFalse(yield* hasModEnter);
+      const beforeToggle = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const toggle = yield* toDetailResult(
+        keybindings.upsertKeybindingRule({
+          command: "keybindings.leader",
+          key: "ctrl+a",
+          when: "false",
+        }),
+      );
+      assertFailure(toggle, "Remove a keybinding to make room for the leader setting.");
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), beforeToggle);
 
       yield* writeKeybindingsConfig(keybindingsConfigPath, [existing]);
       yield* keybindings.syncDefaultKeybindingsOnStartup;
@@ -804,7 +913,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
         upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
-        [{ key: "mod+w", command: "workspace.tile.closeTab" }],
+        [
+          { key: "mod+w", command: "workspace.tile.closeTab" },
+          { key: "leader x", command: "workspace.tile.closeTab" },
+        ],
       );
       assert.deepEqual(
         upgraded.filter((rule) => rule.command === "workspace.tile.closeAllTabs"),
@@ -836,3 +948,55 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 });
+
+it.effect("moves shipped search shortcuts and preserves customized chords and conditions", () =>
+  Effect.gen(function* () {
+    const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+    const keybindings = yield* Keybindings.Keybindings;
+    const custom = { key: "alt+p", command: "filePicker.toggle", when: "terminalFocus" } as const;
+    yield* writeKeybindingsConfig(keybindingsConfigPath, [
+      { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+      { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
+      custom,
+    ]);
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
+    assert.deepEqual(
+      upgraded.filter((rule) =>
+        ["search.toggle", "commandPalette.toggle", "filePicker.toggle"].includes(rule.command),
+      ),
+      [
+        { key: "leader /", command: "search.toggle" },
+        { key: "leader :", command: "commandPalette.toggle" },
+        { key: "mod+k", command: "search.toggle" },
+        { key: "mod+p", command: "commandPalette.toggle" },
+        custom,
+      ],
+    );
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), upgraded);
+    for (const enabled of [false, true]) {
+      yield* keybindings.upsertKeybindingRule({
+        key: "ctrl+a",
+        command: "keybindings.leader",
+        ...(enabled ? {} : { when: "false" }),
+      });
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const preset = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        preset.filter((rule) => rule.key === "mod+k" || rule.key === "mod+p"),
+        [
+          { key: "mod+k", command: "search.toggle" },
+          { key: "mod+p", command: "commandPalette.toggle" },
+        ],
+      );
+      assert.deepInclude(preset, custom);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), preset);
+    }
+    const rebound = { key: "mod+k", command: "commandPalette.toggle" } as const;
+    yield* writeKeybindingsConfig(keybindingsConfigPath, [rebound, custom]);
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    assert.deepInclude(yield* readKeybindingsConfig(keybindingsConfigPath), rebound);
+  }).pipe(Effect.provide(layerKeybindings().pipe(Layer.provideMerge(NodeServices.layer)))),
+);

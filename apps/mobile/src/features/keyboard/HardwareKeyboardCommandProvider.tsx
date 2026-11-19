@@ -54,6 +54,7 @@ export function HardwareKeyboardCommandProvider({
 }: PropsWithChildren<{ readonly pathname: string }>) {
   const navigation = useNavigation();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteMode, setPaletteMode] = useState<"search" | "command">("command");
   const closePalette = useCallback(() => setPaletteOpen(false), []);
   const activeThreadRef = useMemo(() => parseActiveThreadPath(pathname), [pathname]);
   const activeThread = useThreadShell(activeThreadRef);
@@ -108,6 +109,7 @@ export function HardwareKeyboardCommandProvider({
     const commands = new Set<HardwareKeyboardCommand>(getRegisteredHardwareKeyboardCommands());
     commands.add("newTask");
     commands.add("commandPalette");
+    commands.add("search");
     if (pathname !== "/" && !pathname.startsWith("/threads/")) {
       for (const command of commands) {
         if (command.startsWith("thread.jump.")) commands.delete(command);
@@ -126,7 +128,8 @@ export function HardwareKeyboardCommandProvider({
 
   const onCommand = useCallback(
     (command: HardwareKeyboardCommand) => {
-      if (command === "commandPalette") {
+      if (command === "commandPalette" || command === "search") {
+        setPaletteMode(command === "search" ? "search" : "command");
         setPaletteOpen(true);
         return;
       }
@@ -188,9 +191,15 @@ export function HardwareKeyboardCommandProvider({
   const palette = useMemo(
     () =>
       paletteOpen ? (
-        <CommandPalette pathname={pathname} onClose={closePalette} onCommand={onCommand} />
+        <CommandPalette
+          key={paletteMode}
+          mode={paletteMode}
+          pathname={pathname}
+          onClose={closePalette}
+          onCommand={onCommand}
+        />
       ) : null,
-    [closePalette, onCommand, paletteOpen, pathname],
+    [closePalette, onCommand, paletteOpen, paletteMode, pathname],
   );
 
   return (

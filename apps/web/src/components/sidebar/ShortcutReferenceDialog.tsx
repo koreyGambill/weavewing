@@ -1,7 +1,8 @@
+import { leaderShortcutKey } from "@t3tools/shared/keybindings";
 import { useAtomValue } from "@effect/atom-react";
 import type { KeybindingCommand } from "@t3tools/contracts";
 import { useState } from "react";
-import { formatShortcutLabel } from "../../keybindings";
+import { formatShortcutLabel, formatShortcutKeyLabel } from "../../keybindings";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { commandLabel } from "../settings/KeybindingsSettings.logic";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -56,7 +57,12 @@ function ShortcutReferenceContent() {
   const shortcuts = new Map<KeybindingCommand, Set<string>>();
   for (const binding of keybindings) {
     const keys = shortcuts.get(binding.command) ?? new Set<string>();
-    keys.add(formatShortcutLabel(binding.shortcut));
+    const leader = keybindings.findLast((rule) => rule.command === "keybindings.leader")?.shortcut;
+    keys.add(
+      binding.shortcut.leader
+        ? `${leader ? formatShortcutLabel(leader) : "Ctrl+A"} then ${formatShortcutKeyLabel(leaderShortcutKey(binding.shortcut))}`
+        : formatShortcutLabel(binding.shortcut),
+    );
     shortcuts.set(binding.command, keys);
   }
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
