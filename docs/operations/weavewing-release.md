@@ -119,3 +119,13 @@ gh release delete <bad-tag> --repo koreyGambill/weavewing --cleanup-tag
 Installs that already updated stay on that build until the fix ships. Turning a
 public release back into a draft keeps its tag, so delete it instead. The first
 release has no previous release to restore. Remove it and ship a higher version.
+
+## Fork divergence during upstream merges
+
+Weavewing uses tiles and tabs for workspace surfaces. Keep these upstream features removed during weekly merges:
+
+- Legacy terminal drawer splits and groups, including their sidebar and `terminal.split`, `terminal.splitVertical`, and `terminal.new` commands. Each terminal tab owns one PTY; create neighboring terminals with tiles.
+- The legacy right panel and sheet, including their toggle, new-tab, close, and maximize commands. Diff, files, browser, device, and other surfaces belong to tile tabs. The Tools sidebar remains separate.
+- The narrow-window legacy ChatView fallback. Narrow web and desktop windows use the same tile model; native mobile keeps its own terminal UI.
+
+Saved terminal groups become independent tabs using their existing PTY IDs. Removed keybinding commands are ignored without configuration warnings. The command/default guard in the web keybinding tests prevents an upstream merge from restoring those commands silently.

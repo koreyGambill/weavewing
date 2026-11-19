@@ -243,7 +243,7 @@ export const make = Effect.gen(function* () {
                 ?.closeDevTools();
             },
           },
-          // Cmd/Ctrl+W belongs to the renderer's tab close; it must never close the window.
+          // Cmd/Ctrl+W must reach terminal input instead of closing the window.
           environment.platform === "darwin"
             ? { label: "Close Window", click: (_item, window) => window?.close() }
             : { role: "quit" },
@@ -281,7 +281,11 @@ export const make = Effect.gen(function* () {
         label: "View",
         submenu: [
           /* Native reload/DevTools/zoom roles target focused guests; these commands must target the app. */
-          { label: "Reload", accelerator: "CmdOrCtrl+R", click: mainContentsClick("reload") },
+          {
+            label: "Reload",
+            accelerator: "CmdOrCtrl+R",
+            click: mainContentsClick("reload"),
+          },
           {
             label: "Force Reload",
             accelerator: "Shift+CmdOrCtrl+R",

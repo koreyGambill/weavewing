@@ -60,7 +60,7 @@ test(
     const thread = await t3.thread({ project, title: "List", messages: ["List it"] });
     await t3.open(thread);
 
-    await screen.getByRole("button", "Toggle terminal drawer").tap();
+    await browser.keyboard.press("ControlOrMeta+j");
     const input = screen.getByRole("textbox", "Terminal input");
     // The input mounts before fonts and WASM finish loading and its handlers are installed.
     await expect(input).toHaveAttribute("data-workspace-focus-default", "");

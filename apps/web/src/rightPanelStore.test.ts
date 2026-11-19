@@ -822,6 +822,41 @@ describe("rightPanelStore", () => {
     expect(selectThreadRightPanelState(migrated.byThreadKey, refA).maximized).toBe(true);
   });
 
+  it("migrates saved terminal splits to independent tabs with the same PTY ids", () => {
+    const state = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "terminal:term-1",
+          surfaces: [
+            {
+              kind: "terminal",
+              id: "terminal:term-1",
+              resourceId: "term-1",
+              terminalIds: ["term-1", "term-2"],
+              activeTerminalId: "term-2",
+              splitDirection: "vertical",
+            },
+          ],
+        },
+      },
+    });
+    const panel = Object.values(state.byThreadKey)[0]!;
+    expect(panel.surfaces).toEqual([
+      {
+        kind: "terminal",
+        id: "terminal:term-1",
+        resourceId: "term-1",
+      },
+      {
+        kind: "terminal",
+        id: "terminal:term-2",
+        resourceId: "term-2",
+      },
+    ]);
+    expect(panel.activeSurfaceId).toBe("terminal:term-2");
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({
@@ -847,7 +882,7 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("upgrades saved single-session terminal surfaces to split-capable surfaces", () => {
+  it("restores saved single-session terminal surfaces", () => {
     expect(
       migratePersistedRightPanelState({
         byThreadKey: {
@@ -868,8 +903,6 @@ describe("rightPanelStore", () => {
               id: "terminal:term-1",
               kind: "terminal",
               resourceId: "term-1",
-              terminalIds: ["term-1"],
-              activeTerminalId: "term-1",
             },
           ],
         },
@@ -1469,36 +1502,6 @@ describe("rightPanelStore", () => {
         refAfterServerADisconnects,
       ).surfaces,
     ).toEqual([]);
-  });
-
-  it("tracks split panes and the active pane within a terminal surface", async () => {
-    const launchContext = { cwd: "/xwing/envs/7/repo", worktreePath: "/thread/root" };
-    useRightPanelStore.getState().openTerminal(refA, "term-1", launchContext);
-    useRightPanelStore.getState().splitTerminal(refA, "terminal:term-1", "term-2");
-
-    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
-      id: "terminal:term-1",
-      kind: "terminal",
-      launchContext,
-      resourceId: "term-1",
-      terminalIds: ["term-1", "term-2"],
-      activeTerminalId: "term-2",
-    });
-
-    useRightPanelStore.getState().activateTerminal(refA, "terminal:term-1", "term-1");
-    useRightPanelStore.getState().closeTerminal(refA, "terminal:term-1", "term-1");
-    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
-      id: "terminal:term-1",
-      kind: "terminal",
-      launchContext,
-      resourceId: "term-1",
-      terminalIds: ["term-2"],
-      activeTerminalId: "term-2",
-    });
-    await useRightPanelStore.persist.rehydrate();
-    expect(
-      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
-    ).toMatchObject({ launchContext });
   });
 
   it("closing the final terminal pane removes its surface and closes the panel", () => {

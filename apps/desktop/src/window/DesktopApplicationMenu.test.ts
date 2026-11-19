@@ -296,6 +296,8 @@ describe("DesktopApplicationMenu", () => {
           items.find((item) => item.role === "windowMenu" && item.submenu === undefined),
           platform,
         );
+        const reload = items.find((item) => item.label === "Reload");
+        assert.equal(reload?.accelerator, "CmdOrCtrl+R");
         const closeTools = items.find((item) => item.accelerator === "CmdOrCtrl+W");
         assert.equal(closeTools?.label, "Close Developer Tools", platform);
         assert.isFunction(closeTools?.click);

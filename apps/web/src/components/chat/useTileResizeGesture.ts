@@ -10,13 +10,13 @@ import {
 } from "../../threadTileGeometry";
 import { registerCommands, registerMenuAction } from "../../shortcuts/dispatcher";
 import type { TileNode } from "../../threadTileLayout";
-import type { RightPanelTabsProps } from "../RightPanelTabs";
+import type { TileSurfaceActions } from "../SurfaceTabContent";
 
 type Point = { x: number; y: number };
 export function useTileResizeGesture(input: {
   rootRef: RefObject<HTMLDivElement | null>;
   threadRef: ScopedThreadRef;
-  panels: Pick<RightPanelTabsProps, "keybindings" | "getShortcutContext">;
+  panels: Pick<TileSurfaceActions, "keybindings" | "getShortcutContext">;
 }) {
   const [preview, setPreview] = useState<Array<{ splitId: string; ratio: number }> | null>(null);
   const pointer = useRef<Point | null>(null);

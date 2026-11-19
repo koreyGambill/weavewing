@@ -22,32 +22,6 @@ describe("terminalUiStateStore actions", () => {
     });
   });
 
-  it("caps splits at four terminals per group", () => {
-    const store = useTerminalUiStateStore.getState();
-    store.splitTerminal(THREAD_REF, "terminal-2");
-    store.splitTerminal(THREAD_REF, "terminal-3");
-    store.splitTerminal(THREAD_REF, "terminal-4");
-    store.splitTerminal(THREAD_REF, "terminal-5");
-    store.splitTerminal(THREAD_REF, "terminal-6");
-
-    const terminalUiState = selectThreadTerminalUiState(
-      useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
-      THREAD_REF,
-    );
-    expect(terminalUiState.terminalIds).toEqual([
-      "terminal-2",
-      "terminal-3",
-      "terminal-4",
-      "terminal-5",
-    ]);
-    expect(terminalUiState.terminalGroups).toEqual([
-      {
-        id: "group-terminal-2",
-        terminalIds: ["terminal-2", "terminal-3", "terminal-4", "terminal-5"],
-      },
-    ]);
-  });
-
   it("keeps state isolated per environment when raw thread ids collide", () => {
     const store = useTerminalUiStateStore.getState();
     store.setTerminalOpen(THREAD_REF, true);
@@ -99,8 +73,6 @@ describe("terminalUiStateStore actions", () => {
           terminalHeight: 320,
           terminalIds: ["term-1"],
           activeTerminalId: "term-1",
-          terminalGroups: [{ id: "group-term-1", terminalIds: ["term-1"] }],
-          activeTerminalGroupId: "group-term-1",
         },
       },
     });
@@ -122,10 +94,10 @@ describe("terminalUiStateStore actions", () => {
     ).toEqual([]);
   });
 
-  it("keeps a valid active terminal after closing an active split terminal", () => {
+  it("keeps a valid active terminal after closing an active terminal", () => {
     const store = useTerminalUiStateStore.getState();
-    store.splitTerminal(THREAD_REF, "terminal-2");
-    store.splitTerminal(THREAD_REF, "terminal-3");
+    store.newTerminal(THREAD_REF, "terminal-2");
+    store.newTerminal(THREAD_REF, "terminal-3");
     store.closeTerminal(THREAD_REF, "terminal-3");
 
     const terminalUiState = selectThreadTerminalUiState(
@@ -134,21 +106,18 @@ describe("terminalUiStateStore actions", () => {
     );
     expect(terminalUiState.activeTerminalId).toBe("terminal-2");
     expect(terminalUiState.terminalIds).toEqual(["terminal-2"]);
-    expect(terminalUiState.terminalGroups).toEqual([
-      { id: "group-terminal-2", terminalIds: ["terminal-2"] },
-    ]);
   });
 
   it.each([
-    ["terminal-3", "terminal-3", DEFAULT_THREAD_TERMINAL_ID],
-    [DEFAULT_THREAD_TERMINAL_ID, DEFAULT_THREAD_TERMINAL_ID, "terminal-3"],
+    ["terminal-3", "terminal-3", "terminal-2"],
+    [DEFAULT_THREAD_TERMINAL_ID, DEFAULT_THREAD_TERMINAL_ID, "terminal-2"],
     ["terminal-3", DEFAULT_THREAD_TERMINAL_ID, "terminal-3"],
-  ])("keeps the split's tab when %s is active and %s closes", (activeId, closedId, nextId) => {
+  ])("keeps the active terminal when %s is active and %s closes", (activeId, closedId, nextId) => {
     const store = useTerminalUiStateStore.getState();
     store.setTerminalOpen(THREAD_REF, true);
     store.newTerminal(THREAD_REF, "terminal-2");
     store.setActiveTerminal(THREAD_REF, DEFAULT_THREAD_TERMINAL_ID);
-    store.splitTerminal(THREAD_REF, "terminal-3");
+    store.newTerminal(THREAD_REF, "terminal-3");
     store.setActiveTerminal(THREAD_REF, activeId);
     store.closeTerminal(THREAD_REF, closedId);
 
@@ -157,7 +126,6 @@ describe("terminalUiStateStore actions", () => {
       THREAD_REF,
     );
     expect(terminalUiState.activeTerminalId).toBe(nextId);
-    expect(terminalUiState.activeTerminalGroupId).toBe(`group-${DEFAULT_THREAD_TERMINAL_ID}`);
   });
 
   it("does not import a closed panel terminal from stale metadata", () => {

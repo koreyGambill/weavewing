@@ -70,6 +70,18 @@ const syncHtmlFullscreen = () => {
 syncHtmlFullscreen();
 document.addEventListener("fullscreenchange", syncHtmlFullscreen);
 
+// Menu accelerators run before the renderer can preserve shell control keys.
+const syncTerminalFocus = () => {
+  const active = document.activeElement;
+  ipcRenderer.send(
+    IpcChannels.TERMINAL_FOCUS_CHANNEL,
+    active instanceof HTMLElement && active.closest("[data-terminal-owner]") !== null,
+  );
+};
+document.addEventListener("focusin", syncTerminalFocus);
+document.addEventListener("focusout", syncTerminalFocus);
+syncTerminalFocus();
+
 let primaryPasteEnabled = true;
 try {
   primaryPasteEnabled =

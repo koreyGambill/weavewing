@@ -65,10 +65,8 @@ export function useRightPanelSurfaceClose(input: {
       surface.kind === "terminal" &&
       readEnvironmentScope(ref.environmentId, AuthTerminalOperateScope)
     ) {
-      for (const terminalId of surface.terminalIds) {
-        storeCloseTerminal(ref, terminalId);
-        terminalActions.closeTerminalSession(terminalId, ref);
-      }
+      storeCloseTerminal(ref, surface.resourceId);
+      terminalActions.closeTerminalSession(surface.resourceId, ref);
     }
     if (
       surface.kind === "side-chat" &&
@@ -147,16 +145,9 @@ export function useRightPanelSurfaceClose(input: {
       finishClose([surface]);
       return;
     }
-    const otherTerminalIds = surface.terminalIds.filter(
-      (terminalId) => terminalId !== surface.activeTerminalId,
-    );
-    void confirmTerminalClose(
-      threadRef,
-      [surface.activeTerminalId, ...otherTerminalIds].map((terminalId) => ({
-        terminalId,
-        label: labelFor(terminalId),
-      })),
-    ).then((confirmed) => {
+    void confirmTerminalClose(threadRef, [
+      { terminalId: surface.resourceId, label: labelFor(surface.resourceId) },
+    ]).then((confirmed) => {
       if (confirmed) finishClose([surface]);
     });
   });

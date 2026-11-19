@@ -158,7 +158,7 @@ vi.mock(import("../../state/terminalSessions"), async (original) => {
       useAtomValue(state.runningTerminalIds as Atom.Atom<ReadonlyArray<string>>)) as never,
   };
 });
-vi.mock(import("../ThreadTerminalDrawer"), async (original) => ({
+vi.mock(import("../ThreadTerminalTile"), async (original) => ({
   ...(await original()),
   TerminalViewport: () => <div />,
 }));

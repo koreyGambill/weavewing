@@ -1264,7 +1264,7 @@ it.effect.each([
       const latestSettings = yield* settings.updateSettings({ enableProviderUpdateChecks: false });
       const latestKeybindings = yield* keybindings.upsertKeybindingRule({
         key: "mod+alt+z",
-        command: "terminal.split",
+        command: "workspace.tile.splitRight",
       });
       const expectedSettings = [duringDiscovery, latestSettings].map((value) =>
         ServerSettings.redactServerSettingsForClient(value, { secretReferences: true }),

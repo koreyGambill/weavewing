@@ -198,8 +198,8 @@ function ChatWithSideChatPane(props: { ran: string[] }) {
   useChatShortcuts({
     enabled: true,
     keybindings: [
-      ctrlAlt("b", "rightPanel.toggle"),
-      ctrlAlt("k", "rightPanel.close"),
+      ctrlAlt("b", "workspace.tile.maximize"),
+      ctrlAlt("k", "workspace.tile.closeTab"),
       ctrlShift("x", "thread.stop"),
     ],
     scriptKeybindings: [],
@@ -216,8 +216,8 @@ function ChatWithSideChatPane(props: { ran: string[] }) {
     branchToolbarRef: { current: null },
     closeThreadFind: () => {},
     commands: {
-      "rightPanel.toggle": () => void props.ran.push("toggle"),
-      "rightPanel.close": () => void props.ran.push("close"),
+      "workspace.tile.maximize": () => void props.ran.push("toggle"),
+      "workspace.tile.closeTab": () => void props.ran.push("close"),
       "thread.stop": () => void props.ran.push("stop"),
     },
     fallback: () => undefined,
@@ -232,7 +232,7 @@ function ChatWithSideChatPane(props: { ran: string[] }) {
   );
 }
 
-it("runs right panel commands from inside a side chat pane, but not thread commands", async () => {
+it("runs tile commands from inside a side chat pane, but not thread commands", async () => {
   const ran: string[] = [];
   await using screen = await render(<ChatWithSideChatPane ran={ran} />, options);
 
