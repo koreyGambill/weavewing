@@ -37,9 +37,11 @@ highlighted first row.
 
 Choose the machine with the machine button beside the folder under the composer. In the
 picker, **All machines** searches every connected machine, and choosing a project on another
-machine moves the draft to it. **Open folder** and **Clone repo** add a project; with All
-machines on and more than one machine connected, they first ask which machine, listing the
-current one first. The **?** button lists the picker's keys, including `ctrl+alt+m` to cycle
+machine moves the draft to it. **Open folder** and **Clone repo** add a project on the
+selected machine. Adding needs permission to add projects there, and cloning also needs
+source-control write access. With All machines on, they consider every connected machine
+that allows the action and ask which one when more than one does. When none does, the button is unavailable and its tooltip says why.
+The **?** button lists the picker's keys, including `ctrl+alt+m` to cycle
 machines and `ctrl+alt+shift+m` to toggle All machines. The gear button opens the default
 folder setting. In the picker under the composer, it can also make the current place this
 device's default for new threads.

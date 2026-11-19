@@ -90,3 +90,56 @@ export function pickerRecentProjects<T extends PickerProject>(
   );
   return [...worked.filter((project) => project.pinned), ...worked.filter((p) => !p.pinned)];
 }
+
+interface PickerAddMachine<Id extends string> {
+  readonly environmentId: Id;
+  readonly canAddProject: boolean;
+  readonly canWriteSourceControl: boolean;
+}
+
+export type PickerAddTarget<Id extends string> =
+  | { readonly kind: "machine"; readonly environmentId: Id }
+  | { readonly kind: "choose"; readonly environmentIds: ReadonlyArray<Id> }
+  | { readonly kind: "none"; readonly reason: string };
+
+/**
+ * Where Open folder or Clone repo adds a project. Opening a folder needs add-project permission;
+ * cloning also needs source-control write. Only the selected machine counts unless `allMachines`
+ * is on. `machines` are the connected ones; ids in `first` lead a choice, in that order.
+ */
+export function pickerAddProjectTarget<Id extends string>(input: {
+  readonly step: "folder" | "clone";
+  readonly allMachines: boolean;
+  readonly selectedEnvironmentId: Id | null;
+  readonly machines: ReadonlyArray<PickerAddMachine<Id>>;
+  readonly first: ReadonlyArray<Id | null>;
+}): PickerAddTarget<Id> {
+  const eligible = input.machines.filter(
+    (machine) =>
+      (input.allMachines || machine.environmentId === input.selectedEnvironmentId) &&
+      machine.canAddProject &&
+      (input.step === "folder" || machine.canWriteSourceControl),
+  );
+  const [only] = eligible;
+  if (!only) {
+    const where = input.allMachines ? "any connected machine" : "this machine";
+    return {
+      kind: "none",
+      reason:
+        input.step === "folder"
+          ? `You can't add projects on ${where}.`
+          : `You can't clone repositories on ${where}.`,
+    };
+  }
+  if (eligible.length === 1) return { kind: "machine", environmentId: only.environmentId };
+  const rank = (id: Id) => {
+    const index = input.first.indexOf(id);
+    return index === -1 ? input.first.length : index;
+  };
+  return {
+    kind: "choose",
+    environmentIds: eligible
+      .map((machine) => machine.environmentId)
+      .sort((a, b) => rank(a) - rank(b)),
+  };
+}

@@ -4,6 +4,7 @@ import {
   isProjectPickerPath,
   projectPickerPathLabel,
   rankPickerProjects,
+  pickerAddProjectTarget,
   pickerRecentProjects,
 } from "./projectPicker.logic.ts";
 import { ensureBrowseDirectoryPath, getBrowseParentPath } from "./state/projects.ts";
@@ -63,6 +64,43 @@ describe("project picker", () => {
       "wsl:new",
       "wsl:pinned-new",
     ]);
+  });
+
+  it("adds projects only on machines that allow the action, asking only when several do", () => {
+    const machine = (
+      environmentId: string,
+      canAddProject: boolean,
+      canWriteSourceControl: boolean,
+    ) => ({ environmentId, canAddProject, canWriteSourceControl });
+    const readOnly = machine("read-only", false, false);
+    const writable = machine("writable", true, true);
+    const noClone = machine("no-clone", true, false);
+    const target = (
+      step: "folder" | "clone",
+      allMachines: boolean,
+      machines: ReadonlyArray<ReturnType<typeof machine>>,
+    ) =>
+      pickerAddProjectTarget({
+        step,
+        allMachines,
+        selectedEnvironmentId: "read-only",
+        machines,
+        first: ["read-only", "no-clone"],
+      });
+    expect(target("folder", true, [readOnly, writable])).toEqual({
+      kind: "machine",
+      environmentId: "writable",
+    });
+    expect(target("folder", true, [readOnly, writable, noClone])).toEqual({
+      kind: "choose",
+      environmentIds: ["no-clone", "writable"],
+    });
+    expect(target("clone", true, [readOnly, writable, noClone])).toEqual({
+      kind: "machine",
+      environmentId: "writable",
+    });
+    expect(target("clone", true, [readOnly, noClone])).toMatchObject({ kind: "none" });
+    expect(target("folder", false, [readOnly, writable])).toMatchObject({ kind: "none" });
   });
 
   it("completes folder names against the typed directory on every machine", () => {

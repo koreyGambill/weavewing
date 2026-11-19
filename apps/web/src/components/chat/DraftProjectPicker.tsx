@@ -2,8 +2,10 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
+  type PickerAddTarget,
   completePickerFolder,
   isProjectPickerPath,
+  pickerAddProjectTarget,
   pickerRecentProjects,
   projectPickerPathLabel,
   rankPickerProjects,
@@ -52,7 +54,7 @@ import { projectEnvironment } from "~/state/projects";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentsWithScope } from "~/state/session";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { isProjectPinShortcut, ProjectPinButton } from "../ProjectPinButton";
 import { Button, InlineButton } from "../ui/button";
@@ -77,6 +79,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { searchableSetting } from "../settings/settingsSearch";
+import { settingsScopeEnvironmentLabels } from "../settings/settingsScopeAxis";
 import { DraftProjectName } from "./DraftProjectName";
 import { ComposerControl } from "./ComposerControl";
 import { useProjectPickerBrowse, useProjectPickerHomes } from "./useProjectPickerBrowse";
@@ -108,6 +111,7 @@ export function DraftProjectPicker({
   onStartWithoutProject,
   defaultFolderLabel,
   defaultPlace,
+  currentEnvironmentId,
   trigger,
 }: {
   readonly draftId?: DraftId | null;
@@ -122,10 +126,11 @@ export function DraftProjectPicker({
   readonly onEnvironmentChange: (id: EnvironmentId) => void;
   readonly onStartWithoutProject?: () => void;
   readonly defaultFolderLabel?: string | null;
-  /** `environmentId` is set only when the user chose a machine for the new project. */
-  readonly onAddProject: (step: "folder" | "clone", environmentId?: EnvironmentId) => void;
+  readonly onAddProject: (step: "folder" | "clone", environmentId: EnvironmentId) => void;
   /** Whether this draft is at the default place, and how to make its place the default. */
   readonly defaultPlace?: { readonly current: boolean; readonly makeDefault: () => void };
+  /** The machine the new thread uses, when it can differ from `environmentId`. */
+  readonly currentEnvironmentId?: EnvironmentId | null;
   /** Replaces the project-name trigger, as the where-line under the composer does. */
   readonly trigger?: {
     readonly content: ReactNode;
@@ -154,6 +159,7 @@ export function DraftProjectPicker({
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
+  const sourceControlWritable = useEnvironmentsWithScope(environments, AuthSourceControlWriteScope);
   const navigate = useNavigate();
   const connected = environments.filter((env) => env.connection.phase === "connected");
   const targets = (open ? connected : [])
@@ -278,21 +284,25 @@ export function DraftProjectPicker({
     onEnvironmentChange(next.environmentId);
     inputRef.current?.focus();
   });
-  const addProject = (step: "folder" | "clone", target?: EnvironmentId) => {
+  const addProject = (step: "folder" | "clone", target: EnvironmentId) => {
     if (busy) return;
     if (!inline) changeOpen(false);
     onAddProject(step, target);
   };
-  // All machines can reach places on another machine, so adding one asks where, current first.
-  const addTargets =
-    allMachines && connected.length > 1
-      ? connected
-          .filter((env) => operable.has(env.environmentId))
-          .toSorted(
-            (a, b) =>
-              Number(b.environmentId === environmentId) - Number(a.environmentId === environmentId),
-          )
-      : [];
+  const addMachines = connected.map((env) => ({
+    environmentId: env.environmentId,
+    canAddProject: operable.has(env.environmentId),
+    canWriteSourceControl: sourceControlWritable.has(env.environmentId),
+  }));
+  const threadEnvironmentId =
+    currentEnvironmentId === undefined ? environmentId : currentEnvironmentId;
+  const machineLabel = (id: EnvironmentId) => {
+    const env = environments.find((candidate) => candidate.environmentId === id);
+    return {
+      ...(env ? settingsScopeEnvironmentLabels(env, environments) : { primary: id, secondary: "" }),
+      detail: id === threadEnvironmentId ? "current" : id === environmentId ? "selected" : null,
+    };
+  };
   const openPicker = useStableCallback(() => changeOpen(true));
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this draft's picker and remembers composer focus across opening the command palette
   useEffect(() => {
@@ -642,8 +652,14 @@ export function DraftProjectPicker({
           <AddProjectButton
             key={step}
             step={step}
-            machines={addTargets.length > 1 ? addTargets : null}
-            currentEnvironmentId={environmentId}
+            target={pickerAddProjectTarget({
+              step,
+              allMachines,
+              selectedEnvironmentId: environmentId,
+              machines: addMachines,
+              first: [threadEnvironmentId, environmentId],
+            })}
+            machineLabel={machineLabel}
             onChoose={(target) => addProject(step, target)}
           />
         ))}
@@ -805,18 +821,18 @@ const ADD_PROJECT_ACTIONS = {
 
 function AddProjectButton({
   step,
-  machines,
-  currentEnvironmentId,
+  target,
+  machineLabel,
   onChoose,
 }: {
   readonly step: "folder" | "clone";
-  /** Asks for a machine first when set. */
-  readonly machines: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly label: string;
-  }> | null;
-  readonly currentEnvironmentId: EnvironmentId | null;
-  readonly onChoose: (environmentId?: EnvironmentId) => void;
+  readonly target: PickerAddTarget<EnvironmentId>;
+  readonly machineLabel: (id: EnvironmentId) => {
+    readonly primary: string;
+    readonly secondary: string;
+    readonly detail: string | null;
+  };
+  readonly onChoose: (environmentId: EnvironmentId) => void;
 }) {
   const { label, hint, Icon } = ADD_PROJECT_ACTIONS[step];
   const body = (
@@ -825,13 +841,29 @@ function AddProjectButton({
       <span className="@max-[19rem]/picker-footer:sr-only">{label}</span>
     </>
   );
-  if (!machines) {
+  if (target.kind !== "choose") {
     return (
       <Tooltip>
-        <TooltipTrigger render={<Button variant="ghost" size="xs" onClick={() => onChoose()} />}>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="xs"
+              // Stays focusable so the tooltip can say why it is unavailable.
+              aria-disabled={target.kind === "none" || undefined}
+              onClick={() => {
+                if (target.kind === "machine") onChoose(target.environmentId);
+              }}
+            />
+          }
+        >
           {body}
         </TooltipTrigger>
-        <TooltipPopup side="top">{hint}</TooltipPopup>
+        <TooltipPopup side="top">
+          {target.kind === "none"
+            ? target.reason
+            : `${hint} on ${fullMachineLabel(machineLabel(target.environmentId))}`}
+        </TooltipPopup>
       </Tooltip>
     );
   }
@@ -846,18 +878,29 @@ function AddProjectButton({
       <MenuPopup side="top" align="start">
         <MenuGroup>
           <MenuGroupLabel>{label} on</MenuGroupLabel>
-          {machines.map((machine) => (
-            <MenuItem key={machine.environmentId} onClick={() => onChoose(machine.environmentId)}>
-              <MenuItemLabel>{machine.label}</MenuItemLabel>
-              {machine.environmentId === currentEnvironmentId ? (
-                <MenuItemDetail>current</MenuItemDetail>
-              ) : null}
-            </MenuItem>
-          ))}
+          {target.environmentIds.map((id) => {
+            const machine = machineLabel(id);
+            return (
+              <MenuItem key={id} onClick={() => onChoose(id)}>
+                <MenuItemLabel>{machine.primary}</MenuItemLabel>
+                {/* The address tells same-named machines apart, so it never truncates. */}
+                {machine.secondary ? (
+                  <span className="shrink-0 text-muted-foreground text-xs">
+                    {machine.secondary}
+                  </span>
+                ) : null}
+                {machine.detail ? <MenuItemDetail>{machine.detail}</MenuItemDetail> : null}
+              </MenuItem>
+            );
+          })}
         </MenuGroup>
       </MenuPopup>
     </Menu>
   );
+}
+
+function fullMachineLabel({ primary, secondary }: { primary: string; secondary: string }) {
+  return secondary ? `${primary} · ${secondary}` : primary;
 }
 
 function PickerPath({ path }: { readonly path: string }) {

@@ -3099,9 +3099,7 @@ function OpenCommandPaletteDialog(props: {
     <span className="text-muted-foreground text-xs">Searching messages…</span>
   ) : null;
 
-  function addProjectFromPicker(step: "folder" | "clone", chosenEnvironmentId?: EnvironmentId) {
-    const environmentId = chosenEnvironmentId ?? pickerEnvironmentId;
-    if (!environmentId) return;
+  function addProjectFromPicker(step: "folder" | "clone", environmentId: EnvironmentId) {
     openCommandPalette({
       open: "add-project",
       addProjectStart:
@@ -3129,6 +3127,7 @@ function OpenCommandPaletteDialog(props: {
             : defaultProjectRef
         }
         environmentId={pickerEnvironmentId}
+        currentEnvironmentId={currentProjectEnvironmentId}
         defaultFolderLabel={scratchWorkspaceLabelFor(pickerEnvironmentId)}
         onStartWithoutProject={() => {
           if (pickerEnvironmentId) void startScratchThread(pickerEnvironmentId);
