@@ -1975,6 +1975,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
   // Keep close markers in memory so unknown IDs recover after a server restart.
   const closedSessionKeys = new Set<string>();
+  const movedFromSessionKeys = new Set<string>();
   const threadLocks = yield* KeyedLock.make<string>();
   const terminalEventListeners = new Set<(event: TerminalEvent) => Effect.Effect<void>>();
   const workerScope = yield* Scope.make("sequential");
@@ -3896,6 +3897,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       input.threadId,
       Effect.gen(function* () {
         if (input.terminalId) {
+          // A legacy viewer can send a delayed close after a new shell opens at the old key.
+          if (
+            input.sessionId === undefined &&
+            movedFromSessionKeys.has(toSessionKey(input.threadId, input.terminalId))
+          ) {
+            return;
+          }
           yield* closeSession(
             input.threadId,
             input.terminalId,
@@ -4017,6 +4025,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       session.sessionId = NodeCrypto.randomUUID();
       sessions.set(toKey, session);
       closedSessionKeys.add(fromKey);
+      movedFromSessionKeys.add(fromKey);
       // The persisted cursor points into the old file, so the new one starts from a full write.
       persistedHistory.delete(session.history);
       return [advanceEventSequence(session), { ...state, sessions }] as const;

@@ -8,6 +8,8 @@ import {
   ThreadId,
   TerminalCwdNotFoundError,
   type TerminalAttachStreamEvent,
+  TerminalCloseInput,
+  WS_METHODS,
   type TerminalEvent,
   type TerminalOpenInput,
   ProviderDriverKind,
@@ -38,6 +40,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Ref from "effect/Ref";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as RpcSchema from "effect/rpc/RpcSchema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -45,6 +48,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
+import { WsRpcGroup as LegacyWsRpcGroup } from "../upstreamClientCompat.snapshot.js";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -73,6 +77,12 @@ const POWERSHELL_ARGS = [
   "[Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new()",
 ];
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const legacyAttach = LegacyWsRpcGroup.requests.get(WS_METHODS.terminalAttach)!.successSchema;
+assert(RpcSchema.isStreamSchema(legacyAttach));
+const decodeLegacyAttachEvent = Schema.decodeEffect(
+  legacyAttach.success as Schema.Codec<unknown, unknown>,
+);
+const decodeTerminalClose = Schema.decodeEffect(TerminalCloseInput);
 
 class FakePtyProcess implements PtyAdapter.PtyProcess {
   readonly writes: Array<string | Buffer> = [];
@@ -900,6 +910,54 @@ it.layer(
       yield* manager.close({ ...dropdown, terminalId: returned.terminalId });
       expect(ptyAdapter.processes[0]!.killed).toBe(true);
     }),
+  );
+
+  it.effect.each(["open", "attach"] as const)(
+    "keeps the replacement started by %s alive after a legacy close",
+    (start) =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager();
+        const source = { threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID };
+        const input = openInput(source);
+        const oldEvents: TerminalAttachStreamEvent[] = [];
+        const stopOld = yield* manager.attachStream(input, (event) =>
+          Effect.sync(() => oldEvents.push(event)),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(stopOld));
+        const moved = yield* manager.move({
+          ...source,
+          toThreadId: "thread-2",
+          toTerminalId: DEFAULT_TERMINAL_ID,
+        });
+
+        const legacyClosed = yield* decodeLegacyAttachEvent(oldEvents.at(-1));
+        expect(legacyClosed).toMatchObject({ type: "closed", ...source });
+        expect(legacyClosed).not.toHaveProperty("movedTo");
+        const delayedClose = yield* decodeTerminalClose(source);
+
+        const replacementEvents: TerminalAttachStreamEvent[] = [];
+        const opened = start === "open" ? yield* manager.open(input) : null;
+        const stopReplacement = yield* manager.attachStream(input, (event) =>
+          Effect.sync(() => replacementEvents.push(event)),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(stopReplacement));
+        const attached = replacementEvents[0];
+        assert(attached?.type === "snapshot");
+        expect(attached.snapshot).toMatchObject({ ...source, status: "running" });
+        expect(attached.snapshot.sessionId).toBeDefined();
+        expect(attached.snapshot.sessionId).not.toBe(moved.sessionId);
+        if (opened !== null)
+          expect(opened).toMatchObject({ ...source, sessionId: attached.snapshot.sessionId });
+        expect(ptyAdapter.processes).toHaveLength(2);
+
+        yield* manager.close(delayedClose);
+        expect(ptyAdapter.processes[1]!.killed).toBe(false);
+
+        yield* manager.close({ ...source, sessionId: attached.snapshot.sessionId! });
+        expect(ptyAdapter.processes[1]!.killed).toBe(true);
+        yield* manager.close({ threadId: moved.threadId, terminalId: moved.terminalId });
+        expect(ptyAdapter.processes[0]!.killed).toBe(true);
+      }),
   );
 
   // Which client owns the shared PTY size is left open by the issue, so this only asserts
