@@ -1021,12 +1021,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       }
     : { style: undefined };
   // A group drag keeps its row in place, so the row shows the shelf it would drop on too.
-  const destinationVerb =
-    sortable?.isDragging || props.dropVerb !== null
-      ? props.dropVerb
-      : props.sweepAction === "unsnooze"
-        ? "wake"
-        : props.sweepAction;
+  const showsDropVerb = sortable?.isDragging === true || props.dropVerb !== null;
+  const destinationVerb = showsDropVerb
+    ? props.dropVerb
+    : props.sweepAction === "unsnooze"
+      ? "wake"
+      : props.sweepAction;
   const dragDestination =
     destinationVerb !== null ? (
       <span
@@ -1294,7 +1294,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   Regenerating title
                 </span>
               ) : null}
-              {sortable?.isDragging ? (
+              {showsDropVerb ? (
                 dragDestination
               ) : (
                 <span
@@ -1486,7 +1486,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : (
                 <span className="flex-1" />
               )}
-              {sortable?.isDragging ? (
+              {showsDropVerb ? (
                 dragDestination
               ) : (
                 <span
