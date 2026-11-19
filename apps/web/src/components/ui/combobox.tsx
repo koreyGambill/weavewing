@@ -14,14 +14,18 @@ const ComboboxContext = React.createContext<{
   multiple: false,
 });
 
-function Combobox<Value, Multiple extends boolean | undefined = false>(
-  props: ComboboxPrimitive.Root.Props<Value, Multiple>,
-) {
+function Combobox<Value, Multiple extends boolean | undefined = false>({
+  autoHighlight,
+  ...props
+}: Omit<ComboboxPrimitive.Root.Props<Value, Multiple>, "autoHighlight"> & {
+  /** `"always"` highlights the first row as the list opens; Base UI accepts it but types a boolean. */
+  autoHighlight?: boolean | "always";
+}) {
   const chipsRef = React.useRef<Element | null>(null);
   const value = { chipsRef, multiple: !!props.multiple };
   return (
     <ComboboxContext value={value}>
-      <ComboboxPrimitive.Root {...props} />
+      <ComboboxPrimitive.Root {...props} {...({ autoHighlight } as { autoHighlight?: boolean })} />
     </ComboboxContext>
   );
 }

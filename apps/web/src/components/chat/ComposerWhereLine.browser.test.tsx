@@ -104,6 +104,8 @@ it("drills through folders with repeated Tab and opens with Enter in the where-l
   const current = page.getByRole("option").first();
   await expect.element(current.getByText("render", { exact: true })).toBeVisible();
   await expect.element(current.getByText("Current", { exact: true })).toBeVisible();
+  // Highlighted on open, so Enter accepts the first row with no arrow key first.
+  await expect.element(current).toHaveAttribute("data-highlighted");
   await userEvent.type(search, "workspace/alpha");
   await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
   expect(page.getByRole("option").elements()).toHaveLength(1);

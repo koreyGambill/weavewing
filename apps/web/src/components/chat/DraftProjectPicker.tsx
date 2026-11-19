@@ -133,6 +133,8 @@ export function DraftProjectPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const highlighted = useRef<PickerItem | null>(null);
+  // An arrowed-to "Start in this folder" row keeps Tab from drilling; the opening highlight does not.
+  const highlightChosen = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<symbol | null>(null);
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
@@ -516,9 +518,10 @@ export function DraftProjectPicker({
             event.stopPropagation();
             event.preventBaseUIHandler?.();
             // Programmatic query changes do not trigger Base UI's autoHighlight.
-            const target = item?.path
-              ? item
-              : items.find((entry) => entry.path && entry.completionName);
+            const target =
+              item?.path && (item.completionName || highlightChosen.current)
+                ? item
+                : items.find((entry) => entry.path && entry.completionName);
             if (target?.completionName) {
               highlighted.current = null;
               setQuery(completePickerFolder(browseQuery, target.completionName));
@@ -731,14 +734,16 @@ export function DraftProjectPicker({
       inline={inline}
       items={items}
       filteredItems={items}
-      autoHighlight
+      // The first row is ready on open, so Enter alone starts there.
+      autoHighlight="always"
       open={open}
       onOpenChange={changeOpen}
       value={selected}
       itemToStringLabel={(item) => item.label}
       isItemEqualToValue={(a, b) => a.value === b.value}
-      onItemHighlighted={(item) => {
+      onItemHighlighted={(item, details) => {
         highlighted.current = item ?? null;
+        highlightChosen.current = details.reason === "keyboard" || details.reason === "pointer";
       }}
       onValueChange={(item, details) => {
         details.cancel();
