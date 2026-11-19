@@ -1131,7 +1131,7 @@ export default function ThreadTerminalTile({
   runtimeEnv?: Record<string, string>;
   visible?: boolean;
   onCloseTerminal: (terminalId: string, threadRef?: ScopedThreadRef) => void;
-  onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   keybindings: ResolvedKeybindingsConfig;
   terminalLabel?: string;
 }) {
@@ -1156,7 +1156,7 @@ export default function ThreadTerminalTile({
         {...(worktreePath !== undefined ? { worktreePath } : {})}
         {...(runtimeEnv ? { runtimeEnv } : {})}
         onSessionExited={() => onCloseTerminal(terminalId, threadRef)}
-        onAddTerminalContext={onAddTerminalContext}
+        {...(onAddTerminalContext ? { onAddTerminalContext } : {})}
         visible={visible}
         keybindings={keybindings}
       />

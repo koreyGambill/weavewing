@@ -232,6 +232,10 @@ export function ThreadTileWorkspace(props: {
     layoutVersion: string,
     focused: boolean,
   ) => ReactNode;
+  /** Every tile is a terminal: new tiles and tabs open one at once, and saved layouts are hidden. */
+  terminalsOnly?: boolean;
+  /** Runs instead of the maximize command when there is only one tile to maximize. */
+  onMaximizeOnlyTile?: () => void;
 }) {
   const compact = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const savedLayout = useRightPanelStore((state) =>
@@ -411,6 +415,9 @@ export function ThreadTileWorkspace(props: {
         ?.querySelector<HTMLElement>(`[data-tile-chooser="${CSS.escape(groupId)}"]`)
         ?.focus({ preventScroll: true }),
     );
+  // The new tile or tab is focused, so an opened terminal takes its place.
+  const fillNewTab = (groupId: string) =>
+    props.terminalsOnly ? props.panels.onAddTerminal() : focusChooser(groupId);
   const split = (
     group: TileGroup,
     axis: "horizontal" | "vertical",
@@ -425,7 +432,7 @@ export function ThreadTileWorkspace(props: {
       groupId,
       splitId: randomUUID(),
     });
-    focusChooser(groupId);
+    fillNewTab(groupId);
   };
   const moveTabToNewTile = (group: TileGroup, axis: "horizontal" | "vertical") =>
     apply({
@@ -506,7 +513,7 @@ export function ThreadTileWorkspace(props: {
   };
   const openNewTab = (groupId: string) => {
     apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
-    focusChooser(groupId);
+    fillNewTab(groupId);
   };
   // A chooser unmounts once its area arrives or it closes. Focus left on it would drop to the
   // page, and workspace focus recovery would hand it to the composer, in another tile.
@@ -574,7 +581,10 @@ export function ThreadTileWorkspace(props: {
     run: (groupId: string) => void;
   }> = (() => {
     const runs = areaRuns;
-    return TILE_AREAS.map(({ label, key }) => {
+    const areas = props.terminalsOnly
+      ? TILE_AREAS.filter((area) => area.label === "Terminal")
+      : TILE_AREAS;
+    return areas.map(({ label, key }) => {
       const [enabled, run] = runs[label];
       return {
         label,
@@ -728,6 +738,10 @@ export function ThreadTileWorkspace(props: {
       "workspace.tile.splitDown": () => newTile("down"),
       "workspace.tile.maximize": () => {
         const current = currentLayout();
+        if (props.onMaximizeOnlyTile && getTileGroups(current).length === 1) {
+          props.onMaximizeOnlyTile();
+          return;
+        }
         apply({
           type: "maximize",
           groupId: current.maximizedGroupId ? null : current.focusedGroupId,
@@ -834,6 +848,11 @@ export function ThreadTileWorkspace(props: {
           !(
             event.target instanceof Element &&
             event.target.closest('[role="dialog"], [role="alertdialog"], [data-keybinding-capture]')
+          ) &&
+          // With two workspaces mounted, keys typed inside one never reach the other.
+          !(
+            event.target instanceof Element &&
+            event.target.closest("[data-thread-tiling]")?.contains(rootRef.current) === false
           ),
       }),
       ...Object.entries(actions).map(([command, run]) => registerMenuAction(command, run)),
@@ -865,6 +884,7 @@ export function ThreadTileWorkspace(props: {
   const layoutIds = tileLayouts.layouts.map((layout) => layout.id).join("\n");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the palette's saved-layout actions for this mounted thread
   useEffect(() => {
+    if (props.terminalsOnly) return;
     const disposers = [
       registerMenuAction("workspace.tile.layout.save", () => saveLayoutFromMenu()),
       ...(layoutIds ? layoutIds.split("\n") : []).flatMap((layoutId) =>
@@ -878,7 +898,7 @@ export function ThreadTileWorkspace(props: {
     return () => {
       for (const dispose of disposers) dispose();
     };
-  }, [layoutIds]);
+  }, [layoutIds, props.terminalsOnly]);
 
   const resize = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -1024,14 +1044,16 @@ export function ThreadTileWorkspace(props: {
       : undefined;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-thread-tiling>
-      <WorkspaceTitlebarControls>
-        <TileLayoutsMenu
-          api={tileLayouts}
-          hasProject={tileLayouts.projectId !== null}
-          onSaveAs={saveLayoutAs}
-          onApply={applySavedLayout}
-        />
-      </WorkspaceTitlebarControls>
+      {props.terminalsOnly ? null : (
+        <WorkspaceTitlebarControls>
+          <TileLayoutsMenu
+            api={tileLayouts}
+            hasProject={tileLayouts.projectId !== null}
+            onSaveAs={saveLayoutAs}
+            onApply={applySavedLayout}
+          />
+        </WorkspaceTitlebarControls>
+      )}
       <div className="relative shrink-0">{props.header}</div>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
         <div
