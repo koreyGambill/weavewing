@@ -9,6 +9,7 @@ import { expect, it, vi } from "vite-plus/test";
 import {
   artifactDigests,
   databaseBackupDecision,
+  classifyDatabaseBackup,
   localDesktopBuildEnvironment,
   claimPreparedOutput,
   localBuildInstallIdentity,
@@ -600,7 +601,7 @@ it("backs up the database unless installed and candidate migrations are provably
     const startup = await commit();
     expect(await databaseBackupDecision(git, unchanged, startup)).toMatchObject({
       required: true,
-      reason: "migration-set-changed",
+      reason: "migration-runtime-changed",
     });
     NodeFS.appendFileSync(lockfile, "      other: 1.0.0\n");
     const unrelatedDependency = await commit();
@@ -614,7 +615,7 @@ it("backs up the database unless installed and candidate migrations are provably
     const effectChanged = await commit();
     expect(await databaseBackupDecision(git, unrelatedDependency, effectChanged)).toMatchObject({
       required: true,
-      reason: "migration-set-changed",
+      reason: "migration-runtime-changed",
     });
     NodeFS.rmSync(lockfile);
     const unknownEffect = await commit();
@@ -630,6 +631,10 @@ it("backs up the database unless installed and candidate migrations are provably
     const added = await commit();
     expect(await databaseBackupDecision(git, installed, added)).toMatchObject({
       required: true,
+      reason: "migration-runtime-changed",
+    });
+    expect(await databaseBackupDecision(git, startup, added)).toMatchObject({
+      required: true,
       reason: "migration-set-changed",
     });
     expect(await databaseBackupDecision(git, added, installed)).toMatchObject({ required: true });
@@ -637,7 +642,7 @@ it("backs up the database unless installed and candidate migrations are provably
     const edited = await commit();
     expect(await databaseBackupDecision(git, added, edited)).toMatchObject({
       required: true,
-      reason: "migration-set-changed",
+      reason: "migration-runtime-changed",
     });
     NodeFS.writeFileSync(NodePath.join(persistence, "Migrations.ts"), "changed registry");
     const registry = await commit();
@@ -664,4 +669,132 @@ it("does not retry a staging timeout but retries timeouts for explicitly idempot
   const probe = vi.fn().mockRejectedValueOnce(timeout).mockResolvedValue("alive");
   await expect(retryPreparationInterop(probe, true)).resolves.toBe("alive");
   expect(probe).toHaveBeenCalledTimes(2);
+});
+
+it("requires backups for destructive pending migrations and uncertain histories", () => {
+  const manifest = [
+    [1, "Initial"],
+    [2, "Addition"],
+    [3, "Cleanup"],
+  ] as const;
+  const classifications = manifest.map(([id, name]) => ({ id, name, destructive: id === 3 }));
+  const ledger = manifest.map(([id, name]) => ({ id, name }));
+  expect(classifyDatabaseBackup(manifest, classifications, ledger)).toEqual({
+    required: false,
+    reason: "migration-set-unchanged",
+  });
+  expect(
+    classifyDatabaseBackup(manifest.slice(0, 2), classifications.slice(0, 2), ledger.slice(0, 1)),
+  ).toEqual({ required: false, reason: "additive-migrations-only" });
+  expect(classifyDatabaseBackup(manifest, classifications, ledger.slice(0, 2))).toEqual({
+    required: true,
+    reason: "destructive-migrations",
+  });
+  for (const recorded of [
+    null,
+    [ledger[0]!, ledger[2]!],
+    [{ id: 4, name: "Future" }],
+    [{ id: 1, name: "Other" }],
+  ])
+    expect(classifyDatabaseBackup(manifest, classifications, recorded).required).toBe(true);
+  expect(classifyDatabaseBackup(manifest, classifications.slice(1), ledger).required).toBe(true);
+  expect(
+    classifyDatabaseBackup(
+      manifest,
+      classifications.map((entry) => ({ ...entry, name: "Wrong" })),
+      ledger,
+    ).required,
+  ).toBe(true);
+});
+
+it("records the live-ledger backup decision in the standalone worker receipt", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "worker-backup-"));
+  try {
+    const packaging = NodeChildProcess.spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        "const source = process.argv[1]; process.argv[1] = 'worker-packaging-fixture'; const {writeLocalUpdateWorker} = await import(source); await writeLocalUpdateWorker(process.argv[2], process.argv[3]);",
+        NodePath.join(import.meta.dirname, "update-local-desktop.ts"),
+        NodePath.resolve(import.meta.dirname, ".."),
+        root,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(packaging.status, packaging.stderr).toBe(0);
+    const reader = NodePath.join(root, "database-migrations.mjs");
+    const packaged = NodeFS.readFileSync(reader, "utf8");
+    const archive = NodePath.join(root, "runtime.tar.gz");
+    NodeFS.writeFileSync(archive, "verified installed runtime");
+    const receipt = NodePath.join(root, "installed.json");
+    NodeFS.writeFileSync(
+      receipt,
+      JSON.stringify({ commit: "installed", digest: artifactDigests([archive])[archive] }),
+    );
+    for (const scenario of [
+      "additive",
+      "destructive",
+      "unclassified",
+      "matching",
+      "provenance",
+    ] as const) {
+      const scenarioRoot = NodePath.join(root, scenario);
+      const userdata = NodePath.join(scenarioRoot, "home/userdata");
+      NodeFS.mkdirSync(userdata, { recursive: true });
+      const database = NodePath.join(userdata, "statev2.sqlite");
+      const db = new NodeSqlite.DatabaseSync(database);
+      db.exec(
+        "CREATE TABLE effect_sql_migrations(migration_id INTEGER PRIMARY KEY, name TEXT); INSERT INTO effect_sql_migrations VALUES (1, 'Initial')",
+      );
+      if (scenario === "matching") db.exec("INSERT INTO effect_sql_migrations VALUES (2, 'New')");
+      db.close();
+      const metadata = `export const migrationManifest = [[1, "Initial"], [2, "New"]];
+export const migrationClassifications = [{id: 1, name: "Initial", destructive: true}, {id: 2, name: "New", ${scenario === "unclassified" ? "" : `destructive: ${scenario === "destructive"}`} }];`;
+      NodeFS.writeFileSync(
+        reader,
+        packaged.replace(
+          /export const migrationManifest = .*;\nexport const migrationClassifications = .*;/,
+          metadata,
+        ),
+      );
+      const config = NodePath.join(scenarioRoot, "config.json");
+      NodeFS.writeFileSync(
+        config,
+        JSON.stringify({
+          wslHome: NodePath.join(scenarioRoot, "home"),
+          wslBackupRoot: scenarioRoot,
+          installedReceipt: receipt,
+          installedRuntimeArchive: archive,
+          databaseBackup: {
+            required: true,
+            reason: "migration-set-changed",
+            installedCommit: scenario === "provenance" ? "wrong" : "installed",
+          },
+        }),
+      );
+      const result = NodeChildProcess.spawnSync(
+        process.execPath,
+        [NodePath.join(root, "worker.mjs"), "--worker", "backup", config],
+        { encoding: "utf8" },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const decision = JSON.parse(result.stdout).databaseBackup;
+      expect(decision).toEqual({
+        ran: !["additive", "matching"].includes(scenario),
+        reason: {
+          additive: "additive-migrations-only",
+          destructive: "destructive-migrations",
+          unclassified: "database-migrations-unavailable",
+          matching: "migration-set-unchanged",
+          provenance: "installed-runtime-unverified",
+        }[scenario],
+      });
+      expect(NodeFS.existsSync(NodePath.join(scenarioRoot, "backup-wsl/statev2.sqlite"))).toBe(
+        decision.ran,
+      );
+    }
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
 });
