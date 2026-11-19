@@ -2,10 +2,12 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import { ConcurrencyGroup, type Context, definePipeline, memoKey } from "@sparkwing/sdk";
+import { ConcurrencyGroup, type Context, definePipeline } from "@sparkwing/sdk";
 
 import { checkout, checkoutArgs, git, logged, type Checkout } from "../lib/checkout.ts";
 import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseFlags, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
+
+import { verifiedCi } from "../lib/release-ci.ts";
 
 interface Release {
   id: number;
@@ -85,6 +87,7 @@ definePipeline({
     { name: "channel", type: "string", default: "stable", enum: ["stable", "test"], description: "Stable release or nightly test prerelease" },
     { name: "platforms", type: "string", default: "linux,win,mac", description: "Comma-separated linux,win,mac subset" },
     { name: "stage", type: "string", default: "draft", enum: ["draft", "plan", "promote"], description: "draft, plan or promote" },
+    { name: "force-ci", type: "bool", description: "Run full CI even when the exact tree has passing evidence (plan/draft only)" },
     { name: "build-only", type: "bool", description: "Only with --stage plan: skip CI for artifact proof" },
     { name: "notes-file", type: "string", description: "Absolute path to release notes to use instead of generated notes" },
     { name: "draft-evidence", type: "string", description: "Required for promote: absolute evidence directory of the draft run" },
@@ -95,6 +98,7 @@ definePipeline({
     const { platforms, channel } = releaseInputs(version || (run.args.channel === "test" ? "0.0.0-nightly.20000101.0" : "0.0.0"), run.args.platforms || "linux,win,mac", run.args.channel);
     const buildOnly = run.args["build-only"] === "true";
     if (buildOnly && run.args.stage !== "plan") throw new Error("--build-only is restricted to --stage plan");
+    if (run.args["force-ci"] === "true" && (buildOnly || run.args.stage === "promote")) throw new Error("--force-ci requires a plan or draft with CI enabled");
     p.concurrency(new ConcurrencyGroup("weavewing-release", { capacity: 1 }));
 
     if (run.args.stage === "promote") {
@@ -138,11 +142,13 @@ definePipeline({
 
     const ci = p.job("ci", async (ctx) => {
       const co = checkout(ctx);
-      await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
-      return { commit: git(co.root, "rev-parse", "HEAD"), passed: true };
+      const pass = await verifiedCi(co, ctx.run.id, async () => {
+        await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
+      }, { force: ctx.args["force-ci"] === "true" });
+      ctx.log.info(`Full CI passed for tree ${pass.tree}; evidence from ${pass.run}: ${pass.evidence}`);
+      return pass;
     }).inline().cores(0.25).needs(preflight).startsChildren("ci")
-      .skipIf(() => buildOnly)
-      .memo((ctx) => memoKey("release-ci/v1", checkout(ctx).root, git(checkout(ctx).root, "rev-parse", "HEAD"), checkout(ctx).nodeVersion));
+      .skipIf(() => buildOnly);
 
     const bundle = p.job("bundle", async (ctx) => {
       const co = checkout(ctx);
@@ -235,7 +241,7 @@ definePipeline({
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
-      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
+      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", ciEvidence: buildOnly ? undefined : await ctx.output(ci), tree: git(co.root, "rev-parse", `${commit}^{tree}`), assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
       if (ctx.args.stage === "plan") {
         ctx.log.info(`Plan complete. No GitHub writes. Evidence: ${co.evidence}`);
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };
