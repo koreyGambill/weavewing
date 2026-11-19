@@ -18,6 +18,8 @@ test("Mac builds can start with local bundling while promotion only verifies ass
   assert.deepEqual(jobs.find((job) => job.id === "mac")?.deps, ["preflight", "ci"]);
   assert.deepEqual(jobs.find((job) => job.id === "bundle")?.deps, ["preflight", "ci"]);
   assert.ok(jobs.find((job) => job.id === "win-x64")?.deps?.includes("linux-x64"));
+  // Sparkwing only lets a job read outputs of jobs it depends on; publish-draft reads ci's.
+  assert.ok(jobs.find((job) => job.id === "publish-draft")?.deps?.includes("ci"));
   const promote = new Plan();
   await releasePipeline.plan(promote, { ...context, args: { ...context.args, stage: "promote" } });
   assert.deepEqual(inspect(promote).jobs.map((job) => job.id), ["promote"]);

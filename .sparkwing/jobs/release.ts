@@ -257,6 +257,6 @@ export const releasePipeline = definePipeline({
       }
       await gh(ctx, co, "release", "upload", tag, "--repo", RELEASE_REPOSITORY, "--clobber", ...[...names, "SHA256SUMS"].map((name) => Path.join(dir, name)));
       return { commit, evidence: co.evidence };
-    }).inline().cores(0.25).needs(preflight, linux, win, mac);
+    }).inline().cores(0.25).needs(preflight, ci, linux, win, mac);
   },
 });
