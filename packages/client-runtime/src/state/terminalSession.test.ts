@@ -81,6 +81,26 @@ describe("terminal session reducers", () => {
     expect(attached).toMatchObject({ status: "error", error: "Failed to spawn PTY." });
   });
 
+  it("remembers the attached shell and where a moved session went", () => {
+    const attached = applyTerminalAttachStreamEvent(nextTerminalAttachSeedState(), {
+      type: "snapshot",
+      snapshot: { ...BASE_SNAPSHOT, sessionId: "shell-1" },
+    });
+    const moved = applyTerminalAttachStreamEvent(attached, {
+      type: "closed",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      movedTo: { threadId: "thread-2", terminalId: "term-2" },
+    });
+
+    expect(attached).toMatchObject({ sessionId: "shell-1", movedTo: null });
+    expect(moved).toMatchObject({
+      status: "closed",
+      sessionId: "shell-1",
+      movedTo: { threadId: "thread-2", terminalId: "term-2" },
+    });
+  });
+
   it("follows the shared PTY grid from snapshots and activity without disturbing output", () => {
     const attached = applyTerminalAttachStreamEvent(nextTerminalAttachSeedState(), {
       type: "snapshot",

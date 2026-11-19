@@ -60,6 +60,7 @@ import { useEnvironmentScope } from "../state/session";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { terminalInputWriter } from "./terminal/terminalInputWriter";
 import type { TerminalMoveMenu } from "./terminal/useTerminalMoveMenus";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
 import { threadShortcutContext } from "./Sidebar.logic";
@@ -426,7 +427,10 @@ interface TerminalViewportProps {
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
-  onSessionExited: () => void;
+  /** `sessionId` is the ended shell's, so a close cannot reach a later one under this key. */
+  onSessionExited: (sessionId: string | null) => void;
+  /** The session moved to another workspace; drop this view without closing anything. */
+  onSessionMoved?: () => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   /** Focuses the viewport when it mounts; otherwise focus arrives through `focusTerminal`. */
   autoFocus?: boolean;
@@ -458,6 +462,7 @@ function TerminalSessionViewport({
   runtimeEnv,
   providerInstanceId,
   onSessionExited,
+  onSessionMoved,
   onAddTerminalContext,
   autoFocus = false,
   visible,
@@ -537,9 +542,7 @@ function TerminalSessionViewport({
   const selectionActionRequestIdRef = useRef(0);
   const readKeybindings = useEffectEvent(() => keybindings);
   const readThreadShortcutContext = useEffectEvent(() => threadShortcutContext(threadRef));
-  const handleSessionExited = useEffectEvent(() => {
-    if (hasTerminalWriteAccess()) onSessionExited();
-  });
+  const handleSessionMoved = useEffectEvent(() => onSessionMoved?.());
   const handleAddTerminalContext = useEffectEvent((selection: TerminalContextSelection) => {
     onAddTerminalContext?.(selection);
   });
@@ -574,6 +577,9 @@ function TerminalSessionViewport({
   // the surface reads the session itself, so output chunks never re-render here.
   useAtomMount(terminalSessionAtom);
   const readTerminalSession = useEffectEvent(() => appAtomRegistry.get(terminalSessionAtom));
+  const handleSessionExited = useEffectEvent(() => {
+    if (hasTerminalWriteAccess()) onSessionExited(readTerminalSession().sessionId);
+  });
   const subscribeTerminalSession = useEffectEvent(
     (listener: (session: TerminalSessionState) => void) =>
       appAtomRegistry.subscribe(terminalSessionAtom, listener),
@@ -598,9 +604,20 @@ function TerminalSessionViewport({
   const outputCursorRef = useRef<TerminalOutputCursor>(INITIAL_TERMINAL_OUTPUT_CURSOR);
   const synchronizedStatusRef = useRef<TerminalSessionState["status"]>("closed");
   const synchronizeTerminalStatus = useEffectEvent(
-    (terminal: GhosttyTerminalSurface, status: TerminalSessionState["status"], version: number) => {
+    (
+      terminal: GhosttyTerminalSurface,
+      status: TerminalSessionState["status"],
+      version: number,
+      moved: boolean,
+    ) => {
       const synchronized = synchronizedStatusRef.current;
-      if (version > 0 && status === "running") {
+      if (moved && status === "closed") {
+        // The shell lives on under another key; closing this one could end it.
+        if (!hasHandledExitRef.current) {
+          hasHandledExitRef.current = true;
+          window.setTimeout(() => handleSessionMoved(), 0);
+        }
+      } else if (version > 0 && status === "running") {
         hasHandledExitRef.current = false;
       } else if (
         shouldHandleTerminalExit(status, synchronized, hasHandledExitRef.current, version)
@@ -717,7 +734,12 @@ function TerminalSessionViewport({
       outputCursorRef.current = initialOutput.cursor;
       if (latestSession.error !== null) writeSystemMessage(terminal, latestSession.error);
       synchronizedStatusRef.current = "closed";
-      synchronizeTerminalStatus(terminal, latestSession.status, latestSession.version);
+      synchronizeTerminalStatus(
+        terminal,
+        latestSession.status,
+        latestSession.version,
+        latestSession.movedTo !== null,
+      );
       // Read and subscribe in one synchronous step so no output lands between them.
       let previousSession = latestSession;
       let resizeGeneration = writableSessionGeneration(latestSession, hasTerminalWriteAccess());
@@ -733,7 +755,12 @@ function TerminalSessionViewport({
           const previous = previousSession;
           previousSession = session;
           terminal.setSharedGrid(session.grid);
-          synchronizeTerminalStatus(terminal, session.status, session.version);
+          synchronizeTerminalStatus(
+            terminal,
+            session.status,
+            session.version,
+            session.movedTo !== null,
+          );
           outputCursorRef.current = synchronizeTerminalSession(
             terminal,
             previous,
@@ -1154,6 +1181,15 @@ function TerminalSessionViewport({
   );
 }
 
+/** Removes this client's tab for a session that moved elsewhere; the server keeps the session. */
+function dropTerminalTab(threadRef: ScopedThreadRef, terminalId: string) {
+  const store = useRightPanelStore.getState();
+  const surface = selectThreadRightPanelState(store.byThreadKey, threadRef).surfaces.find(
+    (entry) => entry.kind === "terminal" && entry.resourceId === terminalId,
+  );
+  if (surface) store.closeTerminal(threadRef, surface.id, terminalId);
+}
+
 export default function ThreadTerminalTile({
   threadRef,
   threadId,
@@ -1175,7 +1211,11 @@ export default function ThreadTerminalTile({
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   visible?: boolean;
-  onCloseTerminal: (terminalId: string, threadRef?: ScopedThreadRef) => void;
+  onCloseTerminal: (
+    terminalId: string,
+    threadRef?: ScopedThreadRef,
+    sessionId?: string | null,
+  ) => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   keybindings: ResolvedKeybindingsConfig;
   terminalLabel?: string;
@@ -1201,7 +1241,8 @@ export default function ThreadTerminalTile({
         cwd={cwd}
         {...(worktreePath !== undefined ? { worktreePath } : {})}
         {...(runtimeEnv ? { runtimeEnv } : {})}
-        onSessionExited={() => onCloseTerminal(terminalId, threadRef)}
+        onSessionExited={(sessionId) => onCloseTerminal(terminalId, threadRef, sessionId)}
+        onSessionMoved={() => dropTerminalTab(threadRef, terminalId)}
         {...(onAddTerminalContext ? { onAddTerminalContext } : {})}
         visible={visible}
         keybindings={keybindings}

@@ -282,10 +282,10 @@ function DropdownTerminalWorkspace({
   }, [hadTerminals, terminals.length]);
 
   // A shell that exited has nothing left to confirm.
-  const closeExited = (terminalId: string) => {
+  const closeExited = (terminalId: string, _target?: unknown, sessionId?: string | null) => {
     const surface = terminals.find((entry) => entry.resourceId === terminalId);
     if (!surface) return;
-    terminalActions.closeTerminalSession(terminalId);
+    terminalActions.closeTerminalSession(terminalId, ref, sessionId);
     useRightPanelStore.getState().closeTerminal(ref, surface.id, terminalId);
   };
 

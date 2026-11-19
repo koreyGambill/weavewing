@@ -132,15 +132,33 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
     return { terminalId, result };
   };
 
-  /** Ends a session and deletes its history. A failed close falls back to typing `exit`. */
-  const closeTerminalSession = (terminalId: string, target = threadRef) => {
+  /**
+   * Ends a session and deletes its history. A failed close falls back to typing `exit`.
+   * `sessionId` names the shell the caller saw; it defaults to the one the server last listed.
+   */
+  const closeTerminalSession = (
+    terminalId: string,
+    target = threadRef,
+    sessionId?: string | null,
+  ) => {
     if (!target || !readEnvironmentScope(target.environmentId, AuthTerminalOperateScope)) return;
     const environmentId = target.environmentId;
     const threadId = target.threadId;
+    const expectedSessionId =
+      sessionId ??
+      (target.environmentId === threadRef?.environmentId && target.threadId === threadRef.threadId
+        ? knownSessions?.find((session) => session.target.terminalId === terminalId)?.state.summary
+            ?.sessionId
+        : undefined);
     void holdTerminalIdWhileClosing(target, terminalId, async () => {
       const closeResult = await closeTerminalCommand({
         environmentId,
-        input: { threadId, terminalId, deleteHistory: true },
+        input: {
+          threadId,
+          terminalId,
+          deleteHistory: true,
+          ...(expectedSessionId ? { sessionId: expectedSessionId } : {}),
+        },
       });
       if (
         closeResult._tag === "Failure" &&

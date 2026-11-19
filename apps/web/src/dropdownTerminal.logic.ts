@@ -1,5 +1,10 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  DROPDOWN_TERMINAL_THREAD_ID,
+  ThreadId,
+  type EnvironmentId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 
 import type { RightPanelSurface } from "./rightPanelStore";
 import { getTileGroups, type ThreadTileLayout } from "./threadTileLayout";
@@ -12,7 +17,7 @@ export const DROPDOWN_TERMINAL_DEFAULT_HEIGHT = 360;
  * keeps its terminals and tiles under one id per machine that no thread can take.
  */
 export function dropdownTerminalRef(environmentId: EnvironmentId): ScopedThreadRef {
-  return scopeThreadRef(environmentId, ThreadId.make("dropdown-terminal"));
+  return scopeThreadRef(environmentId, ThreadId.make(DROPDOWN_TERMINAL_THREAD_ID));
 }
 
 /** Keeps the bottom edge reachable: at least the minimum, at most the window less a margin. */

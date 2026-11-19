@@ -1,11 +1,13 @@
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthTerminalReadScope,
+  DROPDOWN_TERMINAL_THREAD_ID,
   type ScopedThreadRef,
   type TerminalMoveInput,
   type TerminalSessionSnapshot,
 } from "@t3tools/contracts";
 
+import { useDropdownTerminalStore } from "../../dropdownTerminalStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import { readEnvironmentScope } from "../../state/session";
@@ -69,6 +71,9 @@ export async function moveTerminalTab(input: {
   const store = useRightPanelStore.getState();
   if (result._tag !== "Success") {
     store.openTerminal(from, terminalId, surface.launchContext);
+    // Taking out its last tab hid the drop-down; the restored tab needs it shown again.
+    const dropdown = useDropdownTerminalStore.getState();
+    if (from.threadId === DROPDOWN_TERMINAL_THREAD_ID && !dropdown.open) dropdown.toggle();
     return null;
   }
   store.openTerminal(to.threadRef, toTerminalId, {

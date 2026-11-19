@@ -8,9 +8,10 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { dropdownTerminalRef } from "../../dropdownTerminal.logic";
+import { useDropdownTerminalStore } from "../../dropdownTerminalStore";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import { moveTerminalTab } from "./moveTerminal";
 
@@ -98,19 +99,28 @@ describe("moveTerminalTab", () => {
     expect(terminalsIn(dropdown).map((surface) => surface.resourceId)).toEqual([backToDropdown]);
   });
 
-  it("puts the tab back where it was when the server refuses the move", async () => {
+  it("puts the tab back, with the drop-down shown, when the server refuses the move", async () => {
+    vi.stubGlobal("document", { activeElement: null });
+    vi.stubGlobal("HTMLElement", Object);
+    using _document = { [Symbol.dispose]: () => vi.unstubAllGlobals() };
     const launchContext = { cwd: "/home/user/project", worktreePath: null };
     useRightPanelStore.getState().openTerminal(dropdown, "term-1", launchContext);
-    const { move } = moveRecorder("failure");
+    useDropdownTerminalStore.setState({ open: true });
+    const { move: refuse } = moveRecorder("failure");
 
     const moved = await moveTerminalTab({
       from: dropdown,
       terminalId: "term-1",
       to: { threadRef: thread, worktreePath: null },
-      move,
+      // The drop-down hides itself once its last tab leaves, before the server answers.
+      move: (target) => {
+        useDropdownTerminalStore.setState({ open: false });
+        return refuse(target);
+      },
     });
 
     expect(moved).toBeNull();
+    expect(useDropdownTerminalStore.getState().open).toBe(true);
     expect(terminalsIn(dropdown)).toEqual([
       expect.objectContaining({ resourceId: "term-1", launchContext }),
     ]);

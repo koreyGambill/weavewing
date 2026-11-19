@@ -39,10 +39,19 @@ export interface TerminalSessionState {
   readonly grid: TerminalGrid | null;
   readonly status: TerminalSessionSnapshot["status"] | "closed";
   readonly error: string | null;
+  /** The attached shell's identity; a close sends it so it cannot end a later shell. */
+  readonly sessionId: string | null;
+  /** Where the session went when it closed by moving; viewers drop it and never close it. */
+  readonly movedTo: TerminalMovedTo | null;
   readonly hasRunningSubprocess: boolean;
   readonly updatedAt: string | null;
   readonly version: number;
   readonly lifecycleVersion: number;
+}
+
+export interface TerminalMovedTo {
+  readonly threadId: string;
+  readonly terminalId: string;
 }
 
 export interface TerminalBufferState {
@@ -50,6 +59,8 @@ export interface TerminalBufferState {
   readonly grid: TerminalGrid | null;
   readonly status: TerminalSessionSnapshot["status"] | "closed";
   readonly error: string | null;
+  readonly sessionId: string | null;
+  readonly movedTo: TerminalMovedTo | null;
   readonly updatedAt: string | null;
   readonly version: number;
   readonly lifecycleVersion: number;
@@ -79,6 +90,8 @@ export const EMPTY_TERMINAL_BUFFER_STATE = Object.freeze<TerminalBufferState>({
   grid: null,
   status: "closed",
   error: null,
+  sessionId: null,
+  movedTo: null,
   updatedAt: null,
   version: 0,
   lifecycleVersion: 0,
@@ -90,6 +103,8 @@ export const EMPTY_TERMINAL_SESSION_STATE = Object.freeze<TerminalSessionState>(
   grid: null,
   status: "closed",
   error: null,
+  sessionId: null,
+  movedTo: null,
   hasRunningSubprocess: false,
   updatedAt: null,
   version: 0,
@@ -119,6 +134,8 @@ function terminalBufferStateFromSnapshot(
     grid: nextGrid(current.grid, snapshot),
     status: snapshot.status,
     error: snapshot.error ?? null,
+    sessionId: snapshot.sessionId ?? null,
+    movedTo: null,
     updatedAt: snapshot.updatedAt,
     version: current.version + 1,
     lifecycleVersion: current.lifecycleVersion,
@@ -151,6 +168,8 @@ export function combineTerminalSessionState(
     grid: buffer.grid,
     status: buffer.version > 0 ? buffer.status : (summary?.status ?? buffer.status),
     error: buffer.error,
+    sessionId: buffer.sessionId,
+    movedTo: buffer.movedTo,
     hasRunningSubprocess: summary?.hasRunningSubprocess ?? false,
     updatedAt: latestTimestamp(summary?.updatedAt ?? null, buffer.updatedAt),
     version: buffer.version,
@@ -211,6 +230,7 @@ export function applyTerminalAttachStreamEvent(
         ...current,
         status: "closed",
         error: null,
+        movedTo: event.movedTo ?? null,
         version: current.version + 1,
       };
     case "error":

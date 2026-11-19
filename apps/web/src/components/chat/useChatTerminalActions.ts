@@ -304,14 +304,18 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     );
   };
   const runShellCommandStable = useStableCallback(runShellCommand);
-  const closePanelTerminal = (terminalId: string, target = activeThreadRef) => {
+  const closePanelTerminal = (
+    terminalId: string,
+    target = activeThreadRef,
+    sessionId?: string | null,
+  ) => {
     if (!target || !readEnvironmentScope(target.environmentId, AuthTerminalOperateScope)) return;
     const store = useRightPanelStore.getState();
     const surface = selectThreadRightPanelState(store.byThreadKey, target).surfaces.find(
       (entry) => entry.kind === "terminal" && entry.resourceId === terminalId,
     );
     if (!surface) return;
-    terminalActions.closeTerminalSession(terminalId, target);
+    terminalActions.closeTerminalSession(terminalId, target, sessionId);
     storeCloseTerminal(target, terminalId);
     store.closeTerminal(target, surface.id, terminalId);
     focusActivePanelTerminal(target);

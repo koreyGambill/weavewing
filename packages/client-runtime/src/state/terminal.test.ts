@@ -133,6 +133,7 @@ function setup(
     });
   };
   const exits: Array<true> = [];
+  const moves: Array<true> = [];
   const live: Array<boolean> = [];
   const session = createTerminalSession(
     {
@@ -149,6 +150,7 @@ function setup(
       initialInput: options.initialInput,
       canOperate: () => access.canOperate,
       onExit: () => exits.push(true),
+      onMoved: () => moves.push(true),
       onLiveChange: (value) => live.push(value),
     },
   );
@@ -184,6 +186,7 @@ function setup(
     calls,
     of,
     exits,
+    moves,
     live,
     completeCommands,
   };
@@ -361,12 +364,34 @@ it.each(["failed resize", "starting snapshot", "unmeasured grid"] as const)(
 it("closes and reports a shell that exits while attached", () => {
   const { attached, emit, mount, of, exits, live } = setup();
   mount(attached);
-  emit({ status: "running", version: 1, lifecycleVersion: 0 });
-  emit({ status: "exited", version: 2 });
-  expect(of("close")).toEqual([{ threadId, terminalId: "term-1" }]);
+  emit({ status: "running", version: 1, lifecycleVersion: 0, sessionId: "shell-1" });
+  emit({ status: "exited", version: 2, sessionId: "shell-1" });
+  expect(of("close")).toEqual([{ threadId, terminalId: "term-1", sessionId: "shell-1" }]);
   expect(of("open")).toEqual([]);
   expect(exits).toHaveLength(1);
   expect(live).toEqual([true, false]);
+});
+
+it("drops a session that moved to another key without closing or reopening it", () => {
+  const { attached, emit, mount, of, exits, moves } = setup();
+  mount(attached);
+  emit({ status: "running", version: 1, sessionId: "shell-1" });
+  emit({
+    status: "closed",
+    version: 2,
+    sessionId: "shell-1",
+    movedTo: { threadId: "thread-2", terminalId: "term-2" },
+  });
+  emit({
+    status: "closed",
+    version: 3,
+    sessionId: "shell-1",
+    movedTo: { threadId: "thread-2", terminalId: "term-2" },
+  });
+  expect(of("close")).toEqual([]);
+  expect(of("open")).toEqual([]);
+  expect(exits).toEqual([]);
+  expect(moves).toHaveLength(1);
 });
 
 it("does not reopen an ended shell after a viewer is granted operate", () => {

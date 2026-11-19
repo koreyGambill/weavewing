@@ -307,7 +307,7 @@ it("closes an exited terminal on its own thread after navigating to one reusing 
   await act(async () => {
     vi.runOnlyPendingTimers();
   });
-  expect(onCloseTerminal.mock.calls).toEqual([["term-1", original]]);
+  expect(onCloseTerminal.mock.calls).toEqual([["term-1", original, null]]);
 });
 
 // Thread navigation defaults have no `!terminalFocus`, so they apply in a focused terminal.

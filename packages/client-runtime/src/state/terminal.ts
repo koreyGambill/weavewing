@@ -143,12 +143,15 @@ export interface TerminalLifecycleState {
   /** The user has seen this terminal without operate permission. */
   readonly observed: boolean;
   readonly reopened: boolean;
+  /** The session moved to another key; this view is done with it. */
+  readonly moved: boolean;
 }
 
 export const INITIAL_TERMINAL_LIFECYCLE: TerminalLifecycleState = {
   wasRunning: false,
   observed: false,
   reopened: false,
+  moved: false,
 };
 
 export type TerminalLifecycleEvent =
@@ -159,11 +162,14 @@ export type TerminalLifecycleEvent =
       readonly type: "status";
       readonly status: TerminalBufferState["status"];
       readonly version: number;
+      /** The key closed because its session moved to another one. */
+      readonly moved?: boolean;
     }
   /** `checkoutChanged`: the thread left this shell's checkout, so it stays history only. */
   | { readonly type: "reopen-failed"; readonly checkoutChanged?: boolean };
 
-export type TerminalLifecycleCommand = "exit" | "reopen" | null;
+/** `moved`: drop the view; the session lives on elsewhere and must not be closed. */
+export type TerminalLifecycleCommand = "exit" | "reopen" | "moved" | null;
 
 export function transitionTerminalLifecycle(
   state: TerminalLifecycleState,
@@ -192,6 +198,10 @@ export function transitionTerminalLifecycle(
         return { state: { ...state, wasRunning: true, reopened: false }, command: null };
       }
       if (event.status !== "closed" && event.status !== "exited") return { state, command: null };
+      if (state.moved) return { state, command: null };
+      if (event.status === "closed" && event.moved === true) {
+        return { state: { ...state, wasRunning: false, moved: true }, command: "moved" };
+      }
       if (state.wasRunning) {
         return { state: { ...state, wasRunning: false, reopened: true }, command: "exit" };
       }
@@ -246,6 +256,8 @@ export interface TerminalSessionOptions {
   readonly canOperate: () => boolean;
   /** The shell ended while attached; the store has already closed it. */
   readonly onExit: () => void;
+  /** The session moved to another key; the view should go without closing anything. */
+  readonly onMoved?: () => void;
   /** Fires when the shell starts or stops accepting input, and on every restart. */
   readonly onLiveChange?: (live: boolean) => void;
   readonly debugLog?: (message: string, data: Record<string, unknown>) => void;
@@ -281,6 +293,7 @@ export function createTerminalSession(
   let liveLifecycleVersion: number | null = null;
   let initialInputPending = Boolean(options.initialInput);
   let lastStatus: TerminalBufferState["status"] | null = null;
+  let attachedSessionId: string | null = null;
   let loggedFirstOutput = false;
   let commandRegistry: AtomRegistry.AtomRegistry | null = null;
   // Only a successful resize of the current measured grid may release initial input.
@@ -338,11 +351,19 @@ export function createTerminalSession(
   ) => {
     const step = transitionTerminalLifecycle(lifecycle, event);
     lifecycle = step.state;
+    if (step.command === "moved") {
+      options.onMoved?.();
+      return;
+    }
     if (step.command === "exit") {
       if (!options.canOperate()) return;
       void runAtomCommand(registry, atoms.close, {
         environmentId,
-        input: { threadId, terminalId },
+        input: {
+          threadId,
+          terminalId,
+          ...(attachedSessionId !== null ? { sessionId: attachedSessionId } : {}),
+        },
       });
       options.onExit();
       return;
@@ -417,7 +438,12 @@ export function createTerminalSession(
       sendResize();
     }
 
-    apply({ type: "status", status, version: buffer.version }, registry, input);
+    if (buffer.sessionId !== null) attachedSessionId = buffer.sessionId;
+    apply(
+      { type: "status", status, version: buffer.version, moved: buffer.movedTo !== null },
+      registry,
+      input,
+    );
   };
 
   const label = `terminal-session:${environmentId}:${threadId}:${terminalId}`;

@@ -25,7 +25,11 @@ export interface PersistentThreadTerminalPanelProps {
   launchContext: PersistentTerminalLaunchContext | null;
   keybindings: ResolvedKeybindingsConfig;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
-  onCloseTerminal: (terminalId: string, threadRef?: ScopedThreadRef) => void;
+  onCloseTerminal: (
+    terminalId: string,
+    threadRef?: ScopedThreadRef,
+    sessionId?: string | null,
+  ) => void;
 }
 
 export const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPanel({
