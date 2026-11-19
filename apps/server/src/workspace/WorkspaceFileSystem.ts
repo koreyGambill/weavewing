@@ -28,7 +28,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
-import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
+import { makeIsServerInternalPath, makeIsServerStatePath } from "../auth/serverInternalPaths.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   InstructionFileAllowlist,
@@ -188,6 +188,7 @@ export const make = Effect.gen(function* () {
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const isServerInternalPath = yield* makeIsServerInternalPath;
+  const isServerStatePath = yield* makeIsServerStatePath;
   const instructionFiles = yield* Effect.serviceOption(InstructionFileAllowlist);
   const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
   const grantUpdates = yield* Semaphore.make(1);
@@ -214,6 +215,7 @@ export const make = Effect.gen(function* () {
       isCredentialPath(realPath, home) ||
       isCredentialPath(realPath, realHome) ||
       (yield* isServerInternalPath(realPath)) ||
+      (yield* isServerStatePath(hostPath)) ||
       (yield* Effect.promise(() => isInGitFolder(realPath).catch(() => true)))
     )
       return null;

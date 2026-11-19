@@ -1255,6 +1255,20 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             "gh",
           );
           expect(yield* fileSystem.readFileString(internal)).toBe("secret");
+          // The server's own state stays read-only: a writable settings file could rewrite the grants.
+          yield* writeTextFile(path.dirname(config.settingsPath), "settings.json", "{}");
+          yield* writeTextFile(config.baseDir, "caches/notes.md", "cache");
+          for (const relativePath of [
+            config.settingsPath,
+            path.join(config.baseDir, "caches", "notes.md"),
+            "~/.t3/userdata/notes.md",
+          ]) {
+            yield* refuses(relativePath);
+            yield* inHome(
+              workspaceFileSystem.allowOutsideEdits({ cwd, relativePath, scope: "file" }),
+            ).pipe(Effect.flip);
+          }
+          expect(yield* fileSystem.readFileString(config.settingsPath)).toBe("{}");
           // Home credential files stay read-only once nothing else refuses them.
           yield* fileSystem.remove(path.join(home, ".config", "wing", "hard.md"));
           yield* writeTextFile(home, ".aws/credentials", "[default]");
