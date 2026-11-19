@@ -72,6 +72,10 @@ function isHot(popup: Popup | null, from: string, to: string): boolean {
   }
 }
 
+// Row -1 holds the column headers and column -1 the row headers, so one roving tab stop covers
+// the headers and the squares.
+const cellKey = (row: number, column: number) => `${row}:${column}`;
+
 const KEY_STEPS: Record<string, readonly [number, number]> = {
   ArrowUp: [-1, 0],
   ArrowDown: [1, 0],
@@ -98,16 +102,23 @@ export function ReachGrid({
   if (columns.length === 0) return null;
   const activeRow = Math.min(active.row, rows.length - 1);
   const activeColumn = Math.min(active.column, columns.length - 1);
+  const cell = (row: number, column: number) => ({
+    cells,
+    position: cellKey(row, column),
+    tabbable: row === activeRow && column === activeColumn,
+    onActivate: () => setActive({ row, column }),
+  });
 
   const onGridKeyDown = (event: KeyboardEvent<HTMLTableElement>) => {
     const step = KEY_STEPS[event.key];
     if (step === undefined || !(event.target instanceof HTMLButtonElement)) return;
-    if (!cells.current.has(event.target.dataset.square ?? "")) return;
+    if (!cells.current.has(event.target.dataset.gridCell ?? "")) return;
     event.preventDefault();
-    const row = Math.max(0, Math.min(rows.length - 1, activeRow + step[0]));
-    const column = Math.max(0, Math.min(columns.length - 1, activeColumn + step[1]));
+    const row = Math.max(-1, Math.min(rows.length - 1, activeRow + step[0]));
+    const column = Math.max(-1, Math.min(columns.length - 1, activeColumn + step[1]));
+    if (row === -1 && column === -1) return;
     setActive({ row, column });
-    cells.current.get(squareKey(rows[row]!.id, columns[column]!.id))?.focus();
+    cells.current.get(cellKey(row, column))?.focus();
   };
 
   return (
@@ -122,9 +133,10 @@ export function ReachGrid({
             <thead>
               <tr>
                 <th className="w-[31%] border border-border" />
-                {columns.map((column) => (
+                {columns.map((column, columnIndex) => (
                   <th key={column.id} className="border border-border p-0 font-normal">
                     <HeaderButton
+                      {...cell(-1, columnIndex)}
                       store={store}
                       party={column}
                       focus={{ kind: "column", id: column.id }}
@@ -139,6 +151,7 @@ export function ReachGrid({
                 <tr key={row.id} className={cn(row.kind === "app" && "[&>*]:border-t-2")}>
                   <th scope="row" className="border border-border p-0 text-left font-normal">
                     <HeaderButton
+                      {...cell(rowIndex, -1)}
                       store={store}
                       party={row}
                       focus={{ kind: "row", id: row.id }}
@@ -151,12 +164,10 @@ export function ReachGrid({
                       <td key={column.id} className="border border-border p-0">
                         {square ? (
                           <SquareCell
+                            {...cell(rowIndex, columnIndex)}
                             store={store}
                             square={square}
                             uncertain={change.uncertain.has(squareKey(row.id, column.id))}
-                            cells={cells}
-                            tabbable={rowIndex === activeRow && columnIndex === activeColumn}
-                            onActivate={() => setActive({ row: rowIndex, column: columnIndex })}
                           />
                         ) : null}
                       </td>
@@ -217,12 +228,33 @@ function GridPopup({
   );
 }
 
+interface GridCellProps {
+  readonly cells: RefObject<Map<string, HTMLButtonElement>>;
+  readonly position: string;
+  readonly tabbable: boolean;
+  readonly onActivate: () => void;
+}
+
+/** Wires one header or square into the grid's single roving tab stop. */
+function gridCellAttributes({ cells, position, tabbable, onActivate }: GridCellProps) {
+  return {
+    ref: (element: HTMLButtonElement | null) => {
+      if (element) cells.current.set(position, element);
+      else cells.current.delete(position);
+    },
+    "data-grid-cell": position,
+    tabIndex: tabbable ? 0 : -1,
+    onFocusCapture: onActivate,
+  };
+}
+
 function HeaderButton({
   store,
   party,
   focus,
   locked,
-}: {
+  ...cell
+}: GridCellProps & {
   readonly store: PopupStore;
   readonly party: ReachParty;
   readonly focus: Extract<Focus, { readonly kind: "row" | "column" }>;
@@ -234,6 +266,7 @@ function HeaderButton({
   );
   return (
     <button
+      {...gridCellAttributes(cell)}
       type="button"
       aria-label={`${focus.kind === "column" ? "To" : "From"} ${party.label}`}
       className={cn(
@@ -276,34 +309,23 @@ function SquareCell({
   store,
   square,
   uncertain,
-  cells,
-  tabbable,
-  onActivate,
-}: {
+  ...cell
+}: GridCellProps & {
   readonly store: PopupStore;
   readonly square: ReachSquare;
   /** A relink failed after the target may have changed, so the level shown may be wrong. */
   readonly uncertain: boolean;
-  readonly cells: RefObject<Map<string, HTMLButtonElement>>;
-  readonly tabbable: boolean;
-  readonly onActivate: () => void;
 }) {
   const from = square.from.id;
   const to = square.to.id;
-  const key = squareKey(from, to);
   const hot = useStore(store, (state) => isHot(state.popup, from, to));
   const { state } = square;
   const focus: Focus = { kind: "square", from, to };
   const self = state.kind === "self";
   return (
     <button
-      ref={(element) => {
-        if (element) cells.current.set(key, element);
-        else cells.current.delete(key);
-      }}
+      {...gridCellAttributes(cell)}
       type="button"
-      data-square={key}
-      tabIndex={tabbable ? 0 : -1}
       aria-label={uncertain ? `${squareSentence(square)}, uncertain` : squareSentence(square)}
       className={cn(
         "block w-full py-1.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -318,7 +340,6 @@ function SquareCell({
         }
       }}
       onFocus={(event) => {
-        onActivate();
         // A server's own square only holds a place for the arrow keys.
         if (self) store.getState().hidePreview();
         else store.getState().show(focus, event.currentTarget, false);

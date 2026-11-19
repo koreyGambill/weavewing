@@ -118,12 +118,17 @@ describe("ReachGrid", () => {
     await expect.element(page.getByRole("button", { name: "View only" })).not.toBeInTheDocument();
   });
 
-  it("keeps one tab stop, moves with the arrow keys, and returns focus to the square on Escape", async () => {
+  it("keeps one tab stop across headers and squares, moves with the arrow keys, and returns focus on Escape", async () => {
     const { model, change } = setup();
     await using screen = await render(<ReachGrid model={model} change={change} />);
+    const focusable = () =>
+      [
+        ...screen.container
+          .querySelector("table")!
+          .querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, [tabindex]"),
+      ].filter((element) => element.tabIndex >= 0);
 
-    const tabbable = screen.container.querySelectorAll("td button[tabindex='0']");
-    expect(tabbable).toHaveLength(1);
+    expect(focusable()).toHaveLength(1);
     const first = page.getByRole("button", { name: "From Moonborn to WSL: No access" });
     await userEvent.click(first);
     await userEvent.keyboard("{Escape}");
@@ -132,5 +137,14 @@ describe("ReachGrid", () => {
     await expect
       .element(page.getByRole("button", { name: "From This app to WSL: Full access" }))
       .toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}");
+    await expect
+      .element(page.getByRole("button", { name: "From This app", exact: true }))
+      .toHaveFocus();
+    await userEvent.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}");
+    await expect.element(page.getByRole("button", { name: "From WSL", exact: true })).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}{ArrowUp}");
+    await expect.element(page.getByRole("button", { name: "To WSL", exact: true })).toHaveFocus();
+    expect(focusable()).toHaveLength(1);
   });
 });
