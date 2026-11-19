@@ -209,6 +209,18 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         expect(yield* paths({ cwd: src, workspaceRoot: cwd })).toEqual(["app.ts", "docs-link"]);
         // A boundary the listing is not inside is ignored.
         expect(yield* paths({ cwd: src, workspaceRoot: outside })).toEqual(["app.ts"]);
+        // The listed link expands under the same boundary; a link outside it still cannot.
+        expect(
+          yield* workspaceEntries.list({
+            cwd: src,
+            workspaceRoot: cwd,
+            directoryPath: "docs-link",
+          }),
+        ).toEqual({ entries: [{ path: "docs-link/guide.md", kind: "file" }], truncated: false });
+        const escaped = yield* workspaceEntries
+          .list({ cwd: src, workspaceRoot: cwd, directoryPath: "outside-link" })
+          .pipe(Effect.flip);
+        expect(escaped._tag).toBe("WorkspaceEntriesReadDirectoryError");
       }),
     );
 

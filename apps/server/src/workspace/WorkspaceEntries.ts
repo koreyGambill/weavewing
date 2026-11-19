@@ -401,17 +401,6 @@ export const make = Effect.gen(function* () {
               input.workspaceRoot === undefined
                 ? root
                 : await NodeFSP.realpath(input.workspaceRoot).catch(() => root);
-            const relative = path.relative(root, directory);
-            if (
-              relative === ".." ||
-              relative.startsWith(`..${path.sep}`) ||
-              path.isAbsolute(relative) ||
-              relative.split(path.sep).includes(".git") ||
-              target.relativePath.split("/").includes(".git")
-            ) {
-              throw new Error("Directory must be inside the workspace and outside .git.");
-            }
-            const children = await NodeFSP.readdir(directory, { withFileTypes: true });
             const isSameOrInside = (parent: string, child: string) => {
               const relativeChild = path.relative(parent, child);
               return (
@@ -422,6 +411,18 @@ export const make = Effect.gen(function* () {
             };
             // A subfolder listing shows the links its workspace's tree would show.
             const linkRoot = isSameOrInside(workspaceRoot, root) ? workspaceRoot : root;
+            // Expanding one of those links must pass the same boundary that listed it.
+            const relative = path.relative(linkRoot, directory);
+            if (
+              relative === ".." ||
+              relative.startsWith(`..${path.sep}`) ||
+              path.isAbsolute(relative) ||
+              relative.split(path.sep).includes(".git") ||
+              target.relativePath.split("/").includes(".git")
+            ) {
+              throw new Error("Directory must be inside the workspace and outside .git.");
+            }
+            const children = await NodeFSP.readdir(directory, { withFileTypes: true });
             // Reject canonical ancestors so "Expand all folders" cannot follow a cycle.
             let visitedFolders: Promise<ReadonlyArray<string>> | undefined;
             const loadVisitedFolders = () =>
