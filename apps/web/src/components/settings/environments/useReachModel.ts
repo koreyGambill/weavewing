@@ -127,6 +127,11 @@ export function useReachModel(): ReachData {
               authPolicy: session.auth.policy,
               directEndpoints: serverConfig.directEndpoints,
             });
+    const servedByTailscale =
+      exposure?.tailscaleServeEnabled ??
+      (serverConfig?.directEndpoints ?? []).some(
+        (endpoint) => endpoint.kind === "tailnet" && endpoint.httpBaseUrl.startsWith("https:"),
+      );
     const accessEvent =
       accessResult === null ? null : AsyncResult.getOrElse(accessResult, () => null);
     const access = accessEvent?.type === "snapshot" ? accessEvent.payload : null;
@@ -149,6 +154,7 @@ export function useReachModel(): ReachData {
         routeUrl:
           environment.displayUrl ?? (isPrimary && !isDesktop ? window.location.origin : null),
         reachableFromOthers,
+        servedByTailscale,
         linksOffered: offersLinkedEnvironments(serverConfig),
         canManage: manageable.has(environmentId),
         appScopes: authenticated ? (session.permissions ?? session.scopes ?? []) : null,

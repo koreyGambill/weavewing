@@ -47,6 +47,7 @@ function server(
     route: "direct",
     routeUrl: null,
     reachableFromOthers: true,
+    servedByTailscale: false,
     linksOffered: true,
     canManage: true,
     appScopes: [...AuthStandardClientScopes],
@@ -144,7 +145,7 @@ describe("buildReachModel", () => {
       level: "can-change",
       broken: null,
     });
-    expect(state(model, serverPartyId(WINDOWS), MOON).arrivedVia).toBe("same-computer");
+    expect(state(model, serverPartyId(WINDOWS), MOON).arrivedVia).toBeNull();
   });
 
   it("marks a square unknown when this app can read neither side, and says which", () => {
@@ -421,6 +422,65 @@ describe("arrival tags", () => {
     });
     expect(state(model, device("Phone"), MOON).arrivedVia).toBe("tailscale");
     expect(state(model, device("Laptop"), MOON).arrivedVia).toBe("local-network");
+  });
+
+  // Korey's Windows server stores the phone, the Mac and the WSL link all at 127.0.0.1, because
+  // Tailscale Serve proxies to its loopback.
+  it("says same computer only for this app and a sibling server, never for a loopback address behind a proxy", () => {
+    const loopbackDevice = (label: string, deviceType: "mobile" | "desktop") =>
+      session({ subject: "one-time-token", client: { deviceType, label, ipAddress: "127.0.0.1" } });
+    const model = buildReachModel({
+      servers: [
+        server({
+          environmentId: WINDOWS,
+          label: "Windows",
+          onThisComputer: true,
+          route: "local",
+          servedByTailscale: true,
+          links: null,
+          sessions: [
+            loopbackDevice("Korey Iphone", "mobile"),
+            loopbackDevice("Moonborn", "desktop"),
+            linkSession(WSL, "WSL"),
+          ],
+        }),
+        server({
+          environmentId: WSL,
+          label: "WSL",
+          onThisComputer: true,
+          route: "local",
+          links: null,
+          sessions: [
+            loopbackDevice("Tailnet: iphone171", "mobile"),
+            loopbackDevice("Chrome on Windows", "desktop"),
+          ],
+        }),
+        server({
+          environmentId: VPS,
+          label: "vps",
+          links: null,
+          sessions: [linkSession(WINDOWS, "Windows")],
+        }),
+      ],
+    });
+    const device = (label: string) => model.rows.find((row) => row.label === label)!.id;
+
+    expect(state(model, device("Korey Iphone"), WINDOWS)).toMatchObject({
+      arrivedVia: "tailscale",
+      arrivedFrom: "Through Tailscale Serve on Windows",
+    });
+    expect(state(model, device("Moonborn"), WINDOWS).arrivedVia).toBe("tailscale");
+    expect(state(model, device("Tailnet: iphone171"), WSL)).toMatchObject({
+      arrivedVia: "tailscale",
+      arrivedFrom: "Admitted by tailnet pairing",
+    });
+    expect(state(model, device("Chrome on Windows"), WSL)).toMatchObject({
+      arrivedVia: null,
+      arrivedFrom: null,
+    });
+    expect(state(model, serverPartyId(WSL), WINDOWS).arrivedVia).toBe("same-computer");
+    expect(state(model, serverPartyId(WINDOWS), VPS).arrivedVia).toBeNull();
+    expect(state(model, APP_PARTY_ID, WINDOWS).arrivedVia).toBe("same-computer");
   });
 });
 
