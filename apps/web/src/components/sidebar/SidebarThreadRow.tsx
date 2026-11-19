@@ -40,6 +40,7 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
+  ArrowUpRightIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -586,7 +587,7 @@ function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS; className: 
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
   // "folder" is a one-line row inside a boring sidebar project folder;
-  // "folder-multiline" adds the card's branch and PR line under it.
+  // "folder-multiline" adds a branch and PR line under it.
   variant: "card" | "slim" | "folder" | "folder-multiline";
   navigationParent?: string | undefined;
   familyDepth?: number | undefined;
@@ -875,7 +876,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
 
-  const isRemote = thread.environmentId !== props.currentEnvironmentId;
+  // Matches the composer's External badge: anything but this client's primary environment.
+  const isExternal = thread.environmentId !== props.currentEnvironmentId;
   const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
@@ -1189,12 +1191,29 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     )
   ) : null;
 
+  // Cards have no branch line, so the scratch machine label never names the machine there.
   const remoteMachineIcon =
-    isRemote && !showsScratchMachine ? (
+    isExternal && (variant === "card" || !showsScratchMachine) ? (
       <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
         <EnvironmentMachineIcon aria-hidden kind={props.environmentMachine} className="size-3.5" />
       </span>
     ) : null;
+  const externalMarker = isExternal ? (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label={`On ${props.environmentLabel ?? "another machine"}`}
+            className="inline-flex shrink-0 items-center text-warning-foreground"
+          />
+        }
+      >
+        <ArrowUpRightIcon aria-hidden className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">On {props.environmentLabel ?? "another machine"}</TooltipPopup>
+    </Tooltip>
+  ) : null;
   const diff = latestRunDiff(thread);
   // Only the trailing icons would remain, so the row moves them to the title line instead.
   const metaLineEmpty =
@@ -1214,6 +1233,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           providerEntryByInstanceId={props.providerEntryByInstanceId}
         />
       </span>
+      {externalMarker}
     </span>
   );
   const metaLine = metaLineEmpty ? null : (
@@ -1449,11 +1469,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       {...sortableRootProps}
       style={{ marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12 }}
       {...(fileDropHandlers ?? {})}
-      // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
+      // The hint is the rendered height inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_60px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1478,12 +1497,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             />
           }
         >
-          <div
-            className={cn(
-              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
-              metaLineEmpty && "h-auto",
-            )}
-          >
+          <div className="relative z-10 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {props.project ? (
@@ -1649,9 +1663,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   Regenerating title
                 </span>
               ) : null}
-              {titleLineIcons}
+              {terminalStatusIcon}
+              {prBadge}
+              {trailingIcons()}
             </div>
-            {metaLine}
           </div>
         </TooltipTrigger>
         {detailsTooltip}
