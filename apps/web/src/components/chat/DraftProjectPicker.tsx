@@ -593,11 +593,18 @@ export function DraftProjectPicker({
                       </span>
                     ) : (
                       <>
-                        <span className={cn("truncate", projectRow && "max-w-[50%] shrink-0")}>
+                        <span
+                          className={cn(
+                            "truncate",
+                            projectRow &&
+                              "max-w-[50%] shrink-0 @max-[24rem]/picker:max-w-none @max-[24rem]/picker:shrink",
+                          )}
+                        >
                           {item.label}
                         </span>
                         {projectRow && path ? (
-                          <span className="flex min-w-0 flex-1 overflow-hidden font-mono text-muted-foreground text-xs">
+                          // Narrow popups give the title this room; the tooltip still shows the path.
+                          <span className="flex min-w-0 flex-1 overflow-hidden font-mono text-muted-foreground text-xs @max-[24rem]/picker:hidden">
                             <PickerPath path={path} />
                           </span>
                         ) : null}
@@ -622,7 +629,9 @@ export function DraftProjectPicker({
                 {projectRow && item.activity ? (
                   <Tooltip>
                     <TooltipTrigger
-                      render={<span className="shrink-0 text-muted-foreground text-3xs" />}
+                      render={
+                        <span className="shrink-0 text-muted-foreground text-3xs @max-[19rem]/picker:hidden" />
+                      }
                     >
                       {formatRelativeTimeLabel(new Date(item.activity).toISOString())}
                     </TooltipTrigger>
@@ -762,7 +771,7 @@ export function DraftProjectPicker({
       }}
     >
       {inline ? (
-        <div className="flex max-h-[min(34rem,76vh)] min-h-0 flex-col overflow-hidden">
+        <div className="@container/picker flex max-h-[min(34rem,76vh)] min-h-0 flex-col overflow-hidden">
           {content}
         </div>
       ) : (
@@ -804,7 +813,7 @@ export function DraftProjectPicker({
             // The where-line returns the keyboard to the composer instead of its trigger.
             {...(trigger ? { finalFocus: false } : {})}
             size="tall"
-            className="w-[min(28rem,calc(100vw-2rem))] overflow-hidden"
+            className="@container/picker w-[min(28rem,calc(100vw-2rem))] overflow-hidden"
           >
             {content}
           </ComboboxPopup>
