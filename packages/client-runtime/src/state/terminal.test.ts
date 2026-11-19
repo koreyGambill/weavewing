@@ -373,8 +373,8 @@ it("closes and reports a shell that exits while attached", () => {
 });
 
 it("drops a session that moved to another key without closing or reopening it", () => {
-  const { attached, emit, mount, of, exits, moves } = setup();
-  mount(attached);
+  const { attached, detach, emit, flush, mount, of, exits, moves } = setup();
+  const unmount = mount(attached);
   emit({ status: "running", version: 1, sessionId: "shell-1" });
   emit({
     status: "closed",
@@ -392,6 +392,30 @@ it("drops a session that moved to another key without closing or reopening it", 
   expect(of("open")).toEqual([]);
   expect(exits).toEqual([]);
   expect(moves).toHaveLength(1);
+
+  unmount();
+  flush();
+  detach();
+  mount(attached);
+  emit({ status: "running", version: 4, sessionId: "shell-2" });
+  emit({ status: "exited", version: 5, sessionId: "shell-2" });
+  expect(of("close")).toEqual([{ threadId, terminalId: "term-1", sessionId: "shell-2" }]);
+  expect(exits).toHaveLength(1);
+});
+
+it("drops a read-only view when its terminal moves", () => {
+  const { access, observe, mount, of, exits, moves } = setup();
+  access.canOperate = false;
+  mount({ kind: "observing" });
+  observe({ status: "running", version: 1 });
+  observe({
+    status: "closed",
+    version: 2,
+    movedTo: { threadId: "thread-2", terminalId: "term-2" },
+  });
+  expect(moves).toHaveLength(1);
+  expect(exits).toEqual([]);
+  expect(of("close")).toEqual([]);
 });
 
 it("does not reopen an ended shell after a viewer is granted operate", () => {

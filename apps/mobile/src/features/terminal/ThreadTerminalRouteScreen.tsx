@@ -450,6 +450,7 @@ function ThreadTerminal(props: {
       canOperate: () =>
         readEnvironmentScope(selectedThread.environmentId, AuthTerminalOperateScope),
       onExit: exitNavigation.exited,
+      onMoved: exitNavigation.exited,
       onLiveChange: (live) => {
         if (live) exitNavigation.restarted();
         pasteSession.reset(live);

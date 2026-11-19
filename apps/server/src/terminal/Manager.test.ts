@@ -815,10 +815,73 @@ it.layer(
     }),
   );
 
-  it.effect("ignores a close aimed at a session that moved away and came back", () =>
+  it.effect("keeps the first history copy when the catch-up write fails", () =>
     Effect.gen(function* () {
-      const { manager, ptyAdapter, logsDir } = yield* createManager();
       const fs = yield* FileSystem.FileSystem;
+      const saving = "before move\n";
+      const extra = "during move\n";
+      let onFirstCopy = Effect.void;
+      let failed = false;
+      const fixtureFs = FileSystem.FileSystem.of({
+        ...fs,
+        writeFileString: (file, data, options) => {
+          if (data === saving) {
+            const print = onFirstCopy;
+            onFirstCopy = Effect.void;
+            return fs.writeFileString(file, data, options).pipe(Effect.andThen(print));
+          }
+          if (data === saving + extra) {
+            failed = true;
+            return fs.writeFileString(file, "", options).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "Unknown",
+                    module: "FileSystem",
+                    method: "writeFileString",
+                    cause: { code: "ENOSPC" },
+                  }),
+                ),
+              ),
+            );
+          }
+          return fs.writeFileString(file, data, options);
+        },
+      });
+      const { manager, ptyAdapter, logsDir } = yield* createManager().pipe(
+        Effect.provideService(FileSystem.FileSystem, fixtureFs),
+      );
+      const dropdown = { threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID };
+      yield* manager.open(openInput(dropdown));
+      const first = yield* Deferred.make<void>();
+      const next = yield* Deferred.make<void>();
+      const stop = yield* manager.subscribe((event) =>
+        event.type === "output"
+          ? Deferred.succeed(event.data === saving ? first : next, undefined)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(stop));
+      ptyAdapter.processes[0]!.emitData(saving);
+      yield* Deferred.await(first);
+      onFirstCopy = Effect.sync(() => ptyAdapter.processes[0]!.emitData(extra)).pipe(
+        Effect.andThen(Deferred.await(next)),
+      );
+
+      const moved = yield* manager.move({
+        ...dropdown,
+        toThreadId: "thread-2",
+        toTerminalId: DEFAULT_TERMINAL_ID,
+      });
+
+      expect(failed).toBe(true);
+      expect(moved.history).toBe(saving + extra);
+      expect(yield* fs.readFileString(yield* historyLogPath(logsDir, "thread-2"))).toBe(saving);
+    }),
+  );
+
+  it.effect("keeps the returned shell alive when an old client closes the retired key", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
       const opened = yield* manager.open(openInput({ threadId: "dropdown-terminal" }));
       const dropdown = { threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID };
       yield* manager.move({ ...dropdown, toThreadId: "thread-2", toTerminalId: "term-3" });
@@ -829,12 +892,12 @@ it.layer(
         toTerminalId: dropdown.terminalId,
       });
 
-      yield* manager.close({ ...dropdown, sessionId: opened.sessionId!, deleteHistory: true });
+      yield* manager.close({ ...dropdown, deleteHistory: true });
 
       expect(returned.sessionId).not.toBe(opened.sessionId);
       expect(ptyAdapter.processes[0]!.killed).toBe(false);
-      expect(yield* fs.exists(yield* historyLogPath(logsDir, "dropdown-terminal"))).toBe(true);
-      yield* manager.close({ ...dropdown, sessionId: returned.sessionId! });
+      expect(returned.terminalId).not.toBe(dropdown.terminalId);
+      yield* manager.close({ ...dropdown, terminalId: returned.terminalId });
       expect(ptyAdapter.processes[0]!.killed).toBe(true);
     }),
   );

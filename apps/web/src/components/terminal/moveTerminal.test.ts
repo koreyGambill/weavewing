@@ -24,13 +24,16 @@ const terminalsIn = (ref: ScopedThreadRef) =>
     (surface) => (surface.kind === "terminal" ? [surface] : []),
   );
 
-function moveRecorder(result: "success" | "failure") {
+function moveRecorder(result: "success" | "failure", returnedId?: string) {
   const calls: Array<{ input: TerminalMoveInput; sourceTabs: number }> = [];
   const move: Parameters<typeof moveTerminalTab>[0]["move"] = async (target) => {
     const source = scopeThreadRef(environmentId, ThreadId.make(target.input.threadId));
     calls.push({ input: target.input, sourceTabs: terminalsIn(source).length });
     return result === "success"
-      ? AsyncResult.success({ cwd: "/home/user/project" } as TerminalSessionSnapshot)
+      ? AsyncResult.success({
+          cwd: "/home/user/project",
+          terminalId: returnedId ?? target.input.toTerminalId,
+        } as TerminalSessionSnapshot)
       : AsyncResult.failure(Cause.fail(new Error("refused")));
   };
   return { calls, move };
@@ -81,21 +84,23 @@ describe("moveTerminalTab", () => {
       worktreePath: "/worktrees/a",
     });
 
+    const { calls: returnCalls, move: moveBack } = moveRecorder("success", "fresh-id");
     const backToDropdown = await moveTerminalTab({
       from: thread,
       terminalId: intoThread!,
       to: { threadRef: dropdown, worktreePath: null },
-      move,
+      move: moveBack,
     });
 
-    expect(calls[1]?.input).toMatchObject({
+    expect(returnCalls[0]?.input).toMatchObject({
       threadId: "thread-A",
       terminalId: intoThread,
       toThreadId: "dropdown-terminal",
       worktreePath: null,
     });
-    expect(calls[1]?.sourceTabs).toBe(1);
+    expect(returnCalls[0]?.sourceTabs).toBe(1);
     expect(terminalsIn(thread).map((surface) => surface.resourceId)).toEqual(["term-1"]);
+    expect(backToDropdown).toBe("fresh-id");
     expect(terminalsIn(dropdown).map((surface) => surface.resourceId)).toEqual([backToDropdown]);
   });
 

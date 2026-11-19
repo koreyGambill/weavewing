@@ -2282,6 +2282,18 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   const persistedHistory = new WeakMap<BoundedTerminalHistory, TerminalHistoryPersistenceCursor>();
+  const replaceHistory = Effect.fn("terminal.replaceHistory")(function* (
+    filePath: string,
+    contents: string,
+  ) {
+    const temporaryPath = yield* fileSystem.makeTempFileScoped({
+      directory: logsDir,
+      prefix: ".history-",
+    });
+    yield* fileSystem.writeFileString(temporaryPath, contents);
+    yield* fileSystem.rename(temporaryPath, filePath);
+  }, Effect.scoped);
+
   const persistWorker = yield* makeKeyedCoalescingWorker<
     string,
     PersistHistoryRequest,
@@ -2309,20 +2321,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       // An append may partially succeed before failing. Retry from a full snapshot,
       // never from an uncertain file offset.
       persistedHistory.delete(request.history);
-      yield* fileSystem
-        .writeFileString(historyPath(threadId, terminalId), update.data, {
-          flag: update.append ? "a" : "w",
-        })
-        .pipe(
-          Effect.tap(() => Effect.sync(() => persistedHistory.set(request.history, update.cursor))),
-          Effect.catch((error) =>
-            Effect.logWarning("failed to persist terminal history", {
-              threadId,
-              terminalId,
-              error,
-            }),
-          ),
-        );
+      const filePath = historyPath(threadId, terminalId);
+      yield* (
+        update.append
+          ? fileSystem.writeFileString(filePath, update.data, { flag: "a" })
+          : replaceHistory(filePath, update.data)
+      ).pipe(
+        Effect.tap(() => Effect.sync(() => persistedHistory.set(request.history, update.cursor))),
+        Effect.catch((error) =>
+          Effect.logWarning("failed to persist terminal history", {
+            threadId,
+            terminalId,
+            error,
+          }),
+        ),
+      );
     }),
   });
 
@@ -2425,15 +2438,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       const history = new BoundedTerminalHistory(historyLineLimit, raw, historyByteLimit);
       const capped = history.value();
       if (migrating || truncated || capped !== raw) {
-        const write = Effect.gen(function* () {
-          const temporaryPath = yield* fileSystem.makeTempFileScoped({
-            directory: logsDir,
-            prefix: ".history-",
-          });
-          yield* fileSystem.writeFileString(temporaryPath, capped);
-          yield* fileSystem.rename(temporaryPath, nextPath);
-        }).pipe(
-          Effect.scoped,
+        const write = replaceHistory(nextPath, capped).pipe(
           Effect.mapError(
             (cause) =>
               new TerminalHistoryError({
@@ -3966,7 +3971,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }
     const session = yield* requireSession(input.threadId, input.terminalId);
     const fromKey = toSessionKey(input.threadId, input.terminalId);
-    const toKey = toSessionKey(input.toThreadId, input.toTerminalId);
     if (Option.isSome(yield* getSession(input.toThreadId, input.toTerminalId))) {
       return yield* new TerminalSessionExistsError({
         threadId: input.toThreadId,
@@ -3975,41 +3979,44 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }
     if (guard !== undefined) yield* guard(input);
 
-    // The source log stays until the destination holds a full copy.
-    yield* fileSystem
-      .writeFileString(
-        historyPath(input.toThreadId, input.toTerminalId),
-        session.history.persistenceUpdate().data,
-      )
-      .pipe(
-        Effect.tapError((cause) =>
-          Effect.logWarning("failed to save terminal history for a move", {
-            threadId: input.toThreadId,
-            terminalId: input.toTerminalId,
-            cause,
+    // A legacy viewer can still send an ID-less close to the key that moved away.
+    const suffix = NodeCrypto.randomUUID();
+    const toTerminalId = closedSessionKeys.has(toSessionKey(input.toThreadId, input.toTerminalId))
+      ? `${input.toTerminalId.slice(0, 128 - suffix.length - 1)}-${suffix}`
+      : input.toTerminalId;
+    const toKey = toSessionKey(input.toThreadId, toTerminalId);
+
+    yield* replaceHistory(
+      historyPath(input.toThreadId, toTerminalId),
+      session.history.persistenceUpdate().data,
+    ).pipe(
+      Effect.tapError((cause) =>
+        Effect.logWarning("failed to save terminal history for a move", {
+          threadId: input.toThreadId,
+          terminalId: toTerminalId,
+          cause,
+        }),
+      ),
+      Effect.mapError(
+        () =>
+          new TerminalMoveRefusedError({
+            threadId: input.threadId,
+            toThreadId: input.toThreadId,
+            reason: "history-not-saved",
           }),
-        ),
-        Effect.mapError(
-          () =>
-            new TerminalMoveRefusedError({
-              threadId: input.threadId,
-              toThreadId: input.toThreadId,
-              reason: "history-not-saved",
-            }),
-        ),
-      );
+      ),
+    );
 
     const stamp = yield* modifyManagerState((state) => {
       const sessions = new Map(state.sessions);
       sessions.delete(fromKey);
       session.threadId = input.toThreadId;
-      session.terminalId = input.toTerminalId;
+      session.terminalId = toTerminalId;
       session.worktreePath =
         input.toThreadId === DROPDOWN_TERMINAL_THREAD_ID ? null : (input.worktreePath ?? null);
       session.sessionId = NodeCrypto.randomUUID();
       sessions.set(toKey, session);
       closedSessionKeys.add(fromKey);
-      closedSessionKeys.delete(toKey);
       // The persisted cursor points into the old file, so the new one starts from a full write.
       persistedHistory.delete(session.history);
       return [advanceEventSequence(session), { ...state, sessions }] as const;
@@ -4020,20 +4027,20 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     yield* flushPersist(input.threadId, input.terminalId);
     yield* deleteHistory(input.threadId, input.terminalId);
     // Catches output that arrived between the copy and the re-key.
-    yield* persistHistory(input.toThreadId, input.toTerminalId, session.history);
+    yield* persistHistory(input.toThreadId, toTerminalId, session.history);
 
     yield* publishEvent({
       type: "closed",
       threadId: input.threadId,
       terminalId: input.terminalId,
       sequence: stamp.sequence,
-      movedTo: { threadId: input.toThreadId, terminalId: input.toTerminalId },
+      movedTo: { threadId: input.toThreadId, terminalId: toTerminalId },
     });
     const moved = snapshot(session);
     yield* publishEvent({
       type: "started",
       threadId: input.toThreadId,
-      terminalId: input.toTerminalId,
+      terminalId: toTerminalId,
       sequence: stamp.sequence,
       snapshot: moved,
     });

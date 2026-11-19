@@ -194,8 +194,11 @@ export function transitionTerminalLifecycle(
         : { state: { ...state, reopened: false }, command: null };
     case "status": {
       if (event.version === 0) return { state, command: null };
-      if (event.status === "running" || event.status === "starting") {
-        return { state: { ...state, wasRunning: true, reopened: false }, command: null };
+      if (event.moved !== true && (event.status === "running" || event.status === "starting")) {
+        return {
+          state: { ...state, wasRunning: true, reopened: false, moved: false },
+          command: null,
+        };
       }
       if (event.status !== "closed" && event.status !== "exited") return { state, command: null };
       if (state.moved) return { state, command: null };
@@ -451,12 +454,30 @@ export function createTerminalSession(
   // Viewing read-only counts as observed before the first snapshot lands, so a
   // grant that arrives early still leaves the ended shell's history alone.
   const observing = Atom.make((get) => {
+    const input = { threadId, terminalId };
     // `subscribe`, not `get`: a rebuild would resubscribe on every output chunk.
     get.subscribe(
-      atoms.observe({ environmentId, input: { threadId, terminalId } }),
-      () => {
+      atoms.observe({ environmentId, input }),
+      (result) => {
         if (options.canOperate()) return;
         lifecycle = transitionTerminalLifecycle(lifecycle, { type: "observed" }).state;
+        const buffer = AsyncResult.getOrElse(result, () => EMPTY_TERMINAL_BUFFER_STATE);
+        if (
+          buffer.status === "running" ||
+          buffer.status === "starting" ||
+          buffer.movedTo !== null
+        ) {
+          apply(
+            {
+              type: "status",
+              status: buffer.status,
+              version: buffer.version,
+              moved: buffer.movedTo !== null,
+            },
+            get.registry,
+            input,
+          );
+        }
       },
       { immediate: true },
     );

@@ -55,8 +55,7 @@ export async function moveTerminalTab(input: {
     ).terminalIds,
     selectThreadRightPanelState(panels.byThreadKey, to.threadRef).surfaces,
   );
-  // The server tells the old key's viewers it closed, which a still-mounted tile would take for
-  // an exited shell and close; the tab leaves first and returns if the move fails.
+  // The move event also drops the source tab for viewers that remain attached.
   panels.closeTerminal(from, surface.id, terminalId);
   const result = await input.move({
     environmentId: from.environmentId,
@@ -76,9 +75,10 @@ export async function moveTerminalTab(input: {
     if (from.threadId === DROPDOWN_TERMINAL_THREAD_ID && !dropdown.open) dropdown.toggle();
     return null;
   }
-  store.openTerminal(to.threadRef, toTerminalId, {
+  const movedId = result.value.terminalId;
+  store.openTerminal(to.threadRef, movedId, {
     cwd: result.value.cwd,
     worktreePath: to.worktreePath,
   });
-  return toTerminalId;
+  return movedId;
 }
