@@ -250,7 +250,10 @@ import { useCatalogEnvironmentIds, useEnvironments } from "../state/environments
 import { settingsScopeEnvironmentLabel } from "./settings/settingsScopeAxis";
 import { isEnvironmentOnThisComputer } from "../connection/desktopLocal";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { SidebarComputerLocalityIcon } from "./sidebar/SidebarComputerLocalityIcon";
+import {
+  SidebarComputerLocalityIcon,
+  sidebarComputerLocalityLabel,
+} from "./sidebar/SidebarComputerLocalityIcon";
 import { CheckboxMark } from "./ui/checkbox";
 import {
   groupSidebarComputers,
@@ -1123,15 +1126,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     environmentId: environment.environmentId,
     label: settingsScopeEnvironmentLabel(environment, filterEnvironments),
     computer: serverConfigs.get(environment.environmentId)?.hostname ?? null,
-    onThisComputer: isEnvironmentOnThisComputer(
-      environment.entry.target,
-      window.desktopBridge !== undefined,
-    ),
+    onThisComputer:
+      window.desktopBridge === undefined
+        ? null
+        : isEnvironmentOnThisComputer(environment.entry.target, true),
   }));
-  const localComputerEnvironmentIds = new Set(
-    computerFilterServers
-      .filter((server) => server.onThisComputer)
-      .map((server) => server.environmentId),
+  const computerLocalityById = new Map(
+    computerFilterServers.map((server) => [server.environmentId, server.onThisComputer]),
   );
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
@@ -3661,9 +3662,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             </div>
                             {computer.servers.map((server) => {
                               const chosen = environmentScope?.has(server.environmentId) ?? false;
-                              const localityLabel = server.onThisComputer
-                                ? "On this computer"
-                                : "On another computer";
+                              const localityLabel = sidebarComputerLocalityLabel(
+                                server.onThisComputer,
+                              );
                               return (
                                 <button
                                   key={server.environmentId}
@@ -3808,6 +3809,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             ) ?? null
                           }
                           environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
+                          onThisComputer={computerLocalityById.get(thread.environmentId) ?? null}
                           environmentMachine={
                             environmentMachineById.get(thread.environmentId) ?? "server"
                           }
@@ -4023,7 +4025,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
-                            onThisComputer={localComputerEnvironmentIds.has(thread.environmentId)}
+                            onThisComputer={computerLocalityById.get(thread.environmentId) ?? null}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null
                             }

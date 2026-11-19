@@ -342,7 +342,11 @@ describe("sidebar computer filter", () => {
   // Two servers on two computers, one project and one thread on each.
   function computerFixture(
     stack: DisposableStack,
-    options: { routeThreadRef?: ScopedThreadRef; chosen?: readonly string[] } = {},
+    options: {
+      routeThreadRef?: ScopedThreadRef;
+      chosen?: readonly string[];
+      desktop?: boolean;
+    } = {},
   ) {
     const projects = [
       { ...project("alpha"), environmentId: laptop },
@@ -387,11 +391,16 @@ describe("sidebar computer filter", () => {
     vi.mocked(useCatalogEnvironmentIds).mockReturnValue({ ids: [laptop, desk], ready: true });
     stack.defer(() => vi.mocked(useCatalogEnvironmentIds).mockRestore());
     stack.use(
-      stubGlobal("desktopBridge", {
-        getLocalEnvironmentEnabled: () => true,
-        getLocalEnvironmentBootstraps: () => [],
-        getClientSettings: async () => DEFAULT_CLIENT_SETTINGS,
-      }),
+      stubGlobal(
+        "desktopBridge",
+        options.desktop === false
+          ? undefined
+          : {
+              getLocalEnvironmentEnabled: () => true,
+              getLocalEnvironmentBootstraps: () => [],
+              getClientSettings: async () => DEFAULT_CLIENT_SETTINGS,
+            },
+      ),
     );
     vi.mocked(useEnvironmentMachines).mockReturnValue(
       new Map([
@@ -462,6 +471,17 @@ describe("sidebar computer filter", () => {
     expect(laptopRow).toHaveAttribute("aria-label", expect.stringContaining("On this computer"));
     expect(deskRow).toHaveAttribute("aria-label", expect.stringContaining("On another computer"));
 
+    const search = screen.getByRole("combobox", { name: "Search threads" });
+    await userEvent.fill(search, "Laptop thread");
+    await expect
+      .element(screen.getByRole("option", { name: /^Laptop thread/ }))
+      .toHaveAccessibleName(/On this computer/);
+    await userEvent.fill(search, "Desk thread");
+    await expect
+      .element(screen.getByRole("option", { name: /^Desk thread/ }))
+      .toHaveAccessibleName(/On another computer/);
+    await userEvent.keyboard("{Escape}");
+
     await openFilter(screen);
     const computers = page.getByRole("group", { name: "Computers" });
     await expect.element(computers.getByText("laptop")).toBeVisible();
@@ -480,6 +500,20 @@ describe("sidebar computer filter", () => {
     await expect
       .element(screen.getByRole("combobox", { name: /computers: WSL/ }))
       .toBeInTheDocument();
+  });
+
+  it("reports unknown computer locality when the browser has no desktop registration", async () => {
+    using stack = new DisposableStack();
+    computerFixture(stack, { desktop: false });
+    await using screen = await render(sidebar());
+    const row = screen.getByText("Laptop thread").first().element().closest("[data-sidebar-row]");
+    expect(row).toHaveAttribute("aria-label", expect.stringContaining("Computer locality unknown"));
+
+    await openFilter(screen);
+    const computers = page.getByRole("group", { name: "Computers" });
+    await expect
+      .element(computers.getByRole("button", { name: "WSL", exact: true }))
+      .toHaveAttribute("aria-description", "Computer locality unknown");
   });
 
   it("keeps a remembered choice, needs the project filter to match too, and clears on Show all", async () => {

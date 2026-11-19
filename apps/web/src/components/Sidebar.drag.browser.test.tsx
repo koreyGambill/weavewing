@@ -119,6 +119,7 @@ it("keeps focus in the search box when a click picks a search result", async () 
           project={null}
           projectDisplayName={null}
           environmentLabel={null}
+          onThisComputer={null}
           environmentMachine="server"
           providerEntryByInstanceId={new Map()}
           isHighlighted={false}

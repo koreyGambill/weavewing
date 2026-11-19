@@ -1,16 +1,36 @@
-import { ArrowDownLeftIcon, ArrowUpRightIcon } from "lucide-react";
+import { ArrowDownLeftIcon, ArrowUpRightIcon, CircleHelpIcon } from "lucide-react";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+
+export function sidebarComputerLocalityLabel(
+  onThisComputer: boolean | null,
+  environmentLabel?: string | null,
+): string {
+  if (onThisComputer === null) return "Computer locality unknown";
+  if (onThisComputer) return "On this computer";
+  return environmentLabel ? `On another computer · ${environmentLabel}` : "On another computer";
+}
 
 /** Shows the physical computer's locality with the same marker in rows and filters. */
 export function SidebarComputerLocalityIcon({
   onThisComputer,
   label,
 }: {
-  onThisComputer: boolean;
+  onThisComputer: boolean | null;
   label: string;
 }) {
-  const Icon = onThisComputer ? ArrowDownLeftIcon : ArrowUpRightIcon;
+  const Icon =
+    onThisComputer === null
+      ? CircleHelpIcon
+      : onThisComputer
+        ? ArrowDownLeftIcon
+        : ArrowUpRightIcon;
+  const color =
+    onThisComputer === null
+      ? "text-muted-foreground"
+      : onThisComputer
+        ? "text-success-foreground"
+        : "text-warning-foreground";
   return (
     <Tooltip>
       <TooltipTrigger
@@ -18,7 +38,7 @@ export function SidebarComputerLocalityIcon({
           <span
             role="img"
             aria-label={label}
-            className={`inline-flex shrink-0 items-center ${onThisComputer ? "text-success-foreground" : "text-warning-foreground"}`}
+            className={`inline-flex shrink-0 items-center ${color}`}
           />
         }
       >

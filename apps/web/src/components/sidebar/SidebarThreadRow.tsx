@@ -85,7 +85,10 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
-import { SidebarComputerLocalityIcon } from "./SidebarComputerLocalityIcon";
+import {
+  SidebarComputerLocalityIcon,
+  sidebarComputerLocalityLabel,
+} from "./SidebarComputerLocalityIcon";
 import {
   animateSidebarLayoutChanges,
   hasUnseenCompletion,
@@ -613,7 +616,7 @@ type SidebarThreadRowProps = {
   // Read at click time; a prop would re-render every row on entering or leaving a thread route.
   readOpensPullRequestsInRightPanel: () => boolean;
   jumpLabel: string | null;
-  onThisComputer: boolean;
+  onThisComputer: boolean | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   scratchMachineLabel: string | null;
@@ -878,11 +881,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
 
-  const localityLabel = props.onThisComputer
-    ? "On this computer"
-    : props.environmentLabel
-      ? `On another computer · ${props.environmentLabel}`
-      : "On another computer";
+  const localityLabel = sidebarComputerLocalityLabel(props.onThisComputer, props.environmentLabel);
   const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
@@ -1829,6 +1828,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   environmentLabel: string | null;
+  onThisComputer: boolean | null;
   environmentMachine: EnvironmentMachineKind;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   isHighlighted: boolean;
@@ -1845,11 +1845,13 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
 }) {
   const thread =
     useThreadShell(scopeThreadRef(props.thread.environmentId, props.thread.id)) ?? props.thread;
+  const localityLabel = sidebarComputerLocalityLabel(props.onThisComputer, props.environmentLabel);
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel: null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isRouteActive,
+    localityLabel,
   });
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   // Results only drag out as chat context; the row keeps its own listbox attributes.
@@ -1980,6 +1982,10 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                   settled={props.isSettled}
                 />
               </span>
+              <SidebarComputerLocalityIcon
+                onThisComputer={props.onThisComputer}
+                label={localityLabel}
+              />
               <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
                 <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
               </span>
