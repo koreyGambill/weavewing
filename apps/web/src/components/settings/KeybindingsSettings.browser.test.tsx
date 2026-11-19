@@ -134,7 +134,7 @@ it("re-enables Save when a When editor closes on an expression it could not pars
   const expression = screen.getByRole("textbox", { name: "When expression" });
 
   await whenTrigger.click();
-  await userEvent.type(expression, "terminalFocus");
+  await expression.fill("terminalFocus");
   await userEvent.type(expression, " &&");
   await expect.element(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 

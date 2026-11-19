@@ -142,6 +142,11 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     alongside: { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
     rule: { key: "ctrl+tab", command: "workspace.tile.nextTab" },
   },
+  {
+    id: "workspace.tile.closeTab:meta+w",
+    alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
+    rule: { key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" },
+  },
 ];
 
 function keybindingShortcutContext(rule: KeybindingRule): string | null {

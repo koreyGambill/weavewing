@@ -311,11 +311,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const keybindings = yield* Keybindings.Keybindings;
       const when = "composerFocus && draftThreadRoute";
       const existing = { key: "mod+alt+enter", command: "composer.sendBackground", when } as const;
+      const closeTab = { key: "ctrl+alt+w", command: "workspace.tile.closeTab" } as const;
       const backgroundRules = Effect.map(readKeybindingsConfig(keybindingsConfigPath), (rules) =>
         rules.filter((entry) => entry.command === "composer.sendBackground"),
       );
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
         existing,
+        closeTab,
         { key: "ctrl+alt+arrowleft", command: "workspace.tile.focusLeft" },
         { key: "ctrl+alt+arrowdown", command: "workspace.tile.focusDown" },
         { key: "ctrl+alt+arrowup", command: "workspace.tile.focusUp" },
@@ -342,13 +344,24 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "mod+enter", command: "composer.sendBackground", when },
         existing,
       ]);
+      assert.deepStrictEqual(
+        upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
+        [{ key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" }, closeTab],
+      );
 
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
         existing,
+        closeTab,
         { key: "ctrl+alt+arrowleft", command: "workspace.tile.focusLeft" },
       ]);
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       assert.deepStrictEqual(yield* backgroundRules, [existing]);
+      assert.deepStrictEqual(
+        (yield* readKeybindingsConfig(keybindingsConfigPath)).filter(
+          (rule) => rule.command === "workspace.tile.closeTab",
+        ),
+        [closeTab],
+      );
       assert.deepStrictEqual(
         (yield* readKeybindingsConfig(keybindingsConfigPath)).filter(
           (rule) => rule.command === "workspace.tile.focusLeft",
@@ -367,13 +380,18 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         command: "composer.sendBackground",
         when: "composerFocus && draftThreadRoute",
       } as const;
-      yield* writeKeybindingsConfig(keybindingsConfigPath, [custom]);
+      const customCloseTab = { key: "ctrl+alt+q", command: "workspace.tile.closeTab" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [custom, customCloseTab]);
 
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepStrictEqual(
         persisted.filter((entry) => entry.command === "composer.sendBackground"),
         [custom],
+      );
+      assert.deepStrictEqual(
+        persisted.filter((entry) => entry.command === "workspace.tile.closeTab"),
+        [customCloseTab],
       );
     }).pipe(Effect.provide(layerKeybindings())),
   );

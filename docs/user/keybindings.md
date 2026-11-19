@@ -191,7 +191,7 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 ## Reserved shortcuts
 
-Use `workspace.tile.closeTab` (`Ctrl+Alt+W`, or `Cmd+W` on macOS) to close the selected tile tab.
+Use `workspace.tile.closeTab` (`Ctrl+Alt+W`, or `Cmd+W` on macOS desktop) to close the selected tile tab.
 Focused terminals keep common shell keys, including `Ctrl+D` for EOF and
 `Ctrl+W` for word erase, and `Ctrl+R` for history search. Use **New tile below/right** to split the workspace;
 each terminal tab contains one shell. On Windows and Linux desktop, `Ctrl+R`
