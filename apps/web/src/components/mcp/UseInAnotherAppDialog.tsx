@@ -61,7 +61,7 @@ const requestAtom = Atom.make<{ readonly environmentId: EnvironmentId | null } |
   Atom.withLabel("mcp:use-in-another-app"),
 );
 
-/** Opens the wizard for `environmentId`, or for the one Sharing & access picks when null. */
+/** Opens the wizard for `environmentId`, or for the default environment when null. */
 export function openUseInAnotherApp(environmentId: EnvironmentId | null): void {
   appAtomRegistry.set(requestAtom, { environmentId });
 }

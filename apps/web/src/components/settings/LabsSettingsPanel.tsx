@@ -148,7 +148,7 @@ function LinkedEnvironmentsRow() {
           Let agents here work on your other machines, and theirs here. Turn it on for each machine,
           then link them in{" "}
           <Link to="/settings/connections" className="underline underline-offset-2">
-            Connections
+            Environments
           </Link>
           . While off, nothing new starts over a link; running tasks finish.
         </>

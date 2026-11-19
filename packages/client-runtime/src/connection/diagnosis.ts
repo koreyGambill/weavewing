@@ -170,7 +170,7 @@ function steps(host: string, located: Located, failure: ConnectionAttemptError |
         failure?._tag === "ConnectionTransientError" ? failure.verificationCode : undefined;
       const approve = code ? `approve the device showing ${code}` : "approve this device";
       return [
-        `On a device already connected to ${host}, open Settings > Sharing & access and ${approve}.`,
+        `On a device already connected to ${host}, open Settings > Privacy and ${approve}.`,
         `Or run \`t3 auth connect-device approve ${code ?? "<code>"}\` on ${host}.`,
       ];
     }
