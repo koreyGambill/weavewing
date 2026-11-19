@@ -248,32 +248,32 @@ export function discardNewSidebarThreadGroup(
   id: string,
 ): SidebarThreadGroups {
   const moved = state.groups.find((group) => group.id === id)?.threadKeys ?? [];
-  const insertAt = (keys: readonly string[], index: number, key: string) => {
-    const next = keys.filter((candidate) => candidate !== key);
-    next.splice(Math.min(index, next.length), 0, key);
-    return next;
+  const remaining = deleteSidebarThreadGroup(state, id);
+  const keysByGroup = new Map(remaining.groups.map((group) => [group.id, [...group.threadKeys]]));
+  const ungrouped = [...remaining.ungroupedOrder];
+  const insertAt = (keys: string[], index: number, key: string) => {
+    const at = keys.indexOf(key);
+    if (at !== -1) keys.splice(at, 1);
+    keys.splice(Math.min(index, keys.length), 0, key);
   };
-  let next = deleteSidebarThreadGroup(state, id);
   for (const key of moved) {
     const from = previous.groups.find((group) => group.threadKeys.includes(key));
-    if (from !== undefined) {
-      const index = from.threadKeys.indexOf(key);
-      next = {
-        ...next,
-        groups: next.groups.map((group) =>
-          group.id === from.id
-            ? { ...group, threadKeys: insertAt(group.threadKeys, index, key) }
-            : group,
-        ),
-      };
+    const fromKeys = from === undefined ? undefined : keysByGroup.get(from.id);
+    if (from !== undefined && fromKeys !== undefined) {
+      insertAt(fromKeys, from.threadKeys.indexOf(key), key);
       continue;
     }
     const index = previous.ungroupedOrder.indexOf(key);
-    if (index !== -1) {
-      next = { ...next, ungroupedOrder: insertAt(next.ungroupedOrder, index, key) };
-    }
+    if (index !== -1) insertAt(ungrouped, index, key);
   }
-  return next;
+  return {
+    ...remaining,
+    groups: remaining.groups.map((group) => ({
+      ...group,
+      threadKeys: keysByGroup.get(group.id) ?? group.threadKeys,
+    })),
+    ungroupedOrder: ungrouped,
+  };
 }
 
 export function renameSidebarThreadGroup(
