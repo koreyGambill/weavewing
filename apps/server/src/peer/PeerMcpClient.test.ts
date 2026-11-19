@@ -4,6 +4,7 @@ import {
   EnvironmentId,
   OrchestrationV2LinkedSender,
   OrchestratorMcpFailure,
+  PeerLinkError,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -18,7 +19,14 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientResponse,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
 
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
@@ -48,7 +56,10 @@ const toolkit = Toolkit.make(
 );
 
 /** One `probe` call to a linked peer at a remote address, answered by `http`. */
-const probeThrough = Effect.fn(function* (http: HttpClient.HttpClient) {
+const probeThrough = Effect.fn(function* (
+  http: HttpClient.HttpClient,
+  url = "https://peer.example",
+) {
   const box = descriptorOf("environment-box", "Box");
   const context = yield* Layer.build(
     PeerMcpClient.layer.pipe(
@@ -61,14 +72,14 @@ const probeThrough = Effect.fn(function* (http: HttpClient.HttpClient) {
                 link: {
                   environmentId: box.environmentId,
                   label: box.label,
-                  urls: ["https://peer.example"],
+                  urls: [url],
                   access: "auto",
                   linkedAt: DateTime.makeUnsafe(0),
                   expiresAt: DateTime.makeUnsafe(1),
                   lastReachedAt: null,
                   lastError: null,
                 },
-                url: "https://peer.example",
+                url,
                 token: "fixture",
                 secretName: "peer-link-test",
               }),
@@ -245,15 +256,23 @@ it.effect("keeps a link healthy when the peer refuses a call", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-it.effect("renews a missing peer session once and reuses its replacement", () =>
+it.effect("renews a missing peer session once, where the link resolves now, and reuses it", () =>
   Effect.gen(function* () {
     const sessionHeaders: Array<string | undefined> = [];
-    const statuses = [200, 202, 404, 200, 202, 200, 200, 200];
+    const origins: Array<string> = [];
+    const statuses = [200, 202, 404, 200, 202, 200, 200, 200, 404];
     const outcomes: Array<string | null> = [];
+    // A long request can outlast its address: renewal goes where the link resolves then.
+    const resolvedAt = [
+      "https://peer.example",
+      ...Array<string>(4).fill("https://moved.example"),
+      undefined,
+    ];
     const http = HttpClient.make((request) =>
       Effect.sync(() => {
         const index = sessionHeaders.length;
         sessionHeaders.push(request.headers["mcp-session-id"]);
+        origins.push(new URL(request.url).origin);
         const status = statuses[index];
         if (status === undefined) throw new Error("Unexpected retry");
         return HttpClientResponse.fromWeb(
@@ -288,22 +307,28 @@ it.effect("renews a missing peer session once and reuses its replacement", () =>
           Layer.mergeAll(
             Layer.succeed(HttpClient.HttpClient, http),
             Layer.mock(PeerLinks.PeerLinks)({
-              resolve: () =>
-                Effect.succeed({
-                  secretName: "peer-link-test",
-                  link: {
-                    environmentId: box.environmentId,
-                    label: box.label,
-                    urls: ["https://peer.example"],
-                    access: "auto",
-                    linkedAt: DateTime.makeUnsafe(0),
-                    expiresAt: DateTime.makeUnsafe(1),
-                    lastReachedAt: null,
-                    lastError: null,
-                  },
-                  url: "https://peer.example",
-                  token: "fixture",
-                }),
+              resolve: () => {
+                const url = resolvedAt.shift();
+                return url === undefined
+                  ? Effect.fail(
+                      new PeerLinkError({ reason: "unreachable", message: "Box answers nowhere." }),
+                    )
+                  : Effect.succeed({
+                      secretName: "peer-link-test",
+                      link: {
+                        environmentId: box.environmentId,
+                        label: box.label,
+                        urls: [url],
+                        access: "auto",
+                        linkedAt: DateTime.makeUnsafe(0),
+                        expiresAt: DateTime.makeUnsafe(1),
+                        lastReachedAt: null,
+                        lastError: null,
+                      },
+                      url,
+                      token: "fixture",
+                    });
+              },
               recordOutcome: (_, outcome) => Effect.sync(() => outcomes.push(outcome.error)),
             }),
           ),
@@ -332,7 +357,18 @@ it.effect("renews a missing peer session once and reuses its replacement", () =>
         success: Result,
       })
       .pipe(Effect.flip);
-    expect(outcomes).toEqual([null, null, empty.message]);
+    // Once no address passes, a renewal sends the token nowhere.
+    const gone = yield* client
+      .call({
+        environmentId: box.environmentId,
+        tool: "probe",
+        arguments: {},
+        limits: { runtimeMode: "approval-required", interactionMode: "plan" },
+        success: Result,
+      })
+      .pipe(Effect.flip);
+    expect(gone.message).toBe("Box answers nowhere.");
+    expect(outcomes).toEqual([null, null, empty.message, gone.message]);
     expect(sessionHeaders).toEqual([
       undefined,
       "old",
@@ -342,8 +378,57 @@ it.effect("renews a missing peer session once and reuses its replacement", () =>
       "renewed",
       "renewed",
       "renewed",
+      "renewed",
+    ]);
+    expect(origins).toEqual([
+      ...Array(3).fill("https://peer.example"),
+      ...Array(6).fill("https://moved.example"),
     ]);
   }),
+);
+
+/** A server of its own answering every request with `handle`, at its origin. */
+const serveRaw = (
+  handle: (
+    request: HttpServerRequest.HttpServerRequest,
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse>,
+) =>
+  Layer.build(Layer.fresh(NodeHttpServer.layerTest)).pipe(
+    Effect.flatMap((server) =>
+      Effect.gen(function* () {
+        yield* HttpServer.serve(Effect.flatMap(HttpServerRequest.HttpServerRequest, handle)).pipe(
+          Layer.build,
+        );
+        const address = (yield* HttpServer.HttpServer).address;
+        if (address._tag === "UnixPathAddress") return yield* Effect.die("expected a TCP address");
+        return `http://127.0.0.1:${address.port}`;
+      }).pipe(Effect.provideContext(server)),
+    ),
+  );
+
+it.effect("never follows a peer's redirect with the link's token", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const received = yield* Ref.make(0);
+      const elsewhere = yield* serveRaw(() =>
+        Ref.update(received, (count) => count + 1).pipe(
+          Effect.as(HttpServerResponse.empty({ status: 404 })),
+        ),
+      );
+      const front = yield* serveRaw((request) =>
+        Effect.succeed(
+          HttpServerResponse.empty({
+            status: 307,
+            headers: { location: `${elsewhere}${request.url}` },
+          }),
+        ),
+      );
+      const http = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
+      const failed = yield* (yield* probeThrough(http, front)).pipe(Effect.flip);
+      expect(failed.message).toContain("HTTP 307");
+      expect(yield* Ref.get(received)).toBe(0);
+    }),
+  ),
 );
 
 it.effect("bounds the session handshake, not a tool call that waits longer", () =>
