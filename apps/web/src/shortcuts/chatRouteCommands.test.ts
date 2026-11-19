@@ -9,6 +9,9 @@ import * as settings from "../hooks/useSettings";
 import * as storage from "../hooks/useLocalStorage";
 import * as threadActions from "../lib/chatThreadActions";
 import * as entities from "../state/entities";
+import * as presentation from "../state/presentation";
+import * as atomRegistry from "../rpc/atomRegistry";
+import * as scratchProject from "../hooks/useScratchProject";
 import * as projectsState from "../state/projects";
 import * as session from "../state/session";
 import { Atom } from "effect/reactivity";
@@ -30,13 +33,14 @@ function project(id: string): Project {
   };
 }
 
+const realGet = atomRegistry.appAtomRegistry.get.bind(atomRegistry.appAtomRegistry);
+
 describe("new thread commands", () => {
   it.each([
-    { mode: "normal", count: 2, command: "chat.new", picker: true },
-    { mode: "boring", count: 2, command: "chat.new", picker: true },
-    { mode: "boring", count: 1, command: "chat.new", picker: true },
-    { mode: "boring", count: 2, command: "chat.newLocal", picker: false },
-  ] as const)("$mode sidebar, $count projects, $command: picker=$picker", (scenario) => {
+    { mode: "normal", count: 2, command: "chat.new", place: "default" },
+    { mode: "boring", count: 1, command: "chat.new", place: "default" },
+    { mode: "boring", count: 2, command: "chat.newLocal", place: "project" },
+  ] as const)("$mode sidebar, $count projects, $command opens the $place", (scenario) => {
     using _settings = vi.spyOn(settings, "getClientSettings").mockReturnValue({
       ...DEFAULT_CLIENT_SETTINGS,
       boringSidebarEnabled: scenario.mode === "boring",
@@ -44,12 +48,23 @@ describe("new thread commands", () => {
     using _projects = vi
       .spyOn(entities, "readProjects")
       .mockReturnValue([project("active"), project("idle")].slice(0, scenario.count));
+    using _connected = vi
+      .spyOn(atomRegistry.appAtomRegistry, "get")
+      .mockImplementation(((atom: unknown) =>
+        atom === presentation.environmentSummaries.connectedEnvironmentIdsAtom
+          ? [EnvironmentId.make("local")]
+          : realGet(atom as never)) as typeof atomRegistry.appAtomRegistry.get);
     using _ready = vi
       .spyOn(projectsState, "defaultProjectFallbackReadyAtom")
       .mockReturnValue(Atom.make(true));
     using storedProject = vi.spyOn(storage, "getLocalStorageItem").mockReturnValue("local:active");
     using openPicker = vi.spyOn(commandPalette, "openCommandPalette").mockImplementation(() => {});
     using startLocal = vi.spyOn(threadActions, "startNewThreadFromContext").mockResolvedValue(true);
+    const startDefaultPlace = vi.fn();
+    const actual = scratchProject.createScratchProjectActions;
+    using _scratch = vi
+      .spyOn(scratchProject, "createScratchProjectActions")
+      .mockImplementation((input) => ({ ...actual(input), startDefaultPlace }));
     using register = vi.spyOn(dispatcher, "registerCommands").mockReturnValue(() => {});
     const router = { state: { matches: [] } } as unknown as AnyRouter;
     using stack = new DisposableStack();
@@ -63,11 +78,13 @@ describe("new thread commands", () => {
     storedProject.mockReturnValue("local:idle");
     commands[scenario.command]!(event);
 
-    if (scenario.picker) {
-      expect(openPicker).toHaveBeenCalledWith({ open: "new-thread-in" });
+    // Nothing to answer first: neither command stops at the palette's picker.
+    expect(openPicker).not.toHaveBeenCalled();
+    if (scenario.place === "default") {
+      expect(startDefaultPlace).toHaveBeenCalledOnce();
       expect(startLocal).not.toHaveBeenCalled();
     } else {
-      expect(openPicker).not.toHaveBeenCalled();
+      expect(startDefaultPlace).not.toHaveBeenCalled();
       expect(startLocal).toHaveBeenCalledOnce();
       expect(startLocal.mock.calls[0]![0].defaultProjectRef).toEqual({
         environmentId: "local",

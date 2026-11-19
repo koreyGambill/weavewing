@@ -17,8 +17,9 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readProjects, readThreadShell } from "../state/entities";
+import { readEnvironments } from "../state/environments";
 import { defaultProjectFallbackReadyAtom } from "../state/projects";
-import { environmentPresentations } from "../state/presentation";
+import { environmentSummaries } from "../state/presentation";
 import { readPreferredEnvironmentId } from "../state/preferredEnvironment";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { readEnvironmentScope } from "../state/session";
@@ -39,10 +40,7 @@ const CHAT_ROUTE_ID = "/_chat";
 export function installChatRouteCommands(router: AnyRouter): () => void {
   const handleNewThread = createNewThreadHandler(router);
   const scratch = createScratchProjectActions({
-    environments: () =>
-      [...appAtomRegistry.get(environmentPresentations.presentationsAtom)].map(
-        ([environmentId, presentation]) => ({ ...presentation, environmentId }),
-      ),
+    environments: readEnvironments,
     primaryEnvironmentId: () => appAtomRegistry.get(primaryEnvironmentIdAtom),
     preferredEnvironmentId: readPreferredEnvironmentId,
     registry: appAtomRegistry,
@@ -88,6 +86,10 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         lastUsedProjectKey,
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
         readPreferredEnvironmentId(),
+        (environmentId) =>
+          appAtomRegistry
+            .get(environmentSummaries.connectedEnvironmentIdsAtom)
+            .includes(environmentId),
       ),
       handleNewThread,
     };
@@ -100,11 +102,18 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     event.stopPropagation();
   };
 
+  const startDefaultPlace = () => {
+    const { activeThread, activeDraftThread } = readThreadContext();
+    scratch.startDefaultPlace(
+      activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null,
+    );
+  };
+
   const startNewLocal: CommandHandler = (event) => {
     claim(event);
-    // With no current or open project, such as when every project is archived, pick one.
+    // With no current or open project, such as when every project is archived, start in the default place.
     void startNewThreadFromContext(readThreadContext()).then((started) => {
-      if (!started) openCommandPalette({ open: "new-thread-in" });
+      if (!started) startDefaultPlace();
     });
   };
 
@@ -126,11 +135,11 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         );
         if (choice.kind === "none") return;
         claim(event);
-        scratch.startScratchChoice(choice);
+        startDefaultPlace();
       },
       "chat.new": (event) => {
         claim(event);
-        openCommandPalette({ open: "new-thread-in" });
+        startDefaultPlace();
       },
       "preview.toggle": (event) => {
         claim(event);

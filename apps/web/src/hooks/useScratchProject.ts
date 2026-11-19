@@ -47,7 +47,7 @@ function reportScratchFailure(title: string, error: unknown) {
   );
 }
 
-type ScratchEnvironment = Pick<EnvironmentPresentation, "connection" | "serverConfig"> & {
+type ScratchEnvironment = Pick<EnvironmentPresentation, "connection" | "serverConfig" | "label"> & {
   readonly environmentId: EnvironmentId;
 };
 
@@ -84,25 +84,29 @@ function createScratchLookup(input: ScratchLookupInput) {
       isKnown: (environmentId) =>
         [...input.environments()].some((entry) => entry.environmentId === environmentId),
       isUsable: (environmentId) => scratchWorkspaceRootFor(environmentId) !== null,
-      fallback: () => {
-        const primary = input.primaryEnvironmentId();
-        if (primary !== null && scratchWorkspaceRootFor(primary) !== null) return primary;
-        if (fallback !== null && scratchWorkspaceRootFor(fallback) !== null) return fallback;
-        const offering = [...input.environments()].filter(
-          (entry) => scratchWorkspaceRootFor(entry.environmentId) !== null,
-        );
-        return offering.length === 1 ? (offering[0]?.environmentId ?? null) : null;
-      },
+      fallback: () => fallbackScratchEnvironmentId(fallback),
     });
+
+  const fallbackScratchEnvironmentId = (fallback: EnvironmentId | null): EnvironmentId | null => {
+    const primary = input.primaryEnvironmentId();
+    if (primary !== null && scratchWorkspaceRootFor(primary) !== null) return primary;
+    if (fallback !== null && scratchWorkspaceRootFor(fallback) !== null) return fallback;
+    const offering = [...input.environments()].filter(
+      (entry) => scratchWorkspaceRootFor(entry.environmentId) !== null,
+    );
+    return offering.length === 1 ? (offering[0]?.environmentId ?? null) : null;
+  };
 
   const scratchEnvironmentId = (fallback: EnvironmentId | null): EnvironmentId | null =>
     chosenEnvironmentId(scratchEnvironmentChoice(fallback));
 
   return {
+    environmentFor,
     scratchWorkspaceRootFor,
     scratchWorkspaceLabelFor,
     scratchEnvironmentChoice,
     scratchEnvironmentId,
+    fallbackScratchEnvironmentId,
   };
 }
 
@@ -143,18 +147,39 @@ export function createScratchProjectActions(
     }
   };
 
-  // The palette's default-folder row lets the user pick another machine.
-  const startScratchChoice = (choice: WorkEnvironmentChoice<EnvironmentId>) => {
-    if (choice.kind === "none") return;
-    if (choice.kind === "preferred-unavailable") openCommandPalette({ open: "new-thread-in" });
-    else void startScratchThread(choice.environmentId);
+  /**
+   * Opens a new thread in the default place: the default folder on the preferred machine.
+   * An offline preferred machine hands over to the fallback with a notice, never silently.
+   */
+  const startDefaultPlace = (fallback: EnvironmentId | null) => {
+    const choice = lookup.scratchEnvironmentChoice(fallback);
+    if (choice.kind === "chosen") {
+      void startScratchThread(choice.environmentId);
+      return;
+    }
+    const other =
+      choice.kind === "preferred-unavailable"
+        ? lookup.fallbackScratchEnvironmentId(fallback)
+        : null;
+    if (choice.kind === "preferred-unavailable" && other !== null) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: `${lookup.environmentFor(choice.environmentId)?.label ?? "Your default machine"} is offline`,
+          description: `This thread starts on ${lookup.environmentFor(other)?.label ?? "another machine"} instead.`,
+        }),
+      );
+      void startScratchThread(other);
+      return;
+    }
+    openCommandPalette({ open: "new-thread-in" });
   };
 
   return {
     ...lookup,
     openScratchProject,
     startScratchThread,
-    startScratchChoice,
+    startDefaultPlace,
   };
 }
 

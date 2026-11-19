@@ -13,6 +13,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useScratchProject } from "../hooks/useScratchProject";
 import {
   readProject,
   useAllEnvironmentShellsBootstrapped,
@@ -50,20 +51,47 @@ function IndexDraftLanding() {
       threads,
       "updated_at",
     )[0] ?? null;
+  const { scratchEnvironmentChoice, fallbackScratchEnvironmentId, openScratchProject } =
+    useScratchProject();
+  const defaultChoice = scratchEnvironmentChoice(null);
+  // The default place: the default folder on the preferred machine, or on the fallback while it is offline.
+  const defaultEnvironmentId =
+    defaultChoice.kind === "chosen"
+      ? defaultChoice.environmentId
+      : defaultChoice.kind === "preferred-unavailable"
+        ? fallbackScratchEnvironmentId(null)
+        : null;
+  const hasStartTarget = defaultEnvironmentId !== null || mostRecentProject !== null;
   const attempt = startState.retryRequest;
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts a draft thread in the most recent project and navigates to it while still on the index
+  const openStartDraft = useEffectEvent(async () => {
+    if (defaultEnvironmentId !== null) {
+      const project = await openScratchProject(defaultEnvironmentId);
+      // A null result means the folder could not open; retrying would only fail again.
+      if (project === null) throw new Error("The default folder could not open.");
+      return handleNewThread(scopeProjectRef(project.environmentId, project.id), { replace: true });
+    }
+    if (mostRecentProject === null) return null;
+    return handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
+      replace: true,
+    });
+  });
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts a draft thread in the default place and navigates to it while still on the index
   useEffect(() => {
     // Starting a draft after the user has left would replace the page they picked.
-    if (mostRecentProject === null || startedAttemptRef.current === attempt || !isStillOnIndex()) {
+    if (!hasStartTarget || startedAttemptRef.current === attempt || !isStillOnIndex()) {
       return;
     }
-    const projectRef = scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id);
-    if (readProject(projectRef) === null) {
+    if (
+      defaultEnvironmentId === null &&
+      mostRecentProject !== null &&
+      readProject(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id)) === null
+    ) {
       return;
     }
     startedAttemptRef.current = attempt;
-    void handleNewThread(projectRef, { replace: true })
+    void openStartDraft()
       .then((opened) => {
         if (opened === null) {
           setStartState((state) => ({ ...state, retryRequest: state.retryRequest + 1 }));
@@ -72,9 +100,9 @@ function IndexDraftLanding() {
       .catch(() => {
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [attempt, handleNewThread, mostRecentProject]);
+  }, [attempt, defaultEnvironmentId, hasStartTarget, mostRecentProject]);
 
-  if (mostRecentProject !== null) {
+  if (hasStartTarget) {
     return startState.failed ? (
       <DraftStartError
         onRetry={() => {
