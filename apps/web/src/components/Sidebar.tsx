@@ -248,6 +248,9 @@ import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarT
 import { readScratchProjectActions, useDefaultPlace } from "../hooks/useScratchProject";
 import { useCatalogEnvironmentIds, useEnvironments } from "../state/environments";
 import { settingsScopeEnvironmentLabel } from "./settings/settingsScopeAxis";
+import { isEnvironmentOnThisComputer } from "../connection/desktopLocal";
+import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { SidebarComputerLocalityIcon } from "./sidebar/SidebarComputerLocalityIcon";
 import { CheckboxMark } from "./ui/checkbox";
 import {
   groupSidebarComputers,
@@ -1120,7 +1123,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     environmentId: environment.environmentId,
     label: settingsScopeEnvironmentLabel(environment, filterEnvironments),
     computer: serverConfigs.get(environment.environmentId)?.hostname ?? null,
+    onThisComputer: isEnvironmentOnThisComputer(
+      environment.entry.target,
+      window.desktopBridge !== undefined,
+    ),
   }));
+  const localComputerEnvironmentIds = new Set(
+    computerFilterServers
+      .filter((server) => server.onThisComputer)
+      .map((server) => server.environmentId),
+  );
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
     { open: false, query: "" },
@@ -3649,16 +3661,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             </div>
                             {computer.servers.map((server) => {
                               const chosen = environmentScope?.has(server.environmentId) ?? false;
+                              const localityLabel = server.onThisComputer
+                                ? "On this computer"
+                                : "On another computer";
                               return (
                                 <button
                                   key={server.environmentId}
                                   type="button"
                                   aria-pressed={chosen}
+                                  aria-label={server.label}
+                                  aria-description={localityLabel}
                                   onClick={() => toggleEnvironmentScopeId(server.environmentId)}
                                   className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                                 >
                                   <CheckboxMark checked={chosen} />
-                                  <span className="min-w-0 truncate">{server.label}</span>
+                                  <EnvironmentMachineIcon
+                                    aria-hidden
+                                    kind={
+                                      environmentMachineById.get(server.environmentId) ?? "server"
+                                    }
+                                    className="size-3.5 shrink-0 text-muted-foreground"
+                                  />
+                                  <span className="min-w-0 flex-1 truncate">{server.label}</span>
+                                  <SidebarComputerLocalityIcon
+                                    onThisComputer={server.onThisComputer}
+                                    label={localityLabel}
+                                  />
                                 </button>
                               );
                             })}
@@ -3995,7 +4023,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
-                            currentEnvironmentId={primaryEnvironmentId}
+                            onThisComputer={localComputerEnvironmentIds.has(thread.environmentId)}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null
                             }

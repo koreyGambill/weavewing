@@ -40,7 +40,6 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
-  ArrowUpRightIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -86,6 +85,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { SidebarComputerLocalityIcon } from "./SidebarComputerLocalityIcon";
 import {
   animateSidebarLayoutChanges,
   hasUnseenCompletion,
@@ -613,7 +613,7 @@ type SidebarThreadRowProps = {
   // Read at click time; a prop would re-render every row on entering or leaving a thread route.
   readOpensPullRequestsInRightPanel: () => boolean;
   jumpLabel: string | null;
-  currentEnvironmentId: string | null;
+  onThisComputer: boolean;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   scratchMachineLabel: string | null;
@@ -878,9 +878,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
 
-  // Matches the composer's External badge: anything but this client's primary environment.
-  const isExternal = thread.environmentId !== props.currentEnvironmentId;
-  const externalLabel = isExternal ? `On ${props.environmentLabel ?? "another machine"}` : null;
+  const localityLabel = props.onThisComputer
+    ? "On this computer"
+    : props.environmentLabel
+      ? `On another computer · ${props.environmentLabel}`
+      : "On another computer";
   const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
@@ -1069,7 +1071,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     statusLabel: topStatus?.label ?? null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
-    externalLabel,
+    localityLabel,
   });
 
   const title = isRenaming ? (
@@ -1136,7 +1138,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           prText: prPresentation === null ? null : String(prPresentation.text),
           hasTerminal,
           hasAutomation: Boolean(thread.automationTaskId),
-          isExternal,
           providerCount: providerStack.length,
         })
       : null;
@@ -1221,28 +1222,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   ) : null;
 
   // Cards have no branch line, so the scratch machine label never names the machine there.
-  const remoteMachineIcon =
-    isExternal && (variant === "card" || !showsScratchMachine) ? (
+  const machineIcon =
+    variant === "card" || !showsScratchMachine ? (
       <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
         <EnvironmentMachineIcon aria-hidden kind={props.environmentMachine} className="size-3.5" />
       </span>
     ) : null;
-  const externalMarker = externalLabel ? (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            role="img"
-            aria-label={externalLabel}
-            className="inline-flex shrink-0 items-center text-warning-foreground"
-          />
-        }
-      >
-        <ArrowUpRightIcon aria-hidden className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{externalLabel}</TooltipPopup>
-    </Tooltip>
-  ) : null;
+  const computerLocalityIcon = (
+    <SidebarComputerLocalityIcon onThisComputer={props.onThisComputer} label={localityLabel} />
+  );
   const diff = latestRunDiff(thread);
   // Only the trailing icons would remain, so the row moves them to the title line instead.
   const metaLineEmpty =
@@ -1257,7 +1245,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       aria-hidden
       className={cn("pointer-events-none inline-flex shrink-0 items-center gap-1", className)}
     >
-      {remoteMachineIcon}
+      {machineIcon}
       <SidebarProviderStack
         stack={providerStack}
         providerEntryByInstanceId={props.providerEntryByInstanceId}
@@ -1309,14 +1297,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         </>,
       )}
       {automationMarker}
-      {externalMarker}
+      {computerLocalityIcon}
     </div>
   );
   const titleLineIcons = metaLineEmpty ? (
     <>
       {clippedIndicators(decorationIcons())}
       {automationMarker}
-      {externalMarker}
+      {computerLocalityIcon}
     </>
   ) : null;
 
@@ -1379,6 +1367,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {draftIndicator}
               {title}
               {multiline ? titleLineIcons : automationMarker}
+              {multiline ? null : computerLocalityIcon}
               {pinIndicator}
               {multiline ? null : terminalStatusIcon}
               {isRegeneratingTitle ? (
@@ -1733,7 +1722,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </>,
               )}
               {automationMarker}
-              {externalMarker}
+              {computerLocalityIcon}
             </div>
           </div>
         </TooltipTrigger>
@@ -1743,7 +1732,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
-// Glyph, 3rem title, PR icon, automation button and external arrow with their gaps, plus a card's
+// Glyph, 3rem title, PR icon, automation button and locality arrow with their gaps, plus a card's
 // 10px content inset on each side.
 const ROW_MIN_WIDTH = 136 + 20;
 
@@ -1790,12 +1779,10 @@ function resolveCardTitleLineLayout(input: {
   prText: string | null;
   hasTerminal: boolean;
   hasAutomation: boolean;
-  isExternal: boolean;
   providerCount: number;
 }) {
   const gap = 6;
-  const fixed =
-    20 + gap + 48 + (input.hasAutomation ? gap + 14 : 0) + (input.isExternal ? gap + 14 : 0);
+  const fixed = 20 + gap + 48 + (input.hasAutomation ? gap + 14 : 0) + gap + 14;
   const group = (...items: ReadonlyArray<number | null>) => {
     const present = items.filter((item) => item !== null);
     if (present.length === 0) return 0;
@@ -1804,8 +1791,7 @@ function resolveCardTitleLineLayout(input: {
   const terminal = input.hasTerminal ? 14 : null;
   const prIcon = input.prText === null ? null : 12;
   const prFull = input.prText === null ? null : 12 + 2 + 8 * input.prText.length;
-  const decoration =
-    (input.isExternal ? 14 + 4 : 0) + 14 + 18 * (Math.max(input.providerCount, 1) - 1);
+  const decoration = 14 + 4 + 14 + 18 * (Math.max(input.providerCount, 1) - 1);
   return {
     decoration: cardTitleLineBreakpoint(fixed + group(terminal, prFull, decoration)),
     prNumber: cardTitleLineBreakpoint(fixed + group(terminal, prFull)),
