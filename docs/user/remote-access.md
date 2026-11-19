@@ -302,10 +302,12 @@ such as `user@example.com`. T3 Code starts or reuses a server there and opens
 the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
-The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
-`tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
-The first launch downloads T3 Code's server to `~/.t3/runtime` on the host, so
-it takes longer than later ones.
+If the T3 Code desktop app is open on that computer, the connection uses the
+app's server and installs nothing. Otherwise the remote
+host must be Linux or an Apple Silicon Mac with `curl` or `wget`, `tar`,
+`sha256sum` or `shasum`, and [provider setup](./install.md#providers). The
+first launch downloads the server matching your app's version to
+`~/.t3/runtime` on the host, so it takes longer than later ones.
 Provider CLIs must be on the `PATH` of a non-interactive login shell there;
 check with:
 

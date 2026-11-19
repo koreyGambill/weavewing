@@ -103,18 +103,18 @@ describe("parseManualDesktopSshTarget", () => {
 describe("formatDesktopSshConnectionError", () => {
   const download = (curl: string) =>
     new Error(
-      `Could not prepare the SSH environment: Error invoking remote method 'desktop:ensure-ssh-environment': SshCommandError: ${curl} Could not download t3 0.1.9 from https://github.com/koreyGambill/weavewing/releases/download/weavewing-v0.1.9/SHA256SUMS. If this host cannot reach it, install t3 0.1.9`,
+      `Could not prepare the SSH environment: Error invoking remote method 'desktop:ensure-ssh-environment': SshCommandError: ${curl}\nCould not download t3 0.1.9 from https://github.com/koreyGambill/weavewing/releases/download/weavewing-v0.1.9/SHA256SUMS. If this host cannot reach it, install t3 0.1.9 from https://github.com/koreyGambill/weavewing/releases.\nNo running T3 Code desktop app was found in /Users/me/.t3 to connect to instead. Open the app on this host and retry.`,
     );
   it.each([
     [
       "a version with no published server",
       download("curl: (56) The requested URL returned error: 404"),
-      "This build of Weavewing (0.1.9) has no published server to install over SSH. If Weavewing is already running on that computer, connect with a link and code instead.",
+      "This build of Weavewing (0.1.9) has no published server to install over SSH, and no running Weavewing was found on that computer. Open Weavewing there and retry, or connect with a link and code.",
     ],
     [
       "a host that cannot reach the download",
       download("curl: (6) Could not resolve host: github.com"),
-      "That computer could not download Weavewing 0.1.9. If Weavewing is already running there, connect with a link and code instead.",
+      "That computer could not download Weavewing 0.1.9, and no running Weavewing was found there. Open Weavewing there and retry, or connect with a link and code.",
     ],
     [
       "any other failure, without the bridge's prefixes",

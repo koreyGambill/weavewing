@@ -311,8 +311,8 @@ export function formatDesktopSshConnectionError(error: unknown): string {
   if (missingRelease !== null) {
     const notPublished = /\berror: 404\b/u.test(rawMessage);
     return notPublished
-      ? `This build of Weavewing (${missingRelease[1]}) has no published server to install over SSH. If Weavewing is already running on that computer, connect with a link and code instead.`
-      : `That computer could not download Weavewing ${missingRelease[1]}. If Weavewing is already running there, connect with a link and code instead.`;
+      ? `This build of Weavewing (${missingRelease[1]}) has no published server to install over SSH, and no running Weavewing was found on that computer. Open Weavewing there and retry, or connect with a link and code.`
+      : `That computer could not download Weavewing ${missingRelease[1]}, and no running Weavewing was found there. Open Weavewing there and retry, or connect with a link and code.`;
   }
   const withoutIpcPrefix = rawMessage.replace(
     /^Error invoking remote method 'desktop:ensure-ssh-environment':\s*/u,
