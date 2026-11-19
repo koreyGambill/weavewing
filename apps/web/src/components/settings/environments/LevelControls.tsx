@@ -143,11 +143,17 @@ export function SquareChangeStatus({
     );
   }
   const error = change.errors.get(key);
-  return error ? (
-    <p className="mt-1.5 text-xs text-destructive" role="alert">
-      {error}
-    </p>
-  ) : null;
+  if (!error) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs" role="alert">
+      <span className="basis-full text-destructive">{error}</span>
+      {change.uncertain.has(key) ? (
+        <Button size="xs" variant="default" onClick={() => change.linkAgain(key)}>
+          Link again
+        </Button>
+      ) : null}
+    </div>
+  );
 }
 
 /** The level buttons for one square, in a fixed order so nothing moves after a click. */

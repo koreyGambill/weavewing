@@ -5,7 +5,8 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Result from "effect/Result";
-import { useState } from "react";
+import { RegistryContext } from "@effect/atom-react";
+import { useContext, useState } from "react";
 
 import { desktopSameHostEnvironmentIds } from "~/connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "~/connection/useDesktopLocalBootstraps";
@@ -14,9 +15,11 @@ import { useEnvironments } from "~/state/environments";
 import { mintPairingCodeOn } from "~/state/peerPairingCode";
 import { peerLinkEnvironment } from "~/state/peerLinks";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { runRelink } from "./relink.logic";
 import {
   type LinkLevelChoice,
   planSquareChange,
+  REACH_LEVEL_LABELS,
   type ReachSquare,
   type SquareChangePlan,
   type SquareTarget,
@@ -32,6 +35,9 @@ export interface SquareChangeState {
   readonly request: (square: ReachSquare, target: SquareTarget) => void;
   readonly confirm: () => void;
   readonly cancel: () => void;
+  /** Lines whose link may have changed on the target while saving it here failed. */
+  readonly uncertain: ReadonlySet<string>;
+  readonly linkAgain: (key: string) => void;
   /** Applies at once and settles to the failure, or null. */
   readonly applyNow: (square: ReachSquare, target: SquareTarget) => Promise<string | null>;
 }
@@ -45,8 +51,8 @@ const keyOf = (square: ReachSquare) => `${square.from.id}>${square.to.id}`;
 
 /**
  * Changes one "From X to Y" line. Raising relinks X with a fresh code from Y; removing ends
- * the sessions on Y and forgets the link on X when this app may. A half-done change says
- * which half failed, and leaves the old state standing.
+ * the sessions on Y and forgets the link on X when this app may. A relink that fails once Y may
+ * have changed says the access is uncertain and offers to link again.
  */
 export function useSquareChange(): SquareChangeState {
   const { environments } = useEnvironments();
@@ -57,6 +63,10 @@ export function useSquareChange(): SquareChangeState {
   const [pending, setPending] = useState<SquareChangeState["pending"]>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  const [uncertain, setUncertain] = useState<
+    ReadonlyMap<string, { readonly square: ReachSquare; readonly target: LinkLevelChoice }>
+  >(new Map());
+  const registry = useContext(RegistryContext);
 
   const setError = (key: string, message: string | null) =>
     setErrors((current) => {
@@ -78,30 +88,51 @@ export function useSquareChange(): SquareChangeState {
   const relink = async (square: ReachSquare, target: LinkLevelChoice) => {
     const fromId = square.from.environmentId!;
     const toId = square.to.environmentId!;
-    const from = square.from.label;
-    const to = square.to.label;
     const [url, ...alternateUrls] =
       square.link !== null && square.link.urls.length > 0
         ? square.link.urls
         : targetUrls(fromId, toId);
-    if (url === undefined) return `${from} has no address for ${to}. Nothing changed.`;
-    const code = await mintPairingCodeOn(toId, target);
-    if (Result.isFailure(code)) {
-      return `Could not get a code from ${to}: ${linkRequestFailureMessage(code.failure)} Nothing changed.`;
-    }
-    const linked = await link({
-      environmentId: fromId,
-      input: {
-        url,
-        ...(alternateUrls.length > 0 ? { alternateUrls } : {}),
-        expectedEnvironmentId: toId,
-        expectedLabel: to,
-        pairingCode: code.success,
-        access: target,
+    const outcome = await runRelink({
+      from: square.from.label,
+      to: square.to.label,
+      current: square.state.kind === "level" ? REACH_LEVEL_LABELS[square.state.level] : "no access",
+      hasAddress: url !== undefined,
+      mint: async () => {
+        const code = await mintPairingCodeOn(toId, target);
+        return Result.isSuccess(code)
+          ? { code: code.success }
+          : { failure: linkRequestFailureMessage(code.failure) };
+      },
+      link: async (pairingCode) => {
+        const linked = await link({
+          environmentId: fromId,
+          input: {
+            url: url!,
+            ...(alternateUrls.length > 0 ? { alternateUrls } : {}),
+            expectedEnvironmentId: toId,
+            expectedLabel: square.to.label,
+            pairingCode,
+            access: target,
+          },
+        });
+        return linked._tag === "Success" || isAtomCommandInterrupted(linked)
+          ? null
+          : { failure: failureText(linked) };
       },
     });
-    if (linked._tag === "Success" || isAtomCommandInterrupted(linked)) return null;
-    return `${to} issued a code, but ${from} could not link: ${failureText(linked)} The old level still applies, and the unused code expires on its own.`;
+    const key = keyOf(square);
+    if (outcome.kind === "uncertain") {
+      // Read the source's links again so the page shows what it holds now, not the old level.
+      registry.refresh(peerLinkEnvironment.list({ environmentId: fromId, input: {} }));
+      setUncertain((current) => new Map(current).set(key, { square, target }));
+    } else {
+      setUncertain((current) => {
+        const next = new Map(current);
+        next.delete(key);
+        return next;
+      });
+    }
+    return outcome.kind === "done" ? null : outcome.message;
   };
 
   const remove = async (square: ReachSquare) => {
@@ -173,5 +204,27 @@ export function useSquareChange(): SquareChangeState {
     return plan.reason;
   };
 
-  return { pending, busyKey, errors, request, confirm, cancel, applyNow };
+  // The one way out of an uncertain link: link again at the level that was asked for.
+  const linkAgain = (key: string) => {
+    const entry = uncertain.get(key);
+    if (entry !== undefined)
+      void run(entry.square, {
+        kind: "apply",
+        action: "relink",
+        target: entry.target,
+        sentence: null,
+      });
+  };
+
+  return {
+    pending,
+    busyKey,
+    errors,
+    uncertain: new Set(uncertain.keys()),
+    request,
+    confirm,
+    cancel,
+    applyNow,
+    linkAgain,
+  };
 }

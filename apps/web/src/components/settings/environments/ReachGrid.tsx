@@ -153,6 +153,7 @@ export function ReachGrid({
                           <SquareCell
                             store={store}
                             square={square}
+                            uncertain={change.uncertain.has(squareKey(row.id, column.id))}
                             cells={cells}
                             tabbable={rowIndex === activeRow && columnIndex === activeColumn}
                             onActivate={() => setActive({ row: rowIndex, column: columnIndex })}
@@ -274,12 +275,15 @@ function PartyName({ label }: { readonly label: string }) {
 function SquareCell({
   store,
   square,
+  uncertain,
   cells,
   tabbable,
   onActivate,
 }: {
   readonly store: PopupStore;
   readonly square: ReachSquare;
+  /** A relink failed after the target may have changed, so the level shown may be wrong. */
+  readonly uncertain: boolean;
   readonly cells: RefObject<Map<string, HTMLButtonElement>>;
   readonly tabbable: boolean;
   readonly onActivate: () => void;
@@ -300,7 +304,7 @@ function SquareCell({
       type="button"
       data-square={key}
       tabIndex={tabbable ? 0 : -1}
-      aria-label={squareSentence(square)}
+      aria-label={uncertain ? `${squareSentence(square)}, uncertain` : squareSentence(square)}
       className={cn(
         "block w-full py-1.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         state.kind === "no-path" && "bg-muted/60 text-muted-foreground",
@@ -323,7 +327,7 @@ function SquareCell({
         if (!self) store.getState().show(focus, event.currentTarget, true);
       }}
     >
-      <SquareGlyph state={state} />
+      <SquareGlyph state={uncertain ? { kind: "unknown", reason: "" } : state} />
     </button>
   );
 }

@@ -56,6 +56,8 @@ function setup() {
     confirm: vi.fn(),
     cancel: vi.fn(),
     applyNow: vi.fn(),
+    uncertain: new Set(),
+    linkAgain: vi.fn(),
   };
   const model = buildReachModel({
     servers: [

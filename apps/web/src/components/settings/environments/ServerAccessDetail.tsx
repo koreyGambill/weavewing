@@ -30,6 +30,7 @@ import {
   REACH_LEVEL_LABELS,
   type ReachModel,
   type ReachSquare,
+  squareKey,
 } from "./reachModel.logic";
 import type { ReachServer } from "./useReachModel";
 import type { SquareChangeState } from "./useSquareChange";
@@ -53,8 +54,9 @@ export function accessSummary(model: ReachModel, server: ReachServer): string {
     .join(" · ");
 }
 
-function levelText(square: ReachSquare) {
+function levelText(square: ReachSquare, change: SquareChangeState) {
   const { state } = square;
+  if (change.uncertain.has(squareKey(square.from.id, square.to.id))) return "Uncertain";
   if (state.kind !== "level") return "";
   const broken =
     state.broken === "expired" ? " · expired" : state.broken === "unauthorized" ? " · refused" : "";
@@ -95,7 +97,7 @@ export function AccessLine({
               aria-label={`Level for ${name}`}
               disabled={busy}
             >
-              <SelectValue>{levelText(square)}</SelectValue>
+              <SelectValue>{levelText(square, change)}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
               {LINK_LEVEL_CHOICES.map((option) => (
@@ -106,7 +108,7 @@ export function AccessLine({
             </SelectPopup>
           </Select>
         ) : (
-          <span className="w-44 text-xs text-muted-foreground">{levelText(square)}</span>
+          <span className="w-44 text-xs text-muted-foreground">{levelText(square, change)}</span>
         )}
         <span className="flex w-20 justify-end">
           {changes.canRemove ? (
@@ -147,7 +149,7 @@ function OutgoingLine({
           <span className="truncate">{name}</span>
           <ArrivalTag square={square} />
         </span>
-        <span className="w-44 text-xs">{levelText(square)}</span>
+        <span className="w-44 text-xs">{levelText(square, change)}</span>
         <span className="flex w-20 justify-end">
           {square.changes.canRemove ? (
             <Button
