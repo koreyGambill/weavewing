@@ -161,13 +161,13 @@ function grants(session: AuthClientSession, scope: AuthEnvironmentScope): boolea
 }
 
 /** The level a link session holds, which its scopes only tell apart at the ends. */
-export function linkSessionLevel(session: AuthClientSession): ReachLevel {
+function linkSessionLevel(session: AuthClientSession): ReachLevel {
   if (!grants(session, AuthOrchestrationOperateScope)) return "read-only";
   return grants(session, AuthSettingsWriteScope) ? "full-access" : "can-change";
 }
 
 /** Full access manages who else has access; anything short of it is hand-picked. */
-export function deviceLevel(scopes: ReadonlyArray<AuthEnvironmentScope>): ReachLevel {
+function deviceLevel(scopes: ReadonlyArray<AuthEnvironmentScope>): ReachLevel {
   if (!scopes.includes(AuthOrchestrationOperateScope)) return "read-only";
   return scopes.includes(AuthAccessWriteScope) ? "full-access" : "custom";
 }
