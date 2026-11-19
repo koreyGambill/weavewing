@@ -125,6 +125,12 @@ export function createTerminalEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    move: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:terminal:move",
+      tag: WS_METHODS.terminalMove,
+      scheduler: lifecycleScheduler,
+      concurrency: lifecycleConcurrency,
+    }),
   };
   return {
     ...atoms,

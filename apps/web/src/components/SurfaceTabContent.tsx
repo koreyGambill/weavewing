@@ -47,6 +47,7 @@ import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "./pullRequest/pullRequestIcons";
+import type { TerminalMoveMenu } from "./terminal/useTerminalMoveMenus";
 
 export interface TileSurfaceActions {
   keybindings: ResolvedKeybindingsConfig;
@@ -92,6 +93,8 @@ export interface TileSurfaceActions {
   /** Overrides the default reason while side chats are available but cannot start. */
   sideChatDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
+  /** Moves a terminal tab's live session to another workspace; absent where none is offered. */
+  terminalMoveMenu?: ((terminalId: string) => TerminalMoveMenu | null) | undefined;
 }
 
 export interface PullRequestTabStatus {

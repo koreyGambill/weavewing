@@ -42,6 +42,7 @@ import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { CONVERSATION_TAB_ID } from "../threadTileLayout";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
 import type { TileSurfaceActions } from "./SurfaceTabContent";
+import { useMoveToThreadMenu } from "./terminal/useTerminalMoveMenus";
 import { useThreadTerminalActions } from "./terminal/useThreadTerminalActions";
 import ThreadTerminalTile from "./ThreadTerminalTile";
 import { Button } from "./ui/button";
@@ -247,6 +248,7 @@ function DropdownTerminalWorkspace({
     ]),
   );
   const terminalActions = useThreadTerminalActions(ref);
+  const moveMenu = useMoveToThreadMenu({ dropdownRef: ref, machine: folder.machine });
   const close = useRightPanelSurfaceClose({ threadRef: ref, terminalLabelsById });
 
   const addTerminal = () => {
@@ -328,6 +330,7 @@ function DropdownTerminalWorkspace({
     pullRequestAvailable: false,
     pullRequestsAvailable: false,
     deviceAvailable: false,
+    terminalMoveMenu: moveMenu,
   };
 
   const header = (
@@ -377,6 +380,7 @@ function DropdownTerminalWorkspace({
             )}
             keybindings={keybindings}
             onCloseTerminal={closeExited}
+            moveMenu={moveMenu(surface.resourceId)}
           />
         ) : null
       }

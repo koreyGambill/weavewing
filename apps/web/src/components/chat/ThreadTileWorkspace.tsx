@@ -18,6 +18,7 @@ import {
 import {
   Check,
   Columns2,
+  ArrowRightFromLine,
   ArrowRightLeft,
   ChevronLeft,
   ChevronRight,
@@ -77,6 +78,7 @@ import { useTheme } from "../../hooks/useTheme";
 import { useThreadRelationshipShells } from "../../state/entities";
 import { observeResize } from "../../lib/observeResize";
 import { SurfaceIcon, surfaceTitle, type TileSurfaceActions } from "../SurfaceTabContent";
+import type { TerminalMoveMenu } from "../terminal/useTerminalMoveMenus";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -1217,6 +1219,13 @@ export function ThreadTileWorkspace(props: {
             const chooserSelection =
               chooserIndex?.groupId === id ? chooserIndex.index : firstOpenable;
             const chooserActive = focusedGroupId === id || visibleGroups.length === 1;
+            const activeSurface = props.panels.surfaces.find(
+              (entry) => entry.id === group.activeTabId,
+            );
+            const moveMenu =
+              activeSurface?.kind === "terminal"
+                ? (props.panels.terminalMoveMenu?.(activeSurface.resourceId) ?? null)
+                : null;
             const blank = group.tabs.every(isNewTab);
             // The only tile's only New tab has nothing to close into.
             const lastBlankTab = groups.length === 1 && group.tabs.length === 1 && blank;
@@ -1720,6 +1729,7 @@ export function ThreadTileWorkspace(props: {
                                 </MenuItem>
                               </MenuSubPopup>
                             </MenuSub>
+                            {moveMenu ? <TerminalMoveMenuItem menu={moveMenu} /> : null}
                             <MenuSeparator />
                             <MenuItem
                               disabled={lastBlankTab}
@@ -2214,6 +2224,44 @@ function FittedTileBar(props: {
     target?.focus({ preventScroll: true });
   });
   return props.children(fit, setArea);
+}
+
+function TerminalMoveMenuItem({ menu }: { menu: TerminalMoveMenu }) {
+  if (menu.disabledReason !== null || menu.options === null) {
+    return (
+      <MenuItem disabled={menu.disabledReason !== null} onClick={() => menu.onMove(null)}>
+        <ArrowRightFromLine />
+        {menu.label}
+        {menu.disabledReason ? <MenuItemDetail>{menu.disabledReason}</MenuItemDetail> : null}
+      </MenuItem>
+    );
+  }
+  return (
+    <MenuSub>
+      <MenuSubTrigger>
+        <ArrowRightFromLine />
+        {menu.label}
+      </MenuSubTrigger>
+      <MenuSubPopup>
+        {menu.options.map((option) => (
+          <MenuItem
+            key={option.id}
+            disabled={option.disabled}
+            onClick={() => menu.onMove(option.id)}
+          >
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            {option.detail ? <MenuItemDetail>{option.detail}</MenuItemDetail> : null}
+          </MenuItem>
+        ))}
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+function MenuItemDetail(props: { children: ReactNode }) {
+  return (
+    <span className="ms-auto shrink-0 ps-4 text-xs text-muted-foreground">{props.children}</span>
+  );
 }
 
 function TileMenuShortcut(props: { keys: string | null }) {

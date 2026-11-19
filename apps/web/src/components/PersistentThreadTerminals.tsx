@@ -9,6 +9,7 @@ import type { RightPanelSurface } from "../rightPanelStore";
 import { useProject, useQuietThreadShell } from "../state/entities";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import ThreadTerminalTile from "./ThreadTerminalTile";
+import { useMoveToDropdownMenu } from "./terminal/useTerminalMoveMenus";
 import { resolveTerminalWorktreePath } from "./ChatView.logic";
 
 /** Launch location when a script overrides the thread's checkout. */
@@ -49,6 +50,7 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
     threadId: threadRef.threadId,
   });
   const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const moveMenu = useMoveToDropdownMenu(threadRef);
   const activeSummary =
     knownTerminalSessions?.find((session) => session.target.terminalId === surface.resourceId)
       ?.state.summary ?? null;
@@ -79,6 +81,7 @@ export const PersistentThreadTerminalPanel = memo(function PersistentThreadTermi
       onCloseTerminal={onCloseTerminal}
       onAddTerminalContext={onAddTerminalContext}
       keybindings={keybindings}
+      moveMenu={moveMenu?.(surface.resourceId) ?? null}
     />
   );
 });

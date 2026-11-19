@@ -59,6 +59,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { useEnvironmentScope } from "../state/session";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { terminalInputWriter } from "./terminal/terminalInputWriter";
+import type { TerminalMoveMenu } from "./terminal/useTerminalMoveMenus";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
 import { threadShortcutContext } from "./Sidebar.logic";
@@ -329,7 +330,9 @@ export type TerminalContextMenuAction =
   | "copy"
   | "paste"
   | "select-all"
-  | "scroll-to-bottom";
+  | "scroll-to-bottom"
+  | "move"
+  | `move:${string}`;
 
 function terminalSelectionMenuItems(options?: {
   canAddToChat?: boolean;
@@ -342,10 +345,36 @@ function terminalSelectionMenuItems(options?: {
   ];
 }
 
+function terminalMoveMenuItems(
+  menu: TerminalMoveMenu | null | undefined,
+): ContextMenuItem<TerminalContextMenuAction>[] {
+  if (!menu) return [];
+  const disabled = menu.disabledReason !== null;
+  return [
+    {
+      id: "move",
+      label: menu.label,
+      separatorBefore: true,
+      ...(disabled ? { disabled, detail: menu.disabledReason! } : {}),
+      ...(menu.options && !disabled
+        ? {
+            children: menu.options.map((option) => ({
+              id: `move:${option.id}` as const,
+              label: option.label,
+              ...(option.detail ? { detail: option.detail } : {}),
+              ...(option.disabled ? { disabled: true } : {}),
+            })),
+          }
+        : {}),
+    },
+  ];
+}
+
 function terminalContextMenuItems(options: {
   hasSelection: boolean;
   canAddToChat?: boolean;
   readOnly?: boolean;
+  move?: TerminalMoveMenu | null | undefined;
 }): ContextMenuItem<TerminalContextMenuAction>[] {
   const { hasSelection, canAddToChat = true } = options;
   return [
@@ -356,6 +385,7 @@ function terminalContextMenuItems(options: {
     { id: "paste", label: "Paste", ...(options.readOnly ? { disabled: true } : {}) },
     { id: "select-all", label: "Select all" },
     { id: "scroll-to-bottom", label: "Jump to latest" },
+    ...terminalMoveMenuItems(options.move),
   ];
 }
 
@@ -402,6 +432,7 @@ interface TerminalViewportProps {
   autoFocus?: boolean;
   visible: boolean;
   keybindings: ResolvedKeybindingsConfig;
+  moveMenu?: TerminalMoveMenu | null;
 }
 
 export function TerminalViewport(props: TerminalViewportProps) {
@@ -431,6 +462,7 @@ function TerminalSessionViewport({
   autoFocus = false,
   visible,
   keybindings,
+  moveMenu,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const autoFocusedRef = useRef(false);
@@ -513,6 +545,7 @@ function TerminalSessionViewport({
   });
   const canAddSelectionToChat = useEffectEvent(() => onAddTerminalContext !== undefined);
   const readTerminalLabel = useEffectEvent(() => terminalLabel);
+  const readMoveMenu = useEffectEvent(() => moveMenu);
   const terminalFontFamily = useClientSettings((settings) =>
     resolveTerminalFontPreference({
       advanced: advancedTypography,
@@ -813,6 +846,7 @@ function TerminalSessionViewport({
               hasSelection: selectionAction !== null,
               canAddToChat: canAddSelectionToChat(),
               readOnly: !hasTerminalWriteAccess(),
+              move: readMoveMenu(),
             }),
             { x: event.clientX, y: event.clientY },
           );
@@ -843,6 +877,12 @@ function TerminalSessionViewport({
           case "scroll-to-bottom":
             terminalRef.current?.scrollToBottom();
             focusIfCurrent(requestId);
+            return;
+          case "move":
+            readMoveMenu()?.onMove(null);
+            return;
+          default:
+            readMoveMenu()?.onMove(clicked.slice("move:".length));
             return;
         }
       };
@@ -1126,6 +1166,7 @@ export default function ThreadTerminalTile({
   onAddTerminalContext,
   keybindings,
   terminalLabel,
+  moveMenu,
 }: {
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
@@ -1138,6 +1179,7 @@ export default function ThreadTerminalTile({
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   keybindings: ResolvedKeybindingsConfig;
   terminalLabel?: string;
+  moveMenu?: TerminalMoveMenu | null;
 }) {
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
@@ -1163,6 +1205,7 @@ export default function ThreadTerminalTile({
         {...(onAddTerminalContext ? { onAddTerminalContext } : {})}
         visible={visible}
         keybindings={keybindings}
+        moveMenu={moveMenu ?? null}
       />
     </section>
   );

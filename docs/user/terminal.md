@@ -20,6 +20,14 @@ Jump to latest in the context menu returns to the current output.
 On iPhone and iPad, long-press the terminal to paste or to choose Select Text.
 Select Text shows the visible output, where you can copy text or tap a link.
 
+## Moving terminals
+
+To hand a running drop-down terminal to a thread, choose **Move to thread** in the
+terminal's context menu or its tile actions menu. The thread you are viewing is
+listed first, then recent threads on the same machine. The shell keeps running
+with its scrollback. **Move to drop-down** sends a thread's terminal back.
+Terminals cannot move between machines.
+
 ## fish
 
 T3 Code starts fish with `no-query-term`, avoiding startup waits for terminal

@@ -7,10 +7,15 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { nextTerminalId } from "@t3tools/shared/terminalLabels";
+import type { KnownTerminalSession } from "@t3tools/client-runtime/state/terminal";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { randomUUID } from "~/lib/utils";
-import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
+import {
+  selectThreadRightPanelState,
+  useRightPanelStore,
+  type RightPanelSurface,
+} from "../../rightPanelStore";
 import { useProject, useQuietThreadShell } from "../../state/entities";
 import { readEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
@@ -23,6 +28,31 @@ import { closingTerminalIds, holdTerminalIdWhileClosing } from "./closingTermina
 export interface TerminalLaunchLocation {
   readonly cwd: string;
   readonly worktreePath: string | null;
+}
+
+/**
+ * The next free terminal id in a thread. Server lists lag and colliding ids share a PTY; without
+ * read access, ids get a suffix so they cannot land on sessions the user cannot see.
+ */
+export function allocateThreadTerminalId(
+  threadRef: ScopedThreadRef | null,
+  knownSessions: ReadonlyArray<KnownTerminalSession> | null,
+  drawerTerminalIds: readonly string[],
+  panelSurfaces: readonly RightPanelSurface[],
+): string {
+  const ids = new Set([
+    ...(knownSessions ?? []).map((session) => session.target.terminalId),
+    ...drawerTerminalIds,
+    ...panelSurfaces.flatMap((surface) =>
+      surface.kind === "terminal" ? [surface.resourceId] : [],
+    ),
+    ...(threadRef ? closingTerminalIds(threadRef) : []),
+  ]);
+  const canReuse =
+    knownSessions !== null &&
+    threadRef !== null &&
+    readEnvironmentScope(threadRef.environmentId, AuthTerminalReadScope);
+  return nextTerminalId([...ids], canReuse ? undefined : randomUUID());
 }
 
 /** Allocate terminal ids and launch locations centrally so all surfaces share one view of sessions. */
@@ -55,22 +85,8 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
   const canWrite = () =>
     threadRef !== null && readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope);
 
-  // Server lists lag and colliding ids share a PTY; without read access, suffix ids to avoid unseen sessions.
-  const allocateTerminalId = () => {
-    const ids = new Set([
-      ...(knownSessions ?? []).map((session) => session.target.terminalId),
-      ...drawerTerminalIds,
-      ...panelSurfaces.flatMap((surface) =>
-        surface.kind === "terminal" ? [surface.resourceId] : [],
-      ),
-      ...(threadRef ? closingTerminalIds(threadRef) : []),
-    ]);
-    const canReuse =
-      knownSessions !== null &&
-      threadRef !== null &&
-      readEnvironmentScope(threadRef.environmentId, AuthTerminalReadScope);
-    return nextTerminalId([...ids], canReuse ? undefined : randomUUID());
-  };
+  const allocateTerminalId = () =>
+    allocateThreadTerminalId(threadRef, knownSessions, drawerTerminalIds, panelSurfaces);
 
   const defaultLaunchLocation = (): TerminalLaunchLocation | null =>
     project

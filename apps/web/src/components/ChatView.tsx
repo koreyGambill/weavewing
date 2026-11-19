@@ -2,6 +2,7 @@ import { WorkspaceTitlebar } from "./WorkspaceTitlebar";
 import { ForkConversationButton } from "./chat/ForkConversationButton";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
+import { useMoveToDropdownMenu } from "./terminal/useTerminalMoveMenus";
 import { LegacyTerminalTileBridge } from "./chat/LegacyTerminalTileBridge";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
@@ -1727,6 +1728,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const moveTerminalToDropdown = useMoveToDropdownMenu(activeThreadRef);
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   const liveIsGitRepo = gitStatusQuery.data?.isRepo;
@@ -3899,6 +3901,7 @@ export default function ChatView(props: ChatViewProps) {
     deviceAvailable: activeThreadRef !== null,
     sideChatAvailable: sideChat.available,
     sideChatDisabledReason,
+    terminalMoveMenu: moveTerminalToDropdown ?? undefined,
   };
   const content = (
     <div
