@@ -12,7 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { isMacPlatform } from "@t3tools/shared/keybindings";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, fakeTimers, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -23,6 +23,8 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { useProjects, useServerConfigs, useQuietThreadShells } from "../state/entities";
+import { useEnvironments } from "../state/environments";
+import { useUiStateStore } from "../uiStateStore";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -37,6 +39,7 @@ vi.mock(import("../state/olderSettledShelf"), async (original) => {
   return { ...actual, useOlderSettledShelf: vi.fn(actual.useOlderSettledShelf) };
 });
 vi.mock("../state/entities", { spy: true });
+vi.mock("../state/environments", { spy: true });
 vi.mock("../hooks/useHandleNewThread", { spy: true });
 vi.mock("../hooks/useScratchProject", { spy: true });
 vi.mock("../hooks/useNowMinute", { spy: true });
@@ -245,6 +248,81 @@ describe("sidebar render isolation", () => {
     await userEvent.keyboard(`{/${modifier}}`);
     expect(rowRenders()).toBeGreaterThan(beforeRelease);
     expect(jumpLabelsSince(beforeRelease)).toEqual([]);
+  });
+});
+
+describe("sidebar computer filter", () => {
+  it("lists servers under their computer and hides threads from servers left out", async () => {
+    using stack = new DisposableStack();
+    const laptop = EnvironmentId.make("laptop-env");
+    const desk = EnvironmentId.make("desk-env");
+    const projects = [
+      { ...project("alpha"), environmentId: laptop },
+      { ...project("beta"), environmentId: desk },
+    ];
+    vi.mocked(useNowMinute).mockReturnValue("2026-01-01T00:00");
+    vi.mocked(useProjects).mockReturnValue(projects);
+    vi.mocked(useQuietThreadShells).mockReturnValue([
+      makeThreadFixture({
+        environmentId: laptop,
+        projectId: projects[0]!.id,
+        title: "Laptop thread",
+      }),
+      makeThreadFixture({ environmentId: desk, projectId: projects[1]!.id, title: "Desk thread" }),
+    ]);
+    const routeThreadRef: ScopedThreadRef = {
+      environmentId: laptop,
+      threadId: ThreadId.make("laptop-route"),
+    };
+    vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "server", threadRef: routeThreadRef });
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef,
+    });
+    vi.mocked(useServerConfigs).mockReturnValue(
+      new Map([
+        [laptop, { hostname: "laptop", environment: { capabilities: {} } }],
+        [desk, { hostname: "desk-pc", environment: { capabilities: {} } }],
+      ]) as never,
+    );
+    stack.defer(() => vi.mocked(useServerConfigs).mockRestore());
+    vi.mocked(useEnvironments).mockReturnValue({
+      isReady: true,
+      environments: [
+        { environmentId: laptop, label: "WSL", displayUrl: null },
+        { environmentId: desk, label: "Windows", displayUrl: null },
+      ],
+    } as never);
+    stack.defer(() => vi.mocked(useEnvironments).mockRestore());
+    vi.mocked(scratchProject.useDefaultPlace).mockReturnValue({
+      place: { kind: "none" },
+      label: null,
+    } as never);
+    stack.defer(() => useUiStateStore.getState().setSidebarEnvironmentScopeIds([]));
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText("Desk thread").first()).toBeVisible();
+
+    await userEvent.click(screen.getByRole("combobox", { name: /^Filter threads by project/ }));
+    // The filter's popup renders in a portal, outside the sidebar's container.
+    const computers = page.getByRole("group", { name: "Computers" });
+    await expect.element(computers.getByText("laptop")).toBeVisible();
+    await expect.element(computers.getByText("desk-pc")).toBeVisible();
+    await userEvent.click(computers.getByRole("button", { name: "WSL" }));
+
+    await expect.element(screen.getByText("Desk thread")).not.toBeInTheDocument();
+    await expect.element(screen.getByText("Laptop thread").first()).toBeVisible();
+    expect(useUiStateStore.getState().sidebarEnvironmentScopeIds).toEqual([laptop]);
+    await expect
+      .element(screen.getByRole("combobox", { name: /computers: WSL/ }))
+      .toBeInTheDocument();
   });
 });
 

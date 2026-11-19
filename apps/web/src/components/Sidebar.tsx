@@ -246,6 +246,15 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { readScratchProjectActions, useDefaultPlace } from "../hooks/useScratchProject";
+import { useEnvironments } from "../state/environments";
+import { settingsScopeEnvironmentLabel } from "./settings/settingsScopeAxis";
+import { CheckboxMark } from "./ui/checkbox";
+import {
+  filterSidebarComputerThreads,
+  groupSidebarComputers,
+  resolveSidebarComputerScope,
+  toggleSidebarComputerScope,
+} from "./sidebar/sidebarComputerFilter.logic";
 import { TooltipProvider } from "./ui/tooltip";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import {
@@ -390,6 +399,8 @@ interface SidebarThreadPartitionInput {
   readonly clockKey: string;
   readonly automationFilter: SidebarAutomationThreadFilter;
   readonly routeRowThreadKey: string | null;
+  /** The servers chosen in the filter, or null for every server. */
+  readonly environmentScope: ReadonlySet<string> | null;
 }
 
 function scrollSidebarToTop(content: HTMLElement | null) {
@@ -461,6 +472,7 @@ function useSidebarThreads(input: {
   // The user's own groups for active threads; null when folders own the active area.
   readonly threadGroups: SidebarThreadGroups | null;
   readonly renamingGroupId: string | null;
+  readonly environmentScope: ReadonlySet<string> | null;
 }) {
   const {
     projectScopeKey,
@@ -476,6 +488,7 @@ function useSidebarThreads(input: {
     automationFilter,
     threadGroups,
     renamingGroupId,
+    environmentScope,
   } = input;
   const nowMinute = useNowMinute();
   // Minute-quantized clocks would delay second-precise snooze wakes by up to a minute.
@@ -513,12 +526,18 @@ function useSidebarThreads(input: {
     clockKey: `${nowMinute}:${snoozeWakeClock}`,
     automationFilter,
     routeRowThreadKey,
+    environmentScope,
   });
 
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = partition;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
-    scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
+    scopes: olderSettledScopes(
+      [...serverConfigs.keys()].filter(
+        (id) => environmentScope === null || environmentScope.has(id),
+      ),
+      scopedProjectKeys,
+    ),
     expanded: settledShelfExpanded,
     visibleCount: settledVisibleCount,
   });
@@ -579,7 +598,10 @@ function useSidebarThreads(input: {
           }, []),
           // A filter would otherwise leave a column of empty headers.
           {
-            hideEmptyGroups: scopedProjectKeys !== null || automationFilter === "only",
+            hideEmptyGroups:
+              scopedProjectKeys !== null ||
+              automationFilter === "only" ||
+              environmentScope !== null,
             keepGroupId: renamingGroupId,
           },
         );
@@ -701,9 +723,13 @@ function useSidebarThreads(input: {
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const { threads, scopedProjectKeys, delegatedUnderParent, serverConfigs, optimisticDrop } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarAutomationThreads(
-    filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent),
-    input.automationFilter,
+  const visible = filterSidebarComputerThreads(
+    filterSidebarAutomationThreads(
+      filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent),
+      input.automationFilter,
+      input.routeRowThreadKey,
+    ),
+    input.environmentScope,
     input.routeRowThreadKey,
   );
   const pinned: EnvironmentThreadShell[] = [];
@@ -1067,6 +1093,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const projectGroupsRef = useRef(projectGroups);
   const persistedProjectScopeKeys = useUiStateStore((store) => store.sidebarProjectScopeKeys);
   const setPersistedProjectScopeKeys = useUiStateStore((store) => store.setSidebarProjectScopeKeys);
+  const persistedEnvironmentScopeIds = useUiStateStore((store) => store.sidebarEnvironmentScopeIds);
+  const setPersistedEnvironmentScopeIds = useUiStateStore(
+    (store) => store.setSidebarEnvironmentScopeIds,
+  );
+  const { environments: filterEnvironments, isReady: environmentCatalogReady } = useEnvironments();
+  const environmentScope = resolveSidebarComputerScope({
+    storedIds: persistedEnvironmentScopeIds,
+    knownIds: filterEnvironments.map((environment) => environment.environmentId),
+    ready: environmentCatalogReady,
+  });
+  const computerFilterServers = filterEnvironments.map((environment) => ({
+    environmentId: environment.environmentId,
+    label: settingsScopeEnvironmentLabel(environment, filterEnvironments),
+    computer: serverConfigs.get(environment.environmentId)?.hostname ?? null,
+  }));
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
     { open: false, query: "" },
@@ -1143,6 +1184,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     setPersistedProjectScopeKeys(keys);
     scrollSidebarToTop(sidebarContentRef.current);
   };
+  const setEnvironmentScopeIds = (ids: readonly string[]) => {
+    clearSelection();
+    setPersistedEnvironmentScopeIds(ids);
+    scrollSidebarToTop(sidebarContentRef.current);
+  };
+  // Starts from the servers still listed, so a removed server leaves the stored filter too.
+  const toggleEnvironmentScopeId = (id: string) =>
+    setEnvironmentScopeIds(
+      toggleSidebarComputerScope(environmentScope === null ? [] : [...environmentScope], id),
+    );
   // A scope whose project is gone reads as all projects once every snapshot has
   // loaded. The stored keys are left alone, so the scope returns with its project.
   // An archived project's scope reads as all projects, matching the menu.
@@ -1255,7 +1306,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
   const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
   const threadSearch = useThreadSearch(
-    connectedEnvironmentIds,
+    environmentScope === null
+      ? connectedEnvironmentIds
+      : connectedEnvironmentIds.filter((id) => environmentScope.has(id)),
     threadSearchQuery,
     scopedProjectGroups.length === 0
       ? {}
@@ -1422,6 +1475,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     delegatedUnderParent,
     routeRowThreadKey,
     automationFilter,
+    environmentScope,
     folderGroups: boringSidebarEnabled
       ? scopedProjectGroups.length === 0
         ? // An archived project keeps a folder for its active threads, below the rest.
@@ -3367,6 +3421,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           scopedProjectGroups.length > 0
                             ? `Filter threads by project: ${scopedProjectGroups.map((project) => project.displayName).join(", ")}`
                             : "Filter threads by project"
+                        }${
+                          environmentScope === null
+                            ? ""
+                            : `; computers: ${computerFilterServers
+                                .filter((server) => environmentScope.has(server.environmentId))
+                                .map((server) => server.label)
+                                .join(", ")}`
                         }${AUTOMATION_FILTER_SUFFIX[automationFilter]}`}
                       />
                     }
@@ -3393,7 +3454,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     ) : (
                       <ListFilterIcon className="size-4" />
                     )}
-                    {automationFilter === "show" ? null : (
+                    {automationFilter === "show" && environmentScope === null ? null : (
                       <span
                         aria-hidden
                         className="pointer-events-none absolute top-1 right-1 size-1.5 rounded-full bg-primary"
@@ -3527,6 +3588,53 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         );
                       }}
                     </ComboboxList>
+                    {computerFilterServers.length > 1 ? (
+                      <div
+                        role="group"
+                        aria-labelledby="sidebar-computer-filter-label"
+                        className="border-t px-1 py-1"
+                      >
+                        <div className="flex h-7 items-center justify-between gap-2 px-1.5">
+                          <span
+                            id="sidebar-computer-filter-label"
+                            className="text-xs text-muted-foreground"
+                          >
+                            Computers
+                          </span>
+                          {environmentScope === null ? null : (
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => setEnvironmentScopeIds([])}
+                            >
+                              Show all
+                            </Button>
+                          )}
+                        </div>
+                        {groupSidebarComputers(computerFilterServers).map((computer) => (
+                          <div key={computer.computer ?? ""}>
+                            <div className="truncate px-1.5 pt-1 pb-0.5 text-2xs text-muted-foreground">
+                              {computer.computer ?? "Other servers"}
+                            </div>
+                            {computer.servers.map((server) => {
+                              const chosen = environmentScope?.has(server.environmentId) ?? false;
+                              return (
+                                <button
+                                  key={server.environmentId}
+                                  type="button"
+                                  aria-pressed={chosen}
+                                  onClick={() => toggleEnvironmentScopeId(server.environmentId)}
+                                  className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                                >
+                                  <CheckboxMark checked={chosen} />
+                                  <span className="min-w-0 truncate">{server.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <div className="flex items-center justify-between gap-2 border-t px-2.5 py-2">
                       <span
                         id="sidebar-automation-filter-label"
