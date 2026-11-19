@@ -1,3 +1,4 @@
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
@@ -6,6 +7,7 @@ import {
   selectProjectAxis,
   settingsScopeCheckoutChoices,
   settingsScopeCheckoutLabel,
+  settingsScopeEnvironmentLabel,
 } from "./settingsScopeAxis";
 
 const member = (environmentId: string, physicalProjectKey: string, workspaceRoot = "") =>
@@ -17,7 +19,33 @@ const member = (environmentId: string, physicalProjectKey: string, workspaceRoot
 const group = (...memberProjects: SidebarProjectSnapshot["memberProjects"]) =>
   ({ memberProjects }) as SidebarProjectSnapshot;
 
+const sshBuild = (environmentId: string, port: number | null) =>
+  ({
+    environmentId,
+    label: "Build",
+    displayUrl: "dev@gateway.example.com",
+    entry: {
+      target: { _tag: "SshConnectionTarget" },
+      profile: Option.some({
+        _tag: "SshConnectionProfile",
+        target: { alias: "gw", hostname: "gateway.example.com", username: "dev", port },
+      }),
+    },
+  }) as unknown as Parameters<typeof settingsScopeEnvironmentLabel>[0];
+
 describe("settings scope axes", () => {
+  it("widens same-named machine labels until each one is unique", () => {
+    const first = sshBuild("env-aaaa-11111111", 2222);
+    const second = sshBuild("env-bbbb-22222222", 2223);
+    expect(
+      [first, second].map((env) => settingsScopeEnvironmentLabel(env, [first, second])),
+    ).toEqual(["Build · dev@gateway.example.com:2222", "Build · dev@gateway.example.com:2223"]);
+    const samePort = sshBuild("env-cccc-33333333", 2222);
+    expect(settingsScopeEnvironmentLabel(samePort, [first, samePort])).toBe(
+      "Build · dev@gateway.example.com:2222 · 33333333",
+    );
+  });
+
   it("drops a checkout narrowing from older links when either axis changes", () => {
     const checkout = { project: "app", checkout: "app@first", machine: "first" };
     expect(selectEnvironmentAxis(checkout, "second")).toEqual({

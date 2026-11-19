@@ -1,10 +1,12 @@
+import { connectionCatalogDisplayPort } from "@t3tools/client-runtime/connection";
 import { fileBasename } from "@t3tools/shared/path";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import type { EnvironmentPresentation } from "../../state/environments";
 import type { ResolvedSettingsScope, SettingsScopeSearch } from "./settingsScope";
 
 type ScopeCheckout = SidebarProjectSnapshot["memberProjects"][number];
-type ScopeEnvironment = Pick<EnvironmentPresentation, "environmentId" | "label" | "displayUrl">;
+type ScopeEnvironment = Pick<EnvironmentPresentation, "environmentId" | "label" | "displayUrl"> &
+  Partial<Pick<EnvironmentPresentation, "entry">>;
 
 export function settingsScopeEnvironmentAddress(environment: ScopeEnvironment) {
   if (!environment.displayUrl) return environment.environmentId;
@@ -15,6 +17,22 @@ export function settingsScopeEnvironmentAddress(environment: ScopeEnvironment) {
   }
 }
 
+/** Ever fuller identities, so same-named machines get the shortest one that differs. */
+function environmentIdentities(environment: ScopeEnvironment) {
+  const port = environment.entry ? connectionCatalogDisplayPort(environment.entry) : null;
+  const full = environment.displayUrl
+    ? port === null
+      ? environment.displayUrl
+      : `${environment.displayUrl}:${port}`
+    : environment.environmentId;
+  return [
+    settingsScopeEnvironmentAddress(environment),
+    full,
+    `${full} · ${environment.environmentId.slice(-8)}`,
+    `${full} · ${environment.environmentId}`,
+  ];
+}
+
 export function settingsScopeEnvironmentLabels(
   environment: ScopeEnvironment,
   environments: readonly ScopeEnvironment[],
@@ -23,13 +41,14 @@ export function settingsScopeEnvironmentLabels(
     (other) =>
       other.environmentId !== environment.environmentId && other.label === environment.label,
   );
-  const address = settingsScopeEnvironmentAddress(environment);
-  const secondary = duplicates.some((other) => settingsScopeEnvironmentAddress(other) === address)
-    ? environment.displayUrl || environment.environmentId
-    : address;
+  const identities = environmentIdentities(environment);
+  const others = duplicates.map(environmentIdentities);
+  const tier = identities.findIndex((identity, index) =>
+    others.every((other) => other[index] !== identity),
+  );
   return {
     primary: environment.label,
-    secondary: duplicates.length ? secondary : "",
+    secondary: duplicates.length ? identities[tier === -1 ? identities.length - 1 : tier]! : "",
   };
 }
 

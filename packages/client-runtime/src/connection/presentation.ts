@@ -170,3 +170,12 @@ export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): stri
         : null;
   }
 }
+
+/** The SSH port when one is set; HTTP display URLs already carry theirs. */
+export function connectionCatalogDisplayPort(entry: ConnectionCatalogEntry): number | null {
+  return entry.target._tag === "SshConnectionTarget" &&
+    Option.isSome(entry.profile) &&
+    entry.profile.value._tag === "SshConnectionProfile"
+    ? entry.profile.value.target.port
+    : null;
+}
