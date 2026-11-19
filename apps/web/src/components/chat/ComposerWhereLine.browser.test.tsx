@@ -101,11 +101,11 @@ it("drills through folders with repeated Tab and opens with Enter in the where-l
   await userEvent.click(page.elementLocator(trigger));
   const search = page.getByRole("combobox", { name: "Project name or path" });
   await expect.element(search).toHaveFocus();
-  const current = page.getByRole("option").first();
-  await expect.element(current.getByText("render", { exact: true })).toBeVisible();
-  await expect.element(current.getByText("Current", { exact: true })).toBeVisible();
+  // The current place is marked on its row rather than by a section heading.
+  const current = page.getByRole("option", { name: /^render.*current/ });
+  await expect.element(current).toBeVisible();
   // Highlighted on open, so Enter accepts the first row with no arrow key first.
-  await expect.element(current).toHaveAttribute("data-highlighted");
+  await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
   await userEvent.type(search, "workspace/alpha");
   await expect.element(page.getByRole("option", { name: /alpha/ })).toBeVisible();
   expect(page.getByRole("option").elements()).toHaveLength(1);

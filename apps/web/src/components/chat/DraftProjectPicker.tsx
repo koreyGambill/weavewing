@@ -4,7 +4,6 @@ import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/envir
 import {
   completePickerFolder,
   isProjectPickerPath,
-  pickerProjectSections,
   projectPickerPathLabel,
   rankPickerProjects,
 } from "@t3tools/client-runtime/project-picker";
@@ -34,7 +33,7 @@ import { useProjectPin } from "~/hooks/useProjectGroupUpdate";
 import { useOrderWhileOpen } from "~/hooks/useOrderWhileOpen";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { shortcutLabelForCommand } from "~/keybindings";
-import { newProjectId } from "~/lib/utils";
+import { cn, newProjectId } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { registerCommands } from "~/shortcuts/dispatcher";
 import { useEnvironments } from "~/state/environments";
@@ -129,7 +128,6 @@ export function DraftProjectPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const [allMachines, setAllMachines] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const highlighted = useRef<PickerItem | null>(null);
@@ -223,9 +221,16 @@ export function DraftProjectPicker({
     allMachines ? null : (environmentId ?? ""),
     "",
   );
-  const ordered = useOrderWhileOpen(defaultRanked, (item) => item.key, open);
+  // Pinned first, then by recency; frozen while open so pinning never moves a row under the pointer.
+  const ordered = useOrderWhileOpen(
+    [
+      ...defaultRanked.filter((entry) => entry.pinned),
+      ...defaultRanked.filter((entry) => !entry.pinned),
+    ],
+    (item) => item.key,
+    open,
+  );
   const currentKey = activeProjectRef ? scopedProjectKey(activeProjectRef) : null;
-  const sections = pickerProjectSections(ordered, currentKey);
   const projectItem = (entry: (typeof metadata)[number], section?: string): PickerItem => ({
     value: entry.key,
     label: entry.title,
@@ -263,22 +268,7 @@ export function DraftProjectPicker({
     : query.trim()
       ? ranked.map((entry) => projectItem(entry))
       : [
-          ...sections.current.map((entry) => projectItem(entry)),
-          ...sections.pinned.map((entry, index) =>
-            projectItem(entry, index === 0 ? "Pinned" : undefined),
-          ),
-          ...sections.recent.map((entry, index) =>
-            projectItem(entry, index === 0 ? "Recent" : undefined),
-          ),
-          ...(sections.more.length
-            ? [
-                {
-                  value: "show-all",
-                  label: expanded ? "Show fewer projects" : `Show all ${ordered.length} projects`,
-                },
-              ]
-            : []),
-          ...(expanded ? sections.more.map((entry) => projectItem(entry)) : []),
+          ...ordered.map((entry) => projectItem(entry)),
           ...(onStartWithoutProject && defaultFolderLabel
             ? [{ value: "scratch", label: `Start in ${defaultFolderLabel}` }]
             : []),
@@ -293,7 +283,6 @@ export function DraftProjectPicker({
     setError(null);
     if (next) {
       setQuery("");
-      setExpanded(false);
     }
   };
   const switchMachine = (id: EnvironmentId) => {
@@ -420,10 +409,7 @@ export function DraftProjectPicker({
   };
   const choose = (item: PickerItem) => {
     if (busy) return;
-    if (item.value === "show-all") {
-      setExpanded((value) => !value);
-      inputRef.current?.focus();
-    } else if (pathMode && item.path) {
+    if (pathMode && item.path) {
       void chooseFolder(item);
     } else if (item.project) {
       onSelect(item.project);
@@ -441,13 +427,93 @@ export function DraftProjectPicker({
     : null;
   const content = (
     <>
-      <div className="flex shrink-0 items-center gap-2 px-3 pt-2">
+      {/* One line: search takes the width, the machine controls sit at its right. */}
+      <div className="flex shrink-0 items-end gap-1 pe-2">
         {onBack ? (
-          <InlineButton tone="muted" aria-label="Back" onClick={onBack}>
-            <ArrowLeftIcon className="size-4" />
-          </InlineButton>
+          <div className="ps-2 pb-1">
+            <InlineButton tone="muted" aria-label="Back" onClick={onBack}>
+              <ArrowLeftIcon className="size-4" />
+            </InlineButton>
+          </div>
         ) : null}
-        <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)]">
+        <div className="min-w-0 flex-1">
+          <ComboboxSearchInput
+            ref={(node) => {
+              inputRef.current = node;
+              if (inline && node) node.focus();
+            }}
+            aria-label="Project name or path"
+            placeholder="Project name or path (~/…)"
+            value={query}
+            onChange={(event) => {
+              requestRef.current = null;
+              setBusy(false);
+              setError(null);
+              setQuery(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                event.preventBaseUIHandler?.();
+                return;
+              }
+              const item = items.find((entry) => entry.value === highlighted.current?.value);
+              if (pathMode && event.key === "Tab" && !event.shiftKey) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.preventBaseUIHandler?.();
+                // Programmatic query changes do not trigger Base UI's autoHighlight.
+                const target =
+                  item?.path && (item.completionName || highlightChosen.current)
+                    ? item
+                    : items.find((entry) => entry.path && entry.completionName);
+                if (target?.completionName) {
+                  highlighted.current = null;
+                  setQuery(completePickerFolder(browseQuery, target.completionName));
+                }
+              } else if (pathMode && event.key === "Enter" && !item) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.preventBaseUIHandler?.();
+                const first = items.find(
+                  (entry) => entry.path && entry.environmentId && operable.has(entry.environmentId),
+                );
+                if (first) choose(first);
+              } else if (
+                pathMode &&
+                event.key === "Backspace" &&
+                /[\\/]$/.test(query) &&
+                event.currentTarget.selectionStart === query.length &&
+                event.currentTarget.selectionEnd === query.length
+              ) {
+                const parent = getBrowseParentPath(query);
+                if (parent) {
+                  event.preventDefault();
+                  setQuery(parent);
+                }
+              } else if (item?.project && isProjectPinShortcut(event, keybindings)) {
+                const group = {
+                  memberProjects: [
+                    {
+                      ...item.project,
+                      environmentLabel:
+                        environments.find(
+                          (env) => env.environmentId === item.project?.environmentId,
+                        )?.label ?? null,
+                    },
+                  ],
+                  pinned: Boolean(item.project.pinnedAt),
+                };
+                if (canPinProjectGroup(group)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleProjectGroupPin(group);
+                }
+              }
+            }}
+          />
+        </div>
+        {/* A one-column grid lets the select shrink, so a long machine name truncates. */}
+        <div className="grid w-24 min-w-0 shrink grid-cols-[minmax(0,1fr)] pb-1 sm:w-36">
           <Select
             value={environmentId}
             onValueChange={(id) => {
@@ -481,91 +547,20 @@ export function DraftProjectPicker({
             </SelectPopup>
           </Select>
         </div>
-        <Button
-          variant={allMachines ? "secondary" : "ghost"}
-          size="xs"
-          aria-pressed={allMachines}
-          onClick={() => {
-            setAllMachines((all) => !all);
-            inputRef.current?.focus();
-          }}
-        >
-          All machines
-        </Button>
+        <div className="shrink-0 pb-1">
+          <Button
+            variant={allMachines ? "secondary" : "ghost"}
+            size="xs"
+            aria-pressed={allMachines}
+            onClick={() => {
+              setAllMachines((all) => !all);
+              inputRef.current?.focus();
+            }}
+          >
+            All machines
+          </Button>
+        </div>
       </div>
-      <ComboboxSearchInput
-        ref={(node) => {
-          inputRef.current = node;
-          if (inline && node) node.focus();
-        }}
-        aria-label="Project name or path"
-        placeholder="Project name or path (~/…)"
-        value={query}
-        onChange={(event) => {
-          requestRef.current = null;
-          setBusy(false);
-          setError(null);
-          setQuery(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing || event.keyCode === 229) {
-            event.preventBaseUIHandler?.();
-            return;
-          }
-          const item = items.find((entry) => entry.value === highlighted.current?.value);
-          if (pathMode && event.key === "Tab" && !event.shiftKey) {
-            event.preventDefault();
-            event.stopPropagation();
-            event.preventBaseUIHandler?.();
-            // Programmatic query changes do not trigger Base UI's autoHighlight.
-            const target =
-              item?.path && (item.completionName || highlightChosen.current)
-                ? item
-                : items.find((entry) => entry.path && entry.completionName);
-            if (target?.completionName) {
-              highlighted.current = null;
-              setQuery(completePickerFolder(browseQuery, target.completionName));
-            }
-          } else if (pathMode && event.key === "Enter" && !item) {
-            event.preventDefault();
-            event.stopPropagation();
-            event.preventBaseUIHandler?.();
-            const first = items.find(
-              (entry) => entry.path && entry.environmentId && operable.has(entry.environmentId),
-            );
-            if (first) choose(first);
-          } else if (
-            pathMode &&
-            event.key === "Backspace" &&
-            /[\\/]$/.test(query) &&
-            event.currentTarget.selectionStart === query.length &&
-            event.currentTarget.selectionEnd === query.length
-          ) {
-            const parent = getBrowseParentPath(query);
-            if (parent) {
-              event.preventDefault();
-              setQuery(parent);
-            }
-          } else if (item?.project && isProjectPinShortcut(event, keybindings)) {
-            const group = {
-              memberProjects: [
-                {
-                  ...item.project,
-                  environmentLabel:
-                    environments.find((env) => env.environmentId === item.project?.environmentId)
-                      ?.label ?? null,
-                },
-              ],
-              pinned: Boolean(item.project.pinnedAt),
-            };
-            if (canPinProjectGroup(group)) {
-              event.preventDefault();
-              event.stopPropagation();
-              toggleProjectGroupPin(group);
-            }
-          }
-        }}
-      />
       <div role="status" className="shrink-0 px-3 text-muted-foreground text-xs">
         {busy ? "Opening project…" : folders.pending && pathMode ? "Loading folders…" : null}
         {error ? <p className="py-2 text-destructive">{error}</p> : null}
@@ -594,19 +589,16 @@ export function DraftProjectPicker({
           const path = item.path
             ? projectPickerPathLabel(item.path, homeByEnvironment.get(item.environmentId!))
             : null;
+          const machineLabel = item.environmentId
+            ? environments.find((env) => env.environmentId === item.environmentId)?.label
+            : undefined;
           const group = item.project
             ? {
-                memberProjects: [
-                  {
-                    ...item.project,
-                    environmentLabel:
-                      environments.find((env) => env.environmentId === item.project?.environmentId)
-                        ?.label ?? null,
-                  },
-                ],
+                memberProjects: [{ ...item.project, environmentLabel: machineLabel ?? null }],
                 pinned: Boolean(item.project.pinnedAt),
               }
             : null;
+          const projectRow = !pathMode && item.project !== undefined;
           return (
             <div key={item.value}>
               {item.section ? (
@@ -631,47 +623,56 @@ export function DraftProjectPicker({
                 ) : item.project ? (
                   <ProjectFavicon project={item.project} className="size-4 shrink-0" />
                 ) : null}
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Tooltip>
-                      <TooltipTrigger render={<span className="flex min-w-0 flex-1 text-sm" />}>
-                        {pathMode && path ? (
-                          <PickerPath path={path} />
-                        ) : (
-                          <span className="truncate">{item.label}</span>
-                        )}
-                      </TooltipTrigger>
-                      <TooltipPopup>{item.path ?? item.label}</TooltipPopup>
-                    </Tooltip>
-                    {pathMode && item.path ? (
-                      <span className="shrink-0 text-muted-foreground text-xs">
-                        {item.project ? "project" : "add project"}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="flex min-w-0 flex-1 items-baseline gap-2 text-sm" />}
+                  >
+                    {pathMode && path ? (
+                      <span className="flex min-w-0 flex-1">
+                        <PickerPath path={path} />
                       </span>
-                    ) : null}
-                    {item.current ? (
-                      <span className="shrink-0 text-muted-foreground text-xs">Current</span>
-                    ) : null}
-                    {allMachines && item.environmentId ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <span className="max-w-28 truncate rounded bg-muted px-1 text-muted-foreground text-3xs" />
-                          }
-                        >
-                          {
-                            environments.find((env) => env.environmentId === item.environmentId)
-                              ?.label
-                          }
-                        </TooltipTrigger>
-                        <TooltipPopup>
-                          {
-                            environments.find((env) => env.environmentId === item.environmentId)
-                              ?.label
-                          }
-                        </TooltipPopup>
-                      </Tooltip>
-                    ) : null}
-                    {!pathMode && item.project && group && canPinProjectGroup(group) ? (
+                    ) : (
+                      <>
+                        <span className={cn("truncate", projectRow && "max-w-[50%] shrink-0")}>
+                          {item.label}
+                        </span>
+                        {projectRow && path ? (
+                          <span className="flex min-w-0 flex-1 overflow-hidden font-mono text-muted-foreground text-xs">
+                            <PickerPath path={path} />
+                          </span>
+                        ) : null}
+                      </>
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup>{item.path ?? item.label}</TooltipPopup>
+                </Tooltip>
+                {pathMode && item.path ? (
+                  <span className="shrink-0 text-muted-foreground text-xs">
+                    {item.project ? "project" : "add project"}
+                  </span>
+                ) : null}
+                {allMachines && machineLabel ? (
+                  <span className="max-w-24 shrink-0 truncate rounded bg-muted px-1 text-muted-foreground text-3xs">
+                    {machineLabel}
+                  </span>
+                ) : null}
+                {item.current ? (
+                  <span className="shrink-0 text-muted-foreground text-3xs">current</span>
+                ) : null}
+                {projectRow && item.activity ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span className="shrink-0 text-muted-foreground text-3xs" />}
+                    >
+                      {formatRelativeTimeLabel(new Date(item.activity).toISOString())}
+                    </TooltipTrigger>
+                    <TooltipPopup>{new Date(item.activity).toLocaleString()}</TooltipPopup>
+                  </Tooltip>
+                ) : null}
+                {projectRow ? (
+                  // The pin slot is always reserved so rows line up and never shift.
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-end">
+                    {group && canPinProjectGroup(group) ? (
                       <ProjectPinButton
                         name={item.label}
                         pinned={group.pinned}
@@ -679,32 +680,8 @@ export function DraftProjectPicker({
                         onToggle={() => toggleProjectGroupPin(group)}
                       />
                     ) : null}
-                  </div>
-                  {!pathMode && path ? (
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <span className="flex min-w-0 flex-1 font-mono text-muted-foreground text-xs" />
-                          }
-                        >
-                          <PickerPath path={path} />
-                        </TooltipTrigger>
-                        <TooltipPopup>{item.path}</TooltipPopup>
-                      </Tooltip>
-                      {item.activity && !item.project?.pinnedAt ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={<span className="shrink-0 text-muted-foreground text-3xs" />}
-                          >
-                            {formatRelativeTimeLabel(new Date(item.activity).toISOString())}
-                          </TooltipTrigger>
-                          <TooltipPopup>{new Date(item.activity).toLocaleString()}</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
+                  </span>
+                ) : null}
               </ComboboxItem>
             </div>
           );
@@ -722,7 +699,7 @@ export function DraftProjectPicker({
           )}
         </div>
       ) : null}
-      <div className="shrink-0 border-t px-3 py-2 text-muted-foreground text-3xs">
+      <div className="shrink-0 truncate border-t px-3 py-2 text-muted-foreground text-3xs">
         Tab complete · ↵ open · ⌫ up ·{" "}
         {shortcutLabelForCommand(keybindings, "projectPicker.nextMachine")} machine ·{" "}
         {shortcutLabelForCommand(keybindings, "projectPicker.allMachines")} all
@@ -806,8 +783,11 @@ function PickerPath({ path }: { readonly path: string }) {
   const split = Math.max(0, path.length - 18);
   return (
     <>
-      <span className="truncate">{path.slice(0, split)}</span>
-      <span className="shrink-0">{path.slice(split)}</span>
+      <span className="shrink-[100] truncate">{path.slice(0, split)}</span>
+      {/* Right-to-left only moves the ellipsis to the start, so a squeezed tail keeps its end. */}
+      <span className="min-w-0 truncate [direction:rtl]">
+        <span dir="ltr">{path.slice(split)}</span>
+      </span>
     </>
   );
 }
