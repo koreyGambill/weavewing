@@ -206,6 +206,11 @@ export const make = Effect.gen(function* () {
     const hostPath = expandHomePath(requestedPath, home);
     if (!path.isAbsolute(hostPath) || isNetworkPath(hostPath)) return null;
     if (!(yield* knownWorkspaces.assertContains(cwd).pipe(Effect.isSuccess))) return null;
+    // As workspace reads and writes resolve it: `..` first, then links.
+    const workspaceRoot = yield* Effect.promise(() =>
+      NodeFSP.realpath(path.resolve(cwd)).catch(() => null),
+    );
+    if (workspaceRoot === null) return null;
     const realPath = yield* Effect.promise(() => NodeFSP.realpath(hostPath).catch(() => null));
     // A symlinked home folder resolves away the prefix the real path is checked against.
     const realHome = yield* Effect.promise(() => NodeFSP.realpath(home).catch(() => home));
@@ -237,22 +242,19 @@ export const make = Effect.gen(function* () {
       Option.isSome(instructionFiles) &&
       (yield* instructionFiles.value.editablePath(cwd, hostPath)) === realPath
     )
-      return { realPath, grant: "allowlist" as const };
+      return { realPath, workspaceRoot, grant: "allowlist" as const };
     if (Option.isNone(serverSettings)) return null;
     const grants = yield* serverSettings.value.getSettings.pipe(
       Effect.map((settings) => settings.outsideWorkspaceEditGrants),
       Effect.orElseSucceed((): ReadonlyArray<OutsideWorkspaceEditGrant> => []),
     );
     const fileGrant = grants.find((grant) => grant.kind === "file" && grant.path === realPath);
-    if (fileGrant !== undefined) return { realPath, grant: fileGrant };
-    if (grants.some((grant) => grant.kind === "workspace")) {
-      const realCwd = yield* Effect.promise(() => NodeFSP.realpath(cwd).catch(() => null));
-      const workspaceGrant = grants.find(
-        (grant) => grant.kind === "workspace" && grant.path === realCwd,
-      );
-      if (workspaceGrant !== undefined) return { realPath, grant: workspaceGrant };
-    }
-    return { realPath, grant: null };
+    if (fileGrant !== undefined) return { realPath, workspaceRoot, grant: fileGrant };
+    const workspaceGrant = grants.find(
+      (grant) => grant.kind === "workspace" && grant.path === workspaceRoot,
+    );
+    if (workspaceGrant !== undefined) return { realPath, workspaceRoot, grant: workspaceGrant };
+    return { realPath, workspaceRoot, grant: null };
   });
 
   /** The real path of a host file the Files tile may edit, or null. */
@@ -912,21 +914,7 @@ export const make = Effect.gen(function* () {
         relativePath: input.relativePath,
       });
     }
-    const grantPath =
-      input.scope === "file"
-        ? access.realPath
-        : yield* Effect.tryPromise({
-            try: () => NodeFSP.realpath(path.resolve(input.cwd)),
-            catch: (cause) =>
-              new WorkspaceFileSystemOperationError({
-                workspaceRoot: input.cwd,
-                relativePath: input.relativePath,
-                resolvedPath: access.realPath,
-                operationPath: input.cwd,
-                operation: "realpath-workspace-root",
-                cause,
-              }),
-          });
+    const grantPath = input.scope === "file" ? access.realPath : access.workspaceRoot;
     const grant: OutsideWorkspaceEditGrant = { kind: input.scope, path: grantPath };
     yield* updateOutsideEditGrants((grants) =>
       grants.some((entry) => entry.kind === grant.kind && entry.path === grant.path)

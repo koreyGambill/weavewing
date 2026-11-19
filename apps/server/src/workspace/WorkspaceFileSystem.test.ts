@@ -1307,6 +1307,25 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           yield* workspaceFileSystem.revokeOutsideEdits({ grant: workspaceGrant });
           yield* refuses("~/.bashrc.md");
           expect(yield* read("~/.bashrc.md")).toMatchObject({ canGrantEdit: true });
+
+          // Creating and looking up a grant resolve the workspace root the same way, `link/..` too.
+          yield* fileSystem.makeDirectory(path.join(home, "elsewhere", "inner"), {
+            recursive: true,
+          });
+          yield* fileSystem.symlink(path.join(home, "elsewhere", "inner"), path.join(cwd, "lnk"));
+          const dotted = `${cwd}${path.sep}lnk${path.sep}..`;
+          const dottedGrant = yield* inHome(
+            workspaceFileSystem.allowOutsideEdits({
+              cwd: dotted,
+              relativePath: "~/.bashrc.md",
+              scope: "workspace",
+            }),
+          );
+          expect(yield* read("~/.bashrc.md", dotted)).toMatchObject({
+            writable: true,
+            editGrant: dottedGrant,
+          });
+          yield* write("~/.bashrc.md", dotted);
         }).pipe(Effect.provide(layerGrantWrites())),
     );
 
