@@ -1311,6 +1311,24 @@ it.effect.each([
 );
 
 // Chrome stops sending screencast frames while too many are unacked.
+it.effect("the idle agent tab cleanup leaves a tab that is recording", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const now = vi.spyOn(Date, "now").mockReturnValue(0);
+      yield* Effect.addFinalizer(() => Effect.sync(() => now.mockRestore()));
+      const { broker, tabId } = yield* ready;
+      yield* broker.invoke({ scope, tabId, operation: "recordingStart", input: {} });
+      now.mockReturnValue(31 * 60 * 1000);
+      yield* broker.invoke({
+        scope: asSession("other-agent"),
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      expect(contexts[0]!.page.close).not.toHaveBeenCalled();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.effect("recordings ack screencast frames without waiting for the encoder to decode them", () =>
   Effect.scoped(
     Effect.gen(function* () {
