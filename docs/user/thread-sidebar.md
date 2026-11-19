@@ -31,14 +31,16 @@ folder, and the branch. To change it before the first message, click the folder,
 `mod+shift+o`, or choose **Change project or folder…** in the command palette. After
 the first message, the same click or key opens **Change folder**. Search
 by project name or path. The same picker opens from **New thread in…** in the command
-palette. It starts on the current machine and lists every project, pinned first and then
-by recency. Enter accepts the highlighted first row.
+palette. Before you type, it lists projects you have run threads in on the current machine,
+pinned first and then by recency; type to find any other project. Enter accepts the
+highlighted first row.
 
-Choose a machine to move the draft there, or use **All machines** to search across
-connected machines. A machine that is offline stays listed but cannot be chosen. The
-footer marks your default place; **Make this the default place** saves the current
-machine and project, or the default folder, as this device's default. Choosing a project on another machine moves the draft to it.
-Inside the picker, `ctrl+alt+m` cycles machines and `ctrl+alt+shift+m` toggles All machines.
+Choose the machine with the machine button beside the folder under the composer. In the
+picker, **All machines** searches every connected machine, and choosing a project on another
+machine moves the draft to it. **Open folder** and **Clone repo** add a project. The **?**
+button lists the picker's keys, including `ctrl+alt+m` to cycle machines and
+`ctrl+alt+shift+m` to toggle All machines. The gear button makes the current place this
+device's default for new threads, or opens the default folder setting.
 
 Type a path such as `~/code/` to browse folders on the selected machine. In All
 machines, each machine resolves `~` to its own home. Tab completes a highlighted
@@ -53,7 +55,7 @@ A thread does not need a project. **New thread** and `mod+n` start in the defaul
 on another connected machine and the line under the composer says why. **Use default place** under the
 composer moves a draft back there. On mobile, pick **No project** from the
 project list. Before sending, click the folder under the composer to pick a project, **Open
-folder…** for any folder on that machine, or **Clone repository…**; the draft moves there
+folder** for any folder on that machine, or **Clone repo**; the draft moves there
 with what you typed. Pick another machine from the machine menu to move it there.
 
 A new thread shows in the sidebar as soon as you open it. If you leave it without typing
