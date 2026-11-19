@@ -40,7 +40,7 @@ export function planNextReopen(
     }
     const alreadyOpen =
       entry.kind === "panel-tab"
-        ? owner.panel.isOpen && owner.panel.surfaces.some((s) => s.id === entry.surface.id)
+        ? owner.panel.isOpen && owner.panel.surfaces.some((s) => isSameTab(s, entry.surface))
         : owner.panel.surfaces.some(
             (s) => s.kind === "preview" && s.resourceId === entry.snapshot.tabId,
           );
@@ -52,6 +52,11 @@ export function planNextReopen(
   }
   return { drop, restore: null };
 }
+
+// Files tabs share ids across roots, so only one at the same root is the closed tab.
+const isSameTab = (open: RightPanelSurface, closed: RightPanelSurface) =>
+  open.id === closed.id &&
+  (open.kind !== "files" || closed.kind !== "files" || open.root === closed.root);
 
 type PullRequestsSearchLike = Partial<PullRequestListPreferences> & {
   repository?: string;
@@ -139,7 +144,7 @@ export async function reopenClosedView(
       }
       break;
     case "files": {
-      if (surface.root !== undefined) {
+      if (surface.id !== "files" || surface.root !== undefined) {
         panels.restoreSurface(ref, surface);
         break;
       }

@@ -114,6 +114,57 @@ describe("reopenClosedView", () => {
   });
 
   it.each([
+    {
+      name: "a re-rooted Files tab after Files reopened at the workspace root",
+      setup: () => {
+        const panels = useRightPanelStore.getState();
+        panels.open(threadRef, "files");
+        panels.setFilesRoot(threadRef, "files", "/repo/src");
+        panels.closeSurface(threadRef, "files");
+        panels.open(threadRef, "files");
+      },
+      restored: { kind: "files", root: "/repo/src" },
+    },
+    {
+      name: "a second Files tab at the workspace root",
+      setup: () => {
+        const panels = useRightPanelStore.getState();
+        panels.open(threadRef, "files");
+        panels.add(threadRef, "files");
+        const { activeSurfaceId } = selectThreadRightPanelState(
+          useRightPanelStore.getState().byThreadKey,
+          threadRef,
+        );
+        panels.closeSurface(threadRef, activeSurfaceId!);
+      },
+      restored: { kind: "files" },
+    },
+  ])("reopens $name as its own tab", async ({ setup, restored }) => {
+    setup();
+    const [entry] = useClosedViewStore.getState().entries;
+    const before = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      threadRef,
+    );
+    const plan = planNextReopen([entry!], () => ({
+      environmentKnown: true,
+      catalogReady: true,
+      ownerExists: true,
+      sideChatExists: true,
+      shellLive: true,
+      panel: before,
+    }));
+    expect(plan.restore).toBe(entry);
+    await reopenClosedView(entry!, { openPreview: vi.fn(), workspaceAvailable: true });
+    const after = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
+    expect(after.surfaces).toEqual([
+      { id: "files", kind: "files" },
+      { id: expect.stringMatching(/^files:/), ...restored },
+    ]);
+    expect(after.activeSurfaceId).toBe(after.surfaces[1]!.id);
+  });
+
+  it.each([
     { hosted: false, folderTrail: "packages/contracts/src" },
     { hosted: false, folderTrail: undefined },
     { hosted: true, folderTrail: "packages/contracts/src" },

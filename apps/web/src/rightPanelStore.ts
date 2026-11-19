@@ -884,7 +884,15 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       restoreSurface: (ref, surface) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => upsertSurface(current, surface)),
+          userAction(state, scopedThreadKey(ref), (current) =>
+            upsertSurface(
+              current,
+              // A Files tab's id may now belong to another tab; the restored one stays distinct.
+              surface.kind === "files" && current.surfaces.some((entry) => entry.id === surface.id)
+                ? { ...surface, id: `files:${randomUUID()}` }
+                : surface,
+            ),
+          ),
         ),
       open: (ref, kind) =>
         set((state) =>
