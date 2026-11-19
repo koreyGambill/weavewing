@@ -144,6 +144,7 @@ export type TileAction =
   | { type: "restore-group"; groupId: string }
   | { type: "show-beside"; groupId: string | null }
   | { type: "swap-beside" }
+  | { type: "rotate" }
   | { type: "resize-focus-pair"; ratio: number }
   | { type: "activate"; groupId: string; tabId: string }
   | { type: "focus"; groupId: string }
@@ -456,6 +457,17 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
     )
       return layout;
     return { ...layout, besideGroupId: action.groupId, focusedGroupId: action.groupId };
+  }
+  if (action.type === "rotate") {
+    const docked = groups.filter((group) => !group.floating);
+    if (docked.length < 2) return layout;
+    return {
+      ...layout,
+      root: mapNode(layout.root, (node) => {
+        const index = docked.findIndex((group) => group.id === node.id);
+        return index === -1 ? node : docked[(index + docked.length - 1) % docked.length]!;
+      }),
+    };
   }
   if (action.type === "swap-beside")
     return layout.maximizedGroupId && layout.besideGroupId

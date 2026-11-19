@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import {
   isMacPlatform,
+  leaderShortcutKey,
   matchesKeybindingShortcut,
   matchesKeybindingShortcutModifiers,
   normalizeEventKey,
@@ -41,6 +42,7 @@ export interface ShortcutMatchContext {
 }
 
 interface ShortcutMatchOptions {
+  leader?: boolean;
   platform?: string;
   context?: Partial<ShortcutMatchContext>;
 }
@@ -103,6 +105,7 @@ export function shortcutConflictKey(
   const metaKey = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
   const ctrlKey = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
   return [
+    shortcut.leader ? "leader" : "direct",
     shortcut.key,
     metaKey ? "meta" : "",
     ctrlKey ? "ctrl" : "",
@@ -190,9 +193,22 @@ export function resolveShortcutCommand(
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
-    if (!binding) continue;
+    if (
+      !binding ||
+      binding.command === "keybindings.leader" ||
+      Boolean(binding.shortcut.leader) !== Boolean(options?.leader)
+    )
+      continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
-    if (!matchesKeybindingShortcut(event, shortcutForContext(binding, context), platform)) continue;
+    if (
+      !matchesKeybindingShortcut(
+        event,
+        shortcutForContext(binding, context),
+        platform,
+        options?.leader,
+      )
+    )
+      continue;
     return binding.command;
   }
   return null;
@@ -232,6 +248,7 @@ export function formatShortcutLabel(
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
 ): string {
+  if (shortcut.leader) return `Leader then ${formatShortcutKeyLabel(leaderShortcutKey(shortcut))}`;
   const keyLabel = formatShortcutKeyLabel(shortcut.key);
   const useMetaForMod = isMacPlatform(platform);
   const showMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
@@ -264,7 +281,12 @@ export function shortcutLabelForCommand(
       : options;
   const platform = resolvePlatform(resolvedOptions);
   const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
-  return shortcut ? formatShortcutLabel(shortcut, platform) : null;
+  if (!shortcut) return null;
+  if (shortcut.leader) {
+    const leader = keybindings.findLast((rule) => rule.command === "keybindings.leader")?.shortcut;
+    return `${leader ? formatShortcutLabel(leader, platform) : "Ctrl+A"} then ${formatShortcutKeyLabel(leaderShortcutKey(shortcut))}`;
+  }
+  return formatShortcutLabel(shortcut, platform);
 }
 
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {

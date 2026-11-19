@@ -29,7 +29,11 @@ import {
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
 } from "@t3tools/contracts";
-import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
+import {
+  leaderEnabled,
+  matchesKeybindingShortcut,
+  mergeWithDefaultKeybindings,
+} from "@t3tools/shared/keybindings";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -49,6 +53,7 @@ import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { Toggle } from "../ui/toggle";
 import { toastManager } from "../ui/toast";
 import {
@@ -77,7 +82,21 @@ import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
 
-function KeybindingPill({ value }: { value: string }) {
+function KeybindingPill({
+  value,
+  leaderKey = "ctrl+a",
+}: {
+  value: string;
+  leaderKey?: string | undefined;
+}) {
+  if (value.startsWith("leader "))
+    return (
+      <KbdGroup>
+        <KeybindingPill value={leaderKey} />
+        <span className="text-xs text-muted-foreground">then</span>
+        <Kbd>{value.slice(7) === "space" ? "Space" : value.slice(7).toUpperCase()}</Kbd>
+      </KbdGroup>
+    );
   // Keys dedupe repeated parts; a literal "+" in a shortcut splits into empty strings.
   const seenParts = new Map<string, number>();
   const parts = value.split("+").map((part) => {
@@ -100,7 +119,9 @@ function KeybindingPill({ value }: { value: string }) {
                   ? "⌥"
                   : "Alt"
                 : part === "ctrl"
-                  ? "⌃"
+                  ? navigator.platform.toLowerCase().includes("mac")
+                    ? "⌃"
+                    : "Ctrl"
                   : part.length === 1
                     ? part.toUpperCase()
                     : part}
@@ -752,11 +773,33 @@ function useKeybindingRowEditor({
       else field.blur();
       return;
     }
+    const leader = allRows.find((entry) => entry.command === "keybindings.leader")?.binding;
+    if (
+      row.command !== "keybindings.leader" &&
+      leader &&
+      matchesKeybindingShortcut(event.nativeEvent, leader.shortcut, navigator.platform)
+    ) {
+      setDraft({ keyDraft: "leader ", isRecording: true });
+      return;
+    }
+    if (keyDraft === "leader ") {
+      if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+      setDraft({
+        keyDraft: `leader ${event.key === " " ? "space" : event.key.toLowerCase()}`,
+        isRecording: false,
+      });
+      return;
+    }
     const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform, {
       layoutCharacter: true,
     });
     if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    setDraft({
+      keyDraft: row.binding.shortcut.leader
+        ? `leader ${event.key === " " ? "space" : event.key.toLowerCase()}`
+        : next,
+      isRecording: false,
+    });
   };
 
   return {
@@ -795,11 +838,13 @@ function KeybindingKeyControl({
   editor,
   isSaving,
   pillClassName,
+  leaderKey,
 }: {
   row: KeybindingRow;
   editor: KeybindingRowEditor;
   isSaving: boolean;
   pillClassName?: string | undefined;
+  leaderKey?: string | undefined;
 }) {
   const {
     keyDraft,
@@ -829,13 +874,13 @@ function KeybindingKeyControl({
           ref={pillRef}
           type="button"
           onClick={() => setDraft({ isRecording: true })}
-          aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatShortcutLabel(row.binding.shortcut)}`}
+          aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${row.binding.shortcut.leader ? `${leaderKey ?? "ctrl+a"} then ${row.key.slice(7)}` : formatShortcutLabel(row.binding.shortcut)}`}
           className={cn(
             "inline-flex h-8 cursor-pointer items-center rounded-md border border-transparent px-1.5 sm:h-7 outline-none transition-colors hover:border-border/70 hover:bg-accent focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/24",
             pillClassName,
           )}
         >
-          <KeybindingPill value={row.key} />
+          <KeybindingPill value={row.key} leaderKey={leaderKey} />
         </button>
       ) : (
         <Input
@@ -1017,7 +1062,13 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
       id={anchorId}
       className="group/row rounded-none"
       title={<KeybindingRowTitle row={row} />}
-      description={<KeybindingRowWhen row={row} editor={editor} variables={variables} />}
+      description={
+        row.command === "keybindings.leader" ? (
+          "Press twice to send the key through."
+        ) : (
+          <KeybindingRowWhen row={row} editor={editor} variables={variables} />
+        )
+      }
       control={
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <KeybindingConflictWarning labels={editor.conflictLabels} />
@@ -1032,6 +1083,9 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
             editor={editor}
             isSaving={isSaving}
             pillClassName="-mr-1.5"
+            leaderKey={
+              allRows.find((entry) => entry.command === "keybindings.leader")?.key ?? "ctrl+a"
+            }
           />
         </div>
       }
@@ -1080,6 +1134,23 @@ function useNewKeybindingDraft({
       event.stopPropagation();
       setDraft({ keyDraft: "", isRecording: false });
       event.currentTarget.blur();
+      return;
+    }
+    const leader = allRows.find((entry) => entry.command === "keybindings.leader")?.binding;
+    if (
+      commandDraft !== "keybindings.leader" &&
+      leader &&
+      matchesKeybindingShortcut(event.nativeEvent, leader.shortcut, navigator.platform)
+    ) {
+      setDraft({ keyDraft: "leader ", isRecording: true });
+      return;
+    }
+    if (keyDraft === "leader ") {
+      if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+      setDraft({
+        keyDraft: `leader ${event.key === " " ? "space" : event.key.toLowerCase()}`,
+        isRecording: false,
+      });
       return;
     }
     const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform, {
@@ -1311,6 +1382,7 @@ function useKeybindingCatalog() {
   return {
     commandOptions: buildKeybindingCommandOptions(merged),
     allRows: buildKeybindingRows(merged),
+    leaderOn: leaderEnabled(merged),
   };
 }
 
@@ -1348,9 +1420,10 @@ export function KeybindingsSettingsPanel() {
     if (searchTargetId.startsWith("keybinding-")) setQuery("");
   }
   const whenVariables = buildWhenVariableOptions();
-  const { commandOptions, allRows } = useKeybindingCatalog();
+  const { commandOptions, allRows, leaderOn } = useKeybindingCatalog();
+  const leaderRow = allRows.find((row) => row.command === "keybindings.leader");
   const rows = filterKeybindingRows(allRows, query);
-  const groups = groupKeybindingRows(rows);
+  const groups = groupKeybindingRows(rows.filter((row) => row.command !== "keybindings.leader"));
   const anchorIds = keybindingAnchorIds(rows);
 
   const openKeybindingsFile = () => {
@@ -1513,6 +1586,38 @@ export function KeybindingsSettingsPanel() {
         </p>
       ) : null}
       <div inert={!canWriteSettings} className="flex flex-col gap-8">
+        <SettingsSection title="Leader">
+          <SettingsRow
+            title="Use leader key"
+            description="Press the leader, release it, then a tile or tab key. Press it twice to send it through. Turning this off restores classic shortcuts."
+            control={
+              <Switch
+                aria-label="Use leader key"
+                checked={leaderOn}
+                disabled={savingCommand !== null}
+                onCheckedChange={(checked) =>
+                  saveKeybinding({
+                    command: "keybindings.leader",
+                    key: leaderRow?.key ?? "ctrl+a",
+                    ...(checked ? {} : { when: "false" }),
+                  })
+                }
+              />
+            }
+          />
+          {leaderRow ? (
+            <KeybindingSettingsRow
+              key={leaderRow.id}
+              row={leaderRow}
+              isSaving={savingCommand === "keybindings.leader"}
+              allRows={allRows}
+              variables={whenVariables}
+              onSave={saveKeybinding}
+              onReset={resetKeybinding}
+              onRemove={removeKeybinding}
+            />
+          ) : null}
+        </SettingsSection>
         {isAddingBinding ? (
           <SettingsGroup>
             <NewKeybindingSettingsRow
