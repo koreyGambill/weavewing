@@ -295,8 +295,8 @@ environments** gives each new isolated thread its own Xwing environment instead,
 offers **Xwing environment** in place of **New worktree**. **Off** keeps every thread in an existing
 checkout. Under either of those, the server refuses anything else that would create a T3 worktree,
 including delegated tasks with worktree isolation, worktree handoffs, pull request checkouts in a
-worktree, scheduled tasks that start in a new worktree, and restoring a deleted worktree. The
-refusal names the setting.
+worktree, pull request review guides, scheduled tasks that start in a new worktree, and restoring
+a deleted worktree. The refusal names the setting.
 
 ## Fast worktree checkout on macOS
 
