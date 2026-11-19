@@ -825,7 +825,8 @@ export const BranchToolbar = memo(function BranchToolbar({
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
             showGitControls ? "hidden @xl/composer-surface:flex" : "flex",
-            "flex-1",
+            // The where segment follows the machine directly instead of being pushed to the end.
+            where === undefined && "flex-1",
           )}
         >
           {showServer && availableEnvironments && (

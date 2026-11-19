@@ -91,6 +91,7 @@ export function DraftProjectPicker({
   defaultFolderLabel,
   currentFolder = null,
   defaultFolder = null,
+  defaultEnvironmentId = null,
   trigger,
 }: {
   readonly draftId?: DraftId | null;
@@ -110,6 +111,8 @@ export function DraftProjectPicker({
   readonly currentFolder?: string | null;
   /** The machine's default folder, so the default place can be recognized. */
   readonly defaultFolder?: string | null;
+  /** The machine new threads start on when no preference names one. */
+  readonly defaultEnvironmentId?: EnvironmentId | null;
   /** Replaces the project-name trigger, as the where-line under the composer does. */
   readonly trigger?: {
     readonly content: ReactNode;
@@ -136,7 +139,7 @@ export function DraftProjectPicker({
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
-  const preferredEnvironmentId = usePreferredEnvironmentId();
+  const preferredEnvironmentId = usePreferredEnvironmentId() ?? defaultEnvironmentId;
   const canSaveDefaultFolder = useAtomValue(
     serverEnvironment.updateSettings.permissionAtom(environmentId),
   );

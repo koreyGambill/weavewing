@@ -98,7 +98,7 @@ export function ComposerWhereLine({
           render={
             <ComposerControl
               size="xs"
-              className="min-w-0 flex-initial justify-start"
+              className="min-w-0 max-w-[35%] flex-initial justify-start"
               aria-label={`Change folder: ${ariaLabel}`}
               data-composer-context-control
               onClick={() => openChangeThreadFolder(threadRef)}
@@ -123,11 +123,12 @@ export function ComposerWhereLine({
         label={isScratch ? folderLabel : project.title}
         truncateStart={isScratch}
         currentFolder={folder}
-        defaultFolder={scratchRoot}
+        defaultFolder={selection.scratchWorkspaceRootFor(selection.defaultEnvironmentId)}
+        defaultEnvironmentId={selection.defaultEnvironmentId}
         trigger={{
           content,
           ariaLabel: `Change project or folder: ${ariaLabel}`,
-          className: "min-w-0 flex-initial justify-start",
+          className: "min-w-0 max-w-[35%] flex-initial justify-start",
         }}
         onSelect={selection.selectProject}
         onEnvironmentChange={onEnvironmentChange}
