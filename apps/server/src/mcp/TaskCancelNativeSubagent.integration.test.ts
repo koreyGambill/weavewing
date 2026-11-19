@@ -580,7 +580,6 @@ const cancelBackgroundOnlyTask = (
           assert.isUndefined(after?.cancelledRunId);
           return undefined;
         }
-        // Settling the task ends the async question it left, after its own row.
         const settled = yield* watch(
           (event) =>
             event.type === "runtime-request.updated" &&
