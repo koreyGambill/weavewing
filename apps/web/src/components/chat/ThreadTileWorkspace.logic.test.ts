@@ -6,7 +6,12 @@ import {
   syncTileLayout,
   TILE_MIN_WIDTH_PX,
 } from "../../threadTileLayout";
-import { fitTileTabs, splitTooNarrow, tileCloseConfirmation } from "./ThreadTileWorkspace.logic";
+import {
+  fitTileTabs,
+  splitTooNarrow,
+  tileCloseConfirmation,
+  tileDropZone,
+} from "./ThreadTileWorkspace.logic";
 
 const terminal = (id: string, terminalId: string): RightPanelSurface => ({
   id: `terminal:${id}`,
@@ -162,6 +167,17 @@ describe("splitTooNarrow", () => {
     expect(splitTooNarrow(crowded, edgeDrop, 400)).toBe(true);
   });
 
+  it("measures a floating tile by its own width", () => {
+    const float = (width: number) =>
+      applyTileAction(pair, {
+        type: "float-group",
+        groupId: "panels-group",
+        rect: { x: 0.1, y: 0.1, width, height: 0.5 },
+      });
+    expect(splitTooNarrow(float(0.256), splitRight("panels-group"), 1000)).toBe(true);
+    expect(splitTooNarrow(float(0.5), splitRight("panels-group"), 1000)).toBe(false);
+  });
+
   it("measures a maximized tile where it docks once the split restores the layout", () => {
     const maximized = applyTileAction(pair, { type: "maximize", groupId: "panels-group" });
     expect(splitTooNarrow(maximized, splitRight("panels-group"), 600)).toBe(true);
@@ -169,5 +185,19 @@ describe("splitTooNarrow", () => {
     expect(
       splitTooNarrow(maximized, { ...splitRight("panels-group"), axis: "vertical" }, 600),
     ).toBe(false);
+  });
+});
+
+describe("tileDropZone", () => {
+  const none = () => false;
+  const sidesRefused = (zone: string) => zone === "left" || zone === "right";
+  it.each([
+    ["the nearest edge within reach", 0.9, 0.5, none, "right"],
+    ["the center beyond every edge's reach", 0.5, 0.5, none, "center"],
+    ["no target at a refused edge, never the center", 0.9, 0.5, sidesRefused, null],
+    ["another edge only where it is nearest", 0.5, 0.1, sidesRefused, "top"],
+    ["the center still beyond reach", 0.5, 0.5, sidesRefused, "center"],
+  ] as const)("gives %s", (_name, x, y, refused, expected) => {
+    expect(tileDropZone(x, y, refused)).toBe(expected);
   });
 });

@@ -3,6 +3,7 @@ import { displayTileRoot, tileGeometry } from "../../threadTileGeometry";
 import {
   applyTileAction,
   clampTileWidths,
+  getTileGroups,
   isNewTab,
   TILE_MIN_WIDTH_PX,
   tileMinimumWidth,
@@ -161,9 +162,8 @@ const collapseSplit = (node: TileNode, id: string): TileNode =>
       : { ...node, first: collapseSplit(node.first, id), second: collapseSplit(node.second, id) };
 
 /**
- * Whether a side-by-side split is refused because the pane it divides is narrower than two
- * minimum tiles. The pane is measured as laid out after the action, so a move that empties its
- * source tile counts the room that tile gives back, but never room borrowed from a neighbour.
+ * Whether a side-by-side split is refused: the pane it divides, after the action and without
+ * borrowing from neighbours, or a floating tile's own rect, is under two minimum widths.
  * Tiles have no minimum height, so stacking splits are never refused.
  */
 export function splitTooNarrow(
@@ -174,6 +174,10 @@ export function splitTooNarrow(
   if (action.type !== "split" && action.type !== "new-group" && action.type !== "dock-group")
     return false;
   if (action.axis !== "horizontal" || canvasWidth <= 0) return false;
+  const floating = getTileGroups(layout).find(
+    (group) => group.id === action.targetGroupId,
+  )?.floating;
+  if (floating) return floating.width * canvasWidth < 2 * TILE_MIN_WIDTH_PX - FIT_EPSILON;
   const next = applyTileAction(layout, action);
   const root = next === layout ? null : shownDockedRoot(next);
   const split = root && findSplit(root, action.splitId);
@@ -184,4 +188,28 @@ export function splitTooNarrow(
     (group) => group.id === split.first.id,
   )?.rect;
   return rect ? rect.width * width < 2 * TILE_MIN_WIDTH_PX - FIT_EPSILON : false;
+}
+
+export type TileEdgeZone = "left" | "right" | "top" | "bottom";
+// How far into a tile, as a share of its size, an edge drop reaches.
+const EDGE_REACH = 0.22;
+
+/**
+ * Where a drop lands in a tile's body: the nearest edge within reach, else the center. An edge
+ * that refuses its split gives no target, so a drop aimed beside a tile never merges into it.
+ */
+export function tileDropZone(
+  localX: number,
+  localY: number,
+  refused: (zone: TileEdgeZone) => boolean,
+): TileEdgeZone | "center" | null {
+  const edges = [
+    { zone: "left" as const, distance: localX },
+    { zone: "right" as const, distance: 1 - localX },
+    { zone: "top" as const, distance: localY },
+    { zone: "bottom" as const, distance: 1 - localY },
+  ];
+  const nearest = edges.reduce((a, b) => (a.distance < b.distance ? a : b));
+  if (nearest.distance >= EDGE_REACH) return "center";
+  return refused(nearest.zone) ? null : nearest.zone;
 }

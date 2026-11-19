@@ -114,7 +114,9 @@ import {
   TILE_AREAS,
   TILE_CONTROL_PRIORITY,
   tileCloseConfirmation,
+  tileDropZone,
   type TileAreaLabel,
+  type TileEdgeZone,
   type TileControlKey,
   type TileTabFit,
 } from "./ThreadTileWorkspace.logic";
@@ -133,12 +135,11 @@ type DropZone = "tabs" | "center" | "left" | "right" | "top" | "bottom";
 type TileDrop = { groupId: string; zone: DropZone };
 type TileDrag = { kind: "tab" | "group"; id: string };
 type TileSplitAxis = "horizontal" | "vertical";
-type EdgeZone = Exclude<DropZone, "tabs" | "center">;
 /** Dropping a tab or tile on another tile's edge splits that tile. */
 const edgeDropAction = (
   drag: TileDrag,
   targetGroupId: string,
-  zone: EdgeZone,
+  zone: TileEdgeZone,
   ids: { groupId: string; splitId: string },
 ): TileAction => {
   const axis = zone === "left" || zone === "right" ? "horizontal" : "vertical";
@@ -1052,20 +1053,14 @@ export function ThreadTileWorkspace(props: {
       ) || 26;
     if ((y - hovered.rect.y) * bounds.height <= titlebarHeight)
       return { groupId: hovered.id, zone: "tabs" };
-    const edges = [
-      { zone: "left" as const, distance: localX },
-      { zone: "right" as const, distance: 1 - localX },
-      { zone: "top" as const, distance: localY },
-      { zone: "bottom" as const, distance: 1 - localY },
-    ];
-    const nearest = edges
-      .filter(
-        (edge) =>
-          !dragging ||
-          !tooNarrow(currentLayout(), edgeDropAction(dragging, hovered.id, edge.zone, probeIds)),
-      )
-      .reduce((a, b) => (a.distance < b.distance ? a : b));
-    return { groupId: hovered.id, zone: nearest.distance < 0.22 ? nearest.zone : "center" };
+    const zone = tileDropZone(
+      localX,
+      localY,
+      (edge) =>
+        dragging !== null &&
+        tooNarrow(currentLayout(), edgeDropAction(dragging, hovered.id, edge, probeIds)),
+    );
+    return zone ? { groupId: hovered.id, zone } : null;
   };
   // Floating tiles only move and resize; docking is an explicit button or menu choice.
   const floatGesture = (
