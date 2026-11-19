@@ -15,7 +15,7 @@ import { useEnvironments } from "~/state/environments";
 import { mintPairingCodeOn } from "~/state/peerPairingCode";
 import { peerLinkEnvironment } from "~/state/peerLinks";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { runRelink } from "./relink.logic";
+import { type RelinkOutcome, runRelink, settleUncertain } from "./relink.logic";
 import {
   type LinkLevelChoice,
   planSquareChange,
@@ -64,7 +64,7 @@ export function useSquareChange(): SquareChangeState {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [uncertain, setUncertain] = useState<
-    ReadonlyMap<string, { readonly square: ReachSquare; readonly target: LinkLevelChoice }>
+    ReadonlyMap<string, { readonly square: ReachSquare; readonly target: LinkLevelChoice | null }>
   >(new Map());
   const registry = useContext(RegistryContext);
 
@@ -85,7 +85,7 @@ export function useSquareChange(): SquareChangeState {
       sameHost: desktopSameHostEnvironmentIds(environments, bootstraps),
     }).find((machine) => machine.environmentId === toId)?.urls ?? [];
 
-  const relink = async (square: ReachSquare, target: LinkLevelChoice) => {
+  const relink = async (square: ReachSquare, target: LinkLevelChoice): Promise<RelinkOutcome> => {
     const fromId = square.from.environmentId!;
     const toId = square.to.environmentId!;
     const [url, ...alternateUrls] =
@@ -95,7 +95,11 @@ export function useSquareChange(): SquareChangeState {
     const outcome = await runRelink({
       from: square.from.label,
       to: square.to.label,
-      current: square.state.kind === "level" ? REACH_LEVEL_LABELS[square.state.level] : "no access",
+      current: uncertain.has(keyOf(square))
+        ? null
+        : square.state.kind === "level"
+          ? REACH_LEVEL_LABELS[square.state.level]
+          : "no access",
       hasAddress: url !== undefined,
       mint: async () => {
         const code = await mintPairingCodeOn(toId, target);
@@ -120,19 +124,11 @@ export function useSquareChange(): SquareChangeState {
           : { failure: failureText(linked) };
       },
     });
-    const key = keyOf(square);
     if (outcome.kind === "uncertain") {
       // Read the source's links again so the page shows what it holds now, not the old level.
       registry.refresh(peerLinkEnvironment.list({ environmentId: fromId, input: {} }));
-      setUncertain((current) => new Map(current).set(key, { square, target }));
-    } else {
-      setUncertain((current) => {
-        const next = new Map(current);
-        next.delete(key);
-        return next;
-      });
     }
-    return outcome.kind === "done" ? null : outcome.message;
+    return outcome;
   };
 
   const remove = async (square: ReachSquare) => {
@@ -159,9 +155,16 @@ export function useSquareChange(): SquareChangeState {
     const key = keyOf(square);
     setBusyKey(key);
     setError(key, null);
-    const failure =
-      plan.action === "remove" ? await remove(square) : await relink(square, plan.target);
+    const outcome: RelinkOutcome =
+      plan.action === "relink"
+        ? await relink(square, plan.target)
+        : await remove(square).then((message) =>
+            message === null ? { kind: "done" } : { kind: "unchanged", message },
+          );
+    const target = plan.action === "relink" ? plan.target : null;
+    setUncertain((current) => settleUncertain(current, key, outcome.kind, { square, target }));
     setBusyKey(null);
+    const failure = outcome.kind === "done" ? null : outcome.message;
     setError(key, failure);
     return failure;
   };
@@ -207,7 +210,7 @@ export function useSquareChange(): SquareChangeState {
   // The one way out of an uncertain link: link again at the level that was asked for.
   const linkAgain = (key: string) => {
     const entry = uncertain.get(key);
-    if (entry !== undefined)
+    if (entry !== undefined && entry.target !== null)
       void run(entry.square, {
         kind: "apply",
         action: "relink",
