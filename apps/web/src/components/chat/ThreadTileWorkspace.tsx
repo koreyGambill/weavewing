@@ -105,7 +105,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PanelTabCloseButton } from "../ui/panel-tab-close-button";
 import { cn, randomUUID } from "../../lib/utils";
 import { ThreadPaneAttention } from "../ThreadAttentionOverlay";
-import { TILE_AREAS, tileCloseConfirmation, type TileAreaLabel } from "./ThreadTileWorkspace.logic";
+import {
+  ownsTileInput,
+  TILE_AREAS,
+  tileCloseConfirmation,
+  type TileAreaLabel,
+} from "./ThreadTileWorkspace.logic";
 import {
   savedTileGroupCount,
   TILE_LAYOUT_AREA_LABELS,
@@ -236,6 +241,8 @@ export function ThreadTileWorkspace(props: {
   terminalsOnly?: boolean;
   /** Runs instead of the maximize command when there is only one tile to maximize. */
   onMaximizeOnlyTile?: () => void;
+  /** Mounted over another workspace: takes tile keys and menu actions only while it holds focus. */
+  overlay?: boolean;
 }) {
   const compact = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const savedLayout = useRightPanelStore((state) =>
@@ -277,6 +284,7 @@ export function ThreadTileWorkspace(props: {
     rootRef,
     threadRef: props.threadRef,
     panels: props.panels,
+    overlay: props.overlay === true,
   });
   const layout = gestureResize
     ? gestureResize.reduce(
@@ -849,13 +857,15 @@ export function ThreadTileWorkspace(props: {
             event.target instanceof Element &&
             event.target.closest('[role="dialog"], [role="alertdialog"], [data-keybinding-capture]')
           ) &&
-          // With two workspaces mounted, keys typed inside one never reach the other.
-          !(
-            event.target instanceof Element &&
-            event.target.closest("[data-thread-tiling]")?.contains(rootRef.current) === false
-          ),
+          ownsTileInput(rootRef.current, event.target, props.overlay === true),
       }),
-      ...Object.entries(actions).map(([command, run]) => registerMenuAction(command, run)),
+      ...Object.entries(actions).map(([command, run]) =>
+        registerMenuAction(command, () =>
+          ownsTileInput(rootRef.current, document.activeElement, props.overlay === true)
+            ? run()
+            : false,
+        ),
+      ),
     ];
     for (const surface of props.panels.surfaces) {
       if (surface.kind !== "preview" || !surface.resourceId) continue;

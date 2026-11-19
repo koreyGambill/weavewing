@@ -356,6 +356,7 @@ function DropdownTerminalWorkspace({
       runningTerminalIds={selectRunningSubprocessTerminalIds(knownSessions ?? [])}
       onCloseTileSurfaces={close.closeSurfacesWithoutTerminalPrompt}
       terminalsOnly
+      overlay
       onMaximizeOnlyTile={() => useDropdownTerminalStore.getState().toggleExpanded()}
       renderSurface={(surface, visible) =>
         surface.kind === "terminal" ? (

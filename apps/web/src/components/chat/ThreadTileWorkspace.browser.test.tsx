@@ -762,3 +762,140 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
   expect(first.defaultPrevented).toBe(true);
   expect(second.defaultPrevented).toBe(false);
 });
+
+it("sends tile keys and menu actions only to the workspace that owns focus, else the one underneath", async () => {
+  const keybindings = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1100, 900);
+  await using _viewport = {
+    [Symbol.asyncDispose]: () => page.viewport(viewport.width, viewport.height),
+  };
+  const threadRef = {
+    environmentId: EnvironmentId.make("tiles"),
+    threadId: ThreadId.make("under"),
+  };
+  const overlayRef = {
+    environmentId: EnvironmentId.make("tiles"),
+    threadId: ThreadId.make("over"),
+  };
+  useRightPanelStore.setState({ byThreadKey: {} });
+  const store = useRightPanelStore.getState();
+  store.open(threadRef, "files");
+  store.openTerminal(overlayRef, "term-1");
+  store.applyTileAction(overlayRef, { type: "close-tab", tabId: "conversation" });
+  let terminals = 1;
+  const noop = () => {};
+  function Workspace(props: { threadRef: typeof threadRef; overlay?: boolean }) {
+    const panel = useRightPanelStore((state) =>
+      selectThreadRightPanelState(state.byThreadKey, props.threadRef),
+    );
+    return (
+      <ThreadTileWorkspace
+        threadRef={props.threadRef}
+        projectId={null}
+        newThread={false}
+        header={null}
+        runningTerminalIds={[]}
+        onCloseTileSurfaces={noop}
+        conversation={<textarea aria-label="Thread composer" defaultValue="" />}
+        {...(props.overlay ? { terminalsOnly: true, overlay: true } : {})}
+        panels={{
+          surfaces: panel.surfaces,
+          activeSurfaceId: panel.activeSurfaceId,
+          environmentId: props.threadRef.environmentId,
+          keybindings,
+          getShortcutContext: () => ({
+            terminalFocus: false,
+            terminalOpen: false,
+            previewFocus: false,
+            previewOpen: false,
+            isWeb: true,
+            isDesktop: false,
+          }),
+          pendingSurfaceIds: new Set(),
+          previewSessions: {},
+          desktopByTabId: {},
+          terminalLabelsById: new Map(),
+          onActivate: (surface) => store.activateSurface(props.threadRef, surface.id),
+          onCloseSurface: noop,
+          onCloseOtherSurfaces: noop,
+          onCloseSurfacesToRight: noop,
+          onCloseAllSurfaces: noop,
+          onCopyFilePath: noop,
+          onAddBrowser: noop,
+          onAddBrowserInProfile: noop,
+          onAddTerminal: () => store.openTerminal(props.threadRef, `term-${++terminals}`),
+          onAddDiff: noop,
+          onAddFiles: noop,
+          onAddPullRequest: noop,
+          onAddPullRequests: noop,
+          onAddDevice: noop,
+          browserAvailable: false,
+          terminalAvailable: true,
+          diffAvailable: false,
+          filesAvailable: false,
+          pullRequestAvailable: false,
+          pullRequestsAvailable: false,
+          deviceAvailable: false,
+        }}
+        renderSurface={(surface) => (
+          <textarea aria-label={`Editor ${surface.id}`} defaultValue="" />
+        )}
+      />
+    );
+  }
+  await using screen = await render(
+    <div style={{ display: "flex", flexDirection: "column", width: 900, height: 800 }}>
+      <input aria-label="Outside both" />
+      <div style={{ display: "flex", height: 380 }}>
+        <Workspace threadRef={threadRef} />
+      </div>
+      <div style={{ display: "flex", height: 380 }}>
+        <Workspace threadRef={overlayRef} overlay />
+      </div>
+    </div>,
+  );
+  const groups = () => {
+    const { byThreadKey } = useRightPanelStore.getState();
+    return [
+      getTileGroups(selectThreadTileLayout(byThreadKey, threadRef)).length,
+      getTileGroups(selectThreadTileLayout(byThreadKey, overlayRef)).length,
+    ];
+  };
+  const splitByKey = () =>
+    userEvent.keyboard("{Control>}{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}{/Control}");
+  const focus = (name: string) => {
+    const element = screen.getByRole("textbox", { name, exact: true }).element();
+    (element as HTMLElement).focus();
+    expect(document.activeElement).toBe(element);
+  };
+  // A thread split focuses its new chooser; wait for it so it cannot steal the next focus.
+  const threadChooserFocused = () =>
+    vi.waitFor(() => expect(document.activeElement?.closest("[data-tile-chooser]")).not.toBeNull());
+  expect(groups()).toEqual([2, 1]);
+
+  focus("Editor terminal:term-1");
+  await splitByKey();
+  expect(groups()).toEqual([2, 2]);
+  focus("Editor terminal:term-1");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([2, 3]);
+
+  // The overlay re-rendered last, so its registrations are the newest.
+  focus("Thread composer");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([3, 3]);
+  await threadChooserFocused();
+  focus("Thread composer");
+  await splitByKey();
+  expect(groups()).toEqual([4, 3]);
+  await threadChooserFocused();
+
+  focus("Outside both");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([5, 3]);
+  await threadChooserFocused();
+  focus("Outside both");
+  await splitByKey();
+  expect(groups()).toEqual([6, 3]);
+});

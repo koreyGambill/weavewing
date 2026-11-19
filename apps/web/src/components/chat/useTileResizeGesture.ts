@@ -15,12 +15,14 @@ import {
 } from "../../shortcuts/dispatcher";
 import type { TileNode } from "../../threadTileLayout";
 import type { TileSurfaceActions } from "../SurfaceTabContent";
+import { ownsTileInput } from "./ThreadTileWorkspace.logic";
 
 type Point = { x: number; y: number };
 export function useTileResizeGesture(input: {
   rootRef: RefObject<HTMLDivElement | null>;
   threadRef: ScopedThreadRef;
   panels: Pick<TileSurfaceActions, "keybindings" | "getShortcutContext">;
+  overlay: boolean;
 }) {
   const [preview, setPreview] = useState<Array<{ splitId: string; ratio: number }> | null>(null);
   const pointer = useRef<Point | null>(null);
@@ -206,9 +208,12 @@ export function useTileResizeGesture(input: {
           !(
             event.target instanceof Element &&
             event.target.closest('[role="dialog"], [role="alertdialog"], [data-keybinding-capture]')
-          ),
+          ) &&
+          ownsTileInput(input.rootRef.current, event.target, input.overlay),
       },
     );
+    const owned = (run: () => void) => () =>
+      ownsTileInput(input.rootRef.current, document.activeElement, input.overlay) ? run() : false;
     const unsteps = (
       [
         ["workspace.tile.resizeLeft", "h"],
@@ -216,9 +221,20 @@ export function useTileResizeGesture(input: {
         ["workspace.tile.resizeUp", "k"],
         ["workspace.tile.resizeRight", "l"],
       ] as const
-    ).map(([command, key]) => registerMenuAction(command, () => step(key)));
-    const unmenu = registerMenuAction("workspace.tile.resize", () => begin());
-    const unrelease = registerMenuAction("workspace.tile.resize.release", () => finish(true));
+    ).map(([command, key]) =>
+      registerMenuAction(
+        command,
+        owned(() => step(key)),
+      ),
+    );
+    const unmenu = registerMenuAction(
+      "workspace.tile.resize",
+      owned(() => begin()),
+    );
+    // Ends the held resize wherever it started.
+    const unrelease = registerMenuAction("workspace.tile.resize.release", () =>
+      session.current ? finish(true) : false,
+    );
     window.addEventListener("pointermove", move, true);
     window.addEventListener("keyup", release, true);
     window.addEventListener("blur", cancel);
@@ -240,6 +256,7 @@ export function useTileResizeGesture(input: {
     threadId,
     input.panels.keybindings,
     input.panels.getShortcutContext,
+    input.overlay,
   ]);
   return preview;
 }

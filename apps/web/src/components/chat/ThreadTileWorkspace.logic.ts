@@ -39,3 +39,16 @@ export function tileCloseConfirmation(input: {
     description: `${names} ${running.length === 1 ? "is" : "are"} still running and will be stopped.`,
   };
 }
+
+/**
+ * Whether a tile key or menu action belongs to this workspace: the one holding focus takes it,
+ * and with focus outside every workspace it goes to the one underneath, never to an overlay.
+ */
+export function ownsTileInput(
+  workspace: Element | null,
+  focused: EventTarget | null,
+  overlay: boolean,
+): boolean {
+  const owner = focused instanceof Element ? focused.closest("[data-thread-tiling]") : null;
+  return owner ? workspace !== null && owner.contains(workspace) : !overlay;
+}

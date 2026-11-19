@@ -177,13 +177,17 @@ export function registerCommands(
   return pushScope(scopes, { commands, options });
 }
 
-type MenuActionHandler = () => void;
+/** Return `false` to let the next older handler take the action. */
+type MenuActionHandler = () => boolean | void;
 const menuActionHandlers = new Map<string, MenuActionHandler[]>();
 let menuActionInstalled = false;
 
 export function dispatchMenuAction(action: string): void {
   const handlers = menuActionHandlers.get(action);
-  handlers?.at(-1)?.();
+  if (!handlers) return;
+  for (let index = handlers.length - 1; index >= 0; index -= 1) {
+    if (handlers[index]?.() !== false) return;
+  }
 }
 
 function ensureMenuActionListener() {
@@ -194,7 +198,7 @@ function ensureMenuActionListener() {
   bridge.onMenuAction(dispatchMenuAction);
 }
 
-/** Desktop menu actions; the newest handler for an action wins. */
+/** Desktop menu actions; the newest handler that does not decline an action takes it. */
 export function registerMenuAction(action: string, handler: MenuActionHandler): () => void {
   ensureMenuActionListener();
   const handlers = menuActionHandlers.get(action) ?? [];
