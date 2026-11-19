@@ -2,11 +2,12 @@ import { ArrowUp, FolderSymlink, House } from "lucide-react";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 
 import { Badge } from "~/components/ui/badge";
+import { toastManager } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
-import { filesTabRoot, parentHostFolder, resolveTypedFilesRoot } from "./filesRoot";
+import { filesTabRoot, parentHostFolder, resolveFilesRoot } from "./filesRoot";
 
 function RootBarButton(props: {
   label: string;
@@ -43,6 +44,8 @@ export function FilesRootBar(props: {
   outsideWorkspace: boolean;
   onChangeRoot: (root: string | null) => void;
   onOpenTabHere: () => void;
+  /** Resolves a typed folder to its absolute path on the tab's environment. */
+  resolveFolder: (partialPath: string, cwd: string) => Promise<string>;
 }) {
   const { treeRoot, workspaceRoot, onChangeRoot } = props;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,9 +56,19 @@ export function FilesRootBar(props: {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (draft.trim() === "") return;
-    onChangeRoot(resolveTypedFilesRoot(draft, workspaceRoot));
+    const typed = draft;
     inputRef.current?.blur();
+    resolveFilesRoot(typed, workspaceRoot, props.resolveFolder).then(
+      (root) => {
+        if (root !== undefined) onChangeRoot(root);
+      },
+      (error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Unable to open folder",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+    );
   };
 
   return (

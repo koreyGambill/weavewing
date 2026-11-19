@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   filesTabRoot,
   newFilesTabRoot,
+  filesRootBrowsePath,
+  filesSearchRoot,
   parentHostFolder,
-  resolveTypedFilesRoot,
+  resolveFilesRoot,
   workspacePathOf,
 } from "./filesRoot";
 
@@ -35,13 +37,15 @@ describe("files tab roots", () => {
   });
 
   it.each([
-    ["src/lib", "/repo/src/lib"],
-    ["/tmp/logs/", "/tmp/logs"],
-    ["~/notes", "~/notes"],
-    [".", null],
-    ["/repo", null],
-  ])("reads typed root %j as %j", (input, root) => {
-    expect(resolveTypedFilesRoot(input, "/repo")).toBe(root);
+    ["src", "./src/"],
+    ["..", "../"],
+    ["~", "~"],
+    ["~/", "~/"],
+    ["~\\Documents", "~\\Documents/"],
+    ["C:\\Users", "C:\\Users/"],
+    ["/tmp/logs/", "/tmp/logs/"],
+  ])("asks the environment to resolve %j as %j", (input, partialPath) => {
+    expect(filesRootBrowsePath(input)).toBe(partialPath);
   });
 
   it.each([
@@ -50,6 +54,37 @@ describe("files tab roots", () => {
     ["src/app.ts", "src/app.ts"],
   ])("opens %j as %j", (path, opened) => {
     expect(workspacePathOf(path, "/repo")).toBe(opened);
+  });
+});
+
+describe("resolveFilesRoot", () => {
+  const workspaceRoot = "/home/u/repo";
+  // Mirrors the server's browse resolution: `~` expands to home, explicit relatives use cwd.
+  const resolveFolder = async (partialPath: string, cwd: string) => {
+    const expanded = partialPath.replace(/^~(?=$|[\\/])/, "/home/u");
+    const resolved = new URL(expanded, `file://${cwd}/`).pathname;
+    return resolved.length > 1 ? resolved.replace(/\/+$/, "") : resolved;
+  };
+
+  it.each([
+    { input: "..", root: "/home/u", search: null },
+    { input: "src", root: "/home/u/repo/src", search: "/home/u/repo/src" },
+    { input: "~", root: "/home/u", search: null },
+    { input: "~/", root: "/home/u", search: null },
+    { input: "~/repo/src", root: "/home/u/repo/src", search: "/home/u/repo/src" },
+    { input: "~/repo", root: null, search: workspaceRoot },
+    { input: "/tmp/logs/", root: "/tmp/logs", search: null },
+  ])("stores $input as $root and searches $search", async ({ input, root, search }) => {
+    const stored = await resolveFilesRoot(input, workspaceRoot, resolveFolder);
+    expect(stored).toBe(root);
+    expect(filesSearchRoot(stored ?? workspaceRoot, workspaceRoot)).toBe(search);
+    if (stored !== null && stored !== undefined) {
+      expect(parentHostFolder(stored)).toBe(await resolveFolder(`${stored}/..`, "/"));
+    }
+  });
+
+  it("ignores an empty path", async () => {
+    expect(await resolveFilesRoot("  ", workspaceRoot, resolveFolder)).toBeUndefined();
   });
 });
 

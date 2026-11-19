@@ -41,7 +41,7 @@ import {
 import type { WorkerPoolManager } from "@pierre/diffs/worker";
 import { EditProvider, File, Virtualizer, useWorkerPool } from "@pierre/diffs/react";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
-import { useFilesystemReadAccess } from "~/state/filesystem";
+import { filesystemEnvironment, useFilesystemReadAccess } from "~/state/filesystem";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -94,7 +94,8 @@ import { AudioPreview } from "./AudioPreview";
 import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import { PreviewImage } from "./PreviewImage";
-import FileBrowserPanel from "./FileBrowserPanel";
+import FileBrowserPanel, { type FileBrowserPanelHandle } from "./FileBrowserPanel";
+import { FilesRootBar } from "./FilesRootBar";
 import { FileExplorerPane } from "./FileExplorerPane";
 import { workspacePathOf } from "./filesRoot";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
@@ -1244,6 +1245,16 @@ export default function FilePreviewPanel({
   const hostFolderPath = isFolder && isHostFile ? relativePath : null;
   const treeRoot = hostFolderPath ?? filesRoot ?? cwd;
   const rootedTree = treeRoot !== cwd;
+  const fileBrowserRef = useRef<FileBrowserPanelHandle>(null);
+  const browseFolder = useAtomQueryRunner(filesystemEnvironment.browse, {
+    reportFailure: false,
+    reportDefect: false,
+  });
+  const resolveFolder = async (partialPath: string, folderCwd: string) => {
+    const result = await browseFolder({ environmentId, input: { partialPath, cwd: folderCwd } });
+    if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+    return result.value.parentPath;
+  };
   // The server marks the host files a workspace may edit: instruction files it loads.
   const readOnlyHost = isHostFile && file.data?.writable !== true;
   // A chat-linked folder reads as a file until its read settles, and revealing a
@@ -1793,43 +1804,60 @@ export default function FilePreviewPanel({
         </div>
         {showExplorer ? (
           <FileExplorerPane resizable={Boolean(previewPath)}>
-            <div
-              className="contents"
-              onClick={focusEditorOnTreeRowClickOrEnter}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") focusEditorOnTreeRowClickOrEnter(event);
-              }}
-            >
-              <FileBrowserPanel
-                key={`${environmentId}:${treeRoot}`}
-                environmentId={environmentId}
-                cwd={treeRoot}
-                projectName={rootedTree ? treeRoot : projectName}
-                hostFolder={rootedTree}
-                selectedPath={
-                  hostFolderPath === null
-                    ? relativePath
-                    : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
-                }
-                selectedPathRevealId={revealRequestId}
-                onOpenFile={(path) => onOpenFile(workspacePathOf(path, cwd))}
-                rootControls={{
-                  workspaceRoot: cwd,
-                  outsideWorkspace: workspaceRelativeFilePath(treeRoot, cwd) === null,
-                  ...(onChangeFilesRoot ? { onChangeRoot: onChangeFilesRoot } : {}),
-                  onOpenFilesTab,
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* Outside the keyed tree, so a root change keeps focus on the bar's buttons. */}
+              {onChangeFilesRoot ? (
+                <FilesRootBar
+                  treeRoot={treeRoot}
+                  workspaceRoot={cwd}
+                  outsideWorkspace={workspaceRelativeFilePath(treeRoot, cwd) === null}
+                  onChangeRoot={onChangeFilesRoot}
+                  onOpenTabHere={() =>
+                    onOpenFilesTab(
+                      fileBrowserRef.current?.selectedFolderRoot() ?? filesRoot ?? null,
+                    )
+                  }
+                  resolveFolder={resolveFolder}
+                />
+              ) : null}
+              <div
+                className="contents"
+                onClick={focusEditorOnTreeRowClickOrEnter}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") focusEditorOnTreeRowClickOrEnter(event);
                 }}
-                answersPanelFind={!previewPath}
-                workspaceMutationId={workspaceMutationId}
-                {...(previewPath && !isMedia && !isPdf
-                  ? {
-                      onRefreshSelectedFile: () => {
-                        if (!isDocument) file.refresh();
-                        setFileRefreshRevision((value) => value + 1);
-                      },
-                    }
-                  : {})}
-              />
+              >
+                <FileBrowserPanel
+                  ref={fileBrowserRef}
+                  key={`${environmentId}:${treeRoot}`}
+                  environmentId={environmentId}
+                  cwd={treeRoot}
+                  projectName={rootedTree ? treeRoot : projectName}
+                  hostFolder={rootedTree}
+                  selectedPath={
+                    hostFolderPath === null
+                      ? relativePath
+                      : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
+                  }
+                  selectedPathRevealId={revealRequestId}
+                  onOpenFile={(path) => onOpenFile(workspacePathOf(path, cwd))}
+                  rootControls={{
+                    workspaceRoot: cwd,
+                    ...(onChangeFilesRoot ? { onChangeRoot: onChangeFilesRoot } : {}),
+                    onOpenFilesTab,
+                  }}
+                  answersPanelFind={!previewPath}
+                  workspaceMutationId={workspaceMutationId}
+                  {...(previewPath && !isMedia && !isPdf
+                    ? {
+                        onRefreshSelectedFile: () => {
+                          if (!isDocument) file.refresh();
+                          setFileRefreshRevision((value) => value + 1);
+                        },
+                      }
+                    : {})}
+                />
+              </div>
             </div>
           </FileExplorerPane>
         ) : null}

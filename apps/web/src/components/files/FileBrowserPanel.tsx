@@ -10,7 +10,7 @@ import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Cause from "effect/Cause";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
-import { type Ref, useEffect, useEffectEvent, useRef, useState } from "react";
+import { type Ref, useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -27,8 +27,7 @@ import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { joinHostPath } from "./filePath";
-import { filesTabRoot, newFilesTabRoot } from "./filesRoot";
-import { FilesRootBar } from "./FilesRootBar";
+import { filesSearchRoot, filesTabRoot, newFilesTabRoot } from "./filesRoot";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import {
   areAllDirectoriesExpanded,
@@ -57,13 +56,19 @@ interface FileBrowserPanelProps {
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
   answersPanelFind?: boolean;
-  /** Folder actions; with onChangeRoot the panel is a Files tab and shows its root bar. */
+  /** Lets a Files tab's root bar open a tab at the folder selected in this tree. */
+  ref?: Ref<FileBrowserPanelHandle>;
+  /** Folder actions for the context menu; onChangeRoot is present only in Files tabs. */
   rootControls?: {
     workspaceRoot: string;
-    outsideWorkspace: boolean;
     onChangeRoot?: (root: string | null) => void;
     onOpenFilesTab: (root: string | null) => void;
   };
+}
+
+export interface FileBrowserPanelHandle {
+  /** The tree's selected or focused folder, as a Files tab root (null at the workspace root). */
+  selectedFolderRoot: () => string | null;
 }
 
 function treePath(entry: ProjectEntry): string {
@@ -96,6 +101,7 @@ function FileSearchField({
   ...props
 }: {
   ariaLabel: string;
+  placeholder: string;
   name: string;
   onClose: () => void;
   onValueChange: (value: string) => void;
@@ -111,7 +117,7 @@ function FileSearchField({
         size="sm"
         value={props.value}
         aria-label={props.ariaLabel}
-        placeholder="Search files"
+        placeholder={props.placeholder}
         data-workspace-focus-default
         spellCheck={false}
         onChange={(event) => props.onValueChange(event.target.value)}
@@ -167,6 +173,7 @@ export default function FileBrowserPanel({
   hostFolder = false,
   answersPanelFind = false,
   rootControls,
+  ref,
 }: FileBrowserPanelProps) {
   const panelPath = (relativePath: string) =>
     hostFolder ? joinHostPath(cwd, relativePath) : relativePath;
@@ -184,8 +191,13 @@ export default function FileBrowserPanel({
   } = useDirectoryEntries(environmentId, cwd);
   const [query, setQuery] = useState("");
   const [expandAll, setExpandAll] = useState(false);
+  const searchRoot = rootControls
+    ? filesSearchRoot(cwd, rootControls.workspaceRoot)
+    : hostFolder
+      ? null
+      : cwd;
   const pathSearch = useProjectPathSearch(
-    { environmentId, cwd: hostFolder ? null : cwd, query: query.slice(0, 256) },
+    { environmentId, cwd: searchRoot, query: query.slice(0, 256) },
     200,
   );
   const { entries, entryKinds, treePaths, directoryPaths, expandableDirectoryPaths } =
@@ -360,16 +372,18 @@ export default function FileBrowserPanel({
     setQuery("");
     search.close();
   };
-  const openFilesTabHere = () => {
-    if (!rootControls) return;
-    const root = newFilesTabRoot({
-      treeRoot: cwd,
-      selectedPaths: model.getSelectedPaths(),
-      focusedPath: model.getFocusedPath(),
-      entryKinds: entryKindsRef.current,
-    });
-    rootControls.onOpenFilesTab(filesTabRoot(root, rootControls.workspaceRoot));
-  };
+  useImperativeHandle(ref, () => ({
+    selectedFolderRoot: () =>
+      filesTabRoot(
+        newFilesTabRoot({
+          treeRoot: cwd,
+          selectedPaths: model.getSelectedPaths(),
+          focusedPath: model.getFocusedPath(),
+          entryKinds: entryKindsRef.current,
+        }),
+        rootControls?.workspaceRoot ?? cwd,
+      ),
+  }));
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusSearch = () => {
     searchInputRef.current?.focus();
@@ -577,15 +591,6 @@ export default function FileBrowserPanel({
         focusSearch();
       }}
     >
-      {rootControls?.onChangeRoot ? (
-        <FilesRootBar
-          treeRoot={cwd}
-          workspaceRoot={rootControls.workspaceRoot}
-          outsideWorkspace={rootControls.outsideWorkspace}
-          onChangeRoot={rootControls.onChangeRoot}
-          onOpenTabHere={openFilesTabHere}
-        />
-      ) : null}
       <div
         className="flex h-7 min-h-7 shrink-0 items-center gap-0.5 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
@@ -595,11 +600,12 @@ export default function FileBrowserPanel({
           ref={searchInputRef}
           name="project-files-search"
           ariaLabel={`Search ${projectName} files`}
+          placeholder={searchRoot === null ? "Search opened folders" : "Search files"}
           value={search.value}
           onValueChange={handleSearchValueChange}
           onClose={closeSearch}
         />
-        {directoryPaths.length > 0 && !hostFolder ? (
+        {directoryPaths.length > 0 && searchRoot !== null ? (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -657,7 +663,7 @@ export default function FileBrowserPanel({
       {hasNoSearchMatches ? (
         ready && !isPending && !pathSearch.isPending && !error && !pathSearch.error ? (
           <div role="status" className="px-3 py-4 text-xs text-muted-foreground">
-            No matching files.
+            {searchRoot === null ? "No matching files in opened folders." : "No matching files."}
           </div>
         ) : null
       ) : (

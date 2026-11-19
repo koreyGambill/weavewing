@@ -1,4 +1,5 @@
 import {
+  isExplicitRelativePath,
   isHostPath,
   isWindowsAbsolutePath,
   normalizeProjectPathForDispatch,
@@ -27,11 +28,39 @@ export function filesTabRoot(root: string, workspaceRoot: string): string | null
   return workspaceRelativeFilePath(root, workspaceRoot) === "." ? null : root;
 }
 
-/** Reads a typed root: host paths stay as typed, anything else is relative to the workspace. */
-export function resolveTypedFilesRoot(input: string, workspaceRoot: string): string | null {
-  const path = normalizeProjectPathForDispatch(input);
-  if (path === "" || path === ".") return null;
-  return filesTabRoot(isHostPath(path) ? path : joinHostPath(workspaceRoot, path), workspaceRoot);
+/**
+ * The folder path to ask the environment to resolve for a typed root. Home and absolute paths go
+ * as typed; anything else is made explicitly relative so the server resolves it in the workspace.
+ * The trailing separator asks the server for the folder itself rather than its parent.
+ */
+export function filesRootBrowsePath(input: string): string | null {
+  const path = input.trim();
+  if (path === "") return null;
+  const target =
+    /^~(?:$|[\\/])/.test(path) || isHostPath(path) || isExplicitRelativePath(path)
+      ? path
+      : `./${path}`;
+  return target === "~" || /[\\/]$/.test(target) ? target : `${target}/`;
+}
+
+/**
+ * Resolves a typed root on the environment, which expands `~` and `..` against its own home and
+ * filesystem, and returns the root to store: the canonical folder, or null at the workspace root.
+ */
+export async function resolveFilesRoot(
+  input: string,
+  workspaceRoot: string,
+  resolveFolder: (partialPath: string, cwd: string) => Promise<string>,
+): Promise<string | null | undefined> {
+  const partialPath = filesRootBrowsePath(input);
+  if (partialPath === null) return undefined;
+  const folder = normalizeProjectPathForDispatch(await resolveFolder(partialPath, workspaceRoot));
+  return filesTabRoot(folder, workspaceRoot);
+}
+
+/** Server search runs inside the workspace only; other roots search the folders already listed. */
+export function filesSearchRoot(treeRoot: string, workspaceRoot: string): string | null {
+  return workspaceRelativeFilePath(treeRoot, workspaceRoot) === null ? null : treeRoot;
 }
 
 /** A path opened from a re-rooted tree keeps its workspace spelling when it is inside the workspace. */
