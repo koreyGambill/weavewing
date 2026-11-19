@@ -326,7 +326,7 @@ export function DraftProjectPicker({
             !(event.target instanceof Element && event.target.closest("[data-keybinding-capture]")),
         },
       ),
-    [open, cycleMachine, inline, routeTarget],
+    [open, cycleMachine, inline, routeTarget, setAllMachines],
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prevents an add-project result from navigating after this composer unmounts
   useEffect(
