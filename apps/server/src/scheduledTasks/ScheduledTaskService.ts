@@ -2731,7 +2731,10 @@ export const layer = Layer.effect(
       RunHistory.listRuns(input.id, input.before).pipe(
         withSql,
         Effect.mapError((cause) =>
-          taskError("Could not list automation runs.", { taskId: input.id, cause }),
+          taskError("Could not list automation runs.", {
+            ...(input.id === undefined ? {} : { taskId: input.id }),
+            cause,
+          }),
         ),
       );
 

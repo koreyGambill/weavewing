@@ -407,17 +407,18 @@ const decodeRun = (row: RunRow): ScheduledTaskRun => {
 
 /** Newest first, one page at a time. */
 export const listRuns = Effect.fn("ScheduledTaskRunHistory.listRuns")(function* (
-  taskId: ScheduledTaskId,
+  taskId: ScheduledTaskId | undefined,
   before: ScheduledTaskRunId | undefined,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  const taskFilter = taskId === undefined ? sql`` : sql`AND task_id = ${taskId}`;
   const cursor =
     before === undefined
       ? sql``
       : sql`AND (started_at, rowid) < (SELECT started_at, rowid FROM scheduled_task_runs
-          WHERE id = ${before} AND task_id = ${taskId})`;
+          WHERE id = ${before} ${taskFilter})`;
   const rows = yield* sql<RunRow>`SELECT * FROM scheduled_task_runs
-    WHERE task_id = ${taskId} ${cursor}
+    WHERE 1 = 1 ${taskFilter} ${cursor}
     ORDER BY started_at DESC, rowid DESC LIMIT ${RUNS_PAGE_SIZE + 1}`.pipe(
     NodeSqliteClient.readOnly,
   );

@@ -22,6 +22,7 @@ export interface AutomationSections {
   readonly on: ReadonlyArray<AutomationRowModel>;
   /** Thread scope only: automations switched off for the open thread. */
   readonly off: ReadonlyArray<AutomationRowModel>;
+  readonly completed: ReadonlyArray<AutomationRowModel>;
 }
 
 function matchesFilter(task: ScheduledTask, filter: string) {
@@ -30,6 +31,16 @@ function matchesFilter(task: ScheduledTask, filter: string) {
     needle === "" ||
     task.title.toLowerCase().includes(needle) ||
     task.prompt.toLowerCase().includes(needle)
+  );
+}
+
+function isCompletedOnce(task: ScheduledTask): boolean {
+  return (
+    task.schedule.type === "once" &&
+    task.nextRunAt === null &&
+    task.lastRunStatus !== "running" &&
+    task.lastRunAt !== null &&
+    Date.parse(task.lastRunAt) >= Date.parse(task.schedule.runAt)
   );
 }
 
@@ -45,20 +56,27 @@ export function automationSections(
 ): AutomationSections {
   const on: AutomationRowModel[] = [];
   const off: AutomationRowModel[] = [];
+  const completed: AutomationRowModel[] = [];
   const { thread } = options;
   for (const task of tasks) {
-    if (!matchesFilter(task, options.filter) || (!options.showPaused && !task.enabled)) continue;
-    if (options.scope === "thread") {
-      const applies = thread === null ? null : automationAppliesTo(task, thread);
-      if (thread === null || applies === null) continue;
-      const row = { task, applies };
-      if (applies === "event" && automationOffForThread(task, thread.threadId)) off.push(row);
-      else on.push(row);
-    } else if (options.scope === "server" || task.projectId === thread?.projectId) {
-      on.push({ task, applies: null });
-    }
+    if (!matchesFilter(task, options.filter)) continue;
+    const finished = isCompletedOnce(task);
+    if (!options.showPaused && (!task.enabled || finished)) continue;
+    const applies =
+      options.scope === "thread" && thread !== null ? automationAppliesTo(task, thread) : null;
+    if (options.scope === "thread" && applies === null) continue;
+    if (options.scope === "project" && task.projectId !== thread?.projectId) continue;
+    const row = { task, applies };
+    if (finished) completed.push(row);
+    else if (
+      applies === "event" &&
+      thread !== null &&
+      automationOffForThread(task, thread.threadId)
+    ) {
+      off.push(row);
+    } else on.push(row);
   }
-  return { on, off };
+  return { on, off, completed };
 }
 
 /** Where "Open thread" goes: the thread a one-thread automation keeps, or the newest run's. */

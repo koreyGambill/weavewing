@@ -1,19 +1,19 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { AutomationThreadContext } from "@t3tools/client-runtime/automations";
-import type { EnvironmentId, ScheduledTask } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { formatModelSlugName } from "@t3tools/shared/model";
 import { PlusIcon } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
-import { ScheduledRelativeLabel } from "../settings/ScheduledTasksSettings";
 import { scheduleLabel } from "../settings/scheduledTasksSettings.logic";
 import { SectionHeading } from "../ThreadToolViews";
 import { Button } from "../ui/button";
+import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Empty, EmptyContent, EmptyDescription } from "../ui/empty";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -39,14 +39,18 @@ export function EnvironmentAutomations(props: {
   );
   const actions = useAutomationActions(props.environmentId);
   const navigate = useNavigate();
+  const [showCompleted, setShowCompleted] = useState(false);
   const sections = automationSections(query.data?.tasks ?? [], props);
-  const empty = sections.on.length === 0 && sections.off.length === 0;
+  const empty =
+    sections.on.length === 0 && sections.off.length === 0 && sections.completed.length === 0;
   const unfiltered = props.filter.trim() === "" && props.showPaused;
-  const row = (model: AutomationRowModel, offHere: boolean) => (
+  const completedExpanded = showCompleted || props.filter.trim() !== "";
+  const row = (model: AutomationRowModel, offHere: boolean, completed = false) => (
     <AutomationRow
       key={model.task.id}
       row={model}
       offHere={offHere}
+      completed={completed}
       environmentId={props.environmentId}
       timeZone={query.data?.timeZone}
       thread={props.thread}
@@ -64,6 +68,8 @@ export function EnvironmentAutomations(props: {
         <p className="text-muted-foreground">Loading automations…</p>
       ) : empty && !unfiltered ? (
         <p className="text-muted-foreground">No automations match.</p>
+      ) : empty && props.grouped ? (
+        <p className="text-muted-foreground">No automations on this server.</p>
       ) : empty ? (
         <Empty size="compact">
           <EmptyDescription>
@@ -102,23 +108,28 @@ export function EnvironmentAutomations(props: {
             </div>
           ) : null,
           ...sections.off.map((model) => row(model, true)),
+          sections.completed.length > 0 ? (
+            <CollapsibleSectionHeader
+              key="heading:completed"
+              expanded={completedExpanded}
+              onClick={() => setShowCompleted(!completedExpanded)}
+              disabled={props.filter.trim() !== ""}
+              accessory={<span>{sections.completed.length}</span>}
+            >
+              Completed
+            </CollapsibleSectionHeader>
+          ) : null,
+          ...(completedExpanded ? sections.completed.map((model) => row(model, false, true)) : []),
         ]
       )}
     </section>
   );
 }
 
-const LAST_RUN_LABELS: Record<ScheduledTask["lastRunStatus"], string> = {
-  never: "Not run yet",
-  running: "Running",
-  succeeded: "Ran",
-  failed: "Failed",
-  skipped: "Skipped",
-};
-
 function AutomationRow({
   row,
   offHere,
+  completed,
   environmentId,
   timeZone,
   thread,
@@ -126,6 +137,7 @@ function AutomationRow({
 }: {
   row: AutomationRowModel;
   offHere: boolean;
+  completed: boolean;
   environmentId: EnvironmentId;
   timeZone: string | undefined;
   thread: AutomationThreadContext | null;
@@ -133,7 +145,7 @@ function AutomationRow({
 }) {
   const { task, applies } = row;
   const perThread = applies === "event" && thread !== null;
-  const lit = task.enabled && !offHere;
+  const lit = task.enabled && !offHere && !completed;
   const switchRef = useRef<HTMLButtonElement>(null);
   const refocusSwitch = useRef(false);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Moving the row to the other section re-inserts its DOM node, which drops focus; the switch that moved it takes focus back.
@@ -146,6 +158,13 @@ function AutomationRow({
     offHere,
   ]);
   const offCount = task.disabledThreadIds?.length ?? 0;
+  const status = [
+    !task.enabled ? "Paused" : offHere ? "Off for this thread" : null,
+    task.lastRunStatus === "running" ? "Running" : null,
+    !perThread && offCount > 0 ? `Off for ${offCount} thread${offCount === 1 ? "" : "s"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   // Rows are narrow; the vendor prefix costs the trigger its room. Detail shows the full name.
   const model = formatModelSlugName(task.modelSelection.model).replace(/^Claude /, "");
   const trigger =
@@ -206,37 +225,24 @@ function AutomationRow({
             <span className="shrink-0 whitespace-pre"> · </span>
             <span className="max-w-[40%] shrink-0 truncate">{model}</span>
           </span>
-          <span
-            className={cn(
-              "block truncate",
-              task.lastRunStatus === "failed" ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {task.enabled ? (offHere ? "off here · " : "") : "paused · "}
-            {LAST_RUN_LABELS[task.lastRunStatus]}
-            {task.lastRunAt !== null && task.lastRunStatus !== "running" ? (
-              <>
-                {" "}
-                <ScheduledRelativeLabel value={task.lastRunAt} />
-              </>
-            ) : null}
-            {!perThread && offCount > 0
-              ? ` · off for ${offCount} thread${offCount === 1 ? "" : "s"}`
-              : ""}
-          </span>
+          {!completed && status ? (
+            <span className="block truncate text-muted-foreground">{status}</span>
+          ) : null}
         </span>
       </button>
-      <span className="absolute top-1.5 right-1.5 flex">
-        {pausedEverywhere ? (
-          <Tooltip>
-            {/* A disabled switch takes no pointer events, so the wrapper carries the hint. */}
-            <TooltipTrigger render={<span className="flex" />}>{toggle}</TooltipTrigger>
-            <TooltipPopup side="left">Paused everywhere. Resume it in its detail.</TooltipPopup>
-          </Tooltip>
-        ) : (
-          toggle
-        )}
-      </span>
+      {!completed ? (
+        <span className="absolute top-1.5 right-1.5 flex">
+          {pausedEverywhere ? (
+            <Tooltip>
+              {/* A disabled switch takes no pointer events, so the wrapper carries the hint. */}
+              <TooltipTrigger render={<span className="flex" />}>{toggle}</TooltipTrigger>
+              <TooltipPopup side="left">Paused everywhere. Resume it in its detail.</TooltipPopup>
+            </Tooltip>
+          ) : (
+            toggle
+          )}
+        </span>
+      ) : null}
     </div>
   );
 }

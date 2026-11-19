@@ -53,6 +53,35 @@ describe("automationSections", () => {
     const active = automationSections(tasks, { ...options, scope: "server", showPaused: false });
     expect(ids(active.on)).not.toContain("paused");
   });
+
+  it("folds finished one-time schedules out of the active inventory", () => {
+    const runAt = "2026-11-19T20:00:00.000Z";
+    const schedule = { type: "once", runAt };
+    const once = (id: string, fields: Partial<ScheduledTask>) =>
+      task(id, {
+        schedule,
+        nextRunAt: null,
+        lastRunAt: runAt,
+        lastRunStatus: "succeeded",
+        ...fields,
+      });
+    const scheduled = [
+      once("finished", {}),
+      once("running", { lastRunStatus: "running" }),
+      once("manual-before-due", { lastRunAt: "2026-11-19T19:00:00.000Z", nextRunAt: runAt }),
+      once("paused-before-due", {
+        enabled: false,
+        lastRunAt: "2026-11-19T19:00:00.000Z",
+      }),
+    ];
+    const server = { ...options, scope: "server", thread: null } as const;
+    const all = automationSections(scheduled, server);
+    expect(ids(all.completed)).toEqual(["finished"]);
+    expect(ids(all.on)).toEqual(["running", "manual-before-due", "paused-before-due"]);
+    const active = automationSections(scheduled, { ...server, showPaused: false });
+    expect(ids(active.on)).toEqual(["running", "manual-before-due"]);
+    expect(active.completed).toEqual([]);
+  });
 });
 
 it("opens the kept thread, or the newest run's thread for new-thread automations", () => {

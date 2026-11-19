@@ -863,6 +863,7 @@ describe("upstream client wire compatibility", () => {
           const wire = toWire(ScheduledTaskError, refusal);
           expect(Exit.isSuccess(fromWire(errorOf(runNowRpc), wire))).toBe(true);
         }
+        expect(yield* Effect.flip(forUpstream.listRuns({}))).toBeInstanceOf(ScheduledTaskError);
         expect(ran).toEqual([]);
 
         yield* Effect.all([...calls(shown.id), forUpstream.upsert(upsert)]);

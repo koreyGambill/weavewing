@@ -96,6 +96,10 @@ without the agent's context growing. To move a one-thread task, pick another
 thread in its project under **Destination**. Moving such a task to another
 project starts a new thread there on its next run.
 
+On web and desktop, open **Automations** in the sidebar to browse the inventory.
+Finished one-time schedules are under **Completed**. Open **Run history** to
+see runs by server, then choose an automation to see only its runs.
+
 On web and desktop, open a main conversation’s **Automations** panel and
 choose **Enable idle work check-in**. Manage it here in Scheduled tasks. Every
 30 minutes it checks whether that thread is idle with at most one working

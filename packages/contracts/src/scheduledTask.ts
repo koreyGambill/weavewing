@@ -600,7 +600,7 @@ export const ScheduledTaskRun = Schema.Struct({
 export type ScheduledTaskRun = typeof ScheduledTaskRun.Type;
 
 export const ScheduledTaskListRunsInput = Schema.Struct({
-  id: ScheduledTaskId,
+  id: Schema.optional(ScheduledTaskId),
   /** A run id from the previous page; returns the runs that started before it. */
   before: Schema.optional(ScheduledTaskRunId),
 });
