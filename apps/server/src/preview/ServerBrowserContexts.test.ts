@@ -38,6 +38,42 @@ const makeContext = () => {
   };
 };
 
+const makeProfileContext = () => {
+  const events = new NodeEvents.EventEmitter();
+  const pages: Array<{
+    once: (event: string, listener: () => void) => void;
+    close: () => Promise<void>;
+  }> = [];
+  let closed = false;
+  const context = {
+    on: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
+      events.on(event, listener),
+    ),
+    pages: () => [...pages],
+    isClosed: () => closed,
+    close: vi.fn(async () => {
+      if (!closed) {
+        closed = true;
+        events.emit("close");
+      }
+    }),
+    openPage: () => {
+      const pageEvents = new NodeEvents.EventEmitter();
+      const page = {
+        once: (event: string, listener: () => void) => pageEvents.once(event, listener),
+        close: async () => {
+          pages.splice(pages.indexOf(page), 1);
+          pageEvents.emit("close");
+        },
+      };
+      pages.push(page);
+      events.emit("page", page);
+      return page;
+    },
+  };
+  return context;
+};
+
 const makeBrowser = () => {
   const events = new NodeEvents.EventEmitter();
   const contexts: ReturnType<typeof makeContext>[] = [];
@@ -130,6 +166,89 @@ describe("ServerBrowserContexts", () => {
       expect(browser.close).not.toHaveBeenCalled();
     } finally {
       await pool.close();
+    }
+  });
+
+  it("closes a profile's browser once it has held no page for the idle period", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = makeProfileContext();
+      const second = makeProfileContext();
+      launches.persistent
+        .mockResolvedValueOnce(first as unknown as BrowserContext)
+        .mockResolvedValueOnce(second as unknown as BrowserContext);
+      const pool = new ServerBrowserContexts({ ...options(), idleBrowserMs: 10 });
+      await pool.contextFor("default");
+      const page = first.openPage();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(first.close).not.toHaveBeenCalled();
+      await page.close();
+      await vi.advanceTimersByTimeAsync(9);
+      expect(first.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(await pool.contextFor("default")).toBe(second);
+      await pool.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a profile's browser when a page opens before the idle period ends", async () => {
+    vi.useFakeTimers();
+    try {
+      const context = makeProfileContext();
+      launches.persistent.mockResolvedValue(context as unknown as BrowserContext);
+      const pool = new ServerBrowserContexts({ ...options(), idleBrowserMs: 10 });
+      await pool.contextFor("default");
+      await vi.advanceTimersByTimeAsync(9);
+      context.openPage();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(context.close).not.toHaveBeenCalled();
+      await pool.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs a clear requested while an idle profile closes before relaunching it", async () => {
+    vi.useFakeTimers();
+    try {
+      const idle = makeProfileContext();
+      const relaunched = makeProfileContext();
+      launches.persistent
+        .mockResolvedValueOnce(idle as unknown as BrowserContext)
+        .mockResolvedValueOnce(relaunched as unknown as BrowserContext);
+      const configuration = options();
+      const pool = new ServerBrowserContexts({ ...configuration, idleBrowserMs: 10 });
+      await pool.contextFor("default");
+      const closeStarted = Promise.withResolvers<void>();
+      const finishClose = Promise.withResolvers<void>();
+      idle.close.mockImplementationOnce(async () => {
+        closeStarted.resolve();
+        await finishClose.promise;
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      await closeStarted.promise;
+      let deleted = false;
+      launches.rm.mockImplementationOnce(async () => {
+        deleted = true;
+      });
+      const launchedAfterDelete: Array<boolean> = [];
+      configuration.executable.mockImplementation(async () => {
+        launchedAfterDelete.push(deleted);
+        return "/test/chromium";
+      });
+      const clearing = pool.clearProfile("default");
+      const reopening = pool.contextFor("default");
+      finishClose.resolve();
+      await Promise.all([clearing, reopening]);
+      expect(await reopening).toBe(relaunched);
+      expect(relaunched.close).not.toHaveBeenCalled();
+      expect(launchedAfterDelete).toEqual([true]);
+      await pool.close();
+    } finally {
+      vi.useRealTimers();
     }
   });
 

@@ -63,7 +63,7 @@ interface Options {
   ) => Promise<{ readonly path: string; readonly release: () => Promise<void> } | undefined>;
   readonly diagnose?: (executable: string, cause: unknown) => Promise<unknown>;
   readonly env?: NodeJS.ProcessEnv;
-  /** Closes the shared browser once it has held no context for this long. */
+  /** Closes the shared browser after this long without a context, and a profile's without a page. */
   readonly idleBrowserMs?: number;
   readonly onContextClose?: (context: BrowserContext) => void;
 }
@@ -117,6 +117,9 @@ export class ServerBrowserContexts {
   private readonly options: Options;
   private readonly contexts = new Map<string, Promise<BrowserContext>>();
   private readonly clearing = new Map<string, Promise<void>>();
+  // One profile directory admits one browser, so its launches, retirements and clears run in order.
+  private readonly queues = new Map<string, Promise<void>>();
+  private readonly retirements = new Map<string, ReturnType<typeof setTimeout>>();
   private browser: Promise<Browser> | undefined;
   private closing: Promise<void> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -209,26 +212,79 @@ export class ServerBrowserContexts {
     await browser.close().catch(constVoid);
   }
 
+  private inOrder<A>(key: string, task: () => Promise<A>) {
+    const run = (this.queues.get(key) ?? Promise.resolve()).then(task);
+    const settled = run.then(constVoid, constVoid);
+    this.queues.set(key, settled);
+    void settled.then(() => {
+      if (this.queues.get(key) === settled) this.queues.delete(key);
+    });
+    return run;
+  }
+
+  private cancelRetirement(key: string) {
+    clearTimeout(this.retirements.get(key));
+    this.retirements.delete(key);
+  }
+
+  private retireWhenEmpty(key: string, pending: Promise<BrowserContext>) {
+    const delay = this.options.idleBrowserMs;
+    if (delay === undefined || this.closing) return;
+    this.cancelRetirement(key);
+    const retirement = setTimeout(
+      () => void this.inOrder(key, () => this.retireIfEmpty(key, pending, retirement)),
+      delay,
+    );
+    retirement.unref();
+    this.retirements.set(key, retirement);
+  }
+
+  private async retireIfEmpty(
+    key: string,
+    pending: Promise<BrowserContext>,
+    retirement: ReturnType<typeof setTimeout>,
+  ) {
+    const context = await pending.catch(() => undefined);
+    if (this.retirements.get(key) !== retirement || this.contexts.get(key) !== pending) return;
+    this.retirements.delete(key);
+    if (!context || context.pages().length > 0) return;
+    this.contexts.delete(key);
+    await context.close().catch(constVoid);
+  }
+
   contextFor(profileId: string, isolationKey?: string): Promise<BrowserContext> {
     if (this.closing) return Promise.reject(new Error("The preview browser is closed."));
     const key = JSON.stringify([profileId, isolationKey ?? null]);
     const cached = this.contexts.get(key);
-    if (cached) return cached;
-    const cleared = this.clearing.get(key)?.catch(constVoid) ?? Promise.resolve();
-    const pending = cleared
-      .then(() => this.createContext(profileId, isolationKey))
-      .then(async (context) => {
-        context.on("close", () => {
-          if (this.contexts.get(key) === pending) this.contexts.delete(key);
-          this.options.onContextClose?.(context);
-        });
-        for (const page of context.pages()) await page.close().catch(constVoid);
-        if (this.closing) {
-          await context.close().catch(constVoid);
-          throw new Error("The preview browser is closed.");
-        }
-        return context;
+    if (cached) {
+      // The caller is about to open a page; until it does, the idle period starts over.
+      if (this.retirements.has(key)) this.retireWhenEmpty(key, cached);
+      return cached;
+    }
+    // A clear requested after this launch must close it too, so it cannot join an earlier clear.
+    this.clearing.delete(key);
+    const persistent = isolationKey === undefined && profileId !== INCOGNITO_BROWSER_PROFILE_ID;
+    const pending: Promise<BrowserContext> = this.inOrder(key, () =>
+      this.createContext(profileId, isolationKey),
+    ).then(async (context) => {
+      context.on("close", () => {
+        if (this.contexts.get(key) === pending) this.contexts.delete(key);
+        this.options.onContextClose?.(context);
       });
+      for (const page of context.pages()) await page.close().catch(constVoid);
+      if (this.closing) {
+        await context.close().catch(constVoid);
+        throw new Error("The preview browser is closed.");
+      }
+      if (persistent) {
+        context.on("page", (page) => {
+          this.cancelRetirement(key);
+          page.once("close", () => this.retireWhenEmpty(key, pending));
+        });
+        this.retireWhenEmpty(key, pending);
+      }
+      return context;
+    });
     this.contexts.set(key, pending);
     void pending.catch(() => {
       if (this.contexts.get(key) === pending) this.contexts.delete(key);
@@ -294,15 +350,14 @@ export class ServerBrowserContexts {
     const key = JSON.stringify([profileId, null]);
     const existing = this.clearing.get(key);
     if (existing) return existing;
-    const clearing = (async () => {
-      const pending = this.contexts.get(key);
-      if (pending) {
-        this.contexts.delete(key);
-        const context = await pending.catch(() => undefined);
-        await context?.close();
-      }
+    const pending = this.contexts.get(key);
+    this.contexts.delete(key);
+    this.cancelRetirement(key);
+    const clearing = this.inOrder(key, async () => {
+      const context = await pending?.catch(() => undefined);
+      await context?.close();
       await NodeFSP.rm(this.profileDirectory(profileId), { recursive: true, force: true });
-    })();
+    });
     this.clearing.set(key, clearing);
     try {
       await clearing;
@@ -318,6 +373,8 @@ export class ServerBrowserContexts {
 
   private async dispose() {
     clearTimeout(this.idleTimer);
+    for (const retirement of this.retirements.values()) clearTimeout(retirement);
+    this.retirements.clear();
     await Promise.allSettled(
       [...this.contexts.values()].map(async (pending) => (await pending).close()),
     );
