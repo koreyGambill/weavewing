@@ -104,7 +104,10 @@ Unlinking on the linking side only forgets the token.
   VM has a loopback of its own. Because the id check proves nothing, this
   assumes no other OS user, nor an untrusted process in a mirrored WSL VM, can
   bind the peer's port; a process running as the same user could already read
-  the link's token from the secret store. An address an agent gives is recorded alone, and
+  the link's token from the secret store. A link made over mirrored loopback
+  keeps that stored address, so switching WSL to NAT means forgetting and
+  relinking it, after restarting the desktop app, which reads the networking
+  mode once per run. An address an agent gives is recorded alone, and
   [`linkRequestTarget`](../../packages/client-runtime/src/linkRequest.ts) names
   a machine for it only when the client already reaches exactly one machine
   there. An address alone never moves an unexpired link to another address.
