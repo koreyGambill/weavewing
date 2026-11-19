@@ -786,17 +786,17 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         upgraded.filter((rule) => rule.command === "workspace.tile.closeAllTabs"),
         [custom],
       );
-      assert.includeDeep(upgraded, {
+      assert.deepInclude(upgraded, {
         key: "f6",
         command: "workspace.focusNext",
         when: "!terminalFocus",
       });
-      assert.includeDeep(upgraded, {
+      assert.deepInclude(upgraded, {
         key: "mod+6",
         command: "thread.jump.6",
         when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)",
       });
-      assert.includeDeep(upgraded, {
+      assert.deepInclude(upgraded, {
         key: "mod+shift+j",
         command: "preview.toggle",
         when: "isMac || !terminalFocus",

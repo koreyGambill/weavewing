@@ -992,8 +992,9 @@ describe("isTerminalCopyShortcut", () => {
       expect(isTerminalCopyShortcut(event({ ctrlKey: true, shiftKey: true }), platform)).toBe(
         platform !== "MacIntel",
       );
-      expect(isTerminalCopyShortcut(event({ ctrlKey: true }), "MacIntel")).toBe(false);
-      expect(isTerminalCopyShortcut(event({ metaKey: true }), "MacIntel")).toBe(true);
+      expect(isTerminalCopyShortcut(event({ metaKey: true }), platform)).toBe(
+        platform === "MacIntel",
+      );
     },
   );
 

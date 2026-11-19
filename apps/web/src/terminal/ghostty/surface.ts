@@ -638,7 +638,6 @@ export class GhosttyTerminalSurface {
   // Suppress its duplicate only for the current shortcut gesture.
   private pasteShortcutGesture: { code: string; readText: string } | null = null;
   private copyShortcutToken = 0;
-  private clearSelectionAfterCopy = false;
   private primedCopySelection = "";
   private wheelRemainder = 0;
   private touchScroll: {
@@ -1159,28 +1158,13 @@ export class GhosttyTerminalSurface {
         event.preventDefault();
         document.execCommand("copy");
       } else {
-        // Clear after plain non-mac Ctrl+C so the next press sends SIGINT.
-        this.clearSelectionAfterCopy = !event.shiftKey && !isMacPlatform(navigator.platform);
         const clipboard = navigator.clipboard;
         if (typeof clipboard?.writeText === "function") {
           // Defer fallback writes until native copy can claim the token; browsers may omit copy events.
           const token = ++this.copyShortcutToken;
           void Promise.resolve().then(() => {
             if (this.disposed || this.copyShortcutToken !== token) return;
-            void clipboard.writeText(selection).then(
-              () => {
-                if (this.disposed || this.copyShortcutToken !== token) return;
-                if (this.clearSelectionAfterCopy) {
-                  this.clearSelectionAfterCopy = false;
-                  this.clearSelection();
-                }
-              },
-              () => {
-                if (this.copyShortcutToken === token) {
-                  this.clearSelectionAfterCopy = false;
-                }
-              },
-            );
+            void clipboard.writeText(selection).catch(() => {});
           });
         }
       }
@@ -1302,10 +1286,6 @@ export class GhosttyTerminalSurface {
     if (result.claimWriteFallback) {
       // Native copy wrote successfully; invalidate writeText so it cannot overwrite a later copy.
       this.copyShortcutToken += 1;
-      if (this.clearSelectionAfterCopy) {
-        this.clearSelectionAfterCopy = false;
-        this.clearSelection();
-      }
     }
   };
 

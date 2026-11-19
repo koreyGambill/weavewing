@@ -1312,16 +1312,7 @@ function OpenCommandPaletteDialog(props: {
     if (firstOption) startNewProject(firstOption.environmentId, null);
   };
 
-  const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
-    {
-      kind: "action",
-      value: "action:reload-app",
-      title: "Reload App",
-      searchTerms: ["reload", "refresh", "app"],
-      icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
-      run: async () => window.location.reload(),
-    },
-  ];
+  const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
     const activeProjectTitle =
@@ -1764,6 +1755,15 @@ function OpenCommandPaletteDialog(props: {
         useToolSidebarStore.getState().dispatch({ type: "toggle" });
       },
     });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:reload-app",
+    title: "Reload App",
+    searchTerms: ["reload", "refresh", "app"],
+    icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+    run: async () => window.location.reload(),
+  });
 
   if (activeThread) actionItems.push(...tilePaletteItems(ITEM_ICON_CLASS));
   if (activeThread || activeDraftThread)
