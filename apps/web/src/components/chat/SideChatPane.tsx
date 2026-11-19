@@ -16,7 +16,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { ChevronDownIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArrowUpRightIcon, ChevronDownIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -37,6 +37,8 @@ import { Button, InlineButton } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useNavigate } from "@tanstack/react-router";
+import { useSideChatSource } from "./useSideChatSource";
 import { BackgroundThreadContext } from "./backgroundThread";
 
 const BRING_BACK_ROWS = 3;
@@ -94,7 +96,8 @@ export default function SideChatPane(props: {
   readonly parentRef: ScopedThreadRef;
   readonly threadId: ThreadId;
   readonly parentPanel: SideChatParentPanel;
-  readonly onClose: () => void;
+  readonly onClose?: () => void;
+  readonly inline?: boolean;
 }) {
   const { parentRef, threadId } = props;
   const threadRef = scopeThreadRef(parentRef.environmentId, threadId);
@@ -104,6 +107,8 @@ export default function SideChatPane(props: {
     [parentRef, threadId],
   );
   const shell = useQuietThreadShell(threadRef);
+  const navigate = useNavigate();
+  const source = useSideChatSource(threadRef, shell?.source ?? null, props.inline === true);
   const parent = useQuietThreadShell(parentRef);
   const snapshotLoaded = useEnvironmentShellHasSnapshot(parentRef.environmentId);
   const projection = useQuietThreadProjection(shell === null ? null : threadRef)?.projection;
@@ -189,7 +194,9 @@ export default function SideChatPane(props: {
     if (result._tag === "Success") {
       releaseComposerDraftUploads(threadRef);
       useComposerDraftStore.getState().clearDraftThread(threadRef);
-      useRightPanelStore.getState().closeSurface(parentRef, `side-chat:${threadId}`);
+      if (!props.inline) {
+        useRightPanelStore.getState().closeSurface(parentRef, `side-chat:${threadId}`);
+      }
     } else if (!isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       toastManager.add({
@@ -206,6 +213,30 @@ export default function SideChatPane(props: {
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {shell?.title ?? "Side chat"}
         </span>
+        {source ? (
+          <Button variant="ghost" size="xs" onClick={source.open}>
+            {source.label}
+          </Button>
+        ) : null}
+        {props.inline ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Open full chat"
+                  onClick={() =>
+                    void navigate({ to: "/$environmentId/$threadId", params: threadRef })
+                  }
+                >
+                  <ArrowUpRightIcon />
+                </Button>
+              }
+            />
+            <TooltipPopup side="bottom">Open full chat</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -249,9 +280,16 @@ export default function SideChatPane(props: {
         >
           <Trash2Icon />
         </Button>
-        <Button variant="ghost" size="icon-xs" aria-label="Close side chat" onClick={props.onClose}>
-          <XIcon />
-        </Button>
+        {props.onClose ? (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close side chat"
+            onClick={props.onClose}
+          >
+            <XIcon />
+          </Button>
+        ) : null}
       </div>
       {bringBacks !== null && bringBacks.records.length > 0 ? (
         <ul className="flex shrink-0 flex-col gap-0.5 border-b border-border px-3 py-1.5">

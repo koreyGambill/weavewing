@@ -11,6 +11,7 @@ import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { deriveTimelineMinimapItems, mergeUnloadedUserTurns } from "./timelineMinimapItems";
 import {
   type AssistantCitation,
+  type SideChatAnchor,
   type EnvironmentId,
   MessageId,
   type OrchestrationV2TurnItem,
@@ -227,6 +228,11 @@ interface MessagesTimelineProps {
   onRespondToApproval?: TimelineRowSharedState["onRespondToApproval"];
   citationRequest?: AssistantCitationRequest | null;
   citationHistory?: CitedHistory;
+  onBranchAssistantText?: ((anchor: SideChatAnchor) => Promise<boolean>) | undefined;
+  stableSideChatRunIds?: ReadonlySet<RunId> | undefined;
+  renderInlineSideChats?: ((messageId: MessageId) => ReactNode) | undefined;
+  branchOriginMessageIds?: ReadonlySet<string> | undefined;
+  followUpMessageIds?: ReadonlySet<string> | undefined;
   onCiteAssistantText?: (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
@@ -283,6 +289,7 @@ interface MessagesTimelineProps {
     /** Where it runs, when that is another environment. */
     readonly environmentLabel?: string;
     readonly open?: () => void;
+    readonly actionLabel?: string;
   } | null;
   workflowOpening?: WorkflowOpening | null;
   onForkFromRun?: (input: {
@@ -354,6 +361,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   citationRequest = null,
   citationHistory = CITED_HISTORY_LOADING,
   onCiteAssistantText,
+  onBranchAssistantText,
+  stableSideChatRunIds,
+  renderInlineSideChats,
+  branchOriginMessageIds,
+  followUpMessageIds,
   onReplyToResponse,
   isWorking,
   runlessWorkActive = false,
@@ -779,6 +791,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // Run status/timestamps change per stream event; keep them out of shared row context.
   const runs = useStableHandoffRuns(runsProp);
   const minimapItems = mergeUnloadedUserTurns(deriveTimelineMinimapItems(rows), userTurns);
+  const markedMinimapItems =
+    branchOriginMessageIds?.size || followUpMessageIds?.size
+      ? minimapItems.map((item) => ({
+          ...item,
+          branchOrigin: branchOriginMessageIds?.has(item.id),
+          followUp: followUpMessageIds?.has(item.id),
+        }))
+      : minimapItems;
   const minimapRowIndices = minimapItems.map((item) => item.rowIndex);
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false
@@ -1113,6 +1133,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onRespondToApproval,
     citationRequest: readyCitationRequest,
     onReplyToResponse,
+    renderInlineSideChats,
+    stableSideChatRunIds,
     listRef,
     timestampFormat,
     routeThreadKey,
@@ -1227,7 +1249,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
             icon={parentThreadLink.sideChat ? MessagesSquareIcon : BotIcon}
             {...(parentThreadLink.open === undefined
               ? {}
-              : { actionLabel: "Open parent thread", onAction: parentThreadLink.open })}
+              : {
+                  actionLabel: parentThreadLink.actionLabel ?? "Open parent thread",
+                  onAction: parentThreadLink.open,
+                })}
           />
         </div>
       </div>
@@ -1440,6 +1465,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 viewport={timelineViewportElement}
                 threadRef={citationThreadRef}
                 onCite={onCiteAssistantText}
+                onBranch={onBranchAssistantText}
               />
             ) : null}
             <LegendList<MessagesTimelineRow>
@@ -1492,7 +1518,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               ListFooterComponent={timelineListFooter}
             />
             <TimelineMinimap
-              items={minimapItems}
+              items={markedMinimapItems}
               hasPersistentGutter={minimapHasPersistentGutter}
               hitStripWidth={minimapHitStripWidth}
               currentIndex={minimapCurrentIndex}

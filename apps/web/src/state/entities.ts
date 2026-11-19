@@ -174,6 +174,35 @@ export function useChildThreadInputs(ref: ScopedThreadRef | null) {
   );
 }
 
+const EMPTY_SIDE_CHAT_SHELLS = Atom.make<ReadonlyArray<OrchestrationV2ThreadShell>>([]);
+const sideChatShellsAtomFamily = Atom.family((key: string) => {
+  const parent = parseThreadKey(key);
+  let previous: ReadonlyArray<OrchestrationV2ThreadShell> = [];
+  return Atom.make((get) => {
+    const next = get(environmentThreadShells.environmentThreadsAtom(parent.environmentId))
+      .filter((shell) => shell.lineage.sideChat && shell.lineage.parentThreadId === parent.threadId)
+      .map(
+        (shell) =>
+          get(
+            environmentThreadShells.quietThreadShellAtom({
+              environmentId: parent.environmentId,
+              threadId: shell.id,
+            }),
+          )?.source ?? shell,
+      );
+    if (arrayElementsEqual(previous, next)) return previous;
+    previous = next;
+    return next;
+  });
+});
+
+/** Side chat children of a thread, without opening their detail streams. */
+export function useSideChatShells(ref: ScopedThreadRef | null) {
+  return useAtomValue(
+    ref === null ? EMPTY_SIDE_CHAT_SHELLS : sideChatShellsAtomFamily(threadKey(ref)),
+  );
+}
+
 export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThread | null {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_PROJECTION_ATOM : environmentThreadDetails.threadAtom(ref),

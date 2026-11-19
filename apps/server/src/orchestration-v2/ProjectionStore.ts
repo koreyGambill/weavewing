@@ -590,6 +590,9 @@ export interface ProjectionStoreV2Shape {
     ReadonlyMap<MessageId, OrchestrationV2ConversationMessage>,
     ProjectionStoreV2Error
   >;
+  readonly getSideChatRefresh: (
+    threadId: ThreadId,
+  ) => Effect.Effect<string | undefined, ProjectionStoreV2Error>;
   readonly getThreadRecords: <K extends ProjectionRecordField>(
     threadId: ThreadId,
     fields: ReadonlyArray<K>,
@@ -6800,6 +6803,85 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
     );
 
+    const getSideChatRefresh = Effect.fn("ProjectionStore.getSideChatRefresh")(
+      function* (threadId: ThreadId) {
+        // A normal fork starts its own side-chat tree, even if it has the same lineage root.
+        const rows = yield* sql<{ excerpt: string }>`
+          WITH RECURSIVE
+            ancestors(thread_id, project_id, parent_id, is_side_chat, fork_run_id, cutoff_run_id) AS (
+              SELECT thread_id, project_id,
+                json_extract(payload_json, '$.lineage.parentThreadId'),
+                json_extract(payload_json, '$.lineage.sideChat'),
+                json_extract(payload_json, '$.forkedFrom.runId'), NULL
+              FROM orchestration_v2_projection_threads
+              WHERE thread_id = ${threadId} AND deleted_at IS NULL
+              UNION
+              SELECT parent.thread_id, parent.project_id,
+                json_extract(parent.payload_json, '$.lineage.parentThreadId'),
+                json_extract(parent.payload_json, '$.lineage.sideChat'),
+                json_extract(parent.payload_json, '$.forkedFrom.runId'), child.fork_run_id
+              FROM ancestors child
+              JOIN orchestration_v2_projection_threads parent ON parent.thread_id = child.parent_id
+              WHERE child.is_side_chat = 1 AND parent.project_id = child.project_id
+                AND parent.deleted_at IS NULL
+            ),
+            tree(thread_id, project_id, title) AS (
+              SELECT root.thread_id, root.project_id, substr(thread.title, 1, 120)
+              FROM ancestors root
+              JOIN orchestration_v2_projection_threads thread ON thread.thread_id = root.thread_id
+              WHERE root.is_side_chat IS NOT 1
+              UNION
+              SELECT child.thread_id, child.project_id, substr(child.title, 1, 120)
+              FROM tree parent
+              JOIN orchestration_v2_projection_context_transfers transfer
+                ON transfer.source_thread_id = parent.thread_id AND transfer.type = 'fork'
+              JOIN orchestration_v2_projection_threads child ON child.thread_id = transfer.target_thread_id
+              WHERE json_extract(child.payload_json, '$.lineage.sideChat') = 1
+                AND json_extract(child.payload_json, '$.lineage.parentThreadId') = parent.thread_id
+                AND child.project_id = parent.project_id AND child.deleted_at IS NULL
+            )
+          SELECT json_object(
+            'threadId', tree.thread_id,
+            'title', tree.title,
+            'role', message.role,
+            'text', substr(trim(json_extract(message.payload_json, '$.text')), 1, 800)
+          ) AS excerpt
+          FROM tree
+          JOIN orchestration_v2_projection_messages message ON message.thread_id = tree.thread_id
+          JOIN orchestration_v2_projection_runs run ON run.run_id = message.run_id
+            AND run.thread_id = tree.thread_id
+            AND message.node_id = json_extract(run.payload_json, '$.rootNodeId')
+          LEFT JOIN ancestors ancestor ON ancestor.thread_id = tree.thread_id
+          LEFT JOIN orchestration_v2_projection_runs fork
+            ON fork.run_id = ancestor.cutoff_run_id AND fork.thread_id = tree.thread_id
+          WHERE tree.thread_id <> ${threadId} AND message.streaming = 0
+            AND run.status = 'completed'
+            AND (ancestor.cutoff_run_id IS NULL OR run.ordinal > fork.ordinal)
+            AND (
+              message.role = 'assistant' OR (
+                message.role = 'user' AND json_extract(message.payload_json, '$.origin.kind') = 'user'
+                AND json_extract(message.payload_json, '$.createdBy') = 'user'
+                AND json_extract(message.payload_json, '$.linkedSender') IS NULL
+                AND json_extract(message.payload_json, '$.senderThreadId') IS NULL
+              )
+            )
+            AND trim(json_extract(message.payload_json, '$.text')) <> ''
+          ORDER BY message.created_at DESC, message.message_id DESC
+          LIMIT 8
+        `;
+        // A JSON line keeps embedded newlines and delimiters inside their source excerpt.
+        const excerpts: string[] = [];
+        let remaining = 16_000;
+        for (const { excerpt } of rows) {
+          if (excerpt.length >= remaining) break;
+          excerpts.push(excerpt);
+          remaining -= excerpt.length + 1;
+        }
+        return excerpts.reverse().join("\n") || undefined;
+      },
+      (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
+    );
+
     const getThreadRecords: ProjectionStoreV2Shape["getThreadRecords"] = (
       threadId,
       fields,
@@ -9675,6 +9757,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getNextTurnItemOrdinal: readOnReader(getNextTurnItemOrdinal),
       getTurnItem: readOnReader(getTurnItem),
       getMessagesById: readOnReader(getMessagesById),
+      getSideChatRefresh: readOnReader(getSideChatRefresh),
       getThreadRecords: (threadId, fields, filter) =>
         getThreadRecords(threadId, fields, filter).pipe(NodeSqliteClient.readOnly),
       getRuntimeRequest: readOnReader(getRuntimeRequest),

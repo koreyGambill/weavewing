@@ -354,11 +354,13 @@ export function AssistantCitationSource({
   request,
   listRef,
   citable = true,
+  sideChatSource = false,
   children,
 }: {
   messageId: MessageId;
   /** False for user messages: follow-ups can reveal them, but their text is not quotable. */
   citable?: boolean;
+  sideChatSource?: boolean;
   threadRef?: ScopedThreadRef;
   itemKey: string;
   request: AssistantCitationTarget | null;
@@ -377,6 +379,7 @@ export function AssistantCitationSource({
   return (
     <div
       ref={rootRef}
+      data-side-chat-source={sideChatSource || undefined}
       data-assistant-citation-source={citable ? messageId : undefined}
       data-assistant-citation-environment={citable ? threadRef?.environmentId : undefined}
       data-assistant-citation-thread={citable ? threadRef?.threadId : undefined}

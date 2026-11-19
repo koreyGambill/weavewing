@@ -124,6 +124,7 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
         environmentId: TARGET.environmentId,
         capabilities: {
           repositoryIdentity: true,
+          sideChatContextRefresh: true,
           ...(input.advertiseThreadStop === true ? { threadStop: true } : {}),
         },
       },
@@ -412,53 +413,62 @@ describe("V2 environment commands", () => {
       }),
     ],
     ["session close", Effect.failCause(Cause.interrupt())],
-  ] as const)("retries a message dispatch lost to a %s with the same command id", ([, loss]) =>
-    Effect.gen(function* () {
-      const commands: OrchestrationV2Command[] = [];
-      const supervisor = yield* makeSupervisor({ commands, projects: [] });
-      const healthySession = Option.getOrThrow(yield* SubscriptionRef.get(supervisor.session));
-      const firstAttemptLost = yield* Deferred.make<void>();
-      const lostClient = {
-        ...healthySession.client,
-        [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
-          Effect.gen(function* () {
-            commands.push(command);
-            yield* SubscriptionRef.set(supervisor.session, Option.none());
-            yield* Deferred.succeed(firstAttemptLost, undefined);
-            return yield* loss;
-          }),
-      } as unknown as WsRpcProtocolClient;
-      yield* SubscriptionRef.set(
-        supervisor.session,
-        Option.some({ ...healthySession, client: lostClient }),
-      );
+  ] as const)(
+    "retries a message dispatch lost to a %s with the same command id and refresh request",
+    ([, loss]) =>
+      Effect.gen(function* () {
+        const commands: OrchestrationV2Command[] = [];
+        const supervisor = yield* makeSupervisor({ commands, projects: [] });
+        const healthySession = Option.getOrThrow(yield* SubscriptionRef.get(supervisor.session));
+        const firstAttemptLost = yield* Deferred.make<void>();
+        const lostClient = {
+          ...healthySession.client,
+          [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
+            Effect.gen(function* () {
+              commands.push(command);
+              yield* SubscriptionRef.set(supervisor.session, Option.none());
+              yield* Deferred.succeed(firstAttemptLost, undefined);
+              return yield* loss;
+            }),
+        } as unknown as WsRpcProtocolClient;
+        yield* SubscriptionRef.set(
+          supervisor.session,
+          Option.some({ ...healthySession, client: lostClient }),
+        );
 
-      const sendFiber = yield* startThreadTurn({
-        commandId: CommandId.make("command-lost-ack"),
-        threadId: v2ThreadId,
-        message: {
-          origin: { kind: "user" },
-          messageId: MessageId.make("message-lost-ack"),
-          role: "user",
-          text: "hello",
-          attachments: [],
-        },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-      }).pipe(
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-      yield* Deferred.await(firstAttemptLost);
-      yield* SubscriptionRef.set(supervisor.session, Option.some(healthySession));
-      const exit = yield* Fiber.await(sendFiber);
+        const sendFiber = yield* startThreadTurn({
+          commandId: CommandId.make("command-lost-ack"),
+          refreshSideChatContext: true,
+          threadId: v2ThreadId,
+          message: {
+            origin: { kind: "user" },
+            messageId: MessageId.make("message-lost-ack"),
+            role: "user",
+            text: "hello",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        }).pipe(
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(firstAttemptLost);
+        yield* SubscriptionRef.set(supervisor.session, Option.some(healthySession));
+        const exit = yield* Fiber.await(sendFiber);
 
-      expect(commands.map((command) => [command.type, command.commandId])).toEqual([
-        ["message.dispatch", "command-lost-ack"],
-        ["message.dispatch", "command-lost-ack"],
-      ]);
-      expect(Exit.isSuccess(exit)).toBe(true);
-    }).pipe(Effect.provide(layerTestRandom)),
+        expect(
+          commands.map((command) => [
+            command.type,
+            command.commandId,
+            command.type === "message.dispatch" && command.refreshSideChatContext,
+          ]),
+        ).toEqual([
+          ["message.dispatch", "command-lost-ack", true],
+          ["message.dispatch", "command-lost-ack", true],
+        ]);
+        expect(Exit.isSuccess(exit)).toBe(true);
+      }).pipe(Effect.provide(layerTestRandom)),
   );
 
   it.effect("stops resending a message whose dispatch keeps losing the socket", () =>

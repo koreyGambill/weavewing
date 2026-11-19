@@ -725,6 +725,8 @@ describe("MessagesTimeline messages", () => {
         <MessagesTimeline
           {...props}
           timelineEntries={loaded ? [old, ...answers, recent] : [...answers, recent]}
+          branchOriginMessageIds={new Set(["old"])}
+          followUpMessageIds={new Set(["old"])}
           userTurns={userTurns}
           onRevealMessage={(messageId) =>
             setRequest({
@@ -744,7 +746,11 @@ describe("MessagesTimeline messages", () => {
       .getByRole("button", { name: /^Jump to message/ })
       .element()
       .focus();
-    await userEvent.keyboard("{Home}[Space]");
+    await userEvent.keyboard("{Home}");
+    await expect
+      .element(screen.getByRole("button", { name: /Old question · Side chat branch · Follow up/ }))
+      .toBeVisible();
+    await userEvent.keyboard("[Space]");
 
     await screen.rerender(<Thread loaded />);
     await vi.waitFor(() => {
@@ -1319,6 +1325,59 @@ describe("MessagesTimeline citations", () => {
     await expect
       .element(page.getByRole("button", { name: "Cite selection in composer" }))
       .toBeVisible();
+  });
+
+  it("branches from the nested timeline's normalized assistant selection", async () => {
+    const fixture = makeStreamingTimelineFixture();
+    const source = fixture.visibleTurnItems[2]!;
+    if (source.item.type !== "assistant_message" || source.item.runId === null)
+      throw new Error("Expected fixture reply and run");
+    const stableSideChatRunIds = new Set([source.item.runId]);
+    const text = "Rendered punctuation 🚀";
+    const innerEntries = deriveTimelineEntriesFromVisibleTurnItems({
+      optimisticMessages: [],
+      visibleTurnItems: [
+        { ...source, item: { ...source.item, text: `**${text}**`, status: "completed" } },
+      ],
+    });
+    const parentBranch = vi.fn(async () => true);
+    const childBranch = vi.fn(async () => false);
+    await using screen = await renderTimeline(
+      [message("Parent reply", { role: "assistant" }, "parent-reply")],
+      {
+        onCiteAssistantText: () => true,
+        onBranchAssistantText: parentBranch,
+        renderInlineSideChats: () => (
+          <div className="h-36">
+            <MessagesTimeline
+              {...baseProps()}
+              routeThreadKey={`environment-local:${source.sourceThreadId}`}
+              timelineEntries={innerEntries}
+              onCiteAssistantText={() => true}
+              onBranchAssistantText={childBranch}
+              stableSideChatRunIds={stableSideChatRunIds}
+            />
+          </div>
+        ),
+      },
+    );
+    await userEvent.tripleClick(screen.getByText(text));
+    const cite = page.getByRole("button", { name: "Cite selection in composer" });
+    const branch = page.getByRole("button", { name: "Drill in", exact: true });
+    await expect.element(branch).toBeVisible();
+    await userEvent.keyboard("{Tab}");
+    await expect.element(cite).toHaveFocus();
+    await userEvent.keyboard("{Tab}{Enter}");
+    expect(childBranch).toHaveBeenCalledExactlyOnceWith({
+      messageId: source.item.messageId,
+      text,
+      start: 0,
+      end: text.length,
+      prefix: "",
+      suffix: "",
+    });
+    expect(parentBranch).not.toHaveBeenCalled();
+    expect(window.getSelection()?.toString().trim()).toBe(text);
   });
 
   it("lands a citation present at mount under StrictMode", async () => {

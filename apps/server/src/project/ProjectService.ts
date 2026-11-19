@@ -538,7 +538,7 @@ export const make = Effect.gen(function* () {
       projectThreads,
       (thread) =>
         threadCommands
-          .withDeletionLock(threadCommands.withLock(thread.id, deleteChildThread(input, thread.id)))
+          .withLock(thread.id, deleteChildThread(input, thread.id))
           .pipe(
             Effect.mapError(
               (cause) =>
@@ -578,10 +578,12 @@ export const make = Effect.gen(function* () {
       }
 
       const isFirstDelete = existing.value.deletedAt === null;
-      if (isFirstDelete) {
-        yield* deleteChildThreads(input);
-      }
-      yield* commit({ type: "project.delete", commandId: input.commandId, projectId });
+      yield* threadCommands.withDeletionLock(
+        Effect.gen(function* () {
+          if (isFirstDelete) yield* deleteChildThreads(input);
+          yield* commit({ type: "project.delete", commandId: input.commandId, projectId });
+        }),
+      );
       if (isFirstDelete) {
         yield* clearProjectSettingsOverrides(projectId);
       }

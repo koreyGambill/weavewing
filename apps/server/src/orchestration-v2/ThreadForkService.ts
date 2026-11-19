@@ -9,6 +9,7 @@ import {
   OrchestrationV2ProviderTurnTokenUsage,
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
+  type SideChatAnchor,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -102,6 +103,7 @@ export interface ThreadForkServiceV2Shape {
     readonly targetThreadId: ThreadId;
     readonly title?: string;
     readonly sideChat?: boolean;
+    readonly sideChatAnchor?: SideChatAnchor;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
     readonly createdAt: DateTime.Utc;
@@ -119,19 +121,23 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
     plan: Effect.fn("ThreadForkService.plan")(function* (input) {
       const { sourceRun } = input;
       const sourceLineage = input.sourceProjection.thread.lineage;
+      if (input.sideChat && sourceLineage.sideChat && input.sideChatAnchor === undefined) {
+        return yield* new ThreadForkPlanError({
+          sourceThreadId: input.sourceProjection.thread.id,
+          targetThreadId: input.targetThreadId,
+          cause: "A side chat cannot start another side chat.",
+        });
+      }
       // A task a linked environment delegated here is a subagent of a remote thread.
       if (
         input.sideChat &&
-        (sourceLineage.sideChat ||
-          sourceLineage.relationshipToParent === "subagent" ||
+        (sourceLineage.relationshipToParent === "subagent" ||
           input.sourceProjection.thread.delegatedFrom !== undefined)
       ) {
         return yield* new ThreadForkPlanError({
           sourceThreadId: input.sourceProjection.thread.id,
           targetThreadId: input.targetThreadId,
-          cause: sourceLineage.sideChat
-            ? "A side chat cannot start another side chat."
-            : "A subagent cannot start a side chat.",
+          cause: "A subagent cannot start a side chat.",
         });
       }
       if (sourceRun !== null && !isForkableSourceRunStatus(sourceRun.status)) {
@@ -169,6 +175,7 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           relationshipToParent: "fork",
           rootThreadId: input.sourceProjection.thread.lineage.rootThreadId,
           ...(input.sideChat ? { sideChat: true } : {}),
+          ...(input.sideChatAnchor === undefined ? {} : { sideChatAnchor: input.sideChatAnchor }),
         },
         forkedFrom:
           sourceRun === null

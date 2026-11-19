@@ -65,6 +65,13 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
         >
           <AssistantCitationSource
             messageId={row.message.id}
+            sideChatSource={
+              !row.message.streaming &&
+              row.projectedItem?.sourceThreadId === ctx.threadRef?.threadId &&
+              row.projectedItem?.item.type === "assistant_message" &&
+              row.projectedItem.item.runId !== null &&
+              ctx.stableSideChatRunIds?.has(row.projectedItem.item.runId) === true
+            }
             {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
             itemKey={row.id}
             request={ctx.citationRequest}
@@ -90,6 +97,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             />
           </AssistantCitationSource>
         </div>
+        {ctx.renderInlineSideChats?.(row.message.id)}
         {ctx.onOpenTurnDiff ? (
           <AssistantChangedFilesSection
             turnSummary={row.assistantTurnDiffSummary}

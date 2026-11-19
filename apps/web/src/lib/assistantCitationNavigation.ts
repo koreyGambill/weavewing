@@ -25,6 +25,7 @@ import { randomUUID } from "./utils";
 declare module "@tanstack/react-router" {
   interface HistoryState {
     assistantCitationActivation?: string;
+    openInlineSideChat?: ThreadId;
   }
 }
 
@@ -101,10 +102,12 @@ export function withoutAssistantCitationHash(href: string) {
 type SourceThread = Pick<OrchestrationV2ThreadShell, "lineage"> | null;
 
 function sideChatParentId(sourceThread: SourceThread) {
-  return sourceThread?.lineage.sideChat ? sourceThread.lineage.parentThreadId : null;
+  return sourceThread?.lineage.sideChat && sourceThread.lineage.sideChatAnchor === undefined
+    ? sourceThread.lineage.parentThreadId
+    : null;
 }
 
-/** Side chat quotes open on their parent thread, where the side chat is a tab. */
+/** Quotes from tab-based side chats open in their tab on the parent thread. */
 export function assistantCitationRoute(citation: AssistantCitation, sourceThread: SourceThread) {
   return {
     to: "/$environmentId/$threadId" as const,

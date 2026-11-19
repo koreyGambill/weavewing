@@ -20,14 +20,16 @@ export interface SideChatParentPanel {
 }
 
 /**
- * Where opening `threadRef` should route. A side chat shows as a tab of its parent, so this opens
- * that tab and returns the parent; any other thread returns `threadRef`.
+ * Opens a tab-based side chat on its parent route. Other threads have their own routes.
  */
 export function resolveThreadOpenRoute(
   threadRef: ScopedThreadRef,
   thread: Pick<OrchestrationV2ThreadShell, "lineage"> | null,
 ): ScopedThreadRef {
-  const parentThreadId = thread?.lineage.sideChat === true ? thread.lineage.parentThreadId : null;
+  const parentThreadId =
+    thread?.lineage.sideChat === true && thread.lineage.sideChatAnchor === undefined
+      ? thread.lineage.parentThreadId
+      : null;
   if (parentThreadId === null) return threadRef;
   const parentRef = scopeThreadRef(threadRef.environmentId, parentThreadId);
   useRightPanelStore.getState().openSideChat(parentRef, threadRef.threadId);

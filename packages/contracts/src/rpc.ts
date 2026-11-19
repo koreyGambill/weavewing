@@ -38,6 +38,7 @@ import {
   ThreadTimeline,
   ThreadTimelineGetInput,
   ThreadUserTurns,
+  ThreadUserTurnsGetInput,
   ThreadContextGetInput,
   ThreadContextResult,
   DefaultContextGetInput,
@@ -1722,7 +1723,7 @@ const WsThreadTimelineGetRpc = Rpc.make(WS_METHODS.threadTimelineGet, {
 });
 
 const WsThreadUserTurnsGetRpc = Rpc.make(WS_METHODS.threadUserTurnsGet, {
-  payload: ThreadTimelineGetInput,
+  payload: ThreadUserTurnsGetInput,
   success: ThreadUserTurns,
   error: Schema.Union([ThreadInsightsError, EnvironmentAuthorizationError]),
 });

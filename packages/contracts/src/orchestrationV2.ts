@@ -1,3 +1,4 @@
+import { SideChatAnchor } from "./assistantCitations.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
 import * as DateTime from "effect/DateTime";
@@ -198,6 +199,7 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
   sideChat: Schema.optional(Schema.Boolean),
+  sideChatAnchor: Schema.optionalKey(SideChatAnchor),
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
 
@@ -893,6 +895,10 @@ export const OrchestrationV2Run = Schema.Struct({
   freshContext: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2Run = typeof OrchestrationV2Run.Type;
+
+export function isStableForkRun(run: Pick<OrchestrationV2Run, "status" | "checkpointId">): boolean {
+  return run.status === "completed" && run.checkpointId !== null;
+}
 
 export function orchestrationV2RunWorkStartedAt(
   run: Pick<OrchestrationV2Run, "workStartedAt" | "startedAt" | "requestedAt">,
@@ -3592,6 +3598,8 @@ export const OrchestrationV2Command = Schema.Union([
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     /** Start a new provider session without the thread's earlier context. Never steers. */
     freshContext: Schema.optional(Schema.Boolean),
+    /** Capture recent messages from the side-chat tree for this send. */
+    refreshSideChatContext: Schema.optional(Schema.Boolean),
     commandId: CommandId,
     threadId: ThreadId,
     messageId: MessageId,
@@ -3750,7 +3758,10 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     sourceThreadId: ThreadId,
     targetThreadId: ThreadId,
-    sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+    sourcePoint: Schema.Union([
+      OrchestrationV2ThreadForkSourcePoint,
+      Schema.Struct({ type: Schema.Literal("assistant_selection"), anchor: SideChatAnchor }),
+    ]),
     title: Schema.optional(TrimmedNonEmptyString),
     sideChat: Schema.optional(Schema.Boolean),
     createdAt: Schema.optional(Schema.DateTimeUtc),
@@ -4177,6 +4188,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
       messageId: Schema.optional(MessageId),
       text: Schema.String,
       context: Schema.optional(OrchestrationMessageContext),
+      refreshSideChatContext: Schema.optional(Schema.Boolean),
       attachments: Schema.Array(ChatAttachment),
     }),
   ),

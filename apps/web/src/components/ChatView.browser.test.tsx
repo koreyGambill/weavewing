@@ -625,11 +625,13 @@ it("a mounted thread view lets go of the thread structures it has replaced", asy
     scopeThreadRef(ENVIRONMENT_ID, updated.id),
   );
 
-  // Each round, a new answer arrives while the thread is shown, then the user switches away.
+  // Collect six replacements across three visits to also exercise switching away.
   const shown: Array<WeakRef<object>> = [];
   await open(other.id, "Answer 2 for other.");
   for (let round = 0; round < 6; round++) {
-    await open(updated.id, round === 0 ? "Answer 2 for updated." : `Update ${round - 1}.`);
+    if (round % 2 === 0) {
+      await open(updated.id, round === 0 ? "Answer 2 for updated." : `Update ${round - 1}.`);
+    }
     const update = assistantItem(
       updated.id,
       RunId.make("updated-run-2"),
@@ -641,7 +643,7 @@ it("a mounted thread view lets go of the thread structures it has replaced", asy
     await act(() => emitThreadEvent(updated.id, { type: "turn-item.updated", payload: update }));
     await expect.element(page.getByText(`Update ${round}.`)).toBeVisible();
     shown.push(new WeakRef(appAtomRegistry.get(structureAtom)!.projection));
-    await open(other.id, "Answer 2 for other.");
+    if (round % 2 === 1) await open(other.id, "Answer 2 for other.");
   }
   await cdp().send("HeapProfiler.collectGarbage");
 

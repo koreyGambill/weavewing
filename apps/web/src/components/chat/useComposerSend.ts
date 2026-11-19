@@ -1,5 +1,6 @@
 import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { armFreshSession, disarmFreshSession, readFreshSessionArm } from "./freshSessionArms";
+import { consumeSideChatRefresh, readSideChatRefreshArm } from "./sideChatContextRefresh";
 import {
   mergeDirectPreviewAnnotation,
   resolveBackgroundDraftWorkspaceOptions,
@@ -211,6 +212,7 @@ interface ComposerSendInput {
   readonly panelAnimationDurationMs: number;
   /** `/clear` can arm a fresh session on this thread. */
   readonly freshSessionAvailable: boolean;
+  readonly sideChatRefreshAvailable: boolean;
   readonly usageLimitsKey: string | null;
   readonly usageLimitsOffered: boolean;
   readonly openUsageLimits: UsageLimitsPanel["open"];
@@ -873,6 +875,12 @@ export function useComposerSend(input: ComposerSendInput) {
       artifactAnswers: composerArtifactAnswersSnapshot,
       messageText: messageTextForSend,
     } = sendSnapshot;
+    const refreshArm =
+      input.sideChatRefreshAvailable &&
+      freshArm === undefined &&
+      !messageTextForSend.trimStart().startsWith("/")
+        ? readSideChatRefreshArm(routeThreadKey)
+        : undefined;
     const {
       missingWorktreeBaseBranch,
       baseBranchForWorktree,
@@ -889,7 +897,7 @@ export function useComposerSend(input: ComposerSendInput) {
       isScratchProject: activeProjectIsScratch,
       phase,
       dispatchMode,
-      freshContext: freshArm !== undefined,
+      requiresNewTurn: freshArm !== undefined || refreshArm !== undefined,
     });
     if (missingWorktreeBaseBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
@@ -1412,6 +1420,7 @@ export function useComposerSend(input: ComposerSendInput) {
           interactionMode: DEFAULT_INTERACTION_MODE,
           dispatchMode: turnDispatchMode,
           ...(freshArm === undefined ? {} : { freshContext: true }),
+          ...(refreshArm === undefined ? {} : { refreshSideChatContext: true }),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
@@ -1451,6 +1460,7 @@ export function useComposerSend(input: ComposerSendInput) {
           );
         }
         if (freshArm !== undefined) disarmFreshSession(routeThreadKey, freshArm);
+        if (refreshArm !== undefined) consumeSideChatRefresh(routeThreadKey, refreshArm);
         clearUsageLimitsFor(routeThreadKey);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);

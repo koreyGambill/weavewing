@@ -28,3 +28,14 @@ export const AssistantCitation = Schema.Struct({
   Schema.makeFilter((citation) => citation.end > citation.start && citation.text.trim().length > 0),
 );
 export type AssistantCitation = typeof AssistantCitation.Type;
+
+/** A quote in the parent thread's rendered assistant text, using normalized UTF-16 offsets. */
+export const SideChatAnchor = Schema.Struct({
+  messageId: AssistantCitation.fields.messageId,
+  text: AssistantCitation.fields.text,
+  start: AssistantCitation.fields.start,
+  end: AssistantCitation.fields.end,
+  prefix: AssistantCitation.fields.prefix,
+  suffix: AssistantCitation.fields.suffix,
+}).check(Schema.makeFilter((anchor) => anchor.end > anchor.start && anchor.text.trim().length > 0));
+export type SideChatAnchor = typeof SideChatAnchor.Type;

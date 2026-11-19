@@ -62,6 +62,12 @@ export function TimelineMinimap({
   const activeItem = resolveTimelineMinimapPreview(
     resolvedActiveIndex === null ? null : (items[resolvedActiveIndex] ?? null),
   );
+  const activeMarks = [
+    activeItem?.branchOrigin ? "Side chat branch" : null,
+    activeItem?.followUp ? "Follow up" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const navigationInteractive =
     resolveTimelineMinimapNavigationInteractive(hitStripWidth) && !passThrough;
   const activeTopPercent =
@@ -145,7 +151,7 @@ export function TimelineMinimap({
             }}
           />
           <button
-            aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+            aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}${activeMarks ? ` · ${activeMarks}` : ""}`}
             className="absolute inset-y-0 left-0 w-full cursor-pointer bg-transparent before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
             onBlur={() => setActiveIndex(null)}
             onClick={(event) => {
@@ -198,8 +204,14 @@ export function TimelineMinimap({
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "pointer-events-none absolute left-0 h-0.5 w-6 origin-left -translate-y-1/2 rounded-full transition-transform duration-150 after:absolute after:inset-0 after:rounded-full after:bg-foreground/55 after:opacity-0 after:transition-opacity after:duration-150 data-[in-view=true]:after:opacity-100",
-                    activeDistance === 0 ? "bg-muted-foreground/60" : "bg-muted-foreground/25",
+                    "pointer-events-none absolute left-0 h-0.5 w-6 origin-left -translate-y-1/2 rounded-full transition-transform duration-150 after:absolute after:inset-0 after:rounded-full after:opacity-0 after:transition-opacity after:duration-150 data-[in-view=true]:after:opacity-100",
+                    item.followUp
+                      ? "bg-warning/80 after:bg-warning"
+                      : item.branchOrigin
+                        ? "bg-info/80 after:bg-info"
+                        : activeDistance === 0
+                          ? "bg-muted-foreground/60 after:bg-foreground/55"
+                          : "bg-muted-foreground/25 after:bg-foreground/55",
                     activeDistance === 0
                       ? "scale-x-100"
                       : activeDistance === 1
@@ -219,7 +231,11 @@ export function TimelineMinimap({
                     }
                   }}
                   style={{ top }}
-                />
+                >
+                  {item.followUp && item.branchOrigin ? (
+                    <span className="absolute inset-x-0 top-1 h-0.5 rounded-full bg-info" />
+                  ) : null}
+                </span>
               );
             })}
             {activeItem ? (
@@ -232,6 +248,9 @@ export function TimelineMinimap({
                   <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
                     {activeItem.userText ?? "User message"}
                   </span>
+                  {activeMarks ? (
+                    <span className="block text-xs text-muted-foreground">{activeMarks}</span>
+                  ) : null}
                   {activeItem.assistantText ? (
                     <span
                       className="mt-1 max-h-[3.75rem] overflow-hidden text-muted-foreground text-sm leading-5"

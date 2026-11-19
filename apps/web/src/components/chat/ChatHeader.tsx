@@ -57,7 +57,12 @@ interface ChatHeaderProps {
   activeThreadLinkOrigin?: string | null | undefined;
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
-  parentThreadLink: { threadId: ThreadId; title: string } | null;
+  parentThreadLink: {
+    threadId: ThreadId;
+    title: string;
+    actionLabel?: string;
+    open?: () => void;
+  } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
@@ -346,8 +351,10 @@ export const ChatHeader = memo(function ChatHeader({
                   render={
                     <button
                       type="button"
-                      aria-label={`Open parent thread: ${parentThreadLink.title}`}
-                      onClick={() => onOpenThread(parentThreadLink.threadId)}
+                      aria-label={`${parentThreadLink.actionLabel ?? "Open parent thread"}: ${parentThreadLink.title}`}
+                      onClick={
+                        parentThreadLink.open ?? (() => onOpenThread(parentThreadLink.threadId))
+                      }
                       className="inline-flex min-w-0 max-w-full cursor-pointer items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     />
                   }
@@ -364,7 +371,9 @@ export const ChatHeader = memo(function ChatHeader({
                     </span>
                   ) : null}
                 </TooltipTrigger>
-                <TooltipPopup side="top">{parentThreadLink.title}</TooltipPopup>
+                <TooltipPopup side="top">
+                  {parentThreadLink.actionLabel ?? parentThreadLink.title}
+                </TooltipPopup>
               </Tooltip>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator>

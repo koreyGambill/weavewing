@@ -7,6 +7,7 @@ const THREAD_FIND_ACTIVE_HIGHLIGHT_NAME = "t3-thread-find-active";
 
 const THREAD_FIND_TEXT_SELECTOR = "[data-thread-find-text]";
 const THREAD_FIND_IGNORE_SELECTOR = "[data-thread-find-ignore]";
+const TIMELINE_VIEWPORT_SELECTOR = "[data-assistant-citation-viewport]";
 
 interface ThreadFindRange {
   readonly rowId: string;
@@ -20,7 +21,11 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
   const ranges: ThreadFindRange[] = [];
   const occurrenceByRowId = new Map<string, number>();
 
+  const viewport =
+    container.closest(TIMELINE_VIEWPORT_SELECTOR) ??
+    container.querySelector(TIMELINE_VIEWPORT_SELECTOR);
   for (const scope of container.querySelectorAll(THREAD_FIND_TEXT_SELECTOR)) {
+    if (scope.closest(TIMELINE_VIEWPORT_SELECTOR) !== viewport) continue;
     if (scope.parentElement?.closest(THREAD_FIND_TEXT_SELECTOR)) continue;
     const rowId = scope.closest("[data-timeline-row-id]")?.getAttribute("data-timeline-row-id");
     if (!rowId) continue;
@@ -139,11 +144,16 @@ export function useThreadFindHighlights(input: {
       return;
     }
 
+    const viewport = container.closest(TIMELINE_VIEWPORT_SELECTOR);
     const cache = new Map<Element, readonly ThreadFindRange[]>();
     const paint = makeThreadFindHighlightPainter(container);
     paintRef.current = paint;
     const repaint = () => {
-      const rows = new Set(container.querySelectorAll("[data-timeline-row-id]"));
+      const rows = new Set(
+        [...container.querySelectorAll("[data-timeline-row-id]")].filter(
+          (row) => row.closest(TIMELINE_VIEWPORT_SELECTOR) === viewport,
+        ),
+      );
       const ranges: ThreadFindRange[] = [];
       for (const row of rows) {
         let matches = cache.get(row);
@@ -165,7 +175,14 @@ export function useThreadFindHighlights(input: {
     let frame: number | null = null;
     const observer = new MutationObserver((mutations) => {
       // Ignore timer and status mutations outside searchable text and folds.
-      const relevant = mutations.filter(affectsSearchableText);
+      const relevant = mutations.filter((mutation) => {
+        const node = mutation.target;
+        const target = node instanceof Element ? node : node.parentElement;
+        return (
+          target?.closest(TIMELINE_VIEWPORT_SELECTOR) === viewport &&
+          affectsSearchableText(mutation)
+        );
+      });
       if (relevant.length === 0) return;
       for (const mutation of relevant) {
         const target =

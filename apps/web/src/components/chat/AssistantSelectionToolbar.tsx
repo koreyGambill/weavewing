@@ -3,8 +3,9 @@ import {
   MessageId,
   type AssistantCitation,
   type ScopedThreadRef,
+  type SideChatAnchor,
 } from "@t3tools/contracts";
-import { QuoteIcon } from "lucide-react";
+import { GitBranchIcon, QuoteIcon } from "lucide-react";
 import { use, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -24,17 +25,19 @@ export function AssistantSelectionToolbar({
   viewport,
   threadRef,
   onCite,
+  onBranch,
 }: {
   viewport: HTMLElement | null;
   threadRef: ScopedThreadRef;
   onCite: (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean;
+  onBranch?: ((anchor: SideChatAnchor) => Promise<boolean>) | undefined;
 }) {
   const [selection, setSelection] = useState<{
     citation: AssistantCitation;
     position: SelectionActionPoint;
     sourceAnchor: AssistantCitationSourceAnchor;
   } | null>(null);
-  const toolbarRef = useRef<HTMLButtonElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
   const backgroundThread = use(BackgroundThreadContext);
 
@@ -55,7 +58,11 @@ export function AssistantSelectionToolbar({
       const nativeSelection = window.getSelection();
       const captured = captureAssistantTextSelection(viewport, nativeSelection);
       const messageId = captured?.source.dataset.assistantCitationSource;
-      if (!captured || !messageId) {
+      if (
+        !captured ||
+        !messageId ||
+        captured.source.closest("[data-assistant-citation-viewport]") !== viewport
+      ) {
         clear();
         return;
       }
@@ -160,13 +167,14 @@ export function AssistantSelectionToolbar({
       ) {
         return;
       }
-      if (toolbar.disabled) return;
+      const firstAction = toolbar.querySelector<HTMLButtonElement>("button:not(:disabled)");
+      if (!firstAction) return;
       event.preventDefault();
       event.stopPropagation();
-      toolbar.focus({ preventScroll: true });
+      firstAction.focus({ preventScroll: true });
     };
     // Tab belongs to the foreground chat; a background timeline only follows its selection.
-    if (!backgroundThread) document.addEventListener("keydown", focusActions, true);
+    if (!backgroundThread || onBranch) document.addEventListener("keydown", focusActions, true);
     document.addEventListener("selectionchange", actions.selectionChanged);
     return () => {
       document.removeEventListener("keydown", focusActions, true);
@@ -174,7 +182,7 @@ export function AssistantSelectionToolbar({
       actions.dispose();
       actionsRef.current = null;
     };
-  }, [backgroundThread, threadRef, viewport]);
+  }, [backgroundThread, onBranch, threadRef, viewport]);
 
   if (!selection) return null;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
@@ -188,18 +196,18 @@ export function AssistantSelectionToolbar({
     dismiss();
     return true;
   };
+  const branch =
+    !tooLong && onBranch && selection.sourceAnchor.source.hasAttribute("data-side-chat-source")
+      ? onBranch
+      : null;
   return createPortal(
-    <Button
+    <div
       ref={toolbarRef}
-      type="button"
-      size="xs"
-      variant="glass"
-      disabled={tooLong}
-      aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
-      className="fixed z-50 max-w-[calc(100vw-1rem)]"
+      role="group"
+      aria-label="Selected text actions"
+      className="fixed z-50 flex max-w-[calc(100vw-1rem)] gap-1"
       style={{ left: selection.position.x, top: selection.position.y }}
       onPointerDown={(event) => event.preventDefault()}
-      onClick={cite}
       onKeyDown={(event) => {
         event.stopPropagation();
         if (event.key === "Escape" && !event.nativeEvent.isComposing) {
@@ -208,9 +216,39 @@ export function AssistantSelectionToolbar({
         }
       }}
     >
-      <QuoteIcon aria-hidden="true" className="size-3.5" />
-      {tooLong ? "Shorten selection" : "Cite"}
-    </Button>,
+      <Button
+        type="button"
+        size="xs"
+        variant="glass"
+        disabled={tooLong}
+        aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
+        onClick={cite}
+      >
+        <QuoteIcon aria-hidden="true" className="size-3.5" />
+        {tooLong ? "Shorten selection" : "Cite"}
+      </Button>
+      {branch ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="glass"
+          onClick={() => {
+            const { messageId, text, start, end, prefix, suffix } = selection.citation;
+            const selected = window.getSelection();
+            const activeRange = selected?.rangeCount ? selected.getRangeAt(0) : undefined;
+            void branch({ messageId, text, start, end, prefix, suffix }).then((opened) => {
+              const current = window.getSelection();
+              if (!opened || !current?.rangeCount || current.getRangeAt(0) !== activeRange) return;
+              current.removeAllRanges();
+              dismiss();
+            });
+          }}
+        >
+          <GitBranchIcon aria-hidden="true" className="size-3.5" />
+          Drill in
+        </Button>
+      ) : null}
+    </div>,
     document.body,
   );
 }

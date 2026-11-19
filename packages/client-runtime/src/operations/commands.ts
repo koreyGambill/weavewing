@@ -25,6 +25,7 @@ import {
   type ProviderInteractionMode,
   type ProviderUserInputAnswers,
   type RunId,
+  type SideChatAnchor,
   type RuntimeMode,
   type RuntimeRequestId,
   type ThreadId,
@@ -207,6 +208,8 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";
   /** Start a new provider session; needs the server's `freshContext` capability. */
   readonly freshContext?: boolean;
+  /** Include a server snapshot from the side-chat tree on this send only. */
+  readonly refreshSideChatContext?: boolean;
   /** Defaults to true. Callers with their own retry queue opt out so a dead socket fails fast. */
   readonly resendAfterSocketLoss?: boolean;
 }
@@ -253,6 +256,7 @@ export interface ForkSideChatInput extends CommandMetadata {
   readonly sourceThreadId: ThreadId;
   readonly targetThreadId: ThreadId;
   readonly title?: string;
+  readonly anchor?: SideChatAnchor;
 }
 
 export interface MergeThreadBackInput extends CommandMetadata {
@@ -760,12 +764,30 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,
 ) {
-  if (input.expectedEnvironmentId !== undefined) {
+  if (input.refreshSideChatContext && input.bootstrap?.createThread !== undefined) {
+    return yield* new ConnectionBlockedError({
+      reason: "configuration",
+      detail: "Send from an existing chat to include its newest context.",
+    });
+  }
+  if (input.expectedEnvironmentId !== undefined || input.refreshSideChatContext) {
     const config = yield* getInitialServerConfig();
-    if (config.environment.environmentId !== input.expectedEnvironmentId) {
+    if (
+      input.expectedEnvironmentId !== undefined &&
+      config.environment.environmentId !== input.expectedEnvironmentId
+    ) {
       return yield* new ConnectionBlockedError({
         reason: "configuration",
         detail: "Connected to a different environment. Message was not sent.",
+      });
+    }
+    if (
+      input.refreshSideChatContext &&
+      config.environment.capabilities.sideChatContextRefresh !== true
+    ) {
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail: "This server does not support refreshing side-chat context.",
       });
     }
   }
@@ -837,6 +859,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
         messageId: input.message.messageId,
         text: input.message.text,
         ...(context ? { context } : {}),
+        ...(input.refreshSideChatContext ? { refreshSideChatContext: true } : {}),
         attachments,
       },
     });
@@ -868,6 +891,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
           ? {}
           : { sourcePlanRef: input.sourceProposedPlan }),
         ...(input.freshContext ? { freshContext: true } : {}),
+        ...(input.refreshSideChatContext ? { refreshSideChatContext: true } : {}),
         dispatchMode: { type: "start_immediately" },
       },
       resendAfterSocketLoss,
@@ -899,6 +923,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
         ? {}
         : { sourcePlanRef: input.sourceProposedPlan }),
       ...(input.freshContext ? { freshContext: true } : {}),
+      ...(input.refreshSideChatContext ? { refreshSideChatContext: true } : {}),
       ...(requestedMode !== "queue" ? { deliveryIntent: requestedMode } : {}),
       dispatchMode,
     },
@@ -1121,7 +1146,7 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
   });
 });
 
-/** Forks the thread's latest stable point into a hidden side chat; works while it runs. */
+/** Forks a hidden side chat from the selected reply, or the latest stable point. */
 export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(function* (
   input: ForkSideChatInput,
 ) {
@@ -1132,7 +1157,10 @@ export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(functi
     creationSource: input.creationSource ?? "web",
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
-    sourcePoint: { type: "latest_stable" },
+    sourcePoint:
+      input.anchor === undefined
+        ? { type: "latest_stable" }
+        : { type: "assistant_selection", anchor: input.anchor },
     sideChat: true,
     ...(input.title === undefined ? {} : { title: input.title }),
   });

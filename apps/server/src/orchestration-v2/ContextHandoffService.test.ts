@@ -222,6 +222,20 @@ it.effect("caps the side chat context block without summarizing discarded parent
     assert.isTrue(framingOnly.startsWith("You are in a side chat beside the main thread."));
     assert.notInclude(framingOnly, "Main thread activity");
 
+    const firstPassage = ContextHandoffService.makeSideChatContext({
+      parentThreadId,
+      digest: [],
+      selectedText: "First option",
+    });
+    const secondPassage = ContextHandoffService.makeSideChatContext({
+      parentThreadId,
+      digest: [],
+      selectedText: 'Second option\n"Details"',
+    });
+    assert.include(firstPassage, JSON.stringify("First option"));
+    assert.include(secondPassage, JSON.stringify('Second option\n"Details"'));
+    assert.notInclude(secondPassage, JSON.stringify("First option"));
+
     const multiFilePatch = ContextHandoffService.makeSideChatContext({
       parentThreadId,
       digest: [

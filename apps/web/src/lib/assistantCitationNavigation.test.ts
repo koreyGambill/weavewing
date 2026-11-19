@@ -122,6 +122,21 @@ describe("assistant citation navigation", () => {
     expect(router.history.length).toBe(2);
   });
 
+  it("keeps an anchored side chat citation on the child's full-size route", async () => {
+    const router = createCitationRouter("/environment-one/thread-parent");
+    const { messageId, text, start, end, prefix, suffix } = citation;
+    await router.navigate(
+      assistantCitationNavigation(sideChatCitation, {
+        lineage: {
+          ...sideChatShell.lineage,
+          sideChatAnchor: { messageId, text, start, end, prefix, suffix },
+        },
+      }),
+    );
+    expect(router.state.location.pathname).toBe("/environment-one/side-chat-one");
+    expect(assistantCitationFromLocation(router.state.location.href)).toEqual(sideChatCitation);
+  });
+
   it("keeps quotes from forks on their own thread", () => {
     const forkShell = { lineage: { ...sideChatShell.lineage, sideChat: false } };
 

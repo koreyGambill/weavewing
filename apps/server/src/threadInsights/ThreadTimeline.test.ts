@@ -1,5 +1,10 @@
 import { expect, it } from "@effect/vitest";
-import { THREAD_TIMELINE_RUN_LIMIT, THREAD_USER_TURN_LIMIT, ThreadId } from "@t3tools/contracts";
+import {
+  RunId,
+  THREAD_TIMELINE_RUN_LIMIT,
+  THREAD_USER_TURN_LIMIT,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -176,6 +181,25 @@ const insertItem = (
 const userTurns = Effect.fn(function* (threadId: string) {
   return yield* (yield* Timeline.ThreadTimeline).userTurns({ threadId: ThreadId.make(threadId) });
 });
+
+it.effect("finds a recorded fork's source message independently of the turn rail window", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* insertRun("root", 1, "completed", 0, 1);
+    yield* sql`UPDATE orchestration_v2_projection_runs
+      SET payload_json = json_set(payload_json, '$.userMessageId', 'source-message')
+      WHERE run_id = 'root-1'`;
+    const timeline = yield* Timeline.ThreadTimeline;
+    const sourceRunId = RunId.make("root-1");
+    expect(yield* timeline.userTurns({ threadId: ThreadId.make("root"), sourceRunId })).toEqual({
+      turns: [],
+      sourceMessageId: "source-message",
+    });
+    expect(yield* timeline.userTurns({ threadId: ThreadId.make("other"), sourceRunId })).toEqual({
+      turns: [],
+    });
+  }).pipe(Effect.provide(layer)),
+);
 
 it.effect("lists the user's own turns with each turn's last reply, newest first capped", () =>
   Effect.gen(function* () {

@@ -1317,15 +1317,14 @@ export function planComposerTurn(input: {
   readonly isScratchProject: boolean;
   readonly phase: SessionPhase;
   readonly dispatchMode: ComposerDispatchMode;
-  /** A new provider session cannot steer the current turn. */
-  readonly freshContext: boolean;
+  readonly requiresNewTurn: boolean;
 }) {
   const isFirstMessage =
     !input.sendQueuesBehindSetup && (!input.isServerThread || input.activeMessageCount === 0);
   const shouldCreateWorktree =
     isFirstMessage && input.sendEnvMode === "worktree" && !input.worktreePath;
   const dispatchMode =
-    input.freshContext && (input.dispatchMode === "steer" || input.dispatchMode === "restart")
+    input.requiresNewTurn && (input.dispatchMode === "steer" || input.dispatchMode === "restart")
       ? "queue"
       : input.dispatchMode;
   return {

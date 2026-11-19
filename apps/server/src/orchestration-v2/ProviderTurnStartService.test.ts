@@ -448,6 +448,7 @@ it.each([
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  readonly sideChatRefresh?: string;
   readonly origin?: TurnOrigin;
   readonly discovery?: Discovery.DevelopmentEnvironmentDiscovery["Service"];
   readonly scratch?: boolean;
@@ -557,6 +558,9 @@ function makeLocalCommandHarness(input: {
     nodeId: rootNodeId,
     role: "user",
     text: input.text,
+    ...(input.sideChatRefresh === undefined
+      ? {}
+      : { context: { version: 1, records: [], sideChatRefresh: input.sideChatRefresh } }),
     ...(input.origin === undefined ? {} : { origin: input.origin }),
     attachments: [],
     streaming: false,
@@ -2289,6 +2293,23 @@ effectIt.effect.each([
         },
       ]);
     }),
+);
+
+effectIt.effect("includes a persisted newest-context snapshot in the provider input", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "My own prompt",
+      sideChat: { contextRun: "delivered" },
+      sideChatRefresh: JSON.stringify({ role: "assistant", text: "Pinned at submit" }),
+    });
+    yield* harness.start;
+
+    const text = harness.startTurn.mock.calls[0]?.[0].message.text ?? "";
+    expect(text).toContain("Newest context from related chats");
+    expect(text).toContain("Pinned at submit");
+    expect(text).toMatch(/User message:\nMy own prompt$/);
+    expect(text).not.toContain("SIDE_CHAT_CONTEXT");
+  }),
 );
 
 effectIt.effect.each([
