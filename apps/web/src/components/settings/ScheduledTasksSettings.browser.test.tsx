@@ -137,15 +137,16 @@ vi.mock(import("./SettingsScopeContext"), async (original) => {
 });
 vi.mock(import("../../state/server"), async (original) => {
   const actual = await original();
-  const providers = Atom.make<ReadonlyArray<ServerProvider>>(() =>
-    state.providerAvailable ? [decodeServerProvider(CODEX_PROVIDER)] : [],
-  );
+  const providers = Atom.make<ReadonlyArray<ServerProvider>>(() => [
+    decodeServerProvider(CODEX_PROVIDER),
+  ]);
+  const noProviders = Atom.make<ReadonlyArray<ServerProvider>>([]);
 
   return {
     ...actual,
     serverEnvironment: {
       ...actual.serverEnvironment,
-      providersValueAtom: () => providers,
+      providersValueAtom: () => (state.providerAvailable ? providers : noProviders),
       deleteScheduledTask: {
         ...actual.serverEnvironment.deleteScheduledTask,
         run: state.remove,
