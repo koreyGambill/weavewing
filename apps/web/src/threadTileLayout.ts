@@ -29,8 +29,9 @@ function placeTabs(group: TileGroup, tabIds: string[]): TileGroup {
   return { ...group, tabs, activeTabId: tabIds[0] ?? group.activeTabId };
 }
 
-// Reserves a 96px tab, three 20px buttons, grip, group number, gaps, padding, and borders.
-export const TILE_MIN_WIDTH_PX = 224;
+// The header at its narrowest measures 154px: grip, group number, a 40px icon-only tab, the +N
+// chip, New tab and tile actions, with gaps, padding and borders. Six more fit two-digit counts.
+export const TILE_MIN_WIDTH_PX = 160;
 
 /** Minimum canvas width that keeps every docked header usable. */
 export function tileMinimumWidth(node: TileNode): number {

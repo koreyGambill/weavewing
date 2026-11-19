@@ -2780,20 +2780,9 @@ code {
   background: color-mix(in srgb, var(--tile-group-accent) 15%, var(--background));
   box-shadow: inset 0 -2px var(--tile-group-accent);
 }
-.workspace-tile-tabs {
-  scrollbar-width: none;
-}
-.workspace-tile-tabs[data-masked="true"] {
-  mask-image: linear-gradient(
-    to right,
-    transparent var(--tile-tabs-clip),
-    black var(--tile-tabs-clip),
-    black calc(100% - var(--tile-tabs-fade-end)),
-    transparent
-  );
-}
-.workspace-tile-tabs::-webkit-scrollbar {
-  display: none;
+/* An icon-only tab keeps room for its close button and shows it on hover or focus. */
+.workspace-tile-tab[data-fit="icon"]:not(:hover, :focus-within) > button:not([role="tab"]) {
+  opacity: 0;
 }
 
 .workspace-area-tabs-with-tools {

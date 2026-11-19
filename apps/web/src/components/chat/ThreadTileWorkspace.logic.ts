@@ -68,3 +68,58 @@ export function ownsTileInput(
   const owner = tileOwnerOf(focused);
   return owner ? workspace !== null && owner.contains(workspace) : !overlay;
 }
+
+/** Header controls in the order they give way, before any tab folds, as a tile narrows. */
+export const TILE_CONTROL_PRIORITY = ["split", "float", "maximize", "close"] as const;
+export type TileControlKey = (typeof TILE_CONTROL_PRIORITY)[number];
+
+export type TileTabFit = {
+  /** Indices of the tabs shown in full, in tile order; the rest fold into the +N chip. */
+  shown: readonly number[];
+  /** "truncated" and "icon" apply to the active tab when it is the only one shown. */
+  mode: "full" | "truncated" | "icon";
+  /** How many controls, from the front of the priority list, are hidden. */
+  hiddenControls: number;
+};
+
+// Sub-pixel slack, so a tab that measures exactly the room left still shows.
+const FIT_EPSILON = 0.5;
+const sum = (values: readonly number[]) => values.reduce((total, value) => total + value, 0);
+
+/**
+ * Which tabs and controls a tile header shows. Controls hide in priority order before any tab
+ * folds; then tabs show left to right with the rest behind a +N chip, the active tab taking the
+ * last place when it falls past the cutoff. A lone active tab truncates, then shows its icon.
+ */
+export function fitTileTabs(input: {
+  /** Width for tabs and the chip once every control is hidden. */
+  room: number;
+  /** Control widths, gap included, in the order they hide. */
+  controls: readonly number[];
+  tabs: readonly number[];
+  activeIndex: number;
+  chip: number;
+  /** The narrowest the lone active tab may be while it keeps its title. */
+  truncatedTab: number;
+}): TileTabFit {
+  const { room, controls, tabs, activeIndex } = input;
+  const all = tabs.map((_, index) => index);
+  let controlsWidth = sum(controls);
+  for (let hidden = 0; hidden <= controls.length; hidden += 1) {
+    if (sum(tabs) <= room - controlsWidth + FIT_EPSILON)
+      return { shown: all, mode: "full", hiddenControls: hidden };
+    controlsWidth -= controls[hidden] ?? 0;
+  }
+  const hiddenControls = controls.length;
+  if (activeIndex < 0) return { shown: [], mode: "full", hiddenControls };
+  for (let count = tabs.length - 1; count >= 1; count -= 1) {
+    const shown =
+      activeIndex < count ? all.slice(0, count) : [...all.slice(0, count - 1), activeIndex];
+    if (sum(shown.map((index) => tabs[index]!)) + input.chip <= room + FIT_EPSILON)
+      return { shown, mode: "full", hiddenControls };
+  }
+  const chip = tabs.length > 1 ? input.chip : 0;
+  const truncates =
+    input.truncatedTab < tabs[activeIndex]! && input.truncatedTab + chip <= room + FIT_EPSILON;
+  return { shown: [activeIndex], mode: truncates ? "truncated" : "icon", hiddenControls };
+}
