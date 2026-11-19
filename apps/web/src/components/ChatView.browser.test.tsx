@@ -697,3 +697,67 @@ it("selecting a side-chat tab focuses that side chat's composer", async () => {
   await expect.element(sideEditor).toHaveFocus();
   await expect.element(mainEditor).toHaveTextContent("main draft");
 });
+
+it("preserves chat width, details visibility and focus as the tile resizes", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1560, 860);
+  const thread = threadWithHistory("responsive-details", 3);
+  using _environment = installFakeEnvironment([thread]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  const answer = page.getByText(`Answer 0 for ${thread.id}.`);
+  await expect.element(answer).toBeVisible();
+  const tile = document.querySelector<HTMLElement>("[data-chat-canvas]")!;
+  const composer = document.querySelector<HTMLElement>("[data-chat-composer-stack]")!;
+  const resize = async (width: number, mode: "inline" | "bar") => {
+    tile.style.width = `${width}px`;
+    tile.style.flex = "none";
+    await vi.waitFor(() => {
+      expect(tile.clientWidth).toBe(width);
+      expect(tile.querySelector(`[data-thread-details-panel="${mode}"]`)).not.toBeNull();
+      expect(composer.clientWidth).toBe(736);
+    });
+  };
+  await resize(1300, "inline");
+  await resize(1108, "inline");
+  await resize(1107, "bar");
+  await resize(1050, "bar");
+  const disclosure = page
+    .getByRole("region", { name: "Thread details" })
+    .getByRole("button", { name: "Details", exact: true });
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "true");
+  const control = tile.querySelector<HTMLButtonElement>(
+    "[data-thread-details-card] button:not(:disabled)",
+  )!;
+  control.focus();
+  expect(document.activeElement).toBe(control);
+  await resize(1300, "inline");
+  expect(document.activeElement).toBe(control);
+  await resize(1050, "bar");
+  expect(document.activeElement).toBe(control);
+  await disclosure.click();
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
+  await resize(1300, "inline");
+  expect(document.activeElement).toBe(tile.querySelector('[data-thread-details-panel="inline"]'));
+  await page.getByRole("button", { name: "Toggle thread details panel" }).first().click();
+  tile.style.width = "1050px";
+  await vi.waitFor(() => {
+    expect(tile.querySelector("[data-thread-details-panel]")).toBeNull();
+    expect(composer.clientWidth).toBe(736);
+  });
+});

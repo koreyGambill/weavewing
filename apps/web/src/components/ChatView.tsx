@@ -3237,7 +3237,7 @@ export default function ChatView(props: ChatViewProps) {
             enabled: threadFindEnabled,
           }}
           store={chatCanvasStore}
-          threadRef={activeThreadRef}
+          threadRef={embedded || detailsInSidebar ? null : activeThreadRef}
           preview={canvasPreview}
           detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
           composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
@@ -3248,6 +3248,96 @@ export default function ChatView(props: ChatViewProps) {
           onDrop={workspaceFileDropHandlers.onDrop}
         >
           <ThreadFind onClose={focusComposerStable} />
+          {embedded && !detailsInSidebar ? null : (
+            <>
+              <BranchRestoreConfirmHost
+                threadKey={activeThreadKey}
+                threadBranch={localCheckoutBranchMismatch?.threadBranch ?? ""}
+                canWriteSourceControl={canWriteSourceControl}
+                onConfirm={handleSwitchCheckoutToThreadStable}
+              />
+
+              <ThreadDetailsPanel
+                anchor={threadPanelPopoverAnchorRef}
+                handle={threadPanelPopoverHandle}
+                forceNewWorktree={multipleModelSelections !== null}
+                environmentId={activeThread.environmentId}
+                threadId={activeThread.id}
+                projectId={activeThread.projectId}
+                worktreePath={activeThread.worktreePath}
+                isServerThread={isServerThread}
+                {...(draftId ? { draftId } : {})}
+                composerDraftTarget={composerDraftTarget}
+                activeProjectName={activeProject?.title}
+                activeProjectScripts={activeProject ? activeProjectScripts : undefined}
+                preferredScriptId={
+                  activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+                }
+                keybindings={keybindings}
+                availableEditors={availableEditors}
+                showOpenInPicker={showOpenInPicker}
+                openInShortcutEnabled={
+                  !(
+                    rightPanelOpen &&
+                    activeRightPanelSurface?.kind === "file" &&
+                    activeRightPanelSurface.attachment === undefined
+                  )
+                }
+                gitCwd={gitCwd}
+                workspaceMutationId={workspaceMutationId}
+                isGitRepo={isGitRepo}
+                envLocked={envLocked}
+                availableEnvironments={logicalProjectEnvironments}
+                autoEnvironmentLabel={autoEnvironmentLabel}
+                onAutoEnvironment={
+                  draftId &&
+                  !envLocked &&
+                  canAutoBalanceEnvironments &&
+                  loadBalancingSettings.loadBalancingEnabled
+                    ? onAutoEnvironmentStable
+                    : undefined
+                }
+                {...(canChangeEnvironment
+                  ? { onEnvironmentChange: onEnvironmentChangeStable }
+                  : {})}
+                onEnvModeChange={onEnvModeChangeStable}
+                envMode={envMode}
+                {...(canOverrideServerThreadEnvMode
+                  ? {
+                      activeThreadBranchOverride: activeThreadBranch,
+                      onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                    }
+                  : {})}
+                startFromOrigin={startFromOrigin}
+                onStartFromOriginChange={onStartFromOriginChange}
+                {...(canCheckoutPullRequestIntoThread
+                  ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
+                  : {})}
+                onComposerFocusRequest={scheduleComposerFocusStable}
+                {...(isServerThread && isGitRepo
+                  ? { onOpenChanges: openChangesFromThreadPanelStable }
+                  : {})}
+                onRunProjectScript={runProjectScriptStable}
+                onAddProjectScript={saveProjectScriptStable}
+                onUpdateProjectScript={updateProjectScriptStable}
+                onDeleteProjectScript={deleteProjectScriptStable}
+                usage={{
+                  providerInstanceId: activeProviderInstanceId,
+                  providers: providerStatuses,
+                  sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
+                  contextWindow: activeContextWindow,
+                }}
+              />
+
+              <PullRequestThreadDialogHost
+                threadKey={activeThreadKey}
+                environmentId={activeThread.environmentId}
+                threadId={activeThread.id}
+                cwd={activeProject?.workspaceRoot ?? null}
+                onPrepared={handlePreparedPullRequestThreadStable}
+              />
+            </>
+          )}
           {isWorkspaceFileDragActive ? <WorkspaceFileDropOverlay /> : null}
           <ChatBannerLane
             environmentId={activeThread.environmentId}
@@ -3766,97 +3856,6 @@ export default function ChatView(props: ChatViewProps) {
               miniPlayer={shownPreviewMiniPlayer}
             />
           ) : null}
-
-          {embedded && !detailsInSidebar ? null : (
-            <>
-              <BranchRestoreConfirmHost
-                threadKey={activeThreadKey}
-                threadBranch={localCheckoutBranchMismatch?.threadBranch ?? ""}
-                canWriteSourceControl={canWriteSourceControl}
-                onConfirm={handleSwitchCheckoutToThreadStable}
-              />
-
-              <ThreadDetailsPanel
-                anchor={threadPanelPopoverAnchorRef}
-                handle={threadPanelPopoverHandle}
-                forceNewWorktree={multipleModelSelections !== null}
-                environmentId={activeThread.environmentId}
-                threadId={activeThread.id}
-                projectId={activeThread.projectId}
-                worktreePath={activeThread.worktreePath}
-                isServerThread={isServerThread}
-                {...(draftId ? { draftId } : {})}
-                composerDraftTarget={composerDraftTarget}
-                activeProjectName={activeProject?.title}
-                activeProjectScripts={activeProject ? activeProjectScripts : undefined}
-                preferredScriptId={
-                  activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-                }
-                keybindings={keybindings}
-                availableEditors={availableEditors}
-                showOpenInPicker={showOpenInPicker}
-                openInShortcutEnabled={
-                  !(
-                    rightPanelOpen &&
-                    activeRightPanelSurface?.kind === "file" &&
-                    activeRightPanelSurface.attachment === undefined
-                  )
-                }
-                gitCwd={gitCwd}
-                workspaceMutationId={workspaceMutationId}
-                isGitRepo={isGitRepo}
-                envLocked={envLocked}
-                availableEnvironments={logicalProjectEnvironments}
-                autoEnvironmentLabel={autoEnvironmentLabel}
-                onAutoEnvironment={
-                  draftId &&
-                  !envLocked &&
-                  canAutoBalanceEnvironments &&
-                  loadBalancingSettings.loadBalancingEnabled
-                    ? onAutoEnvironmentStable
-                    : undefined
-                }
-                {...(canChangeEnvironment
-                  ? { onEnvironmentChange: onEnvironmentChangeStable }
-                  : {})}
-                onEnvModeChange={onEnvModeChangeStable}
-                envMode={envMode}
-                {...(canOverrideServerThreadEnvMode
-                  ? {
-                      activeThreadBranchOverride: activeThreadBranch,
-                      onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                    }
-                  : {})}
-                startFromOrigin={startFromOrigin}
-                onStartFromOriginChange={onStartFromOriginChange}
-                {...(canCheckoutPullRequestIntoThread
-                  ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
-                  : {})}
-                onComposerFocusRequest={scheduleComposerFocusStable}
-                {...(isServerThread && isGitRepo
-                  ? { onOpenChanges: openChangesFromThreadPanelStable }
-                  : {})}
-                onRunProjectScript={runProjectScriptStable}
-                onAddProjectScript={saveProjectScriptStable}
-                onUpdateProjectScript={updateProjectScriptStable}
-                onDeleteProjectScript={deleteProjectScriptStable}
-                usage={{
-                  providerInstanceId: activeProviderInstanceId,
-                  providers: providerStatuses,
-                  sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
-                  contextWindow: activeContextWindow,
-                }}
-              />
-
-              <PullRequestThreadDialogHost
-                threadKey={activeThreadKey}
-                environmentId={activeThread.environmentId}
-                threadId={activeThread.id}
-                cwd={activeProject?.workspaceRoot ?? null}
-                onPrepared={handlePreparedPullRequestThreadStable}
-              />
-            </>
-          )}
         </ThreadFindCanvas>
       </div>
     </div>

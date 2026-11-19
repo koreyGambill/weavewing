@@ -3,7 +3,7 @@ import { createStore } from "zustand";
 import type { ThreadPanelPresentation } from "../../rightPanelLayout";
 import type { DetailsCardMeasurement } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
-import { resolveThreadDetailsCardLayout } from "./threadDetailsCardLayout";
+import { canFitThreadDetailsCard, resolveThreadDetailsCardLayout } from "./threadDetailsCardLayout";
 
 interface CanvasEdges {
   readonly left: number;
@@ -22,6 +22,7 @@ export interface ChatCanvasMeasurements {
   readonly timelineGutter: number;
   /** The find bar's box in canvas coordinates while it is shown. */
   readonly findBar: CanvasEdges | null;
+  readonly detailsBar?: CanvasEdges | null;
 }
 
 interface ChatCanvasStoreState {
@@ -55,7 +56,8 @@ const sameMeasurements = (a: ChatCanvasMeasurements, b: ChatCanvasMeasurements) 
   a.minChatWidth === b.minChatWidth &&
   a.composerHeight === b.composerHeight &&
   a.timelineGutter === b.timelineGutter &&
-  sameEdges(a.findBar, b.findBar);
+  sameEdges(a.findBar, b.findBar) &&
+  sameEdges(a.detailsBar ?? null, b.detailsBar ?? null);
 
 /**
  * One store per chat view: the canvas measures into it, and the chat view's
@@ -99,15 +101,27 @@ export function resolveChatCanvasModel({
   const { findBar } = measurements;
   const detailsCardTopInset = findBar?.bottom ?? 0;
   const lane = { padding: measurements.padding, minChatWidth: measurements.minChatWidth };
+  // Sampling both ends of a panel animation keeps the details from switching mid-transition.
+  const fitWidth = Math.min(container.width, measurements.narrowestWidth ?? container.width);
+  const detailsBar = fitWidth > 0 && !canFitThreadDetailsCard(fitWidth, measurements);
+  const barObstacle = detailsBar && detailsCardInlineOpen ? measurements.detailsBar : null;
+  const topObstacle =
+    findBar && barObstacle
+      ? {
+          left: Math.min(findBar.left, barObstacle.left),
+          right: Math.max(findBar.right, barObstacle.right),
+          bottom: Math.max(findBar.bottom, barObstacle.bottom),
+        }
+      : (barObstacle ?? findBar);
   // The preview avoids where an open inline card would sit, whether or not a
   // preview overlap has pushed the card itself into popover mode.
-  const preferredDetailsCard = resolveThreadDetailsCardLayout({
-    container,
-    narrowestWidth: measurements.narrowestWidth ?? measurements.width,
-    lane,
-    frame: null,
-    topInset: detailsCardTopInset,
-  });
+  const preferredDetailsCard = detailsBar
+    ? null
+    : resolveThreadDetailsCardLayout({
+        container,
+        frame: null,
+        topInset: detailsCardTopInset,
+      });
   // The canvas outlives thread switches, so a measurement only counts for the
   // thread whose card is shown now.
   const detailsCardMeasured =
@@ -138,17 +152,18 @@ export function resolveChatCanvasModel({
     minChatWidth: measurements.minChatWidth,
     composerHeight: measurements.composerHeight,
     detailsCard,
-    findBar,
+    findBar: topObstacle,
   });
-  const detailsCardPlacement = resolveThreadDetailsCardLayout({
-    container,
-    narrowestWidth: measurements.narrowestWidth ?? measurements.width,
-    lane,
-    frame: layout.frame,
-    overlapsDetailsCard: layout.overlapsDetailsCard,
-    topInset: detailsCardTopInset,
-  });
-  const detailsCardMode: ThreadPanelPresentation = detailsCardPlacement ? "inline" : "popover";
+  const detailsCardPlacement =
+    preferredDetailsCard &&
+    resolveThreadDetailsCardLayout({
+      container,
+      frame: layout.frame,
+      overlapsDetailsCard: layout.overlapsDetailsCard,
+      topInset: detailsCardTopInset,
+    });
+  const detailsCardMode: ThreadPanelPresentation =
+    detailsCardPlacement || detailsBar ? "inline" : "popover";
   return {
     container,
     lane,
@@ -157,5 +172,6 @@ export function resolveChatCanvasModel({
     preferredDetailsCard,
     detailsCardPlacement,
     detailsCardMode,
+    detailsBar,
   };
 }
