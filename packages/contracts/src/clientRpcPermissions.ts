@@ -45,6 +45,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.developmentEnvironmentsRepair]: AuthSourceControlWriteScope,
   [WS_METHODS.developmentEnvironmentsStartApp]: AuthTerminalOperateScope,
   [WS_METHODS.developmentEnvironmentsStopApp]: AuthTerminalOperateScope,
+  [WS_METHODS.terminalMove]: AuthTerminalOperateScope,
   [WS_METHODS.developmentEnvironmentsRestore]: AuthEnvironmentMaintainScope,
   [WS_METHODS.developmentEnvironmentsCleanUp]: AuthEnvironmentMaintainScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,

@@ -20,12 +20,14 @@ import {
   TerminalProviderInstanceNotFoundError,
   TerminalProviderEnvironmentError,
   TerminalResizeError,
+  TerminalSessionExistsError,
   TerminalSessionLookupError,
   TerminalWriteError,
   type TerminalAttachInput,
   type TerminalAttachStreamEvent,
   type TerminalClearInput,
   type TerminalCloseInput,
+  type TerminalMoveInput,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
@@ -247,6 +249,15 @@ export class TerminalManager extends Context.Service<
 
     /** Omit terminalId to close all sessions for the thread. */
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
+
+    /**
+     * Re-keys a session to `toThreadId`/`toTerminalId` with its process, history and event
+     * sequence intact. Streams on the old key receive `closed`; viewers attach to the new key.
+     */
+    readonly move: (
+      input: TerminalMoveInput,
+      guard?: TerminalLaunchGuard,
+    ) => Effect.Effect<TerminalSessionSnapshot, TerminalError | TerminalSessionExistsError>;
 
     readonly closeOnSettle: (input: { readonly threadId: string }) => Effect.Effect<void>;
 
@@ -3908,6 +3919,72 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       Effect.orElseSucceed(() => true),
     );
 
+  const moveLocked = Effect.fn("terminal.move")(function* (
+    input: TerminalMoveInput,
+    guard: TerminalLaunchGuard | undefined,
+  ) {
+    const session = yield* requireSession(input.threadId, input.terminalId);
+    const fromKey = toSessionKey(input.threadId, input.terminalId);
+    const toKey = toSessionKey(input.toThreadId, input.toTerminalId);
+    if (fromKey === toKey) return snapshot(session);
+    if (Option.isSome(yield* getSession(input.toThreadId, input.toTerminalId))) {
+      return yield* new TerminalSessionExistsError({
+        threadId: input.toThreadId,
+        terminalId: input.toTerminalId,
+      });
+    }
+    if (guard !== undefined) {
+      yield* guard({
+        threadId: input.toThreadId,
+        terminalId: input.toTerminalId,
+        ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+      });
+    }
+
+    const stamp = yield* modifyManagerState((state) => {
+      const sessions = new Map(state.sessions);
+      sessions.delete(fromKey);
+      session.threadId = input.toThreadId;
+      session.terminalId = input.toTerminalId;
+      if (input.worktreePath !== undefined) session.worktreePath = input.worktreePath;
+      sessions.set(toKey, session);
+      closedSessionKeys.add(fromKey);
+      closedSessionKeys.delete(toKey);
+      // The persisted cursor points into the old file, so the new one starts from a full write.
+      persistedHistory.delete(session.history);
+      return [advanceEventSequence(session), { ...state, sessions }] as const;
+    });
+
+    // The port scanner registers the new key on its next poll.
+    yield* unregisterTerminal({ threadId: input.threadId, terminalId: input.terminalId });
+    yield* flushPersist(input.threadId, input.terminalId);
+    yield* deleteHistory(input.threadId, input.terminalId);
+    yield* persistHistory(input.toThreadId, input.toTerminalId, session.history);
+
+    yield* publishEvent({
+      type: "closed",
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      sequence: stamp.sequence,
+    });
+    const moved = snapshot(session);
+    yield* publishEvent({
+      type: "started",
+      threadId: input.toThreadId,
+      terminalId: input.toTerminalId,
+      sequence: stamp.sequence,
+      snapshot: moved,
+    });
+    return moved;
+  });
+
+  // Both threads' locks, taken in a fixed order so opposite moves cannot deadlock.
+  const move: TerminalManager["Service"]["move"] = (input, guard) => {
+    const [first, second] = [input.threadId, input.toThreadId].toSorted();
+    const locked = moveLocked(input, guard);
+    return withThreadLock(first!, first === second ? locked : withThreadLock(second!, locked));
+  };
+
   const closeIdle: TerminalManager["Service"]["closeIdle"] = (input) =>
     withThreadLock(
       input.threadId,
@@ -3973,6 +4050,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     resize,
     clear,
     close,
+    move,
     closeIdle,
     hasForegroundWork,
     closeOnSettle,

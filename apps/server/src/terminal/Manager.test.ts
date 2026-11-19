@@ -16,6 +16,8 @@ import {
   terminalSequenceEnd,
   terminalSequenceStateAfter,
   TerminalProviderInstanceNotFoundError,
+  TerminalSessionExistsError,
+  TerminalSessionLookupError,
   TerminalWorkspaceChangedError,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -619,6 +621,127 @@ it.layer(
         events.filter((event) => event.type === "snapshot").map((event) => event.snapshot.status),
       ).toEqual(["running", "running"]);
       expect(ptyAdapter.spawnInputs).toHaveLength(2);
+    }),
+  );
+
+  it.effect("moves a running terminal to another thread without restarting its shell", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, logsDir } = yield* createManager();
+      const fs = yield* FileSystem.FileSystem;
+      yield* manager.open(openInput({ threadId: "dropdown-terminal" }));
+      const process = ptyAdapter.processes[0]!;
+      const oldEvents = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
+      const beforeReceived = yield* Deferred.make<void>();
+      const stopOld = yield* manager.attachStream(
+        openInput({ threadId: "dropdown-terminal" }),
+        (event) =>
+          Ref.update(oldEvents, (events) => [...events, event]).pipe(
+            Effect.andThen(
+              event.type === "output" ? Deferred.succeed(beforeReceived, undefined) : Effect.void,
+            ),
+          ),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(stopOld));
+      process.emitData("before move\n");
+      yield* Deferred.await(beforeReceived);
+      const sequenceBefore = (yield* Ref.get(oldEvents)).at(-1)?.sequence ?? 0;
+
+      const moved = yield* manager.move({
+        threadId: "dropdown-terminal",
+        terminalId: DEFAULT_TERMINAL_ID,
+        toThreadId: "thread-2",
+        toTerminalId: "term-3",
+        worktreePath: "/checkout",
+      });
+
+      expect(moved).toMatchObject({
+        threadId: "thread-2",
+        terminalId: "term-3",
+        worktreePath: "/checkout",
+        status: "running",
+        pid: process.pid,
+        history: "before move\n",
+      });
+      expect(moved.sequence).toBeGreaterThan(sequenceBefore);
+      expect((yield* Ref.get(oldEvents)).at(-1)?.type).toBe("closed");
+      expect(
+        yield* manager
+          .write({ threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID, data: "x" })
+          .pipe(Effect.flip),
+      ).toBeInstanceOf(TerminalSessionLookupError);
+      expect(yield* fs.exists(yield* historyLogPath(logsDir, "dropdown-terminal"))).toBe(false);
+      const movedHistoryPath = (yield* historyLogPath(logsDir, "thread-2")).replace(
+        /\.log$/,
+        `_${Base64Url.encode("term-3")}.log`,
+      );
+      expect(yield* fs.readFileString(movedHistoryPath)).toBe("before move\n");
+
+      const afterReceived = yield* Deferred.make<TerminalAttachStreamEvent>();
+      const newEvents = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
+      const stopNew = yield* manager.attachStream(
+        openInput({ threadId: "thread-2", terminalId: "term-3", worktreePath: "/checkout" }),
+        (event) =>
+          Ref.update(newEvents, (events) => [...events, event]).pipe(
+            Effect.andThen(
+              event.type === "output" ? Deferred.succeed(afterReceived, event) : Effect.void,
+            ),
+          ),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(stopNew));
+      process.emitData("after move\n");
+      const after = yield* Deferred.await(afterReceived);
+      yield* manager.write({ threadId: "thread-2", terminalId: "term-3", data: "echo hi\n" });
+
+      expect(after.sequence).toBeGreaterThan(moved.sequence!);
+      expect((yield* Ref.get(newEvents))[0]).toMatchObject({
+        type: "snapshot",
+        snapshot: { pid: process.pid, history: "before move\n" },
+      });
+      expect(process.writes).toContain("echo hi\n");
+      expect(process.killed).toBe(false);
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+
+      const resumed = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
+      const stopResumed = yield* manager.attachStream(
+        { ...openInput({ threadId: "dropdown-terminal" }), resume: true },
+        (event) => Ref.update(resumed, (events) => [...events, event]),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(stopResumed));
+      expect((yield* Ref.get(resumed)).map((event) => event.type)).toEqual(["closed"]);
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+    }),
+  );
+
+  it.effect("leaves a terminal where it is when the move target is taken or stale", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput({ threadId: "dropdown-terminal" }));
+      yield* manager.open(openInput({ threadId: "thread-2" }));
+      const stale: TerminalManager.TerminalLaunchGuard = (input) =>
+        Effect.fail(
+          new TerminalWorkspaceChangedError({
+            threadId: input.threadId,
+            terminalId: input.terminalId,
+            worktreePath: "/current",
+          }),
+        );
+      const source = { threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID };
+
+      const taken = yield* manager
+        .move({ ...source, toThreadId: "thread-2", toTerminalId: DEFAULT_TERMINAL_ID })
+        .pipe(Effect.flip);
+      const refused = yield* manager
+        .move(
+          { ...source, toThreadId: "thread-2", toTerminalId: "term-2", worktreePath: "/old" },
+          stale,
+        )
+        .pipe(Effect.flip);
+
+      expect(taken).toBeInstanceOf(TerminalSessionExistsError);
+      expect(refused).toBeInstanceOf(TerminalWorkspaceChangedError);
+      yield* manager.write({ ...source, data: "still here\n" });
+      expect(ptyAdapter.processes[0]!.writes).toEqual(["still here\n"]);
+      expect(ptyAdapter.processes.map((process) => process.killed)).toEqual([false, false]);
     }),
   );
 

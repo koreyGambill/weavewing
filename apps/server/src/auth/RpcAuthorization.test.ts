@@ -141,6 +141,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.terminalResize,
       WS_METHODS.terminalClear,
       WS_METHODS.terminalClose,
+      WS_METHODS.terminalMove,
       WS_METHODS.previewStopLocalServer,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthTerminalOperateScope);

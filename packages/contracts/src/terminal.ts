@@ -232,6 +232,16 @@ export type TerminalResizeInput = Schema.Codec.Encoded<typeof TerminalResizeInpu
 export const TerminalClearInput = TerminalSessionInput;
 export type TerminalClearInput = Schema.Codec.Encoded<typeof TerminalClearInput>;
 
+/** Re-keys a live session to another thread and terminal id; the shell keeps running. */
+export const TerminalMoveInput = Schema.Struct({
+  ...TerminalSessionInput.fields,
+  toThreadId: TrimmedNonEmptyStringSchema,
+  toTerminalId: TerminalIdSchema,
+  // The destination's checkout, which later restarts and checkout moves treat as the shell's.
+  worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
+});
+export type TerminalMoveInput = typeof TerminalMoveInput.Type;
+
 export const TerminalCloseInput = Schema.Struct({
   ...TerminalThreadInput.fields,
   terminalId: Schema.optional(TerminalIdSchema),
@@ -451,6 +461,18 @@ export class TerminalSessionLookupError extends Schema.TaggedError<TerminalSessi
 ) {
   override get message() {
     return `Unknown terminal thread: ${this.threadId}, terminal: ${this.terminalId}`;
+  }
+}
+
+export class TerminalSessionExistsError extends Schema.TaggedError<TerminalSessionExistsError>()(
+  "TerminalSessionExistsError",
+  {
+    threadId: Schema.String,
+    terminalId: Schema.String,
+  },
+) {
+  override get message() {
+    return `A terminal already exists for thread: ${this.threadId}, terminal: ${this.terminalId}`;
   }
 }
 
