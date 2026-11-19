@@ -46,23 +46,22 @@ describe("project picker", () => {
     expect(rankPickerProjects(projects, "wsl", "nothing")).toEqual([]);
   });
 
-  it("lists places with past work, pinned first, on one machine or all of them", () => {
+  it("lists only places with past work, pinned first, on one machine or all of them", () => {
     const unworked = { ...projects[2]!, key: "wsl:new", title: "new", activity: 0 };
-    const listed = [...projects, unworked];
-    expect(pickerRecentProjects(listed, "wsl", null).map((p) => p.key)).toEqual([
+    const pinnedUnworked = { ...unworked, key: "wsl:pinned-new", pinned: true };
+    const listed = [...projects, unworked, pinnedUnworked];
+    expect(pickerRecentProjects(listed, "wsl").map((p) => p.key)).toEqual([
       "wsl:spark",
       "wsl:other",
     ]);
-    expect(pickerRecentProjects(listed, null, null).map((p) => p.key)).toEqual([
+    expect(pickerRecentProjects(listed, null).map((p) => p.key)).toEqual([
       "wsl:spark",
       "win:spark",
       "wsl:other",
     ]);
-    // The current place stays listed even before any thread has run there.
-    expect(pickerRecentProjects(listed, "wsl", "wsl:new").map((p) => p.key)).toEqual([
-      "wsl:spark",
-      "wsl:other",
+    expect(rankPickerProjects(listed, "wsl", "new").map((p) => p.key)).toEqual([
       "wsl:new",
+      "wsl:pinned-new",
     ]);
   });
 

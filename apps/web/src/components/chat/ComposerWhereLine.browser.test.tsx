@@ -21,6 +21,7 @@ import {
   PROJECT_ID,
   installFakeEnvironment,
   answerRpc,
+  threadWithHistory,
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { render } from "../../../test/render";
@@ -44,7 +45,8 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
 }));
 
 it("drills through folders with repeated Tab and opens with Enter in the where-line and palette", async () => {
-  using _environment = installFakeEnvironment([], {
+  // Only places with threads are listed before typing.
+  using _environment = installFakeEnvironment([threadWithHistory("render-work", 1)], {
     extraProjects: [
       { id: ProjectId.make("project-alpha"), title: "alpha" },
       { id: ProjectId.make("project-code"), title: "code" },
@@ -143,7 +145,7 @@ it("drills through folders with repeated Tab and opens with Enter in the where-l
   openCommandPalette({ open: "new-thread-in" });
   await expect.element(page.getByRole("combobox", { name: "Project name or path" })).toHaveFocus();
   await expect
-    .element(page.getByRole("option").first().getByText("alpha", { exact: true }))
+    .element(page.getByRole("option").first().getByText("render", { exact: true }))
     .toBeVisible();
   await expect
     .element(page.getByRole("button", { name: "All machines", exact: true }))

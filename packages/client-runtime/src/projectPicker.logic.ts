@@ -78,16 +78,15 @@ export function completePickerFolder(query: string, folderName: string | null): 
 
 /**
  * The picker's list before anything is typed: places with past work, pinned first, then by
- * recency. A project with no threads stays out unless it is pinned or current, so it is found by
+ * recency. A project with no threads stays out, even when pinned or current, so it is found by
  * typing. `environmentId` null lists every machine.
  */
 export function pickerRecentProjects<T extends PickerProject>(
   projects: ReadonlyArray<T>,
   environmentId: string | null,
-  currentKey: string | null,
 ): T[] {
   const worked = rankPickerProjects(projects, environmentId, "").filter(
-    (project) => project.pinned || project.activity > 0 || project.key === currentKey,
+    (project) => project.activity > 0,
   );
   return [...worked.filter((project) => project.pinned), ...worked.filter((p) => !p.pinned)];
 }

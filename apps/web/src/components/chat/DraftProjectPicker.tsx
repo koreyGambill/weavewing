@@ -203,7 +203,7 @@ export function DraftProjectPicker({
   const currentKey = activeProjectRef ? scopedProjectKey(activeProjectRef) : null;
   // Frozen while open so pinning never moves a row under the pointer.
   const ordered = useOrderWhileOpen(
-    pickerRecentProjects(available, scope, currentKey),
+    pickerRecentProjects(available, scope),
     (item) => item.key,
     open,
   );
