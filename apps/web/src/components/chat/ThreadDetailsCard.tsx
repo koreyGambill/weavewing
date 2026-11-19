@@ -176,7 +176,12 @@ export function ThreadDetailsCard({
           details.cancel();
           return;
         }
-        useRightPanelStore.getState().setThreadPanelOpen(threadRef, "popover", open);
+        const store = useRightPanelStore.getState();
+        if (!open && details.reason === "trigger-press" && popoverOpen) {
+          store.toggleThreadPanel(threadRef, "popover");
+        } else {
+          store.setThreadPanelOpen(threadRef, "popover", open);
+        }
       }}
     >
       {mode === "inline" && inlineOpen ? (

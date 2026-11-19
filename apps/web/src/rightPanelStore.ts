@@ -1380,7 +1380,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             (visibility) =>
               presentation === "inline"
                 ? { ...visibility, inlineOpen: !visibility.inlineOpen }
-                : { ...visibility, popoverOpen: !visibility.popoverOpen },
+                : visibility.popoverOpen
+                  ? { ...visibility, inlineOpen: false, popoverOpen: false }
+                  : { ...visibility, popoverOpen: true },
           ),
         })),
       removeThread: (ref) =>

@@ -143,6 +143,36 @@ it("stays closed on resize after the fallback is dismissed", async () => {
   expect(popoverOpen(threadB)).toBe(false);
 });
 
+it("keeps an explicitly closed fallback closed when the tile grows", async () => {
+  using fixture = setup();
+  const card = (inline: boolean) => (
+    <>
+      <button type="button">Outside Details</button>
+      <Card threadRef={threadB} inline={inline} fixture={fixture} />
+    </>
+  );
+  await using screen = await render(card(true));
+  const rows = page.getByText("Details for thread-b");
+  await expect.element(rows).toBeVisible();
+  await screen.rerender(card(false));
+
+  const toggle = page.getByRole("button", { name: "Toggle Details" });
+  await toggle.click();
+  await expect.element(rows).toBeVisible();
+  await page.getByRole("button", { name: "Outside Details" }).click();
+  await expect.element(rows).not.toBeInTheDocument();
+  await screen.rerender(card(true));
+  await expect.element(rows).toBeVisible();
+  await screen.rerender(card(false));
+
+  await toggle.click();
+  await expect.element(rows).toBeVisible();
+  await toggle.click();
+  await expect.element(rows).not.toBeInTheDocument();
+  await screen.rerender(card(true));
+  await expect.element(rows).not.toBeInTheDocument();
+});
+
 it("removes the leaving thread's popup on a thread switch", async () => {
   using fixture = setup();
   await using screen = await render(<Card threadRef={threadB} inline={false} fixture={fixture} />);
