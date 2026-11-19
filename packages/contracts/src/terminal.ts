@@ -3,6 +3,8 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 export const DEFAULT_TERMINAL_ID = "term-1";
+/** The thread id each environment keeps its drop-down terminals under; no thread can take it. */
+export const DROPDOWN_TERMINAL_THREAD_ID = "dropdown-terminal";
 export const DEFAULT_MAX_TERMINAL_BUFFER_BYTES = 512 * 1024;
 
 const historyEncoder = new TextEncoder();
@@ -246,6 +248,8 @@ export const TerminalCloseInput = Schema.Struct({
   ...TerminalThreadInput.fields,
   terminalId: Schema.optional(TerminalIdSchema),
   deleteHistory: Schema.optional(Schema.Boolean),
+  // The session the caller saw; a key that now holds another session is left alone.
+  sessionId: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 
@@ -270,6 +274,8 @@ export const TerminalSessionSnapshot = Schema.Struct({
   rows: Schema.optional(TerminalRowsSchema),
   // Why the shell failed to start, kept so later attachments can show it.
   error: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  // Changes with each shell start and each move; absent from older servers.
+  sessionId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
 });
 export type TerminalSessionSnapshot = typeof TerminalSessionSnapshot.Type;
 
@@ -285,6 +291,7 @@ export const TerminalSummary = Schema.Struct({
   hasRunningSubprocess: Schema.Boolean,
   label: Schema.String.check(Schema.isMaxLength(128)),
   updatedAt: Schema.String,
+  sessionId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
 });
 export type TerminalSummary = typeof TerminalSummary.Type;
 
@@ -339,6 +346,13 @@ const TerminalExitedEvent = Schema.Struct({
 const TerminalClosedEvent = Schema.Struct({
   ...TerminalEventBaseSchema.fields,
   type: Schema.Literal("closed"),
+  // The session lives on under this key; viewers drop or follow it and never close it.
+  movedTo: Schema.optional(
+    Schema.Struct({
+      threadId: Schema.String.check(Schema.isNonEmpty()),
+      terminalId: Schema.String.check(Schema.isNonEmpty()),
+    }),
+  ),
 });
 
 const TerminalErrorEvent = Schema.Struct({
@@ -473,6 +487,34 @@ export class TerminalSessionExistsError extends Schema.TaggedError<TerminalSessi
 ) {
   override get message() {
     return `A terminal already exists for thread: ${this.threadId}, terminal: ${this.terminalId}`;
+  }
+}
+
+/** Sessions move only between an environment's drop-down and one of its live threads. */
+export class TerminalMoveRefusedError extends Schema.TaggedError<TerminalMoveRefusedError>()(
+  "TerminalMoveRefusedError",
+  {
+    threadId: Schema.String,
+    toThreadId: Schema.String,
+    reason: Schema.Literals([
+      "dropdown-only",
+      "thread-not-found",
+      "thread-archived",
+      "history-not-saved",
+    ]),
+  },
+) {
+  override get message() {
+    switch (this.reason) {
+      case "dropdown-only":
+        return "Terminals move only between the drop-down and a thread.";
+      case "thread-not-found":
+        return "That thread no longer exists on this machine.";
+      case "thread-archived":
+        return "Unarchive the thread before moving a terminal into or out of it.";
+      case "history-not-saved":
+        return "The terminal's history could not be saved at its destination, so it stayed put.";
+    }
   }
 }
 

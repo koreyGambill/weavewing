@@ -1,10 +1,15 @@
-import { ThreadId, TerminalWorkspaceChangedError } from "@t3tools/contracts";
+import {
+  DROPDOWN_TERMINAL_THREAD_ID,
+  TerminalMoveRefusedError,
+  ThreadId,
+  TerminalWorkspaceChangedError,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import type * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import type { TerminalLaunchGuard } from "./Manager.ts";
+import type { TerminalLaunchGuard, TerminalMoveGuard } from "./Manager.ts";
 
 const isThreadNotFound = Schema.is(ProjectionStore.ProjectionStoreThreadNotFoundError);
 
@@ -35,6 +40,51 @@ export const threadCheckoutGuard =
                   worktreePath: thread.worktreePath,
                 }),
               ),
+      }),
+    );
+  };
+
+/**
+ * A move's thread side must be a live thread on this environment, and a terminal moving into it
+ * must name the checkout the thread works in now.
+ */
+export const terminalMoveGuard =
+  (threads: ThreadManagement.ThreadManagementService["Service"]): TerminalMoveGuard =>
+  (input) => {
+    const intoThread = input.toThreadId !== DROPDOWN_TERMINAL_THREAD_ID;
+    const threadId = intoThread ? input.toThreadId : input.threadId;
+    const refuse = (
+      reason: "thread-not-found" | "thread-archived",
+    ): Effect.Effect<void, TerminalMoveRefusedError | TerminalWorkspaceChangedError> =>
+      Effect.fail(
+        new TerminalMoveRefusedError({
+          threadId: input.threadId,
+          toThreadId: input.toThreadId,
+          reason,
+        }),
+      );
+    return threads.getThreadRecords(ThreadId.make(threadId), []).pipe(
+      Effect.matchEffect({
+        onFailure: (cause) =>
+          "cause" in cause && isThreadNotFound(cause.cause)
+            ? refuse("thread-not-found")
+            : Effect.die(cause),
+        onSuccess: ({
+          thread,
+        }): Effect.Effect<void, TerminalMoveRefusedError | TerminalWorkspaceChangedError> =>
+          thread.deletedAt !== null
+            ? refuse("thread-not-found")
+            : thread.archivedAt !== null
+              ? refuse("thread-archived")
+              : intoThread && thread.worktreePath !== (input.worktreePath ?? null)
+                ? Effect.fail(
+                    new TerminalWorkspaceChangedError({
+                      threadId: input.toThreadId,
+                      terminalId: input.toTerminalId,
+                      worktreePath: thread.worktreePath,
+                    }),
+                  )
+                : Effect.void,
       }),
     );
   };

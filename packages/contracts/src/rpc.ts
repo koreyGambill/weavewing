@@ -361,6 +361,7 @@ import {
   TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalMoveInput,
+  TerminalMoveRefusedError,
   TerminalResizeInput,
   TerminalSessionExistsError,
   TerminalSessionSnapshot,
@@ -2168,7 +2169,12 @@ const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
 const WsTerminalMoveRpc = Rpc.make(WS_METHODS.terminalMove, {
   payload: TerminalMoveInput,
   success: TerminalSessionSnapshot,
-  error: Schema.Union([TerminalError, TerminalSessionExistsError, EnvironmentAuthorizationError]),
+  error: Schema.Union([
+    TerminalError,
+    TerminalSessionExistsError,
+    TerminalMoveRefusedError,
+    EnvironmentAuthorizationError,
+  ]),
 });
 
 const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {

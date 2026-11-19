@@ -20,6 +20,8 @@ import {
   TerminalProviderInstanceNotFoundError,
   TerminalProviderEnvironmentError,
   TerminalResizeError,
+  DROPDOWN_TERMINAL_THREAD_ID,
+  TerminalMoveRefusedError,
   TerminalSessionExistsError,
   TerminalSessionLookupError,
   TerminalWriteError,
@@ -182,6 +184,11 @@ export type TerminalLaunchGuard = (input: {
   readonly existingWorktreePath?: string | null | undefined;
 }) => Effect.Effect<void, TerminalError>;
 
+/** Checked under both threads' locks before a move; policy the manager cannot see lives here. */
+export type TerminalMoveGuard = (
+  input: TerminalMoveInput,
+) => Effect.Effect<void, TerminalError | TerminalMoveRefusedError>;
+
 export class TerminalCwdRecovery extends Context.Reference<
   (error: TerminalCwdNotFoundError) => Effect.Effect<void, TerminalCwdNotFoundError>
 >("t3/terminal/TerminalCwdRecovery", { defaultValue: () => (error) => Effect.fail(error) }) {}
@@ -251,13 +258,17 @@ export class TerminalManager extends Context.Service<
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
 
     /**
-     * Re-keys a session to `toThreadId`/`toTerminalId` with its process, history and event
-     * sequence intact. Streams on the old key receive `closed`; viewers attach to the new key.
+     * Re-keys a session between the drop-down and a thread with its process, history and event
+     * sequence intact. Streams on the old key receive `closed` with `movedTo`; viewers attach to
+     * the new key. The destination's history is written first, so a failed move changes nothing.
      */
     readonly move: (
       input: TerminalMoveInput,
-      guard?: TerminalLaunchGuard,
-    ) => Effect.Effect<TerminalSessionSnapshot, TerminalError | TerminalSessionExistsError>;
+      guard?: TerminalMoveGuard,
+    ) => Effect.Effect<
+      TerminalSessionSnapshot,
+      TerminalError | TerminalSessionExistsError | TerminalMoveRefusedError
+    >;
 
     readonly closeOnSettle: (input: { readonly threadId: string }) => Effect.Effect<void>;
 
@@ -360,6 +371,8 @@ interface TerminalSessionState {
   runtimeEnv: Record<string, string> | null;
   stopOnSettle: boolean;
   startupError: string | null;
+  /** Identifies this shell under this key; a new spawn or a move replaces it. */
+  sessionId: string;
 }
 
 interface TerminalGrid {
@@ -457,6 +470,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     cols: session.cols,
     rows: session.rows,
     ...(session.startupError === null ? {} : { error: session.startupError }),
+    sessionId: session.sessionId,
   };
 }
 
@@ -473,6 +487,7 @@ function summary(session: TerminalSessionState): TerminalSummary {
     hasRunningSubprocess: session.hasRunningSubprocess,
     label: terminalWireLabel(session),
     updatedAt: session.updatedAt,
+    sessionId: session.sessionId,
   };
 }
 
@@ -2812,6 +2827,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const startingAt = yield* nowIso;
     yield* modifyManagerState((state) => {
       session.status = "starting";
+      session.sessionId = NodeCrypto.randomUUID();
       session.startupError = null;
       session.shell = null;
       session.cwd = input.cwd;
@@ -2979,9 +2995,18 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     threadId: string,
     terminalId: string,
     deleteHistoryOnClose: boolean,
+    sessionId?: string,
   ) {
     const key = toSessionKey(threadId, terminalId);
     const session = yield* getSession(threadId, terminalId);
+    // A close aimed at an earlier shell, or one that moved away, must not end this one.
+    if (
+      sessionId !== undefined &&
+      Option.isSome(session) &&
+      session.value.sessionId !== sessionId
+    ) {
+      return;
+    }
     const closedEventSequence = Option.isSome(session) ? session.value.eventSequence + 1 : 0;
 
     if (Option.isSome(session)) {
@@ -3282,6 +3307,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         runtimeEnv: normalizedRuntimeEnv(input.env),
         stopOnSettle: input.stopOnSettle ?? false,
         startupError: null,
+        sessionId: NodeCrypto.randomUUID(),
       };
 
       const createdSession = session;
@@ -3865,7 +3891,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       input.threadId,
       Effect.gen(function* () {
         if (input.terminalId) {
-          yield* closeSession(input.threadId, input.terminalId, input.deleteHistory === true);
+          yield* closeSession(
+            input.threadId,
+            input.terminalId,
+            input.deleteHistory === true,
+            input.sessionId,
+          );
           return;
         }
 
@@ -3921,32 +3952,61 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
   const moveLocked = Effect.fn("terminal.move")(function* (
     input: TerminalMoveInput,
-    guard: TerminalLaunchGuard | undefined,
+    guard: TerminalMoveGuard | undefined,
   ) {
+    if (
+      (input.threadId === DROPDOWN_TERMINAL_THREAD_ID) ===
+      (input.toThreadId === DROPDOWN_TERMINAL_THREAD_ID)
+    ) {
+      return yield* new TerminalMoveRefusedError({
+        threadId: input.threadId,
+        toThreadId: input.toThreadId,
+        reason: "dropdown-only",
+      });
+    }
     const session = yield* requireSession(input.threadId, input.terminalId);
     const fromKey = toSessionKey(input.threadId, input.terminalId);
     const toKey = toSessionKey(input.toThreadId, input.toTerminalId);
-    if (fromKey === toKey) return snapshot(session);
     if (Option.isSome(yield* getSession(input.toThreadId, input.toTerminalId))) {
       return yield* new TerminalSessionExistsError({
         threadId: input.toThreadId,
         terminalId: input.toTerminalId,
       });
     }
-    if (guard !== undefined) {
-      yield* guard({
-        threadId: input.toThreadId,
-        terminalId: input.toTerminalId,
-        ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
-      });
-    }
+    if (guard !== undefined) yield* guard(input);
+
+    // The source log stays until the destination holds a full copy.
+    yield* fileSystem
+      .writeFileString(
+        historyPath(input.toThreadId, input.toTerminalId),
+        session.history.persistenceUpdate().data,
+      )
+      .pipe(
+        Effect.tapError((cause) =>
+          Effect.logWarning("failed to save terminal history for a move", {
+            threadId: input.toThreadId,
+            terminalId: input.toTerminalId,
+            cause,
+          }),
+        ),
+        Effect.mapError(
+          () =>
+            new TerminalMoveRefusedError({
+              threadId: input.threadId,
+              toThreadId: input.toThreadId,
+              reason: "history-not-saved",
+            }),
+        ),
+      );
 
     const stamp = yield* modifyManagerState((state) => {
       const sessions = new Map(state.sessions);
       sessions.delete(fromKey);
       session.threadId = input.toThreadId;
       session.terminalId = input.toTerminalId;
-      if (input.worktreePath !== undefined) session.worktreePath = input.worktreePath;
+      session.worktreePath =
+        input.toThreadId === DROPDOWN_TERMINAL_THREAD_ID ? null : (input.worktreePath ?? null);
+      session.sessionId = NodeCrypto.randomUUID();
       sessions.set(toKey, session);
       closedSessionKeys.add(fromKey);
       closedSessionKeys.delete(toKey);
@@ -3959,6 +4019,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     yield* unregisterTerminal({ threadId: input.threadId, terminalId: input.terminalId });
     yield* flushPersist(input.threadId, input.terminalId);
     yield* deleteHistory(input.threadId, input.terminalId);
+    // Catches output that arrived between the copy and the re-key.
     yield* persistHistory(input.toThreadId, input.toTerminalId, session.history);
 
     yield* publishEvent({
@@ -3966,6 +4027,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       threadId: input.threadId,
       terminalId: input.terminalId,
       sequence: stamp.sequence,
+      movedTo: { threadId: input.toThreadId, terminalId: input.toTerminalId },
     });
     const moved = snapshot(session);
     yield* publishEvent({

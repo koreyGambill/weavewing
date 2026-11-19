@@ -209,7 +209,7 @@ import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { makePrepareTerminalLaunch } from "./workspace/restoreMissingWorktree.ts";
 import { terminalOutputStream, withOutputWindow } from "./terminal/OutputProtocol.ts";
-import { threadCheckoutGuard } from "./terminal/threadCheckoutGuard.ts";
+import { terminalMoveGuard, threadCheckoutGuard } from "./terminal/threadCheckoutGuard.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as XwingEnvironments from "./xwing/XwingEnvironments.ts";
@@ -3450,7 +3450,7 @@ export const layerWsRpc = (
         [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
         [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
         [WS_METHODS.terminalMove]: (input) =>
-          terminalManager.move(input, threadCheckoutGuard(threadManagement)),
+          terminalManager.move(input, terminalMoveGuard(threadManagement)),
         [WS_METHODS.terminalObserve]: (input) =>
           terminalOutputStream(
             (listener, registerCleanup) =>

@@ -16,6 +16,7 @@ import {
   terminalSequenceEnd,
   terminalSequenceStateAfter,
   TerminalProviderInstanceNotFoundError,
+  TerminalMoveRefusedError,
   TerminalSessionExistsError,
   TerminalSessionLookupError,
   TerminalWorkspaceChangedError,
@@ -664,7 +665,10 @@ it.layer(
         history: "before move\n",
       });
       expect(moved.sequence).toBeGreaterThan(sequenceBefore);
-      expect((yield* Ref.get(oldEvents)).at(-1)?.type).toBe("closed");
+      expect((yield* Ref.get(oldEvents)).at(-1)).toMatchObject({
+        type: "closed",
+        movedTo: { threadId: "thread-2", terminalId: "term-3" },
+      });
       expect(
         yield* manager
           .write({ threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID, data: "x" })
@@ -745,6 +749,93 @@ it.layer(
       yield* manager.write({ ...source, data: "still here\n" });
       expect(ptyAdapter.processes[0]!.writes).toEqual(["still here\n"]);
       expect(ptyAdapter.processes.map((process) => process.killed)).toEqual([false, false]);
+    }),
+  );
+
+  it.effect("moves terminals only between the drop-down and a thread", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput({ threadId: "thread-1" }));
+
+      const refused = yield* manager
+        .move({
+          threadId: "thread-1",
+          terminalId: DEFAULT_TERMINAL_ID,
+          toThreadId: "thread-2",
+          toTerminalId: "term-2",
+        })
+        .pipe(Effect.flip);
+
+      expect(refused).toBeInstanceOf(TerminalMoveRefusedError);
+      yield* manager.write({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID, data: "x" });
+      expect(ptyAdapter.processes[0]!.writes).toEqual(["x"]);
+    }),
+  );
+
+  it.effect("keeps the terminal and its log in place when the destination log fails", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, logsDir } = yield* createManager();
+      const fs = yield* FileSystem.FileSystem;
+      yield* manager.open(openInput({ threadId: "dropdown-terminal" }));
+      const printed = yield* Deferred.make<void>();
+      const stop = yield* manager.subscribe((event) =>
+        event.type === "output" ? Deferred.succeed(printed, undefined) : Effect.void,
+      );
+      ptyAdapter.processes[0]!.emitData("keep me\n");
+      yield* Deferred.await(printed);
+      stop();
+      const sourcePath = yield* historyLogPath(logsDir, "dropdown-terminal");
+      const destinationPath = (yield* historyLogPath(logsDir, "thread-2")).replace(
+        /\.log$/,
+        `_${Base64Url.encode("term-3")}.log`,
+      );
+      yield* fs.makeDirectory(destinationPath, { recursive: true });
+
+      const failed = yield* manager
+        .move({
+          threadId: "dropdown-terminal",
+          terminalId: DEFAULT_TERMINAL_ID,
+          toThreadId: "thread-2",
+          toTerminalId: "term-3",
+        })
+        .pipe(Effect.flip);
+
+      expect(failed).toMatchObject({
+        _tag: "TerminalMoveRefusedError",
+        reason: "history-not-saved",
+      });
+      yield* manager.write({
+        threadId: "dropdown-terminal",
+        terminalId: DEFAULT_TERMINAL_ID,
+        data: "x",
+      });
+      yield* manager.close({ threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID });
+      expect(yield* fs.readFileString(sourcePath)).toBe("keep me\n");
+      expect(ptyAdapter.processes[0]!.writes).toEqual(["x"]);
+    }),
+  );
+
+  it.effect("ignores a close aimed at a session that moved away and came back", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, logsDir } = yield* createManager();
+      const fs = yield* FileSystem.FileSystem;
+      const opened = yield* manager.open(openInput({ threadId: "dropdown-terminal" }));
+      const dropdown = { threadId: "dropdown-terminal", terminalId: DEFAULT_TERMINAL_ID };
+      yield* manager.move({ ...dropdown, toThreadId: "thread-2", toTerminalId: "term-3" });
+      const returned = yield* manager.move({
+        threadId: "thread-2",
+        terminalId: "term-3",
+        toThreadId: dropdown.threadId,
+        toTerminalId: dropdown.terminalId,
+      });
+
+      yield* manager.close({ ...dropdown, sessionId: opened.sessionId!, deleteHistory: true });
+
+      expect(returned.sessionId).not.toBe(opened.sessionId);
+      expect(ptyAdapter.processes[0]!.killed).toBe(false);
+      expect(yield* fs.exists(yield* historyLogPath(logsDir, "dropdown-terminal"))).toBe(true);
+      yield* manager.close({ ...dropdown, sessionId: returned.sessionId! });
+      expect(ptyAdapter.processes[0]!.killed).toBe(true);
     }),
   );
 
