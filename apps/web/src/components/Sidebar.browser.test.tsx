@@ -252,10 +252,17 @@ describe("sidebar render isolation", () => {
 });
 
 describe("sidebar computer filter", () => {
-  it("lists servers under their computer and hides threads from servers left out", async () => {
-    using stack = new DisposableStack();
-    const laptop = EnvironmentId.make("laptop-env");
-    const desk = EnvironmentId.make("desk-env");
+  const laptop = EnvironmentId.make("laptop-env");
+  const desk = EnvironmentId.make("desk-env");
+  const laptopThreadId = ThreadId.make("laptop-1");
+  const deskThreadId = ThreadId.make("desk-1");
+  const groupsKey = "t3code:sidebar:thread-groups:v1";
+
+  // Two servers on two computers, one project and one thread on each.
+  function computerFixture(
+    stack: DisposableStack,
+    options: { routeThreadRef?: ScopedThreadRef; chosen?: readonly string[] } = {},
+  ) {
     const projects = [
       { ...project("alpha"), environmentId: laptop },
       { ...project("beta"), environmentId: desk },
@@ -265,12 +272,18 @@ describe("sidebar computer filter", () => {
     vi.mocked(useQuietThreadShells).mockReturnValue([
       makeThreadFixture({
         environmentId: laptop,
+        id: laptopThreadId,
         projectId: projects[0]!.id,
         title: "Laptop thread",
       }),
-      makeThreadFixture({ environmentId: desk, projectId: projects[1]!.id, title: "Desk thread" }),
+      makeThreadFixture({
+        environmentId: desk,
+        id: deskThreadId,
+        projectId: projects[1]!.id,
+        title: "Desk thread",
+      }),
     ]);
-    const routeThreadRef: ScopedThreadRef = {
+    const routeThreadRef = options.routeThreadRef ?? {
       environmentId: laptop,
       threadId: ThreadId.make("laptop-route"),
     };
@@ -304,16 +317,28 @@ describe("sidebar computer filter", () => {
       place: { kind: "none" },
       label: null,
     } as never);
+    // A choice already in the store is what a reload restores; the store test covers storage.
+    useUiStateStore.getState().setSidebarEnvironmentScopeIds(options.chosen ?? []);
     stack.defer(() => useUiStateStore.getState().setSidebarEnvironmentScopeIds([]));
-    await using screen = await render(
-      <SidebarProvider>
-        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
-      </SidebarProvider>,
-    );
+    stack.defer(() => useUiStateStore.getState().setSidebarProjectScopeKeys([]));
+  }
+
+  const sidebar = () => (
+    <SidebarProvider>
+      <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+    </SidebarProvider>
+  );
+  // The filter's popup renders in a portal, outside the sidebar's container.
+  const openFilter = (screen: { getByRole: typeof page.getByRole }) =>
+    userEvent.click(screen.getByRole("combobox", { name: /^Filter threads by project/ }));
+
+  it("lists servers under their computer and hides threads from servers left out", async () => {
+    using stack = new DisposableStack();
+    computerFixture(stack);
+    await using screen = await render(sidebar());
     await expect.element(screen.getByText("Desk thread").first()).toBeVisible();
 
-    await userEvent.click(screen.getByRole("combobox", { name: /^Filter threads by project/ }));
-    // The filter's popup renders in a portal, outside the sidebar's container.
+    await openFilter(screen);
     const computers = page.getByRole("group", { name: "Computers" });
     await expect.element(computers.getByText("laptop")).toBeVisible();
     await expect.element(computers.getByText("desk-pc")).toBeVisible();
@@ -321,6 +346,73 @@ describe("sidebar computer filter", () => {
 
     await expect.element(screen.getByText("Desk thread")).not.toBeInTheDocument();
     await expect.element(screen.getByText("Laptop thread").first()).toBeVisible();
+    expect(useUiStateStore.getState().sidebarEnvironmentScopeIds).toEqual([laptop]);
+    await expect
+      .element(screen.getByRole("combobox", { name: /computers: WSL/ }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps a remembered choice, needs the project filter to match too, and clears on Show all", async () => {
+    using stack = new DisposableStack();
+    computerFixture(stack, { chosen: [laptop] });
+    await using screen = await render(sidebar());
+    await expect.element(screen.getByText("Laptop thread").first()).toBeVisible();
+    await expect.element(screen.getByText("Desk thread")).not.toBeInTheDocument();
+
+    // beta lives on the desk server, which the computer filter leaves out: nothing matches both.
+    await openFilter(screen);
+    await userEvent.click(page.getByRole("option", { name: /^beta/ }));
+    await expect.element(screen.getByText("Laptop thread")).not.toBeInTheDocument();
+    await expect.element(screen.getByText("Desk thread")).not.toBeInTheDocument();
+    await openFilter(screen);
+    await userEvent.click(page.getByRole("option", { name: /^alpha/ }));
+    await expect.element(screen.getByText("Laptop thread").first()).toBeVisible();
+
+    await openFilter(screen);
+    await userEvent.click(page.getByRole("option", { name: /^All projects/ }));
+    await openFilter(screen);
+    await userEvent.click(
+      page.getByRole("group", { name: "Computers" }).getByRole("button", { name: "Show all" }),
+    );
+    await expect.element(screen.getByText("Desk thread").first()).toBeVisible();
+    expect(useUiStateStore.getState().sidebarEnvironmentScopeIds).toEqual([]);
+  });
+
+  it("shows only a mixed group's threads on chosen servers while filtered", async () => {
+    using stack = new DisposableStack();
+    localStorage.setItem(
+      groupsKey,
+      JSON.stringify({
+        groups: [
+          {
+            id: "mixed",
+            name: "Mixed",
+            collapsed: false,
+            threadKeys: [`${laptop}:${laptopThreadId}`, `${desk}:${deskThreadId}`],
+          },
+        ],
+        ungroupedOrder: [],
+        ungroupedCollapsed: false,
+      }),
+    );
+    stack.defer(() => localStorage.removeItem(groupsKey));
+    computerFixture(stack, { chosen: [laptop] });
+    await using screen = await render(sidebar());
+
+    await expect.element(screen.getByRole("button", { name: /^Mixed\s*1$/ })).toBeVisible();
+    await expect.element(screen.getByText("Laptop thread").first()).toBeVisible();
+    await expect.element(screen.getByText("Desk thread")).not.toBeInTheDocument();
+  });
+
+  it("lists the open thread from a computer left out without clearing the filter", async () => {
+    using stack = new DisposableStack();
+    computerFixture(stack, {
+      chosen: [laptop],
+      routeThreadRef: { environmentId: desk, threadId: deskThreadId },
+    });
+    await using screen = await render(sidebar());
+
+    await expect.element(screen.getByText("Desk thread").first()).toBeVisible();
     expect(useUiStateStore.getState().sidebarEnvironmentScopeIds).toEqual([laptop]);
     await expect
       .element(screen.getByRole("combobox", { name: /computers: WSL/ }))
