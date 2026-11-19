@@ -341,9 +341,16 @@ function migrateLeaderTileFocus(
     );
   return rules.flatMap((rule) => {
     if (isSameKeybindingRule(rule, oldToggle)) return canRestoreFocusDown ? [focusDown] : [];
-    const tab = /^workspace\.tile\.tab\.([1-9])$/.exec(rule.command)?.[1];
-    if (tab && rule.when === undefined && encodedShortcut(rule) === `leader ${tab}`) return [];
-    return [rule];
+    const key = encodedShortcut(rule);
+    const tab = ([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).find(
+      (index) => key === `leader ${index}` && rule.command === `workspace.tile.tab.${index}`,
+    );
+    if (tab === undefined) return [rule];
+    if (rule.when === undefined) return [];
+    const command = `workspace.tile.focus.${tab}` as const;
+    return rule.when.trim() === "false" && !rules.some((existing) => existing.command === command)
+      ? [rule, { ...rule, command }]
+      : [rule];
   });
 }
 

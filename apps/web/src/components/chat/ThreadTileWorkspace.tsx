@@ -756,7 +756,7 @@ export function ThreadTileWorkspace(props: {
         current.maximizedGroupId &&
         group.id !== current.focusedGroupId &&
         group.id !== current.maximizedGroupId &&
-        !(current.besideGroupId && visibleGeometry().some((tile) => tile.id === group.id))
+        (compact || !visibleGeometry().some((tile) => tile.id === group.id))
       ) {
         apply({ type: "maximize", groupId: null });
       }

@@ -915,7 +915,7 @@ it("opens layout actions from the title bar and saves the current workspace", as
 
 it("runs leader commands from terminal focus and keeps keyboard resize active until Enter", async () => {
   await using fixture = await setup(true, false, true);
-  const { screen, layout, selectTab } = fixture;
+  const { screen, layout, selectTab, store, threadRef } = fixture;
   const terminal = screen.getByRole("textbox", { name: "Editor terminal:new-terminal" });
   await userEvent.click(terminal);
   await userEvent.keyboard("{Control>}a{/Control}");
@@ -971,6 +971,14 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
   target.dispatchEvent(second);
   expect(first.defaultPrevented).toBe(true);
   expect(second.defaultPrevented).toBe(false);
+
+  dispatchMenuAction("workspace.tile.float");
+  expect(getTileGroups(layout())[1]?.floating).toBeDefined();
+  store.applyTileAction(threadRef, { type: "maximize", groupId: "conversation-group" });
+  screen.getByRole("textbox", { name: "Conversation draft" }).element().focus();
+  await userEvent.keyboard("{Control>}a{/Control}2");
+  expect(layout().focusedGroupId).toBe("terminal-group");
+  expect(layout().maximizedGroupId).toBe("conversation-group");
 });
 
 it("sends tile keys and menu actions only to the workspace that owns focus, else the one underneath", async () => {

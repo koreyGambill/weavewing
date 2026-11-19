@@ -1171,6 +1171,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "leader 1", command: "workspace.tile.tab.1" },
         { key: "leader 2", command: "workspace.tile.tab.2" },
         { key: "leader 3", command: "workspace.tile.tab.3" },
+        { key: "leader 4", command: "workspace.tile.tab.4", when: "false" },
         ...custom,
       ]);
       yield* fs.writeFileString(
@@ -1190,6 +1191,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
             "leader 1",
             "leader 2",
             "leader 3",
+            "leader 4",
           ].includes(rule.key),
         ),
         [
@@ -1198,6 +1200,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           oldFocusDown,
           { key: "leader 1", command: "workspace.tile.focus.1" },
           { key: "leader 2", command: "workspace.tile.focus.2" },
+          { key: "leader 4", command: "workspace.tile.tab.4", when: "false" },
+          { key: "leader 4", command: "workspace.tile.focus.4", when: "false" },
           ...custom,
         ],
       );
