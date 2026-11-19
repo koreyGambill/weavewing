@@ -1128,17 +1128,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           status: prStatus,
         })
       : null;
-  const cardTitleLine = resolveCardTitleLineLayout({
-    prText: prPresentation === null ? null : String(prPresentation.text),
-    hasTerminal,
-    hasAutomation: Boolean(thread.automationTaskId),
-    isExternal,
-    providerCount: providerStack.length,
-  });
+  const cardTitleLine =
+    variant === "card"
+      ? resolveCardTitleLineLayout({
+          prText: prPresentation === null ? null : String(prPresentation.text),
+          hasTerminal,
+          hasAutomation: Boolean(thread.automationTaskId),
+          isExternal,
+          providerCount: providerStack.length,
+        })
+      : null;
   const prBadge =
     prBadgeShape?.kind === "stack" || pr || currentLinkedPr ? (
       <ThreadPullRequestBadgeControl
-        numberCollapse={variant === "card" ? cardTitleLine.prNumber : undefined}
+        presentation={prPresentation}
+        numberCollapse={cardTitleLine?.prNumber}
         render={<InlineButton />}
         badge={prBadgeShape}
         pullRequests={thread.pullRequests}
@@ -1258,11 +1262,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       />
     </span>
   );
-  const trailingIcons = (className?: string) => (
-    <span className={cn("inline-flex shrink-0 items-center gap-1", className)}>
-      {automationMarker}
-      {decorationIcons()}
-      {externalMarker}
+  // The 2px padding, cancelled by the margin, keeps focus outlines inside the clip.
+  const clippedIndicators = (children: ReactNode) => (
+    <span className="-m-0.5 flex min-w-0 shrink items-center gap-1.5 overflow-hidden p-0.5">
+      {children}
     </span>
   );
   const metaLine = metaLineEmpty ? null : (
@@ -1286,18 +1289,38 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       ) : (
         <span className="flex-1" />
       )}
-      {terminalStatusIcon}
-      {prBadge}
-      {diff ? (
-        <span className="shrink-0 font-mono">
-          <span className="text-diff-addition-foreground">+{formatDiffCount(diff.insertions)}</span>{" "}
-          <span className="text-diff-deletion-foreground">−{formatDiffCount(diff.deletions)}</span>
-        </span>
-      ) : null}
-      {trailingIcons("ml-auto")}
+      {clippedIndicators(
+        <>
+          {terminalStatusIcon}
+          {prBadge}
+          {diff ? (
+            <span className="shrink-0 font-mono">
+              <span className="text-diff-addition-foreground">
+                +{formatDiffCount(diff.insertions)}
+              </span>{" "}
+              <span className="text-diff-deletion-foreground">
+                −{formatDiffCount(diff.deletions)}
+              </span>
+            </span>
+          ) : null}
+          {decorationIcons()}
+        </>,
+      )}
+      {automationMarker}
+      {externalMarker}
     </div>
   );
-  const titleLineIcons = metaLineEmpty ? trailingIcons() : null;
+  const titleLineIcons = metaLineEmpty ? (
+    <>
+      {clippedIndicators(decorationIcons())}
+      {automationMarker}
+      {externalMarker}
+    </>
+  ) : null;
+
+  // One cap for every row, so a narrow sidebar flattens deep forks evenly instead of leaving
+  // any row too narrow for its title minimum, PR icon and markers.
+  const familyIndent = `min(${Math.min(props.familyDepth ?? 0, 4) * 12}px, max(0px, 100% - ${ROW_MIN_WIDTH}px))`;
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
@@ -1306,7 +1329,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       <li
         data-thread-item={threadKey}
         {...sortableRootProps}
-        style={{ marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12 }}
+        style={{ marginInlineStart: familyIndent }}
         {...(fileDropHandlers ?? {})}
         className={cn(
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
@@ -1496,10 +1519,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     <li
       data-thread-item={threadKey}
       {...sortableRootProps}
-      // Narrow sidebars give up indentation before the title line drops below its minimum.
-      style={{
-        marginInlineStart: `min(${Math.min(props.familyDepth ?? 0, 4) * 12}px, max(0px, 100% - ${cardTitleLine.minWidth + CARD_CONTENT_INSET * 2}px))`,
-      }}
+      style={{ marginInlineStart: familyIndent }}
       {...(fileDropHandlers ?? {})}
       // The hint is the rendered height inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
@@ -1697,17 +1717,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : null}
               {/* The breakpoints only choose what hides first; this group clips whatever they
                   miss, so the title minimum and the markers after it always fit. */}
-              <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
-                {hasTerminal ? (
-                  <span className={cn("contents", cardTitleLine.terminal)}>
-                    {terminalStatusIcon}
-                  </span>
-                ) : null}
-                {prBadge ? (
-                  <span className={cn("contents", cardTitleLine.pr)}>{prBadge}</span>
-                ) : null}
-                {decorationIcons(cardTitleLine.decoration)}
-              </span>
+              {clippedIndicators(
+                <>
+                  {hasTerminal ? (
+                    <span className={cn("contents", cardTitleLine?.terminal)}>
+                      {terminalStatusIcon}
+                    </span>
+                  ) : null}
+                  {prBadge ? (
+                    <span className={cn("contents", cardTitleLine?.pr)}>{prBadge}</span>
+                  ) : null}
+                  {decorationIcons(cardTitleLine?.decoration)}
+                </>,
+              )}
               {automationMarker}
               {externalMarker}
             </div>
@@ -1719,7 +1741,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
-const CARD_CONTENT_INSET = 10;
+// Glyph, 3rem title, PR icon, automation button and external arrow with their gaps, plus a card's
+// 10px content inset on each side.
+const ROW_MIN_WIDTH = 136 + 20;
 
 // Half-rem steps from 6rem to 18rem; Tailwind needs each class written out.
 const CARD_TITLE_LINE_BREAKPOINTS = [
@@ -1785,8 +1809,6 @@ function resolveCardTitleLineLayout(input: {
     prNumber: cardTitleLineBreakpoint(fixed + group(terminal, prFull)),
     terminal: cardTitleLineBreakpoint(fixed + group(terminal, prIcon)),
     pr: cardTitleLineBreakpoint(fixed + group(prIcon)),
-    // Rounded like the breakpoints, so the indentation cap leaves room for the PR icon.
-    minWidth: Math.ceil((fixed + group(prIcon)) / 8) * 8,
   };
 }
 

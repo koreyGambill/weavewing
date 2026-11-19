@@ -248,6 +248,7 @@ export function ThreadPullRequestBadgeControl({
   onOpenList,
   onOpenPullRequest,
   numberCollapse,
+  presentation: precomputed,
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   badge: ThreadPullRequestBadge | null;
@@ -258,8 +259,13 @@ export function ThreadPullRequestBadgeControl({
   onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>, url?: string) => void;
   numberCollapse?: string | undefined;
+  /** Callers that already resolved the presentation from these same inputs can pass it. */
+  presentation?: ThreadPullRequestBadgePresentation | null;
 }) {
-  const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });
+  const presentation =
+    precomputed === undefined
+      ? resolveThreadPullRequestBadgePresentation({ badge, number, url, status })
+      : precomputed;
   if (presentation === null) return null;
   return (
     <PullRequestBadge
