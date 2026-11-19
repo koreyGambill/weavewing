@@ -346,7 +346,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       ]);
       assert.deepStrictEqual(
         upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
-        [{ key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" }, closeTab],
+        [{ key: "mod+w", command: "workspace.tile.closeTab" }, closeTab],
       );
 
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
@@ -394,6 +394,30 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         [customCloseTab],
       );
     }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect.each(["mod+w", "ctrl+w", "meta+w"])(
+    "preserves a conditional customized %s during the terminal migration",
+    (key) =>
+      Effect.gen(function* () {
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        const keybindings = yield* Keybindings.Keybindings;
+        const legacy = {
+          key: "meta+w",
+          command: "workspace.tile.closeTab",
+          when: "isMac",
+        } as const;
+        const alias = { key: "ctrl+alt+w", command: "workspace.tile.closeTab" } as const;
+        const custom = { key, command: "script.custom-close.run", when: "terminalFocus" } as const;
+        yield* writeKeybindingsConfig(keybindingsConfigPath, [custom, legacy, alias]);
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
+        assert.deepEqual(
+          upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
+          [legacy, alias],
+        );
+        assert.deepInclude(upgraded, custom);
+      }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps a late default pending while the config is full", () =>
@@ -755,5 +779,60 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           ),
         );
       }).pipe(Effect.scoped, Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("upgrades the old Mac close backfill once and preserves later edits", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const keybindings = yield* Keybindings.Keybindings;
+      const legacy = { key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" } as const;
+      const custom = { key: "alt+q", command: "workspace.tile.closeAllTabs" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        legacy,
+        custom,
+        { key: "f6", command: "workspace.focusNext" },
+        { key: "mod+6", command: "thread.jump.6", when: "!modelPickerOpen && isDesktop" },
+        { key: "mod+shift+j", command: "preview.toggle" },
+      ]);
+      yield* fs.writeFileString(
+        path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
+        "workspace.tile.closeTab:meta+w\n",
+      );
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        upgraded.filter((rule) => rule.command === "workspace.tile.closeTab"),
+        [{ key: "mod+w", command: "workspace.tile.closeTab" }],
+      );
+      assert.deepEqual(
+        upgraded.filter((rule) => rule.command === "workspace.tile.closeAllTabs"),
+        [custom],
+      );
+      assert.deepInclude(upgraded, {
+        key: "f6",
+        command: "workspace.focusNext",
+        when: "!terminalFocus",
+      });
+      assert.deepInclude(upgraded, {
+        key: "mod+6",
+        command: "thread.jump.6",
+        when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)",
+      });
+      assert.deepInclude(upgraded, {
+        key: "mod+shift+j",
+        command: "preview.toggle",
+        when: "isMac || !terminalFocus",
+      });
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [legacy, custom]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(
+        (yield* readKeybindingsConfig(keybindingsConfigPath)).filter(
+          (rule) => rule.command === "workspace.tile.closeTab",
+        ),
+        [legacy],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 });

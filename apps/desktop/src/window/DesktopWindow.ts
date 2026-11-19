@@ -770,7 +770,9 @@ export const make = Effect.gen(function* () {
       }
     });
 
+    let terminalFocused = false;
     const quitShortcutHandler = makeQuitShortcutHandler({
+      isTerminalFocused: () => terminalFocused,
       platform: environment.platform,
       getMode: () =>
         runPromise(
@@ -793,7 +795,6 @@ export const make = Effect.gen(function* () {
         void runPromise(electronApp.quit);
       },
     });
-    let terminalFocused = false;
     window.webContents.on("ipc-message", (_event, channel, focused) => {
       if (channel === TERMINAL_FOCUS_CHANNEL) terminalFocused = focused === true;
     });
@@ -803,15 +804,12 @@ export const make = Effect.gen(function* () {
     window.webContents.on("before-input-event", (event, input) => {
       quitShortcutHandler(event, input);
       if (window.isDestroyed()) return;
-      // Close belongs to tile tabs; terminal Ctrl+R belongs to the shell.
+      // Native edit, quit and function-key accelerators must yield to terminal input.
       window.webContents.setIgnoreMenuShortcuts(
-        (environment.platform === "darwin" ? input.meta : input.control) &&
-          !input.alt &&
-          !input.shift &&
-          (input.key.toLowerCase() === "w" ||
-            (terminalFocused &&
-              environment.platform !== "darwin" &&
-              input.key.toLowerCase() === "r")),
+        (terminalFocused && !input.meta) ||
+          ((environment.platform === "darwin" ? input.meta : input.control) &&
+            !input.alt &&
+            input.key.toLowerCase() === "w"),
       );
     });
     window.webContents.on("input-event", (_event, input) => {

@@ -24,6 +24,7 @@ export interface QuitHoldKeyInput {
 
 export interface QuitShortcutOptions {
   readonly platform: NodeJS.Platform;
+  readonly isTerminalFocused: () => boolean;
   readonly getMode: () => Promise<QuitConfirmationMode>;
   readonly notify: (event: QuitShortcutHintEvent) => void;
   readonly concealWindow: () => void;
@@ -89,6 +90,11 @@ export function makeQuitShortcutHandler(
   };
 
   return (event, input) => {
+    if (options.platform !== "darwin" && options.isTerminalFocused()) {
+      release();
+      lastPressAt = 0;
+      return;
+    }
     const key = input.key.toLowerCase();
     if (input.type === "keyUp") {
       if (key === "q") {

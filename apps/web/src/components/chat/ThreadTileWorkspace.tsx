@@ -684,6 +684,10 @@ export function ThreadTileWorkspace(props: {
         const group = currentGroup();
         if (group) closeTab(group.activeTabId);
       },
+      "workspace.tile.closeAllTabs": () => {
+        const group = currentGroup();
+        if (group) closeTile(group.id);
+      },
       "workspace.tile.actions": () => {
         const group = currentGroup();
         if (group) setOpenMenu({ kind: "actions", groupId: group.id });
@@ -731,6 +735,8 @@ export function ThreadTileWorkspace(props: {
         event.metaKey ||
         event.altKey ||
         blockedTarget(event.target) ||
+        (event.target instanceof Element &&
+          event.target.closest("[data-terminal-owner], .xterm")) ||
         document.querySelector('[role="menu"], [role="dialog"], [role="alertdialog"]')
       )
         return;
@@ -1518,7 +1524,8 @@ export function ThreadTileWorkspace(props: {
                         onClick={() => closeTile(id)}
                       >
                         <X />
-                        Close tile
+                        Close all tabs in tile
+                        <TileMenuShortcut keys={shortcut("workspace.tile.closeAllTabs")} />
                       </MenuItem>
                     </MenuPopup>
                   </Menu>

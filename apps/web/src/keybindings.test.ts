@@ -865,14 +865,24 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
   }
   for (const platform of ["Linux x86_64", "Win32", "MacIntel"]) {
     for (const key of "abcdefghijklmnopqrstuvwxyz") {
-      assert.equal(
-        resolveShortcutCommand(event({ key, ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
-          platform,
-          context: { terminalFocus: true, terminalOpen: true },
-        }),
-        null,
-        `Ctrl+${key} belongs to the shell on ${platform}`,
-      );
+      for (const shiftKey of [false, true]) {
+        assert.equal(
+          resolveShortcutCommand(
+            event({ key, ctrlKey: true, shiftKey }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            {
+              platform,
+              context: { terminalFocus: true, terminalOpen: true },
+            },
+          ),
+          key === "w" && platform !== "MacIntel"
+            ? shiftKey
+              ? "workspace.tile.closeAllTabs"
+              : "workspace.tile.closeTab"
+            : null,
+          `Ctrl+${shiftKey ? "Shift+" : ""}${key} resolves to the documented terminal action on ${platform}`,
+        );
+      }
     }
   }
 });
@@ -890,3 +900,47 @@ it.each([
     command,
   );
 });
+
+it.each(["Linux x86_64", "Win32", "MacIntel"])(
+  "preserves vim input in focused terminals on %s",
+  (platform) => {
+    const context = { terminalFocus: true, terminalOpen: true, isDesktop: true };
+    const passthrough = [
+      event({ key: "Escape" }),
+      event({ key: "[", ctrlKey: true }),
+      event({ key: " ", ctrlKey: true }),
+      event({ key: "]", ctrlKey: true }),
+      event({ key: "^", code: "Digit6", ctrlKey: true, shiftKey: true }),
+      event({ key: "6", code: "Digit6", ctrlKey: true }),
+      event({ key: "Tab" }),
+      event({ key: "Tab", shiftKey: true }),
+      ...Array.from({ length: 24 }, (_, i) => event({ key: `F${i + 1}` })),
+      ...[..."abcdefghijklmnopqrstuvwxyz"].map((key) => event({ key, altKey: true })),
+    ];
+    for (const input of passthrough) {
+      assert.equal(
+        resolveShortcutCommand(input, DEFAULT_BINDINGS, { platform, context }),
+        null,
+        JSON.stringify(input),
+      );
+    }
+    for (const [shiftKey, command] of [
+      [false, "workspace.tile.closeTab"],
+      [true, "workspace.tile.closeAllTabs"],
+    ] as const) {
+      assert.equal(
+        resolveShortcutCommand(
+          event({
+            key: "w",
+            shiftKey,
+            ctrlKey: platform !== "MacIntel",
+            metaKey: platform === "MacIntel",
+          }),
+          DEFAULT_BINDINGS,
+          { platform, context },
+        ),
+        command,
+      );
+    }
+  },
+);

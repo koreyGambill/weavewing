@@ -29,7 +29,7 @@ export function tileCloseConfirmation(input: {
     .map((terminalId) => input.terminalLabelsById.get(terminalId) ?? "A terminal process");
   const count = input.tabIds.filter((tabId) => !isNewTab(tabId)).length;
   const title = count > 1 ? `Close all ${count} tabs in this tile?` : "Close this tile?";
-  if (running.length === 0) return count > 1 ? { title, description: null } : null;
+  if (running.length === 0) return null;
   const names =
     running.length === 1
       ? running[0]!

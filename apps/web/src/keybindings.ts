@@ -345,7 +345,12 @@ export function isTerminalCloseShortcut(
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
-  return matchesCommandShortcut(event, keybindings, "terminal.close", options);
+  const command = resolveShortcutCommand(event, keybindings, options);
+  return (
+    command === "terminal.close" ||
+    command === "workspace.tile.closeTab" ||
+    command === "workspace.tile.closeAllTabs"
+  );
 }
 
 export function isDiffToggleShortcut(

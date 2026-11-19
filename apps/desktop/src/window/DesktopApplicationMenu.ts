@@ -283,7 +283,7 @@ export const make = Effect.gen(function* () {
           /* Native reload/DevTools/zoom roles target focused guests; these commands must target the app. */
           {
             label: "Reload",
-            accelerator: "CmdOrCtrl+R",
+            ...(environment.platform === "darwin" ? { accelerator: "Cmd+R" } : {}),
             click: mainContentsClick("reload"),
           },
           {
