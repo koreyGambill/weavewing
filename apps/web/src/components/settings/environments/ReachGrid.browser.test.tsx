@@ -10,7 +10,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 
 import { render } from "../../../../test/render";
-import { buildReachModel, type ReachServerInput } from "./reachModel.logic";
+import { buildReachModel, type ReachServerInput, squareKey } from "./reachModel.logic";
 import { ReachGrid } from "./ReachGrid";
 import type { SquareChangeState } from "./useSquareChange";
 
@@ -83,6 +83,22 @@ describe("ReachGrid", () => {
     await expect
       .element(page.getByText("Changing the level needs this app to manage Moonborn too"))
       .toBeVisible();
+  });
+
+  it("claims no level for a line whose relink was left uncertain", async () => {
+    const { model, change } = setup();
+    const square = [...model.squares.values()].find(
+      (candidate) => candidate.from.label === "Moonborn" && candidate.to.label === "WSL",
+    )!;
+    const uncertain = { ...change, uncertain: new Set([squareKey(square.from.id, square.to.id)]) };
+    await using screen = await render(<ReachGrid model={model} change={uncertain} />);
+
+    await userEvent.click(page.getByRole("button", { name: "From Moonborn to WSL: Uncertain" }));
+
+    await expect.element(page.getByText("From Moonborn to WSL: Uncertain")).toBeVisible();
+    expect(screen.container.ownerDocument.querySelectorAll("[aria-pressed='true']")).toHaveLength(
+      0,
+    );
   });
 
   it("offers removal of a device from the popup and nothing that pretends to change its level", async () => {

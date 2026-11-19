@@ -78,12 +78,16 @@ export const GRID_LEGEND: ReadonlyArray<{
   },
 ];
 
-/** "From X to Y: level", the sentence every square and line is read as. */
-export function squareSentence(square: ReachSquare): string {
+/**
+ * "From X to Y: level", the sentence every square and line is read as. An uncertain line says so
+ * instead of repeating a level that may no longer hold.
+ */
+export function squareSentence(square: ReachSquare, uncertain = false): string {
   const { state } = square;
   if (state.kind === "self") return `${square.from.label} itself`;
-  const level =
-    state.kind === "level"
+  const level = uncertain
+    ? "Uncertain"
+    : state.kind === "level"
       ? `${REACH_LEVEL_LABELS[state.level]}${state.broken === "expired" ? " (expired)" : state.broken === "unauthorized" ? ` (refused by ${square.to.label})` : ""}`
       : state.kind === "none"
         ? "No access"
@@ -164,7 +168,9 @@ export function LevelChoices({
   readonly change: SquareChangeState;
   readonly square: ReachSquare;
 }) {
-  const current = square.state.kind === "level" ? square.state.level : null;
+  const uncertain = change.uncertain.has(squareKey(square.from.id, square.to.id));
+  // undefined presses nothing, so an uncertain line does not look like it kept a level.
+  const current = uncertain ? undefined : square.state.kind === "level" ? square.state.level : null;
   const busy = change.busyKey !== null;
   const { changes } = square;
   return (

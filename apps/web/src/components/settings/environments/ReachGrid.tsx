@@ -326,7 +326,7 @@ function SquareCell({
     <button
       {...gridCellAttributes(cell)}
       type="button"
-      aria-label={uncertain ? `${squareSentence(square)}, uncertain` : squareSentence(square)}
+      aria-label={squareSentence(square, uncertain)}
       className={cn(
         "block w-full py-1.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         state.kind === "no-path" && "bg-muted/60 text-muted-foreground",
@@ -391,9 +391,11 @@ function PopupBody({
   return (
     <div className="space-y-2 text-xs leading-relaxed">
       <div>
-        <p>{squareSentence(square)}</p>
+        <p>{squareSentence(square, change.uncertain.has(squareKey(focus.from, focus.to)))}</p>
         <p className="text-muted-foreground">
-          {reverse ? squareSentence(reverse) : `Nothing connects in to ${square.from.label}`}
+          {reverse
+            ? squareSentence(reverse, change.uncertain.has(squareKey(focus.to, focus.from)))
+            : `Nothing connects in to ${square.from.label}`}
         </p>
       </div>
       {state.kind === "unknown" ? <p className="text-muted-foreground">{state.reason}</p> : null}
