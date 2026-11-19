@@ -1,4 +1,3 @@
-import { LeaderHint } from "./LeaderHint";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle } from "../ui/dialog";
 import { useTileResizeGesture } from "./useTileResizeGesture";
 import {
@@ -1025,7 +1024,6 @@ export function ThreadTileWorkspace(props: {
           onApply={applySavedLayout}
         />
       </WorkspaceTitlebarControls>
-      <LeaderHint keybindings={props.panels.keybindings} />
       <div className="relative shrink-0">{props.header}</div>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
         <div

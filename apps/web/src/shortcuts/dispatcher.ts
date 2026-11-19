@@ -37,25 +37,13 @@ export interface CommandScopeOptions {
 }
 
 const leaderEvents = new WeakSet<KeyboardEvent>();
-const leaderListeners = new Set<() => void>();
-let leaderActive = false;
-export const subscribeLeader = (listener: () => void) => {
-  leaderListeners.add(listener);
-  return () => {
-    leaderListeners.delete(listener);
-  };
-};
-export const readLeaderActive = () => leaderActive;
 export const isLeaderSequenceEvent = (event: KeyboardEvent) => leaderEvents.has(event);
 const leader = createLeaderHandler({
   keybindings: () =>
     captureScopes.findLast((scope) => scope.options.keybindings)?.options.keybindings?.() ??
     appAtomRegistry.get(primaryServerKeybindingsAtom),
   platform: () => navigator.platform,
-  changed: (active) => {
-    leaderActive = active;
-    for (const listener of leaderListeners) listener();
-  },
+  changed: () => {},
 });
 
 interface CommandScope {
