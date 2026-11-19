@@ -143,6 +143,11 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     rule: { key: "ctrl+tab", command: "workspace.tile.nextTab" },
   },
   {
+    id: "weavewing.search-palette.v1",
+    alongside: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+    rule: { key: "mod+k", command: "search.toggle" },
+  },
+  {
     id: "weavewing.terminal-keys.v1",
     alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
     rule: { key: "mod+w", command: "workspace.tile.closeTab" },
@@ -591,7 +596,16 @@ const make = Effect.gen(function* () {
           (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
         );
       });
+      const migrateSearchKeys = pendingLateDefaults.some(
+        (late) => late.id === "weavewing.search-palette.v1",
+      );
       const customConfig = runtimeConfig.keybindings.map((rule) => {
+        if (migrateSearchKeys && (rule.when === undefined || rule.when === "!terminalFocus")) {
+          if (rule.command === "commandPalette.toggle" && rule.key === "mod+k")
+            return { key: "mod+k", command: "search.toggle" } as const;
+          if (rule.command === "filePicker.toggle" && rule.key === "mod+p")
+            return { key: "mod+p", command: "commandPalette.toggle" } as const;
+        }
         if (!migrateTerminalKeys) return rule;
         if (
           !closeConflict &&

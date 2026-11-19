@@ -809,7 +809,7 @@ export const make = Effect.gen(function* () {
         (terminalFocused && !input.meta) ||
           ((environment.platform === "darwin" ? input.meta : input.control) &&
             !input.alt &&
-            input.key.toLowerCase() === "w"),
+            ["w", "k", "p"].includes(input.key.toLowerCase())),
       );
     });
     window.webContents.on("input-event", (_event, input) => {
