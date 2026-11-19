@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
 import {
+  closestCenter,
   DndContext,
   useSensor,
   useSensors,
@@ -195,6 +196,7 @@ import {
   searchSidebarThreads,
   shouldNavigateAfterThreadPark,
   sidebarListItemId,
+  sidebarMarkerId,
   sidebarThreadKeyAtY,
   sortPinnedThreadsForSidebar,
   sortWorkingThreadsBySend,
@@ -393,7 +395,9 @@ function threadShellKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id
   return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
 }
 
-const NO_COLLISIONS: CollisionDetection = () => [];
+const SHELF_TARGET_IDS = (
+  ["pinned-header", "pinned-divider", "settled-header", "settled-placeholder"] as const
+).map(sidebarMarkerId);
 const NO_DRAGGED_ORDER: readonly string[] = [];
 const NO_DRAGGED_ORDERS: {
   readonly settledOrder: readonly string[];
@@ -1887,7 +1891,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     isGroupDrag ||
     dragState?.contextDrag === true ||
     dragState?.activeSection === "working";
-  const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
+  // Group drags hold rows still yet still drop on the shelves, while the pointer is in the list.
+  const dragTargetSection = (isGroupDrag ? dragState?.contextDrag === false : !isContextDrag)
+    ? (dragState?.targetSection ?? null)
+    : null;
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
@@ -1931,6 +1938,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const draggedKey = contextDragKeyRef.current;
     if (list === null || arrangement === null || draggedKey === null) {
       groupDropStore.set(null);
+      groupDropStore.setPointerInGroups(false);
       return;
     }
     const grouped = new Set(
@@ -1951,6 +1959,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return [{ kind, groupId: id === "" ? null : id, top, bottom }];
     });
     const hit = resolveSidebarGroupHit(rows, y);
+    groupDropStore.setPointerInGroups(hit !== null);
     const target = hit === null ? null : resolveSidebarGroupDrop(arrangement, draggedKey, hit);
     if (target === null) {
       groupDropStore.set(null);
@@ -1987,6 +1996,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return false;
     }
     groupDropStore.set(null);
+    groupDropStore.setPointerInGroups(false);
     restoreDragScroll();
     const threads = contextDragThreads();
     const threadRef = parseScopedThreadKey(contextDragKeyRef.current ?? "");
@@ -2118,6 +2128,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const handleThreadDragStart = (event: DragStartEvent) => {
     groupDropStore.set(null);
+    groupDropStore.setPointerInGroups(false);
     const activeKey = String(event.active.id);
     contextDragKeyRef.current = activeKey;
     const activeSection = sectionByThreadKey.get(activeKey);
@@ -2228,7 +2239,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     listMotionRef.current?.update(listMotionPass.animate && shelvesUnchanged);
   }, [listMotionPass, shelfExpansionKey]);
   const handleThreadDragOver = (event: DragOverEvent) => {
-    if (isGroupDrag) return;
     const target = event.over
       ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
       : null;
@@ -2264,8 +2274,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;
   const dndCollisionDetection = (() => {
-    // Group drops come from the pointer; a dnd-kit target would re-render every row as it changes.
-    if (isGroupDrag) return NO_COLLISIONS;
+    // Over the groups the pointer picks the drop, and no dnd-kit target keeps rows from
+    // re-rendering per move. Elsewhere the shelves stay targets, so drops still pin and settle.
+    if (isGroupDrag) {
+      const shelfIds = new Set([...pinnedKeys, ...SHELF_TARGET_IDS]);
+      const detect: CollisionDetection = (args) =>
+        groupDropStore.pointerInGroups()
+          ? []
+          : closestCenter({
+              ...args,
+              droppableContainers: args.droppableContainers.filter((container) =>
+                shelfIds.has(String(container.id)),
+              ),
+            });
+      return detect;
+    }
     if (draggedThreadKey === undefined || draggedFromSection === undefined)
       return createSidebarCollisionDetection(() => true);
     const source = threadByKey.get(draggedThreadKey);
@@ -2303,10 +2326,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       const drop = groupDropStore.get();
       groupDropStore.set(null);
       const arrangement = threadGroupArrangement;
-      if (drop === null || arrangement === null) return;
-      const key = String(event.active.id);
-      setThreadGroups((current) => placeSidebarThread(current, arrangement, key, drop.target));
-      return;
+      if (drop !== null && arrangement !== null) {
+        const key = String(event.active.id);
+        setThreadGroups((current) => placeSidebarThread(current, arrangement, key, drop.target));
+        return;
+      }
     }
     if (projectFolders !== null) return;
     const activeKey = String(event.active.id);

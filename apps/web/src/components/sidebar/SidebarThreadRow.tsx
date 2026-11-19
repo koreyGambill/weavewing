@@ -1020,11 +1020,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         ...sortable.listeners,
       }
     : { style: undefined };
-  const destinationVerb = sortable?.isDragging
-    ? props.dropVerb
-    : props.sweepAction === "unsnooze"
-      ? "wake"
-      : props.sweepAction;
+  // A group drag keeps its row in place, so the row shows the shelf it would drop on too.
+  const destinationVerb =
+    sortable?.isDragging || props.dropVerb !== null
+      ? props.dropVerb
+      : props.sweepAction === "unsnooze"
+        ? "wake"
+        : props.sweepAction;
   const dragDestination =
     destinationVerb !== null ? (
       <span

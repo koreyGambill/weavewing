@@ -13,6 +13,7 @@ import "~/index.css";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
 import {
+  dispatchedCommands,
   ENVIRONMENT_ID,
   installFakeEnvironment,
   threadWithHistory,
@@ -35,7 +36,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("drops a dragged thread into a user group where the indicator shows", async () => {
+it("drops a thread into a group at the indicator, and a grouped thread still drags onto Pinned", async () => {
   await page.viewport(1400, 900);
   const [grouped, loose] = [threadWithHistory("grouped", 1), threadWithHistory("loose", 1)];
   using _environment = installFakeEnvironment([grouped, loose]);
@@ -85,22 +86,27 @@ it("drops a dragged thread into a user group where the indicator shows", async (
   // The shift guard ignores presses on rows that moved in the last 500ms, as these did on load;
   // a far-future clock puts that window behind them.
   using _clock = vi.spyOn(performance, "now").mockReturnValue(1e12);
-  const from = row(loose)!.getBoundingClientRect();
-  // Autoscroll can move the list during the drag, so aim at the header where it is now.
-  const headerY = () => {
-    const bounds = header.element().getBoundingClientRect();
+  // Autoscroll can move the list during a drag, so targets are read where they are now.
+  const centerY = (element: Element) => {
+    const bounds = element.getBoundingClientRect();
     return bounds.y + bounds.height / 2;
   };
-  const x = from.x + 40;
-  await act(() => {
-    row(loose)!.firstElementChild!.dispatchEvent(pointer("pointerdown", x, from.y + 20));
-    document.dispatchEvent(pointer("pointermove", x, from.y + 40));
-  });
-  // dnd-kit measures droppables after activation, so the pointer travels in steps like a hand.
-  for (const step of [0.25, 0.5, 0.75, 1, 1]) {
-    const y = from.y + 40 + (headerY() - from.y - 40) * step;
-    await act(() => document.dispatchEvent(pointer("pointermove", x, y)));
-  }
+  const headerY = () => centerY(header.element());
+  const startDrag = async (thread: typeof grouped, targetY: () => number) => {
+    const from = row(thread)!.getBoundingClientRect();
+    const x = from.x + 40;
+    await act(() => {
+      row(thread)!.firstElementChild!.dispatchEvent(pointer("pointerdown", x, from.y + 20));
+      document.dispatchEvent(pointer("pointermove", x, from.y + 40));
+    });
+    // dnd-kit measures droppables after activation, so the pointer travels in steps like a hand.
+    for (const step of [0.25, 0.5, 0.75, 1, 1]) {
+      const y = from.y + 40 + (targetY() - from.y - 40) * step;
+      await act(() => document.dispatchEvent(pointer("pointermove", x, y)));
+    }
+    return () => act(() => document.dispatchEvent(pointer("pointerup", x, targetY())));
+  };
+  const drop = await startDrag(loose, headerY);
   const indicator = page.getByTestId("sidebar-group-drop-indicator");
   await expect.element(indicator).toBeInTheDocument();
   // The line sits on the gap above the group's first row, where the thread will land.
@@ -109,7 +115,7 @@ it("drops a dragged thread into a user group where the indicator shows", async (
       indicator.element().getBoundingClientRect().top - row(grouped)!.getBoundingClientRect().top,
     ),
   ).toBeLessThan(2);
-  await act(() => document.dispatchEvent(pointer("pointerup", x, headerY())));
+  await drop();
   await expect.element(indicator).not.toBeInTheDocument();
   await vi.waitFor(() => {
     expect(
@@ -120,4 +126,22 @@ it("drops a dragged thread into a user group where the indicator shows", async (
       keyOf(grouped),
     ]);
   });
+
+  // The drop moved rows, so the guard's window starts again.
+  _clock.mockReturnValue(2e12);
+  const pinnedTop = () =>
+    document.querySelector('[data-testid="sidebar-pinned-header"]')!.getBoundingClientRect().top +
+    2;
+  const pinDrop = await startDrag(loose, pinnedTop);
+  await expect.element(indicator).not.toBeInTheDocument();
+  await pinDrop();
+  await vi.waitFor(() =>
+    expect(dispatchedCommands()).toContainEqual(
+      expect.objectContaining({ type: "thread.pin", threadId: loose.id }),
+    ),
+  );
+  // Pinning leaves the group membership for when the thread is unpinned.
+  expect(JSON.parse(localStorage.getItem(storageKey)!).groups[0].threadKeys).toContain(
+    keyOf(loose),
+  );
 });

@@ -189,6 +189,8 @@ export interface SidebarGroupDropState {
 /** Holds the live drop target outside React state, so a drag re-renders only the indicator. */
 export function createSidebarGroupDropStore() {
   let current: SidebarGroupDropState | null = null;
+  // Set per pointer move with the target; read by dnd-kit's collision pass, never rendered.
+  let inGroups = false;
   const listeners = new Set<() => void>();
   return {
     get: () => current,
@@ -205,6 +207,10 @@ export function createSidebarGroupDropStore() {
       }
       current = next;
       for (const listener of listeners) listener();
+    },
+    pointerInGroups: () => inGroups,
+    setPointerInGroups(next: boolean) {
+      inGroups = next;
     },
     subscribe(listener: () => void) {
       listeners.add(listener);
