@@ -1,3 +1,4 @@
+import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   DROPDOWN_TERMINAL_THREAD_ID,
@@ -6,11 +7,31 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 
+import { isEnvironmentOnThisComputer } from "./connection/desktopLocal";
+import type { DropdownTerminalTarget } from "./dropdownTerminalStore";
 import type { RightPanelSurface } from "./rightPanelStore";
 import { getTileGroups, type ThreadTileLayout } from "./threadTileLayout";
 
 const DROPDOWN_TERMINAL_MIN_HEIGHT = 160;
 export const DROPDOWN_TERMINAL_DEFAULT_HEIGHT = 360;
+
+export function dropdownTerminalTarget(
+  environment: {
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+    readonly entry: { readonly target: ConnectionTarget };
+  },
+  primaryEnvironmentId: EnvironmentId | null,
+  isDesktop: boolean,
+): DropdownTerminalTarget {
+  return {
+    environmentId: environment.environmentId,
+    label: environment.label,
+    external:
+      environment.environmentId !== primaryEnvironmentId &&
+      !isEnvironmentOnThisComputer(environment.entry.target, isDesktop),
+  };
+}
 
 /**
  * Terminal sessions are keyed by a thread id the server does not need to know, so the drop-down

@@ -1,8 +1,17 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { create } from "zustand";
+
+export interface DropdownTerminalTarget {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly external: boolean;
+}
 
 interface DropdownTerminalState {
   open: boolean;
   expanded: boolean;
+  selectedTarget: DropdownTerminalTarget | null;
+  selectTarget: (target: DropdownTerminalTarget) => void;
   toggle: () => void;
   close: () => void;
   toggleExpanded: () => void;
@@ -14,6 +23,8 @@ let returnFocus: HTMLElement | null = null;
 export const useDropdownTerminalStore = create<DropdownTerminalState>()((set, get) => ({
   open: false,
   expanded: false,
+  selectedTarget: null,
+  selectTarget: (selectedTarget) => set({ selectedTarget }),
   toggle: () => {
     if (get().open) {
       get().close();

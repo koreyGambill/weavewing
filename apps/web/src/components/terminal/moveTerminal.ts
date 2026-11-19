@@ -7,12 +7,15 @@ import {
   type TerminalSessionSnapshot,
 } from "@t3tools/contracts";
 
-import { useDropdownTerminalStore } from "../../dropdownTerminalStore";
+import { dropdownTerminalRef } from "../../dropdownTerminal.logic";
+import { type DropdownTerminalTarget, useDropdownTerminalStore } from "../../dropdownTerminalStore";
+import { focusTerminal } from "../../lib/terminalFocus";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import { readEnvironmentScope } from "../../state/session";
 import { knownTerminalSessionsAtom } from "../../state/terminalSessions";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../../terminalUiStateStore";
+import { CONVERSATION_TAB_ID } from "../../threadTileLayout";
 import { allocateThreadTerminalId } from "./useThreadTerminalActions";
 
 /** Where a moved terminal lands: the workspace, and the checkout its tile attaches with. */
@@ -72,7 +75,13 @@ export async function moveTerminalTab(input: {
     store.openTerminal(from, terminalId, surface.launchContext);
     // Taking out its last tab hid the drop-down; the restored tab needs it shown again.
     const dropdown = useDropdownTerminalStore.getState();
-    if (from.threadId === DROPDOWN_TERMINAL_THREAD_ID && !dropdown.open) dropdown.toggle();
+    if (
+      from.threadId === DROPDOWN_TERMINAL_THREAD_ID &&
+      !dropdown.open &&
+      (dropdown.selectedTarget === null ||
+        dropdown.selectedTarget.environmentId === from.environmentId)
+    )
+      dropdown.toggle();
     return null;
   }
   const movedId = result.value.terminalId;
@@ -81,4 +90,28 @@ export async function moveTerminalTab(input: {
     worktreePath: to.worktreePath,
   });
   return movedId;
+}
+
+export async function moveTerminalToDropdown(input: {
+  readonly from: ScopedThreadRef;
+  readonly terminalId: string;
+  readonly target: DropdownTerminalTarget;
+  readonly move: Parameters<typeof moveTerminalTab>[0]["move"];
+}): Promise<void> {
+  const threadRef = dropdownTerminalRef(input.target.environmentId);
+  const movedId = await moveTerminalTab({
+    from: input.from,
+    terminalId: input.terminalId,
+    to: { threadRef, worktreePath: null },
+    move: input.move,
+  });
+  if (movedId === null) return;
+  // An empty drop-down keeps a conversation tab until its first terminal replaces it.
+  useRightPanelStore
+    .getState()
+    .applyTileAction(threadRef, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
+  const dropdown = useDropdownTerminalStore.getState();
+  dropdown.selectTarget(input.target);
+  if (!dropdown.open) dropdown.toggle();
+  focusTerminal(threadRef, movedId);
 }

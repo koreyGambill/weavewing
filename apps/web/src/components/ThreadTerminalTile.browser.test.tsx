@@ -10,7 +10,11 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { Cause } from "effect";
-import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  compileResolvedKeybindingsConfig,
+  DEFAULT_KEYBINDINGS,
+  DEFAULT_RESOLVED_KEYBINDINGS,
+} from "@t3tools/shared/keybindings";
 import { Atom, AsyncResult } from "effect/reactivity";
 import type { GhosttyTerminalSurfaceOptions } from "~/terminal/ghostty/surface";
 import { AppAtomRegistryProvider, appAtomRegistry } from "../rpc/atomRegistry";
@@ -19,6 +23,7 @@ import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { extractTerminalLinks } from "../terminal-links";
 import { expect, it, vi } from "vite-plus/test";
 import { act, fakeTimers, render } from "../../test/render";
+import { registerCommands } from "../shortcuts/dispatcher";
 import ThreadTerminalTile from "./ThreadTerminalTile";
 
 const fixture = vi.hoisted(() => ({
@@ -49,9 +54,10 @@ const fixture = vi.hoisted(() => ({
 }));
 
 // Every other surface method is a no-op; `then` stays undefined so awaiting the surface resolves to it.
-const fakeSurface: object = new Proxy(
+const fakeSurface = new Proxy(
   {
     input: document.createElement("textarea"),
+    dispose: () => fakeSurface.input.remove(),
     write: (data: string) => fixture.messages.push(data),
     // The real surface re-reports its measured grid.
     resendSize: () => {
@@ -66,12 +72,13 @@ const fakeSurface: object = new Proxy(
 );
 vi.mock("~/terminal/ghostty/surface", () => ({
   GhosttyTerminalSurface: {
-    create: (_mount: HTMLElement, options: GhosttyTerminalSurfaceOptions) =>
+    create: (mount: HTMLElement, options: GhosttyTerminalSurfaceOptions) =>
       new Promise((resolve) => {
         fixture.surfaceOptions.push(options);
         fixture.pendingSurfaces.push(() => {
           fixture.typeIntoSurface = options.onData;
           fixture.pressKey = options.beforeKey ?? null;
+          mount.append(fakeSurface.input);
           resolve(fakeSurface);
         });
       }),
@@ -177,7 +184,10 @@ vi.mock("../state/use-atom-command", () => ({
 vi.mock("../state/server", async () => {
   const Atom = await import("effect/reactivity/Atom");
   const config = Atom.make(null);
-  return { serverEnvironment: { configValueAtom: () => config } };
+  return {
+    serverEnvironment: { configValueAtom: () => config },
+    primaryServerKeybindingsAtom: Atom.make(DEFAULT_RESOLVED_KEYBINDINGS),
+  };
 });
 vi.mock("../state/terminal", () => ({
   terminalEnvironment: { write: {}, resize: fixture.resizeCommand },
@@ -221,11 +231,13 @@ vi.mock("../hooks/useSettings", async () => {
 function Drawer(props: {
   threadRef: ScopedThreadRef;
   cwd?: string;
+  visible?: boolean;
   onCloseTerminal: (terminalId: string, threadRef?: ScopedThreadRef) => void;
   keybindings?: ResolvedKeybindingsConfig;
 }) {
   return (
     <ThreadTerminalTile
+      visible={props.visible ?? true}
       threadRef={props.threadRef}
       threadId={props.threadRef.threadId}
       cwd={props.cwd ?? "/repo"}
@@ -290,6 +302,82 @@ it("drops input until the shell runs instead of failing a write for every key", 
     { threadId: original.threadId, data: "ready" },
     { threadId: original.threadId, data: "\u000c" },
   ]);
+});
+
+it("sends the default leader as terminal input only if the original session stays focused", async () => {
+  const { other: threadRef } = setup();
+  const view = (visible: boolean) => (
+    <>
+      <Drawer threadRef={threadRef} visible={visible} onCloseTerminal={() => {}} />
+      <textarea aria-label="Editor" />
+      <dialog aria-label="Confirmation" />
+    </>
+  );
+  await using screen = await render(view(true));
+  await act(async () => {
+    fixture.pendingSurfaces.shift()?.();
+  });
+
+  using stack = new DisposableStack();
+  using _timers = fakeTimers();
+  const focusLeft = vi.fn();
+  stack.defer(registerCommands({ "workspace.tile.focusLeft": focusLeft }, { capture: true }));
+  const input = fakeSurface.input;
+  const editor = screen.container.querySelector<HTMLTextAreaElement>(
+    "textarea[aria-label=Editor]",
+  )!;
+  const dialog = screen.container.querySelector("dialog")!;
+  const press = (target: Element, key = "a", ctrlKey = true) =>
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true }),
+    );
+  input.focus();
+
+  expect(press(input)).toBe(false);
+  vi.advanceTimersByTime(100);
+  expect(press(input, "h", false)).toBe(false);
+  expect(focusLeft).toHaveBeenCalledOnce();
+
+  expect(press(input)).toBe(false);
+  expect(press(input)).toBe(true);
+  vi.advanceTimersByTime(200);
+  expect(fixture.writes).toEqual([]);
+
+  expect(press(input)).toBe(false);
+  vi.advanceTimersByTime(199);
+  expect(fixture.writes).toEqual([]);
+  vi.advanceTimersByTime(1);
+  expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\x01" }]);
+
+  expect(press(input)).toBe(false);
+  editor.focus();
+  input.focus();
+  vi.advanceTimersByTime(200);
+
+  expect(press(input)).toBe(false);
+  fixture.sessionEvent(threadRef, "restarted");
+  vi.advanceTimersByTime(200);
+
+  expect(press(input)).toBe(false);
+  await screen.rerender(view(false));
+  await screen.rerender(view(true));
+  input.focus();
+  vi.advanceTimersByTime(200);
+
+  expect(press(input)).toBe(false);
+  dialog.setAttribute("open", "");
+  vi.advanceTimersByTime(200);
+  dialog.close();
+
+  expect(press(input)).toBe(false);
+  using _hidden = vi.spyOn(document, "hidden", "get").mockReturnValueOnce(true);
+  document.dispatchEvent(new Event("visibilitychange"));
+  vi.advanceTimersByTime(200);
+
+  editor.focus();
+  expect(press(editor)).toBe(false);
+  vi.advanceTimersByTime(200);
+  expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\x01" }]);
 });
 
 it("closes an exited terminal on its own thread after navigating to one reusing its ID", async () => {

@@ -20,13 +20,26 @@ Jump to latest in the context menu returns to the current output.
 On iPhone and iPad, long-press the terminal to paste or to choose Select Text.
 Select Text shows the visible output, where you can copy text or tap a link.
 
+## Choosing a machine
+
+Open the drop-down terminal with Ctrl+J or Cmd+J. Click outside it to hide it
+while its shells keep running. Use **Run on** to choose a
+connected machine or switch to the current thread's machine. Your choice stays
+selected as you switch threads. Return to a machine to resume its terminals.
+If it disconnects, the drop-down waits for it to reconnect or for you to pick
+another machine.
+
+New tabs and tiles start in the source terminal's recorded launch directory,
+or the machine's default folder when there is no recorded directory. Changes
+made with `cd` inside the shell don't change that starting directory.
+
 ## Moving terminals
 
 To hand a running drop-down terminal to a thread, choose **Move to thread** in the
 terminal's context menu or its tile actions menu. The thread you are viewing is
 listed first, then recent threads on the same machine. The shell keeps running
-with its scrollback. **Move to drop-down** sends a thread's terminal back.
-Terminals cannot move between machines.
+with its scrollback. **Move to drop-down** opens the thread's terminal in the
+drop-down for its machine.
 
 ## fish
 

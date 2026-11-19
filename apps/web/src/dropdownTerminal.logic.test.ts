@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { BearerConnectionTarget } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 import {
   clampDropdownTerminalHeight,
   dropdownTerminalMoveTargets,
+  dropdownTerminalTarget,
   dropdownTerminalToFocus,
 } from "./dropdownTerminal.logic";
+import { desktopLocalConnectionId } from "./connection/desktopLocal";
 import type { RightPanelSurface } from "./rightPanelStore";
 import type { ThreadTileLayout } from "./threadTileLayout";
 
@@ -59,6 +62,26 @@ describe("clampDropdownTerminalHeight", () => {
   ])("clamps %d in a %dpx window to %d", (height, viewport, expected) => {
     expect(clampDropdownTerminalHeight(height, viewport)).toBe(expected);
   });
+});
+
+describe("drop-down machine locality", () => {
+  const primary = EnvironmentId.make("windows");
+  const wsl = EnvironmentId.make("wsl");
+  it.each([
+    [primary, "paired", false, false],
+    [wsl, desktopLocalConnectionId("wsl:Ubuntu"), true, false],
+    [wsl, "paired-wsl", true, true],
+    [wsl, desktopLocalConnectionId("wsl:Ubuntu"), false, true],
+  ] as const)(
+    "classifies %s (%s) with desktop mode %s",
+    (environmentId, connectionId, desktop, external) => {
+      const label = "Machine";
+      const entry = { target: new BearerConnectionTarget({ environmentId, connectionId, label }) };
+      expect(
+        dropdownTerminalTarget({ environmentId, label, entry }, primary, desktop).external,
+      ).toBe(external);
+    },
+  );
 });
 
 describe("dropdownTerminalMoveTargets", () => {

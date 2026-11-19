@@ -3,7 +3,7 @@ import {
   compileResolvedKeybindingsConfig,
   DEFAULT_RESOLVED_KEYBINDINGS,
 } from "@t3tools/shared/keybindings";
-import { createLeaderHandler, LEADER_TIMEOUT_MS } from "./leader";
+import { createLeaderHandler } from "./leader";
 
 const event = (key: string, ctrlKey = false, repeat = false) => ({
   key,
@@ -34,13 +34,16 @@ it.each(["Linux", "Win32", "MacIntel"])(
     expect(handler.handle(event("a", true))).toBe("passthrough");
     expect(changed).toHaveBeenLastCalledWith(false);
     expect(handler.handle(event("a", true))).toBe("prefix");
+    vi.advanceTimersByTime(100);
     expect(handler.handle(event("Shift"))).toBeNull();
     expect(handler.handle({ ...event("%"), shiftKey: true })).toBe("sequence");
     expect(handler.handle(event("a", true))).toBe("prefix");
     expect(handler.handle(event("Escape"))).toBe("cancel");
     expect(handler.handle(event("h"))).toBeNull();
     expect(handler.handle(event("a", true))).toBe("prefix");
-    vi.advanceTimersByTime(LEADER_TIMEOUT_MS);
+    vi.advanceTimersByTime(199);
+    expect(changed).toHaveBeenLastCalledWith(true);
+    vi.advanceTimersByTime(1);
     expect(changed).toHaveBeenLastCalledWith(false);
     expect(handler.handle(event("h"))).toBeNull();
     keybindings = compileResolvedKeybindingsConfig([
@@ -56,3 +59,35 @@ it.each(["Linux", "Win32", "MacIntel"])(
     expect(handler.handle(event("h"))).toBeNull();
   },
 );
+
+it("abandons a pending prefix when the configured Leader is disabled or rebound", () => {
+  vi.useFakeTimers();
+  using stack = new DisposableStack();
+  stack.defer(() => vi.useRealTimers());
+  let keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  const write = vi.fn();
+  const handler = createLeaderHandler({
+    keybindings: () => keybindings,
+    platform: () => "Linux",
+    changed: vi.fn(),
+    prepareDefaultTimeout: () => write,
+  });
+  stack.defer(handler.cancel);
+
+  expect(handler.handle(event("a", true))).toBe("prefix");
+  keybindings = compileResolvedKeybindingsConfig([
+    { key: "ctrl+a", command: "keybindings.leader", when: "false" },
+  ]);
+  vi.advanceTimersByTime(200);
+  expect(write).not.toHaveBeenCalled();
+
+  keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  expect(handler.handle(event("a", true))).toBe("prefix");
+  keybindings = compileResolvedKeybindingsConfig([
+    { key: "ctrl+b", command: "keybindings.leader" },
+  ]);
+  expect(handler.handle(event("b", true))).toBe("prefix");
+  expect(handler.handle(event("h"))).toBe("sequence");
+  vi.advanceTimersByTime(200);
+  expect(write).not.toHaveBeenCalled();
+});
