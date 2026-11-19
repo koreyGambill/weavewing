@@ -341,6 +341,50 @@ describe("buildReachModel", () => {
   });
 });
 
+describe("arrival tags", () => {
+  it("reads each line's tag from the address it uses and keeps that address", () => {
+    const model = buildReachModel({
+      servers: [
+        server({
+          environmentId: WSL,
+          label: "WSL",
+          links: [
+            link(WINDOWS, "Windows", { urls: ["http://localhost:6925"] }),
+            link(MOON, "Moonborn", { urls: ["http://100.67.211.34:14990"] }),
+          ],
+        }),
+        server({ environmentId: WINDOWS, label: "Windows" }),
+        server({
+          environmentId: MOON,
+          label: "Moonborn",
+          sessions: [
+            session({
+              subject: "browser",
+              client: { deviceType: "mobile", label: "Phone", ipAddress: "100.101.1.2" },
+            }),
+            session({
+              subject: "browser",
+              client: { deviceType: "desktop", label: "Laptop", ipAddress: "192.168.68.20" },
+            }),
+          ],
+        }),
+      ],
+    });
+    const device = (label: string) => model.rows.find((row) => row.label === label)!.id;
+
+    expect(state(model, serverPartyId(WSL), WINDOWS)).toMatchObject({
+      arrivedVia: "same-computer",
+      arrivedFrom: "http://localhost:6925",
+    });
+    expect(state(model, serverPartyId(WSL), MOON)).toMatchObject({
+      arrivedVia: "tailscale",
+      arrivedFrom: "http://100.67.211.34:14990",
+    });
+    expect(state(model, device("Phone"), MOON).arrivedVia).toBe("tailscale");
+    expect(state(model, device("Laptop"), MOON).arrivedVia).toBe("local-network");
+  });
+});
+
 describe("an unreachable server", () => {
   it("keeps its last known lines but offers no changes and says it is not answering", () => {
     const model = buildReachModel({

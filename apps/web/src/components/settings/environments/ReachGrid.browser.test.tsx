@@ -89,11 +89,12 @@ describe("ReachGrid", () => {
 
     await userEvent.click(page.getByRole("button", { name: "From Phone to WSL: Full access" }));
     await expect
-      .element(
-        page.getByText("A device keeps the level it paired with. Pair it again to change it."),
-      )
-      .toBeVisible();
-    await userEvent.click(page.getByRole("button", { name: "No access", exact: true }));
+      .element(page.getByRole("button", { name: "Ask before changes" }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Full access", exact: true }))
+      .not.toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Remove access" }));
 
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({ from: expect.objectContaining({ label: "Phone" }) }),

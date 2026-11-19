@@ -3,6 +3,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { AdvertisedEndpoint } from "@t3tools/contracts";
+import { ArrowRightIcon } from "lucide-react";
 import { useState } from "react";
 
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -78,7 +79,7 @@ export function AccessLine({
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="flex min-w-28 flex-1 items-center gap-1.5">
           <span className="truncate">{name}</span>
-          <ArrivalTag arrival={square.arrivedVia} />
+          <ArrivalTag square={square} />
         </span>
         {changes.canRelink && (choice !== null || level === null) ? (
           <Select
@@ -116,6 +117,46 @@ export function AccessLine({
               onClick={() => change.request(square, "none")}
             >
               {changes.ownOutbound ? "Give up…" : "Remove"}
+            </Button>
+          ) : null}
+        </span>
+      </div>
+      <SquareChangeStatus change={change} square={square} />
+    </div>
+  );
+}
+
+/**
+ * A line under Going out. The other side sets its level, so it shows as text with one way to
+ * give the access up; levels change from the target's Coming in lines or the grid.
+ */
+function OutgoingLine({
+  square,
+  name,
+  change,
+}: {
+  readonly square: ReachSquare;
+  readonly name: string;
+  readonly change: SquareChangeState;
+}) {
+  return (
+    <div className="py-1">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span className="flex min-w-28 flex-1 items-center gap-1.5">
+          <ArrowRightIcon aria-hidden className="size-3.5 shrink-0" />
+          <span className="truncate">{name}</span>
+          <ArrivalTag square={square} />
+        </span>
+        <span className="w-44 text-xs">{levelText(square)}</span>
+        <span className="flex w-20 justify-end">
+          {square.changes.canRemove ? (
+            <Button
+              size="xs"
+              variant="ghost-destructive"
+              disabled={change.busyKey !== null}
+              onClick={() => change.request(square, "none")}
+            >
+              Give up…
             </Button>
           ) : null}
         </span>
@@ -226,10 +267,10 @@ export function ServerAccessDetail({
         title="Coming in"
         detail={
           input.appScopes === null
-            ? `last known, ${input.label} is not answering`
+            ? "last known, not answering"
             : input.canManage
-              ? `what others may do on ${input.label}`
-              : `set on ${input.label}`
+              ? "you set this here"
+              : "set on that server"
         }
       />
       {input.sessions === null ? (
@@ -249,7 +290,7 @@ export function ServerAccessDetail({
           <WaitingLinks server={server} />
         </>
       )}
-      <Caption title="Going out" detail={`what ${input.label} may do elsewhere`} />
+      <Caption title="Going out" detail="the other side sets this" />
       {input.links === null ? (
         <p className="text-xs text-muted-foreground">
           {server.linksError ??
@@ -261,7 +302,7 @@ export function ServerAccessDetail({
         <p className="text-xs text-muted-foreground">Nothing</p>
       ) : (
         outgoing.map(({ target, square }) => (
-          <AccessLine key={target.id} square={square} name={target.label} change={change} />
+          <OutgoingLine key={target.id} square={square} name={target.label} change={change} />
         ))
       )}
       {input.appScopes !== null ? (

@@ -122,6 +122,8 @@ export interface ReachSquare {
   readonly to: ReachParty;
   readonly state: SquareState;
   readonly arrivedVia: Arrival | null;
+  /** The address or IP the arrival was read from, to show why. */
+  readonly arrivedFrom: string | null;
   /** Sessions on the receiving server that make up this square, for removal. */
   readonly sessionIds: ReadonlyArray<AuthClientSession["sessionId"]>;
   /** The linking side's record, when it could be read. */
@@ -309,6 +311,7 @@ function serverSquare(
         broken: linkBroken(link),
       },
       arrivedVia: arrivalFromUrl(link.urls[0]),
+      arrivedFrom: link.urls[0] ?? null,
       changes: changes(true),
     };
   }
@@ -319,6 +322,7 @@ function serverSquare(
       ...base,
       state: { kind: "level", level: linkSessionLevel(linkSession), broken: null },
       arrivedVia: arrivalFromHost(clientOf(linkSession).ipAddress ?? null),
+      arrivedFrom: clientOf(linkSession).ipAddress ?? null,
       changes: changes(true),
     };
   }
@@ -328,6 +332,7 @@ function serverSquare(
       ...base,
       state: noPath ? { kind: "no-path" } : { kind: "none" },
       arrivedVia: null,
+      arrivedFrom: null,
       changes: { ...changes(false), canRelink: !noPath && changes(false).canRelink },
     };
   }
@@ -338,6 +343,7 @@ function serverSquare(
       reason: `This app cannot read the links on ${from.label} or who uses ${to.label}.`,
     },
     arrivedVia: null,
+    arrivedFrom: null,
     changes: { ...changes(false), canRelink: false },
   };
 }
@@ -364,6 +370,7 @@ function appSquare(app: ReachParty, to: ReachParty, server: ReachServerInput): R
     link: null,
     sessionIds: [],
     arrivedVia,
+    arrivedFrom: server.route === "relay" || server.route === "ssh" ? null : server.routeUrl,
     changes,
     state:
       server.appScopes === null
@@ -391,6 +398,7 @@ function deviceSquare(
       ...base,
       sessionIds: [],
       arrivedVia: null,
+      arrivedFrom: null,
       state: { kind: "unknown", reason: `This app cannot read who uses ${to.label}.` },
     };
   }
@@ -407,6 +415,7 @@ function deviceSquare(
     arrivedVia: arrivalFromHost(
       (sessions[0] ? clientOf(sessions[0]).ipAddress : undefined) ?? null,
     ),
+    arrivedFrom: (sessions[0] ? clientOf(sessions[0]).ipAddress : undefined) ?? null,
     state:
       strongest !== undefined
         ? { kind: "level", level: strongest, broken: null }
@@ -429,6 +438,7 @@ function outsideLinkSquare(
     link,
     sessionIds: [],
     arrivedVia: arrivalFromUrl(link.urls[0]),
+    arrivedFrom: link.urls[0] ?? null,
     state: {
       kind: "level",
       level: link.access,
@@ -573,6 +583,7 @@ export function buildReachModel(input: {
           to,
           state: { kind: "self" },
           arrivedVia: null,
+          arrivedFrom: null,
           sessionIds: [],
           link: null,
           changes: {

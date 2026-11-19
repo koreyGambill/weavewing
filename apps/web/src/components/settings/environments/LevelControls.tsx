@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import {
   ARRIVAL_LABELS,
-  type Arrival,
   LINK_LEVEL_CHOICES,
   REACH_LEVEL_LABELS,
   type ReachLevel,
@@ -95,11 +95,21 @@ export function squareSentence(square: ReachSquare): string {
   return `From ${square.from.label} to ${square.to.label}: ${level}`;
 }
 
-export function ArrivalTag({ arrival }: { readonly arrival: Arrival | null }) {
-  return arrival === null ? null : (
+export function ArrivalTag({ square }: { readonly square: ReachSquare }) {
+  const arrival = square.arrivedVia;
+  if (arrival === null) return null;
+  const tag = (
     <span className="rounded-sm border border-border px-1 text-2xs whitespace-nowrap text-muted-foreground">
       {ARRIVAL_LABELS[arrival]}
     </span>
+  );
+  return square.arrivedFrom === null ? (
+    tag
+  ) : (
+    <Tooltip>
+      <TooltipTrigger render={tag} />
+      <TooltipPopup side="top">{square.arrivedFrom}</TooltipPopup>
+    </Tooltip>
   );
 }
 

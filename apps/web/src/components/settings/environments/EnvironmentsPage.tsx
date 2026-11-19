@@ -114,9 +114,11 @@ function TrustedTogether({ model }: { readonly model: ReachModel }) {
             </span>
           ))
         )}
-        <span className="ml-auto text-xs text-muted-foreground">
-          Full access to each other, both ways
-        </span>
+        {model.trusted.length > 0 ? (
+          <span className="ml-auto text-xs text-muted-foreground">
+            Full access to each other, both ways
+          </span>
+        ) : null}
       </div>
     </SettingsSection>
   );

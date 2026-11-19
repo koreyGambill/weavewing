@@ -234,6 +234,7 @@ function HeaderButton({
   return (
     <button
       type="button"
+      aria-label={`${focus.kind === "column" ? "To" : "From"} ${party.label}`}
       className={cn(
         "flex w-full min-w-0 items-center gap-1 px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         focus.kind === "column" ? "justify-center" : "justify-start",
@@ -247,11 +248,26 @@ function HeaderButton({
       <span className="text-2xs tracking-wide text-muted-foreground uppercase">
         {focus.kind === "column" ? "To" : "From"}
       </span>
-      <span className="truncate">{party.label}</span>
+      <PartyName label={party.label} />
       {locked ? (
         <LockIcon role="img" aria-label="Set on that machine" className="size-3 shrink-0" />
       ) : null}
     </button>
+  );
+}
+
+/**
+ * Names that share a long start, such as two servers on one machine, differ in their last
+ * " · " part, so that part stays whole and the start gives way.
+ */
+function PartyName({ label }: { readonly label: string }) {
+  const split = label.lastIndexOf(" · ");
+  if (split === -1) return <span className="min-w-0 truncate">{label}</span>;
+  return (
+    <span className="flex min-w-0">
+      <span className="min-w-0 truncate">{label.slice(0, split)}</span>
+      <span className="shrink-0 text-muted-foreground">{label.slice(split)}</span>
+    </span>
   );
 }
 
@@ -330,8 +346,13 @@ function PopupBody({
     const lines = squares.filter(
       (square): square is ReachSquare => square !== undefined && square.state.kind !== "self",
     );
+    const party =
+      focus.kind === "row"
+        ? model.rows.find((row) => row.id === focus.id)
+        : model.columns.find((column) => column.id === focus.id);
     return (
       <ul className="space-y-0.5 text-xs leading-relaxed">
+        {party ? <li className="font-medium">{party.label}</li> : null}
         {lines.map((square) => (
           <li key={squareKey(square.from.id, square.to.id)}>{squareSentence(square)}</li>
         ))}
@@ -353,6 +374,7 @@ function PopupBody({
       {state.kind === "unknown" ? <p className="text-muted-foreground">{state.reason}</p> : null}
       {popup.pinned ? <PinnedControls square={square} change={change} /> : null}
       {popup.pinned &&
+      square.from.kind === "server" &&
       state.kind !== "no-path" &&
       state.kind !== "unknown" &&
       changes.lockedReason === null ? (
@@ -378,6 +400,24 @@ function PinnedControls({
     );
   }
   if (state.kind === "unknown") return null;
+  // A device or this app keeps the level it paired with, so removing it is all there is to do.
+  if (square.from.kind !== "server" && changes.lockedReason === null) {
+    return (
+      <>
+        {changes.canRemove ? (
+          <Button
+            size="xs"
+            variant="destructive-outline"
+            disabled={change.busyKey !== null}
+            onClick={() => change.request(square, "none")}
+          >
+            Remove access
+          </Button>
+        ) : null}
+        <SquareChangeStatus change={change} square={square} />
+      </>
+    );
+  }
   if (changes.lockedReason !== null) {
     return (
       <>
