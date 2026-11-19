@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
 import {
@@ -65,6 +66,17 @@ describe("terminal close shortcut guards", () => {
     }
 
     expect(browserCloseCount).toBe(0);
+    for (const shiftKey of [false, true]) {
+      const repeatedTileClose = keyboardEvent({ repeat: true, shiftKey });
+      expect(
+        preventRepeatedTerminalCloseShortcut(
+          repeatedTileClose,
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          "Linux x86_64",
+        ),
+      ).toBe(true);
+      expect(repeatedTileClose.defaultPrevented).toBe(true);
+    }
     expect(preventRepeatedTerminalCloseShortcut(keyboardEvent(), keybindings, "Linux x86_64")).toBe(
       false,
     );

@@ -57,8 +57,8 @@ type WhenToken =
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle", when: "isMac || !terminalFocus" },
   { key: "mod+alt+shift+b", command: "toolSidebar.toggle" },
-  { key: "f6", command: "workspace.focusNext" },
-  { key: "shift+f6", command: "workspace.focusPrevious" },
+  { key: "f6", command: "workspace.focusNext", when: "!terminalFocus" },
+  { key: "shift+f6", command: "workspace.focusPrevious", when: "!terminalFocus" },
   // Some browsers keep plain F6 for their own toolbars; mod+F6 reaches the page in all of them.
   { key: "mod+f6", command: "workspace.focusNext" },
   { key: "mod+shift+f6", command: "workspace.focusPrevious" },
@@ -82,7 +82,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Ctrl+Alt+T opens a terminal on GNOME, and mod+alt+n starts a new chat on Linux and Windows.
   { key: "ctrl+alt+o", command: "workspace.tile.newTab" },
   { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
-  { key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" },
+  { key: "mod+w", command: "workspace.tile.closeTab" },
+  { key: "mod+shift+w", command: "workspace.tile.closeAllTabs" },
   { key: "ctrl+alt+.", command: "workspace.tile.actions" },
   { key: "ctrl+shift+tab", command: "workspace.tile.previousTab" },
   { key: "ctrl+alt+[", command: "workspace.tile.previousTab" },
@@ -94,9 +95,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+i", command: "threadContext.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
   { key: "mod+shift+d", command: "composer.dictation", when: "!terminalFocus" },
-  { key: "mod+shift+t", command: "view.reopenClosed" },
+  { key: "mod+shift+t", command: "view.reopenClosed", when: "isMac || !terminalFocus" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
-  { key: "mod+shift+j", command: "preview.toggle" },
+  { key: "mod+shift+j", command: "preview.toggle", when: "isMac || !terminalFocus" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
   { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
   { key: "mod+=", command: "preview.zoomIn", when: "previewFocus" },
@@ -158,7 +159,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
-    when: "!modelPickerOpen && isDesktop",
+    when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)",
   })),
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,

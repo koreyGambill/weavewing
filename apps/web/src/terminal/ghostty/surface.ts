@@ -323,7 +323,10 @@ export function isTerminalCopyShortcut(
     return event.ctrlKey && !event.shiftKey && !event.metaKey;
   }
   if (!keys.has("c")) return false;
-  return isMacPlatform(platform) ? event.metaKey : event.ctrlKey;
+  if (event.altKey) return false;
+  return isMacPlatform(platform)
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
 /** Primes native and Electron menu copy from the focused textarea; canvas has no DOM selection. */

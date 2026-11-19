@@ -143,9 +143,9 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     rule: { key: "ctrl+tab", command: "workspace.tile.nextTab" },
   },
   {
-    id: "workspace.tile.closeTab:meta+w",
+    id: "weavewing.terminal-keys.v1",
     alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
-    rule: { key: "meta+w", command: "workspace.tile.closeTab", when: "isMac" },
+    rule: { key: "mod+w", command: "workspace.tile.closeTab" },
   },
 ];
 
@@ -578,7 +578,45 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      const migrateTerminalKeys = pendingLateDefaults.some(
+        (late) => late.id === "weavewing.terminal-keys.v1",
+      );
+      const closeConflict = runtimeConfig.keybindings.some(
+        (rule) =>
+          rule.command !== "workspace.tile.closeTab" &&
+          hasSameShortcutContext(rule, { key: "mod+w", command: "workspace.tile.closeTab" }),
+      );
+      const customConfig = runtimeConfig.keybindings.map((rule) => {
+        if (!migrateTerminalKeys) return rule;
+        if (
+          !closeConflict &&
+          isSameKeybindingRule(rule, {
+            key: "meta+w",
+            command: "workspace.tile.closeTab",
+            when: "isMac",
+          })
+        )
+          return { key: "mod+w", command: rule.command };
+        if (
+          ((rule.command === "workspace.focusNext" && rule.key === "f6") ||
+            (rule.command === "workspace.focusPrevious" && rule.key === "shift+f6")) &&
+          rule.when === undefined
+        )
+          return { ...rule, when: "!terminalFocus" };
+        if (
+          /^thread\.jump\.[1-9]$/.test(rule.command) &&
+          rule.key === `mod+${rule.command.at(-1)}` &&
+          rule.when === "!modelPickerOpen && isDesktop"
+        )
+          return { ...rule, when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)" };
+        if (
+          ((rule.command === "view.reopenClosed" && rule.key === "mod+shift+t") ||
+            (rule.command === "preview.toggle" && rule.key === "mod+shift+j")) &&
+          rule.when === undefined
+        )
+          return { ...rule, when: "isMac || !terminalFocus" };
+        return rule;
+      });
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -648,7 +686,10 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length > 0) {
+      if (
+        defaultsToAppend.length > 0 ||
+        customConfig.some((rule, index) => rule !== runtimeConfig.keybindings[index])
+      ) {
         yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
       }
       const settledLateDefaults = pendingLateDefaults.filter(

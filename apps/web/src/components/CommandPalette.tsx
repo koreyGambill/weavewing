@@ -1312,7 +1312,16 @@ function OpenCommandPaletteDialog(props: {
     if (firstOption) startNewProject(firstOption.environmentId, null);
   };
 
-  const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
+    {
+      kind: "action",
+      value: "action:reload-app",
+      title: "Reload App",
+      searchTerms: ["reload", "refresh", "app"],
+      icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+      run: async () => window.location.reload(),
+    },
+  ];
 
   if (projects.length > 0) {
     const activeProjectTitle =

@@ -34,6 +34,7 @@ function makeHarness(options?: {
   const quit = vi.fn();
   const handler = makeQuitShortcutHandler({
     platform: options?.platform ?? "darwin",
+    isTerminalFocused: () => false,
     getMode: options?.getMode ?? (() => Promise.resolve(options?.mode ?? "hold")),
     notify: (event) => notifications.push(event),
     concealWindow,

@@ -25,6 +25,7 @@ export type ChatShortcutCommands = Partial<Record<KeybindingCommand, ChatShortcu
 /** Window-level commands the main chat still runs while focus is in its side chat pane. */
 const SIDE_CHAT_PANE_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "workspace.tile.closeTab",
+  "workspace.tile.closeAllTabs",
   "workspace.tile.maximize",
 ]);
 

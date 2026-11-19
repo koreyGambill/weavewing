@@ -71,6 +71,7 @@ export const WORKSPACE_TILE_KEYBINDING_COMMANDS = [
   "workspace.tile.float",
   "workspace.tile.newTab",
   "workspace.tile.closeTab",
+  "workspace.tile.closeAllTabs",
   "workspace.tile.actions",
   "workspace.tile.previousTab",
   "workspace.tile.nextTab",

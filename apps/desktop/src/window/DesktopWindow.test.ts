@@ -734,7 +734,13 @@ describe("DesktopWindow", () => {
           beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
           assert.equal(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], platform !== "darwin");
           beforeInput(event, { ...input, key: "r", shift: true });
-          assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          assert.equal(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], platform !== "darwin");
+          for (const key of ["a", "c", "v", "q", "F6", "F11", "Escape", "Tab"]) {
+            prevented = false;
+            beforeInput(event, { ...input, key, meta: false, control: true, isAutoRepeat: false });
+            assert.isFalse(prevented, key);
+            assert.isTrue(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], key);
+          }
           const navigation = fakeWindow.webContentsListeners.get("did-start-navigation");
           navigation?.({}, "http://127.0.0.1:3773/thread", true, true);
           beforeInput(event, { ...input, key: "r", isAutoRepeat: false });

@@ -191,12 +191,31 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 ## Reserved shortcuts
 
-Use `workspace.tile.closeTab` (`Ctrl+Alt+W`, or `Cmd+W` on macOS desktop) to close the selected tile tab.
-Focused terminals keep common shell keys, including `Ctrl+D` for EOF and
-`Ctrl+W` for word erase, and `Ctrl+R` for history search. Use **New tile below/right** to split the workspace;
-each terminal tab contains one shell. On Windows and Linux desktop, `Ctrl+R`
-reloads the app outside a terminal. Use `Ctrl+Shift+R` to reload without its cache.
-On macOS, `Cmd+B`, `Cmd+J`, and `Cmd+O` also work while a terminal has focus.
+Use `workspace.tile.closeTab` (`Ctrl+W` on Windows and Linux, `Cmd+W` on macOS)
+to close the selected tile tab, including a focused terminal. `Ctrl+Alt+W` also
+closes the selected tab. `workspace.tile.closeAllTabs` (`Ctrl+Shift+W`, or
+`Cmd+Shift+W` on macOS) closes every tab in the focused tile. Closing asks for
+confirmation only when a terminal has a running process; the prompt lists the
+running terminals that will stop. Both commands are in the command palette and
+Settings → Keybindings.
+
+These close shortcuts override terminal input. On Windows and Linux, vim's
+`Ctrl+W` window prefix and the shell's word-erase shortcut therefore close the
+tile tab. Remap the close commands in Settings if you want those keys in the
+terminal. Other Control keys, Escape, Tab, Shift+Tab, Alt combinations and function
+keys reach the focused terminal, including `Ctrl+R` for vim redo or shell history
+search, `Ctrl+Space` for completion, and `Ctrl+6` for vim's alternate buffer.
+Escape keeps working inside a maximized terminal or beside the tools overlay.
+Use `Ctrl+Shift+C` to copy terminal selections on Windows and Linux; `Ctrl+C`
+always reaches the terminal. Paste uses `Ctrl+Shift+V` there, leaving `Ctrl+V`
+for vim's visual block mode. macOS uses `Cmd+C` and `Cmd+V` for copy and paste.
+
+Use **New tile below/right** to split the workspace; each terminal tab contains
+one shell. On Windows and Linux desktop, reload the app through **View → Reload**
+or **Reload App** in the command palette. `Ctrl+R` has no app-reload accelerator.
+Use `Ctrl+Shift+R` to reload without its cache outside a focused terminal.
+On macOS, `Cmd+R` reloads, and `Cmd+B`, `Cmd+J`, and `Cmd+O` also work while a
+terminal has focus.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.
@@ -216,7 +235,8 @@ keyboard repeat; if repeat is disabled, use two presses or the application menu.
 
 Change **Settings → General → Confirmations → Quit shortcut** to **Direct** for a
 single press or **Double press** for two presses only. Choosing **Quit** from the
-application menu always quits immediately.
+application menu always quits immediately. A focused terminal keeps `Ctrl+Q` on
+Windows and Linux.
 
 Switch the left sidebar between the thread list and your last thread tool with
 `mod+alt+i` (`threadContext.toggle`). If the sidebar is hidden, it opens on
@@ -231,4 +251,4 @@ page. Hiding and reopening the sidebar restores its last page and width.
 
 Drag the page's left edge to resize it, or focus that edge and use Left and Right.
 Double-click the edge to reset its width. Maximize fills the main workspace;
-Escape restores the sidebar. The tools sidebar is hidden on narrow screens.
+Escape restores the sidebar when focus is outside a terminal. The tools sidebar is hidden on narrow screens.
