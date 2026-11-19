@@ -163,24 +163,40 @@ function makeWindow(
   };
 }
 
+interface StreamWindow {
+  readonly utilization?: number;
+  readonly resetsAt?: number;
+}
+
+/**
+ * The CLI reports each window in `unifiedWindows` and sets top-level `utilization` only past a
+ * warning threshold. Neither field is in the SDK typings we pin, so both are read structurally.
+ */
+function readStreamWindows(info: SDKRateLimitInfo): ReadonlyArray<[string, StreamWindow]> {
+  const unified = (info as { readonly unifiedWindows?: unknown }).unifiedWindows;
+  if (typeof unified === "object" && unified !== null) {
+    return Object.entries(unified as Record<string, StreamWindow>);
+  }
+  return info.rateLimitType ? [[info.rateLimitType, info]] : [];
+}
+
 /** Stream utilization is 0-1. Drop unnamed overage buckets until probed to avoid unreconcilable rows. */
 export function claudeRateLimitEventToUpdate(
   info: SDKRateLimitInfo,
   names: ClaudeScopedLimitNames,
 ): ProviderUsageLimitsUpdate | undefined {
-  const type: string | undefined = info.rateLimitType;
-  if (!type || typeof info.utilization !== "number") {
-    return undefined;
+  const windows: ServerProviderUsageWindow[] = [];
+  for (const [type, window] of readStreamWindows(info)) {
+    if (typeof window?.utilization !== "number") continue;
+    const usedPercent = window.utilization * 100;
+    const resetsAt = isoFromEpochSeconds(window.resetsAt);
+    if (type in WINDOWS) {
+      windows.push(makeWindow(type, usedPercent, resetsAt));
+    } else if (type === OVERAGE_INCLUDED_EVENT_TYPE && names.overageIncluded) {
+      windows.push(scopedWindow(names.overageIncluded, usedPercent, resetsAt));
+    }
   }
-  const usedPercent = info.utilization * 100;
-  const resetsAt = isoFromEpochSeconds(info.resetsAt);
-  if (type in WINDOWS) {
-    return { windows: [makeWindow(type, usedPercent, resetsAt)] };
-  }
-  if (type === OVERAGE_INCLUDED_EVENT_TYPE && names.overageIncluded) {
-    return { windows: [scopedWindow(names.overageIncluded, usedPercent, resetsAt)] };
-  }
-  return undefined;
+  return windows.length > 0 ? { windows } : undefined;
 }
 
 /** get_usage percentages are already 0-100. */

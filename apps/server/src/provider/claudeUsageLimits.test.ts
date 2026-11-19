@@ -284,4 +284,40 @@ describe("claudeRateLimitEventToUpdate", () => {
       ],
     });
   });
+
+  it("reads every unified window, including below the warning threshold", () => {
+    // Claude Code 2.1.322 sets top-level utilization only once a warning threshold is passed.
+    const event = {
+      status: "allowed",
+      resetsAt: 1795323600,
+      rateLimitType: "seven_day",
+      overageStatus: "rejected",
+      overageDisabledReason: "out_of_credits",
+      isUsingOverage: false,
+      unifiedWindows: {
+        seven_day: { utilization: 0.69, resetsAt: 1795323600, status: "allowed" },
+        seven_day_overage_included: { utilization: 0.03, resetsAt: 1795323600, status: "allowed" },
+      },
+    } as const;
+    expect(claudeRateLimitEventToUpdate(event, { overageIncluded: "Fable" })).toEqual({
+      windows: [
+        {
+          id: "seven_day",
+          kind: "weekly",
+          label: "Weekly",
+          usedPercent: 69,
+          windowDurationMins: 10080,
+          resetsAt: "2026-11-22T05:00:00.000Z",
+        },
+        {
+          id: "seven_day_fable",
+          kind: "weekly",
+          label: "Weekly · Fable",
+          usedPercent: 3,
+          windowDurationMins: 10080,
+          resetsAt: "2026-11-22T05:00:00.000Z",
+        },
+      ],
+    });
+  });
 });
