@@ -586,6 +586,25 @@ export async function deleteSelectedThreadEntries<
  * `delegatedUnderParent` holds the tasks linked environments run for a thread
  * the sidebar lists, by thread key; they show under that thread, as subagents do.
  */
+export function isSidebarV2VisibleThread(
+  thread: Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id" | "lineage"> & {
+    projectId: string;
+  },
+  scopedProjectKeys: ReadonlySet<string> | null,
+  delegatedUnderParent: ReadonlySet<string>,
+): boolean {
+  return (
+    thread.archivedAt === null &&
+    !isShownUnderParent(
+      { environmentId: thread.environmentId, threadId: thread.id },
+      thread.lineage,
+      delegatedUnderParent,
+    ) &&
+    (scopedProjectKeys === null ||
+      scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`))
+  );
+}
+
 export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id" | "lineage"> & {
     projectId: string;
@@ -595,16 +614,8 @@ export function filterSidebarV2VisibleThreads<
   scopedProjectKeys: ReadonlySet<string> | null,
   delegatedUnderParent: ReadonlySet<string>,
 ): T[] {
-  return threads.filter(
-    (thread) =>
-      thread.archivedAt === null &&
-      !isShownUnderParent(
-        { environmentId: thread.environmentId, threadId: thread.id },
-        thread.lineage,
-        delegatedUnderParent,
-      ) &&
-      (scopedProjectKeys === null ||
-        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+  return threads.filter((thread) =>
+    isSidebarV2VisibleThread(thread, scopedProjectKeys, delegatedUnderParent),
   );
 }
 
@@ -612,6 +623,18 @@ export const SidebarAutomationThreadFilter = Schema.Literals(["show", "hide", "o
 export type SidebarAutomationThreadFilter = typeof SidebarAutomationThreadFilter.Type;
 
 /** Applies the viewer's automation-thread filter to listed rows; the open thread always stays. */
+export function isSidebarAutomationThreadShown(
+  thread: Pick<SidebarThreadSummary, "environmentId" | "id" | "automationTaskId">,
+  filter: SidebarAutomationThreadFilter,
+  openThreadKey: string | null,
+): boolean {
+  return (
+    filter === "show" ||
+    (thread.automationTaskId !== undefined) === (filter === "only") ||
+    scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === openThreadKey
+  );
+}
+
 export function filterSidebarAutomationThreads<
   T extends Pick<SidebarThreadSummary, "environmentId" | "id" | "automationTaskId">,
 >(
@@ -620,11 +643,7 @@ export function filterSidebarAutomationThreads<
   openThreadKey: string | null,
 ): readonly T[] {
   if (filter === "show") return threads;
-  return threads.filter(
-    (thread) =>
-      (thread.automationTaskId !== undefined) === (filter === "only") ||
-      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === openThreadKey,
-  );
+  return threads.filter((thread) => isSidebarAutomationThreadShown(thread, filter, openThreadKey));
 }
 
 /** Keeps visible forks beside their parent, with the newest family first. */

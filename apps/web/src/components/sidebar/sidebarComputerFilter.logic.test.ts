@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  filterSidebarComputerThreads,
   groupSidebarComputers,
+  isSidebarComputerThreadShown,
   pruneSidebarComputerScope,
   resolveSidebarComputerScope,
   toggleSidebarComputerScope,
@@ -57,21 +57,19 @@ describe("resolveSidebarComputerScope", () => {
   });
 });
 
-describe("filterSidebarComputerThreads", () => {
-  const threads = [
-    { environmentId: "a", id: "1" },
-    { environmentId: "b", id: "2" },
-    { environmentId: "b", id: "3" },
-  ];
+describe("isSidebarComputerThreadShown", () => {
+  const onB = { environmentId: "b", id: "2" };
 
-  it("keeps threads on chosen servers and the open thread", () => {
+  it("shows threads on chosen servers and the open thread", () => {
     expect(
-      filterSidebarComputerThreads(threads, new Set(["a"]), "b:3").map((thread) => thread.id),
-    ).toEqual(["1", "3"]);
+      isSidebarComputerThreadShown({ environmentId: "a", id: "1" }, new Set(["a"]), null),
+    ).toBe(true);
+    expect(isSidebarComputerThreadShown(onB, new Set(["a"]), null)).toBe(false);
+    expect(isSidebarComputerThreadShown(onB, new Set(["a"]), "b:2")).toBe(true);
   });
 
-  it("keeps every thread without a choice", () => {
-    expect(filterSidebarComputerThreads(threads, null, null)).toBe(threads);
+  it("shows every thread without a choice", () => {
+    expect(isSidebarComputerThreadShown(onB, null, null)).toBe(true);
   });
 });
 

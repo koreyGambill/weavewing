@@ -170,8 +170,8 @@ import {
 } from "./threadActionMenu.logic";
 import {
   applySidebarThreadDrop,
-  filterSidebarAutomationThreads,
-  filterSidebarV2VisibleThreads,
+  isSidebarAutomationThreadShown,
+  isSidebarV2VisibleThread,
   SidebarAutomationThreadFilter,
   groupSidebarThreadsByProject,
   groupSidebarThreadFamilies,
@@ -250,8 +250,8 @@ import { useCatalogEnvironmentIds, useEnvironments } from "../state/environments
 import { settingsScopeEnvironmentLabel } from "./settings/settingsScopeAxis";
 import { CheckboxMark } from "./ui/checkbox";
 import {
-  filterSidebarComputerThreads,
   groupSidebarComputers,
+  isSidebarComputerThreadShown,
   pruneSidebarComputerScope,
   resolveSidebarComputerScope,
   toggleSidebarComputerScope,
@@ -725,14 +725,12 @@ function useSidebarThreads(input: {
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const { threads, scopedProjectKeys, delegatedUnderParent, serverConfigs, optimisticDrop } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarComputerThreads(
-    filterSidebarAutomationThreads(
-      filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent),
-      input.automationFilter,
-      input.routeRowThreadKey,
-    ),
-    input.environmentScope,
-    input.routeRowThreadKey,
+  // One pass over every thread: project scope, automation filter and computer filter together.
+  const visible = threads.filter(
+    (thread) =>
+      isSidebarV2VisibleThread(thread, scopedProjectKeys, delegatedUnderParent) &&
+      isSidebarAutomationThreadShown(thread, input.automationFilter, input.routeRowThreadKey) &&
+      isSidebarComputerThreadShown(thread, input.environmentScope, input.routeRowThreadKey),
   );
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];

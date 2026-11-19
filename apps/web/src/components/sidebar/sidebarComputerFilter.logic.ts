@@ -51,18 +51,16 @@ export function pruneSidebarComputerScope(input: {
   return kept.length === input.storedIds.length ? null : kept;
 }
 
-/** Keeps threads on the chosen servers; the open thread always stays listed. */
-export function filterSidebarComputerThreads<
-  T extends { readonly environmentId: string; readonly id: string },
->(
-  threads: readonly T[],
+/** Whether a thread passes the computer filter; the open thread always does. */
+export function isSidebarComputerThreadShown(
+  thread: { readonly environmentId: string; readonly id: string },
   scope: ReadonlySet<string> | null,
   openThreadKey: string | null,
-): readonly T[] {
-  if (scope === null) return threads;
-  return threads.filter(
-    (thread) =>
-      scope.has(thread.environmentId) || `${thread.environmentId}:${thread.id}` === openThreadKey,
+): boolean {
+  return (
+    scope === null ||
+    scope.has(thread.environmentId) ||
+    `${thread.environmentId}:${thread.id}` === openThreadKey
   );
 }
 
