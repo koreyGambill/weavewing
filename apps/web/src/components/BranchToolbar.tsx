@@ -65,6 +65,7 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "./ui/menu";
+import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -260,6 +261,13 @@ const RunContextSelector = memo(function RunContextSelector({
         {autoEnvironmentLabel ??
           (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
       </ComposerContextLabel>
+      {showEnvironmentIndicator &&
+      !autoEnvironmentLabel &&
+      activeEnvironment?.isPrimary === false ? (
+        <Badge variant="warning" size="sm">
+          External
+        </Badge>
+      ) : null}
       {/* Trailing in the panel, so every row label starts on the same edge. */}
       {isPanel && showEnvironmentIndicator ? workspaceIcon : null}
     </>
@@ -724,6 +732,10 @@ export const BranchToolbar = memo(function BranchToolbar({
   const [attachStrip, labelsOverflow] = useLabelsOverflow();
   // The composer strip always names the machine, so the line reads machine, folder, branch.
   const showServer = activeEnvironmentOption !== null;
+  // A locked thread in the project's own checkout is the default, so naming it adds only noise.
+  const showWorkspaceMode =
+    showGitControls &&
+    !(envModeLocked && !forceNewWorktree && !activeWorktreePath && effectiveEnvMode === "local");
 
   if (!activeProject) return null;
 
@@ -840,7 +852,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
                 {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
               />
-              {showGitControls ? (
+              {showWorkspaceMode ? (
                 <Separator
                   orientation="vertical"
                   className="mx-0.5 h-3.5!"
@@ -849,7 +861,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               ) : null}
             </>
           )}
-          {showGitControls ? (
+          {showWorkspaceMode ? (
             <BranchToolbarEnvModeSelector
               forceNewWorktree={forceNewWorktree}
               envLocked={envModeLocked}

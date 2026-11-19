@@ -1,5 +1,6 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
+import { Badge } from "./ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import { useAtomValue } from "@effect/atom-react";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -51,6 +52,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   );
   const activeEnvironment =
     availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
+  const externalBadge =
+    activeEnvironment && !activeEnvironment.isPrimary ? (
+      <Badge variant="warning" size="sm">
+        External
+      </Badge>
+    ) : null;
 
   const environmentItems = [
     ...(onAutoEnvironment
@@ -76,6 +83,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           className="size-3 shrink-0"
         />
         <ComposerContextLabel>{activeEnvironment?.label ?? "Run on"}</ComposerContextLabel>
+        {externalBadge}
       </span>
     );
     return (
@@ -124,9 +132,11 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           <ComposerContextLabel>
             <SelectValue />
           </ComposerContextLabel>
+          {autoEnvironmentLabel ? null : externalBadge}
         </TooltipTrigger>
         <TooltipPopup>
           {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+          {externalBadge && !autoEnvironmentLabel ? " · another machine" : null}
           {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
       </Tooltip>
