@@ -1,3 +1,4 @@
+import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
 import { openChangeThreadFolder } from "../components/chat/changeThreadFolderDialogState";
 import { nextThreadGlyphSeed } from "@t3tools/client-runtime/thread-glyphs";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -65,10 +66,20 @@ export function useThreadActionMenu(input: {
   readonly threadRef: ScopedThreadRef | null;
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
+  readonly onOpenSideChat?: (() => void) | undefined;
+  readonly onOpenChanges?: (() => void) | undefined;
   readonly onFind?: ((threadRef: ScopedThreadRef) => void) | undefined;
   readonly canShareWithGuest: boolean;
 }) {
-  const { threadRef, projectCwd, onStartRename, onFind, canShareWithGuest } = input;
+  const {
+    threadRef,
+    projectCwd,
+    onStartRename,
+    onFind,
+    onOpenChanges,
+    onOpenSideChat,
+    canShareWithGuest,
+  } = input;
   const router = useRouter();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -135,6 +146,9 @@ export function useThreadActionMenu(input: {
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
+        canOpenChanges: onOpenChanges !== undefined,
+        showThreadTools: true,
+        canOpenSideChat: onOpenSideChat !== undefined,
         branch: thread.branch ?? null,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
@@ -189,6 +203,16 @@ export function useThreadActionMenu(input: {
         }
       };
       switch (action) {
+        case "side-chat":
+          onOpenSideChat?.();
+          return;
+        case "todos":
+        case "automations":
+          useThreadContextSidebarStore.getState().show(action, { thread: threadRef });
+          return;
+        case "changes":
+          onOpenChanges?.();
+          return;
         case "find":
           onFind?.(threadRef);
           return;

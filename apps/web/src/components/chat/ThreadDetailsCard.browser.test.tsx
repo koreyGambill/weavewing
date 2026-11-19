@@ -1,10 +1,10 @@
 import { StrictMode } from "react";
 import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import { expect, it } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { act, render } from "../../../test/render";
 import { selectThreadPanelOpen, useRightPanelStore } from "../../rightPanelStore";
-import { PopoverCreateHandle } from "../ui/popover";
+import { PopoverCreateHandle, PopoverTrigger } from "../ui/popover";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout } from "./chatCanvasLayout";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
@@ -22,6 +22,7 @@ const placement = { x: 908, y: 0, right: 12, width: 280, height: 400 } as const;
 
 function setup() {
   useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
+  useRightPanelStore.getState().setThreadPanelOpen(threadB, "inline", true);
   const anchor = document.createElement("div");
   document.body.append(anchor);
   return {
@@ -72,6 +73,7 @@ function Card({
           detailsCardPlacement: inline ? placement : null,
         }}
       >
+        <PopoverTrigger handle={fixture.handle}>Toggle Details</PopoverTrigger>
         <ThreadDetailsCard
           threadRef={threadRef}
           anchor={fixture.anchor}
@@ -108,37 +110,36 @@ it("stays open once opened", async () => {
   expect(popoverOpen(threadB)).toBe(true);
 });
 
-it("closes a popup left open when the card switches inline, and reopens from the flag", async () => {
+it("keeps an explicitly opened fallback visible when the tile grows from default closed", async () => {
   using fixture = setup();
+  useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
   await using screen = await render(<Card threadRef={threadB} inline={false} fixture={fixture} />);
-  const setOpen = (open: boolean) =>
-    act(() => useRightPanelStore.getState().setThreadPanelOpen(threadB, "popover", open));
-  await setOpen(true);
-  await expect.element(page.getByText("Details for thread-b")).toBeVisible();
+  const rows = page.getByText("Details for thread-b");
+  await expect.element(rows).not.toBeInTheDocument();
+  await page.getByRole("button", { name: "Toggle Details" }).click();
+  await expect.element(rows).toBeVisible();
 
-  useRightPanelStore.getState().setThreadPanelOpen(threadB, "inline", false);
   await screen.rerender(<Card threadRef={threadB} inline fixture={fixture} />);
-  await expect.element(page.getByText("Details for thread-b")).not.toBeInTheDocument();
-  await setOpen(false);
-
-  await screen.rerender(<Card threadRef={threadB} inline={false} fixture={fixture} />);
-  await expect.element(page.getByText("Details for thread-b")).not.toBeInTheDocument();
-  await setOpen(true);
-  await expect.element(page.getByText("Details for thread-b")).toBeVisible();
+  await expect
+    .element(page.getByRole("region", { name: "Thread details" }).getByText("Details for thread-b"))
+    .toBeVisible();
+  expect(popoverOpen(threadB)).toBe(false);
 });
 
-it("does not reopen the popover when the card returns from inline mode", async () => {
+it("stays closed on resize after the fallback is dismissed", async () => {
   using fixture = setup();
+  useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
   await using screen = await render(<Card threadRef={threadB} inline={false} fixture={fixture} />);
-  await act(() => useRightPanelStore.getState().setThreadPanelOpen(threadB, "popover", true));
-  await expect.element(page.getByText("Details for thread-b")).toBeVisible();
+  const rows = page.getByText("Details for thread-b");
+  await page.getByRole("button", { name: "Toggle Details" }).click();
+  await expect.element(rows).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(rows).not.toBeInTheDocument();
 
-  useRightPanelStore.getState().setThreadPanelOpen(threadB, "inline", false);
   await screen.rerender(<Card threadRef={threadB} inline fixture={fixture} />);
-  await expect.element(page.getByText("Details for thread-b")).not.toBeInTheDocument();
-
+  await expect.element(rows).not.toBeInTheDocument();
   await screen.rerender(<Card threadRef={threadB} inline={false} fixture={fixture} />);
-  await expect.element(page.getByText("Details for thread-b")).not.toBeInTheDocument();
+  await expect.element(rows).not.toBeInTheDocument();
   expect(popoverOpen(threadB)).toBe(false);
 });
 

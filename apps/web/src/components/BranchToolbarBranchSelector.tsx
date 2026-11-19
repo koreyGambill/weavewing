@@ -41,7 +41,6 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { vcsEnvironment } from "../state/vcs";
 import { cn } from "../lib/utils";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./chat/threadDetailsPanelStyles";
-import { ThreadDetailsThreadPrRows } from "./chat/ThreadDetailsPrRows";
 import { parsePullRequestReference } from "@t3tools/client-runtime/pull-request-link-input";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
@@ -868,15 +867,6 @@ export function BranchToolbarBranchSelector({
             </ComposerContextLabel>
           </ComboboxTrigger>
         </span>
-        {displayMode === "panel" ? (
-          <ThreadDetailsThreadPrRows
-            threadRef={threadRef}
-            project={activeProject}
-            branchPr={branchPr}
-            branchSourceControlProvider={branchStatusQuery.data?.sourceControlProvider}
-            onActed={() => branchStatusQuery.refresh()}
-          />
-        ) : null}
       </div>
     </BranchPicker>
   );
