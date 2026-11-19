@@ -323,6 +323,8 @@ export type ClaudeCapabilitiesProbe = {
   /** Undefined means get_usage failed; absent windows on success mean no subscription windows, as with API keys. */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
   readonly usageCheckedAt?: string;
+  /** Which step of the usage read failed, shown in place of the limits. */
+  readonly usageError?: string;
   /** Each settings source's `maxEffortLevel` caps; Claude Code clamps every higher effort. */
   readonly effortCapSources?: ReadonlyArray<ClaudeEffortCapSource>;
 };
@@ -572,6 +574,13 @@ const probeClaudeCapabilities = (
           ],
           { concurrency: "unbounded" },
         );
+        const usageError =
+          usageResult && Result.isFailure(usageResult)
+            ? describeClaudeUsageFailure(usageResult.failure)
+            : undefined;
+        if (usageError) {
+          yield* Effect.logWarning("Claude usage read failed.", { reason: usageError });
+        }
         const usage =
           usageResult && Result.isSuccess(usageResult)
             ? {
@@ -600,6 +609,7 @@ const probeClaudeCapabilities = (
           slashCommands: parseClaudeInitializationCommands(init.commands),
           ...(init.models?.length ? { models: init.models } : {}),
           ...(usage ? { usage, usageCheckedAt } : {}),
+          ...(usageError ? { usageError } : {}),
           ...(effortCapSources ? { effortCapSources } : {}),
         } satisfies ClaudeCapabilitiesProbe;
       }).pipe(
@@ -618,6 +628,14 @@ const probeClaudeCapabilities = (
 };
 
 type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
+
+function describeClaudeUsageFailure(error: { readonly _tag: string; readonly cause?: unknown }) {
+  if (error._tag !== "ClaudeCapabilitiesProbeSdkError") {
+    return `Claude Code did not answer the usage request within ${DEFAULT_TIMEOUT_MS / 1000} seconds.`;
+  }
+  const detail = error.cause instanceof Error ? error.cause.message : String(error.cause);
+  return `Claude Code could not read plan usage: ${detail.slice(0, 200)}`;
+}
 
 const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   claudeSettings: ClaudeSettings,
@@ -869,7 +887,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   const usageCheckedAt = capabilities.usageCheckedAt ?? checkedAt;
   const usageLimits = !capabilities.usage
-    ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
+    ? makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "probeFailed",
+        ...(capabilities.usageError ? { message: capabilities.usageError } : {}),
+      })
     : scopedLimitNames
       ? yield* recordClaudeUsageResponse(scopedLimitNames, {
           response: capabilities.usage,

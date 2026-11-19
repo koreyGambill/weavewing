@@ -317,6 +317,7 @@ type TestClaudeCapabilities = {
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
   readonly models?: ReadonlyArray<ModelInfo>;
+  readonly usageError?: string;
 };
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
@@ -4305,6 +4306,35 @@ it.layer(
         );
         assert.isNull(status.version, "mise's own version is not Claude's");
       }),
+    );
+
+    it.effect("names the failed step when Claude Code returns no usage", () =>
+      Effect.gen(function* () {
+        const usageError = "Claude Code did not answer the usage request within 4 seconds.";
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            subscriptionType: "max",
+            tokenSource: "claude.ai",
+            apiProvider: "firstParty",
+            usageError,
+          }),
+          { ANTHROPIC_BASE_URL: "" },
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.deepStrictEqual(status.usageLimits?.unavailable, {
+          reason: "probeFailed",
+          message: usageError,
+        });
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "2.1.322\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
     );
 
     it.effect("reports a logged-out CLI as unauthenticated", () =>

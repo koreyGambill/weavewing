@@ -210,6 +210,9 @@ export function claudeUsageResponseToLimits(input: {
       limits: makeUnavailableUsageLimits({
         checkedAt,
         reason: response.rate_limits_available ? "probeFailed" : "unsupported",
+        ...(response.rate_limits_available
+          ? { message: "Claude Code reported plan limits but returned no values." }
+          : {}),
       }),
       names: { overageIncluded: undefined },
     };

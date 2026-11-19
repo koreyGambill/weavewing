@@ -69,9 +69,11 @@ const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 
 const withoutUsage = (capabilities: ClaudeCapabilitiesProbe): ClaudeCapabilitiesProbe => {
-  const result = { ...capabilities };
-  delete result.usage;
-  return result;
+  const { usage: _usage, ...rest } = capabilities;
+  return {
+    ...rest,
+    usageError: "Claude Code's account check failed, so limits were not read this time.",
+  };
 };
 
 export type ClaudeDriverEnv =
