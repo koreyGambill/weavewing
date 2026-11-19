@@ -323,7 +323,9 @@ function PullRequestBadge({
           className={cn("contents font-normal text-xs tabular-nums", presentation.toneClassName)}
         >
           <presentation.Icon aria-hidden className="size-3 shrink-0" />
-          <span className="text-secondary-label">{presentation.text}</span>
+          <span data-slot="pull-request-badge-number" className="text-secondary-label">
+            {presentation.text}
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipPopup

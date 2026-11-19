@@ -878,6 +878,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   // Matches the composer's External badge: anything but this client's primary environment.
   const isExternal = thread.environmentId !== props.currentEnvironmentId;
+  const externalLabel = isExternal ? `On ${props.environmentLabel ?? "another machine"}` : null;
   const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
@@ -1065,6 +1066,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     statusLabel: topStatus?.label ?? null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
+    externalLabel,
   });
 
   const title = isRenaming ? (
@@ -1078,6 +1080,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     <span
       className={cn(
         "min-w-0 flex-1 text-start text-sm transition-opacity motion-reduce:transition-none",
+        variant === "card" && "min-w-12",
         shouldRecede ? "font-normal" : "font-medium",
         variant !== "slim"
           ? cn(
@@ -1198,20 +1201,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         <EnvironmentMachineIcon aria-hidden kind={props.environmentMachine} className="size-3.5" />
       </span>
     ) : null;
-  const externalMarker = isExternal ? (
+  const externalMarker = externalLabel ? (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
             role="img"
-            aria-label={`On ${props.environmentLabel ?? "another machine"}`}
+            aria-label={externalLabel}
             className="inline-flex shrink-0 items-center text-warning-foreground"
           />
         }
       >
         <ArrowUpRightIcon aria-hidden className="size-3.5" />
       </TooltipTrigger>
-      <TooltipPopup side="top">On {props.environmentLabel ?? "another machine"}</TooltipPopup>
+      <TooltipPopup side="top">{externalLabel}</TooltipPopup>
     </Tooltip>
   ) : null;
   const diff = latestRunDiff(thread);
@@ -1223,10 +1226,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     diff === null &&
     runningTerminalIds.length === 0;
   // The marker is a button, so it sits outside the decorative, non-interactive icons.
-  const trailingIcons = (className?: string) => (
+  const trailingIcons = (className?: string, decorationClassName?: string) => (
     <span className={cn("inline-flex shrink-0 items-center gap-1", className)}>
       {automationMarker}
-      <span aria-hidden className="pointer-events-none inline-flex items-center gap-1">
+      <span
+        aria-hidden
+        className={cn("pointer-events-none inline-flex items-center gap-1", decorationClassName)}
+      >
         {remoteMachineIcon}
         <SidebarProviderStack
           thread={thread}
@@ -1269,6 +1275,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </div>
   );
   const titleLineIcons = metaLineEmpty ? trailingIcons() : null;
+  const hasTerminal = runningTerminalIds.length > 0;
+  const prNumberCollapse = CARD_PR_NUMBER_COLLAPSE[Number(hasTerminal) + Number(isExternal)];
+  const terminalCollapse = CARD_TERMINAL_COLLAPSE[Number(prBadge !== null) + Number(isExternal)];
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
@@ -1649,7 +1658,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+            <div className="@container/title-line mt-1 flex min-w-0 items-center gap-1.5">
               <ThreadGlyph
                 threadId={thread.id}
                 seed={thread.glyphSeed}
@@ -1663,9 +1672,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   Regenerating title
                 </span>
               ) : null}
-              {terminalStatusIcon}
-              {prBadge}
-              {trailingIcons()}
+              {hasTerminal ? (
+                <span className={cn("contents", terminalCollapse)}>{terminalStatusIcon}</span>
+              ) : null}
+              {prBadge ? <span className={cn("contents", prNumberCollapse)}>{prBadge}</span> : null}
+              {/* Below the title's minimum, the provider icons and then the machine wrap onto a
+                  clipped second line, so they give way before anything else. */}
+              {trailingIcons("min-w-0 shrink", "h-4 min-w-0 flex-wrap justify-end overflow-hidden")}
             </div>
           </div>
         </TooltipTrigger>
@@ -1674,6 +1687,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </li>
   );
 });
+
+// Indexed by how many other title line indicators render (terminal or PR, and the external marker).
+// Each breakpoint is where they stop fitting beside a 3rem title, sized for a five-digit PR.
+// Container queries cannot see sibling content, so the row picks the breakpoint for its own set.
+const CARD_PR_NUMBER_COLLAPSE = [
+  "@max-[8.75rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
+  "@max-[10rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
+  "@max-[11.25rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
+] as const;
+const CARD_TERMINAL_COLLAPSE = [
+  "@max-[6.25rem]/title-line:hidden",
+  "@max-[7.5rem]/title-line:hidden",
+  "@max-[8.5rem]/title-line:hidden",
+] as const;
 
 function latestRunDiff(
   thread: SidebarThreadSummary,
