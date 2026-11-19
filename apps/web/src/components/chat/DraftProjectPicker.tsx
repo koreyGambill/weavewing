@@ -620,13 +620,7 @@ export function DraftProjectPicker({
                       </span>
                     ) : (
                       <>
-                        <span
-                          className={cn(
-                            "truncate",
-                            projectRow &&
-                              "max-w-[50%] shrink-0 @max-[24rem]/picker:max-w-none @max-[24rem]/picker:shrink",
-                          )}
-                        >
+                        <span className={cn("truncate", projectRow && "max-w-full shrink-0")}>
                           {item.label}
                         </span>
                         {projectRow && path ? (
