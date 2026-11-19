@@ -166,9 +166,10 @@ describe("CommandPalette open intents", () => {
     await expect
       .element(page.getByRole("button", { name: "All machines", exact: true }))
       .toBeVisible();
+    await expect.element(page.getByRole("option", { name: /^Acme/ })).toHaveAttribute("data-selected");
     await userEvent.keyboard("{ArrowDown}");
-    await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
-    await expect.element(page.getByRole("option").nth(1)).not.toHaveAttribute("data-highlighted");
+    await expect.element(page.getByRole("option", { name: /^Beta/ })).toHaveAttribute("data-highlighted");
+    await expect.element(page.getByRole("option", { name: /^Acme/ })).not.toHaveAttribute("data-highlighted");
   });
 
   it("separates commands from thread search and focuses its query", async () => {
