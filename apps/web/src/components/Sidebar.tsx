@@ -455,6 +455,7 @@ function useSidebarThreads(input: {
   readonly keepEmptyFolders: (group: SidebarProjectSnapshot) => boolean;
   // The user's own groups for active threads; null when folders own the active area.
   readonly threadGroups: SidebarThreadGroups | null;
+  readonly renamingGroupId: string | null;
 }) {
   const {
     projectScopeKey,
@@ -469,6 +470,7 @@ function useSidebarThreads(input: {
     keepEmptyFolders: keepEmpty,
     automationFilter,
     threadGroups,
+    renamingGroupId,
   } = input;
   const nowMinute = useNowMinute();
   // Minute-quantized clocks would delay second-precise snooze wakes by up to a minute.
@@ -571,7 +573,10 @@ function useSidebarThreads(input: {
             return families;
           }, []),
           // A filter would otherwise leave a column of empty headers.
-          { hideEmptyGroups: scopedProjectKeys !== null || automationFilter === "only" },
+          {
+            hideEmptyGroups: scopedProjectKeys !== null || automationFilter === "only",
+            keepGroupId: renamingGroupId,
+          },
         );
   const threadGroupSections =
     threadGroups === null || threadGroupArrangement === null
@@ -1416,6 +1421,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     keepEmptyFolders: (group) =>
       scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
     threadGroups: boringSidebarEnabled ? null : threadGroups,
+    renamingGroupId,
   });
   // Stable for drag sensor options, which must keep their identity, yet reads the latest layout.
   const readThreadGroupArrangement = useStableCallback(() => threadGroupArrangement);
@@ -1428,6 +1434,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const cancelThreadGroupRename = useStableCallback(() => setRenamingGroupId(null));
   const createThreadGroup = (threadKey?: string) => {
+    // A click on "New group" while one is being named only commits that name.
+    if (threadKey === undefined && renamingGroupId !== null) return;
     const id = randomUUID();
     setThreadGroups((current) =>
       addSidebarThreadGroup(current, {
@@ -3803,6 +3811,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                   <button
                                     type="button"
                                     data-sidebar-row="group:new"
+                                    // Keeps focus in a name being typed, so the click below sees it and does nothing.
+                                    onMouseDown={(event) => {
+                                      if (renamingGroupId !== null) event.preventDefault();
+                                    }}
                                     onClick={() => createThreadGroup()}
                                     className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
                                   >

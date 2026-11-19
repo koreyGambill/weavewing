@@ -51,7 +51,8 @@ export type SidebarGroupHit =
 export function arrangeSidebarThreadGroups(
   state: SidebarThreadGroups,
   families: ReadonlyArray<Family>,
-  options: { readonly hideEmptyGroups: boolean },
+  // `keepGroupId` names a group the user is naming, which stays shown even when empty.
+  options: { readonly hideEmptyGroups: boolean; readonly keepGroupId?: string | null },
 ): SidebarThreadGroupArrangement {
   const familyByHead = new Map(families.map((family) => [family[0]!, family]));
   const grouped = new Set<string>();
@@ -75,7 +76,11 @@ export function arrangeSidebarThreadGroups(
   }
   ranked.sort((left, right) => manualRank.get(left[0]!)! - manualRank.get(right[0]!)!);
   return {
-    groups: options.hideEmptyGroups ? groups.filter((group) => group.families.length > 0) : groups,
+    groups: options.hideEmptyGroups
+      ? groups.filter(
+          (group) => group.families.length > 0 || group.group.id === options.keepGroupId,
+        )
+      : groups,
     ungrouped: [...fresh, ...ranked],
   };
 }

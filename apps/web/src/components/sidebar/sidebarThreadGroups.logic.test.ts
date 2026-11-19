@@ -67,6 +67,13 @@ describe("arrangeSidebarThreadGroups", () => {
         (group) => group.group.id,
       ),
     ).toEqual(["full"]);
+    // A group being created or renamed stays on screen so its name field does too.
+    expect(
+      arrangeSidebarThreadGroups(groups, families("a"), {
+        hideEmptyGroups: true,
+        keepGroupId: "empty",
+      }).groups.map((group) => group.group.id),
+    ).toEqual(["empty", "full"]);
   });
 });
 
