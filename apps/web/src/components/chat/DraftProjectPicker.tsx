@@ -19,8 +19,8 @@ import {
 } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { ArrowLeftIcon, FolderGit2Icon, FolderOpenIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeftIcon, FolderGit2Icon, FolderOpenIcon, StarIcon } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
 import {
@@ -40,7 +40,9 @@ import { registerCommands } from "~/shortcuts/dispatcher";
 import { useEnvironments } from "~/state/environments";
 import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
-import { primaryServerKeybindingsAtom } from "~/state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
+import { updateClientSettings } from "~/hooks/useSettings";
+import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentsWithScope } from "~/state/session";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
@@ -58,6 +60,7 @@ import {
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { DraftProjectName } from "./DraftProjectName";
+import { ComposerControl } from "./ComposerControl";
 import { useProjectPickerBrowse, useProjectPickerHomes } from "./useProjectPickerBrowse";
 
 interface PickerItem {
@@ -86,6 +89,9 @@ export function DraftProjectPicker({
   onAddProject,
   onStartWithoutProject,
   defaultFolderLabel,
+  currentFolder = null,
+  defaultFolder = null,
+  trigger,
 }: {
   readonly draftId?: DraftId | null;
   readonly inline?: boolean;
@@ -100,6 +106,16 @@ export function DraftProjectPicker({
   readonly onStartWithoutProject?: () => void;
   readonly defaultFolderLabel?: string | null;
   readonly onAddProject: (step: "folder" | "clone") => void;
+  /** The folder this draft starts in; "Make this the default" saves it with the machine. */
+  readonly currentFolder?: string | null;
+  /** The machine's default folder, so the default place can be recognized. */
+  readonly defaultFolder?: string | null;
+  /** Replaces the project-name trigger, as the where-line under the composer does. */
+  readonly trigger?: {
+    readonly content: ReactNode;
+    readonly ariaLabel: string;
+    readonly className?: string;
+  };
 }) {
   const projects = useProjects();
   const threads = useThreadShells();
@@ -120,6 +136,28 @@ export function DraftProjectPicker({
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
+  const preferredEnvironmentId = usePreferredEnvironmentId();
+  const canSaveDefaultFolder = useAtomValue(
+    serverEnvironment.updateSettings.permissionAtom(environmentId),
+  );
+  const saveServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  });
+  const atDefaultPlace =
+    environmentId !== null &&
+    environmentId === preferredEnvironmentId &&
+    (currentFolder === null || currentFolder === defaultFolder);
+  const makeDefault = async () => {
+    if (!environmentId) return;
+    await updateClientSettings({ preferredEnvironmentId: environmentId });
+    if (currentFolder !== null && currentFolder !== defaultFolder && canSaveDefaultFolder) {
+      const result = await saveServerSettings({
+        environmentId,
+        input: { patch: { scratchStartDirectory: currentFolder } },
+      });
+      if (result._tag === "Failure") setError("Could not save this folder as the default.");
+    }
+  };
   const connected = environments.filter((env) => env.connection.phase === "connected");
   const targets = (open ? connected : [])
     .filter((env) => allMachines || env.environmentId === environmentId)
@@ -251,7 +289,6 @@ export function DraftProjectPicker({
     if (next) {
       setQuery("");
       setExpanded(false);
-      setAllMachines(false);
     }
   };
   const switchMachine = (id: EnvironmentId) => {
@@ -419,9 +456,21 @@ export function DraftProjectPicker({
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
-              {connected.map((env) => (
-                <SelectItem key={env.environmentId} value={env.environmentId}>
-                  {env.label}
+              {environments.map((env) => (
+                <SelectItem
+                  key={env.environmentId}
+                  value={env.environmentId}
+                  disabled={!connectedIds.has(env.environmentId)}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    {env.label}
+                    {env.environmentId === preferredEnvironmentId ? (
+                      <StarIcon aria-label="Default" className="size-3" />
+                    ) : null}
+                    {connectedIds.has(env.environmentId) ? null : (
+                      <span className="text-muted-foreground">offline</span>
+                    )}
+                  </span>
                 </SelectItem>
               ))}
             </SelectPopup>
@@ -655,6 +704,18 @@ export function DraftProjectPicker({
           );
         }}
       </ComboboxList>
+      {environmentId !== null && !inline ? (
+        <div className="flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-muted-foreground text-xs">
+          <StarIcon className="size-3 shrink-0" aria-hidden="true" />
+          {atDefaultPlace ? (
+            <span className="min-w-0 truncate">This is your default place for new threads</span>
+          ) : (
+            <InlineButton tone="muted" onClick={() => void makeDefault()}>
+              Make this the default place
+            </InlineButton>
+          )}
+        </div>
+      ) : null}
       <div className="shrink-0 border-t px-3 py-2 text-muted-foreground text-3xs">
         Tab complete · ↵ open · ⌫ up ·{" "}
         {shortcutLabelForCommand(keybindings, "projectPicker.nextMachine")} machine ·{" "}
@@ -690,21 +751,41 @@ export function DraftProjectPicker({
           <Tooltip>
             <TooltipTrigger
               render={
-                <ComboboxTrigger
-                  ref={triggerRef}
-                  render={<InlineButton tone="picker" />}
-                  data-draft-project-trigger=""
-                  className="pointer-events-auto min-w-0 max-w-full align-baseline"
-                />
+                trigger ? (
+                  <ComboboxTrigger
+                    ref={triggerRef}
+                    render={<ComposerControl size="xs" />}
+                    data-draft-project-trigger=""
+                    data-composer-context-control
+                    aria-label={trigger.ariaLabel}
+                    className={trigger.className}
+                  />
+                ) : (
+                  <ComboboxTrigger
+                    ref={triggerRef}
+                    render={<InlineButton tone="picker" />}
+                    data-draft-project-trigger=""
+                    className="pointer-events-auto min-w-0 max-w-full align-baseline"
+                  />
+                )
               }
             >
-              <DraftProjectName value={label} singleLine truncateStart={truncateStart} />
+              {trigger ? (
+                trigger.content
+              ) : (
+                <DraftProjectName value={label} singleLine truncateStart={truncateStart} />
+              )}
             </TooltipTrigger>
             <TooltipPopup side="top">
               {label} · {shortcutLabelForCommand(keybindings, "projectPicker.open")}
             </TooltipPopup>
           </Tooltip>
-          <ComboboxPopup align="center" className="w-[28rem] overflow-hidden">
+          <ComboboxPopup
+            align={trigger ? "start" : "center"}
+            // The where-line returns the keyboard to the composer instead of its trigger.
+            {...(trigger ? { finalFocus: false } : {})}
+            className="w-[min(28rem,calc(100vw-2rem))] overflow-hidden"
+          >
             {content}
           </ComboboxPopup>
         </>
