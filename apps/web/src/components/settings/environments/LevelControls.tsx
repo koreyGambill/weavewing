@@ -65,7 +65,7 @@ export const GRID_LEGEND: ReadonlyArray<{
   { glyph: "◐", label: "Ask before changes", tone: "text-warning" },
   { glyph: "○", label: "View only", tone: "text-info" },
   { glyph: "–", label: "No access", tone: "text-muted-foreground" },
-  { glyph: "▨", label: "No path", tone: "text-muted-foreground" },
+  { glyph: "no path", label: "Nothing can reach it", tone: "text-muted-foreground" },
   { glyph: "?", label: "Unknown here", tone: "text-muted-foreground" },
   { glyph: "!", label: "Expired or refused", tone: "text-destructive" },
   { glyph: "🔒", label: "Set on that machine", tone: "text-muted-foreground" },
@@ -74,6 +74,7 @@ export const GRID_LEGEND: ReadonlyArray<{
 /** "From X to Y: level", the sentence every square and line is read as. */
 export function squareSentence(square: ReachSquare): string {
   const { state } = square;
+  if (state.kind === "self") return `${square.from.label} itself`;
   const level =
     state.kind === "level"
       ? `${REACH_LEVEL_LABELS[state.level]}${state.broken === "expired" ? " (expired)" : state.broken === "unauthorized" ? ` (refused by ${square.to.label})` : ""}`
@@ -107,9 +108,7 @@ export function SquareChangeStatus({
   if (change.pending?.key === key) {
     return (
       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs" role="status">
-        <span className="min-w-0 flex-1 text-warning-foreground">
-          {change.pending.plan.sentence}
-        </span>
+        <span className="basis-full text-warning-foreground">{change.pending.plan.sentence}</span>
         <Button size="xs" variant="default" onClick={change.confirm} autoFocus>
           Confirm
         </Button>

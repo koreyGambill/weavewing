@@ -20,6 +20,7 @@ import { peerLinkEnvironment } from "~/state/peerLinks";
 import { useEnvironmentQuery } from "~/state/query";
 import { environmentSessionStatesAtom, useEnvironmentsWithScope } from "~/state/session";
 import { isServerNetworkAccessible } from "../ConnectionsSettings.logic";
+import { settingsScopeEnvironmentLabel } from "../settingsScopeAxis";
 import { buildReachModel, type ReachModel, type ReachServerInput } from "./reachModel.logic";
 
 // The same atom keys as every other reader, so each server keeps one access stream.
@@ -139,7 +140,7 @@ export function useReachModel(): ReachData {
       linksError: errorOf(linkResult),
       input: {
         environmentId,
-        label: environment.label,
+        label: settingsScopeEnvironmentLabel(environment, listed),
         onThisComputer: isDesktop && (isPrimary || desktopLocal),
         sharesHostLoopback:
           isDesktop &&

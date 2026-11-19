@@ -32,6 +32,7 @@ import { searchableSetting } from "../settingsSearch";
 import { type ReachModel, type ReachParty, squareKey } from "./reachModel.logic";
 import { AccessLine, ServerAccessDetail } from "./ServerAccessDetail";
 import { LocalServerRow, ServerAccessMenuItems, ServerAccessToggle } from "./ServerRows";
+import { ReachGrid } from "./ReachGrid";
 import { type ReachServer, useReachModel } from "./useReachModel";
 import { type SquareChangeState, useSquareChange } from "./useSquareChange";
 import { WslBackendSettings } from "./WslBackendSettings";
@@ -83,6 +84,7 @@ export function EnvironmentsPage() {
         preferredEnvironmentId={preferredEnvironmentId}
       />
       <Devices model={data.model} change={change} />
+      <ReachGrid model={data.model} change={change} />
       <PreferredEnvironmentSetting />
       <LoadBalancingSettings environments={balanced} />
       <PullRequestRoutingSettings environments={balanced} />
@@ -300,9 +302,14 @@ function OtherServers({
     ) ?? Promise.resolve(false));
     if (confirmed) await remove(environment);
   };
-  const visible = servers.filter(
-    (server) => !isDesktopLocalConnectionTarget(server.environment.entry.target),
-  );
+  // The server that served this page comes first; on desktop it sits under This computer.
+  const visible = servers
+    .filter((server) => !isDesktopLocalConnectionTarget(server.environment.entry.target))
+    .toSorted(
+      (left, right) =>
+        Number(right.environment.entry.target._tag === "PrimaryConnectionTarget") -
+        Number(left.environment.entry.target._tag === "PrimaryConnectionTarget"),
+    );
   return (
     <SettingsSection
       {...searchableSetting("remote-environments")}

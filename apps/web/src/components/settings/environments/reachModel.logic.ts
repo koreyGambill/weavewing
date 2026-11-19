@@ -143,6 +143,8 @@ export interface ReachModel {
   /** Groups of servers with Full access to each other in both directions. */
   readonly trusted: ReadonlyArray<ReadonlyArray<ReachParty>>;
   readonly outgoing: ReadonlyMap<EnvironmentId, ReadonlyArray<OutgoingLink>>;
+  /** Columns whose access this app may change; the rest show a lock. */
+  readonly manageable: ReadonlySet<string>;
 }
 
 export const APP_PARTY_ID = "app";
@@ -625,7 +627,12 @@ export function buildReachModel(input: {
     );
   }
 
-  return { columns, rows, squares, trusted, outgoing };
+  const manageable = new Set(
+    servers
+      .filter((server) => server.canManage)
+      .map((server) => serverPartyId(server.environmentId)),
+  );
+  return { columns, rows, squares, trusted, outgoing, manageable };
 }
 
 /** Every square into `to` that holds some access, for a server's "Coming in" lines. */

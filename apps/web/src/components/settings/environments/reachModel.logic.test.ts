@@ -282,6 +282,7 @@ describe("buildReachModel", () => {
       canRemove: true,
       ownOutbound: true,
     });
+    expect([...model.manageable]).toEqual([serverPartyId(WSL), serverPartyId(VPS)]);
     const moonToWsl = state(model, serverPartyId(MOON), WSL).changes;
     expect(moonToWsl).toMatchObject({
       lockedReason: null,
