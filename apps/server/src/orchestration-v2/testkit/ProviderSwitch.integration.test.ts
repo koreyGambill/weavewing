@@ -2824,15 +2824,19 @@ describe("orchestration v2 provider switching", () => {
     }),
   );
 
-  // regression: #20343 sending to an instance with separate history must release the old session
+  // regression: #20343 a handoff releases an idle previous session
   it.live.each([
     [
       "detaches the previous instance's session when a send hands off to another instance",
       { background: false, queued: false, sharedHistory: false },
     ],
     [
-      "refuses the hand-off while the previous instance still runs background work",
+      "keeps Claude background work running when an immediate hand-off starts Codex",
       { background: true, queued: false, sharedHistory: false },
+    ],
+    [
+      "refuses an immediate account switch while the replaced session still runs background work",
+      { background: true, queued: false, sharedHistory: true },
     ],
     [
       "keeps a busy previous session running when a queued hand-off starts",
@@ -2850,10 +2854,13 @@ describe("orchestration v2 provider switching", () => {
       const closedSessions = yield* Ref.make<ReadonlyArray<string>>([]);
       const firstStarted = yield* Deferred.make<void>();
       const releaseFirst = yield* Deferred.make<void>();
-      const secondSelection: ModelSelection = {
-        ...CLAUDE_MODEL_SELECTION,
-        instanceId: ProviderInstanceId.make("claude-second-account"),
-      };
+      const switchToCodex = background && !queued && !sharedHistory;
+      const secondSelection: ModelSelection = switchToCodex
+        ? CODEX_MODEL_SELECTION
+        : {
+            ...CLAUDE_MODEL_SELECTION,
+            instanceId: ProviderInstanceId.make("claude-second-account"),
+          };
       const adapters = [
         makeTestAdapter({
           instanceId: CLAUDE_MODEL_SELECTION.instanceId,
@@ -2868,8 +2875,8 @@ describe("orchestration v2 provider switching", () => {
         }),
         makeTestAdapter({
           instanceId: secondSelection.instanceId,
-          driver: CLAUDE_DRIVER,
-          capabilities: ClaudeProviderCapabilitiesV2,
+          driver: switchToCodex ? CODEX_DRIVER : CLAUDE_DRIVER,
+          capabilities: switchToCodex ? CodexProviderCapabilitiesV2 : ClaudeProviderCapabilitiesV2,
           modelSelection: secondSelection,
           responseByRunOrdinal: { 2: "Second account complete" },
           capturedTurns,
@@ -3004,7 +3011,7 @@ describe("orchestration v2 provider switching", () => {
         );
         assert.equal(firstSession?.status, "ready");
 
-        if (background) {
+        if (background && sharedHistory) {
           // Native subagents live only in the adapter's roster, so the projection's
           // pendingBackgroundTasks stays empty while the probe still reports work.
           assert.deepEqual(afterFirst.providerThreads[0]?.pendingBackgroundTasks ?? [], []);
@@ -3018,7 +3025,7 @@ describe("orchestration v2 provider switching", () => {
             unchanged.providerSessions.map((session) => [session.id, session.status]),
             [[firstSession!.id, "ready"]],
           );
-          yield* Ref.set(backgroundWork, false);
+          return;
         }
 
         yield* send(2, secondSelection);
@@ -3035,6 +3042,14 @@ describe("orchestration v2 provider switching", () => {
           ],
         );
         assert.lengthOf(afterSecond.contextHandoffs, 1);
+        if (background) {
+          assert.equal(
+            projection.providerSessions.find((session) => session.id === firstSession!.id)?.status,
+            "ready",
+          );
+          assert.deepEqual(yield* Ref.get(closedSessions), []);
+          return;
+        }
         assert.deepEqual(
           projection.providerSessions.map((session) => session.providerInstanceId),
           [secondSelection.instanceId],
