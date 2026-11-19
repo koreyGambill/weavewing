@@ -581,15 +581,18 @@ it("passes EOF and common shell control keys through a terminal tile", async () 
     "t",
     "u",
     "v",
-    "w",
     "z",
   ]) {
     expect(
       fixture.pressKey?.(
         new KeyboardEvent("keydown", { key, code: `Key${key.toUpperCase()}`, ctrlKey: true }),
       ),
+      `Ctrl+${key.toUpperCase()}`,
     ).toBe(true);
   }
+  expect(
+    fixture.pressKey?.(new KeyboardEvent("keydown", { key: "w", code: "KeyW", ctrlKey: true })),
+  ).toBe(false);
   fixture.typeIntoSurface?.("\u0004");
   expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\u0004" }]);
   expect(screen.container.querySelectorAll("[data-terminal-owner]")).toHaveLength(1);
