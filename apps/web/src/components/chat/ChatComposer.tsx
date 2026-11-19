@@ -283,8 +283,9 @@ import {
   countPreparingComposerImages,
   usePreparingComposerImages,
 } from "./preparingComposerImages";
-import { ComposerLocation } from "./ComposerLocation";
 import { ComposerControlsBar } from "./ComposerControlsBar";
+import { ComposerContextRing } from "./ComposerContextRing";
+import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
 import { composerCommandKeyHandler } from "./composerCommandKey";
 import { usePromptSuggestion } from "./usePromptSuggestion";
 import { useFreshSessionArmed } from "./freshSessionArms";
@@ -419,6 +420,7 @@ export interface ChatComposerProps {
 
   compactThreadUnavailable: boolean;
   compactDisabled: boolean;
+  contextWindow: ContextWindowSnapshot | null;
 
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -534,6 +536,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectName,
     compactThreadUnavailable,
     compactDisabled,
+    contextWindow,
     resolvedTheme,
     settings,
     keybindings,
@@ -3511,9 +3514,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "Ask anything..."
                   )}
                 </button>
-                <div className="max-w-[45%] min-w-0">
-                  <ComposerLocation environmentId={environmentId} cwd={gitCwd} />
-                </div>
                 {collapsedComposerImagePreviews}
                 <CollapsedComposerStopAction
                   key={`${environmentId}:${activeThreadId ?? "new"}`}
@@ -3767,7 +3767,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 {composerAttachButton && !dictationTakesFooter ? (
                   <div className="me-2">{composerAttachButton}</div>
                 ) : null}
-                <ComposerLocation environmentId={environmentId} cwd={gitCwd} />
                 <div
                   data-chat-composer-actions="right"
                   data-chat-composer-transition-actions="true"
@@ -3787,6 +3786,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   >
                     {composerControls}
                   </div>
+                  {activeThreadId && !dictationTakesFooter ? (
+                    <ComposerContextRing
+                      usage={contextWindow}
+                      compactDisabled={compactDisabled}
+                      onCompact={compactThreadContextStable}
+                    />
+                  ) : null}
                   <ComposerFooterPrimaryActions
                     // Stop state belongs to one thread; the composer stays mounted across threads.
                     key={`${environmentId}:${activeThreadId ?? "new"}`}

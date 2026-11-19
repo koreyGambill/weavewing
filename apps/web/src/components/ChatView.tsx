@@ -291,6 +291,7 @@ import {
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { ComposerWhereLine } from "./chat/ComposerWhereLine";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
 import {
   BranchRestoreConfirmHost,
@@ -319,12 +320,7 @@ import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
 import { NoActiveThreadState } from "./NoActiveThreadState";
-import {
-  resolveEffectiveEnvMode,
-  resolveLocalCheckoutBranchMismatch,
-  shouldShowComposerContextStrip,
-  shouldShowEnvironmentIndicator,
-} from "./BranchToolbar.logic";
+import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   getProviderStatusDismissalKey,
   shouldShowProviderStatusBanner,
@@ -1217,14 +1213,6 @@ export default function ChatView(props: ChatViewProps) {
   );
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
   const canAutoBalanceEnvironments = hasMultipleEnvironments && !activeProjectIsScratch;
-  const activeEnvironmentOption =
-    logicalProjectEnvironments.find(
-      (environment) => environment.environmentId === activeThread?.environmentId,
-    ) ?? null;
-  const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
-    activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
-  });
 
   const pullRequestLinking = usePullRequestLinking(environmentId);
   // Best effort: the thread already exists, so a failed link is only logged.
@@ -1775,15 +1763,8 @@ export default function ChatView(props: ChatViewProps) {
           providerSubagentModels,
           reportedModelSelection,
         );
-  const showComposerContextStrip =
-    !embedded &&
-    shouldShowComposerContextStrip({
-      isDraftHeroState,
-      persistInActiveThreads: settings.persistComposerContextStrip,
-      hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-      isGitRepo,
-      showEnvironmentIndicator: showComposerEnvironmentIndicator,
-    });
+  // The where-line reads the same before and after the first message.
+  const showComposerContextStrip = !embedded && activeProject !== null && !showProviderSubagentBar;
 
   const {
     needsLoadBalancing,
@@ -3441,7 +3422,6 @@ export default function ChatView(props: ChatViewProps) {
                       }
                     >
                       <DraftHeroHeadline
-                        onEnvironmentChange={onEnvironmentChangeStable}
                         draftId={draftId}
                         activeProjectRef={activeProjectRef}
                         activeProjectTitle={activeProject?.title ?? null}
@@ -3618,6 +3598,7 @@ export default function ChatView(props: ChatViewProps) {
 
                               compactThreadUnavailable={compactThreadUnavailable}
                               compactDisabled={compactDisabled}
+                              contextWindow={activeContextWindow}
                               resolvedTheme={resolvedTheme}
                               settings={settings}
                               keybindings={keybindings}
@@ -3720,6 +3701,17 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
+                                where={
+                                  <ComposerWhereLine
+                                    environmentId={activeThread.environmentId}
+                                    threadId={activeThread.id}
+                                    projectId={activeThread.projectId}
+                                    worktreePath={activeThread.worktreePath}
+                                    draftId={!isServerThread ? draftId : null}
+                                    onEnvironmentChange={onEnvironmentChangeStable}
+                                    onComposerFocusRequest={scheduleComposerFocusStable}
+                                  />
+                                }
                                 {...(isServerThread
                                   ? {}
                                   : {
