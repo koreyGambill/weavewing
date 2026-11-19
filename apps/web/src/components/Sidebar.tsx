@@ -2874,6 +2874,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);
 
+  const startDefaultPlace = () =>
+    readScratchProjectActions(appAtomRegistry, handleNewThread).startDefaultPlace(
+      newThreadContext.activeThread?.environmentId ??
+        newThreadContext.activeDraftThread?.environmentId ??
+        null,
+    );
+
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
     if (event?.shiftKey) {
       if (isMobile) setOpenMobile(false);
@@ -2884,12 +2891,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         defaultProjectRef: newThreadContext.defaultProjectRef,
         handleNewThread,
       }).then((started) => {
-        if (!started) openCommandPalette({ open: "new-thread-in" });
+        if (!started) startDefaultPlace();
       });
       return;
     }
     if (isMobile) setOpenMobile(false);
-    openCommandPalette({ open: "new-thread-in" });
+    startDefaultPlace();
   };
 
   const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new");
@@ -3139,7 +3146,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 </Combobox>
               }
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              newThreadDisabled={projects.length === 0 && defaultFolderLabel === null}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               defaultFolderLabel={defaultFolderLabel}
@@ -3149,10 +3156,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               )}
               onNewDefaultFolderThread={() => {
                 if (isMobile) setOpenMobile(false);
-                const scratch = readScratchProjectActions(appAtomRegistry, handleNewThread);
-                scratch.startScratchChoice(
-                  scratch.scratchEnvironmentChoice(defaultFolderFallbackEnvironmentId),
-                );
+                startDefaultPlace();
               }}
               showNewThreadInProjectHint
               searchInputRef={threadSearchInputRef}
