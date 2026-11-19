@@ -966,11 +966,34 @@ it.effect("moves shipped search shortcuts and preserves customized chords and co
         ["search.toggle", "commandPalette.toggle", "filePicker.toggle"].includes(rule.command),
       ),
       [
+        { key: "leader /", command: "search.toggle" },
+        { key: "leader :", command: "commandPalette.toggle" },
         { key: "mod+k", command: "search.toggle" },
         { key: "mod+p", command: "commandPalette.toggle" },
         custom,
       ],
     );
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), upgraded);
+    for (const enabled of [false, true]) {
+      yield* keybindings.upsertKeybindingRule({
+        key: "ctrl+a",
+        command: "keybindings.leader",
+        ...(enabled ? {} : { when: "false" }),
+      });
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const preset = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        preset.filter((rule) => rule.key === "mod+k" || rule.key === "mod+p"),
+        [
+          { key: "mod+k", command: "search.toggle" },
+          { key: "mod+p", command: "commandPalette.toggle" },
+        ],
+      );
+      assert.deepInclude(preset, custom);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), preset);
+    }
     const rebound = { key: "mod+k", command: "commandPalette.toggle" } as const;
     yield* writeKeybindingsConfig(keybindingsConfigPath, [rebound, custom]);
     yield* keybindings.syncDefaultKeybindingsOnStartup;
