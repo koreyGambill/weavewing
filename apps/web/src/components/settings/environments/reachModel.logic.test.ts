@@ -19,6 +19,7 @@ import {
   buildReachModel,
   incomingSquares,
   isRaise,
+  planSquareChange,
   type ReachServerInput,
   serverPartyId,
   squareKey,
@@ -360,5 +361,82 @@ describe("isRaise", () => {
     expect(isRaise("read-only", "full-access")).toBe(true);
     expect(isRaise("full-access", "approval-required")).toBe(false);
     expect(isRaise("auto", "approval-required")).toBe(false);
+  });
+});
+
+describe("planSquareChange", () => {
+  const model = buildReachModel({
+    servers: [
+      server({
+        environmentId: WSL,
+        label: "WSL",
+        onThisComputer: true,
+        links: [link(MOON, "Moonborn", { access: "approval-required" })],
+      }),
+      server({
+        environmentId: MOON,
+        label: "Moonborn",
+        links: [link(WSL, "WSL", { access: "full-access", status: "expired" })],
+      }),
+    ],
+  });
+  const outbound = state(model, serverPartyId(WSL), MOON);
+  const inbound = state(model, serverPartyId(MOON), WSL);
+
+  it("previews a raise before it happens", () => {
+    expect(planSquareChange(outbound, "full-access")).toEqual({
+      kind: "confirm",
+      action: "relink",
+      target: "full-access",
+      sentence:
+        "WSL gets Full access on Moonborn. Moonborn issues a new code and WSL links again with it.",
+    });
+  });
+
+  it("asks before this computer lowers or gives up its own access elsewhere", () => {
+    expect(planSquareChange(outbound, "read-only")).toMatchObject({
+      kind: "confirm",
+      sentence:
+        "WSL drops to View only on Moonborn. Getting it back needs approval on Moonborn, or SSH.",
+    });
+    expect(planSquareChange(outbound, "none")).toMatchObject({
+      kind: "confirm",
+      action: "remove",
+      sentence:
+        "WSL gives up its access to Moonborn. Getting it back needs approval on Moonborn, or SSH.",
+    });
+  });
+
+  it("lowers someone else's access to a server this app manages at once", () => {
+    expect(planSquareChange(inbound, "none")).toEqual({
+      kind: "apply",
+      action: "remove",
+      target: "none",
+      sentence: null,
+    });
+  });
+
+  it("renews an expired link at its own level with a preview", () => {
+    expect(planSquareChange(inbound, "full-access")).toMatchObject({
+      kind: "confirm",
+      action: "relink",
+    });
+  });
+
+  it("refuses an unchanged level and says why a change is blocked", () => {
+    expect(planSquareChange(outbound, "approval-required")).toEqual({
+      kind: "blocked",
+      reason: "Already Ask before changes",
+    });
+    const phone = buildReachModel({
+      servers: [
+        server({ environmentId: WSL, label: "WSL", sessions: [session({ subject: "browser" })] }),
+      ],
+    });
+    const square = phone.squares.get(squareKey("device:korey iphone", serverPartyId(WSL)))!;
+    expect(planSquareChange(square, "read-only")).toEqual({
+      kind: "blocked",
+      reason: "A device keeps the level it paired with. Pair it again to change it.",
+    });
   });
 });

@@ -461,7 +461,7 @@ function GateScreen({
                   <p className="text-sm text-destructive-foreground">
                     Your T3 Connect account is out of tunnels.
                   </p>
-                  <ManageAccessButton environment={environment} label="Manage tunnels" />
+                  <ManageAccessButton environment={environment} label="Manage tunnels" tunnels />
                 </>
               ) : null}
             </div>
@@ -821,13 +821,15 @@ function LinkedLine({
   return <p className="text-xs text-muted-foreground">Linked: {named.join(", ")}</p>;
 }
 
-/** Opens this environment's clients and permissions. */
+/** Opens who may use this environment, or its T3 Connect tunnels under Privacy. */
 function ManageAccessButton({
   environment,
   label = "Manage access",
+  tunnels = false,
 }: {
   readonly environment: EnvironmentPresentation;
   readonly label?: string;
+  readonly tunnels?: boolean;
 }) {
   const navigate = useNavigate();
   return (
@@ -835,7 +837,9 @@ function ManageAccessButton({
       variant="ghost"
       onClick={() => {
         close();
-        void navigate({ to: "/settings/access", search: { machine: environment.environmentId } });
+        void (tunnels
+          ? navigate({ to: "/settings/privacy", search: { machine: environment.environmentId } })
+          : navigate({ to: "/settings/connections" }));
       }}
     >
       {label}

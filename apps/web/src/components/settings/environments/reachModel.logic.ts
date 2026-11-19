@@ -133,7 +133,7 @@ export interface ReachSquare {
 export interface OutgoingLink {
   readonly link: PeerLinkSummary;
   readonly target: ReachParty;
-  readonly square: ReachSquare | null;
+  readonly square: ReachSquare;
 }
 
 export interface ReachModel {
@@ -226,6 +226,9 @@ export function arrivalFromHost(host: string | null): Arrival | null {
   return lower.includes(":") ? "internet" : null;
 }
 
+const linkBroken = (link: PeerLinkSummary) =>
+  link.status === "expired" || link.status === "unauthorized" ? link.status : null;
+
 const arrivalFromUrl = (url: string | undefined) =>
   url === undefined ? null : arrivalFromHost(hostOf(url));
 
@@ -304,12 +307,7 @@ function serverSquare(
       state: {
         kind: "level",
         level: link.access,
-        broken:
-          link.status === "expired"
-            ? "expired"
-            : link.status === "unauthorized"
-              ? "unauthorized"
-              : null,
+        broken: linkBroken(link),
       },
       arrivedVia: arrivalFromUrl(link.urls[0]),
       changes: changes(true),
@@ -407,13 +405,43 @@ function deviceSquare(
   return {
     ...base,
     sessionIds: sessions.map((session) => session.sessionId),
-    arrivedVia: arrivalFromHost((sessions[0] ? clientOf(sessions[0]).ipAddress : undefined) ?? null),
+    arrivedVia: arrivalFromHost(
+      (sessions[0] ? clientOf(sessions[0]).ipAddress : undefined) ?? null,
+    ),
     state:
       strongest !== undefined
         ? { kind: "level", level: strongest, broken: null }
         : server.reachableFromOthers === false
           ? { kind: "no-path" }
           : { kind: "none" },
+  };
+}
+
+/** A link to a server this app does not reach: it can only be given up from the linking side. */
+function outsideLinkSquare(
+  from: ReachParty,
+  to: ReachParty,
+  link: PeerLinkSummary,
+  server: ReachServerInput,
+): ReachSquare {
+  return {
+    from,
+    to,
+    link,
+    sessionIds: [],
+    arrivedVia: arrivalFromUrl(link.urls[0]),
+    state: {
+      kind: "level",
+      level: link.access,
+      broken: linkBroken(link),
+    },
+    changes: {
+      lockedReason: `Set on ${to.label}`,
+      canRemove: server.canManage,
+      canRelink: false,
+      relinkBlockedReason: `This app does not reach ${to.label}`,
+      ownOutbound: from.onThisComputer,
+    },
   };
 }
 
@@ -585,10 +613,13 @@ export function buildReachModel(input: {
         const target =
           columns.find((column) => column.environmentId === link.environmentId) ??
           outsideServers.get(link.environmentId)!;
+        const from = columns.find((column) => column.environmentId === server.environmentId)!;
         return {
           link,
           target,
-          square: squares.get(squareKey(serverPartyId(server.environmentId), target.id)) ?? null,
+          square:
+            squares.get(squareKey(from.id, target.id)) ??
+            outsideLinkSquare(from, target, link, server),
         };
       }),
     );
@@ -603,4 +634,64 @@ export function incomingSquares(model: ReachModel, to: ReachParty): ReadonlyArra
     const square = model.squares.get(squareKey(row.id, to.id));
     return square?.state.kind === "level" ? [square] : [];
   });
+}
+
+export type SquareTarget = LinkLevelChoice | "none";
+
+export type SquareChangePlan =
+  | { readonly kind: "blocked"; readonly reason: string }
+  | ({
+      readonly kind: "apply" | "confirm";
+      /** What will happen, shown before a raise or before giving up one's own access. */
+      readonly sentence: string | null;
+    } & (
+      | { readonly action: "relink"; readonly target: LinkLevelChoice }
+      | { readonly action: "remove"; readonly target: "none" }
+    ));
+
+/**
+ * How a click on a level plays out. Raising and renewing show what will happen first; lowering
+ * or removing applies at once, unless it gives up access this computer holds elsewhere.
+ */
+export function planSquareChange(square: ReachSquare, target: SquareTarget): SquareChangePlan {
+  const { from, to, changes, state } = square;
+  const current = state.kind === "level" ? state.level : null;
+  const broken = state.kind === "level" && state.broken !== null;
+  const getBack = `Getting it back needs approval on ${to.label}, or SSH.`;
+  if (target === "none") {
+    if (!changes.canRemove) {
+      return { kind: "blocked", reason: changes.lockedReason ?? "Nothing to remove" };
+    }
+    return changes.ownOutbound
+      ? {
+          kind: "confirm",
+          action: "remove",
+          target,
+          sentence: `${from.label} gives up its access to ${to.label}. ${getBack}`,
+        }
+      : { kind: "apply", action: "remove", target, sentence: null };
+  }
+  if (!changes.canRelink) {
+    return { kind: "blocked", reason: changes.relinkBlockedReason ?? "Cannot change this here" };
+  }
+  if (current === target && !broken) {
+    return { kind: "blocked", reason: `Already ${REACH_LEVEL_LABELS[target]}` };
+  }
+  const label = REACH_LEVEL_LABELS[target];
+  if (broken || isRaise(current, target)) {
+    return {
+      kind: "confirm",
+      action: "relink",
+      target,
+      sentence: `${from.label} gets ${label} on ${to.label}. ${to.label} issues a new code and ${from.label} links again with it.`,
+    };
+  }
+  return changes.ownOutbound
+    ? {
+        kind: "confirm",
+        action: "relink",
+        target,
+        sentence: `${from.label} drops to ${label} on ${to.label}. ${getBack}`,
+      }
+    : { kind: "apply", action: "relink", target, sentence: null };
 }

@@ -1,10 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ConnectionsSettings } from "../components/settings/ConnectionsSettings";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-function SettingsAccessRoute() {
-  return <ConnectionsSettings view="access" />;
-}
-
+// Sharing & access moved onto Environments; old links and bookmarks still land there.
 export const Route = createFileRoute("/_chat/settings/access")({
-  component: SettingsAccessRoute,
+  beforeLoad: ({ location }) => {
+    throw redirect({ to: "/settings/connections", hash: location.hash, replace: true });
+  },
 });

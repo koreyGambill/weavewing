@@ -73,10 +73,7 @@ import { useProjectScans } from "../../onboarding/useProjectScans";
 import { useProjectImport } from "../../onboarding/useProjectImport";
 import { ImportCandidateList, IMPORT_SOURCES_LABEL } from "./ImportCandidateList";
 import { serverEnvironment } from "../../state/server";
-import {
-  readEnvironmentScope,
-  useEnvironmentScope,
-} from "../../state/session";
+import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -336,7 +333,7 @@ export function WelcomePage({
                         variant="outline"
                         size="sm"
                         onClick={() =>
-                          void navigate({ to: "/settings/access", hash: "wsl-backend" })
+                          void navigate({ to: "/settings/connections", hash: "wsl-backend" })
                         }
                       >
                         Manage WSL
