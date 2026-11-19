@@ -237,7 +237,9 @@ export const releasePipeline = definePipeline({
       FS.copyFileSync(Path.join(co.evidence, "launcher/t3/package.json"), Path.join(dir, "release-metadata.json"));
       const inventory = assetInventory(dir, names);
       FS.writeFileSync(Path.join(dir, "SHA256SUMS"), inventory.map((asset) => `${asset.sha256}  ${asset.name}\n`).join(""));
-      const notes = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
+      const generated = releaseNotes(co.root, version, commit, { draftBody: release?.body, notesFile: ctx.args["notes-file"] });
+      const smokeNotice = "Smoke-tested build: full test suites run only before stable releases.";
+      const notes = ci || buildOnly || generated.includes(smokeNotice) ? generated : `${smokeNotice}\n\n${generated}`;
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
