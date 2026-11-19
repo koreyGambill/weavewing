@@ -8,6 +8,7 @@ import {
   placeSidebarThread,
   resolveSidebarGroupDrop,
   resolveSidebarGroupHit,
+  resolveSidebarShelfHit,
   stepSidebarThread,
   type SidebarThreadGroups,
 } from "./sidebarThreadGroups.logic";
@@ -267,5 +268,36 @@ describe("resolveSidebarGroupHit", () => {
   it("misses above the first header and well below the last group", () => {
     expect(resolveSidebarGroupHit(rows, -5)).toBe(null);
     expect(resolveSidebarGroupHit(rows, 240)).toBe(null);
+  });
+});
+
+describe("resolveSidebarShelfHit", () => {
+  const layout = {
+    listTop: 100,
+    firstGroupTop: 300,
+    pinnedRows: [{ key: "pinned-a", top: 110, bottom: 190 }],
+    pinnedHeaderId: "pinned-header",
+    settledTop: 900,
+    settledHeaderId: "settled-header",
+  };
+
+  it("pins above the first group, at a pinned row or else at the top", () => {
+    expect(resolveSidebarShelfHit({ ...layout, y: 150 })).toEqual({
+      section: "pinned",
+      overId: "pinned-a",
+    });
+    expect(resolveSidebarShelfHit({ ...layout, y: 250 })).toEqual({
+      section: "pinned",
+      overId: "pinned-header",
+    });
+  });
+
+  it("settles from just above the Settled header down, and misses in between", () => {
+    expect(resolveSidebarShelfHit({ ...layout, y: 898 })).toEqual({
+      section: "settled",
+      overId: "settled-header",
+    });
+    expect(resolveSidebarShelfHit({ ...layout, y: 600 })).toBe(null);
+    expect(resolveSidebarShelfHit({ ...layout, y: 40 })).toBe(null);
   });
 });

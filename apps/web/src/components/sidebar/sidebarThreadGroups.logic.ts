@@ -315,3 +315,40 @@ export function resolveSidebarGroupHit(
   }
   return { kind: "header", groupId: hit.groupId };
 }
+
+export interface SidebarShelfHit {
+  readonly section: "pinned" | "settled";
+  /** The list item the drop lands on, as dnd-kit's `over` would name it. */
+  readonly overId: string;
+}
+
+// Lets a drop just above the Settled header, in the gap below the last group, still settle.
+const SHELF_SLACK_PX = 4;
+
+/**
+ * The Pinned or Settled drop for a pointer outside the groups: above the first group is
+ * Pinned, at a pinned row or else at the top; from the Settled header down is Settled.
+ */
+export function resolveSidebarShelfHit(input: {
+  readonly y: number;
+  readonly listTop: number;
+  readonly firstGroupTop: number;
+  readonly pinnedRows: ReadonlyArray<{
+    readonly key: string;
+    readonly top: number;
+    readonly bottom: number;
+  }>;
+  readonly pinnedHeaderId: string;
+  readonly settledTop: number | null;
+  readonly settledHeaderId: string;
+}): SidebarShelfHit | null {
+  const { y } = input;
+  if (y >= input.listTop - SHELF_SLACK_PX && y < input.firstGroupTop) {
+    const row = input.pinnedRows.find((candidate) => y >= candidate.top && y < candidate.bottom);
+    return { section: "pinned", overId: row?.key ?? input.pinnedHeaderId };
+  }
+  if (input.settledTop !== null && y >= input.settledTop - SHELF_SLACK_PX) {
+    return { section: "settled", overId: input.settledHeaderId };
+  }
+  return null;
+}
