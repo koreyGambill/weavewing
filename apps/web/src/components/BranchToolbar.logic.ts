@@ -19,6 +19,7 @@ export interface EnvironmentOption {
   projectId: ProjectId | null;
   label: string;
   isPrimary: boolean;
+  onThisComputer: boolean;
   machine: EnvironmentMachineKind;
 }
 

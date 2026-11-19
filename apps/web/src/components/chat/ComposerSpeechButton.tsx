@@ -1,6 +1,7 @@
 import type { VoiceInputState } from "@t3tools/client-runtime/voice-input";
 import { CheckIcon, MicIcon, XIcon } from "lucide-react";
 import { useEffect, useState, type PointerEvent, type ReactElement } from "react";
+import { COMPOSER_ICON_COLOR } from "./ComposerControl";
 
 import { VoiceInputErrorPill } from "./VoiceInputErrorPill";
 import { VoiceInputPill, VoiceWaveform } from "./VoiceInputPill";
@@ -113,7 +114,7 @@ export function ComposerSpeechButton(props: {
         }}
         className="shrink-0"
       >
-        <MicIcon />
+        <MicIcon className={props.size === "compact" ? undefined : COMPOSER_ICON_COLOR} />
       </Button>
     </ShortcutTooltip>
   );

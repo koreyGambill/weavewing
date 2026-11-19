@@ -36,6 +36,19 @@ const AUTO_VALUE = "action:auto";
 const ADD_MACHINE_VALUE = "action:add-machine";
 const environmentValue = (id: EnvironmentId) => `env:${id}`;
 
+export function BranchToolbarEnvironmentBadge({
+  environment,
+}: {
+  environment: EnvironmentOption | null;
+}) {
+  if (!environment || environment.isPrimary) return null;
+  return (
+    <Badge variant={environment.onThisComputer ? "secondary" : "warning"} size="sm">
+      {environment.onThisComputer ? "This computer" : "External"}
+    </Badge>
+  );
+}
+
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
   autoEnvironmentLabel,
   onAutoEnvironment,
@@ -52,12 +65,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   );
   const activeEnvironment =
     availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
-  const externalBadge =
-    activeEnvironment && !activeEnvironment.isPrimary ? (
-      <Badge variant="warning" size="sm">
-        External
-      </Badge>
-    ) : null;
+  const environmentBadge = <BranchToolbarEnvironmentBadge environment={activeEnvironment} />;
 
   const environmentItems = [
     ...(onAutoEnvironment
@@ -80,10 +88,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       >
         <EnvironmentMachineIcon
           kind={activeEnvironment?.machine ?? "server"}
-          className="size-3 shrink-0"
+          className="size-3 shrink-0 text-foreground/70"
         />
         <ComposerContextLabel>{activeEnvironment?.label ?? "Run on"}</ComposerContextLabel>
-        {externalBadge}
+        {environmentBadge}
       </span>
     );
     return (
@@ -132,11 +140,15 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           <ComposerContextLabel>
             <SelectValue />
           </ComposerContextLabel>
-          {autoEnvironmentLabel ? null : externalBadge}
+          {autoEnvironmentLabel ? null : environmentBadge}
         </TooltipTrigger>
         <TooltipPopup>
           {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
-          {externalBadge && !autoEnvironmentLabel ? " · another machine" : null}
+          {!autoEnvironmentLabel && activeEnvironment && !activeEnvironment.isPrimary
+            ? activeEnvironment.onThisComputer
+              ? " · this computer"
+              : " · another machine"
+            : null}
           {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
       </Tooltip>

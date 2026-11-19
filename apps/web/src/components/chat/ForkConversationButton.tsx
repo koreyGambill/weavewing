@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { COMPOSER_ICON_COLOR } from "./ComposerControl";
 
 export function ForkConversationButton({
   environmentId,
@@ -51,7 +52,7 @@ export function ForkConversationButton({
           />
         }
       >
-        <GitForkIcon className="size-4" />
+        <GitForkIcon className={compact ? `size-4 ${COMPOSER_ICON_COLOR}` : "size-4"} />
       </TooltipTrigger>
       <TooltipPopup side="top">
         {busy ? "Forking conversation…" : "Fork through the last finished turn"}

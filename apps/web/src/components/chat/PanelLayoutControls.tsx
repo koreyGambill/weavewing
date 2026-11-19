@@ -2,6 +2,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { ThreadReviewsButton } from "../reviews/ThreadReviewsButton";
 import { PanelBottomIcon, SquareMenuIcon } from "lucide-react";
 import { memo } from "react";
+import { COMPOSER_ICON_COLOR } from "./ComposerControl";
 
 import type { ThreadPanelPresentation } from "../../rightPanelLayout";
 import { PopoverCreateHandle, PopoverTrigger } from "../ui/popover";
@@ -50,7 +51,9 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       variant="ghost"
       size={compact ? "micro" : "sm"}
     >
-      <SquareMenuIcon className="size-4" />
+      <SquareMenuIcon
+        className={compact ? `size-4 opacity-100 ${COMPOSER_ICON_COLOR}` : "size-4"}
+      />
     </Toggle>
   );
   const threadPanelControl = (

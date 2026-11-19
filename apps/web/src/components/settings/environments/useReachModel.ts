@@ -9,7 +9,11 @@ import {
 import { AsyncResult } from "effect/reactivity";
 import { useContext } from "react";
 
-import { desktopLocalBackendId, isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
+import {
+  desktopLocalBackendId,
+  isDesktopLocalConnectionTarget,
+  isEnvironmentOnThisComputer,
+} from "~/connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "~/connection/useDesktopLocalBootstraps";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { authEnvironment } from "~/state/auth";
@@ -139,7 +143,7 @@ export function useReachModel(): ReachData {
       input: {
         environmentId,
         label: settingsScopeEnvironmentLabel(environment, listed),
-        onThisComputer: isDesktop && (isPrimary || desktopLocal),
+        onThisComputer: isEnvironmentOnThisComputer(target, isDesktop),
         sharesHostLoopback:
           isDesktop &&
           (isPrimary || (desktopLocal && sharing.has(desktopLocalBackendId(target) ?? ""))),

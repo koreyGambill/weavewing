@@ -37,7 +37,10 @@ import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import {
+  BranchToolbarEnvironmentBadge,
+  BranchToolbarEnvironmentSelector,
+} from "./BranchToolbarEnvironmentSelector";
 import { openAddProjectToMachine } from "./AddProjectToMachineDialog";
 import { type AddProjectTarget, useAddProjectTargets } from "../hooks/useAddProjectTargets";
 import { useEnvironmentSettings } from "../hooks/useSettings";
@@ -67,7 +70,6 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "./ui/menu";
-import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -269,12 +271,8 @@ const RunContextSelector = memo(function RunContextSelector({
         {autoEnvironmentLabel ??
           (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
       </ComposerContextLabel>
-      {showEnvironmentIndicator &&
-      !autoEnvironmentLabel &&
-      activeEnvironment?.isPrimary === false ? (
-        <Badge variant="warning" size="sm">
-          External
-        </Badge>
+      {showEnvironmentIndicator && !autoEnvironmentLabel ? (
+        <BranchToolbarEnvironmentBadge environment={activeEnvironment} />
       ) : null}
       {/* Trailing in the panel, so every row label starts on the same edge. */}
       {isPanel && showEnvironmentIndicator ? workspaceIcon : null}
@@ -287,7 +285,7 @@ const RunContextSelector = memo(function RunContextSelector({
         className={cn(
           "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-foreground/70 text-sm sm:h-6 sm:text-xs dark:text-muted-foreground",
           isPanel && "max-w-full",
-          isPanel && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
+          isPanel ? THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS : "[&_svg]:text-foreground/70",
         )}
         onContextMenu={handleContextMenu}
         aria-label={

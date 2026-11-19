@@ -24,6 +24,14 @@ export function isDesktopLocalConnectionTarget(
   );
 }
 
+/** Desktop registration identifies the physical computer, including NAT WSL backends. */
+export function isEnvironmentOnThisComputer(target: ConnectionTarget, isDesktop: boolean): boolean {
+  return (
+    isDesktop &&
+    (target._tag === "PrimaryConnectionTarget" || isDesktopLocalConnectionTarget(target))
+  );
+}
+
 /**
  * The environments on this desktop's host loopback: its primary, and the local
  * backends that share the host's network stack. A NAT WSL backend's loopback is its VM's.

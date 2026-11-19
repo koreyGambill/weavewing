@@ -91,6 +91,7 @@ function setup() {
       projectId,
       label: environmentId,
       isPrimary: environmentId === a,
+      onThisComputer: environmentId === a,
       machine: "desktop",
     })),
     environmentById: new Map(

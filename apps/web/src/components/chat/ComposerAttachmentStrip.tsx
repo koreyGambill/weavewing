@@ -8,6 +8,7 @@ import type {
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { CircleAlertIcon, ImageIcon, PaperclipIcon, PlayIcon, XIcon } from "lucide-react";
 import { type ComponentProps, useLayoutEffect, useRef } from "react";
+import { COMPOSER_ICON_COLOR } from "./ComposerControl";
 
 import {
   type ComposerFileAttachment,
@@ -739,7 +740,7 @@ export function ComposerAttachButton({
           }
         >
           {/* The clip's weight sits in its upper loop; 1px down reads as centered on the row. */}
-          <PaperclipIcon className="translate-y-px" />
+          <PaperclipIcon className={cn("translate-y-px", COMPOSER_ICON_COLOR)} />
         </TooltipTrigger>
         <TooltipPopup>Attach files</TooltipPopup>
       </Tooltip>

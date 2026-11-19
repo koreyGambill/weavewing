@@ -7,6 +7,7 @@ import {
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 
+import { isEnvironmentOnThisComputer } from "../connection/desktopLocal";
 import type { EnvironmentOption } from "../components/BranchToolbar.logic";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -37,6 +38,9 @@ export function useLogicalProjectEnvironments(
       projectId,
       label: environment?.label ?? environmentId,
       isPrimary: environmentId === primaryEnvironmentId,
+      onThisComputer:
+        environment !== null &&
+        isEnvironmentOnThisComputer(environment.entry.target, window.desktopBridge !== undefined),
       machine: resolveEnvironmentMachineKind(environment?.serverConfig ?? null),
     });
   };

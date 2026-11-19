@@ -18,6 +18,7 @@ import {
   createDesktopSecondaryBootstrapsReader,
   desktopLocalConnectionId,
   desktopLocalRefreshes,
+  isEnvironmentOnThisComputer,
   desktopSameHostEnvironmentIds,
 } from "./desktopLocal";
 
@@ -58,6 +59,24 @@ describe("desktopSameHostEnvironmentIds", () => {
       new Set([windows]),
     );
   });
+});
+
+it("recognizes a desktop's WSL registration independently of its display label", () => {
+  const environmentId = EnvironmentId.make("environment-wsl");
+  const registered = new BearerConnectionTarget({
+    environmentId,
+    label: "WSL (Ubuntu)",
+    connectionId: desktopLocalConnectionId("wsl:Ubuntu"),
+  });
+  const remote = new BearerConnectionTarget({
+    environmentId,
+    label: registered.label,
+    connectionId: "paired-wsl",
+  });
+
+  expect(isEnvironmentOnThisComputer(registered, true)).toBe(true);
+  expect(isEnvironmentOnThisComputer(remote, true)).toBe(false);
+  expect(isEnvironmentOnThisComputer(registered, false)).toBe(false);
 });
 
 describe("desktop local topology reads", () => {
