@@ -332,6 +332,24 @@ describe("thread tile layout", () => {
     expect(swapped.focusedGroupId).toBe("panels-group");
     expect(swapped.maximizedGroupId).toBeNull();
     expect(parseTileLayout(JSON.parse(JSON.stringify(swapped)))).toEqual(swapped);
+    const rotated = applyTileAction(initial, { type: "rotate" });
+    expect(getTileGroups(rotated)).toEqual(getTileGroups(initial).toReversed());
+    expect(rotated.focusedGroupId).toBe(initial.focusedGroupId);
+    expect(applyTileAction(rotated, { type: "rotate" })).toEqual(initial);
+    const three = applyTileAction(initial, {
+      type: "new-group",
+      groupId: "third",
+      splitId: "third-split",
+      targetGroupId: "panels-group",
+      axis: "vertical",
+      side: "after",
+    });
+    const beforeRotation = getTileGroups(three);
+    expect(getTileGroups(applyTileAction(three, { type: "rotate" }))).toEqual([
+      beforeRotation.at(-1),
+      ...beforeRotation.slice(0, -1),
+    ]);
+
     const merged = applyTileAction(maximized, {
       type: "merge-groups",
       groupId: "panels-group",

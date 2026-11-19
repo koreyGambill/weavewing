@@ -1,5 +1,9 @@
 import { dispatchMenuAction } from "../../shortcuts/dispatcher";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  compileResolvedKeybindingsConfig,
+  defaultKeybindingsForMode,
+  DEFAULT_RESOLVED_KEYBINDINGS,
+} from "@t3tools/shared/keybindings";
 import "../../index.css";
 import {
   DEFAULT_TILE_LAYOUTS,
@@ -37,7 +41,10 @@ vi.mock("./useSavedTileLayouts", () => ({
   }),
 }));
 
-async function setup(resizeScenario = false, newThread = false) {
+async function setup(resizeScenario = false, newThread = false, leader = false) {
+  const keybindings = leader
+    ? DEFAULT_RESOLVED_KEYBINDINGS
+    : compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
   savedLayouts.effectiveDefault = newThread ? DEFAULT_TILE_LAYOUTS[0]! : null;
   await using resources = new AsyncDisposableStack();
   const viewport = { width: window.innerWidth, height: window.innerHeight };
@@ -92,7 +99,7 @@ async function setup(resizeScenario = false, newThread = false) {
           surfaces: panel.surfaces,
           activeSurfaceId: panel.activeSurfaceId,
           environmentId: threadRef.environmentId,
-          keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+          keybindings,
           getShortcutContext: () => ({
             terminalFocus: false,
             terminalOpen: false,
@@ -660,4 +667,47 @@ it("leaves Escape in a maximized terminal even when the shortcut context is stal
   await userEvent.click(terminal);
   await userEvent.keyboard("{Escape}");
   expect(layout().maximizedGroupId).toBe("terminal-group");
+});
+
+it("runs leader commands from terminal focus and keeps keyboard resize active until Enter", async () => {
+  await using fixture = await setup(true, false, true);
+  const { screen, layout } = fixture;
+  const terminal = screen.getByRole("textbox", { name: "Editor terminal:new-terminal" });
+  await userEvent.click(terminal);
+  await userEvent.keyboard("{Control>}a{/Control}");
+  await expect.element(screen.getByText("Ctrl+A then…")).toBeVisible();
+  await userEvent.keyboard("h");
+  expect(layout().focusedGroupId).toBe("conversation-group");
+  await userEvent.click(terminal);
+  const before = JSON.stringify(layout().root);
+  await userEvent.keyboard("{Control>}a{/Control}r");
+  await expect.element(screen.getByRole("status", { name: "Resizing focused tile" })).toBeVisible();
+  await userEvent.keyboard("h");
+  expect(JSON.stringify(layout().root)).toBe(before);
+  await userEvent.keyboard("{Enter}");
+  expect(JSON.stringify(layout().root)).not.toBe(before);
+  await expect
+    .element(screen.getByRole("status", { name: "Resizing focused tile" }))
+    .not.toBeInTheDocument();
+  const beforeForwardedResize = JSON.stringify(layout().root);
+  dispatchMenuAction("workspace.tile.resizeLeft");
+  expect(JSON.stringify(layout().root)).not.toBe(beforeForwardedResize);
+  const target = terminal.element();
+  target.focus();
+  const first = new KeyboardEvent("keydown", {
+    key: "a",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  const second = new KeyboardEvent("keydown", {
+    key: "a",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(first);
+  target.dispatchEvent(second);
+  expect(first.defaultPrevented).toBe(true);
+  expect(second.defaultPrevented).toBe(false);
 });
