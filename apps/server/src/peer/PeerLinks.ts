@@ -59,6 +59,11 @@ const LINK_REDIRECT_URI = "http://127.0.0.1/t3code-peer-link";
  */
 export const probeTimeout = (origin: string) =>
   isLocalLoopbackHost(new URL(origin).hostname) ? Duration.seconds(3) : Duration.seconds(10);
+/**
+ * How long this machine's Tailscale node list is trusted. A 100.x route is
+ * dropped within this long of Tailscale no longer listing it.
+ */
+const TAILNET_MEMBERSHIP_TTL = Duration.seconds(10);
 /** How long a listing waits on a link's addresses; a real call still gives a waking peer `probeTimeout`. */
 const LIST_PROBE_TIMEOUT = Duration.seconds(3);
 
@@ -187,7 +192,7 @@ const peerOrigin = (url: string, tailnetAddresses: Effect.Effect<ReadonlySet<str
         : Effect.fail(
             new PeerLinkError({
               reason: "unreachable",
-              message: `${url} is plain http, which would send the link's credentials unencrypted. Plain http is used only on this machine or to a node this machine's Tailscale knows; otherwise use https.`,
+              message: `${url} is plain http, which would send the link's credentials unencrypted. Plain http is used only on this machine, to a Tailscale name or IPv6 address, or to a 100.x address this machine's Tailscale lists; otherwise use https.`,
             }),
           ),
     ),
@@ -239,6 +244,17 @@ const make = Effect.gen(function* () {
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const tailscale = yield* TailscaleClient.TailscaleClient;
+  // Read only for a 100.x address, shared by links and calls; a failed read confirms none.
+  const tailnetAddresses = yield* Effect.cachedWithTTL(
+    tailscale.peers.pipe(
+      Effect.map(
+        ({ self, peers }): ReadonlySet<string> =>
+          new Set([self, ...peers].flatMap((node) => node?.tailnetAddresses ?? [])),
+      ),
+      Effect.orElseSucceed((): ReadonlySet<string> => new Set()),
+    ),
+    TAILNET_MEMBERSHIP_TTL,
+  );
   // Relinking revokes the earlier peer credential, so exchange and local persistence must stay ordered.
   const linking = yield* Semaphore.make(1);
   const enabled = serverSettings.getSettings.pipe(
@@ -449,7 +465,6 @@ const make = Effect.gen(function* () {
    */
   const answeringAs = Effect.fn("PeerLinks.answeringAs")(function* (
     urls: ReadonlyArray<string>,
-    tailnetAddresses: Effect.Effect<ReadonlySet<string>>,
     environmentId: EnvironmentId,
     name: string,
   ) {
@@ -488,10 +503,7 @@ const make = Effect.gen(function* () {
   });
 
   /** The peer at `url`, with every address checked for credentials first. */
-  const answeringAt = Effect.fn("PeerLinks.answeringAt")(function* (
-    urls: ReadonlyArray<string>,
-    tailnetAddresses: Effect.Effect<ReadonlySet<string>>,
-  ) {
+  const answeringAt = Effect.fn("PeerLinks.answeringAt")(function* (urls: ReadonlyArray<string>) {
     const origins = yield* Effect.forEach(urls, (url) => peerOrigin(url, tailnetAddresses));
     const primary = origins[0]!;
     return { primary, peer: yield* probe(primary), origins };
@@ -502,24 +514,13 @@ const make = Effect.gen(function* () {
       return yield* new PeerLinkError({ reason: "disabled", message: LINKED_ENVIRONMENTS_OFF });
     }
     const urls = [input.url, ...(input.alternateUrls ?? [])];
-    // Asked at most once per link, and only for an address in 100.64.0.0/10.
-    const tailnetAddresses = yield* Effect.cached(
-      tailscale.peers.pipe(
-        Effect.map(
-          ({ self, peers }) =>
-            new Set([self, ...peers].flatMap((node) => node?.tailnetAddresses ?? [])),
-        ),
-        Effect.orElseSucceed(() => new Set<string>()),
-      ),
-    );
     // The user picked a machine: link through the addresses that answer as
     // it, so one that now answers as another never receives the pairing code.
     const { primary, peer, origins } =
       input.expectedEnvironmentId === undefined
-        ? yield* answeringAt(urls, tailnetAddresses)
+        ? yield* answeringAt(urls)
         : yield* answeringAs(
             urls,
-            tailnetAddresses,
             input.expectedEnvironmentId,
             input.expectedLabel ?? input.expectedEnvironmentId,
           );
@@ -688,14 +689,24 @@ const make = Effect.gen(function* () {
           message: `The link to ${link.label} lost its credential. Link it again.`,
         });
       }
+      // A 100.x route was a tailnet node when linked; another network may route it now.
+      const urls = yield* Effect.filter(link.urls, (url) =>
+        peerOrigin(url, tailnetAddresses).pipe(Effect.isSuccess),
+      );
+      if (urls.length === 0 && link.urls.length > 0) {
+        return yield* new PeerLinkError({
+          reason: "unreachable",
+          message: `${link.label} is linked only at ${link.urls.join(", ")}, which this machine's Tailscale no longer lists.`,
+        });
+      }
       // The token goes only to an address that still answers as this peer,
       // so one that now answers as another machine never receives it. The
       // addresses race, so a silent one never delays one that answers.
       const answered =
-        link.urls.length === 0
+        urls.length === 0
           ? Option.none()
           : yield* Effect.raceAll(
-              link.urls.map((url) =>
+              urls.map((url) =>
                 answersAs(url, environmentId).pipe(
                   Effect.flatMap(Effect.fromOption),
                   Effect.map((peer) => ({ url, peer })),
@@ -705,7 +716,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(answered)) {
         return yield* new PeerLinkError({
           reason: "unreachable",
-          message: `${link.label} did not answer at ${link.urls.join(", ")}.`,
+          message: `${link.label} did not answer at ${urls.join(", ")}.`,
         });
       }
       const { url, peer } = answered.value;

@@ -874,13 +874,19 @@ it.effect(
           shared: false,
         });
         const peersRead = yield* Ref.make(0);
+        const connected = yield* Ref.make(true);
         const tailscale = TailscaleClient.TailscaleClient.of({
           whois: () => Effect.succeed(null),
           peers: Ref.update(peersRead, (count) => count + 1).pipe(
-            Effect.as({
-              self: node(["100.67.211.34", "fd7a:115c:a1e0::1"]),
-              peers: [node(["100.101.102.103"])],
-            }),
+            Effect.andThen(Ref.get(connected)),
+            Effect.flatMap((up) =>
+              up
+                ? Effect.succeed({
+                    self: node(["100.67.211.34", "fd7a:115c:a1e0::1"]),
+                    peers: [node(["100.101.102.103"])],
+                  })
+                : Effect.fail(new TailscaleClient.TailscaleUnavailableError({ cause: "down" })),
+            ),
           ),
         });
         const b = yield* serveB(box);
@@ -896,10 +902,13 @@ it.effect(
             access: "auto",
           });
 
-        const known = yield* layerLinkingEnvironment(laptop, undefined, undefined, tailscale).pipe(
-          Layer.build,
-          Effect.map((context) => Context.get(context, PeerLinks.PeerLinks)),
-        );
+        const knownContext = yield* layerLinkingEnvironment(
+          laptop,
+          undefined,
+          undefined,
+          tailscale,
+        ).pipe(Layer.build);
+        const known = Context.get(knownContext, PeerLinks.PeerLinks);
         // Another VPN's node in the same range is not encrypted by Tailscale.
         const otherVpn = yield* linkVia(known, ["http://100.64.0.9:3773"]).pipe(Effect.flip);
         expect(otherVpn.message).toContain("plain http");
@@ -908,6 +917,17 @@ it.effect(
         ).toMatchObject({
           urls: [new URL(b.url).origin, "http://100.67.211.34:3774", "http://100.101.102.103:3773"],
         });
+        // Both links read Tailscale once between them.
+        expect(yield* Ref.get(peersRead)).toBe(1);
+
+        // Once Tailscale stops listing it, another network may route that address:
+        // a call never sends the token there.
+        const sql = Context.get(knownContext, SqlClient.SqlClient);
+        yield* sql`UPDATE peer_environment_links SET urls_json = '["http://100.101.102.103:3773"]'`;
+        yield* Ref.set(connected, false);
+        yield* TestClock.adjust("1 minute");
+        const dropped = yield* known.resolve(box.environmentId).pipe(Effect.flip);
+        expect(dropped.message).toContain("Tailscale no longer lists");
         expect(yield* Ref.get(peersRead)).toBe(2);
 
         // Without Tailscale here, no 100.x address is known to be on a tailnet.
@@ -958,6 +978,17 @@ it.effect(
         expect(
           yield* a.links.link({ url: b.url, pairingCode: renewal.credential, access: "auto" }),
         ).toMatchObject({ urls: [b.url] });
+        // A picked machine also links at a loopback spelling of its own.
+        const atLocalhost = b.url.replace("127.0.0.1", "localhost");
+        const relinked = yield* b.auth.issuePairingCredential();
+        expect(
+          yield* a.links.link({
+            url: atLocalhost,
+            pairingCode: relinked.credential,
+            access: "auto",
+            expectedEnvironmentId: box.environmentId,
+          }),
+        ).toMatchObject({ urls: [atLocalhost] });
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
@@ -979,7 +1010,7 @@ it.effect("linking a picked machine that answers nowhere names it and links noth
         .pipe(Effect.flip);
       expect(failed.reason).toBe("unreachable");
       expect(failed.message).toBe(
-        `This environment could not reach Box: ${new URL(impostor.url).origin} answered as another environment, Impostor. http://192.168.1.20:3773 is plain http, which would send the link's credentials unencrypted. Plain http is used only on this machine or to a node this machine's Tailscale knows; otherwise use https.`,
+        `This environment could not reach Box: ${new URL(impostor.url).origin} answered as another environment, Impostor. http://192.168.1.20:3773 is plain http, which would send the link's credentials unencrypted. Plain http is used only on this machine, to a Tailscale name or IPv6 address, or to a 100.x address this machine's Tailscale lists; otherwise use https.`,
       );
       expect(yield* a.links.list).toEqual([]);
       expect(yield* linkedSessions(impostor)).toEqual([]);
