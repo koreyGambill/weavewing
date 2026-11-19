@@ -108,6 +108,7 @@ interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   /** The project and folder segment, shown after the machine in the composer strip. */
   where?: ReactNode;
+  whereProjectTitle?: string | null;
   /** Shown at the end of the composer strip, such as the new thread's permissions. */
   trailing?: ReactNode;
   availableEnvironments?: readonly EnvironmentOption[];
@@ -656,6 +657,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   availableEnvironments,
   onEnvironmentChange,
   where,
+  whereProjectTitle,
   trailing,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
@@ -821,7 +823,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     activeWorktreePath !== null &&
     (isServerThread || !draftXwingEnvironment?.label) &&
     resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider) ===
-      activeProject.title;
+      whereProjectTitle;
 
   return (
     <ComposerSurface.ContextStrip
