@@ -323,7 +323,9 @@ it("sends the default leader as terminal input only if the original session stay
   const focusLeft = vi.fn();
   stack.defer(registerCommands({ "workspace.tile.focusLeft": focusLeft }, { capture: true }));
   const input = fakeSurface.input;
-  const editor = screen.container.querySelector<HTMLTextAreaElement>("textarea[aria-label=Editor]")!;
+  const editor = screen.container.querySelector<HTMLTextAreaElement>(
+    "textarea[aria-label=Editor]",
+  )!;
   const dialog = screen.container.querySelector("dialog")!;
   const press = (target: Element, key = "a", ctrlKey = true) =>
     target.dispatchEvent(
