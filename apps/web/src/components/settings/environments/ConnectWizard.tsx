@@ -12,7 +12,8 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { useLocation } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { authEnvironment } from "~/state/auth";
 import type { EnvironmentPresentation } from "~/state/environments";
@@ -29,7 +30,7 @@ import { Input } from "../../ui/input";
 import { Radio, RadioGroup } from "../../ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { WizardFooter, WizardHeader, WizardPanel, WizardPopup, WizardSteps } from "../../ui/wizard";
-import { AddEnvironmentDialog } from "../AddEnvironmentDialog";
+import { AddComputerFields } from "../AddComputerFields";
 import { SettingsSearchTarget } from "../settingsLayout";
 import { searchableSetting } from "../settingsSearch";
 import { PairingClientsList } from "../AuthorizedClientsSettings";
@@ -44,12 +45,18 @@ import {
   type ReachParty,
   serverPartyId,
 } from "./reachModel.logic";
+import {
+  CLOSED,
+  CONNECT_COMPUTER_HASH,
+  type How,
+  type Kind,
+  openConnectWizard,
+  useWizardStore,
+  type WizardState,
+} from "./connectWizardStore";
 import { usePairingEndpoints } from "./ServerAccessDetail";
 import type { ReachServer } from "./useReachModel";
 import type { SquareChangeState } from "./useSquareChange";
-
-type Kind = "device" | "computer";
-type How = "qr" | "link" | "address" | "ssh";
 
 const HOW_CHOICES: Record<Kind, ReadonlyArray<{ value: How; title: string; detail: string }>> = {
   device: [
@@ -99,8 +106,8 @@ function Tiles<T extends string>({
 }
 
 /**
- * The one way to hand out access: "+ Connect a device or computer". A device gets a pairing
- * link on one server; a computer is added to this app, then linked both ways.
+ * The one way to hand out access and to add a computer: "+ Connect a device or computer". A
+ * device gets a pairing link on one server; a computer is added here, then linked both ways.
  */
 export function ConnectWizard({
   model,
@@ -111,17 +118,13 @@ export function ConnectWizard({
   readonly servers: ReadonlyArray<ReachServer>;
   readonly change: SquareChangeState;
 }) {
-  const [open, setOpen] = useState(false);
-  const [step, setStep] = useState(0);
-  const [kind, setKind] = useState<Kind | null>(null);
-  const [how, setHow] = useState<How | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-  const reset = () => {
-    setStep(0);
-    setKind(null);
-    setHow(null);
-  };
+  const { open, step, kind, how } = useWizardStore();
+  const set = (next: Partial<WizardState>) => useWizardStore.setState(next);
+  const hash = useLocation({ select: (location) => location.hash });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a link from elsewhere asks for the wizard through the URL
+  useEffect(() => {
+    if (hash === CONNECT_COMPUTER_HASH) openConnectWizard("computer");
+  }, [hash]);
   const canSsh = window.desktopBridge !== undefined;
   const howChoices =
     kind === null ? [] : HOW_CHOICES[kind].filter((c) => c.value !== "ssh" || canSsh);
@@ -135,8 +138,8 @@ export function ConnectWizard({
       <Dialog
         open={open}
         onOpenChange={(next) => {
-          setOpen(next);
-          if (!next) reset();
+          if (next) set({ open: true });
+          else useWizardStore.setState(CLOSED);
         }}
       >
         <DialogTrigger
@@ -152,7 +155,7 @@ export function ConnectWizard({
             <WizardSteps
               steps={["What", "How", "Access"]}
               currentStep={step}
-              onStepChange={setStep}
+              onStepChange={(next) => set({ step: next })}
               isStepDisabled={(index) => index > step}
             />
           </WizardHeader>
@@ -161,10 +164,7 @@ export function ConnectWizard({
               <Tiles<Kind>
                 label="What are you connecting?"
                 value={kind}
-                onChange={(next) => {
-                  setKind(next);
-                  setHow(null);
-                }}
+                onChange={(next) => set({ kind: next, how: null })}
                 options={[
                   {
                     value: "device",
@@ -183,17 +183,19 @@ export function ConnectWizard({
                 <Tiles<How>
                   label="How will it get here?"
                   value={how}
-                  onChange={setHow}
+                  onChange={(next) => set({ how: next })}
                   options={howChoices}
                 />
                 {kind === "computer" && (how === "address" || how === "ssh") ? (
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-                      {how === "ssh" ? "Add over SSH…" : "Add by address…"}
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
-                      Already added? Go on to Access.
-                    </span>
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <AddComputerFields
+                      key={how}
+                      mode={how === "ssh" ? "ssh" : "remote"}
+                      routeTarget={null}
+                      savedEnvironments={saved}
+                      onAdded={() => set({ step: 2 })}
+                    />
+                    <p className="text-xs text-muted-foreground">Already added? Go on to Access.</p>
                   </div>
                 ) : null}
               </div>
@@ -206,40 +208,24 @@ export function ConnectWizard({
           <WizardFooter
             leading={
               step > 0 ? (
-                <Button variant="ghost" onClick={() => setStep(step - 1)}>
+                <Button variant="ghost" onClick={() => set({ step: step - 1 })}>
                   Back
                 </Button>
               ) : null
             }
           >
             {step < 2 ? (
-              <Button disabled={!ready} onClick={() => setStep(step + 1)}>
+              <Button disabled={!ready} onClick={() => set({ step: step + 1 })}>
                 Next
               </Button>
             ) : (
-              <Button variant="outline" onClick={() => setOpen(false)}>
+              <Button variant="outline" onClick={() => useWizardStore.setState(CLOSED)}>
                 Done
               </Button>
             )}
           </WizardFooter>
         </WizardPopup>
       </Dialog>
-      {kind === "computer" ? (
-        <AddEnvironmentDialog
-          key={how ?? "address"}
-          open={addOpen}
-          routeTarget={null}
-          error={addError}
-          savedEnvironments={saved}
-          initialMode={how === "ssh" ? "ssh" : "remote"}
-          showTrigger={false}
-          onOpenChange={(next) => {
-            setAddOpen(next);
-            if (!next) setAddError(null);
-          }}
-          onErrorChange={setAddError}
-        />
-      ) : null}
     </SettingsSearchTarget>
   );
 }
@@ -592,7 +578,9 @@ function ConnectComputerForm({
     computerId === null
       ? null
       : (model.columns.find((column) => column.id === serverPartyId(computerId)) ?? null);
-  const others = model.columns.filter((column) => column.id !== computer?.id);
+  // Servers this app is not connected to cannot be linked from here.
+  const connected = model.columns.filter((column) => !model.unconnected.has(column.id));
+  const others = connected.filter((column) => column.id !== computer?.id);
   const [uses, setUses] = useState<ReadonlySet<string>>(() => new Set(others.map((o) => o.id)));
   const [usedBy, setUsedBy] = useState<ReadonlySet<string>>(() => new Set(others.map((o) => o.id)));
   const [usesLevel, setUsesLevel] = useState<LinkLevelChoice>("full-access");
@@ -628,7 +616,7 @@ function ConnectComputerForm({
         <span className="block text-xs font-medium">Computer</span>
         <ServerSelect
           label="Computer"
-          servers={model.columns.flatMap((column) =>
+          servers={connected.flatMap((column) =>
             column.environmentId === null
               ? []
               : [{ environmentId: column.environmentId, label: column.label }],

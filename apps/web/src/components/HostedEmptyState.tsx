@@ -13,6 +13,7 @@ import { InstallT3Commands } from "./InstallT3Commands";
 import { retryClerkLoad, useClerkLoadFailed } from "./clerk/clerkLoadFailure";
 import { useT3ConnectAuthPrompt } from "./clerk/useT3ConnectAuthPrompt";
 import { CloudEnvironmentConnectRows } from "./cloud/CloudEnvironmentConnectList";
+import { CONNECT_COMPUTER_HASH } from "./settings/environments/connectWizardStore";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
@@ -128,7 +129,7 @@ function PairingSteps() {
         <RunOnComputer command="t3 pair" />
       </SetupStep>
       <SetupStep number={2}>
-        <Button render={<Link to="/settings/connections" />} size="sm">
+        <Button render={<Link to="/settings/connections" hash={CONNECT_COMPUTER_HASH} />} size="sm">
           Add pairing link
         </Button>
       </SetupStep>

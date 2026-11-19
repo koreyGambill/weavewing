@@ -37,7 +37,6 @@ export interface ReachServer {
   /** Pending pairing links and sessions, when this app may read them. */
   readonly access: AuthAccessSnapshot | null;
   readonly accessError: string | null;
-  readonly linksError: string | null;
 }
 
 export interface ReachData {
@@ -137,7 +136,6 @@ export function useReachModel(): ReachData {
       environment,
       access,
       accessError: errorOf(accessResult),
-      linksError: errorOf(linkResult),
       input: {
         environmentId,
         label: settingsScopeEnvironmentLabel(environment, listed),
