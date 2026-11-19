@@ -1580,20 +1580,27 @@ it.effect("removes the Xwing environment it made when the launch is not accepted
   }).pipe(Effect.provide(intake.layer));
 });
 
-it.effect.each([true, false])(
-  "stores a non-Git scheduled task at the root and keeps worktrees elsewhere (Scratch: %s)",
-  (scratch) => {
-    const harness = scratchHarness({ scratch });
+it.effect.each(
+  (["t3", "xwing", "off"] as const).flatMap((worktreeProvider) => [
+    { scratch: true, worktreeProvider },
+    { scratch: false, worktreeProvider },
+  ]),
+)(
+  "stores a non-Git scheduled task at the root ($worktreeProvider, Scratch: $scratch)",
+  ({ scratch, worktreeProvider }) => {
+    const harness = scratchHarness({ scratch, serverSettings: { worktreeProvider } });
     return Effect.gen(function* () {
       const tasks = yield* ScheduledTasks.ScheduledTaskService;
       const plain = yield* tasks.upsert(
         scheduledTaskInput("scheduled-task:plain-upsert", projectId),
       );
       assert.deepEqual(plain.task.workspaceStrategy, { type: "root" });
-      const git = yield* tasks.upsert(
-        scheduledTaskInput("scheduled-task:git-upsert", otherProjectId),
-      );
-      assert.deepEqual(git.task.workspaceStrategy, worktreeStrategy);
+      if (worktreeProvider === "t3") {
+        const git = yield* tasks.upsert(
+          scheduledTaskInput("scheduled-task:git-upsert", otherProjectId),
+        );
+        assert.deepEqual(git.task.workspaceStrategy, worktreeStrategy);
+      }
     }).pipe(Effect.provide(harness.layer));
   },
 );

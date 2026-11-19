@@ -2327,16 +2327,15 @@ export const layer = Layer.effect(
           (previous.startFromOrigin ?? false) === (workspaceStrategy.startFromOrigin ?? false)
         ) {
           workspaceStrategy = previous;
+        } else if (
+          (yield* managedFolders.isScratchProject(input.projectId)) ||
+          (yield* threadLaunch.isNonGitProject(input.projectId))
+        ) {
+          workspaceStrategy = { type: "root" };
         } else {
           const worktreeProvider = yield* readWorktreeProvider(serverSettings);
           if (worktreeProvider !== "t3") {
             return yield* taskError(scheduledWorktreeRefusal(worktreeProvider), { taskId: id });
-          }
-          if (
-            (yield* managedFolders.isScratchProject(input.projectId)) ||
-            (yield* threadLaunch.isNonGitProject(input.projectId))
-          ) {
-            workspaceStrategy = { type: "root" };
           }
         }
       }
