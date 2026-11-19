@@ -98,13 +98,12 @@ definePipeline({
     p.concurrency(new ConcurrencyGroup("weavewing-release", { capacity: 1 }));
 
     if (run.args.stage === "promote") {
-      const promote = p.job("promote").inline().cores(0.25).startsChildren("ci");
+      const promote = p.job("promote").inline().cores(0.25);
       promote.step("publish", async (ctx) => {
         const co = checkout(ctx);
         const { tag, commit } = await assertInput(ctx, co);
         const draftEvidence = ctx.args["draft-evidence"];
         if (!draftEvidence || !Path.isAbsolute(draftEvidence)) throw new Error("Promote requires --draft-evidence <absolute draft run directory>");
-        await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
         const release = await findRelease(ctx, co);
         if (!release?.draft) throw new Error("Promote requires an existing draft");
         if (release.target_commitish !== commit) throw new Error("The draft target does not match this checkout's commit");

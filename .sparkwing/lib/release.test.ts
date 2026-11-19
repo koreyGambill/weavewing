@@ -192,6 +192,8 @@ test("promotion rejects an asset and SHA256SUMS replaced together on GitHub", ()
     FS.writeFileSync(Path.join(downloaded, "SHA256SUMS"), sums("original"));
     Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123");
     assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "wrong-sha"), /evidence/);
+    FS.writeFileSync(Path.join(local, "release.json"), JSON.stringify({ repository: "koreyGambill/weavewing", tag: "weavewing-v1.0.0", target: "abc123", ci: "skipped: build-only plan", draft: true }));
+    assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123"), /CI-verified/);
   } finally {
     FS.rmSync(root, { recursive: true });
   }

@@ -41,11 +41,11 @@ compatibility for the existing guarded track switch.
 `plan` runs the builds and writes the proposed release without GitHub writes.
 For artifact proof while CI is unavailable, add `--build-only` to a plan run.
 The evidence records CI as skipped. Draft and promote reject this flag, and
-promote runs CI at the release commit before publishing.
+promote requires the draft’s passing CI result for the same release commit.
 `draft` creates or refreshes a private draft called `Weavewing 0.1.0`, targeting
 the release commit with tag name `weavewing-v0.1.0`. A draft creates no tag.
 `promote` verifies the complete uploaded asset set against `assets/SHA256SUMS`
-in the draft run's local evidence directory, including its release commit and CI result,
+in the draft run's local evidence directory, including its release commit and passing CI result,
 then publishes it with the selected channel’s prerelease and latest flags. Only promote needs the prod risk grant.
 
 The default platform set is `linux,win,mac`. `--platforms linux,win` rebuilds a
