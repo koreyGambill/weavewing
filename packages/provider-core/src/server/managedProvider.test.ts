@@ -791,10 +791,9 @@ describe("makeManagedServerProvider", () => {
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );
 
-  it.effect("merges a probe with newer runtime updates per window", () =>
+  it.effect("merges a probe with runtime updates applied while it ran", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        // Values from a captured Claude Code 2.1.322 stream event and get_usage response.
         const weekly = (usedPercent: number) =>
           ({ id: "seven_day", kind: "weekly", label: "Weekly", usedPercent }) as const;
         const fable = (usedPercent: number) =>
@@ -804,10 +803,19 @@ describe("makeManagedServerProvider", () => {
             label: "Weekly · Fable",
             usedPercent,
           }) as const;
+        const session = {
+          id: "five_hour",
+          kind: "session",
+          label: "Session",
+          usedPercent: 10,
+        } as const;
+        const checkedAt = "2026-11-19T19:00:00.000Z";
+        const probeStarted = yield* Deferred.make<void>();
+        const releaseProbe = yield* Deferred.make<void>();
         const probes = yield* Ref.make([
-          { checkedAt: "2026-11-19T19:00:00.000Z", windows: [weekly(69), fable(3)] },
-          { checkedAt: "2026-11-19T19:34:13.000Z", windows: [weekly(93), fable(16)] },
-          { checkedAt: "2026-11-19T19:40:00.000Z", windows: [weekly(95)] },
+          { hold: false, windows: [weekly(69), fable(3)] },
+          { hold: true, windows: [weekly(93), fable(16)] },
+          { hold: false, windows: [weekly(95)] },
         ]);
         const provider = yield* makeManagedServerProvider<TestSettings>({
           resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
@@ -816,22 +824,32 @@ describe("makeManagedServerProvider", () => {
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
           checkProvider: Ref.modify(probes, ([next, ...rest]) => [next!, rest]).pipe(
-            Effect.map((usageLimits) => ({ ...refreshedSnapshot, usageLimits })),
+            Effect.tap(({ hold }) =>
+              hold
+                ? Deferred.succeed(probeStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseProbe)),
+                  )
+                : Effect.void,
+            ),
+            Effect.map(({ windows }) => ({
+              ...refreshedSnapshot,
+              usageLimits: { checkedAt, windows },
+            })),
           ),
           refreshInterval: "1 hour",
         });
         yield* Stream.take(provider.streamChanges, 1).pipe(Stream.runDrain);
 
-        // Observed after the second probe started reading.
-        yield* provider.applyUsageLimits({
-          checkedAt: "2026-11-19T19:34:20.000Z",
-          windows: [weekly(94)],
-        });
-        const merged = yield* provider.refresh;
-        assert.deepStrictEqual(merged.usageLimits?.windows, [weekly(94), fable(16)]);
+        const merging = yield* Effect.forkChild(provider.refresh);
+        yield* Deferred.await(probeStarted);
+        // An unchanged reading taken after the probe started still outranks the probe.
+        yield* provider.applyUsageLimits({ checkedAt, windows: [weekly(69), session] });
+        yield* Deferred.succeed(releaseProbe, undefined);
+        const merged = yield* Fiber.join(merging);
+        assert.deepStrictEqual(merged.usageLimits?.windows, [session, weekly(69), fable(16)]);
 
-        const later = yield* provider.refresh;
-        assert.deepStrictEqual(later.usageLimits?.windows, [weekly(95)]);
+        const next = yield* provider.refresh;
+        assert.deepStrictEqual(next.usageLimits?.windows, [weekly(95)]);
       }),
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );

@@ -110,55 +110,71 @@ function usageWindowEquals(a: ServerProviderUsageWindow, b: ServerProviderUsageW
   );
 }
 
-/** When each published window was last observed, by window id. */
-export type UsageWindowObservations = ReadonlyMap<string, string>;
+/** The sequence number of each published window's latest observation, by window id. */
+export type UsageWindowSequences = ReadonlyMap<string, number>;
 
-/** A published window observed after the probe read wins; the probe wins every other window. */
-export function resolveUsageLimitsAfterProbe(input: {
+/**
+ * Merges a probe into published limits window by window. Sequence numbers come from one
+ * per-provider counter: a probe takes its number when it starts, a runtime update when applied.
+ * A window observed after the probe started keeps its published value; the probe owns the rest.
+ */
+export function mergeProbedUsageLimits(input: {
   readonly published: ServerProviderUsageLimits | undefined;
   readonly probed: ServerProviderUsageLimits | undefined;
-  /** Windows missing here count as observed at the published report's `checkedAt`. */
-  readonly observedAt?: UsageWindowObservations;
-}): ServerProviderUsageLimits | undefined {
-  const { published, probed } = input;
+  readonly sequences: UsageWindowSequences;
+  readonly probeSequence: number;
+}): {
+  readonly limits: ServerProviderUsageLimits | undefined;
+  readonly sequences: UsageWindowSequences;
+} {
+  const { published, probed, sequences, probeSequence } = input;
   if (probed?.unavailable?.reason === "probeFailed" && published && !published.unavailable) {
-    return published;
+    return { limits: published, sequences };
   }
-  if (!published || !probed || published.unavailable || probed.unavailable) {
-    return probed;
-  }
-  const probedAt = Date.parse(probed.checkedAt);
-  const newer = new Map(
-    published.windows
-      .filter(
-        (window) => Date.parse(input.observedAt?.get(window.id) ?? published.checkedAt) > probedAt,
-      )
-      .map((window) => [window.id, window] as const),
+  const nextSequences = new Map(
+    (probed?.windows ?? []).map((window) => [window.id, probeSequence] as const),
   );
+  if (!published || !probed || published.unavailable || probed.unavailable) {
+    return { limits: probed, sequences: nextSequences };
+  }
+  const newer = new Map<string, ServerProviderUsageWindow>();
+  for (const window of published.windows) {
+    const sequence = sequences.get(window.id);
+    if (sequence !== undefined && sequence > probeSequence) {
+      newer.set(window.id, window);
+      nextSequences.set(window.id, sequence);
+    }
+  }
   if (newer.size === 0) {
-    return probed;
+    return { limits: probed, sequences: nextSequences };
   }
   const windows = probed.windows.map((window) => newer.get(window.id) ?? window);
   const probedIds = new Set(probed.windows.map((window) => window.id));
   for (const window of newer.values()) {
     if (!probedIds.has(window.id)) windows.push(window);
   }
-  return { ...probed, checkedAt: published.checkedAt, windows };
+  return {
+    limits: { ...probed, checkedAt: published.checkedAt, windows: sortWindows(windows) },
+    sequences: nextSequences,
+  };
 }
 
-/** Probed windows were observed at the probe; retained windows keep their earlier observation. */
-export function observeUsageWindows(input: {
-  readonly limits: ServerProviderUsageLimits | undefined;
+export function resolveUsageLimitsAfterProbe(input: {
+  readonly published: ServerProviderUsageLimits | undefined;
   readonly probed: ServerProviderUsageLimits | undefined;
-  readonly previous: UsageWindowObservations;
-}): UsageWindowObservations {
-  const { limits, probed, previous } = input;
-  if (!limits) return new Map();
-  const fromProbe = new Set(probed?.windows);
-  return new Map(
-    limits.windows.map((window) => [
-      window.id,
-      (fromProbe.has(window) ? probed?.checkedAt : previous.get(window.id)) ?? limits.checkedAt,
-    ]),
-  );
+}): ServerProviderUsageLimits | undefined {
+  const { published, probed } = input;
+  if (probed?.unavailable?.reason === "probeFailed" && published && !published.unavailable) {
+    return published;
+  }
+  if (
+    published &&
+    probed &&
+    !published.unavailable &&
+    !probed.unavailable &&
+    Date.parse(published.checkedAt) > Date.parse(probed.checkedAt)
+  ) {
+    return { ...probed, checkedAt: published.checkedAt, windows: published.windows };
+  }
+  return probed;
 }

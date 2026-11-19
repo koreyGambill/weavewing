@@ -19,9 +19,8 @@ import * as ProviderHost from "./ProviderHost.ts";
 import {
   applyUsageLimitsUpdate,
   makeUsageLimits,
-  observeUsageWindows,
-  resolveUsageLimitsAfterProbe,
-  type UsageWindowObservations,
+  mergeProbedUsageLimits,
+  type UsageWindowSequences,
 } from "./usageLimits.ts";
 import type { ManagedServerProvider } from "./snapshot.ts";
 
@@ -31,7 +30,9 @@ interface ProviderSnapshotState {
   // null preserves an explicitly cleared plan across probes and enrichment.
   readonly usageAuthLabel: string | null | undefined;
   readonly checked: boolean;
-  readonly usageObservedAt: UsageWindowObservations;
+  /** Orders probes against runtime updates; wall-clock times can tie or step backwards. */
+  readonly usageSequence: number;
+  readonly usageWindowSequences: UsageWindowSequences;
 }
 
 function withUsageLimits(
@@ -86,7 +87,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     enrichmentGeneration: 0,
     usageAuthLabel: undefined,
     checked: false,
-    usageObservedAt: new Map(),
+    usageSequence: 0,
+    usageWindowSequences: new Map(),
+  });
+  const takeUsageSequence = Ref.modify(snapshotStateRef, (state) => {
+    const usageSequence = state.usageSequence + 1;
+    return [usageSequence, { ...state, usageSequence }] as const;
   });
   const settingsRef = yield* Ref.make(initialSettings);
   const recheckPendingRef = yield* Ref.make(false);
@@ -182,6 +188,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
 
     // A probe without usage must not erase a report published while its I/O was in flight.
     const usageBeforeProbe = (yield* Ref.get(snapshotStateRef)).snapshot.usageLimits;
+    const probeSequence = yield* takeUsageSequence;
     const probedSnapshot = yield* input.checkProvider;
     // One failed periodic check over a ready provider is often transient; recheck before showing it.
     if (
@@ -209,16 +216,18 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
           differs(probedSnapshot.auth.email?.toLowerCase(), previous.email?.toLowerCase()) ||
           (probedSnapshot.auth.workspaceId !== undefined &&
             probedSnapshot.auth.workspaceId !== previous.workspaceId);
-        const usageLimits = switchedAccount
-          ? probedSnapshot.usageLimits
-          : probedSnapshot.usageLimits === undefined &&
-              state.snapshot.usageLimits !== usageBeforeProbe
-            ? state.snapshot.usageLimits
-            : resolveUsageLimitsAfterProbe({
-                published: state.snapshot.usageLimits,
+        const merged =
+          probedSnapshot.usageLimits === undefined &&
+          state.snapshot.usageLimits !== usageBeforeProbe &&
+          !switchedAccount
+            ? { limits: state.snapshot.usageLimits, sequences: state.usageWindowSequences }
+            : mergeProbedUsageLimits({
+                published: switchedAccount ? undefined : state.snapshot.usageLimits,
                 probed: probedSnapshot.usageLimits,
-                observedAt: state.usageObservedAt,
+                sequences: state.usageWindowSequences,
+                probeSequence,
               });
+        const usageLimits = merged.limits;
         const workspaceId =
           usageLimits === probedSnapshot.usageLimits ? undefined : state.snapshot.auth.workspaceId;
         const usageAuthLabel =
@@ -241,15 +250,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         return [
           { snapshot, generation },
           {
+            ...state,
             snapshot,
             enrichmentGeneration: generation,
             usageAuthLabel,
             checked: true,
-            usageObservedAt: observeUsageWindows({
-              limits: usageLimits,
-              probed: probedSnapshot.usageLimits,
-              previous: switchedAccount ? new Map() : state.usageObservedAt,
-            }),
+            usageWindowSequences: merged.sequences,
           },
         ] as const;
       },
@@ -279,8 +285,13 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         const relabel =
           (label !== undefined || (complete && state.usageAuthLabel !== undefined)) &&
           label !== auth.label;
+        const usageSequence = state.usageSequence + 1;
+        const usageWindowSequences = new Map([
+          ...(complete ? [] : state.usageWindowSequences),
+          ...update.windows.map((window) => [window.id, usageSequence] as const),
+        ]);
         if (usageLimits === state.snapshot.usageLimits && !relabel) {
-          return [null, state] as const;
+          return [null, { ...state, usageSequence, usageWindowSequences }] as const;
         }
         const snapshot = withUsageLimits(
           relabel ? { ...state.snapshot, auth: { ...auth, label } } : state.snapshot,
@@ -292,13 +303,8 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
             ...state,
             snapshot,
             usageAuthLabel: label ?? (complete ? null : state.usageAuthLabel),
-            usageObservedAt:
-              usageLimits === state.snapshot.usageLimits
-                ? state.usageObservedAt
-                : new Map([
-                    ...(complete ? [] : state.usageObservedAt),
-                    ...update.windows.map((window) => [window.id, update.checkedAt] as const),
-                  ]),
+            usageSequence,
+            usageWindowSequences,
           },
         ] as const;
       });
@@ -367,20 +373,17 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       }
       return;
     }
+    const probeSequence = yield* takeUsageSequence;
     const probed = yield* input.checkUsageLimits;
     const next = yield* Ref.modify(snapshotStateRef, (state) => {
-      const usageLimits = resolveUsageLimitsAfterProbe({
+      const merged = mergeProbedUsageLimits({
         published: state.snapshot.usageLimits,
         probed,
-        observedAt: state.usageObservedAt,
+        sequences: state.usageWindowSequences,
+        probeSequence,
       });
-      const snapshot = withUsageLimits(state.snapshot, usageLimits);
-      const usageObservedAt = observeUsageWindows({
-        limits: usageLimits,
-        probed,
-        previous: state.usageObservedAt,
-      });
-      return [snapshot, { ...state, snapshot, usageObservedAt }] as const;
+      const snapshot = withUsageLimits(state.snapshot, merged.limits);
+      return [snapshot, { ...state, snapshot, usageWindowSequences: merged.sequences }] as const;
     });
     yield* PubSub.publish(changesPubSub, next);
   });
