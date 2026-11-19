@@ -7,13 +7,14 @@ import { useRef } from "react";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
-import { useClientSettings } from "~/hooks/useSettings";
+import { updateClientSettings, useClientSettings } from "~/hooks/useSettings";
 import { seedDraftModelSelection } from "~/lib/seedDraftModelSelection";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
-import { type useProjects, waitForProject } from "~/state/entities";
+import { useProjects, waitForProject } from "~/state/entities";
+import { defaultPlaceUpdate } from "~/lib/defaultPlace.logic";
 import { getAddProjectInitialQuery } from "@t3tools/client-runtime/operations/projects";
 import { useEnvironments } from "~/state/environments";
 
@@ -26,6 +27,7 @@ export function useDraftPlaceSelection(input: {
 }) {
   const { draftId, activeProjectRef } = input;
   const { environments } = useEnvironments();
+  const allProjects = useProjects();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
@@ -98,7 +100,23 @@ export function useDraftPlaceSelection(input: {
   const defaultEnvironmentId = scratch.scratchEnvironmentId(
     activeProjectRef?.environmentId ?? null,
   );
+  const defaultProjectRef = useClientSettings((settings) => settings.defaultProject);
+  const defaultProject =
+    defaultProjectRef === null
+      ? undefined
+      : allProjects.find(
+          (project) =>
+            project.environmentId === defaultProjectRef.environmentId &&
+            project.id === defaultProjectRef.projectId &&
+            project.archivedAt == null,
+        );
+  const makeDefault = (place: Parameters<typeof defaultPlaceUpdate>[0]) =>
+    void updateClientSettings(defaultPlaceUpdate(place));
   const moveToDefaultPlace = async () => {
+    if (defaultProject !== undefined) {
+      selectProject(defaultProject);
+      return;
+    }
     if (defaultEnvironmentId === null) return;
     const request = Symbol("default-place");
     pendingScratchRef.current = request;
@@ -111,6 +129,8 @@ export function useDraftPlaceSelection(input: {
   };
 
   return {
+    defaultProjectRef: defaultProject === undefined ? null : defaultProjectRef,
+    makeDefault,
     selectProject,
     openAddProject,
     moveToDefaultPlace,

@@ -35,7 +35,16 @@ import {
   usePreferredEnvironmentId,
 } from "~/state/preferredEnvironment";
 import { projectEnvironment } from "~/state/projects";
-import { type NewThreadHandler, useNewThreadHandler } from "./useHandleNewThread";
+import {
+  type NewThreadHandler,
+  readLastUsedProjectKey,
+  resolveDefaultProjectRef,
+  useNewThreadHandler,
+} from "./useHandleNewThread";
+import { getClientSettings } from "./useSettings";
+import { resolveDefaultPlace } from "~/lib/defaultPlace.logic";
+import { readProjects } from "~/state/entities";
+import { useUiStateStore } from "~/uiStateStore";
 
 function reportScratchFailure(title: string, error: unknown) {
   toastManager.add(
@@ -148,31 +157,54 @@ export function createScratchProjectActions(
   };
 
   /**
-   * Opens a new thread in the default place: the default folder on the preferred machine.
-   * An offline preferred machine hands over to the fallback with a notice, never silently.
+   * Opens a new thread in the default place and says so whenever it had to fall back, so no
+   * entry point lands somewhere else silently. Resolves false when nothing usable is left.
    */
-  const startDefaultPlace = (fallback: EnvironmentId | null) => {
-    const choice = lookup.scratchEnvironmentChoice(fallback);
-    if (choice.kind === "chosen") {
-      void startScratchThread(choice.environmentId);
-      return;
+  const startDefaultPlace = async (
+    fallback: EnvironmentId | null,
+    options?: { readonly replace?: boolean },
+  ): Promise<boolean> => {
+    const projects = readProjects();
+    const isConnected = (environmentId: EnvironmentId) =>
+      lookup.environmentFor(environmentId)?.connection.phase === "connected";
+    const place = resolveDefaultPlace({
+      defaultProject: getClientSettings().defaultProject,
+      projects,
+      isConnected,
+      scratchChoice: lookup.scratchEnvironmentChoice(fallback),
+      fallbackScratchEnvironmentId: lookup.fallbackScratchEnvironmentId(fallback),
+      fallbackProject: resolveDefaultProjectRef(
+        projects.filter((project) => project.isScratch !== true),
+        useUiStateStore.getState().projectOrder,
+        readLastUsedProjectKey(),
+        true,
+        null,
+        isConnected,
+      ),
+      environmentLabel: (environmentId) =>
+        lookup.environmentFor(environmentId)?.label ?? "Your default machine",
+    });
+    if (place.kind === "none") {
+      openCommandPalette({ open: "new-thread-in" });
+      return false;
     }
-    const other =
-      choice.kind === "preferred-unavailable"
-        ? lookup.fallbackScratchEnvironmentId(fallback)
-        : null;
-    if (choice.kind === "preferred-unavailable" && other !== null) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "info",
-          title: `${lookup.environmentFor(choice.environmentId)?.label ?? "Your default machine"} is offline`,
-          description: `This thread starts on ${lookup.environmentFor(other)?.label ?? "another machine"} instead.`,
-        }),
-      );
-      void startScratchThread(other);
-      return;
+    if (place.notice !== null) {
+      toastManager.add(stackedThreadToast({ type: "info", title: place.notice }));
     }
-    openCommandPalette({ open: "new-thread-in" });
+    const projectRef =
+      place.kind === "project"
+        ? place.projectRef
+        : await openScratchProject(place.environmentId).then((project) =>
+            project ? scopeProjectRef(project.environmentId, project.id) : null,
+          );
+    if (projectRef === null) return false;
+    const opened = await input
+      .handleNewThread(projectRef, options?.replace ? { replace: true } : undefined)
+      .catch((error: unknown) => {
+        reportScratchFailure("Could not start a new thread", error);
+        return null;
+      });
+    return opened !== null;
   };
 
   return {

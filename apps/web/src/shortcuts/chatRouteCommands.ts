@@ -104,7 +104,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
 
   const startDefaultPlace = () => {
     const { activeThread, activeDraftThread } = readThreadContext();
-    scratch.startDefaultPlace(
+    void scratch.startDefaultPlace(
       activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null,
     );
   };

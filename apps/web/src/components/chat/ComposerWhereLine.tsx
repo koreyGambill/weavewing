@@ -52,8 +52,12 @@ export function ComposerWhereLine({
   const scratchRoot = selection.scratchWorkspaceRootFor(environmentId);
   const folder = worktreePath ?? project?.workspaceRoot ?? null;
   const isScratch = project !== null && isScratchProject(project, scratchRoot);
+  const defaultProject = selection.defaultProjectRef;
   const atDefaultPlace =
-    isScratch && environmentId === selection.defaultEnvironmentId && worktreePath === null;
+    worktreePath === null &&
+    (defaultProject !== null
+      ? defaultProject.environmentId === environmentId && defaultProject.projectId === projectId
+      : isScratch && environmentId === selection.defaultEnvironmentId);
   const shortcut = shortcutLabelForCommand(keybindings, "projectPicker.open");
   const threadRef = scopeThreadRef(environmentId, threadId);
   const started = draftId === null;
@@ -122,9 +126,11 @@ export function ComposerWhereLine({
         environmentId={environmentId}
         label={isScratch ? folderLabel : project.title}
         truncateStart={isScratch}
-        currentFolder={folder}
-        defaultFolder={selection.scratchWorkspaceRootFor(selection.defaultEnvironmentId)}
         defaultEnvironmentId={selection.defaultEnvironmentId}
+        defaultPlace={{
+          current: atDefaultPlace,
+          makeDefault: () => selection.makeDefault({ projectRef, isScratch }),
+        }}
         trigger={{
           content,
           ariaLabel: `Change project or folder: ${ariaLabel}`,
@@ -135,7 +141,8 @@ export function ComposerWhereLine({
         onAddProject={selection.openAddProject}
         {...(onComposerFocusRequest ? { onClose: onComposerFocusRequest } : {})}
       />
-      {atDefaultPlace || selection.defaultEnvironmentId === null ? null : (
+      {atDefaultPlace ||
+      (defaultProject === null && selection.defaultEnvironmentId === null) ? null : (
         <span className="shrink-0 text-xs">
           <InlineButton
             tone="muted"

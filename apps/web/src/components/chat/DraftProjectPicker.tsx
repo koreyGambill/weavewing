@@ -39,8 +39,7 @@ import { registerCommands } from "~/shortcuts/dispatcher";
 import { useEnvironments } from "~/state/environments";
 import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
-import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
-import { updateClientSettings } from "~/hooks/useSettings";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentsWithScope } from "~/state/session";
@@ -88,9 +87,8 @@ export function DraftProjectPicker({
   onAddProject,
   onStartWithoutProject,
   defaultFolderLabel,
-  currentFolder = null,
-  defaultFolder = null,
   defaultEnvironmentId = null,
+  defaultPlace,
   trigger,
 }: {
   readonly draftId?: DraftId | null;
@@ -106,10 +104,8 @@ export function DraftProjectPicker({
   readonly onStartWithoutProject?: () => void;
   readonly defaultFolderLabel?: string | null;
   readonly onAddProject: (step: "folder" | "clone") => void;
-  /** The folder this draft starts in; "Make this the default" saves it with the machine. */
-  readonly currentFolder?: string | null;
-  /** The machine's default folder, so the default place can be recognized. */
-  readonly defaultFolder?: string | null;
+  /** Whether this draft is at the default place, and how to make its place the default. */
+  readonly defaultPlace?: { readonly current: boolean; readonly makeDefault: () => void };
   /** The machine new threads start on when no preference names one. */
   readonly defaultEnvironmentId?: EnvironmentId | null;
   /** Replaces the project-name trigger, as the where-line under the composer does. */
@@ -140,27 +136,6 @@ export function DraftProjectPicker({
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
   const preferredEnvironmentId = usePreferredEnvironmentId() ?? defaultEnvironmentId;
-  const canSaveDefaultFolder = useAtomValue(
-    serverEnvironment.updateSettings.permissionAtom(environmentId),
-  );
-  const saveServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    reportFailure: false,
-  });
-  const atDefaultPlace =
-    environmentId !== null &&
-    environmentId === preferredEnvironmentId &&
-    (currentFolder === null || currentFolder === defaultFolder);
-  const makeDefault = async () => {
-    if (!environmentId) return;
-    await updateClientSettings({ preferredEnvironmentId: environmentId });
-    if (currentFolder !== null && currentFolder !== defaultFolder && canSaveDefaultFolder) {
-      const result = await saveServerSettings({
-        environmentId,
-        input: { patch: { scratchStartDirectory: currentFolder } },
-      });
-      if (result._tag === "Failure") setError("Could not save this folder as the default.");
-    }
-  };
   const connected = environments.filter((env) => env.connection.phase === "connected");
   const targets = (open ? connected : [])
     .filter((env) => allMachines || env.environmentId === environmentId)
@@ -687,13 +662,13 @@ export function DraftProjectPicker({
           );
         }}
       </ComboboxList>
-      {environmentId !== null && !inline ? (
+      {defaultPlace !== undefined ? (
         <div className="flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-muted-foreground text-xs">
           <StarIcon className="size-3 shrink-0" aria-hidden="true" />
-          {atDefaultPlace ? (
+          {defaultPlace.current ? (
             <span className="min-w-0 truncate">This is your default place for new threads</span>
           ) : (
-            <InlineButton tone="muted" onClick={() => void makeDefault()}>
+            <InlineButton tone="muted" onClick={defaultPlace.makeDefault}>
               Make this the default place
             </InlineButton>
           )}

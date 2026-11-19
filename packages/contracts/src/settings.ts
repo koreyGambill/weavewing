@@ -26,7 +26,12 @@ import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import { UsageModelFilter } from "./usage.ts";
 import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
 import { SettingsSecretValue } from "./settingsSecretValue.ts";
-import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
+import {
+  EnvironmentMachineKind,
+  ScopedProjectRef,
+  ThreadEnvMode,
+  WorktreeSubmodules,
+} from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
   CustomModelSetting,
@@ -575,6 +580,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // Machine for new work that names none; distinct from the primary connection, which
   // is only how this client reaches its own server. Null keeps primary-first defaults.
   preferredEnvironmentId: ForwardCompatibleNullable(EnvironmentId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // The project new threads start in on this device; null starts them in the default folder.
+  defaultProject: ForwardCompatibleNullable(ScopedProjectRef).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
 
@@ -2184,6 +2193,7 @@ export const ClientSettingsPatch = Schema.Struct({
   glassOpacity: Schema.optionalKey(GlassOpacity),
   onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   preferredEnvironmentId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
+  defaultProject: Schema.optionalKey(Schema.NullOr(ScopedProjectRef)),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),
   fontSizeCode: Schema.optionalKey(CodeFontSize),

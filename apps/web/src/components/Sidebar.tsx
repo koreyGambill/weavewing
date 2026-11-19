@@ -2875,7 +2875,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);
 
   const startDefaultPlace = () =>
-    readScratchProjectActions(appAtomRegistry, handleNewThread).startDefaultPlace(
+    void readScratchProjectActions(appAtomRegistry, handleNewThread).startDefaultPlace(
       newThreadContext.activeThread?.environmentId ??
         newThreadContext.activeDraftThread?.environmentId ??
         null,
