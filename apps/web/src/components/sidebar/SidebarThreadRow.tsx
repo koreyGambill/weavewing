@@ -1040,11 +1040,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
-    props.activeOutlineColor &&
-      "outline-2 outline-solid focus-visible:-outline-offset-4 inert:outline-none",
-    props.activeOutlineColor && (isFileDragOver ? "-outline-offset-4" : "-outline-offset-2"),
-    props.activeOutlineColor === "green" && "outline-(--weavewing-green)",
-    props.activeOutlineColor === "yellow" && "outline-(--weavewing-yellow)",
+    activeThreadOutline(props.activeOutlineColor, isFileDragOver),
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
@@ -1832,6 +1828,15 @@ const scrollHighlightedResultIntoView = (node: HTMLLIElement | null) => {
   node?.scrollIntoView({ block: "nearest" });
 };
 
+function activeThreadOutline(color: "green" | "yellow" | undefined, isFileDragOver: boolean) {
+  if (color === undefined) return;
+  return cn(
+    "outline-2 outline-solid focus-visible:-outline-offset-4 inert:outline-none",
+    isFileDragOver ? "-outline-offset-4" : "-outline-offset-2",
+    color === "green" ? "outline-(--weavewing-green)" : "outline-(--weavewing-yellow)",
+  );
+}
+
 export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   isSettled: boolean;
   thread: SidebarThreadSummary;
@@ -1842,13 +1847,14 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   isHighlighted: boolean;
   isRouteActive: boolean;
+  activeOutlineColor?: "green" | "yellow" | undefined;
   resultId: string;
   searchMatch: EnvironmentThreadSearchMatch | null;
   searchQuery: string;
   /** The query `searchMatch` was found for, which lags `searchQuery` while a search runs. */
   searchMatchQuery?: string;
   onHighlight: () => void;
-  onSelect: () => void;
+  onSelect: (event: ReactMouseEvent) => void;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
 }) {
   const thread =
@@ -1958,6 +1964,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                   : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
                 isFileDragOver && "ring-1 ring-inset ring-primary/70",
                 isFileDragOver && !props.isRouteActive && "bg-sidebar-row-hover",
+                activeThreadOutline(props.activeOutlineColor, isFileDragOver),
               )}
             />
           }

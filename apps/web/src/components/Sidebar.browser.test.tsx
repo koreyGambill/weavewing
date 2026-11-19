@@ -238,6 +238,21 @@ it("alternates the current thread outline only on ordinary row clicks", async ()
 
   await userEvent.click(second);
   await expectOutline(second, "green");
+
+  const search = screen.getByRole("combobox", { name: "Search threads" });
+  await userEvent.fill(search, "Thread 1");
+  const result = screen.getByRole("option", { name: /^Thread 1/ });
+  const green = getComputedStyle(document.documentElement)
+    .getPropertyValue("--weavewing-green")
+    .trim();
+  await expect.element(result).toHaveStyle(`outline: 2px solid ${green}`);
+  await userEvent.click(result);
+  await expectOutline(second, "yellow");
+
+  await userEvent.fill(search, "Thread 1");
+  await expect.element(result).toHaveAttribute("aria-current", "page");
+  await userEvent.keyboard("{Enter}");
+  await expectOutline(second, "yellow");
 });
 
 describe("sidebar render isolation", () => {

@@ -1771,7 +1771,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     setThreadSearchQuery("");
     setSearchHighlightKey(null);
   };
-  const selectThreadSearchResult = (thread: EnvironmentThreadShell) => {
+  const advanceOutlineOnClick = (event: ReactMouseEvent) => {
+    if (
+      event.detail === 1 &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey
+    ) {
+      setActiveOutlineColor((color) => (color === "green" ? "yellow" : "green"));
+    }
+  };
+  const selectThreadSearchResult = (thread: EnvironmentThreadShell, event?: ReactMouseEvent) => {
+    if (event) advanceOutlineOnClick(event);
     const ref = scopeThreadRef(thread.environmentId, thread.id);
     // A row listed for a message match opens find on it, as the palette does.
     const match = threadSearchMatchByKey.get(
@@ -1863,9 +1875,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isTrailingDoubleClick(event.detail)) {
       return;
     }
-    if (event.detail === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      setActiveOutlineColor((color) => (color === "green" ? "yellow" : "green"));
-    }
+    advanceOutlineOnClick(event);
     navigateToThread(threadRef);
   };
 
@@ -3779,6 +3789,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           }
                           isHighlighted={activeSearchResultIndex === index}
                           isRouteActive={routeRowThreadKey === threadKey}
+                          activeOutlineColor={
+                            routeRowThreadKey === threadKey
+                              ? (activeOutlineColor ?? "green")
+                              : undefined
+                          }
                           resultId={threadSearchResultId(index)}
                           searchMatch={
                             threadSearchMatchByKey.get(
@@ -3791,7 +3806,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           searchQuery={threadSearchQuery}
                           searchMatchQuery={threadSearch.query}
                           onHighlight={() => setActiveSearchResultIndex(index)}
-                          onSelect={() => selectThreadSearchResult(thread)}
+                          onSelect={(event) => selectThreadSearchResult(thread, event)}
                           onFileDropThreads={handleThreadFileDrop}
                         />
                       );
