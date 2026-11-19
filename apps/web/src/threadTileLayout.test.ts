@@ -79,8 +79,8 @@ describe("thread tile layout", () => {
     expect(resize(rect, { left: true, bottom: true }, { x: 0.5, y: -0.5 })).toEqual([
       0.4, 0.2, 0.2, 0.2,
     ]);
-    expect(resize(rect, { left: true }, { x: 0.5, y: 0 }, 500)).toEqual([0.28, 0.2, 0.32, 0.4]);
-    expect(resize(rect, { right: true }, { x: -1, y: 0 }, 500)).toEqual([0.2, 0.2, 0.32, 0.4]);
+    expect(resize(rect, { left: true }, { x: 0.5, y: 0 }, 500)).toEqual([0.26, 0.2, 0.34, 0.4]);
+    expect(resize(rect, { right: true }, { x: -1, y: 0 }, 500)).toEqual([0.2, 0.2, 0.34, 0.4]);
     const firstFloat = (...args: Parameters<typeof firstFloatingTile>) =>
       Object.fromEntries(
         Object.entries(firstFloatingTile(...args)).map(([key, value]) => [
@@ -723,9 +723,9 @@ describe("thread tile layout", () => {
     layout = applyTileAction(layout, { type: "resize", splitId: "initial-split", ratio: 0.7 });
     expect(layout.root.kind === "split" && layout.root.ratio).toBe(0.7);
     for (const [width, ratio, expected] of [
-      [1000, 0.01, 0.16],
-      [1000, 0.99, 0.84],
-      [500, 0.7, 0.68],
+      [1000, 0.01, 0.168],
+      [1000, 0.99, 0.832],
+      [500, 0.7, 0.664],
       [300, 0.7, 0.5],
     ] as const) {
       const resized = applyTileAction(layout, {

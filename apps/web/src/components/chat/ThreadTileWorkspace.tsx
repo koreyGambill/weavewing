@@ -59,7 +59,6 @@ import {
   tileMinimumWidth,
   TILE_MIN_WIDTH_PX,
   type FloatingTileEdges,
-  type TileNode,
   type FloatingTileRect,
   type ThreadTileLayout,
   type TileAction,
@@ -68,7 +67,6 @@ import {
 import {
   directionalTile,
   tileGeometry,
-  displayTileRoot,
   tileDropOrder,
   type TileRect,
 } from "../../threadTileGeometry";
@@ -108,8 +106,11 @@ import { PanelTabCloseButton } from "../ui/panel-tab-close-button";
 import { cn, randomUUID } from "../../lib/utils";
 import { ThreadPaneAttention } from "../ThreadAttentionOverlay";
 import {
+  dockedTiles,
   fitTileTabs,
   ownsTileInput,
+  shownDockedRoot,
+  splitTooNarrow,
   TILE_AREAS,
   TILE_CONTROL_PRIORITY,
   tileCloseConfirmation,
@@ -131,6 +132,21 @@ const GROUP_DRAG_TYPE = "application/x-weavewing-group";
 type DropZone = "tabs" | "center" | "left" | "right" | "top" | "bottom";
 type TileDrop = { groupId: string; zone: DropZone };
 type TileDrag = { kind: "tab" | "group"; id: string };
+type TileSplitAxis = "horizontal" | "vertical";
+type EdgeZone = Exclude<DropZone, "tabs" | "center">;
+/** Dropping a tab or tile on another tile's edge splits that tile. */
+const edgeDropAction = (
+  drag: TileDrag,
+  targetGroupId: string,
+  zone: EdgeZone,
+  ids: { groupId: string; splitId: string },
+): TileAction => {
+  const axis = zone === "left" || zone === "right" ? "horizontal" : "vertical";
+  const side = zone === "left" || zone === "top" ? "before" : "after";
+  return drag.kind === "group"
+    ? { type: "dock-group", groupId: drag.id, targetGroupId, axis, side, splitId: ids.splitId }
+    : { type: "split", tabId: drag.id, targetGroupId, axis, side, ...ids };
+};
 type PanelActions = TileSurfaceActions;
 const rectStyle = (rect: TileRect): CSSProperties => ({
   left: `${rect.x * 100}%`,
@@ -315,13 +331,7 @@ export function ThreadTileWorkspace(props: {
   const groups = getTileGroups(layout);
   const maximized = layout.maximizedGroupId;
   const zoomedIds = new Set([maximized, layout.besideGroupId]);
-  const tiled = (node: TileNode): TileNode | null => {
-    if (node.kind === "group") return node.floating ? null : node;
-    const first = tiled(node.first);
-    const second = tiled(node.second);
-    return first && second ? { ...node, first, second } : (first ?? second);
-  };
-  const displayRoot = maximized ? displayTileRoot(layout) : tiled(layout.root);
+  const displayRoot = shownDockedRoot(layout);
   const minimumWidth = compact
     ? 0
     : displayRoot
@@ -381,31 +391,32 @@ export function ThreadTileWorkspace(props: {
   const layoutVersion = JSON.stringify(layout);
   const currentLayout = () =>
     selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, props.threadRef);
-  const dockedMinimum = (current: ThreadTileLayout) => {
-    const root = current.maximizedGroupId ? displayTileRoot(current) : tiled(current.root);
-    return root ? tileMinimumWidth(root) : 0;
-  };
-  // A split that would leave a tile below its minimum width is refused, not scrolled into.
-  const crowds = (current: ThreadTileLayout, action: TileAction) =>
-    !compact &&
-    workspaceWidth > 0 &&
-    (action.type === "split" || action.type === "new-group" || action.type === "dock-group") &&
-    dockedMinimum(reduceTileAction(current, action)) >
-      Math.max(workspaceWidth, dockedMinimum(current));
-  const splitRightCrowds = (current: ThreadTileLayout, groupId: string) =>
-    crowds(current, {
+  // Compact shows one tile at a time, so there is no pane width to keep.
+  const tooNarrow = (current: ThreadTileLayout, action: TileAction) =>
+    !compact && splitTooNarrow(current, action, workspaceWidth);
+  const probeIds = { groupId: "split-probe", splitId: "split-probe-split" };
+  const newTileTooNarrow = (current: ThreadTileLayout, groupId: string, axis: TileSplitAxis) =>
+    tooNarrow(current, {
       type: "new-group",
       targetGroupId: groupId,
-      axis: "horizontal",
+      axis,
       side: "after",
-      groupId: "split-probe",
-      splitId: "split-probe-split",
+      ...probeIds,
+    });
+  const moveTabTooNarrow = (current: ThreadTileLayout, group: TileGroup, axis: TileSplitAxis) =>
+    tooNarrow(current, {
+      type: "split",
+      tabId: group.activeTabId,
+      targetGroupId: group.id,
+      axis,
+      side: "after",
+      ...probeIds,
     });
   /** Applies a tile action; false when a split is refused for want of width. */
   const apply = (
     action: Parameters<ReturnType<typeof useRightPanelStore.getState>["applyTileAction"]>[1],
   ) => {
-    if (crowds(currentLayout(), action)) return false;
+    if (tooNarrow(currentLayout(), action)) return false;
     useRightPanelStore
       .getState()
       .applyTileAction(
@@ -486,7 +497,7 @@ export function ThreadTileWorkspace(props: {
     Boolean(group.floating) ||
     getTileGroups(currentLayout()).filter((entry) => !entry.floating).length > 1;
   const anchoredFloat = (groupId: string) => {
-    const root = tiled(currentLayout().root);
+    const root = dockedTiles(currentLayout().root);
     const docked = root && tileGeometry(root).groups.find((entry) => entry.id === groupId)?.rect;
     const workspace = rootRef.current;
     if (!docked || !workspace?.clientHeight) return DEFAULT_FLOATING_TILE;
@@ -702,8 +713,7 @@ export function ThreadTileWorkspace(props: {
     };
     const visibleGeometry = (restored = false) => {
       const current = currentLayout();
-      const root =
-        current.maximizedGroupId && !restored ? displayTileRoot(current) : tiled(current.root);
+      const root = restored ? dockedTiles(current.root) : shownDockedRoot(current);
       return [
         ...(root ? tileGeometry(root).groups : []),
         ...getTileGroups(current)
@@ -1051,8 +1061,8 @@ export function ThreadTileWorkspace(props: {
     const nearest = edges
       .filter(
         (edge) =>
-          (edge.zone !== "left" && edge.zone !== "right") ||
-          !splitRightCrowds(currentLayout(), hovered.id),
+          !dragging ||
+          !tooNarrow(currentLayout(), edgeDropAction(dragging, hovered.id, edge.zone, probeIds)),
       )
       .reduce((a, b) => (a.distance < b.distance ? a : b));
     return { groupId: hovered.id, zone: nearest.distance < 0.22 ? nearest.zone : "center" };
@@ -1168,18 +1178,15 @@ export function ThreadTileWorkspace(props: {
             const target = locateDrop(event);
             if (target) {
               const { groupId: targetGroupId, zone } = target;
-              const edge = zone !== "center" && zone !== "tabs";
-              if (dragging.kind === "group") {
-                if (edge)
-                  apply({
-                    type: "dock-group",
-                    groupId: dragging.id,
-                    targetGroupId,
-                    axis: zone === "left" || zone === "right" ? "horizontal" : "vertical",
-                    side: zone === "left" || zone === "top" ? "before" : "after",
+              if (zone !== "center" && zone !== "tabs")
+                apply(
+                  edgeDropAction(dragging, targetGroupId, zone, {
+                    groupId: randomUUID(),
                     splitId: randomUUID(),
-                  });
-                else if (zone === "tabs")
+                  }),
+                );
+              else if (dragging.kind === "group") {
+                if (zone === "tabs")
                   apply({ type: "merge-groups", groupId: dragging.id, targetGroupId });
                 else
                   apply({
@@ -1187,17 +1194,7 @@ export function ThreadTileWorkspace(props: {
                     firstGroupId: dragging.id,
                     secondGroupId: targetGroupId,
                   });
-              } else if (edge)
-                apply({
-                  type: "split",
-                  tabId: dragging.id,
-                  targetGroupId,
-                  axis: zone === "left" || zone === "right" ? "horizontal" : "vertical",
-                  side: zone === "left" || zone === "top" ? "before" : "after",
-                  groupId: randomUUID(),
-                  splitId: randomUUID(),
-                });
-              else {
+              } else {
                 const tabElement =
                   event.target instanceof Element
                     ? event.target.closest<HTMLElement>("[data-tab-id]")
@@ -1399,10 +1396,18 @@ export function ThreadTileWorkspace(props: {
                                         <MessagesSquare className="size-3 shrink-0" />
                                       )}
                                       <span
+                                        data-fit-label
                                         className={cn(
                                           "min-w-0 truncate",
                                           tabFit === "icon" && "hidden",
                                         )}
+                                      >
+                                        {title(tabId)}
+                                      </span>
+                                      <span
+                                        aria-hidden
+                                        data-fit-title
+                                        className="pointer-events-none invisible absolute w-max"
                                       >
                                         {title(tabId)}
                                       </span>
@@ -1438,7 +1443,13 @@ export function ThreadTileWorkspace(props: {
                                   />
                                 }
                               >
-                                +{Math.max(1, foldedTabs.length)}
+                                {/* As wide as +99 whatever the count, so the fold count depends on width alone. */}
+                                <span className="grid tabular-nums">
+                                  <span className="invisible col-start-1 row-start-1">+99</span>
+                                  <span className="col-start-1 row-start-1 text-center">
+                                    +{Math.max(1, foldedTabs.length)}
+                                  </span>
+                                </span>
                               </MenuTrigger>
                               <MenuPopup align="start">{tabMenuItems(group, foldedTabs)}</MenuPopup>
                             </Menu>
@@ -1507,7 +1518,7 @@ export function ThreadTileWorkspace(props: {
                           fit="split"
                           hidden={fit.hiddenControls.has("split")}
                           label="New tile to the right"
-                          disabled={splitRightCrowds(layout, id)}
+                          disabled={newTileTooNarrow(layout, id, "horizontal")}
                           shortcut={shortcut("workspace.tile.splitRight")}
                           onClick={() => split(group, "horizontal")}
                         >
@@ -1518,6 +1529,7 @@ export function ThreadTileWorkspace(props: {
                           fit="split"
                           hidden={fit.hiddenControls.has("split")}
                           label="New tile below"
+                          disabled={newTileTooNarrow(layout, id, "vertical")}
                           shortcut={shortcut("workspace.tile.splitDown")}
                           onClick={() => split(group, "vertical")}
                         >
@@ -1565,6 +1577,7 @@ export function ThreadTileWorkspace(props: {
                                       size="icon-micro"
                                       variant="ghost"
                                       aria-label="Tile actions"
+                                      data-fit-menu
                                     />
                                   }
                                 />
@@ -1603,13 +1616,16 @@ export function ThreadTileWorkspace(props: {
                                 </MenuItem>
                               </>
                             ) : null}
-                            <MenuItem onClick={() => split(group, "vertical")}>
+                            <MenuItem
+                              disabled={newTileTooNarrow(layout, id, "vertical")}
+                              onClick={() => split(group, "vertical")}
+                            >
                               <Rows2 />
                               New tile below
                               <TileMenuShortcut keys={shortcut("workspace.tile.splitDown")} />
                             </MenuItem>
                             <MenuItem
-                              disabled={splitRightCrowds(layout, id)}
+                              disabled={newTileTooNarrow(layout, id, "horizontal")}
                               onClick={() => split(group, "horizontal")}
                             >
                               <Columns2 />
@@ -1694,13 +1710,16 @@ export function ThreadTileWorkspace(props: {
                               </MenuSubTrigger>
                               <MenuSubPopup>
                                 <MenuItem
-                                  disabled={splitRightCrowds(layout, id)}
+                                  disabled={moveTabTooNarrow(layout, group, "horizontal")}
                                   onClick={() => moveTabToNewTile(group, "horizontal")}
                                 >
                                   <Columns2 />
                                   Right
                                 </MenuItem>
-                                <MenuItem onClick={() => moveTabToNewTile(group, "vertical")}>
+                                <MenuItem
+                                  disabled={moveTabTooNarrow(layout, group, "vertical")}
+                                  onClick={() => moveTabToNewTile(group, "vertical")}
+                                >
                                   <Rows2 />
                                   Below
                                 </MenuItem>
@@ -2100,8 +2119,8 @@ type TileBarFit = {
 };
 
 /**
- * Fits a tile header's tabs and controls to its width. Tab widths are cached and re-measured only
- * when a tab resizes, so dragging a split re-renders the header only when what fits changes.
+ * Fits a tile header's tabs and controls to its width. Titles are measured off-flow and only when
+ * they resize, so dragging a split re-renders the header only when what fits changes.
  */
 function FittedTileBar(props: {
   tabIds: readonly string[];
@@ -2110,7 +2129,8 @@ function FittedTileBar(props: {
   children: (fit: TileBarFit, tabAreaRef: (element: HTMLDivElement | null) => void) => ReactNode;
 }) {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
-  const widths = useRef(new Map<string, number>());
+  // Width of a tab around its title, kept from when the title last showed.
+  const chrome = useRef(new Map<string, number>());
   const [fit, setFit] = useState<TileBarFit>(() => ({
     shown: new Set(props.tabIds),
     mode: "full",
@@ -2132,31 +2152,38 @@ function FittedTileBar(props: {
       (Number.parseFloat(listStyle.paddingLeft) || 0) +
       (Number.parseFloat(listStyle.paddingRight) || 0);
     const tabs = [...list.querySelectorAll<HTMLElement>(":scope > [data-fit-tab]")];
+    const titles = tabs.map((tab) => tab.querySelector<HTMLElement>("[data-fit-title]")!);
+    const maxTab = tabs[0] ? Number.parseFloat(getComputedStyle(tabs[0]).maxWidth) : Infinity;
     const chip = area.querySelector<HTMLElement>("[data-fit-chip]");
     const newTab = area.querySelector<HTMLElement>("[data-fit-new-tab]");
-    // A truncated or icon-only tab no longer shows its natural width, so its last one stands.
-    const measure = (tab: HTMLElement) => {
-      if (tab.dataset.fit === "full" || tab.dataset.fit === "folded")
-        widths.current.set(tab.dataset.fitTab!, tab.getBoundingClientRect().width);
+    const width = (element: Element) => element.getBoundingClientRect().width;
+    const naturalWidth = (tab: HTMLElement, index: number) => {
+      const label = tab.querySelector<HTMLElement>("[data-fit-label]");
+      if (tab.dataset.fit !== "icon" && label)
+        chrome.current.set(tab.dataset.fitTab!, width(tab) - width(label));
+      return Math.min(
+        maxTab,
+        (chrome.current.get(tab.dataset.fitTab!) ?? 0) + width(titles[index]!),
+      );
     };
     const update = () => {
       const controlElements = [...bar.querySelectorAll<HTMLElement>("[data-fit-control]")];
       const widthOf = (elements: readonly HTMLElement[]) =>
-        elements.reduce((total, element) => total + element.getBoundingClientRect().width + gap, 0);
+        elements.reduce((total, element) => total + width(element) + gap, 0);
       const next = fitTileTabs({
         // The tab area takes what the bar leaves, so adding back the shown controls gives the
         // room with every control hidden.
         room:
-          area.getBoundingClientRect().width +
+          width(area) +
           widthOf(controlElements.filter((element) => element.dataset.fitHidden !== "true")) -
           listPadding -
           (newTab?.offsetWidth ?? 0),
         controls: controls.map((key) =>
           widthOf(controlElements.filter((element) => element.dataset.fitControl === key)),
         ),
-        tabs: tabIds.map((tabId) => widths.current.get(tabId) ?? 0),
+        tabs: tabs.map(naturalWidth),
         activeIndex: tabIds.indexOf(activeTabId),
-        chip: chip?.getBoundingClientRect().width ?? 0,
+        chip: chip ? width(chip) : 0,
         truncatedTab: TRUNCATED_TAB_PX,
       });
       const shown = next.shown.map((index) => tabIds[index]!);
@@ -2171,16 +2198,26 @@ function FittedTileBar(props: {
           : { shown: new Set(shown), mode: next.mode, hiddenControls: new Set(hidden) },
       );
     };
-    for (const tab of tabs) measure(tab);
     update();
-    // The bar, not the tab area, since hiding a control resizes the area inside this callback.
-    return observeResize([bar, ...tabs, ...(chip ? [chip] : [])], (entries) => {
-      for (const entry of entries)
-        if (entry.target instanceof HTMLElement && entry.target.dataset.fitTab)
-          measure(entry.target);
-      update();
-    });
+    // Only boxes a fit cannot resize, so applying one inside the callback never loops: the bar
+    // for its width, and each title's off-flow copy for its natural width.
+    return observeResize([bar, ...titles], update);
   }, [area, tabKey, activeTabId, controlKey]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a fit can hide the focused tab or control; focus stays in the header so the workspace keeps its keys
+  useLayoutEffect(() => {
+    const bar = area?.parentElement;
+    const focused = document.activeElement;
+    if (!area || !bar || !focused || !bar.contains(focused)) return;
+    const folded = focused.closest('[data-fit="folded"]');
+    if (!folded && !focused.closest('[data-fit-hidden="true"]')) return;
+    const chip = area.querySelector<HTMLElement>("[data-fit-chip] button");
+    const target = folded
+      ? chip?.checkVisibility({ visibilityProperty: true })
+        ? chip
+        : area.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      : bar.querySelector<HTMLElement>("[data-fit-menu]");
+    target?.focus({ preventScroll: true });
+  });
   return props.children(fit, setArea);
 }
 

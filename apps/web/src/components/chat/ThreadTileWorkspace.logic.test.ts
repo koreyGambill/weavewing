@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { RightPanelSurface } from "../../rightPanelStore";
-import { newTabId } from "../../threadTileLayout";
-import { fitTileTabs, tileCloseConfirmation } from "./ThreadTileWorkspace.logic";
+import {
+  applyTileAction,
+  newTabId,
+  syncTileLayout,
+  TILE_MIN_WIDTH_PX,
+} from "../../threadTileLayout";
+import { fitTileTabs, splitTooNarrow, tileCloseConfirmation } from "./ThreadTileWorkspace.logic";
 
 const terminal = (id: string, terminalId: string): RightPanelSurface => ({
   id: `terminal:${id}`,
@@ -99,5 +104,70 @@ describe("fitTileTabs", () => {
       mode: "icon",
       hiddenControls: 4,
     });
+  });
+});
+
+describe("splitTooNarrow", () => {
+  // conversation-group | panels-group, half and half.
+  const pair = applyTileAction(syncTileLayout(undefined, [], ["a", "b"], "a", true), {
+    type: "resize",
+    splitId: "initial-split",
+    ratio: 0.5,
+  });
+  const splitRight = (targetGroupId: string) =>
+    ({
+      type: "new-group",
+      targetGroupId,
+      axis: "horizontal",
+      side: "after",
+      groupId: "added",
+      splitId: "added-split",
+    }) as const;
+
+  it("needs two minimum tiles of width in the pane being split", () => {
+    expect(splitTooNarrow(pair, splitRight("panels-group"), 4 * TILE_MIN_WIDTH_PX)).toBe(false);
+    expect(splitTooNarrow(pair, splitRight("panels-group"), 4 * TILE_MIN_WIDTH_PX - 4)).toBe(true);
+    expect(splitTooNarrow(pair, { ...splitRight("panels-group"), axis: "vertical" }, 300)).toBe(
+      false,
+    );
+  });
+
+  it("never borrows width from a neighbouring tile", () => {
+    const lopsided = applyTileAction(pair, {
+      type: "resize",
+      splitId: "initial-split",
+      ratio: 0.3,
+    });
+    expect(splitTooNarrow(lopsided, splitRight("conversation-group"), 1000)).toBe(true);
+    expect(splitTooNarrow(lopsided, splitRight("panels-group"), 1000)).toBe(false);
+  });
+
+  it("counts the width a move gives back when it empties its source tile", () => {
+    const edgeDrop = {
+      type: "split",
+      tabId: "conversation",
+      targetGroupId: "panels-group",
+      axis: "horizontal",
+      side: "after",
+      groupId: "dropped",
+      splitId: "dropped-split",
+    } as const;
+    expect(splitTooNarrow(pair, edgeDrop, 400)).toBe(false);
+    const crowded = applyTileAction(pair, {
+      type: "move",
+      tabId: "b",
+      targetGroupId: "conversation-group",
+    });
+    // The source keeps a tab, so the target pane stays at half the canvas.
+    expect(splitTooNarrow(crowded, edgeDrop, 400)).toBe(true);
+  });
+
+  it("measures a maximized tile where it docks once the split restores the layout", () => {
+    const maximized = applyTileAction(pair, { type: "maximize", groupId: "panels-group" });
+    expect(splitTooNarrow(maximized, splitRight("panels-group"), 600)).toBe(true);
+    expect(splitTooNarrow(maximized, splitRight("panels-group"), 700)).toBe(false);
+    expect(
+      splitTooNarrow(maximized, { ...splitRight("panels-group"), axis: "vertical" }, 600),
+    ).toBe(false);
   });
 });

@@ -1,5 +1,15 @@
 import type { RightPanelSurface } from "../../rightPanelStore";
-import { isNewTab } from "../../threadTileLayout";
+import { displayTileRoot, tileGeometry } from "../../threadTileGeometry";
+import {
+  applyTileAction,
+  clampTileWidths,
+  isNewTab,
+  TILE_MIN_WIDTH_PX,
+  tileMinimumWidth,
+  type ThreadTileLayout,
+  type TileAction,
+  type TileNode,
+} from "../../threadTileLayout";
 
 export const TILE_AREAS = [
   { label: "Main chat", key: "c" },
@@ -122,4 +132,56 @@ export function fitTileTabs(input: {
   const truncates =
     input.truncatedTab < tabs[activeIndex]! && input.truncatedTab + chip <= room + FIT_EPSILON;
   return { shown: [activeIndex], mode: truncates ? "truncated" : "icon", hiddenControls };
+}
+
+/** The tree without its floating tiles, or null when every tile floats. */
+export function dockedTiles(node: TileNode): TileNode | null {
+  if (node.kind === "group") return node.floating ? null : node;
+  const first = dockedTiles(node.first);
+  const second = dockedTiles(node.second);
+  return first && second ? { ...node, first, second } : (first ?? second);
+}
+
+/** The docked tiles on screen: the maximized tile and its pair, or every docked tile. */
+export function shownDockedRoot(layout: ThreadTileLayout): TileNode | null {
+  return layout.maximizedGroupId ? displayTileRoot(layout) : dockedTiles(layout.root);
+}
+
+const findSplit = (node: TileNode, id: string): TileNode | null =>
+  node.kind === "group"
+    ? null
+    : node.id === id
+      ? node
+      : (findSplit(node.first, id) ?? findSplit(node.second, id));
+const collapseSplit = (node: TileNode, id: string): TileNode =>
+  node.kind === "group"
+    ? node
+    : node.id === id
+      ? node.first
+      : { ...node, first: collapseSplit(node.first, id), second: collapseSplit(node.second, id) };
+
+/**
+ * Whether a side-by-side split is refused because the pane it divides is narrower than two
+ * minimum tiles. The pane is measured as laid out after the action, so a move that empties its
+ * source tile counts the room that tile gives back, but never room borrowed from a neighbour.
+ * Tiles have no minimum height, so stacking splits are never refused.
+ */
+export function splitTooNarrow(
+  layout: ThreadTileLayout,
+  action: TileAction,
+  canvasWidth: number,
+): boolean {
+  if (action.type !== "split" && action.type !== "new-group" && action.type !== "dock-group")
+    return false;
+  if (action.axis !== "horizontal" || canvasWidth <= 0) return false;
+  const next = applyTileAction(layout, action);
+  const root = next === layout ? null : shownDockedRoot(next);
+  const split = root && findSplit(root, action.splitId);
+  if (!root || split?.kind !== "split") return false;
+  const pane = collapseSplit(root, action.splitId);
+  const width = Math.max(canvasWidth, tileMinimumWidth(pane));
+  const rect = tileGeometry(clampTileWidths(pane, width)).groups.find(
+    (group) => group.id === split.first.id,
+  )?.rect;
+  return rect ? rect.width * width < 2 * TILE_MIN_WIDTH_PX - FIT_EPSILON : false;
 }
