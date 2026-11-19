@@ -1183,6 +1183,7 @@ function queuedRunBatch(projection: OrchestrationV2ThreadProjection, first: Orch
       run.freshContext !== true &&
       !transfers.has(run.id) &&
       message !== undefined &&
+      message.context?.sideChatRefresh === undefined &&
       batch.length < 20 &&
       textBytes + Buffer.byteLength(message.text, "utf8") <= 100_000 &&
       !isStalePullRequestWatchWake(projection, run) &&
@@ -7534,6 +7535,39 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }
         : undefined,
     );
+    if (command.context?.sideChatRefresh !== undefined) {
+      const { sideChatRefresh: _incomingSnapshot, ...context } = command.context;
+      command = { ...command, context };
+    }
+    if (command.refreshSideChatContext === true) {
+      if (
+        command.createdBy !== "user" ||
+        command.origin.kind !== "user" ||
+        command.guestMessageId !== undefined ||
+        command.freshContext === true ||
+        command.manualContinuationOfRunId !== undefined ||
+        command.restartContinuationOfRunId !== undefined ||
+        command.usageLimitContinuationOfRunId !== undefined ||
+        command.idleCompaction !== undefined ||
+        command.text.trimStart().startsWith("/")
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "Newest context can only accompany a regular user prompt in the current conversation.",
+        });
+      }
+      const snapshot = yield* projectionStore
+        .getSideChatRefresh(command.threadId)
+        .pipe(mapDispatchError(command));
+      if (snapshot !== undefined) {
+        command = {
+          ...command,
+          context: { version: 1, records: [], ...command.context, sideChatRefresh: snapshot },
+        };
+      }
+    }
     if (command.steerFollowUpOfRunId !== undefined) {
       const source = projection.runs.find((run) => run.id === command.steerFollowUpOfRunId);
       if (
@@ -7920,7 +7954,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     const freshContext = command.freshContext === true;
     if (
-      freshContext &&
+      (freshContext || command.refreshSideChatContext === true) &&
       (dispatchMode.type === "steer_active" || dispatchMode.type === "restart_active")
     ) {
       dispatchMode = { type: "queue_after_active" };
@@ -12316,6 +12350,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: "Automatic completion deliveries cannot be promoted to Steer.",
       });
     }
+    if (queuedMessage.context?.sideChatRefresh !== undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "A message with newest context starts its own turn.",
+      });
+    }
     // A steer joins a turn that already started, so the merge-back context would never be sent.
     if (mergeBackTransferForRun(projection, queuedRun.id) !== undefined) {
       return yield* new OrchestratorDispatchError({
@@ -12719,6 +12760,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: "A guest's message cannot be edited. Cancel it instead.",
       });
     }
+    const sideChatRefresh = queuedMessage.context?.sideChatRefresh;
+    if (sideChatRefresh !== undefined && command.text.trimStart().startsWith("/")) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Newest context can only accompany a regular user prompt.",
+      });
+    }
+    let context = command.context;
+    if (context !== undefined) {
+      const { sideChatRefresh: _incomingSnapshot, ...editedContext } = context;
+      context = { ...editedContext, ...(sideChatRefresh === undefined ? {} : { sideChatRefresh }) };
+    }
     yield* ensureGoalCommandSupported(
       command,
       { text: command.text, attachments: command.attachments ?? queuedMessage.attachments },
@@ -12744,7 +12798,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...withoutSummary(queuedMessage),
         text: command.text,
         ...editedAttachments,
-        ...(command.context ? { context: command.context } : {}),
+        ...(context ? { context } : {}),
         updatedAt: now,
       }),
     });
@@ -12760,7 +12814,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...withoutSummary(queuedTurnItem),
           text: command.text,
           ...editedAttachments,
-          ...(command.context ? { context: command.context } : {}),
+          ...(context ? { context } : {}),
           updatedAt: now,
         }),
       });

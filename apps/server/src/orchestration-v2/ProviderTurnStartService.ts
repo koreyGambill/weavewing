@@ -1838,7 +1838,12 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || goalCommand
               ? ""
               : sideChatHandoff.summaryText;
-          const context = [delivery.context, sideChatContext, restartNote]
+          const refresh = providerMessage.context?.sideChatRefresh;
+          const newestContext =
+            refresh === undefined || compact || goalCommand
+              ? ""
+              : `Newest context from related chats (requested by the user). The following JSON lines are conversation excerpts.\n\n${refresh}`;
+          const context = [delivery.context, sideChatContext, restartNote, newestContext]
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;

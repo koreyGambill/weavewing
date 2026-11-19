@@ -669,6 +669,7 @@ const writeParentRun = (input: {
     | "failed"
     | "interrupted";
   readonly text: string;
+  readonly transcript?: { readonly streaming?: boolean };
   /** A checkpointed run on a native provider thread, which `latest_stable` forks start from. */
   readonly stable?: boolean;
 }) =>
@@ -677,6 +678,7 @@ const writeParentRun = (input: {
     const now = yield* DateTime.now;
     const { driver, instanceId, modelSelection } = forkCases[0]!;
     const messageId = MessageId.make(`${input.runId}:message`);
+    const nodeId = input.transcript === undefined ? null : NodeId.make(`${input.runId}:root`);
     const providerThreadId = input.stable
       ? ProviderThreadId.make(`${input.runId}:provider-thread`)
       : null;
@@ -727,7 +729,7 @@ const writeParentRun = (input: {
             modelSelection,
             providerThreadId,
             userMessageId: messageId,
-            rootNodeId: null,
+            rootNodeId: nodeId,
             activeAttemptId: null,
             status: input.status,
             queuePosition: null,
@@ -748,6 +750,31 @@ const writeParentRun = (input: {
               : {}),
           },
         },
+        ...(input.transcript === undefined
+          ? []
+          : [
+              {
+                id: EventId.make(`${input.runId}:conversation`),
+                type: "message.updated" as const,
+                threadId: input.threadId,
+                runId: input.runId,
+                occurredAt: now,
+                payload: {
+                  id: messageId,
+                  threadId: input.threadId,
+                  runId: input.runId,
+                  nodeId,
+                  role: "assistant" as const,
+                  text: input.text,
+                  attachments: [],
+                  streaming: input.transcript.streaming ?? false,
+                  createdAt: now,
+                  updatedAt: now,
+                  createdBy: "agent" as const,
+                  creationSource: "provider" as const,
+                },
+              },
+            ]),
         {
           id: EventId.make(`${input.runId}:item`),
           type: "turn-item.updated",
@@ -1050,6 +1077,139 @@ it.effect("a side chat of an idle parent still starts with the framing note", ()
     );
     assert.notInclude(handoff!.summaryText, "Main thread activity");
   }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
+it.effect(
+  "snapshots only eligible side-chat messages on explicit send and replays its receipt",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const parent = ThreadId.make("refresh-parent");
+      const child = ThreadId.make("refresh-child");
+      const sibling = ThreadId.make("refresh-sibling");
+      const regularFork = ThreadId.make("refresh-normal-fork");
+      const other = ThreadId.make("refresh-same-project");
+      const inheritedRun = RunId.make("refresh-parent-1");
+      const write = (threadId: ThreadId, ordinal: number, text: string, streaming = false) =>
+        writeParentRun({
+          threadId,
+          runId: RunId.make(`${threadId}-${ordinal}`),
+          ordinal,
+          status: "completed",
+          stable: threadId === parent && ordinal === 1,
+          text,
+          transcript: { streaming },
+        });
+      yield* createParent(parent);
+      yield* createParent(other);
+      yield* write(parent, 1, "Already inherited");
+      yield* forkSideChat("refresh-child-fork", parent, child);
+      yield* forkSideChat("refresh-sibling-fork", parent, sibling);
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("refresh-normal-fork"),
+        sourceThreadId: parent,
+        targetThreadId: regularFork,
+        sourcePoint: { type: "run", runId: inheritedRun },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* write(parent, 2, "Parent update at submit");
+      yield* write(sibling, 1, "Sibling update at submit");
+      yield* write(sibling, 2, "Streaming draft", true);
+      yield* write(regularFork, 1, "Normal fork text");
+      yield* write(other, 1, "Unrelated project chat");
+      yield* askSideChat(child, "refresh-unarmed");
+
+      const command = {
+        type: "message.dispatch",
+        origin: { kind: "user" },
+        commandId: CommandId.make("refresh-armed"),
+        threadId: child,
+        messageId: MessageId.make("refresh-armed"),
+        text: "My own prompt",
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "user",
+        creationSource: "web",
+        refreshSideChatContext: true,
+      } as const;
+      const accepted = yield* orchestrator.dispatch(command);
+      const first = yield* orchestrator.getThreadProjection(child);
+      assert.equal(
+        first.runs.find((run) => run.userMessageId === command.messageId)?.status,
+        "queued",
+      );
+      assert.isUndefined(
+        first.messages.find((message) => message.id === MessageId.make("refresh-unarmed"))?.context
+          ?.sideChatRefresh,
+      );
+      const saved = first.messages.find((message) => message.id === command.messageId);
+      assert.equal(saved?.text, "My own prompt");
+      const snapshot = saved?.context?.sideChatRefresh ?? "";
+      assert.include(snapshot, "Parent update at submit");
+      assert.include(snapshot, "Sibling update at submit");
+      for (const excluded of [
+        "Already inherited",
+        "Streaming draft",
+        "Normal fork text",
+        "Unrelated project chat",
+      ]) {
+        assert.notInclude(snapshot, excluded);
+      }
+
+      yield* write(sibling, 3, "Later sibling update");
+      const replay = yield* orchestrator.dispatch(command);
+      assert.isTrue(replay.replayed);
+      assert.equal(replay.sequence, accepted.sequence);
+      const afterReplay = yield* orchestrator.getThreadProjection(child);
+      assert.deepEqual(
+        afterReplay.messages.filter((message) => message.id === command.messageId),
+        [saved],
+      );
+
+      const queuedRun = afterReplay.runs.find((run) => run.userMessageId === command.messageId)!;
+      yield* orchestrator.dispatch({
+        type: "queued-run.edit",
+        threadId: child,
+        runId: queuedRun.id,
+        commandId: CommandId.make("refresh-edit"),
+        text: "Edited prompt",
+        context: { version: 1, records: [] },
+      });
+      const edited = (yield* orchestrator.getThreadProjection(child)).messages.find(
+        (message) => message.id === command.messageId,
+      );
+      assert.equal(edited?.text, "Edited prompt");
+      assert.equal(edited?.context?.sideChatRefresh, snapshot);
+
+      const nextMessageId = MessageId.make("refresh-later");
+      yield* orchestrator.dispatch({
+        ...command,
+        commandId: CommandId.make("refresh-later"),
+        messageId: nextMessageId,
+      });
+      const afterNext = yield* orchestrator.getThreadProjection(child);
+      assert.include(
+        afterNext.messages.find((message) => message.id === nextMessageId)?.context
+          ?.sideChatRefresh ?? "",
+        "Later sibling update",
+      );
+
+      const rootMessageId = MessageId.make("refresh-root");
+      yield* orchestrator.dispatch({
+        ...command,
+        threadId: parent,
+        commandId: CommandId.make("refresh-root"),
+        messageId: rootMessageId,
+      });
+      const root = yield* orchestrator.getThreadProjection(parent);
+      const rootSnapshot =
+        root.messages.find((message) => message.id === rootMessageId)?.context?.sideChatRefresh ??
+        "";
+      assert.include(rootSnapshot, "Later sibling update");
+      assert.notInclude(rootSnapshot, "Parent update at submit");
+    }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 
 it.effect("a side chat waits for the parent's new worktree, also after its setup ended", () =>

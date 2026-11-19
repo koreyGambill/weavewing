@@ -328,6 +328,8 @@ export type GuestMessageAttribution = typeof GuestMessageAttribution.Type;
 export const OrchestrationMessageContext = Schema.Struct({
   version: Schema.Literal(1),
   guest: Schema.optional(GuestMessageAttribution),
+  /** The bounded conversation snapshot captured when a refresh was submitted. */
+  sideChatRefresh: Schema.optional(Schema.String.check(Schema.isMaxLength(16_000))),
   records: Schema.Array(Schema.Unknown)
     .check(
       Schema.isMaxLength(COMPOSER_CONTEXT_MAX_RECORDS),

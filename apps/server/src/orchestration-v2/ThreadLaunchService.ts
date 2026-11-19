@@ -88,6 +88,7 @@ export interface ThreadLaunchInitialMessage {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
+  readonly refreshSideChatContext?: boolean;
 }
 
 export interface ThreadLaunchInput {
@@ -1246,6 +1247,12 @@ const make = Effect.gen(function* () {
           "update-thread",
         )("Reusing an existing thread requires a thread id.");
       }
+      if (input.initialMessage?.refreshSideChatContext && input.reuseExistingThread !== true) {
+        return yield* mapError(
+          input,
+          "dispatch-message",
+        )("Send from an existing chat to include its newest context.");
+      }
       const developmentEnvironment = input.developmentEnvironment;
       if (
         developmentEnvironment !== undefined &&
@@ -1338,6 +1345,10 @@ const make = Effect.gen(function* () {
                   : { senderThreadId: input.initialMessage.senderThreadId }),
                 attachments: input.initialMessage.attachments,
                 ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
+                ...(input.reuseExistingThread === true &&
+                input.initialMessage.refreshSideChatContext
+                  ? { refreshSideChatContext: true }
+                  : {}),
                 ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               };
         const claimDispatch =
