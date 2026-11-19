@@ -1,9 +1,20 @@
 import { useAtomValue } from "@effect/atom-react";
 import { selectRunningSubprocessTerminalIds } from "@t3tools/client-runtime/state/terminal";
+import {
+  availableScratchWorkspaceRoot,
+  scratchWorkspaceLabel,
+} from "@t3tools/client-runtime/operations/projects";
 import { AuthTerminalOperateScope } from "@t3tools/contracts";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
-import { Maximize2, Minimize2, SquareTerminal } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  SquareTerminal,
+  TriangleAlert,
+} from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
@@ -18,13 +29,15 @@ import {
   clampDropdownTerminalHeight,
   DROPDOWN_TERMINAL_DEFAULT_HEIGHT,
   dropdownTerminalRef,
+  dropdownTerminalTarget,
   dropdownTerminalToFocus,
 } from "../dropdownTerminal.logic";
-import { useDropdownTerminalStore } from "../dropdownTerminalStore";
+import { type DropdownTerminalTarget, useDropdownTerminalStore } from "../dropdownTerminalStore";
 import { isElectron } from "../env";
-import { useDefaultFolder } from "../hooks/useScratchProject";
+import { useDefaultFolderEnvironmentId } from "../hooks/useScratchProject";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
+import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { shortcutLabelForCommand } from "../keybindings";
 import { isEditableFocused } from "../lib/editableFocus";
 import { focusTerminal, isTerminalFocused } from "../lib/terminalFocus";
@@ -36,8 +49,9 @@ import {
   type RightPanelSurface,
 } from "../rightPanelStore";
 import { registerCommands } from "../shortcuts/dispatcher";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { useEnvironmentScope } from "../state/session";
+import { useEnvironmentScope, useEnvironmentsWithScope } from "../state/session";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { CONVERSATION_TAB_ID } from "../threadTileLayout";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
@@ -46,6 +60,7 @@ import { useMoveToThreadMenu } from "./terminal/useTerminalMoveMenus";
 import { useThreadTerminalActions } from "./terminal/useThreadTerminalActions";
 import ThreadTerminalTile from "./ThreadTerminalTile";
 import { Button } from "./ui/button";
+import { Menu, MenuItem, MenuItemDetail, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const HEIGHT_STORAGE_KEY = "t3code:dropdown-terminal-height";
@@ -148,7 +163,43 @@ function DropdownTerminalPanel() {
     DROPDOWN_TERMINAL_DEFAULT_HEIGHT,
     Schema.Finite,
   );
-  const folder = useDefaultFolder();
+  const selectedTarget = useDropdownTerminalStore((state) => state.selectedTarget);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const defaultEnvironmentId = useDefaultFolderEnvironmentId(environments);
+  const threadRef = useThreadRouteRef();
+  const connected = environments.filter(
+    (environment) => environment.connection.phase === "connected",
+  );
+  const allowed = useEnvironmentsWithScope(connected, AuthTerminalOperateScope);
+  const targetEnvironmentId = selectedTarget?.environmentId ?? defaultEnvironmentId;
+  const environment = environments.find((entry) => entry.environmentId === targetEnvironmentId);
+  const target = environment
+    ? dropdownTerminalTarget(environment, primaryEnvironmentId, isElectron)
+    : selectedTarget;
+  const root = availableScratchWorkspaceRoot(
+    environment?.connection.phase,
+    environment?.serverConfig,
+  );
+  const folderLabel = root && (scratchWorkspaceLabel(environment?.serverConfig) ?? root);
+  const machineChoices = connected.map((entry) => ({
+    target: dropdownTerminalTarget(entry, primaryEnvironmentId, isElectron),
+    unavailable: !availableScratchWorkspaceRoot(entry.connection.phase, entry.serverConfig)
+      ? "No default folder"
+      : !allowed.has(entry.environmentId)
+        ? "Terminal permission required"
+        : null,
+  }));
+  const threadChoice = machineChoices.find(
+    (choice) =>
+      choice.target.environmentId === threadRef?.environmentId && choice.unavailable === null,
+  );
+  const changedMachine = useRef(false);
+  const select = (choice: DropdownTerminalTarget) => {
+    changedMachine.current = choice.environmentId !== targetEnvironmentId;
+    useDropdownTerminalStore.getState().selectTarget(choice);
+  };
   const panelRef = useRef<HTMLElement>(null);
   const drag = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
 
@@ -178,11 +229,87 @@ function DropdownTerminalPanel() {
         expanded ? undefined : { height: clampDropdownTerminalHeight(height, window.innerHeight) }
       }
     >
-      {folder ? (
-        <DropdownTerminalWorkspace key={folder.environmentId} folder={folder} />
+      <header className="flex h-9 shrink-0 items-center gap-2 border-b pr-1 pl-3">
+        <SquareTerminal className="size-4 shrink-0 text-muted-foreground" />
+        <h2 className="sr-only">Terminal</h2>
+        <div className="min-w-0">
+          <Menu
+            onOpenChange={(open) => {
+              if (open) changedMachine.current = false;
+            }}
+          >
+            <MenuTrigger
+              aria-label={`Run on ${target?.label ?? "Choose machine"}`}
+              render={<Button variant="outline" size="compact" className="max-w-full" />}
+            >
+              <span className="shrink-0">Run on</span>
+              <span className="truncate">{target?.label ?? "Choose machine"}</span>
+              <ChevronDown />
+            </MenuTrigger>
+            <MenuPopup align="start" finalFocus={() => !changedMachine.current}>
+              {threadChoice && (
+                <>
+                  <MenuItem onClick={() => select(threadChoice.target)}>
+                    Use current thread’s machine
+                  </MenuItem>
+                  <MenuSeparator />
+                </>
+              )}
+              {machineChoices.map((choice) => (
+                <MenuItem
+                  key={choice.target.environmentId}
+                  disabled={choice.unavailable !== null}
+                  onClick={() => select(choice.target)}
+                >
+                  <span className="min-w-0 wrap-anywhere">{choice.target.label}</span>
+                  {choice.unavailable && <MenuItemDetail>{choice.unavailable}</MenuItemDetail>}
+                  {choice.target.environmentId === targetEnvironmentId && (
+                    <Check aria-label="Selected" />
+                  )}
+                </MenuItem>
+              ))}
+              {machineChoices.length === 0 && <MenuItem disabled>No connected machines</MenuItem>}
+            </MenuPopup>
+          </Menu>
+        </div>
+        {folderLabel && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block" />
+              }
+            >
+              {folderLabel}
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">{folderLabel}</TooltipPopup>
+          </Tooltip>
+        )}
+        <div className="ml-auto flex shrink-0 items-center">
+          <HeaderControl
+            label={expanded ? "Restore drop-down height" : "Fill the window"}
+            keys={shortcutLabelForCommand(keybindings, "terminal.dropdownExpand")}
+            onClick={() => useDropdownTerminalStore.getState().toggleExpanded()}
+          >
+            {expanded ? <Minimize2 /> : <Maximize2 />}
+          </HeaderControl>
+        </div>
+      </header>
+      {target?.external && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-warning/45 bg-warning/25 px-3 py-2 text-warning-foreground">
+          <TriangleAlert aria-hidden className="size-5 shrink-0" />
+          <strong className="text-sm font-bold">External</strong>
+          <span className="text-xs text-foreground">Commands run on another machine.</span>
+        </div>
+      )}
+      {target && root !== null ? (
+        <DropdownTerminalWorkspace key={target.environmentId} target={target} root={root} />
       ) : (
-        <p className="m-auto p-6 text-sm text-muted-foreground">
-          No connected machine offers a default folder for terminals.
+        <p role="status" className="m-auto p-6 text-sm text-muted-foreground">
+          {target
+            ? environment?.connection.phase === "connected"
+              ? "This machine has no default folder for terminals."
+              : "This machine is disconnected."
+            : "No connected machine offers a default folder for terminals."}
         </p>
       )}
       {expanded ? null : (
@@ -219,14 +346,15 @@ function DropdownTerminalPanel() {
 }
 
 function DropdownTerminalWorkspace({
-  folder,
+  target,
+  root,
 }: {
-  folder: NonNullable<ReturnType<typeof useDefaultFolder>>;
+  target: DropdownTerminalTarget;
+  root: string;
 }) {
-  const ref = dropdownTerminalRef(folder.environmentId);
-  const expanded = useDropdownTerminalStore((state) => state.expanded);
+  const ref = dropdownTerminalRef(target.environmentId);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const canOperate = useEnvironmentScope(folder.environmentId, AuthTerminalOperateScope);
+  const canOperate = useEnvironmentScope(target.environmentId, AuthTerminalOperateScope);
   const panelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, ref),
   );
@@ -248,7 +376,7 @@ function DropdownTerminalWorkspace({
     ]),
   );
   const terminalActions = useThreadTerminalActions(ref);
-  const moveMenu = useMoveToThreadMenu({ dropdownRef: ref, machine: folder.machine });
+  const moveMenu = useMoveToThreadMenu({ dropdownRef: ref, machine: target.label });
   const close = useRightPanelSurfaceClose({ threadRef: ref, terminalLabelsById });
 
   const addTerminal = () => {
@@ -256,7 +384,7 @@ function DropdownTerminalWorkspace({
     const terminalId = terminalActions.allocateTerminalId();
     const store = useRightPanelStore.getState();
     // The tile attaches with this folder, which starts the shell.
-    store.openTerminal(ref, terminalId, { cwd: folder.root, worktreePath: null });
+    store.openTerminal(ref, terminalId, { cwd: root, worktreePath: null });
     store.applyTileAction(ref, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
     focusTerminal(ref, terminalId);
   };
@@ -270,8 +398,10 @@ function DropdownTerminalWorkspace({
     if (terminalId === null) addTerminal();
     else focusTerminal(ref, terminalId);
   });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- each opening mounts the panel, which focuses its terminal or starts one
-  useEffect(() => focusOnOpen(), []);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opening or restoring the operate grant focuses or starts the machine's shell
+  useEffect(() => {
+    if (canOperate) focusOnOpen();
+  }, [canOperate]);
 
   // Closing the last terminal hides the drop-down; the next opening starts a fresh one.
   const [hadTerminals, setHadTerminals] = useState(false);
@@ -301,7 +431,7 @@ function DropdownTerminalWorkspace({
       isDesktop: isElectron,
     }),
     surfaces: panelState.surfaces,
-    environmentId: folder.environmentId,
+    environmentId: target.environmentId,
     activeSurfaceId: panelState.activeSurfaceId,
     pendingSurfaceIds: NO_PENDING_SURFACES,
     previewSessions: {},
@@ -333,31 +463,20 @@ function DropdownTerminalWorkspace({
     terminalMoveMenu: moveMenu,
   };
 
-  const header = (
-    <header className="flex h-9 shrink-0 items-center gap-2 border-b pr-1 pl-3">
-      <SquareTerminal className="size-4 shrink-0 text-muted-foreground" />
-      <h2 className="shrink-0 text-sm font-medium">Terminal</h2>
-      <p className="min-w-0 truncate text-xs text-muted-foreground">
-        {folder.machine} · {folder.label}
+  if (!canOperate && terminals.length === 0) {
+    return (
+      <p role="status" className="m-auto p-6 text-sm text-muted-foreground">
+        You can’t operate terminals on this machine.
       </p>
-      <div className="ml-auto flex shrink-0 items-center">
-        <HeaderControl
-          label={expanded ? "Restore drop-down height" : "Fill the window"}
-          keys={shortcutLabelForCommand(keybindings, "terminal.dropdownExpand")}
-          onClick={() => useDropdownTerminalStore.getState().toggleExpanded()}
-        >
-          {expanded ? <Minimize2 /> : <Maximize2 />}
-        </HeaderControl>
-      </div>
-    </header>
-  );
+    );
+  }
 
   return (
     <ThreadTileWorkspace
       threadRef={ref}
       projectId={null}
       newThread={false}
-      header={header}
+      header={null}
       conversation={null}
       panels={panels}
       runningTerminalIds={selectRunningSubprocessTerminalIds(knownSessions ?? [])}
@@ -372,7 +491,7 @@ function DropdownTerminalWorkspace({
             threadRef={ref}
             threadId={ref.threadId}
             terminalId={surface.resourceId}
-            cwd={surface.launchContext?.cwd ?? summaryFor(surface.resourceId)?.cwd ?? folder.root}
+            cwd={surface.launchContext?.cwd ?? summaryFor(surface.resourceId)?.cwd ?? root}
             worktreePath={null}
             terminalLabel={resolveTerminalSessionLabel(
               surface.resourceId,

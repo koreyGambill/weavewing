@@ -1,21 +1,24 @@
 import { AuthTerminalOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
 import { useRouter } from "@tanstack/react-router";
 
-import { dropdownTerminalMoveTargets, dropdownTerminalRef } from "../../dropdownTerminal.logic";
-import { useDropdownTerminalStore } from "../../dropdownTerminalStore";
-import { useDefaultFolder } from "../../hooks/useScratchProject";
+import { dropdownTerminalMoveTargets, dropdownTerminalTarget } from "../../dropdownTerminal.logic";
+import { isElectron } from "../../env";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useThreadRouteRef } from "../../hooks/useThreadRouteTarget";
 import { focusTerminal, focusTerminalOnNavigation } from "../../lib/terminalFocus";
-import { useRightPanelStore } from "../../rightPanelStore";
 import { useQuietThreadShells } from "../../state/entities";
-import { readEnvironmentScope } from "../../state/session";
+import {
+  readEnvironment,
+  readPrimaryEnvironmentId,
+  useEnvironment,
+} from "../../state/environments";
+import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import { CONVERSATION_TAB_ID } from "../../threadTileLayout";
-import { moveTerminalTab } from "./moveTerminal";
+import { moveTerminalTab, moveTerminalToDropdown } from "./moveTerminal";
 
 export interface TerminalMoveOption {
   readonly id: string;
@@ -51,7 +54,12 @@ export function useMoveToThreadMenu(input: {
   });
   const move = useStableCallback(async (terminalId: string, optionId: string | null) => {
     const target = targets.find((entry) => scopedThreadKey(entry.threadRef) === optionId);
-    if (!target || target.reason !== null) return;
+    if (
+      !target ||
+      target.reason !== null ||
+      !readEnvironmentScope(input.dropdownRef.environmentId, AuthTerminalOperateScope)
+    )
+      return;
     const movedId = await moveTerminalTab({
       from: input.dropdownRef,
       terminalId,
@@ -86,38 +94,42 @@ export function useMoveToThreadMenu(input: {
   });
 }
 
-/** "Move to drop-down" for a thread's terminals, when the drop-down runs on the same machine. */
+/** A thread's terminals can move into its machine's drop-down. */
 export function useMoveToDropdownMenu(
   threadRef: ScopedThreadRef | null,
 ): ((terminalId: string) => TerminalMoveMenu) | null {
-  const folder = useDefaultFolder();
+  const environment = useEnvironment(threadRef?.environmentId ?? null);
+  const canOperate = useEnvironmentScope(
+    threadRef?.environmentId ?? null,
+    AuthTerminalOperateScope,
+  );
   const runMove = useAtomCommand(terminalEnvironment.move, "terminal move");
   const move = useStableCallback(async (terminalId: string) => {
-    if (!threadRef || !folder || folder.environmentId !== threadRef.environmentId) return;
-    const dropdownRef = dropdownTerminalRef(folder.environmentId);
-    const movedId = await moveTerminalTab({
+    if (!threadRef) return;
+    const entry = readEnvironment(threadRef.environmentId);
+    if (
+      !entry ||
+      availableScratchWorkspaceRoot(entry.connection.phase, entry.serverConfig) === null ||
+      !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
+    )
+      return;
+    await moveTerminalToDropdown({
       from: threadRef,
       terminalId,
-      to: { threadRef: dropdownRef, worktreePath: null },
+      target: dropdownTerminalTarget(entry, readPrimaryEnvironmentId(), isElectron),
       move: runMove,
     });
-    if (movedId === null) return;
-    // An empty drop-down keeps a conversation tab until its first terminal replaces it.
-    useRightPanelStore
-      .getState()
-      .applyTileAction(dropdownRef, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
-    const dropdown = useDropdownTerminalStore.getState();
-    if (!dropdown.open) dropdown.toggle();
-    focusTerminal(dropdownRef, movedId);
   });
   if (!threadRef) return null;
-  const disabledReason = !folder
-    ? "No connected machine offers a drop-down terminal"
-    : folder.environmentId !== threadRef.environmentId
-      ? `The drop-down terminal runs on ${folder.machine}`
-      : !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
-        ? "You can't operate terminals on this machine"
-        : null;
+  const disabledReason =
+    environment?.connection.phase !== "connected"
+      ? "This machine is disconnected"
+      : availableScratchWorkspaceRoot(environment.connection.phase, environment.serverConfig) ===
+          null
+        ? "This machine has no default folder"
+        : !canOperate
+          ? "You can't operate terminals on this machine"
+          : null;
   return (terminalId) => ({
     label: "Move to drop-down",
     options: null,

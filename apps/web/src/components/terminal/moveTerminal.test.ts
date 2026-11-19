@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { dropdownTerminalRef } from "../../dropdownTerminal.logic";
 import { useDropdownTerminalStore } from "../../dropdownTerminalStore";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
-import { moveTerminalTab } from "./moveTerminal";
+import { moveTerminalTab, moveTerminalToDropdown } from "./moveTerminal";
 
 const environmentId = EnvironmentId.make("env-1");
 const dropdown = dropdownTerminalRef(environmentId);
@@ -27,7 +27,7 @@ const terminalsIn = (ref: ScopedThreadRef) =>
 function moveRecorder(result: "success" | "failure", returnedId?: string) {
   const calls: Array<{ input: TerminalMoveInput; sourceTabs: number }> = [];
   const move: Parameters<typeof moveTerminalTab>[0]["move"] = async (target) => {
-    const source = scopeThreadRef(environmentId, ThreadId.make(target.input.threadId));
+    const source = scopeThreadRef(target.environmentId, ThreadId.make(target.input.threadId));
     calls.push({ input: target.input, sourceTabs: terminalsIn(source).length });
     return result === "success"
       ? AsyncResult.success({
@@ -40,6 +40,7 @@ function moveRecorder(result: "success" | "failure", returnedId?: string) {
 }
 
 beforeEach(() => {
+  useDropdownTerminalStore.setState({ open: false, selectedTarget: null });
   useRightPanelStore.setState({
     byThreadKey: {},
     threadPanelVisibilityByThreadKey: {},
@@ -149,3 +150,50 @@ describe("moveTerminalTab", () => {
     expect(terminalsIn(dropdown)).toHaveLength(1);
   });
 });
+
+it.each(["failure", "success"] as const)(
+  "keeps the local workspace intact when a remote move returns %s",
+  async (result) => {
+    const remote = EnvironmentId.make("env-2");
+    const pinned = { environmentId, label: "Local", external: false };
+    const target = { environmentId: remote, label: "Remote", external: true };
+    const source = scopeThreadRef(remote, ThreadId.make("remote-thread"));
+    const launch = { cwd: "/remote/project", worktreePath: null };
+    useDropdownTerminalStore.setState({ open: true, selectedTarget: pinned });
+    useRightPanelStore.getState().openTerminal(dropdown, "term-1");
+    useRightPanelStore.getState().openTerminal(source, "term-1", launch);
+    const { calls, move } = moveRecorder(result, "moved");
+
+    await moveTerminalToDropdown({
+      from: source,
+      terminalId: "term-1",
+      target,
+      move: (request) => {
+        expect(request.environmentId).toBe(remote);
+        expect(useDropdownTerminalStore.getState().selectedTarget).toBe(pinned);
+        return move(request);
+      },
+    });
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        input: expect.objectContaining({ toThreadId: dropdownTerminalRef(remote).threadId }),
+        sourceTabs: 0,
+      }),
+    ]);
+    expect(terminalsIn(dropdown)).toEqual([expect.objectContaining({ resourceId: "term-1" })]);
+    if (result === "success") {
+      expect(useDropdownTerminalStore.getState().selectedTarget).toBe(target);
+      expect(terminalsIn(source)).toEqual([]);
+      expect(terminalsIn(dropdownTerminalRef(remote))).toEqual([
+        expect.objectContaining({ resourceId: "moved" }),
+      ]);
+    } else {
+      expect(useDropdownTerminalStore.getState().selectedTarget).toBe(pinned);
+      expect(terminalsIn(source)).toEqual([
+        expect.objectContaining({ resourceId: "term-1", launchContext: launch }),
+      ]);
+      expect(terminalsIn(dropdownTerminalRef(remote))).toEqual([]);
+    }
+  },
+);
