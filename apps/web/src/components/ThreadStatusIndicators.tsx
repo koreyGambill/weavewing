@@ -197,7 +197,7 @@ export interface ThreadPullRequestBadgePresentation {
   readonly text: string | number;
 }
 
-function resolveThreadPullRequestBadgePresentation({
+export function resolveThreadPullRequestBadgePresentation({
   badge,
   number,
   url,
@@ -247,6 +247,7 @@ export function ThreadPullRequestBadgeControl({
   status,
   onOpenList,
   onOpenPullRequest,
+  numberCollapse,
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   badge: ThreadPullRequestBadge | null;
@@ -256,6 +257,7 @@ export function ThreadPullRequestBadgeControl({
   status: PrStatusIndicator | null;
   onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>, url?: string) => void;
+  numberCollapse?: string | undefined;
 }) {
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });
   if (presentation === null) return null;
@@ -263,6 +265,7 @@ export function ThreadPullRequestBadgeControl({
     <PullRequestBadge
       render={render}
       presentation={presentation}
+      numberCollapse={numberCollapse}
       opensList={badge !== null && (badge.kind === "stack" || badge.others > 0)}
       url={url}
       number={number}
@@ -284,9 +287,11 @@ function PullRequestBadge({
   pullRequests,
   onOpenList,
   onOpenPullRequest,
+  numberCollapse,
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   presentation: NonNullable<ReturnType<typeof resolveThreadPullRequestBadgePresentation>>;
+  numberCollapse: string | undefined;
   opensList: boolean;
   url: string | undefined;
   number: number | undefined;
@@ -323,9 +328,7 @@ function PullRequestBadge({
           className={cn("contents font-normal text-xs tabular-nums", presentation.toneClassName)}
         >
           <presentation.Icon aria-hidden className="size-3 shrink-0" />
-          <span data-slot="pull-request-badge-number" className="text-secondary-label">
-            {presentation.text}
-          </span>
+          <span className={cn("text-secondary-label", numberCollapse)}>{presentation.text}</span>
         </span>
       </TooltipTrigger>
       <TooltipPopup

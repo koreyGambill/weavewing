@@ -108,6 +108,7 @@ import {
   ThreadWorktreeIndicator,
   prStatusIndicator,
   resolveThreadPullRequestBadge,
+  resolveThreadPullRequestBadgePresentation,
   terminalStatusFromRunningIds,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
@@ -193,10 +194,10 @@ function terminalProcessLabel(count: number): string {
 }
 
 function SidebarProviderStack(props: {
-  thread: SidebarThreadSummary;
+  stack: ReturnType<typeof resolveThreadProviderStack>;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
 }) {
-  const stack = resolveThreadProviderStack(props.thread);
+  const { stack } = props;
   const currentInstanceId = stack[stack.length - 1]!;
   const currentEntry = props.providerEntryByInstanceId.get(currentInstanceId) ?? null;
   if (currentEntry === null) return null;
@@ -1116,9 +1117,28 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     useRightPanelStore.getState().open(threadRef, "pull-requests");
     if (!props.isRouteThread) onThreadActivate(threadRef);
   };
+  const providerStack = resolveThreadProviderStack(thread);
+  const hasTerminal = runningTerminalIds.length > 0;
+  const prPresentation =
+    prBadgeShape?.kind === "stack" || pr || currentLinkedPr
+      ? resolveThreadPullRequestBadgePresentation({
+          badge: prBadgeShape,
+          number: pr?.number ?? currentLinkedPr?.number,
+          url: pr?.url ?? currentLinkedPr?.url,
+          status: prStatus,
+        })
+      : null;
+  const cardTitleLine = resolveCardTitleLineLayout({
+    prText: prPresentation === null ? null : String(prPresentation.text),
+    hasTerminal,
+    hasAutomation: Boolean(thread.automationTaskId),
+    isExternal,
+    providerCount: providerStack.length,
+  });
   const prBadge =
     prBadgeShape?.kind === "stack" || pr || currentLinkedPr ? (
       <ThreadPullRequestBadgeControl
+        numberCollapse={variant === "card" ? cardTitleLine.prNumber : undefined}
         render={<InlineButton />}
         badge={prBadgeShape}
         pullRequests={thread.pullRequests}
@@ -1226,25 +1246,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     diff === null &&
     runningTerminalIds.length === 0;
   // The marker is a button, so it sits outside the decorative, non-interactive icons.
-  const trailingIcons = (
-    className?: string,
-    decorationClassName?: string,
-    decorationCollapseClassName?: string,
-  ) => (
+  const decorationIcons = (className?: string) => (
+    <span
+      aria-hidden
+      className={cn("pointer-events-none inline-flex shrink-0 items-center gap-1", className)}
+    >
+      {remoteMachineIcon}
+      <SidebarProviderStack
+        stack={providerStack}
+        providerEntryByInstanceId={props.providerEntryByInstanceId}
+      />
+    </span>
+  );
+  const trailingIcons = (className?: string) => (
     <span className={cn("inline-flex shrink-0 items-center gap-1", className)}>
       {automationMarker}
-      <span
-        aria-hidden
-        className={cn("pointer-events-none inline-flex items-center gap-1", decorationClassName)}
-      >
-        <span className={cn("contents", decorationCollapseClassName)}>
-          {remoteMachineIcon}
-          <SidebarProviderStack
-            thread={thread}
-            providerEntryByInstanceId={props.providerEntryByInstanceId}
-          />
-        </span>
-      </span>
+      {decorationIcons()}
       {externalMarker}
     </span>
   );
@@ -1281,18 +1298,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </div>
   );
   const titleLineIcons = metaLineEmpty ? trailingIcons() : null;
-  const hasTerminal = runningTerminalIds.length > 0;
-  const prNumberCollapse = CARD_PR_NUMBER_COLLAPSE[Number(hasTerminal) + Number(isExternal)];
-  const terminalCollapse = CARD_TERMINAL_COLLAPSE[Number(prBadge !== null) + Number(isExternal)];
-  const decorationCollapse =
-    hasTerminal || prBadge !== null
-      ? resolveCardProvidersCollapse({
-          hasTerminal,
-          hasPr: prBadge !== null,
-          isExternal,
-          providerCount: resolveThreadProviderStack(thread).length,
-        })
-      : null;
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
@@ -1491,7 +1496,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     <li
       data-thread-item={threadKey}
       {...sortableRootProps}
-      style={{ marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12 }}
+      // Narrow sidebars give up indentation before the title line drops below its minimum.
+      style={{
+        marginInlineStart: `min(${Math.min(props.familyDepth ?? 0, 4) * 12}px, max(0px, 100% - ${cardTitleLine.minWidth + CARD_CONTENT_INSET * 2}px))`,
+      }}
       {...(fileDropHandlers ?? {})}
       // The hint is the rendered height inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
@@ -1687,16 +1695,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   Regenerating title
                 </span>
               ) : null}
-              {hasTerminal ? (
-                <span className={cn("contents", terminalCollapse)}>{terminalStatusIcon}</span>
-              ) : null}
-              {prBadge ? <span className={cn("contents", prNumberCollapse)}>{prBadge}</span> : null}
-              {/* Past the container query, anything still too wide wraps onto a clipped second line. */}
-              {trailingIcons(
-                "min-w-0 shrink",
-                "h-4 min-w-0 flex-wrap justify-end overflow-hidden",
-                decorationCollapse ?? undefined,
-              )}
+              {/* The breakpoints only choose what hides first; this group clips whatever they
+                  miss, so the title minimum and the markers after it always fit. */}
+              <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
+                {hasTerminal ? (
+                  <span className={cn("contents", cardTitleLine.terminal)}>
+                    {terminalStatusIcon}
+                  </span>
+                ) : null}
+                {prBadge ? (
+                  <span className={cn("contents", cardTitleLine.pr)}>{prBadge}</span>
+                ) : null}
+                {decorationIcons(cardTitleLine.decoration)}
+              </span>
+              {automationMarker}
+              {externalMarker}
             </div>
           </div>
         </TooltipTrigger>
@@ -1706,16 +1719,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
-// Indexed by how many other title line indicators render (terminal or PR, and the external marker).
-// Each breakpoint is where they stop fitting beside a 3rem title, sized for a five-digit PR.
-// Container queries cannot see sibling content, so the row picks the breakpoint for its own set.
-const CARD_PR_NUMBER_COLLAPSE = [
-  "@max-[8.75rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
-  "@max-[10rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
-  "@max-[11.25rem]/title-line:**:data-[slot=pull-request-badge-number]:hidden",
-] as const;
-// Half-rem steps from 7.5rem, covering every card that shows a terminal or PR.
-const CARD_PROVIDERS_COLLAPSE = [
+const CARD_CONTENT_INSET = 10;
+
+// Half-rem steps from 6rem to 18rem; Tailwind needs each class written out.
+const CARD_TITLE_LINE_BREAKPOINTS = [
+  "@max-[6rem]/title-line:hidden",
+  "@max-[6.5rem]/title-line:hidden",
+  "@max-[7rem]/title-line:hidden",
   "@max-[7.5rem]/title-line:hidden",
   "@max-[8rem]/title-line:hidden",
   "@max-[8.5rem]/title-line:hidden",
@@ -1733,37 +1743,52 @@ const CARD_PROVIDERS_COLLAPSE = [
   "@max-[14.5rem]/title-line:hidden",
   "@max-[15rem]/title-line:hidden",
   "@max-[15.5rem]/title-line:hidden",
+  "@max-[16rem]/title-line:hidden",
+  "@max-[16.5rem]/title-line:hidden",
+  "@max-[17rem]/title-line:hidden",
+  "@max-[17.5rem]/title-line:hidden",
+  "@max-[18rem]/title-line:hidden",
 ] as const;
 
-// Wrapping the machine and provider icons away would leave their width blank beside a 3rem title,
-// so a card whose terminal or PR crowds the line hides them once everything stops fitting.
-function resolveCardProvidersCollapse(input: {
+function cardTitleLineBreakpoint(width: number) {
+  const index = Math.ceil(width / 8) - 12;
+  return CARD_TITLE_LINE_BREAKPOINTS[
+    Math.min(Math.max(index, 0), CARD_TITLE_LINE_BREAKPOINTS.length - 1)
+  ];
+}
+
+// Widths in px of what the card title line renders, from its icon sizes and a tabular digit width.
+// Each breakpoint is where an indicator stops fitting beside the 3rem title. They hide the machine
+// and provider icons, the PR label, the terminal, then the PR icon; misses only clip the group.
+function resolveCardTitleLineLayout(input: {
+  prText: string | null;
   hasTerminal: boolean;
-  hasPr: boolean;
+  hasAutomation: boolean;
   isExternal: boolean;
   providerCount: number;
 }) {
-  // Glyph, title and their gaps; then terminal, PR, the provider stack, and machine plus arrow.
-  const width =
-    74 +
-    (input.hasTerminal ? 20 : 0) +
-    (input.hasPr ? 60 : 0) +
-    6 +
-    14 +
-    18 * (Math.max(input.providerCount, 1) - 1) +
-    (input.isExternal ? 36 : 0);
-  const index = Math.min(
-    Math.max(Math.ceil(width / 8) - 15, 0),
-    CARD_PROVIDERS_COLLAPSE.length - 1,
-  );
-  return CARD_PROVIDERS_COLLAPSE[index];
+  const gap = 6;
+  const fixed =
+    20 + gap + 48 + (input.hasAutomation ? gap + 14 : 0) + (input.isExternal ? gap + 14 : 0);
+  const group = (...items: ReadonlyArray<number | null>) => {
+    const present = items.filter((item) => item !== null);
+    if (present.length === 0) return 0;
+    return gap + present.reduce((sum, item) => sum + item, 0) + gap * (present.length - 1);
+  };
+  const terminal = input.hasTerminal ? 14 : null;
+  const prIcon = input.prText === null ? null : 12;
+  const prFull = input.prText === null ? null : 12 + 2 + 8 * input.prText.length;
+  const decoration =
+    (input.isExternal ? 14 + 4 : 0) + 14 + 18 * (Math.max(input.providerCount, 1) - 1);
+  return {
+    decoration: cardTitleLineBreakpoint(fixed + group(terminal, prFull, decoration)),
+    prNumber: cardTitleLineBreakpoint(fixed + group(terminal, prFull)),
+    terminal: cardTitleLineBreakpoint(fixed + group(terminal, prIcon)),
+    pr: cardTitleLineBreakpoint(fixed + group(prIcon)),
+    // Rounded like the breakpoints, so the indentation cap leaves room for the PR icon.
+    minWidth: Math.ceil((fixed + group(prIcon)) / 8) * 8,
+  };
 }
-
-const CARD_TERMINAL_COLLAPSE = [
-  "@max-[6.25rem]/title-line:hidden",
-  "@max-[7.5rem]/title-line:hidden",
-  "@max-[8.5rem]/title-line:hidden",
-] as const;
 
 function latestRunDiff(
   thread: SidebarThreadSummary,
