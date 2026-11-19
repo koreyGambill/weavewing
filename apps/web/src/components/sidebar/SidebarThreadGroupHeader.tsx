@@ -16,6 +16,13 @@ const GROUP_DOT_CLASS_NAME = {
   working: "bg-info",
 } as const;
 
+const GROUP_DOT_LABEL = {
+  attention: ", needs you",
+  failed: ", failed",
+  unread: ", done",
+  working: ", working",
+} as const;
+
 /** The group's sidebar tree row; its thread rows name it as their parent. */
 export function sidebarThreadGroupRowId(groupId: string | null) {
   return groupId === null ? "group:ungrouped" : `group:${groupId}`;
@@ -139,7 +146,9 @@ export const SidebarThreadGroupHeader = memo(function SidebarThreadGroupHeader(p
             {props.name}
           </span>
           {dot ? (
-            <span className={cn("size-1.5 shrink-0 rounded-full", GROUP_DOT_CLASS_NAME[dot])} />
+            <span className={cn("size-1.5 shrink-0 rounded-full", GROUP_DOT_CLASS_NAME[dot])}>
+              <span className="sr-only">{GROUP_DOT_LABEL[dot]}</span>
+            </span>
           ) : null}
           {/* The count yields its place to the menu button on hover, so the chevron never moves. */}
           <span className="w-6 shrink-0 text-right tabular-nums text-sidebar-muted-foreground group-hover/thread-group:invisible group-has-[[data-sidebar-action-for]:focus]/thread-group:invisible pointer-coarse:invisible">
