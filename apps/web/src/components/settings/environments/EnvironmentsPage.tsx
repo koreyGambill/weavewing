@@ -17,9 +17,11 @@ import { type EnvironmentPresentation, usePrimaryEnvironmentId } from "~/state/e
 import { usePreferredEnvironmentId } from "~/state/preferredEnvironment";
 import { useEnvironmentQuery } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
+import { useNowMinute } from "~/hooks/useNowMinute";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { RemoveT3ConnectEnvironmentDialog } from "../../clerk/RemoveT3ConnectEnvironmentDialog";
 import { Badge } from "../../ui/badge";
+import { Button } from "../../ui/button";
 import { stackedThreadToast, toastManager } from "../../ui/toast";
 import { AddRouteDialog } from "../AddRouteDialog";
 import { LoadBalancingSettings } from "../LoadBalancingSettings";
@@ -29,10 +31,17 @@ import { PullRequestRoutingSettings } from "../PullRequestRoutingSettings";
 import { SavedBackendListRow } from "../SavedEnvironmentRows";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settingsLayout";
 import { searchableSetting } from "../settingsSearch";
-import { type ReachModel, type ReachParty, squareKey } from "./reachModel.logic";
+import {
+  describeDevice,
+  deviceParties,
+  type ReachModel,
+  type ReachParty,
+  squareKey,
+} from "./reachModel.logic";
 import { AccessLine, ServerAccessDetail } from "./ServerAccessDetail";
 import { LocalServerRow, ServerAccessMenuItems, ServerAccessToggle } from "./ServerRows";
 import { ConnectWizard } from "./ConnectWizard";
+import { openConnectWizard } from "./connectWizardStore";
 import { ReachGrid } from "./ReachGrid";
 import { type ReachServer, useReachModel } from "./useReachModel";
 import { type SquareChangeState, useSquareChange } from "./useSquareChange";
@@ -315,7 +324,14 @@ function OtherServers({
   return (
     <SettingsSection {...searchableSetting("remote-environments")} title={title}>
       {visible.length === 0 ? (
-        <SettingsRow title="None yet" />
+        <SettingsRow
+          title="None connected to this app"
+          control={
+            <Button size="xs" variant="outline" onClick={() => openConnectWizard("computer")}>
+              Connect a computer
+            </Button>
+          }
+        />
       ) : (
         visible.map((server) =>
           server.environment.entry.target._tag === "PrimaryConnectionTarget" ? (
@@ -371,7 +387,7 @@ function usesText(model: ReachModel, party: ReachParty) {
     : `Uses ${used.map((column) => column.label).join(", ")}`;
 }
 
-/** Phones, browsers, this app and outside agents: they connect in, nothing connects to them. */
+/** Phones, browsers and outside agents: they connect in, nothing connects to them. */
 function Devices({
   model,
   change,
@@ -379,11 +395,19 @@ function Devices({
   readonly model: ReachModel;
   readonly change: SquareChangeState;
 }) {
-  const devices = model.rows.filter((row) => row.kind !== "server");
+  const devices = deviceParties(model);
+  const nowMs = Date.parse(`${useNowMinute()}Z`);
   return (
     <SettingsSection title="Devices">
+      {devices.length === 0 ? <SettingsRow title="None paired yet" /> : null}
       {devices.map((device) => (
-        <DeviceRow key={device.id} model={model} device={device} change={change} />
+        <DeviceRow
+          key={device.id}
+          model={model}
+          device={device}
+          description={describeDevice(model.deviceSessions.get(device.id)!, nowMs)}
+          change={change}
+        />
       ))}
     </SettingsSection>
   );
@@ -392,10 +416,13 @@ function Devices({
 function DeviceRow({
   model,
   device,
+  description,
   change,
 }: {
   readonly model: ReachModel;
   readonly device: ReachParty;
+  /** How it got in, what it is and when it was last seen. */
+  readonly description: string;
   readonly change: SquareChangeState;
 }) {
   const [open, setOpen] = useState(false);
@@ -411,11 +438,14 @@ function DeviceRow({
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <span className="min-w-0 shrink truncate text-sm font-medium">
-          {device.label}
-          {device.kind === "agent" ? (
-            <span className="ml-1.5 text-xs font-normal text-muted-foreground">agent</span>
-          ) : null}
+        <span className="min-w-0 shrink">
+          <span className="block truncate text-sm font-medium">
+            {device.label}
+            {device.kind === "agent" ? (
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">agent</span>
+            ) : null}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">{description}</span>
         </span>
         <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
           {usesText(model, device)}

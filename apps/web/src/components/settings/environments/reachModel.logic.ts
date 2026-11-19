@@ -9,6 +9,9 @@ import {
   MCP_PEER_LINK_SUBJECT_PREFIX,
   type PeerLinkSummary,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+
+import { formatRelativeElapsed } from "~/timestampFormat";
 
 /** A server this app knows, with what this app can read and change there. */
 export interface ReachServerInput {
@@ -133,22 +136,16 @@ export interface ReachSquare {
   readonly changes: SquareChanges;
 }
 
-/** A line under a server's "Going out": one of its links, including to servers this app lacks. */
-export interface OutgoingLink {
-  readonly link: PeerLinkSummary;
-  readonly target: ReachParty;
-  readonly square: ReachSquare;
-}
-
 export interface ReachModel {
   readonly columns: ReadonlyArray<ReachParty>;
   readonly rows: ReadonlyArray<ReachParty>;
   readonly squares: ReadonlyMap<string, ReachSquare>;
   /** Groups of servers with Full access to each other in both directions. */
   readonly trusted: ReadonlyArray<ReadonlyArray<ReachParty>>;
-  readonly outgoing: ReadonlyMap<EnvironmentId, ReadonlyArray<OutgoingLink>>;
   /** Columns whose access this app may change; the rest show a lock. */
   readonly manageable: ReadonlySet<string>;
+  /** The one session behind each device or agent row. */
+  readonly deviceSessions: ReadonlyMap<string, AuthClientSession>;
 }
 
 export const APP_PARTY_ID = "app";
@@ -203,6 +200,54 @@ function deviceName(session: AuthClientSession): string {
   return parts.length > 0 ? parts.join(" on ") : "Unnamed device";
 }
 
+// The label tailnet pairing gives the credential it issues, which the session keeps.
+const TAILNET_PAIRING_LABEL = /^Tailnet: /;
+
+const admittedOverTailnet = (session: AuthClientSession) =>
+  TAILNET_PAIRING_LABEL.test(clientOf(session).label ?? "");
+
+const ADMISSIONS: Record<string, string> = {
+  "one-time-token": "paired by link or code",
+  "administrative-bootstrap": "paired with the server's startup link",
+  "desktop-bootstrap": "a desktop app on that computer",
+  "cli-issued-session": "issued from the command line",
+  "mcp-client": "outside agent, approved there",
+};
+
+function deviceKind(client: AuthClientSession["client"]): string | null {
+  const { os, deviceType, browser } = client;
+  if (os === "iOS") return deviceType === "tablet" ? "iPad" : "iPhone";
+  if (deviceType === "mobile") return os ? `${os} phone` : "phone";
+  if (deviceType === "tablet") return os ? `${os} tablet` : "tablet";
+  const app = browser === "Electron" ? "desktop app" : browser;
+  return [app, os].filter((part): part is string => Boolean(part)).join(" on ") || null;
+}
+
+/**
+ * How a device got in, what it is and when it was last seen, so two entries that may be the
+ * same phone each explain themselves. Without a stable device identity they are never merged.
+ */
+export function describeDevice(session: AuthClientSession, nowMs: number): string {
+  const client = clientOf(session);
+  const admission = admittedOverTailnet(session)
+    ? "admitted automatically over Tailscale"
+    : (ADMISSIONS[session.subject] ?? null);
+  const kind = deviceKind(client);
+  const seen = session.connected
+    ? "connected now"
+    : session.lastConnectedAt === null
+      ? "never connected"
+      : `last seen ${relativeLabel(nowMs - DateTime.toEpochMillis(session.lastConnectedAt))}`;
+  return [admission, kind === deviceName(session) ? null : kind, seen]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
+function relativeLabel(elapsedMs: number): string {
+  const { value, suffix } = formatRelativeElapsed(Math.max(0, elapsedMs));
+  return suffix ? `${value} ${suffix}` : value;
+}
+
 function hostOf(address: string): string | null {
   try {
     return new URL(address.includes("://") ? address : `http://${address}`).hostname.replace(
@@ -233,12 +278,6 @@ export function arrivalFromHost(host: string | null): Arrival | null {
   if (lower.startsWith("fd7a:115c:a1e0:")) return "tailscale";
   return lower.includes(":") ? "internet" : null;
 }
-
-// The label tailnet pairing gives the credential it issues, which the session keeps.
-const TAILNET_PAIRING_LABEL = /^Tailnet: /;
-
-const admittedOverTailnet = (session: AuthClientSession) =>
-  TAILNET_PAIRING_LABEL.test(clientOf(session).label ?? "");
 
 /**
  * How a session on `server` arrived. A loopback address proves nothing behind a local proxy
@@ -457,35 +496,6 @@ function deviceSquare(
   };
 }
 
-/** A link to a server this app does not reach: it can only be given up from the linking side. */
-function outsideLinkSquare(
-  from: ReachParty,
-  to: ReachParty,
-  link: PeerLinkSummary,
-  server: ReachServerInput,
-): ReachSquare {
-  return {
-    from,
-    to,
-    link,
-    sessionIds: [],
-    arrivedVia: arrivalFromUrl(link.urls[0]),
-    arrivedFrom: link.urls[0] ?? null,
-    state: {
-      kind: "level",
-      level: link.access,
-      broken: linkBroken(link),
-    },
-    changes: {
-      lockedReason: `Set on ${to.label}`,
-      canRemove: manages(server),
-      canRelink: false,
-      relinkBlockedReason: `This app does not reach ${to.label}`,
-      ownOutbound: from.onThisComputer,
-    },
-  };
-}
-
 /**
  * Device names, told apart where two match: first by address, then by server, then by
  * session. Every entry is one session on one server.
@@ -698,39 +708,35 @@ export function buildReachModel(input: {
     (left, right) => isFull(left, right) && isFull(right, left),
   ).map((group) => group.map((id) => columns.find((column) => column.id === id)!));
 
-  const outgoing = new Map<EnvironmentId, OutgoingLink[]>();
-  for (const server of servers) {
-    outgoing.set(
-      server.environmentId,
-      (server.links ?? []).map((link) => {
-        const target =
-          columns.find((column) => column.environmentId === link.environmentId) ??
-          outsideServers.get(link.environmentId)!;
-        const from = columns.find((column) => column.environmentId === server.environmentId)!;
-        return {
-          link,
-          target,
-          square:
-            squares.get(squareKey(from.id, target.id)) ??
-            outsideLinkSquare(from, target, link, server),
-        };
-      }),
-    );
-  }
-
   const manageable = new Set(
     servers.filter(manages).map((server) => serverPartyId(server.environmentId)),
   );
-  return { columns, rows, squares, trusted, outgoing, manageable };
+  const deviceSessionByParty = new Map(deviceEntries.map((entry) => [entry.key, entry.session]));
+  return {
+    columns,
+    rows,
+    squares,
+    trusted,
+    manageable,
+    deviceSessions: deviceSessionByParty,
+  };
 }
 
-/** Every square into `to` that holds some access, for a server's "Coming in" lines. */
-export function incomingSquares(model: ReachModel, to: ReachParty): ReadonlyArray<ReachSquare> {
+/**
+ * Who holds access to `to`, for its list. This app is left out: it is what the person is
+ * looking through, and its own level shows in the grid.
+ */
+export function accessHolders(model: ReachModel, to: ReachParty): ReadonlyArray<ReachSquare> {
   return model.rows.flatMap((row) => {
+    if (row.kind === "app") return [];
     const square = model.squares.get(squareKey(row.id, to.id));
     return square?.state.kind === "level" ? [square] : [];
   });
 }
+
+/** Phones, browsers and outside agents: what connects in and is not a server or this app. */
+export const deviceParties = (model: ReachModel): ReadonlyArray<ReachParty> =>
+  model.rows.filter((row) => row.kind === "device" || row.kind === "agent");
 
 export type SquareTarget = LinkLevelChoice | "none";
 

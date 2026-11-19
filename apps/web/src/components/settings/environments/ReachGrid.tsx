@@ -268,7 +268,7 @@ function HeaderButton({
     <button
       {...gridCellAttributes(cell)}
       type="button"
-      aria-label={`${focus.kind === "column" ? "To" : "From"} ${party.label}`}
+      aria-label={`${focus.kind === "column" ? "To" : "From"} ${party.label}${party.kind === "app" ? " (you)" : ""}`}
       className={cn(
         "flex w-full min-w-0 items-center gap-1 px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         focus.kind === "column" ? "justify-center" : "justify-start",
@@ -283,6 +283,7 @@ function HeaderButton({
         {focus.kind === "column" ? "To" : "From"}
       </span>
       <PartyName label={party.label} />
+      {party.kind === "app" ? <span className="shrink-0 text-muted-foreground">(you)</span> : null}
       {locked ? (
         <LockIcon role="img" aria-label="Set on that machine" className="size-3 shrink-0" />
       ) : null}

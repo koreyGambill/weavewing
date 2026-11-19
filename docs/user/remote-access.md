@@ -318,8 +318,8 @@ the connection stops a server that T3 Code launched; a server that was already
 running is left alone.
 
 Each desktop app keeps one session on the host for its SSH connection and reuses
-it when it reconnects. Remove sessions you no longer use from the host's
-**Coming in** lines in **Settings → Environments**, or on a headless host with
+it when it reconnects. Remove sessions you no longer use from the host's access
+list: expand it under **Settings → Environments**. On a headless host, use
 `t3 auth session list` and `t3 auth session revoke <id>`. A desktop that can
 still sign in over SSH pairs again on its next connect.
 
@@ -455,12 +455,12 @@ an address you trust: the code is sent there.
   access, the link's agents can change only threads it started, not that
   machine's own threads, projects or settings, and they skip its project setup
   scripts.
-- The link shows up under the other machine's **Coming in** lines in
-  **Settings → Environments**. Remove it there to end it. Linking again replaces
-  this machine's previous session there.
-- Removing a link from a server's **Going out** lines forgets it there. When a
-  server on this computer gives up its own access to another machine, the app
-  asks first, because getting it back needs approval on that machine, or SSH.
+- The link shows up in the other machine's access list in **Settings →
+  Environments**. Remove it there to end it. Linking again replaces this
+  machine's previous session there.
+- **No access** on a square ends the link and forgets it on the linking side.
+  When a server on this computer gives up its own access to another machine, the
+  app asks first, because getting it back needs approval on that machine, or SSH.
 - Once the other machine refuses the link, after a removal, its square shows it
   as refused, even though that machine still answers.
 - Links last 30 days. Pick a level again on an expired or refused link to renew
@@ -505,9 +505,10 @@ and `orchestration:operate`.
 
 To change an existing client's permissions, create a fresh pairing link with the
 scopes it needs. In a browser opened directly on the environment, open that link
-to replace the browser's current grant. For mobile or a saved remote environment
-in web or desktop, use **Add Environment** with the fresh link or code; pairing
-the same environment replaces its saved grant. Reconnecting alone does not change
+to replace the browser's current grant. On mobile, use **Add environment** with
+the fresh link or code; in web or desktop, use **Settings → Environments →
+Connect a device or computer → Another computer**. Pairing the same environment
+replaces its saved grant. Reconnecting alone does not change
 permissions.
 
 Grouping checkouts does not combine their permissions. Shared project settings

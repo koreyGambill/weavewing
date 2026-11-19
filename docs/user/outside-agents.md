@@ -160,6 +160,6 @@ result that always includes the thread id.
 
 ## Remove an agent
 
-Approved agents appear under **Devices** and each server's **Coming in** lines in
+Approved agents appear under **Devices** and in each server's access list in
 **Settings → Environments**. Remove one there to cut off its access immediately. A sign-in lasts 30 days;
 after that the agent asks you to approve it again.

@@ -17,7 +17,9 @@ import {
   APP_PARTY_ID,
   arrivalFromHost,
   buildReachModel,
-  incomingSquares,
+  describeDevice,
+  accessHolders,
+  deviceParties,
   isRaise,
   planSquareChange,
   type ReachServerInput,
@@ -263,6 +265,13 @@ describe("buildReachModel", () => {
 
     expect(model.rows.map((row) => row.label)).toEqual(["WSL", "Moonborn", "This app"]);
     expect(state(model, APP_PARTY_ID, WSL).state).toMatchObject({ level: "full-access" });
+    expect(deviceParties(model)).toEqual([]);
+    expect(
+      accessHolders(
+        model,
+        model.columns.find((column) => column.environmentId === WSL)!,
+      ),
+    ).toEqual([]);
   });
 
   it("lists a server that links in but this app does not know as a row only", () => {
@@ -348,17 +357,6 @@ describe("buildReachModel", () => {
         .toSorted(),
     ).toEqual(["Moonborn+WSL", "WSL+Windows"]);
   });
-
-  it("collects each server's outbound links, including to servers this app lacks", () => {
-    const model = buildReachModel({
-      servers: [server({ environmentId: WSL, label: "WSL", links: [link(VPS, "vps")] })],
-    });
-
-    expect(model.outgoing.get(WSL)?.map((entry) => entry.target.label)).toEqual(["vps"]);
-    expect(incomingSquares(model, model.columns[0]!).map((square) => square.from.label)).toEqual([
-      "This app",
-    ]);
-  });
 });
 
 describe("T3 Connect sessions", () => {
@@ -372,9 +370,7 @@ describe("T3 Connect sessions", () => {
     });
 
     expect(model.rows.map((row) => row.label)).toEqual(["WSL", "This app"]);
-    expect(incomingSquares(model, model.columns[0]!).map((square) => square.from.label)).toEqual([
-      "This app",
-    ]);
+    expect(accessHolders(model, model.columns[0]!)).toEqual([]);
     expect([...model.squares.values()].flatMap((square) => square.sessionIds)).not.toContain(
       connect.sessionId,
     );
@@ -507,6 +503,42 @@ describe("an unreachable server", () => {
     const phone = model.rows.find((row) => row.label === "Korey iPhone")!;
     expect(state(model, phone.id, MOON).changes.canRemove).toBe(false);
     expect(model.manageable.has(serverPartyId(MOON))).toBe(false);
+  });
+});
+
+describe("describeDevice", () => {
+  const HOUR = 3_600_000;
+  it.each([
+    [
+      "a phone admitted by tailnet pairing",
+      session({
+        subject: "one-time-token",
+        connected: false,
+        lastConnectedAt: DateTime.makeUnsafe(0),
+        client: { deviceType: "mobile", os: "iOS", label: "Tailnet: iphone171" },
+      }),
+      "admitted automatically over Tailscale · iPhone · last seen 3h ago",
+    ],
+    [
+      "a Mac paired by link",
+      session({
+        subject: "one-time-token",
+        client: { deviceType: "desktop", os: "macOS", browser: "Electron", label: "Moonborn" },
+      }),
+      "paired by link or code · desktop app on macOS · connected now",
+    ],
+    [
+      "a browser whose name already says what it is",
+      session({
+        subject: "administrative-bootstrap",
+        connected: false,
+        lastConnectedAt: null,
+        client: { deviceType: "desktop", os: "Windows", browser: "Chrome" },
+      }),
+      "paired with the server's startup link · never connected",
+    ],
+  ] as const)("describes %s", (_name, device, expected) => {
+    expect(describeDevice(device, 3 * HOUR)).toBe(expected);
   });
 });
 
