@@ -948,3 +948,32 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 });
+
+it.effect("moves shipped search shortcuts and preserves customized chords and conditions", () =>
+  Effect.gen(function* () {
+    const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+    const keybindings = yield* Keybindings.Keybindings;
+    const custom = { key: "alt+p", command: "filePicker.toggle", when: "terminalFocus" } as const;
+    yield* writeKeybindingsConfig(keybindingsConfigPath, [
+      { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+      { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
+      custom,
+    ]);
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
+    assert.deepEqual(
+      upgraded.filter((rule) =>
+        ["search.toggle", "commandPalette.toggle", "filePicker.toggle"].includes(rule.command),
+      ),
+      [
+        { key: "mod+k", command: "search.toggle" },
+        { key: "mod+p", command: "commandPalette.toggle" },
+        custom,
+      ],
+    );
+    const rebound = { key: "mod+k", command: "commandPalette.toggle" } as const;
+    yield* writeKeybindingsConfig(keybindingsConfigPath, [rebound, custom]);
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    assert.deepInclude(yield* readKeybindingsConfig(keybindingsConfigPath), rebound);
+  }).pipe(Effect.provide(layerKeybindings().pipe(Layer.provideMerge(NodeServices.layer)))),
+);

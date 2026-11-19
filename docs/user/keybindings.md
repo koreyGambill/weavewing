@@ -27,14 +27,34 @@ Ctrl+Alt tile shortcuts. Custom bindings survive either choice.
 
 The leader works in a focused terminal or editor. **Ctrl+A, Ctrl+A** sends one
 literal Ctrl+A through, so a shell can still move to the start of its input.
-Other Control-letter keys retain their shell behavior, except the close commands
-below. **Alt+H/J/K/L** always resizes the focused tile by a step, including in a
+Other Control-letter keys retain their shell behavior, except Search, the command
+palette, and the close commands below. **Alt+H/J/K/L** always resizes the focused tile by a step, including in a
 terminal; terminal applications lose those four Alt shortcuts.
 
 Ctrl+Tab and Ctrl+Shift+Tab cycle tile tabs directly. The existing close,
 command palette, new-thread, and sidebar shortcuts remain available in their
 usual focus contexts. These tile bindings apply to web and desktop; native
 mobile clients use their own navigation and do not render this keybindings page.
+
+## Search and command palette
+
+Press `mod+k` to search. Threads searches thread titles, project names and finished
+user and assistant messages. Select a message result to open its thread at the
+match. Projects matches names and paths, and starts a new thread in the selected
+project. Files searches the active workspace and opens the selected file.
+
+Use Tab or Shift+Tab to switch between Threads, Projects and Files without losing
+the query. Ctrl+1, Ctrl+2 and Ctrl+3 select a tab directly. Search starts on the
+current machine. Use the machine control to include all connected machines.
+
+Press `mod+p` for commands and actions, including new threads, themes and adding
+projects. Files is available in Search instead of on `mod+p`.
+
+These shortcuts take priority while a terminal or vim is focused. On Linux and
+Windows, Ctrl+K and Ctrl+P no longer reach the shell for kill-line or previous
+history, or vim for its own commands. You can change the bindings in Settings.
+Optional leader alternatives are Ctrl+A then `/` for Search and Ctrl+A then `:`
+for the command palette when leader bindings are enabled.
 
 ## Composer controls
 
@@ -106,10 +126,9 @@ find only searches the files loaded so far.
 
 With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
 displayed threads. The shortcuts follow the current list filters and order.
-`Cmd+K` opens the command palette to search commands, projects, and threads.
-Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
-choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
-to show only actions.
+`Cmd+K` opens Search with Threads, Projects and Files tabs. `Cmd+P` opens the
+command palette. Use the arrow keys and Return to choose a result, or `Cmd+1`
+through `Cmd+9` to choose directly. Escape closes either dialog.
 
 In a new thread, `Cmd+Shift+H` moves the draft to the next machine.
 

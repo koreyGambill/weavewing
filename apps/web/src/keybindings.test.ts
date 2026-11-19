@@ -895,7 +895,11 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
             ? shiftKey
               ? "workspace.tile.closeAllTabs"
               : "workspace.tile.closeTab"
-            : null,
+            : !shiftKey && platform !== "MacIntel" && key === "k"
+              ? "search.toggle"
+              : !shiftKey && platform !== "MacIntel" && key === "p"
+                ? "commandPalette.toggle"
+                : null,
           `Ctrl+${shiftKey ? "Shift+" : ""}${key} resolves to the documented terminal action on ${platform}`,
         );
       }
@@ -982,7 +986,7 @@ it.each(["Linux", "Win32", "MacIntel"])(
       ["f", "workspace.tile.float"],
       ["r", "workspace.tile.resize"],
       [".", "workspace.tile.actions"],
-      ["/", "commandPalette.toggle"],
+      ["/", "search.toggle"],
       [":", "commandPalette.toggle"],
       ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [`${n}`, `workspace.tile.tab.${n}`]),
     ];
@@ -1052,3 +1056,30 @@ it.each(["Linux", "Win32", "MacIntel"])(
     );
   },
 );
+
+describe("search and palette defaults", () => {
+  it.each(["Linux", "Win32", "MacIntel"])(
+    "opens both dialogs even with terminal focus on %s",
+    (platform) => {
+      for (const leaderEnabled of [false, true]) {
+        const bindings = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(leaderEnabled));
+        assert.isFalse(bindings.some((rule) => rule.command === "filePicker.toggle"));
+        for (const terminalFocus of [false, true]) {
+          const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+          for (const [key, command] of [
+            ["k", "search.toggle"],
+            ["p", "commandPalette.toggle"],
+          ] as const) {
+            assert.equal(
+              resolveShortcutCommand(event({ key, ...modifier }), bindings, {
+                platform,
+                context: { terminalFocus },
+              }),
+              command,
+            );
+          }
+        }
+      }
+    },
+  );
+});

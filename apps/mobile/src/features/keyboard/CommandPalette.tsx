@@ -1,3 +1,4 @@
+import { rankPickerProjects } from "@t3tools/client-runtime/project-picker";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { useAtomValue } from "@effect/atom-react";
 import { uuidv4 } from "../../lib/uuid";
@@ -50,7 +51,7 @@ import {
   useThreadShell,
   useVisibleThreadShells,
 } from "../../state/entities";
-import { useThreadSearch } from "../../state/queries";
+import { useThreadSearch, useComposerPathSearch } from "../../state/queries";
 import { requestThreadMessageJump } from "../threads/threadMessageJump";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -78,6 +79,7 @@ import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspace
 
 const PALETTE_COMMANDS: ReadonlyArray<HardwareKeyboardCommand> = [
   "commandPalette",
+  "search",
   "paletteDismiss",
   "paletteNext",
   "palettePrevious",
@@ -218,6 +220,7 @@ function PaletteRow(props: {
 
 /** Mounted only while open, so the app root does not subscribe to the full thread catalog. */
 export function CommandPalette(props: {
+  readonly mode: "search" | "command";
   readonly pathname: string;
   readonly onClose: () => void;
   readonly onCommand: (command: HardwareKeyboardCommand) => void;
@@ -236,6 +239,8 @@ export function CommandPalette(props: {
   const environments = useWorkspaceEnvironments();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"threads" | "projects" | "files">("threads");
+  const [allMachines, setAllMachines] = useState(false);
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.
   const [now] = useState(() => Date.now());
   const [selection, setSelection] = useState<string | null>(null);
@@ -266,9 +271,16 @@ export function CommandPalette(props: {
         )
       : undefined;
   const search = useThreadSearch(
-    searchEnvironmentIds,
+    props.mode === "search" && tab === "threads"
+      ? searchEnvironmentIds.filter(
+          (id) => allMachines || id === (activeThreadRef?.environmentId ?? searchEnvironmentIds[0]),
+        )
+      : [],
     query.startsWith(">") ? "" : query,
-    environmentLabels === undefined ? {} : { environmentLabels },
+    {
+      ...(environmentLabels === undefined ? {} : { environmentLabels }),
+      ...(props.mode === "search" ? { limit: 50 } : {}),
+    },
   );
   const serverConfigs = useServerConfigs();
   const startTriage = useStartTriage();
@@ -507,21 +519,92 @@ export function CommandPalette(props: {
     shownOrder,
     search.query,
     rankedMessageKeys,
-    PALETTE_MESSAGE_LIMIT,
+    props.mode === "search" ? 50 : PALETTE_MESSAGE_LIMIT,
   );
   if (messageOrder !== shownOrder) setShownOrder(messageOrder);
   const messageMatchKeys = useMemo(
     () => messageOrder.keys.slice(0, messageOrder.shown),
     [messageOrder.keys, messageOrder.shown],
   );
-  const results = useMemo(() => {
-    const ranked = filterCommandPaletteItems(items, query, messageMatchKeys, now);
+  const results = useMemo<CommandPaletteResult[]>(() => {
+    if (props.mode === "command")
+      return filterCommandPaletteItems(
+        items.filter((item) => item.kind === "action"),
+        query,
+        [],
+        now,
+      );
+    const environmentId = activeThreadRef?.environmentId ?? searchEnvironmentIds[0] ?? null;
+    if (tab === "projects") {
+      const projectItems = items.flatMap((item) =>
+        item.project
+          ? [
+              {
+                key: item.key,
+                environmentId: item.project.environmentId,
+                title: item.title,
+                workspaceRoot: item.project.workspaceRoot,
+                pinned: Boolean(item.project.pinnedAt),
+                activity: Date.parse(item.project.updatedAt),
+                item,
+              },
+            ]
+          : [],
+      );
+      return rankPickerProjects(projectItems, allMachines ? null : environmentId, query).map(
+        ({ item }) => item,
+      );
+    }
+    const candidates = items.filter(
+      (item) => item.kind === "thread" && (allMachines || item.key.startsWith(`${environmentId}:`)),
+    );
+    const ranked = filterCommandPaletteItems(candidates, query, messageMatchKeys, now);
     // Recent threads leave out the open one, which would always lead them.
     const activeKey = activeThread
       ? scopedThreadKey(activeThread.environmentId, activeThread.id)
       : null;
     return query.trim() ? ranked : ranked.filter((item) => item.key !== activeKey);
-  }, [activeThread, items, messageMatchKeys, now, query]);
+  }, [
+    activeThread,
+    activeThreadRef?.environmentId,
+    searchEnvironmentIds,
+    allMachines,
+    props.mode,
+    tab,
+    items,
+    messageMatchKeys,
+    now,
+    query,
+  ]);
+  const activeProject = projects.find(
+    (project) =>
+      project.environmentId === activeThreadRef?.environmentId &&
+      project.id === activeThread?.projectId,
+  );
+  const fileSearch = useComposerPathSearch({
+    environmentId:
+      props.mode === "search" && tab === "files" ? (activeThreadRef?.environmentId ?? null) : null,
+    cwd: activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? null,
+    query,
+  });
+  const fileResults: CommandPaletteResult[] = fileSearch.entries
+    .filter((entry) => entry.kind === "file")
+    .map((entry) => ({
+      key: `file:${entry.path}`,
+      kind: "action",
+      title: entry.path.split("/").at(-1) ?? entry.path,
+      detail: entry.path,
+      searchTerms: [],
+      run: () => {
+        if (activeThreadRef)
+          navigation.navigate("ThreadFile", {
+            environmentId: activeThreadRef.environmentId,
+            threadId: activeThreadRef.threadId,
+            path: entry.path.split("/"),
+          });
+      },
+    }));
+  const visibleResults = props.mode === "search" && tab === "files" ? fileResults : results;
   const runResult = (item: CommandPaletteResult) => {
     const thread =
       item.kind === "thread" && query.trim() && !query.startsWith(">")
@@ -548,12 +631,12 @@ export function CommandPalette(props: {
     }
     item.run();
   };
-  const firstMessageIndex = results.findIndex((item) => item.fromMessages);
+  const firstMessageIndex = visibleResults.findIndex((item) => item.fromMessages);
   const selectedIndex = Math.max(
     0,
-    results.findIndex((item) => item.key === selection),
+    visibleResults.findIndex((item) => item.key === selection),
   );
-  const selectedKey = results[selectedIndex]?.key;
+  const selectedKey = visibleResults[selectedIndex]?.key;
   // The native list follows the highlighted row. Key presses move it, but so do
   // live thread updates and late message matches that reorder or drop the
   // selected row under a kept selection, so no single handler owns the scroll.
@@ -596,15 +679,23 @@ export function CommandPalette(props: {
   }
 
   function onCommand(command: HardwareKeyboardCommand) {
-    if (command === "commandPalette" || command === "paletteDismiss") {
+    if (command === "searchNextTab" || command === "searchPreviousTab") {
+      const tabs = ["threads", "projects", "files"] as const;
+      setTab(tabs[(tabs.indexOf(tab) + (command === "searchNextTab" ? 1 : 2)) % 3] ?? "threads");
+      setSelection(null);
+    } else if (command === "commandPalette" || command === "search") {
+      if ((command === "search") === (props.mode === "search")) close();
+      else props.onCommand(command);
+    } else if (command === "paletteDismiss") {
       close();
     } else if (command === "paletteNext" || command === "palettePrevious") {
       setSelection(
-        results[nextPaletteIndex(selectedIndex, command === "paletteNext" ? 1 : -1, results.length)]
-          ?.key ?? null,
+        visibleResults[
+          nextPaletteIndex(selectedIndex, command === "paletteNext" ? 1 : -1, visibleResults.length)
+        ]?.key ?? null,
       );
     } else {
-      const item = results[threadJumpIndex(command)];
+      const item = visibleResults[threadJumpIndex(command)];
       if (item) close(() => runResult(item));
     }
   }
@@ -619,7 +710,14 @@ export function CommandPalette(props: {
       onDismiss={handleDismissed}
     >
       <GestureHandlerRootView className="flex-1">
-        <T3KeyboardCommands enabledCommands={PALETTE_COMMANDS} onCommand={onCommand}>
+        <T3KeyboardCommands
+          enabledCommands={
+            props.mode === "search"
+              ? [...PALETTE_COMMANDS, "searchNextTab", "searchPreviousTab"]
+              : PALETTE_COMMANDS
+          }
+          onCommand={onCommand}
+        >
           <KeyboardAvoidingView
             behavior="padding"
             className="flex-1 items-center justify-center py-4"
@@ -641,6 +739,41 @@ export function CommandPalette(props: {
                 borderRadius: 20,
               }}
             >
+              {props.mode === "search" ? (
+                <View className="flex-row items-center gap-4 px-5 pt-3">
+                  {(["threads", "projects", "files"] as const).map((value) => (
+                    <Pressable
+                      key={value}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: tab === value }}
+                      onPress={() => {
+                        setTab(value);
+                        setSelection(null);
+                      }}
+                    >
+                      <Text
+                        className={
+                          tab === value ? "font-t3-bold text-foreground" : "text-foreground-muted"
+                        }
+                      >
+                        {value === "threads"
+                          ? "Threads"
+                          : value === "projects"
+                            ? "Projects"
+                            : "Files"}
+                      </Text>
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setAllMachines(!allMachines)}
+                  >
+                    <Text className="text-xs text-foreground-muted">
+                      {allMachines ? "All machines" : "Current machine"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
               <View className="px-3 pb-2.5 pt-3.5">
                 <View className="h-[38px] flex-row items-center gap-1.5 pr-2.5 pl-[11px]">
                   <SymbolView
@@ -651,8 +784,10 @@ export function CommandPalette(props: {
                   />
                   <TextInput
                     ref={inputRef}
-                    accessibilityLabel="Search commands, projects, and threads"
-                    placeholder="Search commands, projects, and threads…"
+                    accessibilityLabel={
+                      props.mode === "command" ? "Command palette" : `Search ${tab}`
+                    }
+                    placeholder={props.mode === "command" ? "Search commands…" : `Search ${tab}…`}
                     placeholderTextColorClassName="accent-placeholder"
                     autoCorrect={false}
                     autoCapitalize="none"
@@ -669,7 +804,7 @@ export function CommandPalette(props: {
                     returnKeyType="go"
                     submitBehavior="submit"
                     onSubmitEditing={() => {
-                      const item = results[selectedIndex];
+                      const item = visibleResults[selectedIndex];
                       if (item) close(() => runResult(item));
                     }}
                   />
@@ -678,7 +813,7 @@ export function CommandPalette(props: {
               {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- The palette is a modal with no navigation header to register with. */}
               <LegendList
                 ref={listRef}
-                data={results}
+                data={visibleResults}
                 extraData={{
                   selectedKey,
                   firstMessageIndex,
@@ -694,12 +829,21 @@ export function CommandPalette(props: {
                 contentContainerStyle={{ paddingBottom: 8 }}
                 ListEmptyComponent={
                   <Text className="p-5 text-center text-foreground-muted">
-                    {search.isPending ? "Searching…" : "No results"}
+                    {props.mode === "search" && tab === "files"
+                      ? (fileSearch.error ??
+                        (fileSearch.isPending
+                          ? "Searching files…"
+                          : activeThreadRef
+                            ? "No results"
+                            : "Open a thread to search its files."))
+                      : search.isPending
+                        ? "Searching…"
+                        : "No results"}
                   </Text>
                 }
                 // Message results from slower environments may still arrive below.
                 ListFooterComponent={
-                  results.length > 0 && search.isPending && !query.startsWith(">") ? (
+                  visibleResults.length > 0 && search.isPending && !query.startsWith(">") ? (
                     <Text className="px-5 pt-2 text-xs text-foreground-muted">
                       Searching messages…
                     </Text>

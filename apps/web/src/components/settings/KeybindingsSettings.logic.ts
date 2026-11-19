@@ -226,6 +226,7 @@ const KEYBINDING_GROUPS = [
       "sidebar",
       "threadContext",
       "commandPalette",
+      "search",
       "filePicker",
       "projectSearch",
       "editor",
