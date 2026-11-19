@@ -174,7 +174,7 @@ test("promotion checksums reject missing assets, duplicates and modified bytes",
   }
 });
 
-test("promotion rejects an asset and SHA256SUMS replaced together on GitHub", () => {
+test("promotion enforces channel CI policy and commit-bound checksums", () => {
   const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "weavewing-promote-"));
   try {
     const local = Path.join(root, "draft");
@@ -194,6 +194,19 @@ test("promotion rejects an asset and SHA256SUMS replaced together on GitHub", ()
     assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "wrong-sha"), /evidence/);
     FS.writeFileSync(Path.join(local, "release.json"), JSON.stringify({ repository: "koreyGambill/weavewing", tag: "weavewing-v1.0.0", target: "abc123", ci: "skipped: build-only plan", draft: true }));
     assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123"), /CI-verified/);
+    const writeEvidence = (channel: string, ci: string) => FS.writeFileSync(Path.join(local, "release.json"), JSON.stringify({ repository: "koreyGambill/weavewing", tag: "weavewing-v1.0.0", target: "abc123", channel, ci, draft: true }));
+    writeEvidence("test", "smoke: test channel");
+    Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "test");
+    assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "stable"), /evidence/);
+    writeEvidence("stable", "smoke: test channel");
+    assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "stable"), /CI-verified/);
+    writeEvidence("test", "passed");
+    Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "test");
+    assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "stable"), /evidence/);
+    for (const ci of ["skipped: build-only plan", "smoke: stable channel", "smoke: nightly channel", "failed"]) {
+      writeEvidence("test", ci);
+      assert.throws(() => Release.verifyPromotionAssets(downloaded, ["app.zip"], local, "weavewing-v1.0.0", "abc123", "test"), /CI-verified/);
+    }
   } finally {
     FS.rmSync(root, { recursive: true });
   }

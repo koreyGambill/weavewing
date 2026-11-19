@@ -7,7 +7,7 @@ import { ConcurrencyGroup, type Context, definePipeline } from "@sparkwing/sdk";
 import { checkout, checkoutArgs, git, logged, type Checkout } from "../lib/checkout.ts";
 import { assertCleanBundle, assertPushedCommit, assertTagAbsent, assetInventory, buildEnvironment, expectedAssets, macPreflight, normalizeArtifacts, PLATFORMS, RELEASE_REPOSITORY, releaseInputs, releaseFlags, releaseNotes, verifyChecksums, verifyPromotionAssets } from "../lib/release.ts";
 
-import { verifiedCi } from "../lib/release-ci.ts";
+import { smokeCi, verifiedCi } from "../lib/release-ci.ts";
 
 interface Release {
   id: number;
@@ -87,7 +87,7 @@ export const releasePipeline = definePipeline({
     { name: "channel", type: "string", default: "stable", enum: ["stable", "test"], description: "Stable release or nightly test prerelease" },
     { name: "platforms", type: "string", default: "linux,win,mac", description: "Comma-separated linux,win,mac subset" },
     { name: "stage", type: "string", default: "draft", enum: ["draft", "plan", "promote"], description: "draft, plan or promote" },
-    { name: "force-ci", type: "bool", description: "Run full CI even when the exact tree has passing evidence (plan/draft only)" },
+    { name: "force-ci", type: "bool", description: "Force full CI on any channel, bypassing passing evidence (plan/draft only)" },
     { name: "build-only", type: "bool", description: "Only with --stage plan: skip CI for artifact proof" },
     { name: "notes-file", type: "string", description: "Absolute path to release notes to use instead of generated notes" },
     { name: "draft-evidence", type: "string", description: "Required for promote: absolute evidence directory of the draft run" },
@@ -117,7 +117,7 @@ export const releasePipeline = definePipeline({
         const download = Path.join(co.evidence, "promote-assets");
         FS.mkdirSync(download, { recursive: true });
         await gh(ctx, co, "release", "download", tag, "--repo", RELEASE_REPOSITORY, "--dir", download, "--clobber");
-        verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit);
+        verifyPromotionAssets(download, names.filter((name) => name !== "SHA256SUMS"), draftEvidence, tag, commit, channel);
         await assertNoTag(ctx, co);
         await gh(ctx, co, "release", "edit", tag, "--repo", RELEASE_REPOSITORY, "--draft=false", ...releaseFlags(channel, "promote"));
         const ref = JSON.parse(await gh(ctx, co, "api", `repos/${RELEASE_REPOSITORY}/git/ref/tags/${tag}`));
@@ -140,15 +140,15 @@ export const releasePipeline = definePipeline({
       return result;
     }).inline().cores(0.25);
 
-    const ci = p.job("ci", async (ctx) => {
+    const ci = !buildOnly && (channel === "stable" || run.args["force-ci"] === "true") ? p.job("ci", async (ctx) => {
       const co = checkout(ctx);
       const pass = await verifiedCi(co, ctx.run.id, async () => {
         await ctx.runPipeline("ci", "changes", { args: { worktree: co.root, evidence: Path.join(co.evidence, "ci"), full: "true" } });
       }, { force: ctx.args["force-ci"] === "true" });
       ctx.log.info(`Full CI passed for tree ${pass.tree}; evidence from ${pass.run}: ${pass.evidence}`);
       return pass;
-    }).inline().cores(0.25).needs(preflight).startsChildren("ci")
-      .skipIf(() => buildOnly);
+    }).inline().cores(0.25).needs(preflight).startsChildren("ci") : undefined;
+    const ciDeps = ci ? [ci] : [];
 
     const bundle = p.job("bundle", async (ctx) => {
       const co = checkout(ctx);
@@ -160,7 +160,7 @@ export const releasePipeline = definePipeline({
       await build(ctx, co, "align-version", ["node", "scripts/update-release-package-versions.ts", version]);
       await build(ctx, co, "bundle", ["vp", "run", "build:desktop:bundle"]);
       return { commit };
-    }).inline().cores(8).needs(preflight, ci);
+    }).inline().cores(8).needs(preflight, ...ciDeps);
 
     const clean = p.job("assert-clean-bundle", (ctx) => {
       assertCleanBundle(source(checkout(ctx)));
@@ -208,7 +208,7 @@ export const releasePipeline = definePipeline({
       const { commit } = (await ctx.output(preflight))!;
       await logged(ctx, co, "mac", ["node", ".sparkwing/lib/release-mac.ts", "--worktree", co.root, "--commit", commit, "--version", version, "--channel", channel, "--run", ctx.run.id, "--evidence", co.evidence], Object.fromEntries(await Promise.all(["APPLE_CSC_LINK", "APPLE_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_TEAM_ID"].map(async (key) => [key, (await ctx.secret(key)) ?? ""]))));
       return { platform: "mac" };
-    }).inline().cores(1).needs(preflight, ci).skipIf(() => !platforms.includes("mac"))
+    }).inline().cores(1).needs(preflight, ...ciDeps).skipIf(() => !platforms.includes("mac"))
       .concurrency(new ConcurrencyGroup("weavewing-release-moonborn", { capacity: 1 }));
 
     p.job("publish-draft", async (ctx) => {
@@ -241,7 +241,8 @@ export const releasePipeline = definePipeline({
       const notesFile = Path.join(co.evidence, "notes.md");
       FS.writeFileSync(notesFile, notes);
       FS.writeFileSync(Path.join(co.evidence, "artifacts.json"), JSON.stringify(assetInventory(dir, [...names, "SHA256SUMS"]), null, 2));
-      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : "passed", ciEvidence: buildOnly ? undefined : await ctx.output(ci), tree: git(co.root, "rev-parse", `${commit}^{tree}`), assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
+      const ciEvidence = buildOnly ? undefined : ci ? await ctx.output(ci) : smokeCi(co, ctx.run.id, channel);
+      FS.writeFileSync(Path.join(co.evidence, "release.json"), JSON.stringify({ repository: RELEASE_REPOSITORY, tag, target: commit, title: `Weavewing ${version}`, channel, prerelease: channel === "test", latest: false, draft: true, ci: buildOnly ? "skipped: build-only plan" : ci ? "passed" : `smoke: ${channel} channel`, ciEvidence, tree: git(co.root, "rev-parse", `${commit}^{tree}`), assets: [...names, "SHA256SUMS"], notesFile }, null, 2));
       if (ctx.args.stage === "plan") {
         ctx.log.info(`Plan complete. No GitHub writes. Evidence: ${co.evidence}`);
         return { commit, evidence: co.evidence, assets: [...names, "SHA256SUMS"] };
@@ -257,6 +258,6 @@ export const releasePipeline = definePipeline({
       }
       await gh(ctx, co, "release", "upload", tag, "--repo", RELEASE_REPOSITORY, "--clobber", ...[...names, "SHA256SUMS"].map((name) => Path.join(dir, name)));
       return { commit, evidence: co.evidence };
-    }).inline().cores(0.25).needs(preflight, ci, linux, win, mac);
+    }).inline().cores(0.25).needs(preflight, ...ciDeps, linux, win, mac);
   },
 });
