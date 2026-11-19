@@ -418,6 +418,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "workspace.tile.resizeDown") return "Resize Tile Down";
   if (command === "workspace.tile.resizeUp") return "Resize Tile Up";
   if (command === "workspace.tile.resizeRight") return "Resize Tile Right";
+  if (/^workspace\.tile\.focus\.[1-9]$/.test(command)) return `Focus Tile ${command.at(-1)}`;
   if (command === "workspace.tile.focusLeft") return "Focus Tile Left";
   if (command === "workspace.tile.focusRight") return "Focus Tile Right";
   if (command === "workspace.tile.focusUp") return "Focus Tile Up";

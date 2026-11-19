@@ -184,7 +184,7 @@ const LEADER_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: 'leader "', command: "workspace.tile.splitDown" },
   { key: "leader h", command: "workspace.tile.focusLeft" },
   { key: "leader arrowleft", command: "workspace.tile.focusLeft" },
-  { key: "leader j", command: "terminal.toggle" },
+  { key: "leader j", command: "workspace.tile.focusDown" },
   { key: "leader arrowdown", command: "workspace.tile.focusDown" },
   { key: "leader k", command: "workspace.tile.focusUp" },
   { key: "leader arrowup", command: "workspace.tile.focusUp" },
@@ -205,7 +205,7 @@ const LEADER_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "leader :", command: "commandPalette.toggle" },
   ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
     key: `leader ${n}`,
-    command: `workspace.tile.tab.${n}` as const,
+    command: `workspace.tile.focus.${n}` as const,
   })),
 ];
 

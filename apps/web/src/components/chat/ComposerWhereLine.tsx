@@ -1,7 +1,6 @@
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { projectPickerPathLabel } from "@t3tools/client-runtime/project-picker";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect } from "react";
 
@@ -31,6 +30,7 @@ export function ComposerWhereLine({
   threadId,
   projectId,
   worktreePath,
+  isScratch,
   draftId,
   onEnvironmentChange,
   onComposerFocusRequest,
@@ -39,6 +39,7 @@ export function ComposerWhereLine({
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly worktreePath: string | null;
+  readonly isScratch: boolean;
   /** Set while the thread is an unsent draft. */
   readonly draftId: DraftId | null;
   readonly onEnvironmentChange: (environmentId: EnvironmentId) => void;
@@ -50,9 +51,7 @@ export function ComposerWhereLine({
   const routeTarget = useThreadRouteTarget();
   const selection = useDraftPlaceSelection({ draftId, activeProjectRef: projectRef });
   const homes = useProjectPickerHomes([{ environmentId }], project !== null);
-  const scratchRoot = selection.scratchWorkspaceRootFor(environmentId);
   const folder = worktreePath ?? project?.workspaceRoot ?? null;
-  const isScratch = project !== null && isScratchProject(project, scratchRoot);
   // Where New thread would start right now, from the one default-place resolver.
   const resolved = selection.defaultPlace;
   const atResolvedPlace =

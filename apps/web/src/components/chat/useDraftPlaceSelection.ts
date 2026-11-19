@@ -129,6 +129,5 @@ export function useDraftPlaceSelection(input: {
     selectProject,
     openAddProject,
     moveToDefaultPlace,
-    scratchWorkspaceRootFor: scratch.scratchWorkspaceRootFor,
   };
 }

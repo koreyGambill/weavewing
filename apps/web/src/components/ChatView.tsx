@@ -3811,12 +3811,16 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
+                                whereProjectTitle={
+                                  activeProjectIsScratch ? null : (activeProject?.title ?? null)
+                                }
                                 where={
                                   <ComposerWhereLine
                                     environmentId={activeThread.environmentId}
                                     threadId={activeThread.id}
                                     projectId={activeThread.projectId}
                                     worktreePath={activeThread.worktreePath}
+                                    isScratch={activeProjectIsScratch}
                                     draftId={!isServerThread ? draftId : null}
                                     onEnvironmentChange={onEnvironmentChangeStable}
                                     onComposerFocusRequest={scheduleComposerFocusStable}

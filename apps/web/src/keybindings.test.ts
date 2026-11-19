@@ -1051,7 +1051,7 @@ it.each(["Linux", "Win32", "MacIntel"])(
       ["ArrowDown", "workspace.tile.focusDown"],
       ["ArrowUp", "workspace.tile.focusUp"],
       ["ArrowRight", "workspace.tile.focusRight"],
-      ["j", "terminal.toggle"],
+      ["j", "workspace.tile.focusDown"],
       ["k", "workspace.tile.focusUp"],
       ["l", "workspace.tile.focusRight"],
       ["x", "workspace.tile.closeTab"],
@@ -1067,7 +1067,7 @@ it.each(["Linux", "Win32", "MacIntel"])(
       [".", "workspace.tile.actions"],
       ["/", "search.toggle"],
       [":", "commandPalette.toggle"],
-      ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [`${n}`, `workspace.tile.tab.${n}`]),
+      ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [`${n}`, `workspace.tile.focus.${n}`]),
     ];
     for (const [key, command] of sequences) {
       const input = event({

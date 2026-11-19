@@ -42,21 +42,16 @@ export function ComposerContextRing({
   return (
     <Popover>
       <PopoverTrigger
-        render={<ComposerControl size="xs" aria-label={label} data-composer-context-ring="" />}
+        render={
+          <ComposerControl
+            size="xs"
+            className="gap-1.5"
+            aria-label={label}
+            data-composer-context-ring=""
+          />
+        }
       >
-        {/* The meter and its numbers when the bar has room; the ring alone when it does not. */}
-        <span className="hidden items-center gap-1.5 @lg/composer-surface:inline-flex">
-          {breakdown.usedPercent === null ? null : (
-            <span className="h-1 w-8 overflow-hidden rounded-full bg-border">
-              <span
-                className={cn("block h-full bg-current", tone)}
-                style={{ width: `${Math.min(100, percent)}%` }}
-              />
-            </span>
-          )}
-          <span className={cn("tabular-nums", breakdown.tone !== "normal" && tone)}>{amount}</span>
-        </span>
-        <svg viewBox="0 0 16 16" className="size-4 @lg/composer-surface:hidden" aria-hidden="true">
+        <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true">
           <circle
             cx="8"
             cy="8"
@@ -78,6 +73,14 @@ export function ComposerContextRing({
             className={tone}
           />
         </svg>
+        <span
+          className={cn(
+            "hidden tabular-nums @lg/composer-surface:inline",
+            breakdown.tone !== "normal" && tone,
+          )}
+        >
+          {amount}
+        </span>
       </PopoverTrigger>
       <PopoverPopup side="top" align="end" width="sm">
         <div className="flex items-baseline justify-between gap-3 text-sm">

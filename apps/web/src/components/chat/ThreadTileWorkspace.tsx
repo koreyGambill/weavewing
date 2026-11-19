@@ -748,6 +748,20 @@ export function ThreadTileWorkspace(props: {
       apply({ type: "maximize", groupId: null });
       focus(next);
     };
+    const focusNumberedTile = (index: number) => {
+      const current = currentLayout();
+      const group = getTileGroups(current)[index];
+      if (!group) return;
+      if (
+        current.maximizedGroupId &&
+        group.id !== current.focusedGroupId &&
+        group.id !== current.maximizedGroupId &&
+        (compact || !visibleGeometry().some((tile) => tile.id === group.id))
+      ) {
+        apply({ type: "maximize", groupId: null });
+      }
+      focus(group.id);
+    };
     const newTile = (direction: "left" | "right" | "up" | "down") => {
       const group = currentGroup();
       if (!group) return;
@@ -785,17 +799,20 @@ export function ThreadTileWorkspace(props: {
         else setSwapGroupId(current.focusedGroupId);
       },
       ...Object.fromEntries(
-        ([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [
-          `workspace.tile.tab.${n}`,
-          () => {
-            const group = currentGroup();
-            const tab = group?.tabs[n - 1];
-            if (!group || !tab) return;
-            parkFocus(group.id);
-            activate(group, tab);
-            focus(group.id);
-          },
-        ]),
+        Array.from({ length: 9 }, (_, index) => [
+          [`workspace.tile.focus.${index + 1}`, () => focusNumberedTile(index)] as const,
+          [
+            `workspace.tile.tab.${index + 1}`,
+            () => {
+              const group = currentGroup();
+              const tab = group?.tabs[index];
+              if (!group || !tab) return;
+              parkFocus(group.id);
+              activate(group, tab);
+              focus(group.id);
+            },
+          ] as const,
+        ]).flat(),
       ),
       "workspace.tile.float": () => {
         const group = currentGroup();

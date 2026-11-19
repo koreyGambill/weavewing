@@ -30,6 +30,7 @@ const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
   forceNewWorktree?: boolean;
+  hideLockedWorkspaceLabel?: boolean;
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
@@ -44,6 +45,7 @@ interface BranchToolbarEnvModeSelectorProps {
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
   forceNewWorktree = false,
+  hideLockedWorkspaceLabel = false,
   envLocked,
   effectiveEnvMode,
   activeWorktreePath,
@@ -96,11 +98,13 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         ) : (
           <FolderIcon className="size-3" />
         )}
-        <ComposerContextLabel>
-          {forceNewWorktree
-            ? resolveEnvModeLabel("worktree", worktreeProvider)
-            : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider)}
-        </ComposerContextLabel>
+        {hideLockedWorkspaceLabel ? null : (
+          <ComposerContextLabel>
+            {forceNewWorktree
+              ? resolveEnvModeLabel("worktree", worktreeProvider)
+              : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider)}
+          </ComposerContextLabel>
+        )}
       </span>
     );
 

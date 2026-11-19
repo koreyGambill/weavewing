@@ -108,6 +108,7 @@ interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   /** The project and folder segment, shown after the machine in the composer strip. */
   where?: ReactNode;
+  whereProjectTitle?: string | null;
   /** Shown at the end of the composer strip, such as the new thread's permissions. */
   trailing?: ReactNode;
   availableEnvironments?: readonly EnvironmentOption[];
@@ -145,6 +146,7 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 interface RunContextSelectorProps {
   displayMode?: "toolbar" | "panel";
   workspaceRoot?: string;
+  hideLockedWorkspaceLabel?: boolean;
   forceNewWorktree: boolean;
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
@@ -171,6 +173,7 @@ interface RunContextSelectorProps {
 const RunContextSelector = memo(function RunContextSelector({
   displayMode = "toolbar",
   workspaceRoot,
+  hideLockedWorkspaceLabel = false,
   forceNewWorktree,
   autoEnvironmentLabel,
   onAutoEnvironment,
@@ -234,7 +237,7 @@ const RunContextSelector = memo(function RunContextSelector({
         <WorkspaceIcon className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"} />
       </TooltipTrigger>
       <TooltipPopup>
-        {isPanel
+        {isPanel || hideLockedWorkspaceLabel
           ? forceNewWorktree
             ? "Each model starts in its own worktree."
             : (workspacePath ?? workspaceLabel)
@@ -267,10 +270,12 @@ const RunContextSelector = memo(function RunContextSelector({
   const triggerContent = (
     <>
       {icon}
-      <ComposerContextLabel displayMode={displayMode}>
-        {autoEnvironmentLabel ??
-          (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
-      </ComposerContextLabel>
+      {autoEnvironmentLabel || showEnvironmentIndicator || !hideLockedWorkspaceLabel ? (
+        <ComposerContextLabel displayMode={displayMode}>
+          {autoEnvironmentLabel ??
+            (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
+        </ComposerContextLabel>
+      ) : null}
       {showEnvironmentIndicator && !autoEnvironmentLabel ? (
         <BranchToolbarEnvironmentBadge environment={activeEnvironment} />
       ) : null}
@@ -652,6 +657,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   availableEnvironments,
   onEnvironmentChange,
   where,
+  whereProjectTitle,
   trailing,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
@@ -747,7 +753,6 @@ export const BranchToolbar = memo(function BranchToolbar({
   const showWorkspaceMode =
     showGitControls &&
     !(envModeLocked && !forceNewWorktree && !activeWorktreePath && effectiveEnvMode === "local");
-
   if (!activeProject) return null;
 
   if (layout === "panel") {
@@ -812,6 +817,14 @@ export const BranchToolbar = memo(function BranchToolbar({
     );
   }
 
+  const hideLockedWorkspaceLabel =
+    where != null &&
+    envModeLocked &&
+    activeWorktreePath !== null &&
+    (isServerThread || !draftXwingEnvironment?.label) &&
+    resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode, worktreeProvider) ===
+      whereProjectTitle;
+
   return (
     <ComposerSurface.ContextStrip
       ref={attachStrip}
@@ -821,6 +834,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       {showGitControls ? (
         <div className="contents @xl/composer-surface:hidden">
           <RunContextSelector
+            hideLockedWorkspaceLabel={hideLockedWorkspaceLabel}
             forceNewWorktree={forceNewWorktree}
             autoEnvironmentLabel={autoEnvironmentLabel}
             onAutoEnvironment={onAutoEnvironment}
@@ -876,6 +890,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           )}
           {showWorkspaceMode ? (
             <BranchToolbarEnvModeSelector
+              hideLockedWorkspaceLabel={hideLockedWorkspaceLabel}
               forceNewWorktree={forceNewWorktree}
               envLocked={envModeLocked}
               effectiveEnvMode={effectiveEnvMode}
