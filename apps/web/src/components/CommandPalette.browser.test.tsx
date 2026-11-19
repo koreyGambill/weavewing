@@ -25,6 +25,19 @@ vi.mock("../state/entities", async (original) => ({
   useDelegatedUnderParent: () => entities.delegatedUnderParent,
 }));
 
+// The default project must be on a connected machine.
+vi.mock("../state/presentation", async (original) => {
+  const actual = await original<typeof import("../state/presentation")>();
+  const { Atom } = await import("effect/reactivity");
+  return {
+    ...actual,
+    environmentSummaries: {
+      ...actual.environmentSummaries,
+      connectedEnvironmentIdsAtom: Atom.make([EnvironmentId.make("local")]),
+    },
+  };
+});
+
 function setup(state: Partial<typeof entities> = {}) {
   // Earlier browser test files share this origin's localStorage; a remembered project
   // that is not listed here hides the default "New thread in <project>" row.
@@ -147,9 +160,11 @@ describe("CommandPalette open intents", () => {
     await expect
       .element(page.getByRole("button", { name: "All machines", exact: true }))
       .toBeVisible();
-    await userEvent.keyboard("{ArrowDown}");
+    // The first row is highlighted as the picker opens, so Enter alone accepts it.
     await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
     await expect.element(page.getByRole("option").nth(1)).not.toHaveAttribute("data-highlighted");
+    await userEvent.keyboard("{ArrowDown}");
+    await expect.element(page.getByRole("option").nth(1)).toHaveAttribute("data-highlighted");
   });
 
   it("opens a search intent with its query in the focused input", async () => {
