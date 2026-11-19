@@ -234,6 +234,36 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
+const NEW_THREAD_KEY_MIGRATION = "weavewing.new-thread-mod-n.v1";
+const newThreadKey: KeybindingRule = { key: "mod+n", command: "chat.new", when: "!terminalFocus" };
+// Saved files that swapped New thread with the removed default-folder command kept it here.
+const strandedNewThreadKey: KeybindingRule = { ...newThreadKey, key: "mod+alt+n" };
+
+function takesNewThreadKey(rule: KeybindingRule): boolean {
+  const shortcut = parseKeybindingShortcut(rule.key);
+  return (
+    shortcut !== null &&
+    shortcut.leader !== true &&
+    shortcut.key === "n" &&
+    !shortcut.altKey &&
+    !shortcut.shiftKey &&
+    (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
+  );
+}
+
+/**
+ * Gives New thread Ctrl/Cmd+N back in a saved file that lost it. A user's own binding on that key
+ * wins, and only the exact stranded Ctrl+Alt+N rule is removed.
+ */
+function restoreNewThreadKey(rules: readonly KeybindingRule[]): readonly KeybindingRule[] {
+  if (rules.some((rule) => rule.command !== "chat.new" && takesNewThreadKey(rule))) return rules;
+  const stranded = rules.findIndex((rule) => isSameKeybindingRule(rule, strandedNewThreadKey));
+  if (rules.some((rule) => rule.command === "chat.new" && takesNewThreadKey(rule))) {
+    return stranded === -1 ? rules : rules.filter((_, index) => index !== stranded);
+  }
+  return stranded === -1 ? [newThreadKey, ...rules] : rules.with(stranded, newThreadKey);
+}
+
 function encodedShortcut(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
   return parsed ? encodeShortcut(parsed) || null : null;
@@ -646,11 +676,12 @@ const make = Effect.gen(function* () {
       const configExists = yield* readConfigExists;
       if (!configExists) {
         yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
-        if (pendingLateDefaults.length > 0) {
+        if (pendingLateDefaults.length > 0 || !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION)) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
             ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
             "weavewing.leader.v1",
+            NEW_THREAD_KEY_MIGRATION,
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -759,6 +790,11 @@ const make = Effect.gen(function* () {
           return rule;
         });
       if (migrateLeader) customConfig = [...switchTilePreset(customConfig, enabled)];
+      // A full file keeps the migration pending until a rule is removed.
+      const migrateNewThreadKey =
+        !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION) &&
+        customConfig.length < MAX_KEYBINDINGS_COUNT;
+      if (migrateNewThreadKey) customConfig = [...restoreNewThreadKey(customConfig)];
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -840,11 +876,12 @@ const make = Effect.gen(function* () {
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),
       );
-      if (settledLateDefaults.length > 0 || migrateLeader) {
+      if (settledLateDefaults.length > 0 || migrateLeader || migrateNewThreadKey) {
         yield* recordAppliedMigrations([
           ...appliedMigrationIds,
           ...settledLateDefaults.map((late) => late.id),
           "weavewing.leader.v1",
+          NEW_THREAD_KEY_MIGRATION,
         ]);
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
