@@ -38,6 +38,16 @@ function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
 }
 
 describe("terminal word navigation", () => {
+  it.each([
+    ["Backspace", "ctrlKey", "Win32", "\x15"],
+    ["Backspace", "altKey", "Linux", "\x1b\x7f"],
+    ["Delete", "ctrlKey", "Linux", "\x0b"],
+    ["Delete", "altKey", "Win32", "\x1bd"],
+    ["Backspace", "metaKey", "MacIntel", "\x15"],
+    ["Backspace", "altKey", "MacIntel", null],
+  ])("translates %s with %s on %s", (key, modifier, platform, expected) => {
+    assert.equal(terminalNavigationShortcutData(event({ key: key!, [modifier!]: true }), platform!), expected);
+  });
   it.each(["Win32", "Linux x86_64"])(
     "leaves Ctrl+Arrow to the terminal encoder on %s",
     (platform) => {

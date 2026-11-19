@@ -481,6 +481,17 @@ export function terminalNavigationShortcutData(
   if (event.shiftKey) return null;
 
   const key = normalizeEventKey(event.key);
+  if (key === "backspace" || key === "delete") {
+    if (isMacPlatform(platform)) {
+      return key === "backspace" && event.metaKey && !event.ctrlKey && !event.altKey
+        ? "\x15"
+        : null;
+    }
+    if (event.metaKey) return null;
+    if (event.ctrlKey && !event.altKey) return key === "backspace" ? "\x15" : "\x0b";
+    if (event.altKey && !event.ctrlKey) return key === "backspace" ? "\x1b\x7f" : "\x1bd";
+    return null;
+  }
   if (key !== "arrowleft" && key !== "arrowright") {
     return null;
   }
