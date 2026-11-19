@@ -64,6 +64,16 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../ui/combobox";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuItemDetail,
+  MenuItemLabel,
+  MenuPopup,
+  MenuTrigger,
+} from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { searchableSetting } from "../settings/settingsSearch";
@@ -112,7 +122,8 @@ export function DraftProjectPicker({
   readonly onEnvironmentChange: (id: EnvironmentId) => void;
   readonly onStartWithoutProject?: () => void;
   readonly defaultFolderLabel?: string | null;
-  readonly onAddProject: (step: "folder" | "clone") => void;
+  /** `environmentId` is set only when the user chose a machine for the new project. */
+  readonly onAddProject: (step: "folder" | "clone", environmentId?: EnvironmentId) => void;
   /** Whether this draft is at the default place, and how to make its place the default. */
   readonly defaultPlace?: { readonly current: boolean; readonly makeDefault: () => void };
   /** Replaces the project-name trigger, as the where-line under the composer does. */
@@ -267,11 +278,21 @@ export function DraftProjectPicker({
     onEnvironmentChange(next.environmentId);
     inputRef.current?.focus();
   });
-  const addProject = (step: "folder" | "clone") => {
+  const addProject = (step: "folder" | "clone", target?: EnvironmentId) => {
     if (busy) return;
     if (!inline) changeOpen(false);
-    onAddProject(step);
+    onAddProject(step, target);
   };
+  // All machines can reach places on another machine, so adding one asks where, current first.
+  const addTargets =
+    allMachines && connected.length > 1
+      ? connected
+          .filter((env) => operable.has(env.environmentId))
+          .toSorted(
+            (a, b) =>
+              Number(b.environmentId === environmentId) - Number(a.environmentId === environmentId),
+          )
+      : [];
   const openPicker = useStableCallback(() => changeOpen(true));
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this draft's picker and remembers composer focus across opening the command palette
   useEffect(() => {
@@ -616,28 +637,36 @@ export function DraftProjectPicker({
           );
         }}
       </ComboboxList>
-      <div className="flex shrink-0 items-center gap-1 border-t px-2 py-1.5">
-        <Button variant="ghost" size="xs" onClick={() => addProject("folder")}>
-          <FolderOpenIcon />
-          Open folder
-        </Button>
-        <Button variant="ghost" size="xs" onClick={() => addProject("clone")}>
-          <FolderGit2Icon />
-          Clone repo
-        </Button>
+      <div className="@container/picker-footer flex shrink-0 items-center gap-1 border-t px-2 py-1.5">
+        {(["folder", "clone"] as const).map((step) => (
+          <AddProjectButton
+            key={step}
+            step={step}
+            machines={addTargets.length > 1 ? addTargets : null}
+            currentEnvironmentId={environmentId}
+            onChoose={(target) => addProject(step, target)}
+          />
+        ))}
         <div className="ms-auto">
-          <Button
-            variant="ghost-toggle"
-            size="xs"
-            aria-pressed={allMachines}
-            onClick={() => {
-              setAllMachines((all) => !all);
-              inputRef.current?.focus();
-            }}
-          >
-            <GlobeIcon />
-            All machines
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost-toggle"
+                  size="xs"
+                  aria-pressed={allMachines}
+                  onClick={() => {
+                    setAllMachines((all) => !all);
+                    inputRef.current?.focus();
+                  }}
+                />
+              }
+            >
+              <GlobeIcon />
+              <span className="@max-[24rem]/picker-footer:sr-only">All machines</span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">Search every connected machine</TooltipPopup>
+          </Tooltip>
         </div>
         <Popover>
           <PopoverTrigger
@@ -766,6 +795,68 @@ export function DraftProjectPicker({
         </>
       )}
     </Combobox>
+  );
+}
+
+const ADD_PROJECT_ACTIONS = {
+  folder: { label: "Open folder", hint: "Add a folder as a project", Icon: FolderOpenIcon },
+  clone: { label: "Clone repo", hint: "Clone a repository as a project", Icon: FolderGit2Icon },
+} as const;
+
+function AddProjectButton({
+  step,
+  machines,
+  currentEnvironmentId,
+  onChoose,
+}: {
+  readonly step: "folder" | "clone";
+  /** Asks for a machine first when set. */
+  readonly machines: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+  }> | null;
+  readonly currentEnvironmentId: EnvironmentId | null;
+  readonly onChoose: (environmentId?: EnvironmentId) => void;
+}) {
+  const { label, hint, Icon } = ADD_PROJECT_ACTIONS[step];
+  const body = (
+    <>
+      <Icon />
+      <span className="@max-[19rem]/picker-footer:sr-only">{label}</span>
+    </>
+  );
+  if (!machines) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<Button variant="ghost" size="xs" onClick={() => onChoose()} />}>
+          {body}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{hint}</TooltipPopup>
+      </Tooltip>
+    );
+  }
+  return (
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger render={<MenuTrigger render={<Button variant="ghost" size="xs" />} />}>
+          {body}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{hint} on a chosen machine</TooltipPopup>
+      </Tooltip>
+      <MenuPopup side="top" align="start">
+        <MenuGroup>
+          <MenuGroupLabel>{label} on</MenuGroupLabel>
+          {machines.map((machine) => (
+            <MenuItem key={machine.environmentId} onClick={() => onChoose(machine.environmentId)}>
+              <MenuItemLabel>{machine.label}</MenuItemLabel>
+              {machine.environmentId === currentEnvironmentId ? (
+                <MenuItemDetail>current</MenuItemDetail>
+              ) : null}
+            </MenuItem>
+          ))}
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
   );
 }
 

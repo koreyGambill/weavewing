@@ -1,6 +1,6 @@
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useRef } from "react";
 
@@ -65,8 +65,9 @@ export function useDraftPlaceSelection(input: {
   };
 
   // The folder becomes a project; this draft, typed content included, moves into it.
-  const openAddProject = (step?: "folder" | "clone") => {
+  const openAddProject = (step?: "folder" | "clone", chosenEnvironmentId?: EnvironmentId) => {
     const environmentId =
+      chosenEnvironmentId ??
       activeProjectRef?.environmentId ??
       scratch.scratchEnvironmentId(activeProjectRef?.environmentId ?? null);
     const settings = environments.find((environment) => environment.environmentId === environmentId)

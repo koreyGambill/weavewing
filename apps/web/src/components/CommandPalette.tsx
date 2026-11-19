@@ -3099,18 +3099,19 @@ function OpenCommandPaletteDialog(props: {
     <span className="text-muted-foreground text-xs">Searching messages…</span>
   ) : null;
 
-  function addProjectFromPicker(step: "folder" | "clone") {
-    if (!pickerEnvironmentId) return;
+  function addProjectFromPicker(step: "folder" | "clone", chosenEnvironmentId?: EnvironmentId) {
+    const environmentId = chosenEnvironmentId ?? pickerEnvironmentId;
+    if (!environmentId) return;
     openCommandPalette({
       open: "add-project",
       addProjectStart:
         step === "folder"
           ? {
               step,
-              environmentId: pickerEnvironmentId,
-              query: getAddProjectInitialQueryForEnvironment(pickerEnvironmentId),
+              environmentId,
+              query: getAddProjectInitialQueryForEnvironment(environmentId),
             }
-          : { step, environmentId: pickerEnvironmentId },
+          : { step, environmentId },
       onProjectReady: async (projectRef) => {
         await handleNewThread(projectRef);
       },
