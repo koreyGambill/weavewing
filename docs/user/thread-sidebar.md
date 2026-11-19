@@ -37,10 +37,12 @@ highlighted first row.
 
 Choose the machine with the machine button beside the folder under the composer. In the
 picker, **All machines** searches every connected machine, and choosing a project on another
-machine moves the draft to it. **Open folder** and **Clone repo** add a project. The **?**
-button lists the picker's keys, including `ctrl+alt+m` to cycle machines and
-`ctrl+alt+shift+m` to toggle All machines. The gear button makes the current place this
-device's default for new threads, or opens the default folder setting.
+machine moves the draft to it. **Open folder** and **Clone repo** add a project; with All
+machines on and more than one machine connected, they first ask which machine, listing the
+current one first. The **?** button lists the picker's keys, including `ctrl+alt+m` to cycle
+machines and `ctrl+alt+shift+m` to toggle All machines. The gear button opens the default
+folder setting. In the picker under the composer, it can also make the current place this
+device's default for new threads.
 
 Type a path such as `~/code/` to browse folders on the selected machine. In All
 machines, each machine resolves `~` to its own home. Tab completes a highlighted
