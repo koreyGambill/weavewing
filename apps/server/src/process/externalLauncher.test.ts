@@ -1335,15 +1335,20 @@ it.effect(
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          layerLauncher,
-          Layer.succeed(HostProcess.Platform, "win32"),
-          ConfigProvider.layer(
-            ConfigProvider.fromEnv({
-              env: {
-                PATH: "C:\\t3-editor-discovery-cache-test",
-                PATHEXT: ".COM;.EXE;.BAT;.CMD",
-              },
-            }),
+          layerLauncher.pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                Layer.succeed(HostProcess.Platform, "win32"),
+                ConfigProvider.layer(
+                  ConfigProvider.fromEnv({
+                    env: {
+                      PATH: "C:\\t3-editor-discovery-cache-test",
+                      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+                    },
+                  }),
+                ),
+              ),
+            ),
           ),
           TestClock.layer(),
         ),

@@ -146,7 +146,7 @@ layer("100_FoldWatchersIntoAutomations", (it) => {
         yield* sql`INSERT INTO monitoring_runs (id, profile_id, started_at, payload_json)
           VALUES (${entry.id}, ${entry.profileId}, ${entry.startedAt}, ${JSON.stringify(entry)})`;
 
-      yield* runMigrations();
+      yield* runMigrations({ toMigrationInclusive: 100 });
 
       const tasks = yield* sql<{
         task_id: string;
