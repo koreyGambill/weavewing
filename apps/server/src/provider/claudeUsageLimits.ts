@@ -170,7 +170,7 @@ interface StreamWindow {
 
 /**
  * The CLI reports each window in `unifiedWindows` and sets top-level `utilization` only past a
- * warning threshold. Neither field is in the SDK typings we pin, so both are read structurally.
+ * warning threshold. The SDK typings we pin omit `unifiedWindows`, so it is read structurally.
  */
 function readStreamWindows(info: SDKRateLimitInfo): ReadonlyArray<[string, StreamWindow]> {
   const unified = (info as { readonly unifiedWindows?: unknown }).unifiedWindows;
