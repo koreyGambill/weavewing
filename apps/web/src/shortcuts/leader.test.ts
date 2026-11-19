@@ -59,3 +59,35 @@ it.each(["Linux", "Win32", "MacIntel"])(
     expect(handler.handle(event("h"))).toBeNull();
   },
 );
+
+it("abandons a pending prefix when the configured Leader is disabled or rebound", () => {
+  vi.useFakeTimers();
+  using stack = new DisposableStack();
+  stack.defer(() => vi.useRealTimers());
+  let keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  const write = vi.fn();
+  const handler = createLeaderHandler({
+    keybindings: () => keybindings,
+    platform: () => "Linux",
+    changed: vi.fn(),
+    prepareDefaultTimeout: () => write,
+  });
+  stack.defer(handler.cancel);
+
+  expect(handler.handle(event("a", true))).toBe("prefix");
+  keybindings = compileResolvedKeybindingsConfig([
+    { key: "ctrl+a", command: "keybindings.leader", when: "false" },
+  ]);
+  vi.advanceTimersByTime(200);
+  expect(write).not.toHaveBeenCalled();
+
+  keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  expect(handler.handle(event("a", true))).toBe("prefix");
+  keybindings = compileResolvedKeybindingsConfig([
+    { key: "ctrl+b", command: "keybindings.leader" },
+  ]);
+  expect(handler.handle(event("b", true))).toBe("prefix");
+  expect(handler.handle(event("h"))).toBe("sequence");
+  vi.advanceTimersByTime(200);
+  expect(write).not.toHaveBeenCalled();
+});
