@@ -589,6 +589,18 @@ const REMOTE_MANAGED_SERVER_RUNNING_SCRIPT = `managed_server_running() {
   ! ps -ww -o args= -p "$$" >/dev/null 2>&1
 }`;
 
+// A packaged desktop app writes bin/t3 in its home to run its own bundled CLI.
+// Its server is reached with that CLI, so it needs no download of this
+// client's version. A server an SSH launch started is left to the runner,
+// which may replace it.
+const REMOTE_DESKTOP_SERVER_SCRIPT = `DESKTOP_CLI="$DEFAULT_SERVER_HOME/bin/t3"
+desktop_server_answers() {
+  [ -x "$DESKTOP_CLI" ] || return 1
+  DESKTOP_RUNTIME_INFO="$("$DESKTOP_CLI" __ssh-helper runtime-port "$DEFAULT_SERVER_HOME/userdata/server-runtime.json" 2>/dev/null)" || return 1
+  ! managed_server_running "\${DESKTOP_RUNTIME_INFO%% *}" &&
+    "$DESKTOP_CLI" __ssh-helper wait-ready "\${DESKTOP_RUNTIME_INFO#* }" "${REMOTE_REUSE_READY_TIMEOUT_MS}" "${SSH_READY_PROBE_TIMEOUT_MS}" >/dev/null 2>&1
+}`;
+
 const REMOTE_LAUNCH_SCRIPT = `set -eu
 @@T3_NODE_ENV_SCRIPT@@
 STATE_KEY="$1"
@@ -621,12 +633,20 @@ cat >"$RUNNER_NEXT" <<'SH'
 @@T3_RUNNER_SCRIPT@@
 SH
 chmod 700 "$RUNNER_NEXT"
+@@T3_MANAGED_SERVER_RUNNING_SCRIPT@@
+@@T3_DESKTOP_SERVER_SCRIPT@@
 T3_ARCHIVE_MODE=@@T3_ARCHIVE_MODE@@
+USE_DESKTOP_CLI=0
 if [ "$T3_ARCHIVE_MODE" = "1" ]; then
   # The archive ships the helpers below inside the executable; the remote
   # needs no Node at all. Resolving the runner once here also downloads the
   # archive before the port and readiness probes rely on it.
-  "$RUNNER_NEXT" --version >/dev/null
+  if desktop_server_answers; then
+    USE_DESKTOP_CLI=1
+  elif ! "$RUNNER_NEXT" --version >/dev/null; then
+    printf 'No running T3 Code desktop app was found in %s to connect to instead. Open the app on this host and retry.\\n' "$DEFAULT_SERVER_HOME" >&2
+    exit 1
+  fi
 elif ! ensure_remote_node_path; then
   if ! command -v node >/dev/null 2>&1; then
     printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
@@ -680,12 +700,16 @@ if [ ! -f "$RUNNER_FILE" ] || ! cmp -s "$RUNNER_NEXT" "$RUNNER_FILE"; then
   RUNNER_CHANGED=1
 fi
 mv "$RUNNER_NEXT" "$RUNNER_FILE"
+HELPER_CLI="$RUNNER_FILE"
+if [ "$USE_DESKTOP_CLI" = "1" ]; then
+  HELPER_CLI="$DESKTOP_CLI"
+fi
 if [ -n "$LAUNCHER_ID" ]; then
   printf '%s\\n' "$LAUNCHER_ID" >"$STATE_DIR/launcher"
 fi
 pick_port() {
   if [ "$T3_ARCHIVE_MODE" = "1" ]; then
-    "$RUNNER_FILE" __ssh-helper pick-port "$PORT_FILE" "@@T3_DEFAULT_REMOTE_PORT@@" "@@T3_REMOTE_PORT_SCAN_WINDOW@@"
+    "$HELPER_CLI" __ssh-helper pick-port "$PORT_FILE" "@@T3_DEFAULT_REMOTE_PORT@@" "@@T3_REMOTE_PORT_SCAN_WINDOW@@"
     return
   fi
   node - "$PORT_FILE" "@@T3_DEFAULT_REMOTE_PORT@@" "@@T3_REMOTE_PORT_SCAN_WINDOW@@" <<'NODE'
@@ -694,7 +718,7 @@ NODE
 }
 wait_ready() {
   if [ "$T3_ARCHIVE_MODE" = "1" ]; then
-    "$RUNNER_FILE" __ssh-helper wait-ready "$REMOTE_PORT" "$1" "@@T3_READY_PROBE_TIMEOUT_MS@@"
+    "$HELPER_CLI" __ssh-helper wait-ready "$REMOTE_PORT" "$1" "@@T3_READY_PROBE_TIMEOUT_MS@@"
     return
   fi
   node - "$REMOTE_PORT" "$1" "@@T3_READY_PROBE_TIMEOUT_MS@@" <<'NODE'
@@ -717,14 +741,13 @@ server_running() {
     *Z*) return 1 ;;
   esac
 }
-@@T3_MANAGED_SERVER_RUNNING_SCRIPT@@
 # Both are SQLite locks the OS drops with their holder: a server holds
 # server-owner.sqlite, and a boot service holds service-serving.lock from
 # before it starts a server, between two of them during its own update, until
 # it stops or idles behind another server.
 home_owned() {
   if [ "$T3_ARCHIVE_MODE" = "1" ]; then
-    "$RUNNER_FILE" __ssh-helper home-owned "$DEFAULT_SERVER_HOME" 2>/dev/null
+    "$HELPER_CLI" __ssh-helper home-owned "$DEFAULT_SERVER_HOME" 2>/dev/null
     return
   fi
   node - "$DEFAULT_SERVER_HOME" 2>/dev/null <<'NODE'
@@ -753,7 +776,7 @@ NODE
 }
 resolve_default_runtime_port() {
   if [ "$T3_ARCHIVE_MODE" = "1" ]; then
-    "$RUNNER_FILE" __ssh-helper runtime-port "$DEFAULT_RUNTIME_FILE"
+    "$HELPER_CLI" __ssh-helper runtime-port "$DEFAULT_RUNTIME_FILE"
     return
   fi
   node - "$DEFAULT_RUNTIME_FILE" <<'NODE'
@@ -780,7 +803,7 @@ NODE
 # This script ships with the SSH client; older clients do not honor this marker.
 update_remaining() {
   if [ "$T3_ARCHIVE_MODE" = "1" ]; then
-    "$RUNNER_FILE" __ssh-helper update-remaining "$DEFAULT_SERVER_HOME/runtime/@@T3_UPDATE_MARKER_FILE@@"
+    "$HELPER_CLI" __ssh-helper update-remaining "$DEFAULT_SERVER_HOME/runtime/@@T3_UPDATE_MARKER_FILE@@"
     return
   fi
   node - "$DEFAULT_SERVER_HOME/runtime/@@T3_UPDATE_MARKER_FILE@@" <<'NODE'
@@ -958,6 +981,10 @@ while [ -z "$REMOTE_PORT" ] && ! managed_server_running "$(cat "$PID_FILE" 2>/de
   sleep 1
   OWNER_WAITED=$((OWNER_WAITED + 1))
 done
+if [ -z "$REMOTE_PORT" ] && [ "$USE_DESKTOP_CLI" = "1" ]; then
+  printf 'The T3 Code desktop app in %s stopped answering during the connection. Retry once it is running.\\n' "$DEFAULT_SERVER_HOME" >&2
+  exit 1
+fi
 if [ -z "$REMOTE_PORT" ]; then
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
@@ -1013,8 +1040,13 @@ cat >"$RUNNER_FILE" <<'SH'
 @@T3_RUNNER_SCRIPT@@
 SH
 chmod 700 "$RUNNER_FILE"
-PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
-"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
+@@T3_MANAGED_SERVER_RUNNING_SCRIPT@@
+@@T3_DESKTOP_SERVER_SCRIPT@@
+PAIRING_CLI="$RUNNER_FILE"
+if desktop_server_answers; then
+  PAIRING_CLI="$DESKTOP_CLI"
+fi
+"$PAIRING_CLI" auth pairing create --base-dir "$DEFAULT_SERVER_HOME" --json
 `;
 
 const REMOTE_STOP_SCRIPT = `set -eu
@@ -1124,6 +1156,7 @@ function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
     T3_WAIT_READY_SCRIPT: stripTrailingNewlines(REMOTE_WAIT_READY_SCRIPT),
     T3_MANAGED_SERVER_RUNNING_SCRIPT: REMOTE_MANAGED_SERVER_RUNNING_SCRIPT,
+    T3_DESKTOP_SERVER_SCRIPT: REMOTE_DESKTOP_SERVER_SCRIPT,
     T3_DEFAULT_REMOTE_PORT: String(DEFAULT_REMOTE_PORT),
     T3_REMOTE_PORT_SCAN_WINDOW: String(REMOTE_PORT_SCAN_WINDOW),
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
@@ -1140,6 +1173,8 @@ function buildRemotePairingScript(stateKey: string, input?: RemoteT3RunnerOption
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_STATE_KEY: stateKey,
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
+    T3_MANAGED_SERVER_RUNNING_SCRIPT: REMOTE_MANAGED_SERVER_RUNNING_SCRIPT,
+    T3_DESKTOP_SERVER_SCRIPT: REMOTE_DESKTOP_SERVER_SCRIPT,
   });
 }
 

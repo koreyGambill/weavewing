@@ -11,11 +11,18 @@ import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
-import { launchOrReuseRemoteServer, type RemoteT3RunnerOptions } from "./tunnel.ts";
+import {
+  issueRemotePairingToken,
+  launchOrReuseRemoteServer,
+  type RemoteT3RunnerOptions,
+} from "./tunnel.ts";
+
+const TARGET = { alias: "test", hostname: "test.invalid", username: null, port: null } as const;
 
 // Capture exactly the script sent over SSH, then run it with fake remote commands.
-export const captureLauncherFor = Effect.fn("test.captureLauncher")(function* (
-  runner: RemoteT3RunnerOptions,
+const captureScript = Effect.fn("test.captureScript")(function* <E, R>(
+  run: Effect.Effect<unknown, E, R>,
+  stdout: string,
 ) {
   let script = "";
   const spawner = ChildProcessSpawner.make((command) =>
@@ -28,7 +35,7 @@ export const captureLauncherFor = Effect.fn("test.captureLauncher")(function* (
       }
       return ChildProcessSpawner.makeHandle({
         pid: ChildProcessSpawner.ProcessId(123),
-        stdout: Stream.make(new TextEncoder().encode('{"remotePort":3773}\n')),
+        stdout: Stream.make(new TextEncoder().encode(stdout)),
         stderr: Stream.empty,
         all: Stream.empty,
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
@@ -41,21 +48,19 @@ export const captureLauncherFor = Effect.fn("test.captureLauncher")(function* (
       });
     }),
   );
-  yield* launchOrReuseRemoteServer(
-    { alias: "test", hostname: "test.invalid", username: null, port: null },
-    undefined,
-    runner,
-  ).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        NodeServices.layer,
-        NodeCrypto.layer,
-        Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      ),
-    ),
+  // Provided innermost so it replaces the real spawner NodeServices brings.
+  yield* run.pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   return script;
 });
+
+export const captureLauncherFor = (runner: RemoteT3RunnerOptions) =>
+  captureScript(launchOrReuseRemoteServer(TARGET, undefined, runner), '{"remotePort":3773}\n');
+
+export const capturePairingFor = (runner: RemoteT3RunnerOptions) =>
+  captureScript(issueRemotePairingToken(TARGET, undefined, runner), '{"credential":"captured"}\n');
 
 export const captureLauncher = captureLauncherFor({ nodeScriptPath: "/fake/server.ts" });
 
@@ -80,6 +85,11 @@ export function runLauncher(
     readonly allowFailure?: boolean;
     // The desktop publishes runtime and removes the marker right after the first runtime read.
     readonly publishAfterFirstRuntimeRead?: boolean;
+    // Leaves the archive's version uninstalled; its download then fails as an unpublished one does.
+    readonly archiveMissing?: boolean;
+    // A packaged desktop app writes its CLI launcher; "running" also makes the
+    // runtime record's server the app's own process rather than a launched one.
+    readonly desktopApp?: "installed" | "running";
   },
 ) {
   const root = NodeURL.fileURLToPath(new URL("../../../", import.meta.url));
@@ -164,7 +174,11 @@ fi`,
     executable(
       "ps",
       `if [ "$*" = "-ww -o args= -p $TEST_SERVER_PID" ]; then
-  printf '/bin/sh %s/.t3/ssh-launch/test-target/run-t3.sh serve --host 127.0.0.1 --port 5999\\n' "$HOME"
+  if [ "$TEST_DESKTOP_SERVER" = 1 ]; then
+    printf '/Applications/T3 Code.app/Contents/MacOS/T3 Code app.asar/apps/server/dist/bin.mjs --bootstrap-fd 3\\n'
+  else
+    printf '/bin/sh %s/.t3/ssh-launch/test-target/run-t3.sh serve --host 127.0.0.1 --port 5999\\n' "$HOME"
+  fi
   exit 0
 fi
 PATH=/usr/bin:/bin exec ps "$@"`,
@@ -181,9 +195,12 @@ PATH=/usr/bin:/bin exec ps "$@"`,
     }
     if (options.archive) {
       executable("node", 'printf "unexpected host node invocation\\n" >&2; exit 1');
-      const version = NodePath.join(home, ".t3/runtime/versions/1.2.3");
-      NodeFS.mkdirSync(version, { recursive: true });
-      NodeFS.writeFileSync(NodePath.join(version, ".install-complete"), "1.2.3");
+      executable(
+        "curl",
+        `printf 'download\\n' >> "$HOME/events"
+printf 'curl: (56) The requested URL returned error: 404\\n' >&2
+exit 22`,
+      );
       NodeFS.writeFileSync(
         NodePath.join(home, "helper.ts"),
         `
@@ -194,11 +211,13 @@ import { sshHelperCommand } from ${JSON.stringify(NodePath.join(root, "apps/serv
 await Effect.runPromise(Command.runWith(sshHelperCommand, { version: "1.2.3" })(process.argv.slice(2)).pipe(Effect.provide(NodeServices.layer)));
 `,
       );
-      NodeFS.writeFileSync(
-        NodePath.join(version, "t3"),
-        `#!/bin/sh
+      const fakeT3 = `#!/bin/sh
 set -eu
 if [ "$1" = --version ]; then printf 1.2.3; exit; fi
+if [ "$1" = auth ]; then
+  case "$0" in */.t3/bin/t3) printf '{"credential":"desktop"}' ;; *) printf '{"credential":"runner"}' ;; esac
+  exit
+fi
 [ "$1" = __ssh-helper ]
 case "$2" in
   update-remaining) printf 'marker %s\\n' "$(cat "$HOME/clock")" >> "$HOME/events"; exec "$TEST_REAL_NODE" --require "$HOME/clock.cjs" "$HOME/helper.ts" "$2" "$3" ;;
@@ -206,9 +225,17 @@ case "$2" in
   runtime-port | pick-port | wait-ready) exec "$HOME/bin/test-node" - "$3" ;;
   *) exit 1 ;;
 esac
-`,
-        { mode: 0o755 },
-      );
+`;
+      const installT3 = (directory: string) => {
+        NodeFS.mkdirSync(directory, { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(directory, "t3"), fakeT3, { mode: 0o755 });
+      };
+      if (!options.archiveMissing) {
+        const version = NodePath.join(home, ".t3/runtime/versions/1.2.3");
+        installT3(version);
+        NodeFS.writeFileSync(NodePath.join(version, ".install-complete"), "1.2.3");
+      }
+      if (options.desktopApp) installT3(NodePath.join(home, ".t3/bin"));
     }
     using _serving = options.serviceServing
       ? holdLock(NodePath.join(runtime, "service-serving.lock"))
@@ -234,6 +261,7 @@ ${script}`,
         TEST_READY_AT: String(options.readyAt ?? 1_000_000),
         TEST_INITIAL_PORT: options.initialPort === undefined ? "" : String(options.initialPort),
         TEST_PUBLISH_AFTER_FIRST_READ: options.publishAfterFirstRuntimeRead ? "1" : "0",
+        TEST_DESKTOP_SERVER: options.desktopApp === "running" ? "1" : "0",
       },
     });
     if (result.error || (result.status !== 0 && !options.allowFailure))
