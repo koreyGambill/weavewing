@@ -49,6 +49,30 @@ export function needsRouteDraftCapture(
 }
 
 /**
+ * Whether a draft passes the sidebar's project and computer filters. The open draft always passes
+ * the computer filter, as the open thread does.
+ */
+export function isSidebarDraftInScope(input: {
+  readonly session: Pick<DraftSessionState, "environmentId" | "projectId">;
+  readonly isOpen: boolean;
+  readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly environmentScope: ReadonlySet<string> | null;
+}): boolean {
+  const { session } = input;
+  if (
+    input.scopedProjectKeys !== null &&
+    !input.scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
+  ) {
+    return false;
+  }
+  return (
+    input.isOpen ||
+    input.environmentScope === null ||
+    input.environmentScope.has(session.environmentId)
+  );
+}
+
+/**
  * The open draft is listed from the moment it opens, even empty. Any other draft is listed only once
  * it holds something the user typed or attached, so leaving an untouched draft drops its row.
  */
@@ -58,13 +82,18 @@ export function selectSidebarDraftRows(input: {
   readonly routeDraftId: string | null;
   readonly frozen: FrozenRouteDraftRow;
   readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly environmentScope: ReadonlySet<string> | null;
 }): SidebarDraftRowData[] {
   const rows: SidebarDraftRowData[] = [];
   for (const [draftKey, session] of Object.entries(input.sessions)) {
     if (session.promotedTo != null) continue;
     if (
-      input.scopedProjectKeys !== null &&
-      !input.scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
+      !isSidebarDraftInScope({
+        session,
+        isOpen: draftKey === input.routeDraftId,
+        scopedProjectKeys: input.scopedProjectKeys,
+        environmentScope: input.environmentScope,
+      })
     ) {
       continue;
     }

@@ -271,6 +271,7 @@ import {
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
 import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
+import { isSidebarDraftInScope } from "./sidebar/SidebarDraftBlock.logic";
 import {
   createSidebarGroupDropStore,
   SidebarGroupDropIndicator,
@@ -1328,8 +1329,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         continue;
       }
       if (
-        scopedProjectKeys !== null &&
-        !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
+        !isSidebarDraftInScope({
+          session,
+          isOpen: draftKey === routeDraftIdForRows,
+          scopedProjectKeys,
+          environmentScope,
+        })
       ) {
         continue;
       }
@@ -4003,6 +4008,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           projectByKey={projectByKey}
                           projectDisplayNameByKey={projectDisplayNameByKey}
                           scopedProjectKeys={scopedProjectKeys}
+                          environmentScope={environmentScope}
                           routeDraftId={routeDraftIdForRows}
                           onNavigateToDraft={navigateToDraft}
                           onDraftContextMenu={handleDraftContextMenu}

@@ -145,6 +145,7 @@ export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectByKey: ReadonlyMap<string, EnvironmentProject>;
   projectDisplayNameByKey: ReadonlyMap<string, string>;
   scopedProjectKeys: ReadonlySet<string> | null;
+  environmentScope: ReadonlySet<string> | null;
   routeDraftId: string | null;
   onNavigateToDraft: (draftId: DraftId) => void;
   onDraftContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
@@ -174,6 +175,7 @@ export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     routeDraftId: props.routeDraftId,
     frozen: frozenActive,
     scopedProjectKeys: props.scopedProjectKeys,
+    environmentScope: props.environmentScope,
   });
   if (drafts.length === 0) {
     return null;

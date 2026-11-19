@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { ComposerThreadDraftState, DraftSessionState } from "../../composerDraftStore";
 import {
   captureRouteDraftRow,
+  isSidebarDraftInScope,
   needsRouteDraftCapture,
   selectSidebarDraftRows,
   type FrozenRouteDraftRow,
@@ -49,6 +50,7 @@ function listed(
   composers: Record<string, ComposerThreadDraftState | undefined>,
   routeDraftId: string | null,
   previous: FrozenRouteDraftRow = { routeDraftId: null, row: null },
+  environmentScope: ReadonlySet<string> | null = null,
 ) {
   const frozen = needsRouteDraftCapture(previous, routeDraftId, sessions)
     ? captureRouteDraftRow(routeDraftId, sessions, composers)
@@ -61,6 +63,7 @@ function listed(
       routeDraftId,
       frozen,
       scopedProjectKeys: null,
+      environmentScope,
     }).map((row) => row.draftId as string),
   };
 }
@@ -89,6 +92,23 @@ describe("sidebar draft rows", () => {
     const moved = { a: { ...before.a, projectId: ProjectId.make("picked") } };
     expect(needsRouteDraftCapture(opened.frozen, "a", moved)).toBe(true);
     expect(captureRouteDraftRow("a", moved, {}).row?.session.projectId).toBe("picked");
+  });
+
+  it("hides drafts on servers left out of the computer filter, except the open draft", () => {
+    const elsewhere = { ...session("b", "2026-01-02"), environmentId: EnvironmentId.make("other") };
+    const sessions = { a: session("a", "2026-01-01"), b: elsewhere };
+    const typed = { a: composer("fix the build"), b: composer("ship it") };
+    const onEnv = new Set(["env"]);
+    expect(listed(sessions, typed, null, undefined, onEnv).ids).toEqual(["a"]);
+    expect(listed(sessions, typed, "b", undefined, onEnv).ids).toEqual(["b", "a"]);
+    expect(
+      isSidebarDraftInScope({
+        session: elsewhere,
+        isOpen: false,
+        scopedProjectKeys: null,
+        environmentScope: onEnv,
+      }),
+    ).toBe(false);
   });
 
   it("keeps a sent draft out and does not recapture it", () => {
