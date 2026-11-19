@@ -7,6 +7,9 @@ export const newTabId = (id: string) => `${NEW_TAB_PREFIX}${id}`;
 export const isNewTab = (tabId: string) => tabId.startsWith(NEW_TAB_PREFIX);
 
 const SURFACE_AREAS: Record<string, TileLayoutArea> = {
+  device: "device",
+  "side-chat": "side-chat",
+  "pull-request": "pull-request",
   browser: "browser",
   terminal: "terminal",
   files: "files",
@@ -169,6 +172,7 @@ export type TileAction =
   | { type: "close-group"; groupId: string }
   | { type: "close-tab"; tabId: string }
   | { type: "new-tab"; groupId: string; tabId: string }
+  | { type: "pending-area"; tabId: string; area: TileLayoutArea }
   | { type: "merge-groups"; groupId: string; targetGroupId: string }
   | { type: "swap-groups"; firstGroupId: string; secondGroupId: string }
   | {
@@ -528,6 +532,11 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
       focusedGroupId: root ? layout.focusedGroupId : group.id,
       maximizedGroupId: null,
     });
+  }
+  if (action.type === "pending-area") {
+    if (!groups.some((group) => group.tabs.includes(action.tabId)) || !isNewTab(action.tabId))
+      return layout;
+    return { ...layout, pendingAreas: { ...layout.pendingAreas, [action.tabId]: action.area } };
   }
   if (action.type === "new-tab") {
     const group = groups.find((entry) => entry.id === action.groupId);

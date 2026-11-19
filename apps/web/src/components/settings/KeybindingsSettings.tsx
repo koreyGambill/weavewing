@@ -1621,7 +1621,6 @@ export function KeybindingsSettingsPanel() {
         </p>
       ) : null}
       <div inert={!canWriteSettings} className="flex flex-col gap-8">
-
         {isAddingBinding ? (
           <SettingsGroup>
             <NewKeybindingSettingsRow

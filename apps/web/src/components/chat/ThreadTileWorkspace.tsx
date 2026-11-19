@@ -37,6 +37,7 @@ import type {
   KeybindingCommand,
   ProjectId,
   SavedTileLayout,
+  TileLayoutArea,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -384,7 +385,10 @@ export function ThreadTileWorkspace(props: {
   const sideChatTitles = new Map(relationshipShells.map((shell) => [shell.id, shell.title]));
   const title = (id: string) => {
     if (id === CONVERSATION_TAB_ID) return "Main chat";
-    if (isNewTab(id)) return "New tab";
+    if (isNewTab(id))
+      return savedLayout.pendingAreas?.[id]
+        ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[id]!]
+        : "New tab";
     const surface = props.panels.surfaces.find((entry) => entry.id === id);
     return surface
       ? surfaceTitle(
@@ -570,36 +574,40 @@ export function ThreadTileWorkspace(props: {
     run: (groupId: string) => void;
   }> = (() => {
     const runs = areaRuns;
-    return TILE_AREAS.flatMap(({ label, key }) => {
+    return TILE_AREAS.map(({ label, key }) => {
       const [enabled, run] = runs[label];
-      return enabled
-        ? [
-            {
-              label,
-              key,
-              enabled,
-              openElsewhere:
-                label === "Main chat" && chatGroup
-                  ? `Main chat is open in tile ${groups.indexOf(chatGroup) + 1}`
-                  : null,
-              run: (groupId: string) => {
-                if (label === "Main chat" && chatGroup) {
-                  activate(chatGroup, CONVERSATION_TAB_ID);
-                  focus(chatGroup.id);
-                  return;
-                }
-                parkFocus(groupId);
-                if (label === "Main chat")
-                  apply({ type: "move", tabId: CONVERSATION_TAB_ID, targetGroupId: groupId });
-                else {
-                  apply({ type: "focus", groupId });
-                  run?.();
-                }
-                focus(groupId);
-              },
-            },
-          ]
-        : [];
+      return {
+        label,
+        key,
+        enabled,
+        openElsewhere:
+          label === "Main chat" && chatGroup
+            ? `Main chat is open in tile ${groups.indexOf(chatGroup) + 1}`
+            : null,
+        run: (groupId: string) => {
+          if (label === "Main chat" && chatGroup) {
+            activate(chatGroup, CONVERSATION_TAB_ID);
+            focus(chatGroup.id);
+            return;
+          }
+          if (!enabled) {
+            const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
+            const area = (Object.keys(TILE_LAYOUT_AREA_LABELS) as TileLayoutArea[]).find(
+              (area) => TILE_LAYOUT_AREA_LABELS[area] === label,
+            );
+            if (group && area) apply({ type: "pending-area", tabId: group.activeTabId, area });
+            return;
+          }
+          parkFocus(groupId);
+          if (label === "Main chat")
+            apply({ type: "move", tabId: CONVERSATION_TAB_ID, targetGroupId: groupId });
+          else {
+            apply({ type: "focus", groupId });
+            run?.();
+          }
+          focus(groupId);
+        },
+      };
     });
   })();
   const firstOpenable = Math.max(
@@ -1571,11 +1579,16 @@ export function ThreadTileWorkspace(props: {
                       floatGesture(event, group);
                     }}
                   >
-                    <p className="text-sm font-medium">Choose an area</p>
+                    <p className="text-sm font-medium">
+                      {savedLayout.pendingAreas?.[group.activeTabId]
+                        ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]
+                        : "Choose an area"}
+                    </p>
                     {savedLayout.pendingAreas?.[group.activeTabId] && (
                       <p className="-mt-2 text-xs text-muted-foreground">
-                        {TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]}{" "}
-                        opens here once it is available.
+                        {savedLayout.pendingAreas[group.activeTabId] === "diff"
+                          ? "No changes to diff yet. This tile will update when changes are available."
+                          : `${TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} will open automatically when this thread is ready.`}
                       </p>
                     )}
                     <div

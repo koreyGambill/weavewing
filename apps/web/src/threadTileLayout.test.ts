@@ -13,6 +13,19 @@ import {
 } from "./threadTileLayout";
 
 describe("thread tile layout", () => {
+  it("keeps an unavailable area in its tile until its surface arrives", () => {
+    const initial = syncTileLayout(undefined, [], [], null, true);
+    const group = getTileGroups(initial)[0]!;
+    const tabId = newTabId("waiting");
+    const blank = applyTileAction(initial, { type: "new-tab", groupId: group.id, tabId });
+    const pending = applyTileAction(blank, { type: "pending-area", tabId, area: "notes" });
+    expect(pending.pendingAreas).toEqual({ [tabId]: "notes" });
+    const ready = syncTileLayout(pending, [], ["notes:one"], "notes:one", true);
+    expect(getTileGroups(ready).find((entry) => entry.id === group.id)?.tabs).toContain(
+      "notes:one",
+    );
+    expect(ready.pendingAreas).toBeUndefined();
+  });
   it("floats, bounds, persists and docks groups without changing tab ownership", () => {
     const initial = syncTileLayout(undefined, [], ["a", "b"], "a", true);
     const floating = applyTileAction(initial, {

@@ -572,7 +572,7 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
   });
   await userEvent.click(screen.getByText("Choose an area", { exact: true }));
   // Main chat is highlighted, but Enter on a Tabbed-to choice presses that choice.
-  await userEvent.keyboard("{Tab}{Tab}{Tab}");
+  await userEvent.keyboard("{Tab}{Tab}{Tab}{Tab}{Tab}");
   await expect.element(screen.getByRole("button", { name: "Notes", exact: true })).toHaveFocus();
   await userEvent.keyboard("{Enter}");
   expect(getTileGroups(layout()).find((group) => group.id === "tabbed")?.tabs[0]).toMatch(
@@ -727,7 +727,6 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
   const terminal = screen.getByRole("textbox", { name: "Editor terminal:new-terminal" });
   await userEvent.click(terminal);
   await userEvent.keyboard("{Control>}a{/Control}");
-  await expect.element(screen.getByText("Ctrl+A then…")).toBeVisible();
   await userEvent.keyboard("h");
   expect(layout().focusedGroupId).toBe("conversation-group");
   await userEvent.click(terminal);

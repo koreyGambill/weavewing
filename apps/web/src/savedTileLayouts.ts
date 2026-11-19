@@ -19,6 +19,9 @@ import {
 } from "./threadTileLayout";
 
 export const TILE_LAYOUT_AREA_LABELS = {
+  device: "Device",
+  "side-chat": "Side chat",
+  "pull-request": "Pull request",
   chat: "Main chat",
   browser: "Browser",
   terminal: "Terminal",
@@ -47,7 +50,9 @@ export function toSavedTileNode(layout: ThreadTileLayout): {
         const pending = layout.pendingAreas?.[tabId];
         if (pending) return [pending];
         if (isNewTab(tabId)) return [];
-        const area = tabArea(tabId);
+        const kind = tabArea(tabId);
+        const area =
+          kind === "side-chat" || kind === "pull-request" || kind === "device" ? null : kind;
         if (!area) dropped = true;
         return area ? [area] : [];
       });
