@@ -375,9 +375,10 @@ export class ServerBrowserContexts {
     clearTimeout(this.idleTimer);
     for (const retirement of this.retirements.values()) clearTimeout(retirement);
     this.retirements.clear();
-    await Promise.allSettled(
-      [...this.contexts.values()].map(async (pending) => (await pending).close()),
-    );
+    await Promise.allSettled([
+      ...this.queues.values(),
+      ...[...this.contexts.values()].map(async (pending) => (await pending).close()),
+    ]);
     const browser = await this.browser?.catch(() => undefined);
     await browser?.close().catch(constVoid);
     this.contexts.clear();

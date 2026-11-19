@@ -1789,6 +1789,8 @@ const make = Effect.gen(function* () {
         tab.control.agentId !== null &&
         !reclaimingTabs.has(tab) &&
         !isVisible(tab) &&
+        !tab.recording &&
+        !tab.recordingStart &&
         tab.usedAt < cutoff,
     );
   };
@@ -1872,8 +1874,7 @@ const make = Effect.gen(function* () {
   // Desktop browsing bypasses streamed viewers and server input tracking,
   // so these idle signals only apply to headless tabs.
   const closeIdleAgentTabs = () => {
-    for (const tab of idleAgentTabs())
-      if (tab.desktop === null && !tab.recording && !tab.recordingStart) dropTab(tab, true);
+    for (const tab of idleAgentTabs()) if (tab.desktop === null) dropTab(tab, true);
   };
 
   const latestThreadTab = (threadId: string, agentSessionId?: string) => {

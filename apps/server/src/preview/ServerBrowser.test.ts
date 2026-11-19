@@ -3841,6 +3841,12 @@ it.effect("a full server takes back the slot of the longest idle agent tab nobod
         tabId: PreviewTabId.make(opened[0]!),
         input: {},
       });
+      yield* broker.invoke({
+        scope: asSession("agent-3"),
+        operation: "recordingStart",
+        tabId: PreviewTabId.make(opened[24]!),
+        input: {},
+      });
 
       // Inside the idle window every desktop tab keeps its slot.
       now.mockReturnValue(29 * 60 * 1000);
@@ -3853,6 +3859,8 @@ it.effect("a full server takes back the slot of the longest idle agent tab nobod
       expect(releasedDesktopTabs).toEqual([]);
       // Tabs a desktop window shows keep their slots however long they sit idle.
       for (const tabId of opened) shownDesktopTabs.add(tabId);
+      expect(yield* open("agent-new").pipe(Effect.flip)).toMatchObject({ reason: "tabLimit" });
+      shownDesktopTabs.delete(opened[24]!);
       expect(yield* open("agent-new").pipe(Effect.flip)).toMatchObject({ reason: "tabLimit" });
       expect(releasedDesktopTabs).toEqual([]);
       shownDesktopTabs.clear();

@@ -211,6 +211,31 @@ describe("ServerBrowserContexts", () => {
     }
   });
 
+  it("waits for an idle profile to close during shutdown", async () => {
+    vi.useFakeTimers();
+    try {
+      const context = makeProfileContext();
+      launches.persistent.mockResolvedValue(context as unknown as BrowserContext);
+      const pool = new ServerBrowserContexts({ ...options(), idleBrowserMs: 10 });
+      await pool.contextFor("default");
+      const finishClose = Promise.withResolvers<void>();
+      context.close.mockReturnValueOnce(finishClose.promise);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(context.close).toHaveBeenCalledOnce();
+      const closed = vi.fn();
+      const shutdown = pool.close().then(closed);
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(closed).not.toHaveBeenCalled();
+      } finally {
+        finishClose.resolve();
+        await shutdown;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("runs a clear requested while an idle profile closes before relaunching it", async () => {
     vi.useFakeTimers();
     try {
