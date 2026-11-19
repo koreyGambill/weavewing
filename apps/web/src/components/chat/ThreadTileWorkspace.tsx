@@ -468,8 +468,8 @@ export function ThreadTileWorkspace(props: {
         ?.focus({ preventScroll: true }),
     );
   // The new tile or tab is focused, so an opened terminal takes its place.
-  const fillNewTab = (groupId: string) =>
-    props.terminalsOnly ? props.panels.onAddTerminal() : focusChooser(groupId);
+  const fillNewTab = (groupId: string, sourceTabId?: string) =>
+    props.terminalsOnly ? props.panels.onAddTerminal(sourceTabId) : focusChooser(groupId);
   const split = (
     group: TileGroup,
     axis: "horizontal" | "vertical",
@@ -484,7 +484,7 @@ export function ThreadTileWorkspace(props: {
       groupId,
       splitId: randomUUID(),
     });
-    if (added) fillNewTab(groupId);
+    if (added) fillNewTab(groupId, group.activeTabId);
   };
   const moveTabToNewTile = (group: TileGroup, axis: "horizontal" | "vertical") =>
     apply({
@@ -564,8 +564,9 @@ export function ThreadTileWorkspace(props: {
     );
   };
   const openNewTab = (groupId: string) => {
+    const source = getTileGroups(currentLayout()).find((group) => group.id === groupId);
     apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
-    fillNewTab(groupId);
+    fillNewTab(groupId, source?.activeTabId);
   };
   // A chooser unmounts once its area arrives or it closes. Focus left on it would drop to the
   // page, and workspace focus recovery would hand it to the composer, in another tile.

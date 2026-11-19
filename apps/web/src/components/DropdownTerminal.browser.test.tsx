@@ -3,17 +3,25 @@ import {
   PrimaryConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  combineTerminalSessionState,
+  EMPTY_TERMINAL_BUFFER_STATE,
+  type KnownTerminalSession,
+} from "@t3tools/client-runtime/state/terminal";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { installFakeEnvironment } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
+import { dropdownTerminalRef } from "../dropdownTerminal.logic";
 import { useDropdownTerminalStore } from "../dropdownTerminalStore";
+import { CONVERSATION_TAB_ID } from "../threadTileLayout";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
-import { useRightPanelStore } from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import type { EnvironmentPresentation } from "../state/environments";
-import { DropdownTerminalHost } from "./DropdownTerminal";
+import { ConfirmDialogHost } from "./ConfirmDialogHost";
+import { DropdownTerminalButton, DropdownTerminalHost } from "./DropdownTerminal";
 import "../index.css";
 
 const fixture = vi.hoisted(() => {
@@ -23,6 +31,7 @@ const fixture = vi.hoisted(() => {
     primary: null as EnvironmentId | null,
     shown: null as EnvironmentId | null,
     permitted: new Set<EnvironmentId>(),
+    knownSessions: null as KnownTerminalSession[] | null,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
@@ -87,7 +96,11 @@ vi.mock("../state/terminalSessions", async (load) => {
   });
   return {
     ...(await load<typeof import("../state/terminalSessions")>()),
-    useKnownTerminalSessions: () => null,
+    useKnownTerminalSessions: (ref: { environmentId: EnvironmentId; threadId: ThreadId }) =>
+      fixture.knownSessions?.filter(
+        ({ target }) =>
+          target.environmentId === ref.environmentId && target.threadId === ref.threadId,
+      ) ?? null,
     attachedTerminalSessionAtom: (
       environmentId: EnvironmentId,
       input: { threadId: ThreadId; terminalId: string; cwd: string },
@@ -103,6 +116,7 @@ function setup() {
   const remote = EnvironmentId.make("remote");
   const noFolder = EnvironmentId.make("no-folder");
   const readOnly = EnvironmentId.make("read-only");
+  fixture.knownSessions = null;
   fixture.primary = local;
   fixture.shown = remote;
   fixture.permitted = new Set([local, remote, noFolder]);
@@ -142,9 +156,11 @@ function setup() {
   return { local, remote };
 }
 
-function fixtureApp() {
+function fixtureApp(controls?: React.ReactNode) {
   return (
     <AppAtomRegistryProvider>
+      {controls}
+      <ConfirmDialogHost />
       <DropdownTerminalHost />
     </AppAtomRegistryProvider>
   );
@@ -207,4 +223,118 @@ it("keeps a chosen machine across thread navigation, disconnects and reopening",
   await expect.element(input).toHaveFocus();
   await expect.poll(() => tabs.elements()).toHaveLength(2);
   await expect.element(scrollback).toBeVisible();
+});
+
+it("handles an outside click and keeps the toggle, shell and dialogs working", async () => {
+  using _environment = installFakeEnvironment([]);
+  setup();
+  const outsideAction = vi.fn();
+  await using _screen = await render(
+    fixtureApp(
+      <>
+        <DropdownTerminalButton />
+        <button
+          className="fixed bottom-4 left-4"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            outsideAction();
+          }}
+        >
+          Underlying action
+        </button>
+      </>,
+    ),
+  );
+  const outside = page.getByRole("button", { name: "Underlying action" });
+  const toggle = page.getByRole("button", { name: "Drop-down terminal", exact: true });
+  const terminal = page.getByRole("region", { name: "Drop-down terminal" });
+  const input = terminal.getByRole("textbox", { name: "Terminal input" });
+
+  await toggle.click();
+  await expect.element(input).toHaveFocus();
+  const canvas = page.elementLocator(terminal.element().querySelector("canvas")!);
+  await canvas.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Select all", exact: true }).click();
+  await expect.element(input).toHaveFocus();
+  await terminal.getByRole("button", { name: "Close Terminal 1", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect.element(terminal.getByRole("tab", { name: "Terminal 1" })).toBeVisible();
+
+  await outside.click();
+  await expect.element(terminal).not.toBeInTheDocument();
+  expect(outsideAction).toHaveBeenCalledTimes(1);
+  await expect.element(outside).toHaveFocus();
+
+  await toggle.click();
+  await expect.element(terminal.getByRole("tab", { name: "Terminal 1" })).toBeVisible();
+  await expect.element(input).toHaveFocus();
+  await toggle.click();
+  await expect.element(terminal).not.toBeInTheDocument();
+  await expect.element(toggle).toHaveFocus();
+});
+
+it("inherits the source tab directory for new tabs and splits on the selected machine", async () => {
+  using _environment = installFakeEnvironment([]);
+  const { local, remote } = setup();
+  const ref = dropdownTerminalRef(local);
+  const store = useRightPanelStore.getState();
+  store.openTerminal(ref, "project", { cwd: "/project/at-launch", worktreePath: null });
+  store.openTerminal(ref, "moved", { cwd: "/other/moved-worktree", worktreePath: null });
+  store.applyTileAction(ref, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
+  fixture.knownSessions = [
+    {
+      target: { ...ref, terminalId: "project" },
+      state: combineTerminalSessionState(
+        {
+          threadId: ref.threadId,
+          terminalId: "project",
+          label: "Project",
+          cwd: "/project/on-server",
+          worktreePath: null,
+          status: "running",
+          pid: 123,
+          hasRunningSubprocess: false,
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: "2026-11-19T00:00:00.000Z",
+        },
+        EMPTY_TERMINAL_BUFFER_STATE,
+      ),
+    },
+  ];
+  const terminalPaths = (environmentId: EnvironmentId) =>
+    selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      dropdownTerminalRef(environmentId),
+    ).surfaces.flatMap((surface) =>
+      surface.kind === "terminal" ? [surface.launchContext?.cwd] : [],
+    );
+
+  await using _screen = await render(fixtureApp());
+  const terminal = page.getByRole("region", { name: "Drop-down terminal" });
+  await userEvent.keyboard("{Control>}j{/Control}");
+  await terminal.getByRole("tab", { name: "Project", exact: true }).click();
+  await terminal.getByRole("button", { name: "New tab", exact: true }).click();
+  expect(terminalPaths(local)).toEqual([
+    "/project/at-launch",
+    "/other/moved-worktree",
+    "/project/on-server",
+  ]);
+
+  await terminal.getByRole("tab", { name: "moved", exact: true }).click();
+  await terminal.getByRole("button", { name: "Tile actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^New tile below/ }).click();
+  await expect
+    .poll(() => terminalPaths(local))
+    .toEqual([
+      "/project/at-launch",
+      "/other/moved-worktree",
+      "/project/on-server",
+      "/other/moved-worktree",
+    ]);
+
+  await terminal.getByRole("button", { name: /Run on/ }).click();
+  await page.getByRole("menuitem", { name: "Build machine", exact: true }).click();
+  await expect.poll(() => terminalPaths(remote)).toEqual(["/home/remote"]);
 });

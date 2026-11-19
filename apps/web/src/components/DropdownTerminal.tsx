@@ -40,6 +40,7 @@ import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { shortcutLabelForCommand } from "../keybindings";
 import { isEditableFocused } from "../lib/editableFocus";
+import { isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { focusTerminal, isTerminalFocused } from "../lib/terminalFocus";
 import { cn } from "../lib/utils";
 import {
@@ -120,6 +121,7 @@ export function DropdownTerminalButton() {
             size="icon-sm"
             aria-label="Drop-down terminal"
             aria-pressed={open}
+            data-dropdown-terminal-toggle
             onClick={() => useDropdownTerminalStore.getState().toggle()}
           />
         }
@@ -201,6 +203,46 @@ function DropdownTerminalPanel() {
     useDropdownTerminalStore.getState().selectTarget(choice);
   };
   const panelRef = useRef<HTMLElement>(null);
+  const pointerStartedOutside = useRef(false);
+  const insideClicks = useRef(new WeakSet<Event>());
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- dismisses on document clicks, including controls that stop propagation
+  useEffect(() => {
+    let pending: number | undefined;
+    const isOutside = (event: MouseEvent) =>
+      !event
+        .composedPath()
+        .some(
+          (node) =>
+            node === panelRef.current ||
+            (node instanceof Element &&
+              (node.matches("[data-dropdown-terminal-toggle], [data-context-menu]") ||
+                (isTerminalCloseConfirmPending() &&
+                  node.matches(
+                    '[data-slot="alert-dialog-viewport"], [data-slot="alert-dialog-backdrop"]',
+                  )))),
+        );
+    const onPointerDown = (event: PointerEvent) => {
+      pointerStartedOutside.current = event.isPrimary && event.button === 0 && isOutside(event);
+    };
+    const onClick = (event: MouseEvent) => {
+      const startedOutside = pointerStartedOutside.current;
+      pointerStartedOutside.current = false;
+      if (!startedOutside || event.detail === 0 || !isOutside(event)) return;
+      window.clearTimeout(pending);
+      // Let React mark portaled clicks and let the clicked control handle its event and focus.
+      pending = window.setTimeout(() => {
+        if (!insideClicks.current.has(event)) useDropdownTerminalStore.getState().close();
+      }, 0);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.clearTimeout(pending);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, []);
   const drag = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
 
   // Moves the edge directly so a drag re-renders nothing until it ends.
@@ -221,6 +263,10 @@ function DropdownTerminalPanel() {
       ref={panelRef}
       aria-label="Drop-down terminal"
       data-dropdown-terminal
+      onPointerDownCapture={() => {
+        pointerStartedOutside.current = false;
+      }}
+      onClickCapture={(event) => insideClicks.current.add(event.nativeEvent)}
       className={cn(
         "fixed inset-x-0 top-[var(--workspace-topbar-height)] z-50 flex max-h-[calc(100dvh-var(--workspace-topbar-height)-2rem)] flex-col border-b bg-background shadow-xl transition-transform duration-150 ease-out starting:-translate-y-full motion-reduce:transition-none [-webkit-app-region:no-drag]",
         expanded && "bottom-0 max-h-none",
@@ -379,12 +425,14 @@ function DropdownTerminalWorkspace({
   const moveMenu = useMoveToThreadMenu({ dropdownRef: ref, machine: target.label });
   const close = useRightPanelSurfaceClose({ threadRef: ref, terminalLabelsById });
 
-  const addTerminal = () => {
+  const addTerminal = (sourceTabId?: string) => {
     if (!canOperate) return;
+    const source = terminals.find((surface) => surface.id === sourceTabId);
+    const cwd =
+      (source && (summaryFor(source.resourceId)?.cwd ?? source.launchContext?.cwd)) ?? root;
     const terminalId = terminalActions.allocateTerminalId();
     const store = useRightPanelStore.getState();
-    // The tile attaches with this folder, which starts the shell.
-    store.openTerminal(ref, terminalId, { cwd: root, worktreePath: null });
+    store.openTerminal(ref, terminalId, { cwd, worktreePath: null });
     store.applyTileAction(ref, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
     focusTerminal(ref, terminalId);
   };

@@ -72,7 +72,7 @@ export interface TileSurfaceActions {
   onAddBrowser: () => void;
   /** Keep separate from the DOM click handler so a MouseEvent cannot become a profile id. */
   onAddBrowserInProfile: (profileId: string) => void;
-  onAddTerminal: () => void;
+  onAddTerminal: (sourceTabId?: string) => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddNotes?: (() => void) | undefined;
