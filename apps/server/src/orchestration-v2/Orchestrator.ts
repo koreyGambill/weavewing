@@ -1176,6 +1176,8 @@ function queuedRunBatch(projection: OrchestrationV2ThreadProjection, first: Orch
       run.providerThreadId !== null &&
       run.inputMessageIds === undefined &&
       run.restartContinuationOfRunId === undefined &&
+      run.manualContinuationOfRunId === undefined &&
+      run.usageLimitContinuationOfRunId === undefined &&
       run.workspacePreparation === undefined &&
       run.freshContext !== true &&
       !transfers.has(run.id) &&
@@ -8181,19 +8183,28 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       dispatchMode.type === "defer_start" ||
       dispatchMode.type === "start_immediately" ||
       dispatchMode.type === "queue_after_active";
-    // New idle turns join held input; client sends also release holds while active.
-    // Provider failure or usage limits re-hold the queue.
+    // Ordinary sends can join input held by a shutdown; resumes and native wakes keep their priority.
     const worktreeSetupUnresolved = worktreeSetupPending(projection);
+    const continuation =
+      command.restartContinuationOfRunId !== undefined ||
+      command.manualContinuationOfRunId !== undefined ||
+      command.usageLimitContinuationOfRunId !== undefined;
     const sentByUserFromClient =
+      !continuation &&
       command.steerFollowUpOfRunId === undefined &&
       command.createdBy === "user" &&
       (command.creationSource === "web" || command.creationSource === "mobile") &&
       command.scheduledTaskId === undefined;
-    const startsIdleTurn =
+    const lastExecutedRun = latestExecutedRun(projection.runs);
+    const startsAfterShutdown =
+      !continuation &&
+      command.creationSource !== "provider" &&
       (dispatchMode.type === "start_immediately" || dispatchMode.type === "queue_after_active") &&
-      !projection.runs.some(isActiveRun);
+      !projection.runs.some(isActiveRun) &&
+      lastExecutedRun?.status === "interrupted" &&
+      !(yield* stopReachedRun(command, command.threadId, lastExecutedRun.id));
     const heldRunsToRelease =
-      (startsIdleTurn ||
+      (startsAfterShutdown ||
         (sentByUserFromClient &&
           (startsOrQueuesRun ||
             (dispatchMode.type === "steer_active" && command.deliveryIntent === "auto")))) &&
@@ -16814,6 +16825,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (
       command.type === "message.dispatch" &&
       command.restartContinuationOfRunId === undefined &&
+      command.manualContinuationOfRunId === undefined &&
+      command.usageLimitContinuationOfRunId === undefined &&
       command.idleCheckin !== true &&
       command.advisoryOnly !== true &&
       (command.dispatchMode.type === "start_immediately" ||

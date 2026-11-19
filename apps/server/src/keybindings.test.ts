@@ -248,7 +248,12 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           configState.keybindings
             .filter((entry) => entry.shortcut.key === "b" && entry.shortcut.shiftKey)
             .map((entry) => entry.command),
-          ["threadPanel.toggle", "script.custom-panel.run", "script.custom-composer.run"],
+          [
+            "toolSidebar.toggle",
+            "threadPanel.toggle",
+            "script.custom-panel.run",
+            "script.custom-composer.run",
+          ],
         );
       }).pipe(Effect.provide(layerKeybindings())),
   );

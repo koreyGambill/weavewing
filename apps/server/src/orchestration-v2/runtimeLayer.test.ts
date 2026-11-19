@@ -10133,10 +10133,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("places held queued messages after a continuation that started first", () =>
+  it.effect("combines held queued messages with a new user turn in delivery order", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const eventSink = yield* EventSink.EventSinkV2;
       const threadId = ThreadId.make("runtime-layer-continuation-before-queue");
       const messageId = (key: string) => MessageId.make(`${threadId}:${key}`);
       yield* orchestrator.dispatch({
@@ -10190,49 +10189,14 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         threadId,
       });
 
-      const startedRunIds = yield* Queue.unbounded<RunId>();
-      const afterSequence = yield* orchestrator.getThreadEventSequence(threadId);
-      yield* eventSink.stream({ threadId, afterSequence }).pipe(
-        Stream.runForEach((stored) =>
-          stored.event.type === "run.updated" && stored.event.payload.status === "starting"
-            ? Queue.offer(startedRunIds, stored.event.payload.id)
-            : Effect.void,
-        ),
-        Effect.forkScoped,
-      );
-      const complete = (key: string) =>
-        Effect.gen(function* () {
-          const run = yield* runFor(key);
-          const now = yield* DateTime.now;
-          yield* eventSink.write({
-            events: [
-              {
-                id: EventId.make(`${threadId}:${key}:completed`),
-                type: "run.updated",
-                threadId,
-                runId: run.id,
-                ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
-                providerInstanceId: run.providerInstanceId,
-                occurredAt: now,
-                payload: { ...run, status: "completed", startedAt: now, completedAt: now },
-              },
-            ],
-          });
-        });
-
-      yield* complete("continue");
-      assert.equal(yield* Queue.take(startedRunIds), (yield* runFor("first-queued")).id);
       const delivered = yield* runFor("first-queued");
-      const merged = yield* runFor("second-queued");
-      assert.equal(merged.status, "cancelled");
-      assert.equal(merged.mergedIntoRunId, delivered.id);
-      const keys = ["active", "continue", "first-queued", "second-queued"];
-      const runs = yield* Effect.forEach(keys.slice(0, 3), runFor);
-      const ordinals = runs.map((run) => run.ordinal);
-      assert.deepEqual(
-        ordinals,
-        ordinals.toSorted((left, right) => left - right),
-      );
+      assert.equal(delivered.status, "starting");
+      const keys = ["active", "first-queued", "second-queued", "continue"];
+      assert.deepEqual(delivered.inputMessageIds, keys.slice(1).map(messageId));
+      for (const key of ["second-queued", "continue"]) {
+        const merged = yield* runFor(key);
+        assert.equal(merged.mergedIntoRunId, delivered.id);
+      }
       const { turnItems } = yield* orchestrator.getThreadProjection(threadId);
       const userItems = turnItems.filter((item) => item.type === "user_message");
       assert.deepEqual(
