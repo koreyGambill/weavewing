@@ -4,6 +4,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
 import { act, render } from "../../test/render";
+import { dispatchCommandPalette } from "../commandPaletteStore";
 import { CommandPalette } from "./CommandPalette";
 import { openCommandPalette } from "../commandPaletteBus";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -251,4 +252,30 @@ it("tells screen readers whether a new project will be published", async () => {
   await expect.element(option).toHaveAttribute("aria-checked", "false");
   await option.click();
   await expect.element(option).toHaveAttribute("aria-checked", "true");
+});
+
+it("keeps the query across search tabs and restores input focus", async () => {
+  setup();
+  await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+  await act(() => dispatchCommandPalette({ _tag: "ToggleMode", mode: "search" }));
+  await page.getByRole("combobox").fill("token refresh");
+  await userEvent.keyboard("{Tab}");
+  await expect
+    .element(page.getByRole("tab", { name: "Projects", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await expect.element(page.getByRole("combobox")).toHaveValue("token refresh");
+  await expect.element(page.getByRole("combobox")).toHaveFocus();
+  await userEvent.keyboard("{Tab}");
+  await expect
+    .element(page.getByRole("tab", { name: "Files", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await expect.element(page.getByRole("combobox")).toHaveValue("token refresh");
+  await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+  await expect
+    .element(page.getByRole("tab", { name: "Projects", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(page.getByRole("dialog", { name: "Search", exact: true }))
+    .not.toBeInTheDocument();
 });

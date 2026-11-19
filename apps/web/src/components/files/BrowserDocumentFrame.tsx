@@ -53,6 +53,7 @@ import { AGENT_HTML_SANDBOX } from "@t3tools/shared/weavewingOutbound";
  */
 const HTML_RENDER_SHORTCUT_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "commandPalette.toggle",
+  "search.toggle",
   "filePicker.toggle",
   "projectSearch.toggle",
   "chat.find",

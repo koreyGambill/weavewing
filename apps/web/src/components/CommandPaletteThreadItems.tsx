@@ -66,7 +66,10 @@ function useProviderEntryByEnvironmentAndInstanceId() {
   );
 }
 
-function useConnectedThreadSearch(query: string) {
+function useConnectedThreadSearch(
+  query: string,
+  selectedEnvironmentIds?: ReadonlyArray<EnvironmentId>,
+) {
   const { environments } = useEnvironments();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
   const environmentIds: ReadonlyArray<EnvironmentId> = environments
@@ -83,7 +86,7 @@ function useConnectedThreadSearch(query: string) {
         )
       : undefined;
   return useThreadSearch(
-    environmentIds,
+    selectedEnvironmentIds ?? environmentIds,
     query,
     environmentLabels === undefined ? {} : { environmentLabels },
   );
@@ -96,6 +99,9 @@ function useConnectedThreadSearch(query: string) {
 export function useCommandPaletteThreadItems(input: {
   readonly activeThread: { readonly environmentId: EnvironmentId; readonly id: ThreadId } | null;
   readonly threadSearchQuery: string;
+  readonly environmentIds?: ReadonlyArray<EnvironmentId>;
+  readonly messageLimit?: number;
+  readonly includeTitleMatches?: boolean;
 }) {
   const { activeThread, threadSearchQuery } = input;
   const navigate = useNavigate();
@@ -103,7 +109,7 @@ export function useCommandPaletteThreadItems(input: {
   const delegatedUnderParent = useDelegatedUnderParent();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
   const providerEntryByEnvironmentAndInstanceId = useProviderEntryByEnvironmentAndInstanceId();
-  const messageSearch = useConnectedThreadSearch(threadSearchQuery);
+  const messageSearch = useConnectedThreadSearch(threadSearchQuery, input.environmentIds);
   const { projectByKey } = useProjectLookups();
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.
@@ -200,7 +206,7 @@ export function useCommandPaletteThreadItems(input: {
     (match) => itemForMatch(match)?.threadSearch,
     foldSearchQuery(threadSearchQuery),
     now,
-    { withoutTitleMatches: true },
+    { withoutTitleMatches: !input.includeTitleMatches },
   ).flatMap((match) => {
     const item = itemForMatch(match);
     if (!item) return [];
@@ -236,7 +242,7 @@ export function useCommandPaletteThreadItems(input: {
     shownOrder,
     messageSearch.query,
     rankedMessageItems.map((item) => item.value),
-    PALETTE_MESSAGE_LIMIT,
+    input.messageLimit ?? PALETTE_MESSAGE_LIMIT,
   );
   if (order !== shownOrder) setShownOrder(order);
   const messageItemByValue = new Map(rankedMessageItems.map((item) => [item.value, item]));

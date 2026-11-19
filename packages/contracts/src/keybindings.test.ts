@@ -75,6 +75,7 @@ const SHIPPED_DEFAULT_COMMANDS = [
   "chat.newLocal",
   "chat.newWithoutProject",
   "commandPalette.toggle",
+  "search.toggle",
   "composer.branch",
   "composer.dictation",
   "composer.effort",
