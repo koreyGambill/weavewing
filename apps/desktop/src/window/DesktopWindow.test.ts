@@ -735,6 +735,16 @@ describe("DesktopWindow", () => {
           assert.equal(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], platform !== "darwin");
           beforeInput(event, { ...input, key: "r", shift: true });
           assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          const navigation = fakeWindow.webContentsListeners.get("did-start-navigation");
+          navigation?.({}, "http://127.0.0.1:3773/thread", true, true);
+          beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
+          assert.equal(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], platform !== "darwin");
+          navigation?.({}, "http://127.0.0.1:3773/thread", false, false);
+          beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
+          assert.equal(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], platform !== "darwin");
+          navigation?.({}, "http://127.0.0.1:3773/thread", false, true);
+          beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
+          assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
           ipcMessage?.({}, "desktop:terminal-focus", false);
           beforeInput(event, { ...input, key: "r" });
           assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);

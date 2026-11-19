@@ -797,8 +797,8 @@ export const make = Effect.gen(function* () {
     window.webContents.on("ipc-message", (_event, channel, focused) => {
       if (channel === TERMINAL_FOCUS_CHANNEL) terminalFocused = focused === true;
     });
-    window.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
-      if (isMainFrame) terminalFocused = false;
+    window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) terminalFocused = false;
     });
     window.webContents.on("before-input-event", (event, input) => {
       quitShortcutHandler(event, input);
