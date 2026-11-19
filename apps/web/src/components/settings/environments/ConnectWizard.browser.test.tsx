@@ -100,25 +100,41 @@ describe("PairDeviceForm", () => {
 });
 
 describe("ConnectWizard", () => {
-  it("adds a computer in place on the How step, without opening another dialog", async () => {
+  it("adds a computer from the How step's Next, and never opens Access without one", async () => {
     setup([]);
+    state.connectPairing.mockReset();
     state.connectPairing.mockResolvedValue(AsyncResult.success(undefined));
     const change = {} as SquareChangeState;
-    openConnectWizard("computer");
+    openConnectWizard();
     await using _screen = await render(
       <ConnectWizard model={buildReachModel({ servers: [] })} servers={[]} change={change} />,
     );
+
+    await userEvent.click(page.getByText("Another computer"));
+    await userEvent.click(page.getByRole("button", { name: "Next" }));
+    await userEvent.click(page.getByText("Link or address"));
+    await expect.element(page.getByPlaceholder("backend.example.com")).toBeVisible();
+    await expect.element(page.getByPlaceholder("PAIRCODE")).toBeVisible();
+
+    await userEvent.click(page.getByRole("button", { name: "Next" }));
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("Enter its address and pairing code first, or paste its pairing link.");
+    await expect.element(page.getByPlaceholder("backend.example.com")).toBeVisible();
+    expect(state.connectPairing).not.toHaveBeenCalled();
 
     await userEvent.fill(
       page.getByPlaceholder("backend.example.com"),
       "http://box:3773/pair#token=ABCD1234",
     );
+    await expect
+      .element(page.getByPlaceholder("backend.example.com"))
+      .toHaveValue("http://box:3773");
     await expect.element(page.getByPlaceholder("PAIRCODE")).toHaveValue("ABCD1234");
-    expect(page.getByRole("dialog").all()).toHaveLength(1);
-    await userEvent.click(page.getByRole("button", { name: "Add computer" }));
+    await userEvent.click(page.getByRole("button", { name: "Next" }));
 
     expect(state.connectPairing).toHaveBeenCalledOnce();
-    await expect.element(page.getByText("Add the computer first.")).toBeVisible();
+    await expect.element(page.getByText("No computer is added yet.")).toBeVisible();
     expect(page.getByRole("dialog").all()).toHaveLength(1);
   });
 });
