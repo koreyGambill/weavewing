@@ -844,17 +844,20 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
       />
     );
   }
-  await using screen = await render(
+  const tree = (withOverlay: boolean) => (
     <div style={{ display: "flex", flexDirection: "column", width: 900, height: 800 }}>
       <input aria-label="Outside both" />
-      <div style={{ display: "flex", height: 380 }}>
+      <div role="group" aria-label="Thread" style={{ display: "flex", height: 380 }}>
         <Workspace threadRef={threadRef} />
       </div>
-      <div style={{ display: "flex", height: 380 }}>
-        <Workspace threadRef={overlayRef} overlay />
-      </div>
-    </div>,
+      {withOverlay ? (
+        <div role="group" aria-label="Overlay" style={{ display: "flex", height: 380 }}>
+          <Workspace threadRef={overlayRef} overlay />
+        </div>
+      ) : null}
+    </div>
   );
+  await using screen = await render(tree(true));
   const groups = () => {
     const { byThreadKey } = useRightPanelStore.getState();
     return [
@@ -898,4 +901,49 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
   focus("Outside both");
   await splitByKey();
   expect(groups()).toEqual([6, 3]);
+
+  // A tile menu renders in a portal, yet its workspace still owns the input.
+  const openTileMenu = async (workspace: "Thread" | "Overlay") => {
+    await userEvent.click(
+      screen
+        .getByRole("group", { name: workspace, exact: true })
+        .getByRole("button", { name: "Tile actions", exact: true })
+        .first(),
+    );
+    await expect.element(screen.getByRole("menu")).toBeVisible();
+    await userEvent.keyboard("{ArrowDown}");
+    await vi.waitFor(() => expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull());
+  };
+  const closeTileMenu = async () => {
+    await userEvent.keyboard("{Escape}");
+    await expect.element(screen.getByRole("menu")).not.toBeInTheDocument();
+  };
+  await openTileMenu("Overlay");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([6, 4]);
+  await closeTileMenu();
+  await openTileMenu("Overlay");
+  await splitByKey();
+  expect(groups()).toEqual([6, 5]);
+  await closeTileMenu();
+
+  // Maximize keeps focus in the thread's menu, unlike a split, which moves it to a new chooser.
+  const maximized = () => {
+    const { byThreadKey } = useRightPanelStore.getState();
+    return [
+      selectThreadTileLayout(byThreadKey, threadRef).maximizedGroupId !== null,
+      selectThreadTileLayout(byThreadKey, overlayRef).maximizedGroupId !== null,
+    ];
+  };
+  await openTileMenu("Thread");
+  dispatchMenuAction("workspace.tile.maximize");
+  expect(maximized()).toEqual([true, false]);
+  await userEvent.keyboard("{Control>}{Alt>}{Enter}{/Alt}{/Control}");
+  expect(maximized()).toEqual([false, false]);
+  await closeTileMenu();
+
+  focus("Editor terminal:term-1");
+  await screen.rerender(tree(false));
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([7, 5]);
 });

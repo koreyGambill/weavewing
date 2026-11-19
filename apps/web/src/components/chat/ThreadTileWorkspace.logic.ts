@@ -40,15 +40,41 @@ export function tileCloseConfirmation(input: {
   };
 }
 
+// Menus and listboxes render in portals outside the workspace that opened them.
+const PORTALED_CONTROL = '[role="menu"], [role="listbox"]';
+let lastTileOwner: Element | null = null;
+let trackingTileFocus = false;
+
+function tileOwnerOf(focused: EventTarget | null): Element | null {
+  if (!(focused instanceof Element)) return null;
+  const workspace = focused.closest("[data-thread-tiling]");
+  if (workspace) return workspace;
+  return focused.closest(PORTALED_CONTROL) && lastTileOwner?.isConnected ? lastTileOwner : null;
+}
+
+/** Remembers the workspace focus was last in, so a menu it opened still acts on it. */
+export function trackTileFocus() {
+  if (trackingTileFocus || typeof document === "undefined") return;
+  trackingTileFocus = true;
+  lastTileOwner = tileOwnerOf(document.activeElement);
+  document.addEventListener(
+    "focusin",
+    (event) => {
+      lastTileOwner = tileOwnerOf(event.target);
+    },
+    true,
+  );
+}
+
 /**
- * Whether a tile key or menu action belongs to this workspace: the one holding focus takes it,
- * and with focus outside every workspace it goes to the one underneath, never to an overlay.
+ * Whether a tile key or menu action belongs to this workspace: the one holding focus, or whose
+ * menu holds it, takes it; with focus elsewhere it goes to the one underneath, never an overlay.
  */
 export function ownsTileInput(
   workspace: Element | null,
   focused: EventTarget | null,
   overlay: boolean,
 ): boolean {
-  const owner = focused instanceof Element ? focused.closest("[data-thread-tiling]") : null;
+  const owner = tileOwnerOf(focused);
   return owner ? workspace !== null && owner.contains(workspace) : !overlay;
 }
