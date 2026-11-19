@@ -61,11 +61,13 @@ import {
   memo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import type { SidebarGroupDropStore } from "./SidebarThreadGroupHeader";
 
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useOpenPrLink } from "../../lib/openPullRequestLink";
@@ -446,6 +448,8 @@ type SortableThreadRowBag = Pick<
 export const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
 export const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
+const subscribeToNothing = () => () => {};
+
 // useSortable memoizes on its `disabled` object, so a fresh one per render
 // re-renders every row and marker on each sidebar update.
 export const SIDEBAR_SORTABLE_DRAG_DISABLED = { draggable: true } as const;
@@ -459,9 +463,11 @@ export function SortableThreadRow(
     sortableId: string;
     sortableDisabled: boolean;
     contextDrag: boolean;
+    // Set during group drags; the held row reads its Pin or Settle badge from it.
+    shelfDropStore?: SidebarGroupDropStore | undefined;
   },
 ) {
-  const { sortableId, sortableDisabled, contextDrag, ...rowProps } = props;
+  const { sortableId, sortableDisabled, contextDrag, shelfDropStore, ...rowProps } = props;
   const canOperateThread = useEnvironmentScope(
     rowProps.thread.environmentId,
     AuthOrchestrationOperateScope,
@@ -496,7 +502,18 @@ export function SortableThreadRow(
         ? asLaunchingThread(liveThread)
         : liveThread;
   // Keyed by variant so a card/slim switch remounts the row.
-  return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
+  const shelfVerb = useSyncExternalStore(shelfDropStore?.subscribe ?? subscribeToNothing, () =>
+    isDragging ? (shelfDropStore?.shelf()?.verb ?? null) : null,
+  );
+  return (
+    <SidebarThreadRow
+      key={rowProps.variant}
+      {...rowProps}
+      dropVerb={rowProps.dropVerb ?? shelfVerb}
+      thread={thread}
+      sortable={bag}
+    />
+  );
 }
 export type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
@@ -1020,7 +1037,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         ...sortable.listeners,
       }
     : { style: undefined };
-  const destinationVerb = sortable?.isDragging
+  // A group drag keeps its row in place, so the row shows the shelf it would drop on too.
+  const showsDropVerb = sortable?.isDragging === true || props.dropVerb !== null;
+  const destinationVerb = showsDropVerb
     ? props.dropVerb
     : props.sweepAction === "unsnooze"
       ? "wake"
@@ -1292,7 +1311,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   Regenerating title
                 </span>
               ) : null}
-              {sortable?.isDragging ? (
+              {showsDropVerb ? (
                 dragDestination
               ) : (
                 <span
@@ -1484,7 +1503,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : (
                 <span className="flex-1" />
               )}
-              {sortable?.isDragging ? (
+              {showsDropVerb ? (
                 dragDestination
               ) : (
                 <span

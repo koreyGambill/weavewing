@@ -72,7 +72,7 @@ type SavedBackendListRowProps = {
   onSetEnabled: (environmentId: EnvironmentId, enabled: boolean) => void;
   onRemove: (environment: EnvironmentPresentation) => void;
   onAddRoute: (environment: EnvironmentPresentation) => void;
-  /** Who comes in and goes out, under the status line. */
+  /** Who has access to it, under the status line. */
   access?: ReactNode;
   accessDetail?: ReactNode;
   menuItems?: ReactNode;

@@ -3,7 +3,6 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { AdvertisedEndpoint } from "@t3tools/contracts";
-import { ArrowRightIcon } from "lucide-react";
 import { useState } from "react";
 
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -25,7 +24,7 @@ import {
 import { ImportConversations } from "./ImportConversations";
 import { ArrivalTag, SquareChangeStatus } from "./LevelControls";
 import {
-  incomingSquares,
+  accessHolders,
   LINK_LEVEL_CHOICES,
   REACH_LEVEL_LABELS,
   type ReachModel,
@@ -38,20 +37,12 @@ import type { SquareChangeState } from "./useSquareChange";
 const EMPTY_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
 const EMPTY_CREDENTIALS: ReadonlyMap<string, string> = new Map();
 
-/** "4 come in · goes out to 2", or where that is managed when this app cannot read it. */
+/** "3 have access", or nothing when this app cannot read who uses the server. */
 export function accessSummary(model: ReachModel, server: ReachServer): string {
+  if (server.input.sessions === null) return "";
   const column = model.columns.find((party) => party.environmentId === server.input.environmentId)!;
-  const incoming = server.input.sessions === null ? null : incomingSquares(model, column).length;
-  const outgoing =
-    server.input.links === null
-      ? null
-      : (model.outgoing.get(server.input.environmentId)?.length ?? 0);
-  return [
-    incoming === null ? null : `${incoming} come in`,
-    outgoing === null ? null : `goes out to ${outgoing}`,
-  ]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
+  const count = accessHolders(model, column).length;
+  return count === 1 ? "1 has access" : `${count} have access`;
 }
 
 function levelText(square: ReachSquare, change: SquareChangeState) {
@@ -119,46 +110,6 @@ export function AccessLine({
               onClick={() => change.request(square, "none")}
             >
               {changes.ownOutbound ? "Give up…" : "Remove"}
-            </Button>
-          ) : null}
-        </span>
-      </div>
-      <SquareChangeStatus change={change} square={square} />
-    </div>
-  );
-}
-
-/**
- * A line under Going out. The other side sets its level, so it shows as text with one way to
- * give the access up; levels change from the target's Coming in lines or the grid.
- */
-function OutgoingLine({
-  square,
-  name,
-  change,
-}: {
-  readonly square: ReachSquare;
-  readonly name: string;
-  readonly change: SquareChangeState;
-}) {
-  return (
-    <div className="py-1">
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <span className="flex min-w-28 flex-1 items-center gap-1.5">
-          <ArrowRightIcon aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">{name}</span>
-          <ArrivalTag square={square} />
-        </span>
-        <span className="w-44 text-xs">{levelText(square, change)}</span>
-        <span className="flex w-20 justify-end">
-          {square.changes.canRemove ? (
-            <Button
-              size="xs"
-              variant="ghost-destructive"
-              disabled={change.busyKey !== null}
-              onClick={() => change.request(square, "none")}
-            >
-              Give up…
             </Button>
           ) : null}
         </span>
@@ -241,15 +192,7 @@ function WaitingLinks({ server }: { readonly server: ReachServer }) {
   );
 }
 
-function Caption({ title, detail }: { readonly title: string; readonly detail: string }) {
-  return (
-    <p className="mt-2 mb-0.5 text-xs font-semibold first:mt-0">
-      {title} <span className="font-normal text-muted-foreground">· {detail}</span>
-    </p>
-  );
-}
-
-/** A server's lines: what may come in, what it reaches elsewhere, and its history import. */
+/** A server's list of who has access to it, and its history import. */
 export function ServerAccessDetail({
   model,
   server,
@@ -261,51 +204,36 @@ export function ServerAccessDetail({
 }) {
   const { input } = server;
   const column = model.columns.find((party) => party.environmentId === input.environmentId)!;
-  const incoming = incomingSquares(model, column);
-  const outgoing = model.outgoing.get(input.environmentId) ?? [];
+  const holders = accessHolders(model, column);
+  const note =
+    input.appScopes === null
+      ? "Last known. It is not answering."
+      : input.canManage
+        ? null
+        : `Set on ${input.label}.`;
   return (
     <div className="mt-2 space-y-1 rounded-lg bg-muted/40 px-3 py-2 sm:px-4">
-      <Caption
-        title="Coming in"
-        detail={
-          input.appScopes === null
-            ? "last known, not answering"
-            : input.canManage
-              ? "you set this here"
-              : "set on that server"
-        }
-      />
+      {note !== null ? <p className="text-xs text-muted-foreground">{note}</p> : null}
       {input.sessions === null ? (
         <p className="text-xs text-muted-foreground">
           {server.accessError ?? `This app cannot read who uses ${input.label}.`}
         </p>
       ) : (
         <>
-          {incoming.map((square) => (
-            <AccessLine
-              key={square.from.id}
-              square={square}
-              name={square.from.label}
-              change={change}
-            />
-          ))}
+          {holders.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No one else has access.</p>
+          ) : (
+            holders.map((square) => (
+              <AccessLine
+                key={square.from.id}
+                square={square}
+                name={square.from.label}
+                change={change}
+              />
+            ))
+          )}
           <WaitingLinks server={server} />
         </>
-      )}
-      <Caption title="Going out" detail="the other side sets this" />
-      {input.links === null ? (
-        <p className="text-xs text-muted-foreground">
-          {server.linksError ??
-            (input.linksOffered
-              ? `This app cannot read ${input.label}'s links.`
-              : "Linked environments is off here (Settings → Labs).")}
-        </p>
-      ) : outgoing.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing</p>
-      ) : (
-        outgoing.map(({ target, square }) => (
-          <OutgoingLine key={target.id} square={square} name={target.label} change={change} />
-        ))
       )}
       {input.appScopes !== null ? (
         <div className="mt-2 border-t border-border/60 pt-1">

@@ -22,7 +22,7 @@ import type { ReachModel } from "./reachModel.logic";
 import type { ReachServer } from "./useReachModel";
 import type { SquareChangeState } from "./useSquareChange";
 
-/** The toggle under a server's name that opens its Coming in and Going out lines. */
+/** The toggle under a server's name that opens its list of who has access. */
 export function ServerAccessToggle({
   model,
   server,
