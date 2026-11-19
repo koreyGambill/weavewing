@@ -69,6 +69,7 @@ function useProviderEntryByEnvironmentAndInstanceId() {
 function useConnectedThreadSearch(
   query: string,
   selectedEnvironmentIds?: ReadonlyArray<EnvironmentId>,
+  limit?: number,
 ) {
   const { environments } = useEnvironments();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
@@ -85,11 +86,10 @@ function useConnectedThreadSearch(
           }),
         )
       : undefined;
-  return useThreadSearch(
-    selectedEnvironmentIds ?? environmentIds,
-    query,
-    environmentLabels === undefined ? {} : { environmentLabels },
-  );
+  return useThreadSearch(selectedEnvironmentIds ?? environmentIds, query, {
+    ...(environmentLabels === undefined ? {} : { environmentLabels }),
+    ...(limit === undefined ? {} : { limit }),
+  });
 }
 
 /**
@@ -109,7 +109,11 @@ export function useCommandPaletteThreadItems(input: {
   const delegatedUnderParent = useDelegatedUnderParent();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
   const providerEntryByEnvironmentAndInstanceId = useProviderEntryByEnvironmentAndInstanceId();
-  const messageSearch = useConnectedThreadSearch(threadSearchQuery, input.environmentIds);
+  const messageSearch = useConnectedThreadSearch(
+    threadSearchQuery,
+    input.environmentIds,
+    input.messageLimit,
+  );
   const { projectByKey } = useProjectLookups();
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.

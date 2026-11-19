@@ -124,6 +124,7 @@ it("asks environments that omit older settled threads for their rows, with the c
   const scope = {
     projectIds: [ProjectId.make("project-a")],
     environmentLabels: { [envA]: "Laptop" },
+    limit: 50,
   };
 
   // Too short to match messages: only the environment with older rows is asked, for titles.
@@ -137,6 +138,7 @@ it("asks environments that omit older settled threads for their rows, with the c
       envA,
       {
         query: "ui",
+        limit: 50,
         olderSettledBefore: "2026-10-01T00:00:00.000Z",
         projectIds: scope.projectIds,
         environmentLabel: "Laptop",

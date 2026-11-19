@@ -68,6 +68,7 @@ export const ThreadSearchScope = Schema.Struct({
   projectIds: Schema.optionalKey(Schema.Array(ProjectId)),
   environmentLabels: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   titlesOnly: Schema.optionalKey(Schema.Boolean),
+  limit: OrchestrationSearchThreadsInput.fields.limit,
 });
 export type ThreadSearchScope = typeof ThreadSearchScope.Type;
 
@@ -141,6 +142,7 @@ export function createThreadSearchResultsAtomFamily<E>(options: {
         const result = get(
           options.getSearchAtom(environmentId, {
             query,
+            ...(scope.limit === undefined ? {} : { limit: scope.limit }),
             ...(before === null
               ? {}
               : {

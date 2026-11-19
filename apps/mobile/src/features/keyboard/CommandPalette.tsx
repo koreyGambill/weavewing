@@ -277,7 +277,10 @@ export function CommandPalette(props: {
         )
       : [],
     query.startsWith(">") ? "" : query,
-    environmentLabels === undefined ? {} : { environmentLabels },
+    {
+      ...(environmentLabels === undefined ? {} : { environmentLabels }),
+      ...(props.mode === "search" ? { limit: 50 } : {}),
+    },
   );
   const serverConfigs = useServerConfigs();
   const startTriage = useStartTriage();
@@ -516,7 +519,7 @@ export function CommandPalette(props: {
     shownOrder,
     search.query,
     rankedMessageKeys,
-    PALETTE_MESSAGE_LIMIT,
+    props.mode === "search" ? 50 : PALETTE_MESSAGE_LIMIT,
   );
   if (messageOrder !== shownOrder) setShownOrder(messageOrder);
   const messageMatchKeys = useMemo(
