@@ -3,6 +3,7 @@ import {
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
+  AuthFilesystemWriteScope,
   AuthProvidersManageScope,
   AuthSettingsWriteScope,
   DEFAULT_SERVER_SETTINGS,
@@ -630,5 +631,55 @@ it.effect("denies manual cleanup before the handler without settings permission"
       requiredPermission: AuthSettingsWriteScope,
     });
     expect(handled).toBe(false);
+  }),
+);
+
+it.effect("lets only connections that can write files grant edits outside the workspace", () =>
+  Effect.gen(function* () {
+    type GrantMethod =
+      | typeof WS_METHODS.projectsAllowOutsideEdits
+      | typeof WS_METHODS.projectsRevokeOutsideEdits;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, GrantMethod> =>
+          tag !== WS_METHODS.projectsAllowOutsideEdits &&
+          tag !== WS_METHODS.projectsRevokeOutsideEdits,
+      ),
+    );
+    let handled = 0;
+    const grant = { kind: "file" as const, path: "/home/user/.claude/skills/x/SKILL.md" };
+    const clientWith = (scopes: Parameters<typeof RpcAuthorization.layer>[0]) =>
+      RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.projectsAllowOutsideEdits, () =>
+              Effect.sync(() => {
+                handled++;
+                return grant;
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.projectsRevokeOutsideEdits, () =>
+              Effect.sync(() => {
+                handled++;
+              }),
+            ),
+            RpcAuthorization.layer(scopes),
+          ),
+        ),
+      );
+    const allow = { cwd: "/repo", relativePath: grant.path, scope: "workspace" as const };
+    const reader = yield* clientWith([AuthOrchestrationReadScope, AuthFilesystemReadScope]);
+    expect(
+      yield* reader[WS_METHODS.projectsAllowOutsideEdits](allow).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthFilesystemWriteScope });
+    expect(
+      yield* reader[WS_METHODS.projectsRevokeOutsideEdits]({ grant }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthFilesystemWriteScope });
+    expect(handled).toBe(0);
+
+    const writer = yield* clientWith([AuthOrchestrationOperateScope, AuthFilesystemWriteScope]);
+    expect(yield* writer[WS_METHODS.projectsAllowOutsideEdits](allow)).toEqual(grant);
+    yield* writer[WS_METHODS.projectsRevokeOutsideEdits]({ grant });
+    expect(handled).toBe(2);
   }),
 );

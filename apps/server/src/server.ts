@@ -555,6 +555,7 @@ const layerWorkspaceEntries = WorkspaceEntries.layer.pipe(Layer.provide(Workspac
 
 const layerWorkspaceFileSystem = WorkspaceFileSystem.layer.pipe(
   Layer.provide(InstructionFileAllowlist.layer.pipe(Layer.provide(layerServerSettings))),
+  Layer.provide(layerServerSettings),
   Layer.provide(WorkspacePaths.layer),
   Layer.provide(layerWorkspaceEntries),
   Layer.provide(layerKnownWorkspaces),

@@ -48,6 +48,10 @@ export const providerConfigDir = Effect.fn("InstructionFileAllowlist.providerCon
 // Credential folders under ~/.config whose files stay read-only even when an instruction file links them.
 const CREDENTIAL_CONFIG = /\/\.config\/(gh|hub|gcloud|op|rclone|sops|age|github-copilot)\//;
 
+/** Files in a credential folder stay read-only, whatever links or grants reach them. */
+export const isCredentialConfigPath = (filePath: string) =>
+  CREDENTIAL_CONFIG.test(filePath.replaceAll("\\", "/"));
+
 /**
  * Host files the Files tile may edit: `.md` files the Default view reads as instruction
  * files for a workspace, reached at a path under a provider's config folder or

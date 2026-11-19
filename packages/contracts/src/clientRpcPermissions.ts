@@ -3,6 +3,7 @@ import { GitPreparePullRequestThreadInput, GitRunStackedActionInput } from "./gi
 import {
   AuthAccessWriteScope,
   AuthEnvironmentMaintainScope,
+  AuthFilesystemWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
@@ -34,6 +35,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.developmentEnvironmentsSelectCheckout]: AuthOrchestrationOperateScope,
   [WS_METHODS.developmentEnvironmentsUnlink]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectsCreateFromThread]: AuthOrchestrationOperateScope,
+  // A grant makes host files writable to every client that can already write files.
+  [WS_METHODS.projectsAllowOutsideEdits]: AuthFilesystemWriteScope,
+  [WS_METHODS.projectsRevokeOutsideEdits]: AuthFilesystemWriteScope,
   // Creating and repairing make worktrees and branches and run the repository's installs.
   [WS_METHODS.developmentEnvironmentsCreate]: AuthSourceControlWriteScope,
   [WS_METHODS.developmentEnvironmentsAttach]: AuthSourceControlWriteScope,

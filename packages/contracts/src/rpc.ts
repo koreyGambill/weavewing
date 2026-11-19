@@ -347,6 +347,9 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  ProjectAllowOutsideEditsInput,
+  ProjectRevokeOutsideEditsInput,
+  OutsideWorkspaceEditGrant,
 } from "./project.ts";
 import {
   TerminalAttachInput,
@@ -560,6 +563,8 @@ export const WS_METHODS = {
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+  projectsAllowOutsideEdits: "projects.allowOutsideEdits",
+  projectsRevokeOutsideEdits: "projects.revokeOutsideEdits",
   projectsMutate: "projects.mutate",
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
@@ -1609,6 +1614,17 @@ const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
 const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
+  error: Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectsAllowOutsideEditsRpc = Rpc.make(WS_METHODS.projectsAllowOutsideEdits, {
+  payload: ProjectAllowOutsideEditsInput,
+  success: OutsideWorkspaceEditGrant,
+  error: Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectsRevokeOutsideEditsRpc = Rpc.make(WS_METHODS.projectsRevokeOutsideEdits, {
+  payload: ProjectRevokeOutsideEditsInput,
   error: Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),
 });
 
@@ -2830,6 +2846,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsCreateFromThreadRpc,
   WsThreadsChangeFolderRpc,
   WsProjectsWriteFileRpc,
+  WsProjectsAllowOutsideEditsRpc,
+  WsProjectsRevokeOutsideEditsRpc,
   WsProjectsMutateRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,

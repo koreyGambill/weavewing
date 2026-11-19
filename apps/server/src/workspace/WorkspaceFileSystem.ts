@@ -4,6 +4,9 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
 import type {
+  OutsideWorkspaceEditGrant,
+  ProjectAllowOutsideEditsInput,
+  ProjectRevokeOutsideEditsInput,
   FilesystemEntryMetadata,
   FilesystemGetMetadataInput,
   FilesystemGetMetadataResult,
@@ -23,9 +26,14 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
-import { InstructionFileAllowlist } from "../threadInsights/InstructionFileAllowlist.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import {
+  InstructionFileAllowlist,
+  isCredentialConfigPath,
+} from "../threadInsights/InstructionFileAllowlist.ts";
 import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
@@ -126,7 +134,10 @@ export class WorkspaceFileSystem extends Context.Service<
       ProjectReadFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
     >;
-    /** Writes inside a known workspace, or to an existing instruction file on its allowlist. */
+    /**
+     * Writes inside a known workspace, or to an existing host file on the instruction file
+     * allowlist or covered by an outside edit grant.
+     */
     readonly writeFile: (
       input: ProjectWriteFileInput,
     ) => Effect.Effect<
@@ -135,6 +146,16 @@ export class WorkspaceFileSystem extends Context.Service<
       | WorkspacePaths.WorkspacePathOutsideRootError
       | KnownWorkspaces.UnknownWorkspaceError
     >;
+    /** Grants edits to one host file, or to every host file while `cwd` is the workspace. */
+    readonly allowOutsideEdits: (
+      input: ProjectAllowOutsideEditsInput,
+    ) => Effect.Effect<
+      OutsideWorkspaceEditGrant,
+      | WorkspaceFileSystemError
+      | WorkspacePaths.WorkspacePathOutsideRootError
+      | KnownWorkspaces.UnknownWorkspaceError
+    >;
+    readonly revokeOutsideEdits: (input: ProjectRevokeOutsideEditsInput) => Effect.Effect<void>;
   }
 >()("t3/workspace/WorkspaceFileSystem") {}
 
@@ -168,18 +189,30 @@ export const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const isServerInternalPath = yield* makeIsServerInternalPath;
   const instructionFiles = yield* Effect.serviceOption(InstructionFileAllowlist);
+  const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
+  const grantUpdates = yield* Semaphore.make(1);
 
-  /** The real path of a host file the Files tile may edit, or null. */
-  const editableHostPath = Effect.fn("WorkspaceFileSystem.editableHostPath")(function* (
+  /**
+   * Whether the Files tile may edit a host file: null when nothing can make it writable,
+   * otherwise its real path and what grants the edit, if anything does yet.
+   */
+  const hostEditAccess = Effect.fn("WorkspaceFileSystem.hostEditAccess")(function* (
     cwd: string,
     requestedPath: string,
   ) {
-    if (Option.isNone(instructionFiles) || !isHostPath(requestedPath)) return null;
+    if (!isHostPath(requestedPath)) return null;
     const hostPath = expandHomePath(requestedPath, yield* HostProcess.HomeDirectory);
     if (!path.isAbsolute(hostPath) || isNetworkPath(hostPath)) return null;
     if (!(yield* knownWorkspaces.assertContains(cwd).pipe(Effect.isSuccess))) return null;
-    const realPath = yield* instructionFiles.value.editablePath(cwd, hostPath);
-    if (realPath === null || (yield* isServerInternalPath(realPath))) return null;
+    const realPath = yield* Effect.promise(() => NodeFSP.realpath(hostPath).catch(() => null));
+    if (
+      realPath === null ||
+      isCredentialConfigPath(hostPath) ||
+      isCredentialConfigPath(realPath) ||
+      (yield* isServerInternalPath(realPath)) ||
+      (yield* Effect.promise(() => isInGitFolder(realPath).catch(() => true)))
+    )
+      return null;
     // A hard link aliases another file, which may be a credential.
     const links = yield* Effect.promise(() =>
       NodeFSP.lstat(realPath).then(
@@ -187,8 +220,55 @@ export const make = Effect.gen(function* () {
         () => 0,
       ),
     );
-    return links === 1 ? realPath : null;
+    if (links !== 1) return null;
+    if (
+      Option.isSome(instructionFiles) &&
+      (yield* instructionFiles.value.editablePath(cwd, hostPath)) === realPath
+    )
+      return { realPath, grant: "allowlist" as const };
+    if (Option.isNone(serverSettings)) return null;
+    const grants = yield* serverSettings.value.getSettings.pipe(
+      Effect.map((settings) => settings.outsideWorkspaceEditGrants),
+      Effect.orElseSucceed((): ReadonlyArray<OutsideWorkspaceEditGrant> => []),
+    );
+    const fileGrant = grants.find((grant) => grant.kind === "file" && grant.path === realPath);
+    if (fileGrant !== undefined) return { realPath, grant: fileGrant };
+    if (grants.some((grant) => grant.kind === "workspace")) {
+      const realCwd = yield* Effect.promise(() => NodeFSP.realpath(cwd).catch(() => null));
+      const workspaceGrant = grants.find(
+        (grant) => grant.kind === "workspace" && grant.path === realCwd,
+      );
+      if (workspaceGrant !== undefined) return { realPath, grant: workspaceGrant };
+    }
+    return { realPath, grant: null };
   });
+
+  /** The real path of a host file the Files tile may edit, or null. */
+  const editableHostPath = Effect.fn("WorkspaceFileSystem.editableHostPath")(function* (
+    cwd: string,
+    requestedPath: string,
+  ) {
+    const access = yield* hostEditAccess(cwd, requestedPath);
+    return access?.grant ? access.realPath : null;
+  });
+
+  const updateOutsideEditGrants = (
+    update: (
+      grants: ReadonlyArray<OutsideWorkspaceEditGrant>,
+    ) => ReadonlyArray<OutsideWorkspaceEditGrant>,
+  ) =>
+    Option.isNone(serverSettings)
+      ? Effect.die(new Error("Outside edit grants need server settings."))
+      : grantUpdates.withPermits(1)(
+          serverSettings.value.getSettings.pipe(
+            Effect.flatMap((settings) =>
+              serverSettings.value.updateSettings({
+                outsideWorkspaceEditGrants: update(settings.outsideWorkspaceEditGrants),
+              }),
+            ),
+            Effect.orDie,
+          ),
+        );
 
   /**
    * Replaces an existing host file through a temp file in its folder, so a failed save
@@ -625,8 +705,12 @@ export const make = Effect.gen(function* () {
             }),
     );
     if ("exists" in result || !isHostPath(input.relativePath)) return result;
-    const writable = (yield* editableHostPath(input.cwd, input.relativePath)) === realTargetPath;
-    return writable ? { ...result, writable } : result;
+    const access = yield* hostEditAccess(input.cwd, input.relativePath);
+    if (access === null || access.realPath !== realTargetPath) return result;
+    if (access.grant === null) return { ...result, canGrantEdit: true };
+    return access.grant === "allowlist"
+      ? { ...result, writable: true }
+      : { ...result, writable: true, editGrant: access.grant };
   });
 
   // Resolve existing ancestors and reject dangling links so creation cannot follow symlinks outside root.
@@ -780,7 +864,56 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  return WorkspaceFileSystem.of({ getMetadata, readFile, writeFile });
+  const allowOutsideEdits: WorkspaceFileSystem["Service"]["allowOutsideEdits"] = Effect.fn(
+    "WorkspaceFileSystem.allowOutsideEdits",
+  )(function* (input) {
+    yield* knownWorkspaces.assertContains(input.cwd);
+    const access = yield* hostEditAccess(input.cwd, input.relativePath);
+    if (access === null) {
+      return yield* new WorkspacePaths.WorkspacePathOutsideRootError({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+      });
+    }
+    const grantPath =
+      input.scope === "file"
+        ? access.realPath
+        : yield* Effect.tryPromise({
+            try: () => NodeFSP.realpath(path.resolve(input.cwd)),
+            catch: (cause) =>
+              new WorkspaceFileSystemOperationError({
+                workspaceRoot: input.cwd,
+                relativePath: input.relativePath,
+                resolvedPath: access.realPath,
+                operationPath: input.cwd,
+                operation: "realpath-workspace-root",
+                cause,
+              }),
+          });
+    const grant: OutsideWorkspaceEditGrant = { kind: input.scope, path: grantPath };
+    yield* updateOutsideEditGrants((grants) =>
+      grants.some((entry) => entry.kind === grant.kind && entry.path === grant.path)
+        ? grants
+        : [...grants, grant],
+    );
+    return grant;
+  });
+
+  const revokeOutsideEdits: WorkspaceFileSystem["Service"]["revokeOutsideEdits"] = Effect.fn(
+    "WorkspaceFileSystem.revokeOutsideEdits",
+  )(function* ({ grant }) {
+    yield* updateOutsideEditGrants((grants) =>
+      grants.filter((entry) => entry.kind !== grant.kind || entry.path !== grant.path),
+    );
+  });
+
+  return WorkspaceFileSystem.of({
+    getMetadata,
+    readFile,
+    writeFile,
+    allowOutsideEdits,
+    revokeOutsideEdits,
+  });
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);

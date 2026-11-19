@@ -3113,6 +3113,20 @@ export const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.projectsAllowOutsideEdits]: (input) =>
+          workspaceFileSystem.allowOutsideEdits(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProjectWriteFileError({
+                  cwd: input.cwd,
+                  relativePath: input.relativePath,
+                  ...projectFileFailureContext(cause),
+                  cause,
+                }),
+            ),
+          ),
+        [WS_METHODS.projectsRevokeOutsideEdits]: (input) =>
+          workspaceFileSystem.revokeOutsideEdits(input),
         [WS_METHODS.projectsMutate]: (mutation) =>
           startup.enqueueCommand(mutateProject(mutation)).pipe(
             Effect.mapError(

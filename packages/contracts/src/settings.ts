@@ -40,7 +40,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectScript, type ProjectMutation } from "./project.ts";
+import { OutsideWorkspaceEditGrant, ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
@@ -1474,6 +1474,10 @@ export const ServerSettings = Schema.Struct({
   worktreesDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /** macOS only, Labs beta: clone new worktrees from a cached checkout instead of writing every file. */
   fastWorktreeCheckout: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Set only through the grant RPCs, which resolve real paths and refuse protected files. */
+  outsideWorkspaceEditGrants: Schema.Array(OutsideWorkspaceEditGrant).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   /** Server-maintained history keeps old worktrees eligible for cleanup and review diffs. */
   previousWorktreesDirectories: Schema.Array(TrimmedString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -2104,12 +2108,19 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+  outsideWorkspaceEditGrants: Schema.optionalKey(Schema.Array(OutsideWorkspaceEditGrant)),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
-/** The theme service sets theme defaults after it validates them, so clients cannot. */
+/** Services set these after validating them, so clients cannot patch them directly. */
 export const ClientServerSettingsPatch = ServerSettingsPatch.mapFields(
-  Struct.omit(["defaultTheme", "defaultThemeSetAt", "defaultAppearance", "defaultAppearanceSetAt"]),
+  Struct.omit([
+    "defaultTheme",
+    "defaultThemeSetAt",
+    "defaultAppearance",
+    "defaultAppearanceSetAt",
+    "outsideWorkspaceEditGrants",
+  ]),
 );
 
 export function requiredScopesForServerSettingsPatch(

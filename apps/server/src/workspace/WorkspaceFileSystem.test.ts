@@ -6,6 +6,7 @@ import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
+import type { OutsideWorkspaceEditGrant } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -1125,6 +1126,140 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             "edited",
           );
         }).pipe(Effect.provide(layerInstructionWrites)),
+    );
+
+    const layerGrantWrites = () => {
+      let grants: ReadonlyArray<OutsideWorkspaceEditGrant> = [];
+      const settings = Layer.mock(ServerSettingsService)({
+        getSettings: Effect.sync(
+          () => ({ providerInstances: {}, outsideWorkspaceEditGrants: grants }) as never,
+        ),
+        updateSettings: (patch) =>
+          Effect.sync(() => {
+            grants = patch.outsideWorkspaceEditGrants ?? grants;
+            return { outsideWorkspaceEditGrants: grants } as never;
+          }),
+      });
+      return Layer.fresh(WorkspaceFileSystem.layer).pipe(
+        Layer.provide(InstructionFileAllowlist.layer.pipe(Layer.provide(settings))),
+        Layer.provide(settings),
+        Layer.provide(layerKnownWorkspacesTest),
+        Layer.provide(WorkspacePaths.layer),
+        Layer.provide(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
+      );
+    };
+
+    it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+      "edits outside the workspace only what a grant covers, until it is revoked",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const config = yield* ServerConfig.ServerConfig;
+          const { home, cwd } = yield* setup;
+          const inHome = asHome(home);
+          const otherWorkspace = path.join(home, "code", "elsewhere");
+          yield* writeTextFile(otherWorkspace, "README.md");
+          // A skill linked into ~/.claude from another repository.
+          yield* writeTextFile(home, "ink/.git/HEAD", "ref");
+          yield* writeTextFile(home, "ink/skills/choices/SKILL.md", "skill");
+          yield* writeTextFile(home, "ink/skills/other/SKILL.md", "other skill");
+          const skill = "~/.claude/skills/choices/SKILL.md";
+          yield* fileSystem.makeDirectory(path.join(home, ".claude", "skills", "choices"), {
+            recursive: true,
+          });
+          yield* fileSystem.symlink(
+            path.join(home, "ink", "skills", "choices", "SKILL.md"),
+            path.join(home, ".claude", "skills", "choices", "SKILL.md"),
+          );
+          const internal = path.join(config.secretsDir, "notes.md");
+          yield* writeTextFile(config.secretsDir, "notes.md", "secret");
+
+          const read = (relativePath: string, workspace = cwd) =>
+            inHome(workspaceFileSystem.readFile({ cwd: workspace, relativePath }));
+          const write = (relativePath: string, workspace = cwd) =>
+            inHome(
+              workspaceFileSystem.writeFile({ cwd: workspace, relativePath, contents: "edited" }),
+            );
+          const refuses = Effect.fn("refuses")(function* (relativePath: string, workspace = cwd) {
+            const result = yield* read(relativePath, workspace).pipe(Effect.option);
+            expect(result._tag === "Some" && result.value.writable === true).toBe(false);
+            yield* write(relativePath, workspace).pipe(Effect.flip);
+          });
+
+          expect(yield* read(skill)).toMatchObject({ canGrantEdit: true });
+          yield* refuses(skill);
+
+          const fileGrant = yield* inHome(
+            workspaceFileSystem.allowOutsideEdits({ cwd, relativePath: skill, scope: "file" }),
+          );
+          expect(fileGrant).toEqual({
+            kind: "file",
+            path: path.join(home, "ink", "skills", "choices", "SKILL.md"),
+          });
+          expect(yield* read(skill)).toMatchObject({ writable: true, editGrant: fileGrant });
+          // The grant follows the file wherever it is opened, and covers nothing else.
+          yield* write(skill, otherWorkspace);
+          expect(yield* fileSystem.readFileString(fileGrant.path)).toBe("edited");
+          expect(
+            yield* fileSystem.readLink(path.join(home, ".claude", "skills", "choices", "SKILL.md")),
+          ).toBe(fileGrant.path);
+          yield* refuses("~/ink/skills/other/SKILL.md");
+          yield* refuses("~/vault/target.md");
+          // Relinking the granted path to another file does not carry the grant along.
+          yield* fileSystem.remove(path.join(home, ".claude", "skills", "choices", "SKILL.md"));
+          yield* fileSystem.symlink(
+            path.join(home, "ink", "skills", "other", "SKILL.md"),
+            path.join(home, ".claude", "skills", "choices", "SKILL.md"),
+          );
+          yield* refuses(skill);
+          expect(
+            yield* fileSystem.readFileString(path.join(home, "ink/skills/other/SKILL.md")),
+          ).toBe("other skill");
+
+          yield* workspaceFileSystem.revokeOutsideEdits({ grant: fileGrant });
+          yield* refuses("~/ink/skills/choices/SKILL.md");
+
+          const workspaceGrant = yield* inHome(
+            workspaceFileSystem.allowOutsideEdits({
+              cwd,
+              relativePath: "~/vault/target.md",
+              scope: "workspace",
+            }),
+          );
+          expect(workspaceGrant).toEqual({ kind: "workspace", path: cwd });
+          for (const relativePath of ["~/vault/target.md", "~/.bashrc.md", skill]) {
+            expect(yield* read(relativePath)).toMatchObject({
+              writable: true,
+              editGrant: workspaceGrant,
+            });
+            yield* write(relativePath);
+          }
+          yield* refuses("~/vault/target.md", otherWorkspace);
+          // No grant reaches credentials, hard links, git metadata, or the server's own files.
+          for (const relativePath of [
+            "~/.config/gh/notes.md",
+            "~/.config/ghnotes.md",
+            "~/.config/ghalias/notes.md",
+            "~/.config/wing/hard.md",
+            "~/ink/.git/HEAD",
+            internal,
+          ]) {
+            yield* refuses(relativePath);
+            yield* inHome(
+              workspaceFileSystem.allowOutsideEdits({ cwd, relativePath, scope: "file" }),
+            ).pipe(Effect.flip);
+          }
+          expect(yield* fileSystem.readFileString(path.join(home, ".config/gh/notes.md"))).toBe(
+            "gh",
+          );
+          expect(yield* fileSystem.readFileString(internal)).toBe("secret");
+
+          yield* workspaceFileSystem.revokeOutsideEdits({ grant: workspaceGrant });
+          yield* refuses("~/.bashrc.md");
+          expect(yield* read("~/.bashrc.md")).toMatchObject({ canGrantEdit: true });
+        }).pipe(Effect.provide(layerGrantWrites())),
     );
 
     it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(

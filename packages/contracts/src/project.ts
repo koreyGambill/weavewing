@@ -448,6 +448,16 @@ export const ProjectReadFileInput = Schema.Struct({
 });
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
 
+/**
+ * Lets the Files tile edit files outside a workspace: one file by its real path, or every
+ * file outside a workspace root while that root is open.
+ */
+export const OutsideWorkspaceEditGrant = Schema.Struct({
+  kind: Schema.Literals(["file", "workspace"]),
+  path: TrimmedNonEmptyString,
+});
+export type OutsideWorkspaceEditGrant = typeof OutsideWorkspaceEditGrant.Type;
+
 export const ProjectReadFileResult = Schema.Struct({
   relativePath: Schema.NonEmptyString,
   contents: Schema.String,
@@ -455,10 +465,27 @@ export const ProjectReadFileResult = Schema.Struct({
   truncated: Schema.Boolean,
   // Omitted by older servers; false only for an absent optional file.
   exists: Schema.optional(Schema.Boolean),
-  // A host file the server lets this workspace edit: an instruction file the Default view reads.
+  // A host file the server lets this workspace edit: an instruction file or one the user allowed.
   writable: Schema.optional(Schema.Boolean),
+  // The grant that makes the host file writable, when the instruction file allowlist does not.
+  editGrant: Schema.optional(OutsideWorkspaceEditGrant),
+  // A read-only host file that a grant could make writable.
+  canGrantEdit: Schema.optional(Schema.Boolean),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
+
+export const ProjectAllowOutsideEditsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  // The host file the user asked to edit; a workspace grant still needs one the grant can cover.
+  relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+  scope: Schema.Literals(["file", "workspace"]),
+});
+export type ProjectAllowOutsideEditsInput = typeof ProjectAllowOutsideEditsInput.Type;
+
+export const ProjectRevokeOutsideEditsInput = Schema.Struct({
+  grant: OutsideWorkspaceEditGrant,
+});
+export type ProjectRevokeOutsideEditsInput = typeof ProjectRevokeOutsideEditsInput.Type;
 
 export const ProjectFileFailure = Schema.Literals([
   "workspace_path_outside_root",
