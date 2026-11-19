@@ -1463,6 +1463,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       (current) => stepSidebarThread(current, arrangement, threadKey, delta) ?? current,
     );
   };
+  const openThreadListContextMenu = (position: { x: number; y: number }) => {
+    const api = readLocalApi();
+    if (!api) return;
+    void (async () => {
+      const clicked = await settlePromise(() =>
+        api.contextMenu.show(
+          [{ id: "new-group", label: "New group", icon: "folder-plus" }],
+          position,
+        ),
+      );
+      if (clicked._tag === "Success" && clicked.value === "new-group") createThreadGroup();
+    })();
+  };
   const handleThreadGroupContextMenu = useStableCallback(
     (groupId: string | null, position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -3517,6 +3530,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               }
               onNewThread={handleNewThreadClick}
               onNewThreadInProject={handleNewThreadInProjectClick}
+              onNewGroup={boringSidebarEnabled ? undefined : () => createThreadGroup()}
+              namingGroup={renamingGroupId !== null}
               newThreadDisabled={projects.length === 0 && defaultPlace.place.kind === "none"}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
@@ -3543,7 +3558,24 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="flex-1" role="presentation">
+        <SidebarGroup
+          className="flex-1"
+          role="presentation"
+          onContextMenu={(event) => {
+            // Only the list's own empty space; rows, headers and controls have their own menus.
+            const target = event.target;
+            if (
+              event.defaultPrevented ||
+              boringSidebarEnabled ||
+              isSearchingThreads ||
+              (target !== event.currentTarget && target !== threadListRef.current)
+            ) {
+              return;
+            }
+            event.preventDefault();
+            openThreadListContextMenu({ x: event.clientX, y: event.clientY });
+          }}
+        >
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -3857,25 +3889,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         if (threadGroupSections !== null && item.marker === "active-placeholder") {
                           for (const group of threadGroupSections) {
                             const groupKey = group.groupId ?? "ungrouped";
-                            if (group.groupId === null) {
-                              items.push(
-                                <li key="thread-group-new" className="list-none">
-                                  <button
-                                    type="button"
-                                    data-sidebar-row="group:new"
-                                    // Keeps focus in a name being typed, so the click below sees it and does nothing.
-                                    onMouseDown={(event) => {
-                                      if (renamingGroupId !== null) event.preventDefault();
-                                    }}
-                                    onClick={() => createThreadGroup()}
-                                    className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                                  >
-                                    <PlusIcon aria-hidden className="size-3 shrink-0" />
-                                    New group
-                                  </button>
-                                </li>,
-                              );
-                            }
                             items.push(
                               <SidebarThreadGroupHeader
                                 key={`thread-group:${groupKey}`}
