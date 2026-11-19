@@ -1,6 +1,7 @@
 import type { OrchestrationV2ThreadShell, ScopedThreadRef } from "@t3tools/contracts";
 import { ChevronDownIcon, ChevronRightIcon, GitBranchIcon } from "lucide-react";
 import type { SideChatParentPanel } from "~/lib/sideChatPane";
+import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import SideChatPane from "./SideChatPane";
@@ -45,7 +46,12 @@ export function InlineSideChat({
         <TooltipPopup className="max-w-xs whitespace-pre-wrap wrap-anywhere">{quote}</TooltipPopup>
       </Tooltip>
       {expanded ? (
-        <div className="mt-1 h-[min(32rem,70dvh)] min-w-0 overflow-hidden rounded-md border border-border bg-background">
+        <div
+          className={cn(
+            "mt-1 min-w-0 overflow-hidden rounded-md border border-border bg-background",
+            child.latestUserMessageAt === null ? "h-56" : "h-[min(32rem,70dvh)]",
+          )}
+        >
           <SideChatPane
             parentRef={parentRef}
             threadId={child.id}

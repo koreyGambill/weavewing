@@ -414,6 +414,16 @@ You can also choose **Side chat** from a tile’s **+** menu. The side
 chat opens as a tab there, with its own composer. Side chats do not show in the
 sidebar. Find one again under **Side chats** in thread details.
 
+Select text in an assistant reply and choose **Drill in** to start a side chat under
+that reply. Expand the annotation to ask a question, and select text in its reply
+to drill further. **Open full chat** gives the branch more room. **Jump to source**
+takes you back to the passage, or to the fork turn for a side chat opened without a
+selection.
+
+A branch starts with context through its fork point. Choose **Get newest context**
+in a branch or its parent to include recent discussion from elsewhere in the tree
+with your next message. Choose it again before sending to cancel the refresh.
+
 A side chat works in the same folder as the thread and starts with the permissions,
 model, and reasoning level shown in the thread's composer, including for its first
 reply. Change them for an individual side chat in its composer. Later changes to the

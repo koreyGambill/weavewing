@@ -217,6 +217,11 @@ export const DefaultContextItemText = Schema.Struct({
 export type DefaultContextItemText = typeof DefaultContextItemText.Type;
 export const ThreadTimelineGetInput = Schema.Struct({ threadId: ThreadId });
 export type ThreadTimelineGetInput = typeof ThreadTimelineGetInput.Type;
+export const ThreadUserTurnsGetInput = Schema.Struct({
+  threadId: ThreadId,
+  sourceRunId: Schema.optional(RunId),
+});
+export type ThreadUserTurnsGetInput = typeof ThreadUserTurnsGetInput.Type;
 export const ThreadTimelineRelation = Schema.Literals([
   "self",
   "delegate",
@@ -277,6 +282,9 @@ export const ThreadUserTurn = Schema.Struct({
 });
 export type ThreadUserTurn = typeof ThreadUserTurn.Type;
 /** Newest `THREAD_USER_TURN_LIMIT` turns, oldest first. */
-export const ThreadUserTurns = Schema.Struct({ turns: Schema.Array(ThreadUserTurn) });
+export const ThreadUserTurns = Schema.Struct({
+  turns: Schema.Array(ThreadUserTurn),
+  sourceMessageId: Schema.optional(MessageId),
+});
 export type ThreadUserTurns = typeof ThreadUserTurns.Type;
 export const THREAD_USER_TURN_LIMIT = 60;

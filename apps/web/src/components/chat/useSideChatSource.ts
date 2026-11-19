@@ -6,6 +6,8 @@ import {
   messageRevealNavigation,
 } from "~/lib/assistantCitationNavigation";
 import { useQuietThreadProjection } from "../../state/entities";
+import { useEnvironmentQuery } from "../../state/query";
+import { threadUserTurnsGet } from "../../state/threadInsights";
 
 export function useSideChatSource(
   threadRef: ScopedThreadRef,
@@ -21,7 +23,16 @@ export function useSideChatSource(
   const parentProjection = useQuietThreadProjection(
     anchor === undefined && runId !== null ? parentRef : null,
   )?.projection;
-  const sourceMessageId = parentProjection?.runs.find((run) => run.id === runId)?.userMessageId;
+  const loadedSourceId = parentProjection?.runs.find((run) => run.id === runId)?.userMessageId;
+  const sourceQuery = useEnvironmentQuery(
+    parentRef && anchor === undefined && runId !== null && loadedSourceId === undefined
+      ? threadUserTurnsGet({
+          environmentId: parentRef.environmentId,
+          input: { threadId: parentRef.threadId, sourceRunId: runId },
+        })
+      : null,
+  );
+  const sourceMessageId = loadedSourceId ?? sourceQuery.data?.sourceMessageId;
   if (!parentRef) return null;
 
   if (anchor) {

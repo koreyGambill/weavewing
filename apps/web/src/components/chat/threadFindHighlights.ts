@@ -21,7 +21,9 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
   const ranges: ThreadFindRange[] = [];
   const occurrenceByRowId = new Map<string, number>();
 
-  const viewport = container.closest(TIMELINE_VIEWPORT_SELECTOR);
+  const viewport =
+    container.closest(TIMELINE_VIEWPORT_SELECTOR) ??
+    container.querySelector(TIMELINE_VIEWPORT_SELECTOR);
   for (const scope of container.querySelectorAll(THREAD_FIND_TEXT_SELECTOR)) {
     if (scope.closest(TIMELINE_VIEWPORT_SELECTOR) !== viewport) continue;
     if (scope.parentElement?.closest(THREAD_FIND_TEXT_SELECTOR)) continue;

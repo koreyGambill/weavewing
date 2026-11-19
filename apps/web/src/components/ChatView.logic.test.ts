@@ -1347,7 +1347,7 @@ describe("planComposerTurn", () => {
     keepFullHistory: false,
     phase: "ready" as const,
     dispatchMode: "auto" as const,
-    freshContext: false,
+    requiresNewTurn: false,
   };
 
   it("prepares a worktree from the selected branch on a new thread", () => {
@@ -1405,7 +1405,7 @@ describe("planComposerTurn", () => {
       planComposerTurn({
         ...running,
         dispatchMode: "steer",
-        freshContext: true,
+        requiresNewTurn: true,
       }),
     ).toMatchObject({
       turnDispatchMode: "queue",

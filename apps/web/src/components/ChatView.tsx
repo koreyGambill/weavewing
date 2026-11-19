@@ -1,5 +1,6 @@
 import { WorkspaceTitlebar } from "./WorkspaceTitlebar";
 import { ForkConversationButton } from "./chat/ForkConversationButton";
+import { SideChatContextButton } from "./chat/SideChatContextButton";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
 import { useMoveToDropdownMenu } from "./terminal/useTerminalMoveMenus";
@@ -1625,6 +1626,11 @@ export default function ChatView(props: ChatViewProps) {
   const displayedThreadRef = parseScopedThreadKey(displayedTimelineKey);
   const canReadTurns = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   const sideChatShells = useSideChatShells(isServerThread ? displayedThreadRef : null);
+  const sideChatRefreshAvailable =
+    isServerThread &&
+    canOperateThread &&
+    serverConfig?.environment.capabilities.sideChatContextRefresh === true &&
+    (activeThread?.lineage.sideChat === true || sideChatShells.length > 0);
   const followUps = useThreadFollowUpList(isServerThread ? displayedThreadRef : null);
   const followUpMessageIds = new Set(followUps.map((item) => item.messageId));
   const branchRunIds = new Set(
@@ -2917,6 +2923,7 @@ export default function ChatView(props: ChatViewProps) {
     panelAnimationsActive,
     panelAnimationDurationMs,
     freshSessionAvailable: freshSessionCommandAvailable,
+    sideChatRefreshAvailable,
     usageLimitsKey,
     usageLimitsOffered,
     openUsageLimits,
@@ -3575,6 +3582,9 @@ export default function ChatView(props: ChatViewProps) {
                               cornerControls={
                                 isServerThread ? (
                                   <div className="flex flex-col items-center gap-1">
+                                    {sideChatRefreshAvailable ? (
+                                      <SideChatContextButton threadKey={routeThreadKey} />
+                                    ) : null}
                                     {activeThread.lineage.sideChat !== true &&
                                       (() => {
                                         const source = resolveLatestForkableAssistantItem({

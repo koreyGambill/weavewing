@@ -1360,7 +1360,7 @@ describe("MessagesTimeline citations", () => {
     );
     await userEvent.tripleClick(screen.getByText(text));
     const cite = page.getByRole("button", { name: "Cite selection in composer" });
-    const branch = page.getByRole("button", { name: "Side chat", exact: true });
+    const branch = page.getByRole("button", { name: "Drill in", exact: true });
     await expect.element(branch).toBeVisible();
     await userEvent.keyboard("{Tab}");
     await expect.element(cite).toHaveFocus();

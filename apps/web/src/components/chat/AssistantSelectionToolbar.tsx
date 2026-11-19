@@ -240,7 +240,7 @@ export function AssistantSelectionToolbar({
           }}
         >
           <GitBranchIcon aria-hidden="true" className="size-3.5" />
-          Side chat
+          Drill in
         </Button>
       ) : null}
     </div>,

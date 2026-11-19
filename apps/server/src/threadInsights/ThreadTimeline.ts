@@ -10,6 +10,7 @@ import {
   type ThreadTimelineRun,
   type ThreadUserTurn,
   type ThreadUserTurns,
+  type ThreadUserTurnsGetInput,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
@@ -26,7 +27,7 @@ export class ThreadTimeline extends Context.Service<
   {
     readonly get: (input: ThreadTimelineGetInput) => Effect.Effect<Timeline, ThreadInsightsError>;
     readonly userTurns: (
-      input: ThreadTimelineGetInput,
+      input: ThreadUserTurnsGetInput,
     ) => Effect.Effect<ThreadUserTurns, ThreadInsightsError>;
   }
 >()("t3/threadInsights/ThreadTimeline") {}
@@ -199,7 +200,15 @@ const make = Effect.gen(function* () {
       NodeSqliteClient.readOnly,
     ),
     userTurns: Effect.fn("ThreadTimeline.userTurns")(
-      function* ({ threadId }) {
+      function* ({ threadId, sourceRunId }) {
+        if (sourceRunId !== undefined) {
+          const [source] = yield* sql<{ readonly messageId: ThreadUserTurn["messageId"] | null }>`
+            SELECT json_extract(payload_json, '$.userMessageId') AS "messageId"
+            FROM orchestration_v2_projection_runs
+            WHERE thread_id = ${threadId} AND run_id = ${sourceRunId}
+          `;
+          return { turns: [], ...(source?.messageId ? { sourceMessageId: source.messageId } : {}) };
+        }
         // Mirrors deriveTimelineMinimapItems: messages without a creator or origin are the user's.
         // The reply is the last assistant text before the next user-role message, as on the client.
         const turns = yield* sql<ThreadUserTurn>`
