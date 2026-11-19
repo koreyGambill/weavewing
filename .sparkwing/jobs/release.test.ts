@@ -13,7 +13,7 @@ test("Mac builds can start with local bundling while promotion only verifies ass
   };
   const plan = new Plan();
   await releasePipeline.plan(plan, context);
-  const inspect = (value: Plan) => (value as Plan & { toDoc(): { jobs: { id: string; deps?: string[]; pipeline_refs?: unknown }[] } }).toDoc();
+  const inspect = (value: Plan) => (value as Plan & { toDoc(): { jobs: { id: string; deps?: string[]; children?: unknown }[] } }).toDoc();
   const jobs = inspect(plan).jobs;
   assert.deepEqual(jobs.find((job) => job.id === "mac")?.deps, ["preflight", "ci"]);
   assert.deepEqual(jobs.find((job) => job.id === "bundle")?.deps, ["preflight", "ci"]);
@@ -21,7 +21,7 @@ test("Mac builds can start with local bundling while promotion only verifies ass
   const promote = new Plan();
   await releasePipeline.plan(promote, { ...context, args: { ...context.args, stage: "promote" } });
   assert.deepEqual(inspect(promote).jobs.map((job) => job.id), ["promote"]);
-  assert.equal(inspect(promote).jobs[0]?.pipeline_refs, undefined);
+  assert.equal(inspect(promote).jobs[0]?.children, undefined);
   const invalidArgs: Record<string, string>[] = [{ stage: "promote", "force-ci": "true" }, { stage: "plan", "force-ci": "true", "build-only": "true" }];
   for (const args of invalidArgs) {
     await assert.rejects(async () => releasePipeline.plan(new Plan(), { ...context, args: { ...context.args, ...args } }), /force-ci/);
