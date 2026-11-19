@@ -414,5 +414,33 @@ describe("default project selection", () => {
         "last-used:project",
       ),
     ).toEqual({ environmentId: "first", projectId: "project" });
+    const connected =
+      (...ids: string[]) =>
+      (id: EnvironmentId) =>
+        ids.includes(id);
+    // An offline preferred machine never hands its default to another machine.
+    expect(
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        true,
+        EnvironmentId.make("first"),
+        connected("last-used"),
+      ),
+    ).toBeNull();
+    expect(
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        true,
+        EnvironmentId.make("empty"),
+        connected("first", "last-used", "empty"),
+      ),
+    ).toBeNull();
+    expect(
+      resolveDefaultProjectRef(projects, [], "last-used:project", true, null, connected("first")),
+    ).toEqual({ environmentId: "first", projectId: "project" });
   });
 });

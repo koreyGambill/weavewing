@@ -451,17 +451,26 @@ export function createNewThreadHandler(router: AnyRouter) {
   };
 }
 
-/** The last used project on the preferred machine, then its first project in sidebar order. */
+/**
+ * The last used project on the preferred machine, then its first project in sidebar order.
+ * Null when the preferred machine is offline or has none, so callers start in the default
+ * folder instead of quietly picking another machine.
+ */
 export function resolveDefaultProjectRef(
   projects: ReadonlyArray<EnvironmentProject>,
   projectOrder: readonly string[],
   lastUsedProjectKey: string | null = null,
   fallbackReady = true,
   preferredEnvironmentId: EnvironmentId | null = null,
+  isConnected: (environmentId: EnvironmentId) => boolean = () => true,
 ): ScopedProjectRef | null {
-  const active = projects.filter((project) => project.archivedAt == null);
-  const onPreferred = active.filter((project) => project.environmentId === preferredEnvironmentId);
-  const candidates = onPreferred.length > 0 ? onPreferred : active;
+  const active = projects.filter(
+    (project) => project.archivedAt == null && isConnected(project.environmentId),
+  );
+  const candidates =
+    preferredEnvironmentId === null
+      ? active
+      : active.filter((project) => project.environmentId === preferredEnvironmentId);
   const lastUsed = candidates.find(
     (project) =>
       scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) === lastUsedProjectKey,
@@ -505,12 +514,14 @@ export function useHandleNewThread() {
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
   const preferredEnvironmentId = usePreferredEnvironmentId();
+  const connectedEnvironmentIds = useAtomValue(environmentSummaries.connectedEnvironmentIdsAtom);
   const defaultProjectRef = resolveDefaultProjectRef(
     projects,
     projectOrder,
     lastUsedProjectKey,
     defaultProjectFallbackReady,
     preferredEnvironmentId,
+    (environmentId) => connectedEnvironmentIds.includes(environmentId),
   );
 
   return {
