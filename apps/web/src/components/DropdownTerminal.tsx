@@ -166,6 +166,7 @@ function DropdownTerminalPanel() {
     Schema.Finite,
   );
   const selectedTarget = useDropdownTerminalStore((state) => state.selectedTarget);
+  const [openedTarget, setOpenedTarget] = useState<DropdownTerminalTarget | null>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -175,11 +176,13 @@ function DropdownTerminalPanel() {
     (environment) => environment.connection.phase === "connected",
   );
   const allowed = useEnvironmentsWithScope(connected, AuthTerminalOperateScope);
-  const targetEnvironmentId = selectedTarget?.environmentId ?? defaultEnvironmentId;
+  const pinnedTarget = selectedTarget ?? openedTarget;
+  const targetEnvironmentId = pinnedTarget?.environmentId ?? defaultEnvironmentId;
   const environment = environments.find((entry) => entry.environmentId === targetEnvironmentId);
   const target = environment
     ? dropdownTerminalTarget(environment, primaryEnvironmentId, isElectron)
-    : selectedTarget;
+    : pinnedTarget;
+  if (pinnedTarget === null && target !== null) setOpenedTarget(target);
   const root = availableScratchWorkspaceRoot(
     environment?.connection.phase,
     environment?.serverConfig,

@@ -178,6 +178,21 @@ it("keeps a chosen machine across thread navigation, disconnects and reopening",
   await expect.element(picker).toHaveAccessibleName("Run on This PC");
   await expect.element(input).toHaveFocus();
   await expect.element(scrollback).toBeVisible();
+  const initialEnvironments = fixture.environments;
+  await act(() => {
+    fixture.environments = initialEnvironments.filter(
+      (environment) => environment.environmentId === remote,
+    );
+    fixture.publish();
+  });
+  await expect.element(picker).toHaveAccessibleName("Run on This PC");
+  await expect.element(terminal.getByText("This machine is disconnected.")).toBeVisible();
+  await expect.element(input).not.toBeInTheDocument();
+  await act(() => {
+    fixture.environments = initialEnvironments;
+    fixture.publish();
+  });
+  await expect.element(input).toHaveFocus();
   const tabs = terminal.getByRole("tab");
   await userEvent.keyboard("{Control>}a{/Control}t");
   await expect.poll(() => tabs.elements()).toHaveLength(2);
