@@ -2002,6 +2002,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return { ...hit, verb: from === undefined ? null : resolveSidebarDropVerb(from, hit.section) };
   };
   const updateGroupDrop = (y: number) => {
+    groupDropStore.setPointerY(y);
     const list = threadListRef.current;
     const arrangement = readThreadGroupArrangement();
     const draggedKey = contextDragKeyRef.current;
@@ -2031,6 +2032,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     // Rows sit 1px apart, so the line centres in the gap above the anchor.
     groupDropStore.set({ top: anchor.top - 0.5, target });
   };
+  const followGroupDropOnScroll = useStableCallback(() => {
+    const y = groupDropStore.pointerY();
+    if (y !== null) updateGroupDrop(y);
+  });
+  const isDraggingThread = dragState !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a wheel scroll moves rows under a still pointer, so a group drag recomputes its drop on scroll too
+  useEffect(() => {
+    if (!isGroupDrag || !isDraggingThread) return;
+    const viewport = threadListRef.current?.closest('[data-slot="scroll-area-viewport"]');
+    if (!viewport) return;
+    viewport.addEventListener("scroll", followGroupDropOnScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", followGroupDropOnScroll);
+  }, [isGroupDrag, isDraggingThread, followGroupDropOnScroll]);
   const moveThreadContextDrag = (point: { x: number; y: number }) => {
     // Search results cannot reorder, so their context preview starts inside the list.
     const contextDrag = searchResultsListRef.current !== null || pointerOutsideThreadList(point);
@@ -2046,6 +2060,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     }
     groupDropStore.set(null);
     groupDropStore.setShelf(null);
+    groupDropStore.setPointerY(null);
     restoreDragScroll();
     const threads = contextDragThreads();
     const threadRef = parseScopedThreadKey(contextDragKeyRef.current ?? "");
@@ -2177,6 +2192,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const handleThreadDragStart = (event: DragStartEvent) => {
     groupDropStore.set(null);
+    groupDropStore.setPointerY(null);
     groupDropStore.setGeometry(null);
     groupDropStore.setShelf(null);
     const activeKey = String(event.active.id);

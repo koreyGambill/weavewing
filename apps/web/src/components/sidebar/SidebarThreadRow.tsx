@@ -59,6 +59,7 @@ import {
 } from "lucide-react";
 import {
   memo,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -442,13 +443,26 @@ function SnoozeMenuButton(props: {
 
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
-  "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
+  "listeners" | "setNodeRef" | "isDragging"
 >;
 
 export const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
 export const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
 const subscribeToNothing = () => () => {};
+
+function writeDragStyle(
+  node: { readonly current: HTMLElement | null },
+  transform: string,
+  transition: string,
+  visibility: string,
+) {
+  const style = node.current?.style;
+  if (style === undefined) return;
+  style.transform = transform;
+  style.transition = transition;
+  style.visibility = visibility;
+}
 
 // useSortable memoizes on its `disabled` object, so a fresh one per render
 // re-renders every row and marker on each sidebar update.
@@ -472,7 +486,7 @@ export function SortableThreadRow(
     rowProps.thread.environmentId,
     AuthOrchestrationOperateScope,
   );
-  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { listeners, setNodeRef, node, transform, transition, isDragging } = useSortable({
     id: sortableId,
     disabled:
       sortableDisabled || !canOperateThread
@@ -482,13 +496,17 @@ export function SortableThreadRow(
   });
   // dnd-kit memoizes each field but not the bag, so the memoized row would
   // rerender on every shell update without this.
-  const bag = {
-    listeners,
-    setNodeRef,
-    transform: contextDrag ? null : transform,
-    transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
-    isDragging: isDragging && !contextDrag,
-  };
+  const bag = { listeners, setNodeRef, isDragging: isDragging && !contextDrag };
+  const translate = (contextDrag ? null : CSS.Translate.toString(transform)) ?? "";
+  const shownTransition =
+    (contextDrag && isDragging ? "transform 150ms ease-out" : transition) ?? "";
+  // A zero-height boundary also makes dnd-kit scale the source to zero. Only
+  // projected peers use scaleY as a visibility sentinel.
+  const visibility = !bag.isDragging && !contextDrag && transform?.scaleY === 0 ? "hidden" : "";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes dnd-kit's per-move position to the row node, since a prop would re-render every row the drag preview shifts
+  useLayoutEffect(() => {
+    writeDragStyle(node, translate, shownTransition, visibility);
+  }, [node, translate, shownTransition, visibility]);
   // The sidebar arranges rows from quiet shells, which hold still while a
   // thread streams; reading the live shell here re-renders only this row.
   const liveThread = useThreadShell(
@@ -1021,22 +1039,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
   const sortable = props.sortable;
-  const sortableRootProps = sortable
-    ? {
-        ref: sortable.setNodeRef,
-        style: {
-          transform: CSS.Translate.toString(sortable.transform),
-          transition: sortable.transition,
-          // A zero-height boundary also makes dnd-kit scale the source to
-          // zero. Only projected peers use scaleY as a visibility sentinel.
-          visibility:
-            !sortable.isDragging && sortable.transform?.scaleY === 0
-              ? ("hidden" as const)
-              : undefined,
-        },
-        ...sortable.listeners,
-      }
-    : { style: undefined };
+  // SortableThreadRow writes the drag position to the node; React never sets it.
+  const sortableRootProps = sortable ? { ref: sortable.setNodeRef, ...sortable.listeners } : {};
   // A group drag keeps its row in place, so the row shows the shelf it would drop on too.
   const showsDropVerb = sortable?.isDragging === true || props.dropVerb !== null;
   const destinationVerb = showsDropVerb
@@ -1253,10 +1257,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       <li
         data-thread-item={threadKey}
         {...sortableRootProps}
-        style={{
-          ...sortableRootProps.style,
-          marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12,
-        }}
+        style={{ marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12 }}
         {...(fileDropHandlers ?? {})}
         className={cn(
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
@@ -1446,10 +1447,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     <li
       data-thread-item={threadKey}
       {...sortableRootProps}
-      style={{
-        ...sortableRootProps.style,
-        marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12,
-      }}
+      style={{ marginInlineStart: Math.min(props.familyDepth ?? 0, 4) * 12 }}
       {...(fileDropHandlers ?? {})}
       // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.

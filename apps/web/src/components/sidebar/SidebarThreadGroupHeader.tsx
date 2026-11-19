@@ -211,6 +211,7 @@ export function createSidebarGroupDropStore() {
   let current: SidebarGroupDropState | null = null;
   let shelf: SidebarShelfDrop | null = null;
   let geometry: SidebarGroupGeometry | null = null;
+  let pointerY: number | null = null;
   const listeners = new Set<() => void>();
   return {
     get: () => current,
@@ -234,6 +235,11 @@ export function createSidebarGroupDropStore() {
       if (next?.overId === shelf?.overId && next?.verb === shelf?.verb) return;
       shelf = next;
       for (const listener of listeners) listener();
+    },
+    /** The last pointer y of the current drag, so a scroll can recompute the drop. */
+    pointerY: () => pointerY,
+    setPointerY(next: number | null) {
+      pointerY = next;
     },
     geometry: () => geometry,
     setGeometry(next: SidebarGroupGeometry | null) {
