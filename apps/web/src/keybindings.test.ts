@@ -46,7 +46,10 @@ describe("terminal word navigation", () => {
     ["Backspace", "metaKey", "MacIntel", "\x15"],
     ["Backspace", "altKey", "MacIntel", null],
   ])("translates %s with %s on %s", (key, modifier, platform, expected) => {
-    assert.equal(terminalNavigationShortcutData(event({ key: key!, [modifier!]: true }), platform!), expected);
+    assert.equal(
+      terminalNavigationShortcutData(event({ key: key!, [modifier!]: true }), platform!),
+      expected,
+    );
   });
   it.each(["Win32", "Linux x86_64"])(
     "leaves Ctrl+Arrow to the terminal encoder on %s",
@@ -983,6 +986,10 @@ it.each(["Linux", "Win32", "MacIntel"])(
       ["%", "workspace.tile.splitRight"],
       ['"', "workspace.tile.splitDown"],
       ["h", "workspace.tile.focusLeft"],
+      ["ArrowLeft", "workspace.tile.focusLeft"],
+      ["ArrowDown", "workspace.tile.focusDown"],
+      ["ArrowUp", "workspace.tile.focusUp"],
+      ["ArrowRight", "workspace.tile.focusRight"],
       ["j", "workspace.tile.focusDown"],
       ["k", "workspace.tile.focusUp"],
       ["l", "workspace.tile.focusRight"],

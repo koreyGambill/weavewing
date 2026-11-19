@@ -132,6 +132,26 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   readonly rule: KeybindingRule;
 }> = [
   {
+    id: "weavewing.leader-arrow-left.v1",
+    alongside: { key: "leader h", command: "workspace.tile.focusLeft" },
+    rule: { key: "leader arrowleft", command: "workspace.tile.focusLeft" },
+  },
+  {
+    id: "weavewing.leader-arrow-down.v1",
+    alongside: { key: "leader j", command: "workspace.tile.focusDown" },
+    rule: { key: "leader arrowdown", command: "workspace.tile.focusDown" },
+  },
+  {
+    id: "weavewing.leader-arrow-up.v1",
+    alongside: { key: "leader k", command: "workspace.tile.focusUp" },
+    rule: { key: "leader arrowup", command: "workspace.tile.focusUp" },
+  },
+  {
+    id: "weavewing.leader-arrow-right.v1",
+    alongside: { key: "leader l", command: "workspace.tile.focusRight" },
+    rule: { key: "leader arrowright", command: "workspace.tile.focusRight" },
+  },
+  {
     id: "composer.sendBackground:mod+enter",
     alongside: {
       key: "mod+alt+enter",
