@@ -42,7 +42,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("drills through folders with repeated Tab and opens with Enter in heading and palette", async () => {
+it("drills through folders with repeated Tab and opens with Enter in the where-line and palette", async () => {
   using _environment = installFakeEnvironment([], {
     extraProjects: [
       { id: ProjectId.make("project-alpha"), title: "alpha" },
@@ -119,7 +119,7 @@ it("drills through folders with repeated Tab and opens with Enter in heading and
   await expect.element(page.getByRole("option").first()).toBeVisible();
   await userEvent.keyboard("{Enter}");
   await vi.waitFor(() =>
-    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("alpha"),
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toContain("alpha"),
   );
   await expect.element(search).not.toBeInTheDocument();
   expect(useComposerDraftStore.getState().getDraftSession(draftId)?.environmentSelection).toBe(
@@ -171,9 +171,38 @@ it("drills through folders with repeated Tab and opens with Enter in heading and
   await userEvent.keyboard("{Enter}");
   await expect.element(search).not.toBeInTheDocument();
   await vi.waitFor(() =>
-    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("code"),
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toMatch(/^code/),
   );
   expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
     "Keep this unsent prompt",
+  );
+});
+
+it("hands the keyboard back to the composer when the picker closes without a choice", async () => {
+  using _environment = installFakeEnvironment([]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const draftId = DraftId.make("draft-escape");
+  useComposerDraftStore
+    .getState()
+    .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId);
+  const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText("render", { exact: true }).first()).toBeVisible();
+  const trigger = document.querySelector<HTMLElement>("[data-draft-project-trigger]");
+  if (!trigger) throw new Error("The where-line trigger did not render.");
+  await userEvent.click(page.elementLocator(trigger));
+  const search = page.getByRole("combobox", { name: "Project name or path" });
+  await expect.element(search).toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(search).not.toBeInTheDocument();
+  await vi.waitFor(() =>
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("composer-editor"),
   );
 });

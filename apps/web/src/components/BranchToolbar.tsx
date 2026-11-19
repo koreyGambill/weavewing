@@ -101,6 +101,8 @@ interface BranchToolbarProps {
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
+  /** The project and folder segment, shown after the machine in the composer strip. */
+  where?: ReactNode;
   /** Shown at the end of the composer strip, such as the new thread's permissions. */
   trailing?: ReactNode;
   availableEnvironments?: readonly EnvironmentOption[];
@@ -634,6 +636,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
+  where,
   trailing,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
@@ -719,6 +722,8 @@ export const BranchToolbar = memo(function BranchToolbar({
     canPickEnvironment: hasMultipleEnvironments,
   });
   const [attachStrip, labelsOverflow] = useLabelsOverflow();
+  // The composer strip always names the machine, so the line reads machine, folder, branch.
+  const showServer = activeEnvironmentOption !== null;
 
   if (!activeProject) return null;
 
@@ -815,7 +820,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           />
         </div>
       ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
+      {showGitControls || showServer ? (
         <div
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
@@ -823,7 +828,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             "flex-1",
           )}
         >
-          {showEnvironmentIndicator && availableEnvironments && (
+          {showServer && availableEnvironments && (
             <>
               <BranchToolbarEnvironmentSelector
                 autoEnvironmentLabel={autoEnvironmentLabel}
@@ -860,6 +865,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         </div>
       ) : null}
 
+      {where}
       {showGitControls && showXwingChooser ? (
         <XwingCheckoutChooser
           environmentId={environmentId}
