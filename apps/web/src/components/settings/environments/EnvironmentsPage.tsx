@@ -21,7 +21,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { RemoveT3ConnectEnvironmentDialog } from "../../clerk/RemoveT3ConnectEnvironmentDialog";
 import { Badge } from "../../ui/badge";
 import { stackedThreadToast, toastManager } from "../../ui/toast";
-import { AddEnvironmentDialog } from "../AddEnvironmentDialog";
+import { AddRouteDialog } from "../AddRouteDialog";
 import { LoadBalancingSettings } from "../LoadBalancingSettings";
 import { LocalEnvironmentSetting } from "../LocalEnvironmentSetting";
 import { PreferredEnvironmentSetting } from "../PreferredEnvironmentSetting";
@@ -262,9 +262,7 @@ function OtherServers({
   const setEnvironmentEnabled = useAtomCommand(environmentCatalog.setEnabled, {
     reportFailure: false,
   });
-  const [addOpen, setAddOpen] = useState(false);
   const [routeTarget, setRouteTarget] = useState<EnvironmentPresentation | null>(null);
-  const [addError, setAddError] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<EnvironmentId | null>(null);
   const [pendingT3ConnectRemoval, setPendingT3ConnectRemoval] =
     useState<EnvironmentPresentation | null>(null);
@@ -337,26 +335,15 @@ function OtherServers({
               removingEnvironmentId={removingId}
               onSetEnabled={(environmentId, enabled) => void setEnabled(environmentId, enabled)}
               onRemove={(environment) => void requestRemove(environment)}
-              onAddRoute={(environment) => {
-                setRouteTarget(environment);
-                setAddError(null);
-                setAddOpen(true);
-              }}
+              onAddRoute={setRouteTarget}
             />
           ),
         )
       )}
-      <AddEnvironmentDialog
-        open={addOpen}
+      <AddRouteDialog
         routeTarget={routeTarget}
-        error={addError}
         savedEnvironments={savedEnvironments}
-        showTrigger={false}
-        onOpenChange={(open) => {
-          setAddOpen(open);
-          if (!open) setAddError(null);
-        }}
-        onErrorChange={setAddError}
+        onClose={() => setRouteTarget(null)}
       />
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
