@@ -454,7 +454,8 @@ export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
  */
 export const OutsideWorkspaceEditGrant = Schema.Struct({
   kind: Schema.Literals(["file", "workspace"]),
-  path: TrimmedNonEmptyString,
+  // Untrimmed: the grant authorizes these exact bytes, and POSIX names may end in whitespace.
+  path: Schema.NonEmptyString.check(Schema.isMaxLength(4096)),
 });
 export type OutsideWorkspaceEditGrant = typeof OutsideWorkspaceEditGrant.Type;
 

@@ -20,11 +20,16 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  OutsideWorkspaceEditGrant,
+  ProjectRevokeOutsideEditsInput,
 } from "./project.ts";
+import { ServerSettings, ServerSettingsPatch } from "./settings.ts";
 
 const decodeProjectCreatePayload = Schema.decodeUnknownSync(ProjectCreatePayload);
 const decodeProjectUpdatePayload = Schema.decodeUnknownSync(ProjectUpdatePayload);
 const decodeProjectMutation = Schema.decodeUnknownSync(ProjectMutation);
+const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
+const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
 describe("project RPC errors", () => {
   it("keeps whitespace in file paths across the wire", () => {
@@ -49,6 +54,22 @@ describe("project RPC errors", () => {
         }).relativePath,
       ).toBe(relativePath);
       expect(roundTrip(ProjectWriteFileResult, { relativePath }).relativePath).toBe(relativePath);
+      // A grant authorizes the exact real path, so its bytes must survive the wire and the settings file.
+      const grant = { kind: "file" as const, path: resolvedPath };
+      expect(roundTrip(OutsideWorkspaceEditGrant, grant)).toEqual(grant);
+      expect(roundTrip(ProjectRevokeOutsideEditsInput, { grant }).grant).toEqual(grant);
+      expect(
+        roundTrip(ServerSettingsPatch, { outsideWorkspaceEditGrants: [grant] })
+          .outsideWorkspaceEditGrants,
+      ).toEqual([grant]);
+      expect(
+        decodeServerSettings(
+          encodeServerSettings({
+            ...decodeServerSettings({}),
+            outsideWorkspaceEditGrants: [grant],
+          }),
+        ).outsideWorkspaceEditGrants,
+      ).toEqual([grant]);
       for (const FileError of [ProjectReadFileError, ProjectWriteFileError]) {
         const error = new FileError({
           cwd,
