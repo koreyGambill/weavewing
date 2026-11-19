@@ -110,22 +110,55 @@ function usageWindowEquals(a: ServerProviderUsageWindow, b: ServerProviderUsageW
   );
 }
 
+/** When each published window was last observed, by window id. */
+export type UsageWindowObservations = ReadonlyMap<string, string>;
+
+/** A published window observed after the probe read wins; the probe wins every other window. */
 export function resolveUsageLimitsAfterProbe(input: {
   readonly published: ServerProviderUsageLimits | undefined;
   readonly probed: ServerProviderUsageLimits | undefined;
+  /** Windows missing here count as observed at the published report's `checkedAt`. */
+  readonly observedAt?: UsageWindowObservations;
 }): ServerProviderUsageLimits | undefined {
   const { published, probed } = input;
   if (probed?.unavailable?.reason === "probeFailed" && published && !published.unavailable) {
     return published;
   }
-  if (
-    published &&
-    probed &&
-    !published.unavailable &&
-    !probed.unavailable &&
-    Date.parse(published.checkedAt) > Date.parse(probed.checkedAt)
-  ) {
-    return { ...probed, checkedAt: published.checkedAt, windows: published.windows };
+  if (!published || !probed || published.unavailable || probed.unavailable) {
+    return probed;
   }
-  return probed;
+  const probedAt = Date.parse(probed.checkedAt);
+  const newer = new Map(
+    published.windows
+      .filter(
+        (window) => Date.parse(input.observedAt?.get(window.id) ?? published.checkedAt) > probedAt,
+      )
+      .map((window) => [window.id, window] as const),
+  );
+  if (newer.size === 0) {
+    return probed;
+  }
+  const windows = probed.windows.map((window) => newer.get(window.id) ?? window);
+  const probedIds = new Set(probed.windows.map((window) => window.id));
+  for (const window of newer.values()) {
+    if (!probedIds.has(window.id)) windows.push(window);
+  }
+  return { ...probed, checkedAt: published.checkedAt, windows };
+}
+
+/** Probed windows were observed at the probe; retained windows keep their earlier observation. */
+export function observeUsageWindows(input: {
+  readonly limits: ServerProviderUsageLimits | undefined;
+  readonly probed: ServerProviderUsageLimits | undefined;
+  readonly previous: UsageWindowObservations;
+}): UsageWindowObservations {
+  const { limits, probed, previous } = input;
+  if (!limits) return new Map();
+  const fromProbe = new Set(probed?.windows);
+  return new Map(
+    limits.windows.map((window) => [
+      window.id,
+      (fromProbe.has(window) ? probed?.checkedAt : previous.get(window.id)) ?? limits.checkedAt,
+    ]),
+  );
 }

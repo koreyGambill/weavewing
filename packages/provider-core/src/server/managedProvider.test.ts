@@ -791,6 +791,51 @@ describe("makeManagedServerProvider", () => {
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );
 
+  it.effect("merges a probe with newer runtime updates per window", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Values from a captured Claude Code 2.1.322 stream event and get_usage response.
+        const weekly = (usedPercent: number) =>
+          ({ id: "seven_day", kind: "weekly", label: "Weekly", usedPercent }) as const;
+        const fable = (usedPercent: number) =>
+          ({
+            id: "seven_day_fable",
+            kind: "weekly",
+            label: "Weekly · Fable",
+            usedPercent,
+          }) as const;
+        const probes = yield* Ref.make([
+          { checkedAt: "2026-11-19T19:00:00.000Z", windows: [weekly(69), fable(3)] },
+          { checkedAt: "2026-11-19T19:34:13.000Z", windows: [weekly(93), fable(16)] },
+          { checkedAt: "2026-11-19T19:40:00.000Z", windows: [weekly(95)] },
+        ]);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.modify(probes, ([next, ...rest]) => [next!, rest]).pipe(
+            Effect.map((usageLimits) => ({ ...refreshedSnapshot, usageLimits })),
+          ),
+          refreshInterval: "1 hour",
+        });
+        yield* Stream.take(provider.streamChanges, 1).pipe(Stream.runDrain);
+
+        // Observed after the second probe started reading.
+        yield* provider.applyUsageLimits({
+          checkedAt: "2026-11-19T19:34:20.000Z",
+          windows: [weekly(94)],
+        });
+        const merged = yield* provider.refresh;
+        assert.deepStrictEqual(merged.usageLimits?.windows, [weekly(94), fable(16)]);
+
+        const later = yield* provider.refresh;
+        assert.deepStrictEqual(later.usageLimits?.windows, [weekly(95)]);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
   it.effect.each([
     { name: "a live plan", clearPlan: false },
     { name: "a cleared plan", clearPlan: true },
