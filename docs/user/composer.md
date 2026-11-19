@@ -434,11 +434,12 @@ choose one of these options:
 
 - **Allow this file** lets you edit that one file from any workspace. When the file
   is a link, the grant covers the file it points to.
-- **Allow any file from this workspace** lets you edit any file outside the workspace
-  while this workspace is open. Each worktree is a separate workspace.
+- **Allow any file on this machine** lets you edit every file on the machine
+  outside the workspace, from this workspace while it is open. Each worktree is a
+  separate workspace.
 
-Grants are saved on the environment, so every client connected to it with
-permission to write files can use them. To turn editing off, select the
+Grants are saved on the environment. The agent and every connected client
+allowed to write files and run terminals can use them. To turn editing off, select the
 **Editable outside workspace** badge. The badge lists every grant on the
 environment, and you can remove each one there. T3 Code never edits files in
 credential folders, git metadata, hard-linked files, or its own state.

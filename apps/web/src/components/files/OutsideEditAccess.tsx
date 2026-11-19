@@ -22,7 +22,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 const EMPTY_GRANTS: ReadonlyArray<OutsideWorkspaceEditGrant> = [];
 
 function grantLabel(grant: OutsideWorkspaceEditGrant): string {
-  return grant.kind === "file" ? grant.path : `Any file, from ${grant.path}`;
+  return grant.kind === "file" ? grant.path : `Any file on this machine, from ${grant.path}`;
 }
 
 /**
@@ -72,11 +72,11 @@ export function OutsideEditAccess({
   const status = granted
     ? editGrant.kind === "file"
       ? "You allowed editing this file outside the workspace."
-      : "You allowed editing any file outside this workspace while it is open."
+      : "You allowed editing any file on this machine, from this workspace."
     : canGrantEdit
       ? canGrant
         ? "This file is outside the workspace, so it opens read-only until you allow editing."
-        : "This file is outside the workspace, and this connection cannot write files."
+        : "This file is outside the workspace. Editing it needs a connection that can write files and run terminals."
       : "This file stays read-only: T3 Code never edits credential folders, git metadata, hard-linked files, or its own state outside the workspace.";
 
   return (
@@ -153,16 +153,30 @@ export function OutsideEditAccess({
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>Allow editing outside this workspace?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {relativePath} is outside {cwd}. Anyone connected to this environment with permission
-              to write files can then edit it from the Files tile. You can turn editing off again
-              from the file's lock badge.
+            <AlertDialogDescription render={<div />}>
+              <div className="flex flex-col gap-2">
+                <p>
+                  {relativePath} is outside the workspace at {cwd}.
+                </p>
+                <p>
+                  <strong>Allow this file</strong> lets you edit only this file, from any workspace.
+                </p>
+                <p>
+                  <strong>Allow any file on this machine</strong> lets you edit every file on this
+                  machine outside the workspace, from this workspace while it is open. Only
+                  credential folders, git metadata and T3 Code's own folders stay read-only.
+                </p>
+                <p>
+                  The agent and any client allowed to run terminals can use either grant. Turn
+                  editing off again from the file's lock badge.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
             <Button variant="outline" onClick={() => grantFile("workspace")}>
-              Allow any file from this workspace
+              Allow any file on this machine
             </Button>
             <Button onClick={() => grantFile("file")}>Allow this file</Button>
           </AlertDialogFooter>
