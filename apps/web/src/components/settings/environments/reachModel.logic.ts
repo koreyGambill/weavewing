@@ -9,6 +9,12 @@ import {
   MCP_PEER_LINK_SUBJECT_PREFIX,
   type PeerLinkSummary,
 } from "@t3tools/contracts";
+import {
+  isLocalLoopbackHost,
+  isSharedAddressSpaceHost,
+  isTailnetHost,
+  normalizeHostname,
+} from "@t3tools/shared/hostClassification";
 import * as DateTime from "effect/DateTime";
 
 import { formatRelativeElapsed } from "~/timestampFormat";
@@ -262,20 +268,20 @@ function hostOf(address: string): string | null {
 /** How something at this host arrived, from the address alone. */
 export function arrivalFromHost(host: string | null): Arrival | null {
   if (host === null || host.length === 0) return null;
-  const lower = host.toLowerCase();
-  if (lower === "localhost" || lower === "::1" || lower.startsWith("127.")) return "same-computer";
-  if (lower.endsWith(".ts.net")) return "tailscale";
+  if (isLocalLoopbackHost(host)) return "same-computer";
+  // Tailscale's ranges sit inside private ones (its IPv6 prefix is unique-local), so test them first.
+  // 100.64.0.0/10 is shared address space, which Tailscale assigns its machines from.
+  if (isTailnetHost(host) || isSharedAddressSpaceHost(host)) return "tailscale";
+  const lower = normalizeHostname(host);
   const octets = lower.split(".").map(Number);
   if (octets.length === 4 && octets.every((octet) => Number.isInteger(octet))) {
     const [a, b] = octets as [number, number, number, number];
-    if (a === 100 && b >= 64 && b <= 127) return "tailscale";
     if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
       return "local-network";
     }
     return "internet";
   }
   if (lower.startsWith("fe80:") || /^f[cd][0-9a-f]{2}:/.test(lower)) return "local-network";
-  if (lower.startsWith("fd7a:115c:a1e0:")) return "tailscale";
   return lower.includes(":") ? "internet" : null;
 }
 

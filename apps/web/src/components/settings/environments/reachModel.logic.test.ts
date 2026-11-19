@@ -607,6 +607,12 @@ describe("arrivalFromHost", () => {
     ["192.168.1.20", "local-network"],
     ["172.20.0.4", "local-network"],
     ["8.8.8.8", "internet"],
+    ["fd7a:115c:a1e0::1234:5678", "tailscale"],
+    ["[FD7A:115C:A1E0:AB12::1]", "tailscale"],
+    ["fd12:3456:789a::1", "local-network"],
+    // Link-local only reaches the same network segment.
+    ["fe80::1c2b:3aff:fe4d:5e6f", "local-network"],
+    ["2606:4700::1111", "internet"],
     [null, null],
   ] as const)("%s arrives %s", (host, expected) => {
     expect(arrivalFromHost(host)).toBe(expected);
