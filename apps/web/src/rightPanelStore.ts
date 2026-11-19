@@ -20,6 +20,7 @@ import {
   getTileGroups,
   isNewTab,
   parseTileLayout,
+  renameTileTab,
   syncTileLayout,
   tileCloseFallback,
   type ThreadTileLayout,
@@ -81,7 +82,7 @@ export type RightPanelSurface =
       kind: "files";
       /** Set when breadcrumbs moved a folder browser up to the workspace root. */
       folderTrail?: string;
-      /** Absolute folder this tab's tree starts at instead of the workspace root. */
+      /** Absolute folder this tab's tree starts at; never set on the `files` id, which is the workspace root. */
       root?: string;
     }
   | {
@@ -887,8 +888,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           userAction(state, scopedThreadKey(ref), (current) =>
             upsertSurface(
               current,
-              // A Files tab's id may now belong to another tab; the restored one stays distinct.
-              surface.kind === "files" && current.surfaces.some((entry) => entry.id === surface.id)
+              // A Files tab's id may now belong to another tab, and `files` is only the workspace root.
+              surface.kind === "files" &&
+                (current.surfaces.some((entry) => entry.id === surface.id) ||
+                  (surface.id === "files" && surface.root !== undefined))
                 ? { ...surface, id: `files:${randomUUID()}` }
                 : surface,
             ),
@@ -1100,10 +1103,20 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (existing?.kind !== "files" || (existing.root ?? null) === root) return current;
             // The breadcrumb trail is relative to the old root.
             const { root: _previous, folderTrail: _trail, ...rest } = existing;
-            const surface: RightPanelSurface = root === null ? rest : { ...rest, root };
+            // `files` stays free for the workspace root, so a re-rooted default tab takes its own id.
+            const id = root !== null && surfaceId === "files" ? `files:${randomUUID()}` : surfaceId;
+            const surface = {
+              ...rest,
+              id,
+              ...(root === null ? {} : { root }),
+            } as RightPanelSurface;
             return {
               ...current,
               surfaces: current.surfaces.map((entry) => (entry.id === surfaceId ? surface : entry)),
+              activeSurfaceId: current.activeSurfaceId === surfaceId ? id : current.activeSurfaceId,
+              ...(current.tileLayout && id !== surfaceId
+                ? { tileLayout: renameTileTab(current.tileLayout, surfaceId, id) }
+                : {}),
             };
           }),
         ),

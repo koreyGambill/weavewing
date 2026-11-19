@@ -287,6 +287,26 @@ function settle(input: ThreadTileLayout): ThreadTileLayout {
 }
 
 /** The tab its group shows after `tabId` closes, so focus stays in the group the user closed from. */
+/** Gives a tab a new id in place, keeping its group, position and active state. */
+export function renameTileTab(
+  layout: ThreadTileLayout,
+  fromTabId: string,
+  toTabId: string,
+): ThreadTileLayout {
+  return {
+    ...layout,
+    root: mapNode(layout.root, (node) =>
+      node.kind === "group" && node.tabs.includes(fromTabId)
+        ? {
+            ...node,
+            tabs: node.tabs.map((id) => (id === fromTabId ? toTabId : id)),
+            activeTabId: node.activeTabId === fromTabId ? toTabId : node.activeTabId,
+          }
+        : node,
+    ),
+  };
+}
+
 export function tileCloseFallback(layout: ThreadTileLayout | undefined, tabId: string) {
   const tabs = layout && getTileGroups(layout).find((group) => group.tabs.includes(tabId))?.tabs;
   if (!tabs) return null;

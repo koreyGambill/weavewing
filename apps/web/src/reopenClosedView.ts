@@ -144,18 +144,14 @@ export async function reopenClosedView(
       }
       break;
     case "files": {
-      if (surface.id !== "files" || surface.root !== undefined) {
-        panels.restoreSurface(ref, surface);
-        break;
-      }
-      const rootAlreadyExists = selectThreadRightPanelState(
-        panels.byThreadKey,
-        rightPanelHostRef(ref),
-      ).surfaces.some((current) => current.kind === "files");
-      panels.open(ref, "files");
-      if (!rootAlreadyExists && typeof surface.folderTrail === "string") {
-        panels.navigateFolder(ref, surface.id, "", surface.folderTrail);
-      }
+      // An open workspace-root tab is the closed one already; any other Files tab is not.
+      const workspaceRootOpen =
+        surface.id === "files" &&
+        selectThreadRightPanelState(panels.byThreadKey, rightPanelHostRef(ref)).surfaces.some(
+          (current) => current.id === "files",
+        );
+      if (workspaceRootOpen) panels.activateSurface(ref, "files");
+      else panels.restoreSurface(ref, surface);
       break;
     }
     case "device":

@@ -1229,17 +1229,43 @@ describe("rightPanelStore", () => {
       useRightPanelStore.getState().byThreadKey,
       refA,
     );
+    // The `files` id stays the workspace root, so re-rooting the default tab gives it its own id.
+    const rerooted = surfaces[0]!;
+    expect(rerooted.id).toMatch(/^files:/);
     expect(surfaces).toEqual([
-      { id: "files", kind: "files", root: "/repo/src" },
+      { id: rerooted.id, kind: "files", root: "/repo/src" },
       { id: other, kind: "files" },
       expect.objectContaining({ id: "file:README.md" }),
       { id: activeSurfaceId, kind: "files", root: "/repo/src/lib" },
     ]);
+    const tabs = getTileGroups(
+      selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA)!,
+    ).flatMap((group) => group.tabs);
+    expect(tabs.indexOf(rerooted.id)).toBeLessThan(tabs.indexOf(other));
+    expect(tabs).not.toContain("files");
 
-    useRightPanelStore.getState().setFilesRoot(refA, "files", null);
+    useRightPanelStore.getState().setFilesRoot(refA, rerooted.id, null);
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces[0],
-    ).toEqual({ id: "files", kind: "files" });
+    ).toEqual({ id: rerooted.id, kind: "files" });
+  });
+
+  it("walks a breadcrumb to the workspace root after the default Files tab was re-rooted", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "files");
+    store.setFilesRoot(refA, "files", "/repo/src");
+    store.openFile(refA, "apps/web/src");
+    store.navigateFolder(refA, "file:apps/web/src", "", "apps/web/src");
+
+    const { surfaces, activeSurfaceId } = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      refA,
+    );
+    expect(activeSurfaceId).toBe("files");
+    expect(surfaces).toEqual([
+      { id: expect.stringMatching(/^files:/), kind: "files", root: "/repo/src" },
+      { id: "files", kind: "files", folderTrail: "apps/web/src" },
+    ]);
   });
 
   it.each([

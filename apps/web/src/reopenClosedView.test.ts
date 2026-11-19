@@ -120,7 +120,11 @@ describe("reopenClosedView", () => {
         const panels = useRightPanelStore.getState();
         panels.open(threadRef, "files");
         panels.setFilesRoot(threadRef, "files", "/repo/src");
-        panels.closeSurface(threadRef, "files");
+        const { activeSurfaceId } = selectThreadRightPanelState(
+          useRightPanelStore.getState().byThreadKey,
+          threadRef,
+        );
+        panels.closeSurface(threadRef, activeSurfaceId!);
         panels.open(threadRef, "files");
       },
       restored: { kind: "files", root: "/repo/src" },
@@ -163,6 +167,40 @@ describe("reopenClosedView", () => {
     ]);
     expect(after.activeSurfaceId).toBe(after.surfaces[1]!.id);
   });
+
+  it.each([
+    { survivorRoot: null, name: "the workspace root" },
+    { survivorRoot: "/repo/src", name: "src" },
+  ])(
+    "reopens the closed default Files tab beside another Files tab at $name",
+    async ({ survivorRoot }) => {
+      const panels = useRightPanelStore.getState();
+      panels.open(threadRef, "files");
+      panels.openFilesAt(threadRef, survivorRoot);
+      const survivor = selectThreadRightPanelState(
+        useRightPanelStore.getState().byThreadKey,
+        threadRef,
+      ).surfaces[1]!;
+      panels.closeSurface(threadRef, "files");
+      const [entry] = useClosedViewStore.getState().entries;
+      const plan = planNextReopen([entry!], () => ({
+        environmentKnown: true,
+        catalogReady: true,
+        ownerExists: true,
+        sideChatExists: true,
+        shellLive: true,
+        panel: selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef),
+      }));
+      expect(plan.restore).toBe(entry);
+      await reopenClosedView(entry!, { openPreview: vi.fn(), workspaceAvailable: true });
+      const after = selectThreadRightPanelState(
+        useRightPanelStore.getState().byThreadKey,
+        threadRef,
+      );
+      expect(after.surfaces).toEqual([survivor, { id: "files", kind: "files" }]);
+      expect(after.activeSurfaceId).toBe("files");
+    },
+  );
 
   it.each([
     { hosted: false, folderTrail: "packages/contracts/src" },
