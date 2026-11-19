@@ -3831,9 +3831,15 @@ export default function ChatView(props: ChatViewProps) {
                                 }
                                 trailing={
                                   isServerThread ? (
-                                    isGitRepo && gitStatusAtom ? (
+                                    isGitRepo &&
+                                    gitStatusAtom &&
+                                    activeThreadRef &&
+                                    gitStatusCwd ? (
                                       <ComposerChangesControl
                                         status={gitStatusAtom}
+                                        threadRef={activeThreadRef}
+                                        cwd={gitStatusCwd}
+                                        workspaceMutationId={workspaceMutationId}
                                         onOpen={openChangesFromThreadPanelStable}
                                       />
                                     ) : null

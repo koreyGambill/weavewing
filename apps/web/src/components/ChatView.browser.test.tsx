@@ -10,6 +10,8 @@ import {
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
+import type { ReviewDiffPreviewInput } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 
@@ -36,7 +38,6 @@ import {
   assistantItem,
   dispatchedCommands,
   emitThreadEvent,
-  emitVcsStatus,
   hasPendingAssetUrl,
   installFakeEnvironment,
   rejectPendingCommand,
@@ -832,8 +833,27 @@ it("opens workspace actions, lineage and changes with the card closed", async ()
   );
   useRightPanelStore.getState().close(threadRef);
   await page.viewport(1300, 860);
-  await act(() =>
-    emitVcsStatus({
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  const hosted = page.getByRole("navigation", { name: "Threads" });
+  await expect.element(hosted.getByText("Add project script")).toBeVisible();
+  await expect.element(card).not.toBeInTheDocument();
+});
+
+it("uses the remembered base and whitespace-filtered Diff counts beside the branch", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1400, 860);
+
+  const thread = {
+    ...threadWithHistory("branch-counts", 1),
+    olderSettled: true as const,
+    worktreePath: "/workspace/branch-counts",
+  };
+  const threadRef = scopeThreadRef(ENVIRONMENT_ID, thread.id);
+  using _environment = installFakeEnvironment([thread], {
+    vcsStatus: {
       _tag: "snapshot",
       local: {
         isRepo: true,
@@ -848,15 +868,72 @@ it("opens workspace actions, lineage and changes with the card closed", async ()
         },
       },
       remote: null,
+    },
+  });
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    diffIgnoreWhitespace: true,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  useDiffPanelStore.getState().selectBranchBaseRef(threadRef, "origin/stable");
+  useDiffPanelStore.getState().selectGitScope(threadRef, "unstaged");
+  const branchPreview = vi.fn((input: ReviewDiffPreviewInput) =>
+    Effect.succeed({
+      cwd: input.cwd,
+      generatedAt: DateTime.makeUnsafe("2026-03-17T19:12:28.000Z"),
+      sources: [
+        {
+          id: "branch",
+          kind: "branch-range",
+          title: "Changes",
+          baseRef: input.baseRef ?? null,
+          headRef: "main",
+          diff: "",
+          diffHash: "filtered-diff",
+          truncated: false,
+          patchesDeferred: true,
+          files: [{ path: "src/app.ts", previousPath: null, additions: 2, deletions: 1 }],
+        },
+      ],
     }),
   );
-  const counts = page.getByRole("button", { name: "Changes: 12 additions, 3 deletions" });
+  using _branchPreview = answerRpc(WS_METHODS.reviewGetDiffPreview, branchPreview);
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  const counts = page.getByRole("button", { name: "Changes: 2 additions, 1 deletions" });
   await expect.element(counts, { timeout: 3000 }).toBeVisible();
+  expect(branchPreview).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      sourceKind: "branch-range",
+      baseRef: "origin/stable",
+      ignoreWhitespace: true,
+      metadataOnly: true,
+    }),
+  );
+  const metadataRequests = () =>
+    branchPreview.mock.calls.filter(([input]) => input.metadataOnly === true);
+  expect(metadataRequests()).toHaveLength(1);
   await counts.click();
-  await expect.element(page.getByRole("tab", { name: "Diff", exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: "Details", exact: true }).click();
-  const hosted = page.getByRole("navigation", { name: "Threads" });
-  await expect.element(hosted.getByText("Add project script")).toBeVisible();
-  await expect.element(card).not.toBeInTheDocument();
+  await expect
+    .element(page.getByRole("tab", { name: "Diff", exact: true }), { timeout: 2500 })
+    .toBeVisible();
+  await expect
+    .element(page.getByText("origin/stable", { exact: true }).first(), { timeout: 2500 })
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("group", { name: "2 additions, 1 deletions", exact: true }).first(), {
+      timeout: 2500,
+    })
+    .toBeVisible();
+  expect(metadataRequests()).toHaveLength(1);
+  expect(
+    selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, threadRef),
+  ).toEqual({ kind: "branch", baseRef: "origin/stable" });
 });

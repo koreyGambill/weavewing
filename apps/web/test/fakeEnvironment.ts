@@ -219,6 +219,7 @@ function run(
 }
 
 export interface FakeThread {
+  readonly worktreePath?: string;
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
   /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
@@ -314,7 +315,7 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: "main",
-    worktreePath: null,
+    worktreePath: thread.worktreePath ?? null,
     activeProviderThreadId: thread.providerThreads?.[0]?.id ?? null,
     lineage: {
       rootThreadId: thread.sideChatOf ?? thread.id,
@@ -417,6 +418,7 @@ let pendingDispatches: Array<{
 }> = [];
 let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
 let sequence = 1;
+let vcsStatusSnapshot: Extract<VcsStatusStreamEvent, { _tag: "snapshot" }> | undefined;
 let vcsStatusSubscriber: Queue.Queue<VcsStatusStreamEvent> | null = null;
 
 const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>) => () => void) =>
@@ -501,7 +503,7 @@ const handlers: Record<string, (input: never) => unknown> = {
     });
   },
   [WS_METHODS.subscribeVcsStatus]: () =>
-    subscribe<VcsStatusStreamEvent>([], (queue) => {
+    subscribe<VcsStatusStreamEvent>(vcsStatusSnapshot ? [vcsStatusSnapshot] : [], (queue) => {
       vcsStatusSubscriber = queue;
       return () => {
         if (vcsStatusSubscriber === queue) vcsStatusSubscriber = null;
@@ -563,6 +565,7 @@ export function installFakeEnvironment(
   fixtures: ReadonlyArray<FakeThread>,
   options?: {
     readonly acceptCommands?: boolean;
+    readonly vcsStatus?: typeof vcsStatusSnapshot;
     readonly keybindings?: ResolvedKeybindingsConfig;
     readonly extraProjects?: ReadonlyArray<Pick<OrchestrationProjectShell, "id" | "title">>;
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
@@ -571,6 +574,7 @@ export function installFakeEnvironment(
   },
 ): Disposable {
   threads = fixtures;
+  vcsStatusSnapshot = options?.vcsStatus;
   baseServerConfig = {
     ...makeServerConfig(options?.providers ?? [CODEX_PROVIDER]),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,

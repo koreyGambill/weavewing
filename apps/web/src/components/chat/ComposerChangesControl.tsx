@@ -1,7 +1,8 @@
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useEnvironmentQuery } from "../../state/query";
 import type { vcsEnvironment } from "../../state/vcs";
-import { resolveChangesTotals } from "../GitActionsControl.logic";
+import type { ScopedThreadRef } from "@t3tools/contracts";
+import { useBranchChangesTotals } from "../useBranchChangesTotals";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl } from "./ComposerControl";
 
@@ -9,13 +10,25 @@ type StatusAtom = ReturnType<typeof vcsEnvironment.status>;
 
 export function ComposerChangesControl({
   status,
+  threadRef,
+  cwd,
+  workspaceMutationId,
   onOpen,
 }: {
   status: StatusAtom;
+  threadRef: ScopedThreadRef;
+  cwd: string;
+  workspaceMutationId: string | null;
   onOpen: () => void;
 }) {
   const { data } = useEnvironmentQuery(status);
-  const totals = resolveChangesTotals(data);
+  const totals = useBranchChangesTotals({
+    enabled: true,
+    threadRef,
+    cwd,
+    workspaceMutationId,
+    gitStatus: data,
+  });
   if (!totals || (totals.insertions === 0 && totals.deletions === 0)) return null;
   const { insertions, deletions } = totals;
   return (

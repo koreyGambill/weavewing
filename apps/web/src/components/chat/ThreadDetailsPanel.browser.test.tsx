@@ -1,6 +1,8 @@
 import {
   EnvironmentId,
   ProjectId,
+  SourceControlProviderKind,
+  type PullRequestDetail,
   ThreadId,
   type ScopedThreadRef,
   type ThreadPullRequestLink,
@@ -16,6 +18,9 @@ const state = vi.hoisted(() => ({
   folder: "",
   pullRequests: [] as unknown[],
   configLoaded: true,
+  git: false,
+  openLink: vi.fn(),
+  openChanges: vi.fn(),
 }));
 
 vi.mock(import("~/state/entities"), async (importOriginal) => ({
@@ -29,6 +34,19 @@ vi.mock(import("~/state/entities"), async (importOriginal) => ({
           title: state.workspaceRoot === SCRATCH_ROOT ? "No project" : "plain",
           workspaceRoot: state.workspaceRoot,
           scripts: [],
+          repositoryIdentity: state.git
+            ? {
+                canonicalKey: "github.com/owner/repo",
+                locator: {
+                  source: "git-remote",
+                  remoteName: "origin",
+                  remoteUrl: "https://github.com/owner/repo.git",
+                },
+                provider: "github",
+                owner: "owner",
+                name: "repo",
+              }
+            : null,
         }) as never,
   useProjects: (() => []) as never,
   useQuietThreadShell: ((ref: unknown) =>
@@ -39,7 +57,7 @@ vi.mock(import("~/state/entities"), async (importOriginal) => ({
           environmentId: "environment",
           projectId: "project",
           worktreePath: state.folder,
-          branch: null,
+          branch: state.git ? "feature" : null,
           pullRequests: state.pullRequests,
         }) as never,
   useServerConfigs: (() =>
@@ -57,7 +75,6 @@ vi.mock(import("~/state/entities"), async (importOriginal) => ({
         : [],
     )) as never,
 }));
-// Neither folder is a repository, which is what the server reports for both.
 vi.mock(import("~/state/vcs"), async (importOriginal) => {
   const actual = await importOriginal();
   const notARepo = Atom.make(
@@ -75,15 +92,104 @@ vi.mock(import("~/state/vcs"), async (importOriginal) => {
       pr: null,
     }),
   );
+  const gitStatus = Atom.make(
+    AsyncResult.success({
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 12, deletions: 3 },
+      hasUpstream: false,
+      aheadCount: 0,
+      behindCount: 0,
+      isRepo: true,
+      refName: "feature",
+      pr: {
+        number: 7,
+        title: "Branch draft",
+        url: "https://github.com/owner/repo/pull/7",
+        state: "open",
+        isDraft: true,
+        headRef: "feature",
+        baseRef: "main",
+      },
+    }),
+  );
   return {
     ...actual,
-    vcsEnvironment: { ...actual.vcsEnvironment, status: (() => notARepo) as never },
+    vcsEnvironment: {
+      ...actual.vcsEnvironment,
+      status: (() => (state.git ? gitStatus : notARepo)) as never,
+    },
+  };
+});
+
+vi.mock(import("~/browser/useOpenLink"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  useOpenLink: () => state.openLink,
+}));
+
+vi.mock(import("~/state/pullRequests"), async (importOriginal) => {
+  const actual = await importOriginal();
+  const detail = Atom.make(
+    AsyncResult.success({
+      provider: SourceControlProviderKind.make("github"),
+      projectId: ProjectId.make("project"),
+      projectTitle: "plain",
+      workspaceRoot: "/work/project",
+      repository: "owner/repo",
+      number: 7,
+      title: "Branch draft",
+      body: "",
+      url: "https://github.com/owner/repo/pull/7",
+      author: { login: "author", name: null, avatarUrl: null },
+      viewer: "author",
+      state: "open",
+      isDraft: true,
+      mergeability: "mergeable",
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+      headBranch: "feature",
+      baseBranch: "main",
+      createdAt: "2026-09-01T00:00:00Z",
+      updatedAt: "2026-09-01T00:00:00Z",
+      mergedAt: null,
+      closedAt: null,
+      reviewers: [],
+      labels: [],
+      checks: [],
+      mergeCapabilities: { merge: false, squash: false, rebase: false },
+      capabilities: {
+        diff: true,
+        comment: false,
+        search: true,
+        actions: ["ready"],
+        mergeMethods: [],
+        review: { inlineComment: false, reply: false, resolve: false, verdicts: [] },
+        reviewers: { request: false, listCandidates: false },
+        edit: { changeRequest: true, comment: false },
+      },
+      viewerPermissions: {
+        actions: ["ready"],
+        comment: false,
+        resolve: false,
+        verdicts: [],
+        requestReviewers: false,
+      },
+    } satisfies PullRequestDetail),
+  );
+  return {
+    ...actual,
+    pullRequestEnvironment: { ...actual.pullRequestEnvironment, detail: (() => detail) as never },
   };
 });
 
 import { render } from "../../../test/render";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { PopoverCreateHandle } from "../ui/popover";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { PopoverCreateHandle, PopoverTrigger } from "../ui/popover";
+import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout } from "./chatCanvasLayout";
 import { ThreadDetailsPanel } from "./ThreadDetailsPanel";
@@ -110,7 +216,12 @@ function setup(input: {
   folder: string;
   pullRequests?: ThreadPullRequestLink[];
   configLoaded?: boolean;
+  git?: boolean;
 }) {
+  state.git = input.git ?? false;
+  state.openLink.mockReset().mockResolvedValue(undefined);
+  state.openChanges.mockReset();
+  __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, pullRequestLinksOpenInApp: false });
   state.configLoaded = input.configLoaded ?? true;
   state.workspaceRoot = input.workspaceRoot;
   state.folder = input.folder;
@@ -122,11 +233,18 @@ function setup(input: {
   return {
     anchor: { current: anchor },
     handle: PopoverCreateHandle(),
+    actionsHandle: PopoverCreateHandle(),
     [Symbol.dispose]: () => anchor.remove(),
   };
 }
 
-function Panel({ fixture }: { fixture: ReturnType<typeof setup> }) {
+function Panel({
+  fixture,
+  composerContextAvailable = true,
+}: {
+  fixture: ReturnType<typeof setup>;
+  composerContextAvailable?: boolean;
+}) {
   const noop = () => {};
   const scriptResult = async () => ({ ok: true }) as never;
   return (
@@ -143,7 +261,19 @@ function Panel({ fixture }: { fixture: ReturnType<typeof setup> }) {
         detailsCardPlacement: placement,
       }}
     >
+      {state.git && composerContextAvailable ? (
+        <BranchToolbarBranchSelector
+          environmentId={threadRef.environmentId}
+          threadId={threadRef.threadId}
+          envLocked
+          startFromOrigin={false}
+          onStartFromOriginChange={noop}
+        />
+      ) : null}
+      <PopoverTrigger handle={fixture.actionsHandle}>Workspace actions</PopoverTrigger>
       <ThreadDetailsPanel
+        actionsHandle={fixture.actionsHandle}
+        composerContextAvailable={composerContextAvailable}
         anchor={fixture.anchor}
         handle={fixture.handle}
         environmentId={threadRef.environmentId}
@@ -159,9 +289,10 @@ function Panel({ fixture }: { fixture: ReturnType<typeof setup> }) {
         availableEditors={[]}
         showOpenInPicker={false}
         openInShortcutEnabled={false}
+        onOpenChanges={state.openChanges}
         gitCwd={state.folder}
         workspaceMutationId={null}
-        isGitRepo={false}
+        isGitRepo={state.git}
         envLocked
         availableEnvironments={[]}
         onEnvModeChange={noop}
@@ -215,4 +346,30 @@ it("offers no Initialize Git before the server config says where No project live
   await expect
     .element(page.getByRole("button", { name: "Initialize Git" }))
     .not.toBeInTheDocument();
+});
+
+it("offers Ready for a branch-discovered draft in Workspace actions with external PR links", async () => {
+  using fixture = setup({ workspaceRoot: "/work/project", folder: "/work/project", git: true });
+  useRightPanelStore.getState().setThreadPanelOpen(threadRef, "inline", false);
+  await using _screen = await render(<Panel fixture={fixture} />);
+  await page.getByRole("link", { name: /#7/ }).click();
+  expect(state.openLink).toHaveBeenCalledWith(
+    "https://github.com/owner/repo/pull/7",
+    expect.anything(),
+  );
+  await page.getByRole("button", { name: "Workspace actions" }).click();
+  const actions = page.getByRole("dialog", { name: "Workspace actions" });
+  await expect.element(actions.getByRole("button", { name: "Ready", exact: true })).toBeEnabled();
+});
+
+it("shows counted Changes in Workspace actions when there is no composer strip", async () => {
+  using fixture = setup({ workspaceRoot: "/work/project", folder: "/work/project", git: true });
+  useRightPanelStore.getState().setThreadPanelOpen(threadRef, "inline", false);
+  await using _screen = await render(<Panel fixture={fixture} composerContextAvailable={false} />);
+  await page.getByRole("button", { name: "Workspace actions" }).click();
+  const actions = page.getByRole("dialog", { name: "Workspace actions" });
+  const changes = actions.getByRole("button", { name: /Changes.*\+12.*-3/ });
+  await expect.element(changes, { timeout: 2500 }).toBeVisible();
+  await changes.click();
+  expect(state.openChanges).toHaveBeenCalledOnce();
 });

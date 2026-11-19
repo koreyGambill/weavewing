@@ -172,7 +172,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       scripts: actions && (!card || visible.scripts) && props.activeProjectScripts !== undefined,
       branch:
         showCheckout && (card ? visible.branch : workspaceFallback) && offersGit && props.isGitRepo,
-      pullRequests: actions && (!card || visible.branch) && !(offersGit && props.isGitRepo),
+      pullRequests: actions && (!card || visible.branch),
       git:
         actions &&
         offersGit &&
@@ -249,13 +249,19 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                     threadRef={activeThreadRef}
                     project={project}
                     composerTarget={props.composerDraftTarget}
+                    branchCwd={offersGit && props.isGitRepo ? props.gitCwd : null}
+                    {...(props.activeThreadBranchOverride !== undefined
+                      ? { branchOverride: props.activeThreadBranchOverride }
+                      : {})}
                   />
                 ) : null}
                 {show.git && props.gitCwd ? (
                   <GitActionsControl
                     compact={density !== "full"}
                     showActions={!card || visible.gitActions}
-                    showChanges={card ? visible.changes : !props.isServerThread}
+                    showChanges={
+                      card ? visible.changes : workspaceFallback || !props.isServerThread
+                    }
                     gitCwd={props.gitCwd}
                     workspaceMutationId={props.workspaceMutationId}
                     activeThreadRef={activeThreadRef}

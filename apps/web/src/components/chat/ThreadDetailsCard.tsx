@@ -82,14 +82,12 @@ export function ThreadDetailsCard({
   const density = bar ? "full" : resolveThreadDetailsCardDensity(height, contentHeights);
   const measureDetailsCard = canvas?.measureDetailsCard;
   const cardWidth = preferredPlacement?.width;
-  // The mode derives from canvas measurements, the preview frame and the
-  // inline flag, which live in three stores, so no single write site sees the
-  // card leave popover mode. A flag left set would reopen the popover unasked
-  // when the card returns to popover mode.
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the popover flag in the right panel store when the derived mode turns inline
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- transfers an open fallback to the inline card as the canvas gains room
   useLayoutEffect(() => {
-    if (mode === "inline" && popoverOpen)
-      useRightPanelStore.getState().setThreadPanelOpen(threadRef, "popover", false);
+    if (mode !== "inline" || !popoverOpen) return;
+    const store = useRightPanelStore.getState();
+    store.setThreadPanelOpen(threadRef, "inline", true);
+    store.setThreadPanelOpen(threadRef, "popover", false);
   }, [mode, popoverOpen, threadRef]);
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const { environmentId, threadId } = threadRef;
