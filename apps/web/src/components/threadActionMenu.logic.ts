@@ -17,6 +17,12 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "group"
+  | `group:${string}`
+  | "group-none"
+  | "group-new"
+  | "move-up"
+  | "move-down"
   | "reroll-glyph"
   | "rename"
   | "regenerate-title"
@@ -96,11 +102,21 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** Whether this connection can change a thread's working folder. */
   readonly canChangeFolder?: boolean;
+  /** The sidebar's own groups, offered for an active thread; they live on this device. */
+  readonly groups?: {
+    readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+    readonly current: string | null;
+    readonly canMoveUp: boolean;
+    readonly canMoveDown: boolean;
+  } | null;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
+  if (action.startsWith("group")) return false;
   return ![
+    "move-up",
+    "move-down",
     "find",
     "new-thread-on-branch",
     "project-settings",
@@ -166,6 +182,44 @@ export function buildThreadActionMenuItems(
                   },
                 ],
               },
+        ]
+      : []),
+    ...(state.groups
+      ? [
+          {
+            id: "group" as const,
+            label: "Move to group",
+            icon: "folder-tree",
+            separatorBefore: true,
+            children: [
+              ...state.groups.options.map((group) => ({
+                id: `group:${group.id}` as const,
+                label: group.name,
+                checked: state.groups?.current === group.id,
+              })),
+              {
+                id: "group-none" as const,
+                label: "Ungrouped",
+                checked: state.groups.current === null,
+              },
+              {
+                id: "group-new" as const,
+                label: "New group…",
+                icon: "folder-plus",
+                separatorBefore: true,
+              },
+            ],
+          },
+          ...(state.groups.options.length > 0
+            ? [
+                { id: "move-up" as const, label: "Move up", disabled: !state.groups.canMoveUp },
+                {
+                  id: "move-down" as const,
+                  label: "Move down",
+                  disabled: !state.groups.canMoveDown,
+                },
+              ]
+            : []),
         ]
       : []),
     { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },
