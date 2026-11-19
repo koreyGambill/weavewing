@@ -4,7 +4,7 @@ import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/con
 import type { RightPanelSurface } from "./rightPanelStore";
 import { getTileGroups, type ThreadTileLayout } from "./threadTileLayout";
 
-export const DROPDOWN_TERMINAL_MIN_HEIGHT = 160;
+const DROPDOWN_TERMINAL_MIN_HEIGHT = 160;
 export const DROPDOWN_TERMINAL_DEFAULT_HEIGHT = 360;
 
 /**
