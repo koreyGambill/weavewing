@@ -48,9 +48,19 @@ export const providerConfigDir = Effect.fn("InstructionFileAllowlist.providerCon
 // Credential folders under ~/.config whose files stay read-only even when an instruction file links them.
 const CREDENTIAL_CONFIG = /\/\.config\/(gh|hub|gcloud|op|rclone|sops|age|github-copilot)\//;
 
-/** Files in a credential folder stay read-only, whatever links or grants reach them. */
-export const isCredentialConfigPath = (filePath: string) =>
-  CREDENTIAL_CONFIG.test(filePath.replaceAll("\\", "/"));
+// Credential folders and files directly under the home folder.
+const HOME_CREDENTIALS =
+  /^(\.ssh|\.gnupg|\.aws|\.kube)(\/|$)|^(\.docker\/config\.json|\.netrc|\.git-credentials)$/;
+
+/** Credential files stay read-only, whatever links or grants reach them. */
+export const isCredentialPath = (filePath: string, home: string) => {
+  const file = filePath.replaceAll("\\", "/");
+  const root = home.replaceAll("\\", "/").replace(/\/+$/, "");
+  return (
+    CREDENTIAL_CONFIG.test(file) ||
+    (file.startsWith(`${root}/`) && HOME_CREDENTIALS.test(file.slice(root.length + 1)))
+  );
+};
 
 /**
  * Host files the Files tile may edit: `.md` files the Default view reads as instruction
@@ -101,8 +111,8 @@ const make = Effect.gen(function* () {
         const root = roots.find((candidate) => within(candidate, documented));
         if (
           root === undefined ||
-          CREDENTIAL_CONFIG.test(documented) ||
-          CREDENTIAL_CONFIG.test(realPath)
+          isCredentialPath(documented, home) ||
+          isCredentialPath(realPath, home)
         )
           return false;
         // Only the file itself may be a symlink: a linked folder could lead into another repository.

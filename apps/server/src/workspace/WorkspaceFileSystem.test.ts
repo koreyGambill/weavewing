@@ -1255,6 +1255,21 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             "gh",
           );
           expect(yield* fileSystem.readFileString(internal)).toBe("secret");
+          // Home credential files stay read-only once nothing else refuses them.
+          yield* fileSystem.remove(path.join(home, ".config", "wing", "hard.md"));
+          yield* writeTextFile(home, ".aws/credentials", "[default]");
+          for (const relativePath of ["~/.ssh/authorized_keys", "~/.aws/credentials"]) {
+            yield* refuses(relativePath);
+            yield* inHome(
+              workspaceFileSystem.allowOutsideEdits({ cwd, relativePath, scope: "file" }),
+            ).pipe(Effect.flip);
+          }
+          expect(yield* fileSystem.readFileString(path.join(home, ".ssh", "authorized_keys"))).toBe(
+            "ssh-ed25519 KEY",
+          );
+          expect(yield* fileSystem.readFileString(path.join(home, ".aws", "credentials"))).toBe(
+            "[default]",
+          );
 
           yield* workspaceFileSystem.revokeOutsideEdits({ grant: workspaceGrant });
           yield* refuses("~/.bashrc.md");

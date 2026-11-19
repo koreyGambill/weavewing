@@ -32,7 +32,7 @@ import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   InstructionFileAllowlist,
-  isCredentialConfigPath,
+  isCredentialPath,
 } from "../threadInsights/InstructionFileAllowlist.ts";
 import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
@@ -201,14 +201,18 @@ export const make = Effect.gen(function* () {
     requestedPath: string,
   ) {
     if (!isHostPath(requestedPath)) return null;
-    const hostPath = expandHomePath(requestedPath, yield* HostProcess.HomeDirectory);
+    const home = yield* HostProcess.HomeDirectory;
+    const hostPath = expandHomePath(requestedPath, home);
     if (!path.isAbsolute(hostPath) || isNetworkPath(hostPath)) return null;
     if (!(yield* knownWorkspaces.assertContains(cwd).pipe(Effect.isSuccess))) return null;
     const realPath = yield* Effect.promise(() => NodeFSP.realpath(hostPath).catch(() => null));
+    // A symlinked home folder resolves away the prefix the real path is checked against.
+    const realHome = yield* Effect.promise(() => NodeFSP.realpath(home).catch(() => home));
     if (
       realPath === null ||
-      isCredentialConfigPath(hostPath) ||
-      isCredentialConfigPath(realPath) ||
+      isCredentialPath(hostPath, home) ||
+      isCredentialPath(realPath, home) ||
+      isCredentialPath(realPath, realHome) ||
       (yield* isServerInternalPath(realPath)) ||
       (yield* Effect.promise(() => isInGitFolder(realPath).catch(() => true)))
     )
