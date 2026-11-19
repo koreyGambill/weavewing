@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - FileSystem cannot create a FIFO, and reads spy on native realpath.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
 import * as NodePath from "@effect/platform-node/NodePath";
@@ -1381,6 +1382,69 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           expect(yield* fileSystem.readFileString(path.join(`${claudeDir}.old`, "CLAUDE.md"))).toBe(
             "original",
           );
+        }).pipe(Effect.provide(layerInstructionWrites)),
+    );
+
+    it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+      "refuses a hard link or a swapped folder that appears after the file opens",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const { home, cwd, wing } = yield* setup;
+          const claudeDir = path.join(home, ".claude");
+          const target = path.join(claudeDir, "CLAUDE.md");
+          const native = yield* Effect.promise(() =>
+            vi.importActual<typeof NodeFSP>("node:fs/promises"),
+          );
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => vi.mocked(NodeFSP.open).mockImplementation(native.open)),
+          );
+          const save = (relativePath: string) =>
+            asHome(home)(
+              workspaceFileSystem.writeFile({ cwd, relativePath, contents: "pwned" }),
+            ).pipe(Effect.flip);
+
+          // In place: an alias linked after the writable open would receive the new text.
+          const linked = path.join(wing, "LINKED.md");
+          const alias = path.join(home, "alias-of-linked.md");
+          yield* Effect.acquireRelease(
+            Effect.promise(() => NodeFSP.chmod(wing, 0o555)),
+            () => Effect.promise(() => NodeFSP.chmod(wing, 0o755)),
+          );
+          vi.mocked(NodeFSP.open).mockImplementation(async (file, flags, mode) => {
+            const handle = await native.open(file, flags, mode);
+            if (String(file) === linked && (Number(flags) & NodeFS.constants.O_WRONLY) !== 0) {
+              await NodeFSP.link(linked, alias);
+            }
+            return handle;
+          });
+          yield* save("~/.config/wing/LINKED.md");
+          expect(yield* fileSystem.readFileString(alias)).toBe("linked");
+
+          // Replace: the real folder is swapped for another holding the same file and the temp file.
+          const realTarget = yield* fileSystem.realPath(target);
+          let swapped = false;
+          vi.mocked(NodeFSP.open).mockImplementation(async (file, flags, mode) => {
+            const handle = await native.open(file, flags, mode);
+            const name = String(file);
+            if (!swapped && name.endsWith(".t3-save")) {
+              swapped = true;
+              const folder = path.dirname(name);
+              const old = `${folder}.old`;
+              await NodeFSP.rename(folder, old);
+              await NodeFSP.mkdir(folder);
+              await NodeFSP.rename(path.join(old, path.basename(realTarget)), realTarget);
+              await NodeFSP.rename(path.join(old, path.basename(name)), name);
+            }
+            return handle;
+          });
+          const before = yield* fileSystem.readFileString(realTarget);
+          const error = yield* save("~/.claude/CLAUDE.md");
+          expect(swapped).toBe(true);
+          expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFileSystemOperationError);
+          expect(yield* fileSystem.readFileString(realTarget)).toBe(before);
         }).pipe(Effect.provide(layerInstructionWrites)),
     );
 

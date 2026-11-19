@@ -283,10 +283,9 @@ export const make = Effect.gen(function* () {
         );
 
   /**
-   * Replaces an existing host file through a temp file in its folder, so a failed save
-   * leaves the old text; a folder that takes no new entries gets an in-place write. The check opens without creating, following a final symlink, or
-   * blocking on a FIFO; the file must stay the single-link regular file at `realPath`
-   * until the rename, so a swapped path component or hard-linked alias is refused.
+   * Replaces a host file via a temp file in its folder (in place when the folder is read-only).
+   * The file must stay the single-link regular file at `realPath`, in the same folder, until the
+   * write. Node lacks `renameat`, so a swap between the last check and the rename stays possible.
    */
   const writeHostFile = Effect.fn("WorkspaceFileSystem.writeHostFile")(function* (
     input: ProjectWriteFileInput,
@@ -311,6 +310,7 @@ export const make = Effect.gen(function* () {
             if (
               !opened.isFile() ||
               opened.nlink !== 1 ||
+              current.nlink !== 1 ||
               resolved !== realPath ||
               current.dev !== opened.dev ||
               current.ino !== opened.ino
@@ -321,6 +321,7 @@ export const make = Effect.gen(function* () {
           await unchanged();
           const mode = opened.mode & 0o7777;
           const folder = path.dirname(realPath);
+          const folderBefore = await NodeFSP.stat(folder);
           const name = path.join(
             folder,
             `.${path.basename(realPath)}.${NodeCrypto.randomUUID()}.t3-save`,
@@ -345,11 +346,17 @@ export const make = Effect.gen(function* () {
                 (NodeFS.constants.O_NOFOLLOW ?? 0),
             );
             try {
+              await unchanged();
+              // The opened file itself, last: a hard link made after the open aliases it.
               const target = await inPlace.stat();
-              if (target.dev !== opened.dev || target.ino !== opened.ino) {
+              if (
+                !target.isFile() ||
+                target.nlink !== 1 ||
+                target.dev !== opened.dev ||
+                target.ino !== opened.ino
+              ) {
                 throw new Error("The file changed or is not a single regular file.");
               }
-              await unchanged();
               await inPlace.truncate(0);
               await inPlace.writeFile(input.contents);
               await inPlace.sync();
@@ -359,15 +366,33 @@ export const make = Effect.gen(function* () {
             return;
           }
           temp = name;
+          let written: NodeFS.Stats;
           try {
             await output.writeFile(input.contents);
             // The umask may have narrowed the mode the open asked for.
             await output.chmod(mode);
             await output.sync();
+            written = await output.stat();
           } finally {
             await output.close();
           }
           await unchanged();
+          // Node has no renameat, so the rename resolves the folder path again: check that it is
+          // still the folder the temp file was written in, as late as possible.
+          const [folderNow, realFolder, tempNow] = await Promise.all([
+            NodeFSP.stat(folder),
+            NodeFSP.realpath(folder),
+            NodeFSP.lstat(temp),
+          ]);
+          if (
+            realFolder !== folder ||
+            folderNow.dev !== folderBefore.dev ||
+            folderNow.ino !== folderBefore.ino ||
+            tempNow.dev !== written.dev ||
+            tempNow.ino !== written.ino
+          ) {
+            throw new Error("The folder changed while saving.");
+          }
           await NodeFSP.rename(temp, realPath);
           temp = null;
           // Best effort: the rename already replaced the file; this only makes it durable sooner.
