@@ -219,6 +219,8 @@ export interface KeybindingGroup {
 }
 
 const KEYBINDING_GROUPS = [
+  { id: "tiles", title: "Tiles & tabs", prefixes: ["workspace"] },
+  { id: "search", title: "Search & palette", prefixes: ["commandPalette", "search", "filePicker", "projectSearch"] },
   {
     id: "navigation",
     title: "Navigation",

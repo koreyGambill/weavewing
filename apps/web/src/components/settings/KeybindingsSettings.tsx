@@ -92,6 +92,7 @@ function KeybindingPill({
   if (value.startsWith("leader "))
     return (
       <KbdGroup>
+        <Badge variant="outline">Leader</Badge>
         <KeybindingPill value={leaderKey} />
         <span className="text-xs text-muted-foreground">then</span>
         <Kbd>{value.slice(7) === "space" ? "Space" : value.slice(7).toUpperCase()}</Kbd>
@@ -1543,6 +1544,40 @@ export function KeybindingsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <div inert={!canWriteSettings}>
+        <SettingsSection title="Leader">
+          <SettingsRow
+            title="Use leader key"
+            description="Press the leader, release it, then a tile or tab key. Press it twice to send it through. Turning this off restores classic shortcuts."
+            control={
+              <Switch
+                aria-label="Use leader key"
+                checked={leaderOn}
+                disabled={savingCommand !== null}
+                onCheckedChange={(checked) =>
+                  saveKeybinding({
+                    command: "keybindings.leader",
+                    key: leaderRow?.key ?? "ctrl+a",
+                    ...(checked ? {} : { when: "false" }),
+                  })
+                }
+              />
+            }
+          />
+          {leaderRow ? (
+            <KeybindingSettingsRow
+              key={leaderRow.id}
+              row={leaderRow}
+              isSaving={savingCommand === "keybindings.leader"}
+              allRows={allRows}
+              variables={whenVariables}
+              onSave={saveKeybinding}
+              onReset={resetKeybinding}
+              onRemove={removeKeybinding}
+            />
+          ) : null}
+        </SettingsSection>
+      </div>
       <SettingsSection
         {...searchableSetting("keybindings")}
         headerAction={!isElectron ? <BrowserKeybindingNotice /> : null}
@@ -1586,38 +1621,7 @@ export function KeybindingsSettingsPanel() {
         </p>
       ) : null}
       <div inert={!canWriteSettings} className="flex flex-col gap-8">
-        <SettingsSection title="Leader">
-          <SettingsRow
-            title="Use leader key"
-            description="Press the leader, release it, then a tile or tab key. Press it twice to send it through. Turning this off restores classic shortcuts."
-            control={
-              <Switch
-                aria-label="Use leader key"
-                checked={leaderOn}
-                disabled={savingCommand !== null}
-                onCheckedChange={(checked) =>
-                  saveKeybinding({
-                    command: "keybindings.leader",
-                    key: leaderRow?.key ?? "ctrl+a",
-                    ...(checked ? {} : { when: "false" }),
-                  })
-                }
-              />
-            }
-          />
-          {leaderRow ? (
-            <KeybindingSettingsRow
-              key={leaderRow.id}
-              row={leaderRow}
-              isSaving={savingCommand === "keybindings.leader"}
-              allRows={allRows}
-              variables={whenVariables}
-              onSave={saveKeybinding}
-              onReset={resetKeybinding}
-              onRemove={removeKeybinding}
-            />
-          ) : null}
-        </SettingsSection>
+
         {isAddingBinding ? (
           <SettingsGroup>
             <NewKeybindingSettingsRow
