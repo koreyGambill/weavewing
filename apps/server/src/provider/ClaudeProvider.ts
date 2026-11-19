@@ -629,12 +629,11 @@ const probeClaudeCapabilities = (
 
 type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
 
-function describeClaudeUsageFailure(error: { readonly _tag: string; readonly cause?: unknown }) {
+function describeClaudeUsageFailure(error: { readonly _tag: string }) {
   if (error._tag !== "ClaudeCapabilitiesProbeSdkError") {
     return `Claude Code did not answer the usage request within ${DEFAULT_TIMEOUT_MS / 1000} seconds.`;
   }
-  const detail = error.cause instanceof Error ? error.cause.message : String(error.cause);
-  return `Claude Code could not read plan usage: ${detail.slice(0, 200)}`;
+  return "Claude Code could not read plan usage.";
 }
 
 const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (

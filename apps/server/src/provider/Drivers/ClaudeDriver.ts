@@ -6,6 +6,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -273,37 +274,45 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       stateDir,
       processEnv,
     );
-    const resolveCapabilities = Cache.get(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
-      Effect.map((result) => result.capabilities),
-    );
-
     const checkProvider = catalogService.refreshInBackground.pipe(
       Effect.andThen(
-        modelCatalog.pipe(
-          Effect.flatMap((catalog) =>
-            checkClaudeProviderStatus(
-              effectiveConfig,
-              () => resolveCapabilities,
-              processEnv,
-              stateDir,
-              catalog,
-              scopedLimitNames,
-              (version) =>
-                ClaudeResetCredits.readClaudeResetCredits(configDir, version).pipe(
-                  Effect.provideService(HttpClient.HttpClient, httpClient),
-                  Effect.provideService(FileSystem.FileSystem, fileSystem),
-                  Effect.provideService(Path.Path, path),
-                ),
-            ),
-          ),
-          Effect.tap((provider) =>
-            provider.auth.status === "unauthenticated"
-              ? Cache.invalidateAll(capabilitiesProbeCache)
-              : Effect.void,
-          ),
-          Effect.map(stampIdentity),
-        ),
+        Effect.gen(function* () {
+          const catalog = yield* modelCatalog;
+          let cachedUsageSample = false;
+          const resolveCapabilities = Effect.gen(function* () {
+            const cached = yield* Cache.getSuccess(capabilitiesProbeCache, capabilitiesCacheKey);
+            if (Option.isSome(cached)) {
+              cachedUsageSample = cached.value.capabilities.usage !== undefined;
+              return cached.value.capabilities;
+            }
+            const result = yield* Cache.get(capabilitiesProbeCache, capabilitiesCacheKey);
+            return result.capabilities;
+          });
+          const provider = yield* checkClaudeProviderStatus(
+            effectiveConfig,
+            () => resolveCapabilities,
+            processEnv,
+            stateDir,
+            catalog,
+            scopedLimitNames,
+            (version) =>
+              ClaudeResetCredits.readClaudeResetCredits(configDir, version).pipe(
+                Effect.provideService(HttpClient.HttpClient, httpClient),
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+              ),
+          );
+          if (provider.auth.status === "unauthenticated") {
+            yield* Cache.invalidateAll(capabilitiesProbeCache);
+          }
+          return {
+            ...stampIdentity(provider),
+            ...(cachedUsageSample && provider.usageLimits ? { cachedUsageSample } : {}),
+          };
+        }),
       ),
+      // An interrupted check can fill the cache without publishing its sample.
+      Effect.onInterrupt(() => Cache.invalidateAll(capabilitiesProbeCache)),
       // Disabled, failed version checks and interruption never reach the probe.
       Effect.ensuring(modelRoutes.settle),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

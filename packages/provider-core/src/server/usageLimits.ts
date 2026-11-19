@@ -117,24 +117,40 @@ export type UsageWindowSequences = ReadonlyMap<string, number>;
  * Merges a probe into published limits window by window. Sequence numbers come from one
  * per-provider counter: a probe takes its number when it starts, a runtime update when applied.
  * A window observed after the probe started keeps its published value; the probe owns the rest.
+ * A cached sample can refresh probe metadata without reapplying its windows.
  */
 export function mergeProbedUsageLimits(input: {
   readonly published: ServerProviderUsageLimits | undefined;
   readonly probed: ServerProviderUsageLimits | undefined;
   readonly sequences: UsageWindowSequences;
   readonly probeSequence: number;
+  readonly cachedUsageSample?: boolean | undefined;
 }): {
   readonly limits: ServerProviderUsageLimits | undefined;
   readonly sequences: UsageWindowSequences;
 } {
   const { published, probed, sequences, probeSequence } = input;
+  if (input.cachedUsageSample && published) {
+    return {
+      limits:
+        !published.unavailable && probed && !probed.unavailable
+          ? { ...probed, checkedAt: published.checkedAt, windows: published.windows }
+          : published,
+      sequences,
+    };
+  }
   if (probed?.unavailable?.reason === "probeFailed" && published && !published.unavailable) {
     return { limits: published, sequences };
   }
   const nextSequences = new Map(
     (probed?.windows ?? []).map((window) => [window.id, probeSequence] as const),
   );
-  if (!published || !probed || published.unavailable || probed.unavailable) {
+  if (
+    !published ||
+    !probed ||
+    published.unavailable?.reason === "unsupported" ||
+    probed.unavailable?.reason === "unsupported"
+  ) {
     return { limits: probed, sequences: nextSequences };
   }
   const newer = new Map<string, ServerProviderUsageWindow>();

@@ -560,6 +560,13 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       expect(effortLabels.some((label) => label.includes("capped"))).toBe(false);
       expect(snapshot.auth).toMatchObject({ status: "authenticated", email: "test@example.com" });
       expect(snapshot.usageLimits?.windows[0]?.usedPercent).toBe(100);
+
+      yield* claude!.snapshot.applyUsageLimits!({
+        checkedAt: snapshot.checkedAt,
+        windows: [{ id: "five_hour", kind: "session", label: "Session", usedPercent: 42 }],
+      });
+      const cached = yield* claude!.snapshot.refresh;
+      expect(cached.usageLimits?.windows[0]?.usedPercent).toBe(42);
     }).pipe(Effect.provide(layerTest)),
   );
 

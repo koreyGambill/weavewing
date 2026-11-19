@@ -791,7 +791,7 @@ describe("makeManagedServerProvider", () => {
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );
 
-  it.effect("merges a probe with runtime updates applied while it ran", () =>
+  it.effect.each([false, true])("merges racing usage reads (recovery: %s)", (recovering) =>
     Effect.scoped(
       Effect.gen(function* () {
         const weekly = (usedPercent: number) =>
@@ -813,7 +813,7 @@ describe("makeManagedServerProvider", () => {
         const probeStarted = yield* Deferred.make<void>();
         const releaseProbe = yield* Deferred.make<void>();
         const probes = yield* Ref.make([
-          { hold: false, windows: [weekly(69), fable(3)] },
+          { hold: false, windows: recovering ? [] : [weekly(69), fable(3)] },
           { hold: true, windows: [weekly(93), fable(16)] },
           { hold: false, windows: [weekly(95)] },
         ]);
@@ -833,7 +833,13 @@ describe("makeManagedServerProvider", () => {
             ),
             Effect.map(({ windows }) => ({
               ...refreshedSnapshot,
-              usageLimits: { checkedAt, windows },
+              usageLimits: {
+                checkedAt,
+                windows,
+                ...(windows.length === 0
+                  ? { unavailable: { reason: "probeFailed" as const } }
+                  : {}),
+              },
             })),
           ),
           refreshInterval: "1 hour",
@@ -842,11 +848,11 @@ describe("makeManagedServerProvider", () => {
 
         const merging = yield* Effect.forkChild(provider.refresh);
         yield* Deferred.await(probeStarted);
-        // An unchanged reading taken after the probe started still outranks the probe.
         yield* provider.applyUsageLimits({ checkedAt, windows: [weekly(69), session] });
         yield* Deferred.succeed(releaseProbe, undefined);
         const merged = yield* Fiber.join(merging);
         assert.deepStrictEqual(merged.usageLimits?.windows, [session, weekly(69), fable(16)]);
+        assert.isUndefined(merged.usageLimits?.unavailable);
 
         const next = yield* provider.refresh;
         assert.deepStrictEqual(next.usageLimits?.windows, [weekly(95)]);

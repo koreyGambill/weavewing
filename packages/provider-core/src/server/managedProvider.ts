@@ -56,7 +56,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>;
-  readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
+  readonly checkProvider: Effect.Effect<
+    ServerProvider & { readonly cachedUsageSample?: boolean },
+    ServerSettingsError
+  >;
   readonly checkUsageLimits?: Effect.Effect<ServerProvider["usageLimits"]>;
   readonly invalidateUsageCache?: Effect.Effect<void>;
   readonly enrichSnapshot?: (input: {
@@ -189,7 +192,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     // A probe without usage must not erase a report published while its I/O was in flight.
     const usageBeforeProbe = (yield* Ref.get(snapshotStateRef)).snapshot.usageLimits;
     const probeSequence = yield* takeUsageSequence;
-    const probedSnapshot = yield* input.checkProvider;
+    const { cachedUsageSample, ...probedSnapshot } = yield* input.checkProvider;
     // One failed periodic check over a ready provider is often transient; recheck before showing it.
     if (
       options?.deferFailure === true &&
@@ -216,16 +219,17 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
           differs(probedSnapshot.auth.email?.toLowerCase(), previous.email?.toLowerCase()) ||
           (probedSnapshot.auth.workspaceId !== undefined &&
             probedSnapshot.auth.workspaceId !== previous.workspaceId);
+        const published = state.snapshot.usageLimits;
+        const probed = probedSnapshot.usageLimits;
         const merged =
-          probedSnapshot.usageLimits === undefined &&
-          state.snapshot.usageLimits !== usageBeforeProbe &&
-          !switchedAccount
-            ? { limits: state.snapshot.usageLimits, sequences: state.usageWindowSequences }
+          !switchedAccount && probed === undefined && published !== usageBeforeProbe
+            ? { limits: published, sequences: state.usageWindowSequences }
             : mergeProbedUsageLimits({
-                published: switchedAccount ? undefined : state.snapshot.usageLimits,
-                probed: probedSnapshot.usageLimits,
+                published: switchedAccount ? undefined : published,
+                probed,
                 sequences: state.usageWindowSequences,
                 probeSequence,
+                cachedUsageSample,
               });
         const usageLimits = merged.limits;
         const workspaceId =

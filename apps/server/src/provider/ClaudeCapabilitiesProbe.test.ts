@@ -110,6 +110,7 @@ it.effect("keeps the probe subprocess alive while gateway model discovery can fi
       capabilities.models?.map((model) => model.value),
       ["gateway/claude-relay"],
     );
+    assert.equal(capabilities.usageError, "Claude Code could not read plan usage.");
     assert.equal(abortSignal?.aborted, false);
     yield* TestClock.adjust("3 seconds");
     assert.equal(abortSignal?.aborted, true);
