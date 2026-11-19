@@ -550,6 +550,35 @@ describe("DesktopBackendConfiguration", () => {
     );
   });
 
+  it.effect.each([
+    { mode: "mirrored", shares: true },
+    { mode: "nat", shares: false },
+    // `wslinfo` answering something else, failing, or missing all read as unknown.
+    { mode: null, shares: false },
+  ] as const)("resolveWsl shares host loopback only in mirrored mode: $mode", ({ mode, shares }) =>
+    withPackagedWslHarness(
+      {
+        archiveHash: "e".repeat(64),
+        wsl: () => ({
+          prepareRuntime: () => ({ ok: true, linuxAppRoot: "/runtime" }),
+          getNetworkingMode: () => mode,
+          // A NAT guest bridge can match a Windows VPN adapter; the mode decides, not the IP.
+          getDistroIp: () => Option.some("127.0.0.1"),
+        }),
+      },
+      () =>
+        Effect.gen(function* () {
+          const config =
+            yield* (yield* DesktopBackendConfiguration.DesktopBackendConfiguration).resolveWsl({
+              port: 5000,
+              distro: "Ubuntu",
+            });
+          assert.isTrue(Option.isNone(config.preflightFailure));
+          assert.equal(config.sharesHostLoopback, shares);
+        }),
+    ),
+  );
+
   it.effect("resolveWsl retries a failed preflight without waiting for an IP query", () =>
     withPackagedWslHarness(
       {
@@ -644,8 +673,6 @@ describe("DesktopBackendConfiguration", () => {
         assert.notInclude(config.args, "/bin/sh");
         assert.notInclude(config.args, "-c");
         assert.isTrue(Option.isNone(config.preflightFailure));
-        // A NAT distro IP is never one of the host's own addresses.
-        assert.isFalse(config.sharesHostLoopback);
       }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
