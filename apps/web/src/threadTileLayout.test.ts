@@ -10,6 +10,7 @@ import {
   syncTileLayout,
   clampTileWidths,
   tileMinimumWidth,
+  TILE_MIN_WIDTH_PX,
 } from "./threadTileLayout";
 
 describe("thread tile layout", () => {
@@ -78,8 +79,8 @@ describe("thread tile layout", () => {
     expect(resize(rect, { left: true, bottom: true }, { x: 0.5, y: -0.5 })).toEqual([
       0.4, 0.2, 0.2, 0.2,
     ]);
-    expect(resize(rect, { left: true }, { x: 0.5, y: 0 }, 500)).toEqual([0.15, 0.2, 0.45, 0.4]);
-    expect(resize(rect, { right: true }, { x: -1, y: 0 }, 500)).toEqual([0.2, 0.2, 0.45, 0.4]);
+    expect(resize(rect, { left: true }, { x: 0.5, y: 0 }, 500)).toEqual([0.26, 0.2, 0.34, 0.4]);
+    expect(resize(rect, { right: true }, { x: -1, y: 0 }, 500)).toEqual([0.2, 0.2, 0.34, 0.4]);
     const firstFloat = (...args: Parameters<typeof firstFloatingTile>) =>
       Object.fromEntries(
         Object.entries(firstFloatingTile(...args)).map(([key, value]) => [
@@ -722,9 +723,9 @@ describe("thread tile layout", () => {
     layout = applyTileAction(layout, { type: "resize", splitId: "initial-split", ratio: 0.7 });
     expect(layout.root.kind === "split" && layout.root.ratio).toBe(0.7);
     for (const [width, ratio, expected] of [
-      [1000, 0.01, 0.224],
-      [1000, 0.99, 0.776],
-      [500, 0.7, 0.552],
+      [1000, 0.01, 0.168],
+      [1000, 0.99, 0.832],
+      [500, 0.7, 0.664],
       [300, 0.7, 0.5],
     ] as const) {
       const resized = applyTileAction(layout, {
@@ -734,7 +735,13 @@ describe("thread tile layout", () => {
       });
       const root = clampTileWidths(resized.root, width);
       expect(root.kind === "split" && root.ratio).toBeCloseTo(expected);
-      expect(tileMinimumWidth(root)).toBe(448);
+      expect(tileMinimumWidth(root)).toBe(2 * TILE_MIN_WIDTH_PX);
+      // Neither tile ends up narrower than the header's minimum.
+      const ratioAfter = root.kind === "split" ? root.ratio : 0;
+      const canvas = Math.max(width, tileMinimumWidth(root));
+      expect(Math.min(ratioAfter, 1 - ratioAfter) * canvas).toBeGreaterThanOrEqual(
+        TILE_MIN_WIDTH_PX - 1e-6,
+      );
     }
     const nested = applyTileAction(layout, {
       type: "new-group",
@@ -745,7 +752,7 @@ describe("thread tile layout", () => {
       side: "after",
     });
     const root = clampTileWidths(nested.root, 400);
-    expect(tileMinimumWidth(root)).toBe(672);
+    expect(tileMinimumWidth(root)).toBe(3 * TILE_MIN_WIDTH_PX);
     expect(root.kind === "split" && root.ratio).toBeCloseTo(1 / 3);
 
     layout = syncTileLayout(layout, ["a"], [], null, false);

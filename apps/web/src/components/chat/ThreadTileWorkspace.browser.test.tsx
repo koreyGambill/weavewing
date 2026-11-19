@@ -22,12 +22,14 @@ import {
   selectThreadTileLayout,
   useRightPanelStore,
 } from "../../rightPanelStore";
-import { getTileGroups, isNewTab, newTabId } from "../../threadTileLayout";
+import { getTileGroups, isNewTab, newTabId, TILE_MIN_WIDTH_PX } from "../../threadTileLayout";
 import { ThreadTileWorkspace } from "./ThreadTileWorkspace";
 
+const tabTitles = vi.hoisted(() => new Map<string, string>());
 vi.mock("../SurfaceTabContent", () => ({
   SurfaceIcon: () => null,
-  surfaceTitle: (surface: { kind: string }) => surface.kind,
+  surfaceTitle: (surface: { id: string; kind: string }) =>
+    tabTitles.get(surface.id) ?? surface.kind,
 }));
 vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
 const savedLayouts = vi.hoisted(() => ({ effectiveDefault: null as SavedTileLayout | null }));
@@ -49,6 +51,7 @@ async function setup(resizeScenario = false, newThread = false, leader = false) 
     ? DEFAULT_RESOLVED_KEYBINDINGS
     : compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
   savedLayouts.effectiveDefault = newThread ? DEFAULT_TILE_LAYOUTS[0]! : null;
+  tabTitles.clear();
   await using resources = new AsyncDisposableStack();
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   await page.viewport(1100, 800);
@@ -166,7 +169,7 @@ async function setup(resizeScenario = false, newThread = false, leader = false) 
     const tab = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]')).find(
       (element) => element.getAttribute("aria-label") === name,
     );
-    if (tab && !tab.checkVisibility()) {
+    if (tab && !tab.checkVisibility({ visibilityProperty: true })) {
       const active = tab
         .closest("[data-tile-group]")!
         .querySelector('[role="tab"][aria-selected="true"]')!
@@ -182,11 +185,15 @@ async function setup(resizeScenario = false, newThread = false, leader = false) 
       await userEvent.click(screen.getByRole("tab", { name, exact: true }));
     }
   };
-  const newTileRight = async () => {
+  const newTile = async (where: "right" | "below") => {
     await userEvent.click(
       screen.getByRole("button", { name: "Tile actions", exact: true }).first(),
     );
-    await userEvent.click(screen.getByRole("menuitem", { name: /New tile to the right/ }));
+    await userEvent.click(
+      screen.getByRole("menuitem", {
+        name: where === "right" ? /New tile to the right/ : /New tile below/,
+      }),
+    );
   };
   const layout = () => selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, threadRef);
   const owned = resources.move();
@@ -197,14 +204,14 @@ async function setup(resizeScenario = false, newThread = false, leader = false) 
     threadRef,
     layout,
     selectTab,
-    newTileRight,
+    newTile,
     [Symbol.asyncDispose]: () => owned.disposeAsync(),
   };
 }
 
 it("keeps conversation and editor contents mounted through grouping, splitting and maximizing", async () => {
   await using fixture = await setup();
-  const { screen, store, threadRef, layout, selectTab, newTileRight } = fixture;
+  const { screen, store, threadRef, layout, selectTab, newTile } = fixture;
   await userEvent.fill(
     screen.getByRole("textbox", { name: "Conversation draft" }),
     "unfinished conversation",
@@ -249,7 +256,7 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
   await expect
     .element(screen.getByRole("textbox", { name: "Conversation draft" }))
     .toHaveValue("unfinished conversation");
-  await newTileRight();
+  await newTile("right");
   await expect.element(screen.getByText("Choose an area", { exact: true })).toBeVisible();
   const chooser = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   expect(
@@ -299,7 +306,7 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
   await vi.waitFor(() =>
     expect(document.activeElement?.getAttribute("data-tile-content")).toBe("files"),
   );
-  await newTileRight();
+  await newTile("right");
   await expect.element(screen.getByText("Choose an area", { exact: true })).toBeVisible();
   const empty = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   expect(empty).toBeDefined();
@@ -357,8 +364,8 @@ it("keeps conversation and editor contents mounted through grouping, splitting a
 
 it("resizes, shows tiles beside a maximized one and opens independent area views", async () => {
   await using fixture = await setup(true);
-  const { screen, store, threadRef, layout, newTileRight } = fixture;
-  await newTileRight();
+  const { screen, store, threadRef, layout, newTile } = fixture;
+  await newTile("right");
   const notesChooser = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   await userEvent.click(screen.getByRole("button", { name: "Notes", exact: true }));
   await expect
@@ -449,7 +456,8 @@ it("resizes, shows tiles beside a maximized one and opens independent area views
   );
   await userEvent.keyboard("{/Alt}{/Control}");
   expect(JSON.stringify(layout().root)).not.toBe(beforeNativeResize);
-  await newTileRight();
+  // The first tile is now too narrow to halve side by side.
+  await newTile("below");
   const secondNotesGroup = getTileGroups(layout()).find((group) => group.tabs.every(isNewTab))!;
   await userEvent.click(screen.getByRole("button", { name: "Notes", exact: true }));
   expect(
@@ -691,6 +699,178 @@ it("keeps the focused tile and its editors when the window becomes narrow", asyn
     .toHaveValue("chat draft");
 });
 
+type Fixture = Awaited<ReturnType<typeof setup>>;
+/** Main chat, diff and notes, then an active New tab, in the left of two side-by-side tiles. */
+function fourTabTile({ store, threadRef, layout }: Fixture) {
+  store.add(threadRef, "notes");
+  const notes = getTileGroups(layout())
+    .flatMap((group) => group.tabs)
+    .find((tabId) => tabId.startsWith("notes"))!;
+  store.applyTileAction(threadRef, {
+    type: "move",
+    tabId: notes,
+    targetGroupId: "conversation-group",
+  });
+  store.applyTileAction(threadRef, {
+    type: "new-tab",
+    groupId: "conversation-group",
+    tabId: newTabId("last"),
+  });
+  const tile = () => document.querySelector<HTMLElement>('[data-tile-group="conversation-group"]')!;
+  return {
+    notes,
+    tile,
+    shownTabs: () =>
+      [...tile().querySelectorAll<HTMLElement>('[role="tab"]')]
+        .filter((tab) => tab.checkVisibility({ visibilityProperty: true }))
+        .map((tab) => tab.getAttribute("aria-label")),
+    shown: (label: string) =>
+      tile()
+        .querySelector<HTMLElement>(`[aria-label="${label}"]`)
+        ?.checkVisibility({ visibilityProperty: true }) ?? false,
+    tabFit: (tabId: string) =>
+      tile().querySelector<HTMLElement>(`[data-fit-tab="${tabId}"]`)?.dataset.fit,
+    resize: (ratio: number) =>
+      store.applyTileAction(threadRef, { type: "resize", splitId: "terminal-split", ratio }),
+  };
+}
+
+it("folds tabs that do not fit into a +N list as a tile narrows, keeping the active tab", async () => {
+  await using fixture = await setup(true);
+  const { screen, layout } = fixture;
+  const { tile, shownTabs, shown, resize } = fourTabTile(fixture);
+
+  resize(0.9);
+  await vi.waitFor(() => expect(shownTabs()).toEqual(["Main chat", "diff", "notes", "New tab"]));
+  expect(shown("New tile to the right")).toBe(true);
+  expect(
+    tile().querySelector("[data-fit-chip]")!.checkVisibility({ visibilityProperty: true }),
+  ).toBe(false);
+
+  // Controls give way before any tab folds; New tab and tile actions stay.
+  resize(0.45);
+  await vi.waitFor(() => expect(shown("Close tile")).toBe(false));
+  expect(shownTabs()).toEqual(["Main chat", "diff", "notes", "New tab"]);
+  expect(shown("New tile to the right")).toBe(false);
+  expect(shown("Maximize tile")).toBe(false);
+  expect(shown("New tab")).toBe(true);
+  expect(shown("Tile actions")).toBe(true);
+
+  // Then the tail folds, and the active tab takes the last place.
+  resize(0.38);
+  await vi.waitFor(() => expect(shownTabs()).toEqual(["Main chat", "New tab"]));
+  expect(shown("2 more tabs")).toBe(true);
+
+  // At the minimum width only the active tab's icon is left beside +3.
+  resize(0.1);
+  await vi.waitFor(() => expect(shown("3 more tabs")).toBe(true));
+  expect(shownTabs()).toEqual(["New tab"]);
+  const activeTab = tile().querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')!;
+  expect(activeTab.querySelector("span")!.checkVisibility()).toBe(false);
+  const tileRect = tile().getBoundingClientRect();
+  expect(tileRect.width).toBeGreaterThanOrEqual(TILE_MIN_WIDTH_PX - 0.5);
+  // Nothing in the header is clipped at the minimum.
+  expect(
+    tile().querySelector('[aria-label="Tile actions"]')!.getBoundingClientRect().right,
+  ).toBeLessThanOrEqual(tileRect.right);
+
+  await userEvent.click(screen.getByRole("button", { name: "3 more tabs", exact: true }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "diff", exact: true }));
+  expect(
+    getTileGroups(layout()).find((group) => group.id === "conversation-group")?.activeTabId,
+  ).toBe("diff");
+  await vi.waitFor(() => expect(shownTabs()).toEqual(["diff"]));
+});
+
+it("moves focus to the +N chip when the focused tab folds", async () => {
+  await using fixture = await setup(true);
+  const { screen } = fixture;
+  const { tile, shownTabs, resize } = fourTabTile(fixture);
+  resize(0.9);
+  await vi.waitFor(() => expect(shownTabs()).toHaveLength(4));
+  tile().querySelector<HTMLElement>('[role="tab"][aria-label="diff"]')!.focus();
+  resize(0.38);
+  await vi.waitFor(() => expect(shownTabs()).toEqual(["Main chat", "New tab"]));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "2 more tabs", exact: true }).element(),
+  );
+});
+
+it("re-measures a tab whose title changes while truncated, without a resize observer loop", async () => {
+  const errors: string[] = [];
+  const onError = (event: ErrorEvent) => errors.push(event.message);
+  window.addEventListener("error", onError);
+  using _errors = { [Symbol.dispose]: () => window.removeEventListener("error", onError) };
+  await using fixture = await setup(true);
+  const { store, threadRef } = fixture;
+  const { notes, shownTabs, tabFit, resize } = fourTabTile(fixture);
+  const retitle = (title: string) => {
+    tabTitles.set(notes, title);
+    store.applyTileAction(threadRef, { type: "focus", groupId: "conversation-group" });
+  };
+  store.applyTileAction(threadRef, {
+    type: "activate",
+    groupId: "conversation-group",
+    tabId: notes,
+  });
+  resize(0.25);
+  await vi.waitFor(() => expect(shownTabs()).toEqual(["notes"]));
+  expect(tabFit(notes)).toBe("full");
+  retitle("notes with a title long enough to truncate");
+  await vi.waitFor(() => expect(tabFit(notes)).toBe("truncated"));
+  retitle("n");
+  await vi.waitFor(() => expect(tabFit(notes)).toBe("full"));
+  expect(errors.filter((message) => message.includes("ResizeObserver"))).toEqual([]);
+});
+
+it("keeps the +N chip one width for one- and two-digit counts", async () => {
+  await using fixture = await setup(true);
+  const { store, threadRef } = fixture;
+  const { tile, shown, resize } = fourTabTile(fixture);
+  const chipWidth = () => tile().querySelector("[data-fit-chip]")!.getBoundingClientRect().width;
+  resize(0.1);
+  await vi.waitFor(() => expect(shown("3 more tabs")).toBe(true));
+  const single = chipWidth();
+  for (const id of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])
+    store.applyTileAction(threadRef, {
+      type: "new-tab",
+      groupId: "conversation-group",
+      tabId: newTabId(id),
+    });
+  await vi.waitFor(() => expect(shown("13 more tabs")).toBe(true));
+  expect(chipWidth()).toBe(single);
+});
+
+it("refuses a side-by-side split of a tile narrower than two minimum widths", async () => {
+  await using fixture = await setup(true);
+  const { screen, store, threadRef, layout } = fixture;
+  // 630px beside 270px: the right tile has no room to halve.
+  store.applyTileAction(threadRef, { type: "resize", splitId: "terminal-split", ratio: 0.7 });
+  const control = (groupId: string, label: string) =>
+    document.querySelector<HTMLButtonElement>(
+      `[data-tile-group="${groupId}"] button[aria-label="${label}"]`,
+    )!;
+  await vi.waitFor(() =>
+    expect(control("terminal-group", "New tile to the right").disabled).toBe(true),
+  );
+  expect(control("conversation-group", "New tile to the right").disabled).toBe(false);
+  expect(control("terminal-group", "New tile below").disabled).toBe(false);
+  const terminalTile = screen.getByRole("region", { name: "Tile: terminal", exact: true });
+  await userEvent.click(terminalTile.getByRole("button", { name: "Tile actions", exact: true }));
+  await expect
+    .element(screen.getByRole("menuitem", { name: /New tile to the right/ }))
+    .toHaveAttribute("aria-disabled", "true");
+  await expect
+    .element(screen.getByRole("menuitem", { name: /New tile below/ }))
+    .not.toHaveAttribute("aria-disabled");
+  await userEvent.keyboard("{Escape}");
+  store.applyTileAction(threadRef, { type: "focus", groupId: "terminal-group" });
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(getTileGroups(layout())).toHaveLength(2);
+  dispatchMenuAction("workspace.tile.splitDown");
+  expect(getTileGroups(layout())).toHaveLength(3);
+});
+
 it("leaves Escape in a maximized terminal even when the shortcut context is stale", async () => {
   await using fixture = await setup(true);
   const { store, threadRef, layout, screen } = fixture;
@@ -861,6 +1041,7 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
       />
     );
   }
+  // Splits stack, since a tile narrower than two minimum widths refuses a side-by-side split.
   const tree = (withOverlay: boolean) => (
     <div style={{ display: "flex", flexDirection: "column", width: 900, height: 800 }}>
       <input aria-label="Outside both" />
@@ -883,7 +1064,7 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
     ];
   };
   const splitByKey = () =>
-    userEvent.keyboard("{Control>}{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}{/Control}");
+    userEvent.keyboard("{Control>}{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}{/Control}");
   const focus = (name: string) => {
     const element = screen.getByRole("textbox", { name, exact: true }).element();
     (element as HTMLElement).focus();
@@ -898,12 +1079,12 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
   await splitByKey();
   expect(groups()).toEqual([2, 2]);
   focus("Editor terminal:term-1");
-  dispatchMenuAction("workspace.tile.splitRight");
+  dispatchMenuAction("workspace.tile.splitDown");
   expect(groups()).toEqual([2, 3]);
 
   // The overlay re-rendered last, so its registrations are the newest.
   focus("Thread composer");
-  dispatchMenuAction("workspace.tile.splitRight");
+  dispatchMenuAction("workspace.tile.splitDown");
   expect(groups()).toEqual([3, 3]);
   await threadChooserFocused();
   focus("Thread composer");
@@ -912,7 +1093,7 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
   await threadChooserFocused();
 
   focus("Outside both");
-  dispatchMenuAction("workspace.tile.splitRight");
+  dispatchMenuAction("workspace.tile.splitDown");
   expect(groups()).toEqual([5, 3]);
   await threadChooserFocused();
   focus("Outside both");
@@ -936,7 +1117,7 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
     await expect.element(screen.getByRole("menu")).not.toBeInTheDocument();
   };
   await openTileMenu("Overlay");
-  dispatchMenuAction("workspace.tile.splitRight");
+  dispatchMenuAction("workspace.tile.splitDown");
   expect(groups()).toEqual([6, 4]);
   await closeTileMenu();
   await openTileMenu("Overlay");
@@ -961,6 +1142,6 @@ it("sends tile keys and menu actions only to the workspace that owns focus, else
 
   focus("Editor terminal:term-1");
   await screen.rerender(tree(false));
-  dispatchMenuAction("workspace.tile.splitRight");
+  dispatchMenuAction("workspace.tile.splitDown");
   expect(groups()).toEqual([7, 5]);
 });
