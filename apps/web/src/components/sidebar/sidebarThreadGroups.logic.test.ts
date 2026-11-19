@@ -139,14 +139,23 @@ describe("placeSidebarThread", () => {
     expect(next.groups.map((group) => group.threadKeys)).toEqual([["a", "settled", "c", "b"], []]);
   });
 
-  it("writes the shown Ungrouped order when a thread lands there, keeping hidden entries after it", () => {
+  it("writes the shown Ungrouped order and keeps hidden entries in their slots", () => {
     const current = state([["demo", ["a"]]], ["filtered-out", "y"]);
     const arranged = arrangeSidebarThreadGroups(current, families("new", "a", "y"), {
       hideEmptyGroups: false,
     });
     const next = placeSidebarThread(current, arranged, "a", { groupId: null, beforeKey: "y" });
     expect(next.groups[0]!.threadKeys).toEqual([]);
-    expect(next.ungroupedOrder).toEqual(["new", "a", "y", "filtered-out"]);
+    expect(next.ungroupedOrder).toEqual(["new", "filtered-out", "a", "y"]);
+  });
+
+  it("reorders under a filter without moving the threads it hides", () => {
+    const current = state([], ["m", "hidden-1", "p", "hidden-2", "q"]);
+    const arranged = arrangeSidebarThreadGroups(current, families("m", "p", "q"), {
+      hideEmptyGroups: true,
+    });
+    const next = placeSidebarThread(current, arranged, "q", { groupId: null, beforeKey: "m" });
+    expect(next.ungroupedOrder).toEqual(["q", "hidden-1", "m", "hidden-2", "p"]);
   });
 
   it("returns the state unchanged for a group that no longer exists", () => {

@@ -160,13 +160,22 @@ export function placeSidebarThread(
       ungroupedOrder: state.ungroupedOrder.filter((candidate) => candidate !== key),
     };
   }
-  // The shown order becomes manual; entries hidden by a filter or a shelf keep their relative order after it.
-  const shown = insert(arrangement.ungrouped.map((family) => family[0]!));
+  // Shown threads take the new order in the slots shown threads held, so threads a filter or
+  // a shelf hides keep their places.
+  const shownBefore = arrangement.ungrouped.map((family) => family[0]!);
+  const stored = new Set(state.ungroupedOrder);
+  const order = [...shownBefore.filter((entry) => !stored.has(entry)), ...state.ungroupedOrder];
+  if (!order.includes(key)) {
+    const at = target.beforeKey === null ? -1 : order.indexOf(target.beforeKey);
+    order.splice(at === -1 ? order.length : at, 0, key);
+  }
+  const shown = insert(shownBefore);
   const shownSet = new Set(shown);
+  let next = 0;
   return {
     ...state,
     groups,
-    ungroupedOrder: [...shown, ...state.ungroupedOrder.filter((entry) => !shownSet.has(entry))],
+    ungroupedOrder: order.map((entry) => (shownSet.has(entry) ? shown[next++]! : entry)),
   };
 }
 
