@@ -197,6 +197,10 @@ export interface ThreadPullRequestBadgePresentation {
   readonly text: string | number;
 }
 
+/**
+ * The icon, tone, accessible label and visible text for a thread's PR badge, or null when the
+ * thread has no badge. Sidebar rows resolve it once and pass it to the badge as `presentation`.
+ */
 export function resolveThreadPullRequestBadgePresentation({
   badge,
   number,
