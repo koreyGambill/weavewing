@@ -107,70 +107,67 @@ describe("sidebar header new thread", () => {
       tooltip: "No current project, so this starts in idle",
       opens: "default place",
     },
-  ] as const)(
-    "$mode sidebar, current=$current: $button opens the $opens",
-    async (scenario) => {
-      using stack = new DisposableStack();
-      const previousSettings = getClientSettings();
-      stack.defer(() => __setClientSettingsForTests(previousSettings));
-      __setClientSettingsForTests({
-        ...DEFAULT_CLIENT_SETTINGS,
-        boringSidebarEnabled: scenario.mode === "boring",
-      });
-      const projects = [project("active"), project("idle")];
-      const currentProjectRef = {
-        environmentId: projects[0]!.environmentId,
-        projectId: projects[0]!.id,
-      };
-      const startThread = vi.fn().mockResolvedValue(null);
-      const startDefaultPlace = vi.fn().mockResolvedValue(true);
-      vi.mocked(useProjects).mockReturnValue(projects);
-      vi.mocked(useHandleNewThread).mockReturnValue({
-        activeDraftThread: null,
-        activeThread: scenario.current
-          ? (makeThreadFixture({
-              environmentId: currentProjectRef.environmentId,
-              projectId: currentProjectRef.projectId,
-            }) as never)
-          : null,
-        defaultProjectFallbackReady: true,
-        handleNewThread: startThread,
-        routeDraftId: null,
-        routeThreadRef: null,
-      });
-      // The resolver says New thread goes to "idle"; the tooltip and the click must agree.
-      vi.mocked(scratchProject.useDefaultPlace).mockReturnValue({
-        place: {
-          kind: "project",
-          projectRef: { environmentId: projects[1]!.environmentId, projectId: projects[1]!.id },
-          unavailable: null,
-        },
-        label: "idle",
-      });
-      vi.mocked(scratchProject.readScratchProjectActions).mockReturnValue({
-        startDefaultPlace,
-      } as never);
-      await using screen = await render(
-        <SidebarProvider>
-          <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
-        </SidebarProvider>,
-      );
+  ] as const)("$mode sidebar, current=$current: $button opens the $opens", async (scenario) => {
+    using stack = new DisposableStack();
+    const previousSettings = getClientSettings();
+    stack.defer(() => __setClientSettingsForTests(previousSettings));
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      boringSidebarEnabled: scenario.mode === "boring",
+    });
+    const projects = [project("active"), project("idle")];
+    const currentProjectRef = {
+      environmentId: projects[0]!.environmentId,
+      projectId: projects[0]!.id,
+    };
+    const startThread = vi.fn().mockResolvedValue(null);
+    const startDefaultPlace = vi.fn().mockResolvedValue(true);
+    vi.mocked(useProjects).mockReturnValue(projects);
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: scenario.current
+        ? (makeThreadFixture({
+            environmentId: currentProjectRef.environmentId,
+            projectId: currentProjectRef.projectId,
+          }) as never)
+        : null,
+      defaultProjectFallbackReady: true,
+      handleNewThread: startThread,
+      routeDraftId: null,
+      routeThreadRef: null,
+    });
+    // The resolver says New thread goes to "idle"; the tooltip and the click must agree.
+    vi.mocked(scratchProject.useDefaultPlace).mockReturnValue({
+      place: {
+        kind: "project",
+        projectRef: { environmentId: projects[1]!.environmentId, projectId: projects[1]!.id },
+        unavailable: null,
+      },
+      label: "idle",
+    });
+    vi.mocked(scratchProject.readScratchProjectActions).mockReturnValue({
+      startDefaultPlace,
+    } as never);
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
 
-      const button = screen.getByRole("button", { name: scenario.button, exact: true });
-      await userEvent.hover(button);
-      await expect.element(screen.getByText(scenario.tooltip)).toBeVisible();
-      await userEvent.click(button);
+    const button = screen.getByRole("button", { name: scenario.button, exact: true });
+    await userEvent.hover(button);
+    await expect.element(screen.getByText(scenario.tooltip)).toBeVisible();
+    await userEvent.click(button);
 
-      expect(openCommandPalette).not.toHaveBeenCalled();
-      if (scenario.opens === "current project") {
-        expect(startThread).toHaveBeenCalledExactlyOnceWith(currentProjectRef);
-        expect(startDefaultPlace).not.toHaveBeenCalled();
-      } else {
-        await vi.waitFor(() => expect(startDefaultPlace).toHaveBeenCalledOnce());
-        expect(startThread).not.toHaveBeenCalled();
-      }
-    },
-  );
+    expect(openCommandPalette).not.toHaveBeenCalled();
+    if (scenario.opens === "current project") {
+      expect(startThread).toHaveBeenCalledExactlyOnceWith(currentProjectRef);
+      expect(startDefaultPlace).not.toHaveBeenCalled();
+    } else {
+      await vi.waitFor(() => expect(startDefaultPlace).toHaveBeenCalledOnce());
+      expect(startThread).not.toHaveBeenCalled();
+    }
+  });
 });
 
 function threadShell(projectId: ProjectId, index: number): EnvironmentThreadShell {
