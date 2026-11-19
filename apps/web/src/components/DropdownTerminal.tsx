@@ -183,6 +183,7 @@ function DropdownTerminalPanel() {
     ? dropdownTerminalTarget(environment, primaryEnvironmentId, isElectron)
     : pinnedTarget;
   if (pinnedTarget === null && target !== null) setOpenedTarget(target);
+  const disconnected = target !== null && environment?.connection.phase !== "connected";
   const root = availableScratchWorkspaceRoot(
     environment?.connection.phase,
     environment?.serverConfig,
@@ -343,21 +344,33 @@ function DropdownTerminalPanel() {
           </HeaderControl>
         </div>
       </header>
-      {target?.external && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-warning/45 bg-warning/25 px-3 py-2 text-warning-foreground">
+      {(disconnected || target?.external) && (
+        <div
+          role={disconnected ? "status" : undefined}
+          className={cn(
+            "flex shrink-0 items-center gap-2 border-b px-3 py-2",
+            disconnected
+              ? "border-destructive/45 bg-destructive/20 text-destructive-foreground"
+              : "border-warning/45 bg-warning/25 text-warning-foreground",
+          )}
+        >
           <TriangleAlert aria-hidden className="size-5 shrink-0" />
-          <strong className="text-sm font-bold">External</strong>
-          <span className="text-xs text-foreground">Commands run on another machine.</span>
+          <strong className="text-sm font-bold">
+            {disconnected ? "Disconnected" : "External"}
+          </strong>
+          <span className="text-xs text-foreground">
+            {disconnected
+              ? "Reconnect or choose another machine."
+              : "Commands run on another machine."}
+          </span>
         </div>
       )}
       {target && root !== null ? (
         <DropdownTerminalWorkspace key={target.environmentId} target={target} root={root} />
-      ) : (
+      ) : disconnected ? null : (
         <p role="status" className="m-auto p-6 text-sm text-muted-foreground">
           {target
-            ? environment?.connection.phase === "connected"
-              ? "This machine has no default folder for terminals."
-              : "This machine is disconnected."
+            ? "This machine has no default folder for terminals."
             : "No connected machine offers a default folder for terminals."}
         </p>
       )}

@@ -186,7 +186,7 @@ it("keeps a chosen machine across thread navigation, disconnects and reopening",
     fixture.publish();
   });
   await expect.element(picker).toHaveAccessibleName("Run on This PC");
-  await expect.element(terminal.getByText("This machine is disconnected.")).toBeVisible();
+  await expect.element(terminal.getByRole("status").getByText("Disconnected")).toBeVisible();
   await expect.element(input).not.toBeInTheDocument();
   await act(() => {
     fixture.environments = initialEnvironments;
@@ -226,9 +226,7 @@ it("keeps a chosen machine across thread navigation, disconnects and reopening",
     );
     fixture.publish();
   });
-  await expect
-    .element(terminal.getByText("This machine is disconnected.", { exact: true }))
-    .toBeVisible();
+  await expect.element(terminal.getByRole("status").getByText("Disconnected")).toBeVisible();
   await expect.element(picker).toHaveAccessibleName("Run on Build machine");
   await expect.element(input).not.toBeInTheDocument();
 
