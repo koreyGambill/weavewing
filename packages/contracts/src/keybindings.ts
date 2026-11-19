@@ -94,6 +94,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "navigation.forward",
   "terminal.toggle",
   "terminal.close",
+  "terminal.dropdown",
   "threadContext.toggle",
   "threadPanel.toggle",
   "view.reopenClosed",
