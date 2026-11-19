@@ -18,6 +18,7 @@ export {
   normalizeEventKey,
   resolveEventKeys,
   shortcutKeyFromEvent,
+  leaderShortcutKey,
   type ShortcutEventLike,
   type ShortcutModifierStateLike,
 } from "./keybindingMatching.ts";
@@ -54,7 +55,7 @@ type WhenToken =
   | { type: "lparen" }
   | { type: "rparen" };
 
-export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+export const CLASSIC_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle", when: "isMac || !terminalFocus" },
   { key: "mod+alt+shift+b", command: "toolSidebar.toggle" },
   { key: "f6", command: "workspace.focusNext", when: "!terminalFocus" },
@@ -92,6 +93,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
   { key: "mod+j", command: "terminal.toggle", when: "isMac || !terminalFocus" },
+  { key: "ctrl+`", command: "terminal.dropdown" },
   { key: "mod+alt+i", command: "threadContext.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
   { key: "mod+shift+d", command: "composer.dictation", when: "!terminalFocus" },
@@ -105,8 +107,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
   { key: "mod+f", command: "preview.find", when: "previewFocus" },
-  { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
-  { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
+  { key: "mod+k", command: "search.toggle" },
+  { key: "mod+p", command: "commandPalette.toggle" },
   { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
   { key: "mod+u", command: "usage.open", when: "!terminalFocus" },
   { key: "mod+alt+a", command: "theme.select", when: "!terminalFocus" },
@@ -148,8 +150,13 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
   { key: "ctrl+alt+m", command: "projectPicker.nextMachine", when: "!terminalFocus" },
   { key: "ctrl+alt+shift+m", command: "projectPicker.allMachines", when: "!terminalFocus" },
-  { key: "mod+shift+[", command: "thread.previous" },
-  { key: "mod+shift+]", command: "thread.next" },
+  { key: "mod+shift+[", command: "thread.previous", when: "!isMac" },
+  { key: "mod+shift+]", command: "thread.next", when: "!isMac" },
+  // Cmd+Shift+[ ] cycles tabs in every Mac app, so threads move to Ctrl+Cmd there.
+  { key: "ctrl+meta+[", command: "thread.previous", when: "isMac" },
+  { key: "ctrl+meta+]", command: "thread.next", when: "isMac" },
+  { key: "mod+shift+[", command: "workspace.tile.previousTab", when: "isMac" },
+  { key: "mod+shift+]", command: "workspace.tile.nextTab", when: "isMac" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
@@ -173,6 +180,82 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+4", command: "usage.period.quarter", when: "usagePageOpen" },
 ];
 
+const LEADER_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "leader %", command: "workspace.tile.splitRight" },
+  { key: 'leader "', command: "workspace.tile.splitDown" },
+  { key: "leader h", command: "workspace.tile.focusLeft" },
+  { key: "leader arrowleft", command: "workspace.tile.focusLeft" },
+  { key: "leader j", command: "workspace.tile.focusDown" },
+  { key: "leader arrowdown", command: "workspace.tile.focusDown" },
+  { key: "leader k", command: "workspace.tile.focusUp" },
+  { key: "leader arrowup", command: "workspace.tile.focusUp" },
+  { key: "leader l", command: "workspace.tile.focusRight" },
+  { key: "leader arrowright", command: "workspace.tile.focusRight" },
+  { key: "leader x", command: "workspace.tile.closeTab" },
+  { key: "leader m", command: "workspace.tile.maximize" },
+  { key: "leader 0", command: "workspace.tile.swap" },
+  { key: "leader space", command: "workspace.tile.rotate" },
+  { key: "leader t", command: "workspace.tile.newTab" },
+  { key: "leader n", command: "workspace.tile.nextTab" },
+  { key: "leader p", command: "workspace.tile.previousTab" },
+  { key: "leader f", command: "workspace.tile.float" },
+  { key: "leader r", command: "workspace.tile.resize" },
+  { key: "leader .", command: "workspace.tile.actions" },
+  { key: "leader /", command: "search.toggle" },
+  { key: "leader :", command: "commandPalette.toggle" },
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
+    key: `leader ${n}`,
+    command: `workspace.tile.tab.${n}` as const,
+  })),
+];
+
+export function isClassicTileDefault(rule: KeybindingRule): boolean {
+  return (
+    rule.command.startsWith("workspace.tile.") &&
+    rule.key.startsWith("ctrl+alt+") &&
+    CLASSIC_KEYBINDINGS.some(
+      (entry) =>
+        entry.command === rule.command && entry.key === rule.key && entry.when === rule.when,
+    )
+  );
+}
+
+export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  ...CLASSIC_KEYBINDINGS.filter((rule) => !isClassicTileDefault(rule)),
+  ...LEADER_KEYBINDINGS,
+  ...(["h", "j", "k", "l"] as const).map((key, index) => ({
+    key: `alt+${key}`,
+    command: (
+      [
+        "workspace.tile.resizeLeft",
+        "workspace.tile.resizeDown",
+        "workspace.tile.resizeUp",
+        "workspace.tile.resizeRight",
+      ] as const
+    )[index]!,
+  })),
+  { key: "ctrl+a", command: "keybindings.leader" },
+];
+
+export function leaderEnabled(config: ResolvedKeybindingsConfig): boolean {
+  const binding = config.findLast((rule) => rule.command === "keybindings.leader");
+  return !(binding?.whenAst?.type === "identifier" && binding.whenAst.name === "false");
+}
+
+export function defaultKeybindingsForMode(enabled: boolean): ReadonlyArray<KeybindingRule> {
+  return enabled
+    ? DEFAULT_KEYBINDINGS
+    : [
+        ...CLASSIC_KEYBINDINGS,
+        ...DEFAULT_KEYBINDINGS.filter(
+          (rule) =>
+            rule.command.startsWith("workspace.tile.resize") &&
+            rule.command !== "workspace.tile.resize",
+        ),
+        { key: "ctrl+a", command: "keybindings.leader", when: "false" },
+      ];
+}
+
 function normalizeKeyToken(token: string): string {
   if (token === "space") return " ";
   if (token === "esc") return "escape";
@@ -180,6 +263,24 @@ function normalizeKeyToken(token: string): string {
 }
 
 export function parseKeybindingShortcut(value: string): KeybindingShortcut | null {
+  if (value.startsWith("leader ")) {
+    const key = value.slice(7);
+    if (
+      !(key.length === 1 && !/\s|\+/.test(key)) &&
+      !/^(space|escape|enter|tab|arrowleft|arrowright|arrowup|arrowdown)$/.test(key)
+    )
+      return null;
+    return {
+      key: `leader ${normalizeKeyToken(key.toLowerCase())}`,
+      leader: true,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      modKey: false,
+    };
+  }
+  if (value.trim() === "leader") return null;
   const rawTokens = value
     .toLowerCase()
     .split("+")
@@ -415,14 +516,15 @@ export const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig(DEF
 export function mergeWithDefaultKeybindings(
   custom: ResolvedKeybindingsConfig,
 ): ResolvedKeybindingsConfig {
+  const defaults = leaderEnabled(custom)
+    ? DEFAULT_RESOLVED_KEYBINDINGS
+    : compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
   if (custom.length === 0) {
-    return [...DEFAULT_RESOLVED_KEYBINDINGS];
+    return [...defaults];
   }
 
   const overriddenCommands = new Set(custom.map((binding) => binding.command));
-  const retainedDefaults = DEFAULT_RESOLVED_KEYBINDINGS.filter(
-    (binding) => !overriddenCommands.has(binding.command),
-  );
+  const retainedDefaults = defaults.filter((binding) => !overriddenCommands.has(binding.command));
   const merged = [...retainedDefaults, ...custom];
 
   if (merged.length <= MAX_KEYBINDINGS_COUNT) {

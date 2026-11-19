@@ -1,3 +1,4 @@
+import { Dialog, DialogPopup, DialogHeader, DialogTitle } from "../ui/dialog";
 import { useTileResizeGesture } from "./useTileResizeGesture";
 import {
   registerCommands,
@@ -36,6 +37,7 @@ import type {
   KeybindingCommand,
   ProjectId,
   SavedTileLayout,
+  TileLayoutArea,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -103,13 +105,19 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PanelTabCloseButton } from "../ui/panel-tab-close-button";
 import { cn, randomUUID } from "../../lib/utils";
 import { ThreadPaneAttention } from "../ThreadAttentionOverlay";
-import { TILE_AREAS, tileCloseConfirmation, type TileAreaLabel } from "./ThreadTileWorkspace.logic";
+import {
+  ownsTileInput,
+  TILE_AREAS,
+  tileCloseConfirmation,
+  type TileAreaLabel,
+} from "./ThreadTileWorkspace.logic";
 import {
   savedTileGroupCount,
   TILE_LAYOUT_AREA_LABELS,
   toSavedTileNode,
 } from "../../savedTileLayouts";
-import { SaveTileLayoutDialog, TileLayoutsSubmenu } from "./TileLayoutsMenu";
+import { WorkspaceTitlebarControls } from "../WorkspaceTitlebar";
+import { SaveTileLayoutDialog, TileLayoutsMenu } from "./TileLayoutsMenu";
 import { useSavedTileLayouts } from "./useSavedTileLayouts";
 
 const TAB_DRAG_TYPE = "application/x-weavewing-tab";
@@ -229,6 +237,12 @@ export function ThreadTileWorkspace(props: {
     layoutVersion: string,
     focused: boolean,
   ) => ReactNode;
+  /** Every tile is a terminal: new tiles and tabs open one at once, and saved layouts are hidden. */
+  terminalsOnly?: boolean;
+  /** Runs instead of the maximize command when there is only one tile to maximize. */
+  onMaximizeOnlyTile?: () => void;
+  /** Mounted over another workspace: takes tile keys and menu actions only while it holds focus. */
+  overlay?: boolean;
 }) {
   const compact = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const savedLayout = useRightPanelStore((state) =>
@@ -258,6 +272,7 @@ export function ThreadTileWorkspace(props: {
   const [resizeOverride, setResizeOverride] = useState<{ splitId: string; ratio: number } | null>(
     null,
   );
+  const [swapGroupId, setSwapGroupId] = useState<string | null>(null);
   const [openMenu, setOpenMenu] = useState<{ kind: "actions"; groupId: string } | null>(null);
   const [closeConfirm, setCloseConfirm] = useState<{
     groupId: string;
@@ -269,6 +284,7 @@ export function ThreadTileWorkspace(props: {
     rootRef,
     threadRef: props.threadRef,
     panels: props.panels,
+    overlay: props.overlay === true,
   });
   const layout = gestureResize
     ? gestureResize.reduce(
@@ -381,7 +397,10 @@ export function ThreadTileWorkspace(props: {
   const sideChatTitles = new Map(relationshipShells.map((shell) => [shell.id, shell.title]));
   const title = (id: string) => {
     if (id === CONVERSATION_TAB_ID) return "Main chat";
-    if (isNewTab(id)) return "New tab";
+    if (isNewTab(id))
+      return savedLayout.pendingAreas?.[id]
+        ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[id]!]
+        : "New tab";
     const surface = props.panels.surfaces.find((entry) => entry.id === id);
     return surface
       ? surfaceTitle(
@@ -404,6 +423,9 @@ export function ThreadTileWorkspace(props: {
         ?.querySelector<HTMLElement>(`[data-tile-chooser="${CSS.escape(groupId)}"]`)
         ?.focus({ preventScroll: true }),
     );
+  // The new tile or tab is focused, so an opened terminal takes its place.
+  const fillNewTab = (groupId: string) =>
+    props.terminalsOnly ? props.panels.onAddTerminal() : focusChooser(groupId);
   const split = (
     group: TileGroup,
     axis: "horizontal" | "vertical",
@@ -418,7 +440,7 @@ export function ThreadTileWorkspace(props: {
       groupId,
       splitId: randomUUID(),
     });
-    focusChooser(groupId);
+    fillNewTab(groupId);
   };
   const moveTabToNewTile = (group: TileGroup, axis: "horizontal" | "vertical") =>
     apply({
@@ -498,11 +520,8 @@ export function ThreadTileWorkspace(props: {
     );
   };
   const openNewTab = (groupId: string) => {
-    const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
-    if (group && !isNewTab(group.activeTabId))
-      apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
-    else apply({ type: "focus", groupId });
-    focusChooser(groupId);
+    apply({ type: "new-tab", groupId, tabId: newTabId(randomUUID()) });
+    fillNewTab(groupId);
   };
   // A chooser unmounts once its area arrives or it closes. Focus left on it would drop to the
   // page, and workspace focus recovery would hand it to the composer, in another tile.
@@ -570,36 +589,43 @@ export function ThreadTileWorkspace(props: {
     run: (groupId: string) => void;
   }> = (() => {
     const runs = areaRuns;
-    return TILE_AREAS.flatMap(({ label, key }) => {
+    const areas = props.terminalsOnly
+      ? TILE_AREAS.filter((area) => area.label === "Terminal")
+      : TILE_AREAS;
+    return areas.map(({ label, key }) => {
       const [enabled, run] = runs[label];
-      return enabled
-        ? [
-            {
-              label,
-              key,
-              enabled,
-              openElsewhere:
-                label === "Main chat" && chatGroup
-                  ? `Main chat is open in tile ${groups.indexOf(chatGroup) + 1}`
-                  : null,
-              run: (groupId: string) => {
-                if (label === "Main chat" && chatGroup) {
-                  activate(chatGroup, CONVERSATION_TAB_ID);
-                  focus(chatGroup.id);
-                  return;
-                }
-                parkFocus(groupId);
-                if (label === "Main chat")
-                  apply({ type: "move", tabId: CONVERSATION_TAB_ID, targetGroupId: groupId });
-                else {
-                  apply({ type: "focus", groupId });
-                  run?.();
-                }
-                focus(groupId);
-              },
-            },
-          ]
-        : [];
+      return {
+        label,
+        key,
+        enabled,
+        openElsewhere:
+          label === "Main chat" && chatGroup
+            ? `Main chat is open in tile ${groups.indexOf(chatGroup) + 1}`
+            : null,
+        run: (groupId: string) => {
+          if (label === "Main chat" && chatGroup) {
+            activate(chatGroup, CONVERSATION_TAB_ID);
+            focus(chatGroup.id);
+            return;
+          }
+          if (!enabled) {
+            const group = getTileGroups(currentLayout()).find((entry) => entry.id === groupId);
+            const area = (Object.keys(TILE_LAYOUT_AREA_LABELS) as TileLayoutArea[]).find(
+              (area) => TILE_LAYOUT_AREA_LABELS[area] === label,
+            );
+            if (group && area) apply({ type: "pending-area", tabId: group.activeTabId, area });
+            return;
+          }
+          parkFocus(groupId);
+          if (label === "Main chat")
+            apply({ type: "move", tabId: CONVERSATION_TAB_ID, targetGroupId: groupId });
+          else {
+            apply({ type: "focus", groupId });
+            run?.();
+          }
+          focus(groupId);
+        },
+      };
     });
   })();
   const firstOpenable = Math.max(
@@ -671,7 +697,25 @@ export function ThreadTileWorkspace(props: {
           setOpenMenu({ kind: "actions", groupId: current.maximizedGroupId });
         else apply({ type: "maximize", groupId: current.focusedGroupId });
       },
-      "workspace.tile.swap": () => apply({ type: "swap-beside" }),
+      "workspace.tile.rotate": () => apply({ type: "rotate" }),
+      "workspace.tile.swap": () => {
+        const current = currentLayout();
+        if (current.besideGroupId) apply({ type: "swap-beside" });
+        else setSwapGroupId(current.focusedGroupId);
+      },
+      ...Object.fromEntries(
+        ([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [
+          `workspace.tile.tab.${n}`,
+          () => {
+            const group = currentGroup();
+            const tab = group?.tabs[n - 1];
+            if (!group || !tab) return;
+            parkFocus(group.id);
+            activate(group, tab);
+            focus(group.id);
+          },
+        ]),
+      ),
       "workspace.tile.float": () => {
         const group = currentGroup();
         if (group) toggleFloat(group);
@@ -702,6 +746,10 @@ export function ThreadTileWorkspace(props: {
       "workspace.tile.splitDown": () => newTile("down"),
       "workspace.tile.maximize": () => {
         const current = currentLayout();
+        if (props.onMaximizeOnlyTile && getTileGroups(current).length === 1) {
+          props.onMaximizeOnlyTile();
+          return;
+        }
         apply({
           type: "maximize",
           groupId: current.maximizedGroupId ? null : current.focusedGroupId,
@@ -808,9 +856,16 @@ export function ThreadTileWorkspace(props: {
           !(
             event.target instanceof Element &&
             event.target.closest('[role="dialog"], [role="alertdialog"], [data-keybinding-capture]')
-          ),
+          ) &&
+          ownsTileInput(rootRef.current, event.target, props.overlay === true),
       }),
-      ...Object.entries(actions).map(([command, run]) => registerMenuAction(command, run)),
+      ...Object.entries(actions).map(([command, run]) =>
+        registerMenuAction(command, () =>
+          ownsTileInput(rootRef.current, document.activeElement, props.overlay === true)
+            ? run()
+            : false,
+        ),
+      ),
     ];
     for (const surface of props.panels.surfaces) {
       if (surface.kind !== "preview" || !surface.resourceId) continue;
@@ -839,6 +894,7 @@ export function ThreadTileWorkspace(props: {
   const layoutIds = tileLayouts.layouts.map((layout) => layout.id).join("\n");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the palette's saved-layout actions for this mounted thread
   useEffect(() => {
+    if (props.terminalsOnly) return;
     const disposers = [
       registerMenuAction("workspace.tile.layout.save", () => saveLayoutFromMenu()),
       ...(layoutIds ? layoutIds.split("\n") : []).flatMap((layoutId) =>
@@ -852,7 +908,7 @@ export function ThreadTileWorkspace(props: {
     return () => {
       for (const dispose of disposers) dispose();
     };
-  }, [layoutIds]);
+  }, [layoutIds, props.terminalsOnly]);
 
   const resize = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -998,6 +1054,16 @@ export function ThreadTileWorkspace(props: {
       : undefined;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-thread-tiling>
+      {props.terminalsOnly ? null : (
+        <WorkspaceTitlebarControls>
+          <TileLayoutsMenu
+            api={tileLayouts}
+            hasProject={tileLayouts.projectId !== null}
+            onSaveAs={saveLayoutAs}
+            onApply={applySavedLayout}
+          />
+        </WorkspaceTitlebarControls>
+      )}
       <div className="relative shrink-0">{props.header}</div>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
         <div
@@ -1507,13 +1573,6 @@ export function ThreadTileWorkspace(props: {
                         </MenuSubPopup>
                       </MenuSub>
                       <MenuSeparator />
-                      <TileLayoutsSubmenu
-                        api={tileLayouts}
-                        hasProject={tileLayouts.projectId !== null}
-                        onSaveAs={saveLayoutAs}
-                        onApply={applySavedLayout}
-                      />
-                      <MenuSeparator />
                       <MenuItem disabled={lastBlankTab} onClick={() => closeTab(group.activeTabId)}>
                         <X />
                         Close tab
@@ -1552,11 +1611,16 @@ export function ThreadTileWorkspace(props: {
                       floatGesture(event, group);
                     }}
                   >
-                    <p className="text-sm font-medium">Choose an area</p>
+                    <p className="text-sm font-medium">
+                      {savedLayout.pendingAreas?.[group.activeTabId]
+                        ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]
+                        : "Choose an area"}
+                    </p>
                     {savedLayout.pendingAreas?.[group.activeTabId] && (
                       <p className="-mt-2 text-xs text-muted-foreground">
-                        {TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]}{" "}
-                        opens here once it is available.
+                        {savedLayout.pendingAreas[group.activeTabId] === "diff"
+                          ? "No changes to diff yet. This tile will update when changes are available."
+                          : `${TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} will open automatically when this thread is ready.`}
                       </p>
                     )}
                     <div
@@ -1763,7 +1827,7 @@ export function ThreadTileWorkspace(props: {
               role="status"
             >
               <span className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-ring bg-popover px-3 py-1 text-xs text-popover-foreground">
-                Resize · release to keep · Esc to cancel
+                Resize · H/J/K/L or arrows · Enter to keep · Esc to cancel
               </span>
             </div>
           )}
@@ -1776,6 +1840,40 @@ export function ThreadTileWorkspace(props: {
           )}
         </div>
       </div>
+      <Dialog
+        open={swapGroupId !== null}
+        onOpenChange={(open) => {
+          if (!open) setSwapGroupId(null);
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Swap tile with…</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            {groups
+              .filter((group) => group.id !== swapGroupId)
+              .map((group) => (
+                <Button
+                  key={group.id}
+                  variant="outline"
+                  onClick={() => {
+                    if (swapGroupId)
+                      apply({
+                        type: "swap-groups",
+                        firstGroupId: swapGroupId,
+                        secondGroupId: group.id,
+                      });
+                    setSwapGroupId(null);
+                  }}
+                >
+                  {groups.indexOf(group) + 1}. {title(group.activeTabId)}
+                </Button>
+              ))}
+            {groups.length < 2 ? <p>No other tiles to swap.</p> : null}
+          </div>
+        </DialogPopup>
+      </Dialog>
       {saveLayout && (
         <SaveTileLayoutDialog
           open
@@ -1832,10 +1930,16 @@ export function ThreadTileWorkspace(props: {
             <CircleHelp className="size-3" />
           </TooltipTrigger>
           <TooltipPopup>
-            Ctrl+Alt+arrows or H/J/K/L: focus tile. Hold Ctrl+Alt+R and move the mouse: resize. Add
-            Shift: new tile on that side. Ctrl+Alt+Enter: maximize. Ctrl+Alt+[ or ] / Ctrl+Tab:
-            switch tab. Drag a tab to group it or split at an edge. Drag the title bar to move the
-            whole tile.
+            {shortcut("workspace.tile.actions")}: tile actions.{" "}
+            {shortcut("workspace.tile.splitRight")}: new tile right.{" "}
+            {shortcut("workspace.tile.splitDown")}: new tile below.{" "}
+            {shortcut("workspace.tile.resize")}:{" "}
+            {props.panels.keybindings.findLast((rule) => rule.command === "workspace.tile.resize")
+              ?.shortcut.leader
+              ? "resize with H/J/K/L or arrows, then Enter to keep or Esc to cancel."
+              : "hold and move the mouse or use arrows to resize."}{" "}
+            Alt+H/J/K/L: resize by a step. Drag a tab to group it or split at an edge. Drag the
+            title bar to move the whole tile.
           </TooltipPopup>
         </Tooltip>
       </div>

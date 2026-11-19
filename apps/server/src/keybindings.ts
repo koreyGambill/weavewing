@@ -36,6 +36,11 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   DEFAULT_KEYBINDINGS,
+  CLASSIC_KEYBINDINGS,
+  isClassicTileDefault,
+  defaultKeybindingsForMode,
+  leaderEnabled,
+  leaderShortcutKey,
   mergeWithDefaultKeybindings,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
@@ -94,11 +99,58 @@ function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): bool
   return keybindingRuleIdentity(left) === keybindingRuleIdentity(right);
 }
 
+function switchTilePreset(
+  rules: readonly KeybindingRule[],
+  enabled: boolean,
+  capacity = MAX_KEYBINDINGS_COUNT,
+): readonly KeybindingRule[] {
+  const presets = [...CLASSIC_KEYBINDINGS, ...DEFAULT_KEYBINDINGS];
+  const isTileDefault = (rule: KeybindingRule) =>
+    (rule.command.startsWith("workspace.tile.") || rule.key.startsWith("leader ")) &&
+    presets.some((preset) => isSameKeybindingRule(preset, rule));
+  const custom = rules.filter((rule) => !isTileDefault(rule));
+  const customizedCommands = new Set(
+    rules
+      .filter((rule) => !presets.some((preset) => isSameKeybindingRule(preset, rule)))
+      .map((rule) => rule.command),
+  );
+  return [
+    ...defaultKeybindingsForMode(enabled)
+      .filter(
+        (rule) =>
+          (rule.command.startsWith("workspace.tile.") || rule.key.startsWith("leader ")) &&
+          !customizedCommands.has(rule.command),
+      )
+      .slice(0, Math.max(0, capacity - custom.length)),
+    ...custom,
+  ];
+}
+
 const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   readonly id: string;
   readonly alongside: KeybindingRule;
   readonly rule: KeybindingRule;
 }> = [
+  {
+    id: "weavewing.leader-arrow-left.v1",
+    alongside: { key: "leader h", command: "workspace.tile.focusLeft" },
+    rule: { key: "leader arrowleft", command: "workspace.tile.focusLeft" },
+  },
+  {
+    id: "weavewing.leader-arrow-down.v1",
+    alongside: { key: "leader j", command: "workspace.tile.focusDown" },
+    rule: { key: "leader arrowdown", command: "workspace.tile.focusDown" },
+  },
+  {
+    id: "weavewing.leader-arrow-up.v1",
+    alongside: { key: "leader k", command: "workspace.tile.focusUp" },
+    rule: { key: "leader arrowup", command: "workspace.tile.focusUp" },
+  },
+  {
+    id: "weavewing.leader-arrow-right.v1",
+    alongside: { key: "leader l", command: "workspace.tile.focusRight" },
+    rule: { key: "leader arrowright", command: "workspace.tile.focusRight" },
+  },
   {
     id: "composer.sendBackground:mod+enter",
     alongside: {
@@ -142,6 +194,39 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     alongside: { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
     rule: { key: "ctrl+tab", command: "workspace.tile.nextTab" },
   },
+  ...(
+    [
+      ["previous", "["],
+      ["next", "]"],
+    ] as const
+  ).flatMap(([direction, bracket]) => {
+    const alongside = {
+      key: `mod+shift+${bracket}`,
+      command: `thread.${direction}`,
+      when: "!isMac",
+    } as const;
+    return [
+      {
+        id: `weavewing.mac-tab-keys.thread-${direction}.v1`,
+        alongside,
+        rule: { key: `ctrl+meta+${bracket}`, command: `thread.${direction}`, when: "isMac" },
+      },
+      {
+        id: `weavewing.mac-tab-keys.tab-${direction}.v1`,
+        alongside,
+        rule: {
+          key: `mod+shift+${bracket}`,
+          command: `workspace.tile.${direction}Tab`,
+          when: "isMac",
+        },
+      },
+    ] as const;
+  }),
+  {
+    id: "weavewing.search-palette.v1",
+    alongside: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+    rule: { key: "mod+k", command: "search.toggle" },
+  },
   {
     id: "weavewing.terminal-keys.v1",
     alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
@@ -180,6 +265,8 @@ function replaceTargetFromUpsertInput(input: ServerUpsertKeybindingInput): Keybi
 }
 
 function encodeShortcut(shortcut: KeybindingShortcut): string | null {
+  if (shortcut.leader)
+    return `leader ${leaderShortcutKey(shortcut) === " " ? "space" : leaderShortcutKey(shortcut)}`;
   const modifiers: string[] = [];
   if (shortcut.modKey) modifiers.push("mod");
   if (shortcut.metaKey) modifiers.push("meta");
@@ -563,6 +650,7 @@ const make = Effect.gen(function* () {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
             ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
+            "weavewing.leader.v1",
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -612,11 +700,34 @@ const make = Effect.gen(function* () {
           !isSameKeybindingRule(rule, oldPickerKey) &&
           encodedShortcut(rule) === encodedShortcut(pickerKey),
       );
-      const customConfig = runtimeConfig.keybindings
+      const migrateSearchKeys = pendingLateDefaults.some(
+        (late) => late.id === "weavewing.search-palette.v1",
+      );
+      const migrateMacTabKeys = pendingLateDefaults.some((late) =>
+        late.id.startsWith("weavewing.mac-tab-keys."),
+      );
+      const migrateLeader = !appliedMigrationIds.has("weavewing.leader.v1");
+      const enabled = leaderEnabled(compileResolvedKeybindingsConfig(runtimeConfig.keybindings));
+      const defaults = defaultKeybindingsForMode(enabled);
+      let customConfig = runtimeConfig.keybindings
+        .filter((rule) => !(migrateLeader && enabled && isClassicTileDefault(rule)))
         // The untouched old second New thread key gives way to the project picker.
         .filter((rule) => !isSameKeybindingRule(rule, oldNewThreadKey))
         .map((rule) => {
           if (!pickerKeyTaken && isSameKeybindingRule(rule, oldPickerKey)) return pickerKey;
+          if (migrateSearchKeys && (rule.when === undefined || rule.when === "!terminalFocus")) {
+            if (rule.command === "commandPalette.toggle" && rule.key === "mod+k")
+              return { key: "mod+k", command: "search.toggle" } as const;
+            if (rule.command === "filePicker.toggle" && rule.key === "mod+p")
+              return { key: "mod+p", command: "commandPalette.toggle" } as const;
+          }
+          if (
+            migrateMacTabKeys &&
+            rule.when === undefined &&
+            ((rule.command === "thread.previous" && rule.key === "mod+shift+[") ||
+              (rule.command === "thread.next" && rule.key === "mod+shift+]"))
+          )
+            return { ...rule, when: "!isMac" };
           if (!migrateTerminalKeys) return rule;
           if (
             !closeConflict &&
@@ -647,6 +758,7 @@ const make = Effect.gen(function* () {
             return { ...rule, when: "isMac || !terminalFocus" };
           return rule;
         });
+      if (migrateLeader) customConfig = [...switchTilePreset(customConfig, enabled)];
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -655,7 +767,7 @@ const make = Effect.gen(function* () {
         key: string;
         when: string | null;
       }> = [];
-      for (const defaultRule of DEFAULT_KEYBINDINGS) {
+      for (const defaultRule of defaults) {
         if (existingCommands.has(defaultRule.command)) {
           continue;
         }
@@ -674,6 +786,7 @@ const make = Effect.gen(function* () {
         missingDefaults.push(defaultRule);
       }
       for (const { id, alongside, rule } of pendingLateDefaults) {
+        if (enabled && isClassicTileDefault(rule)) continue;
         if (id === "weavewing.terminal-keys.v1" && closeConflict) continue;
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
@@ -719,6 +832,7 @@ const make = Effect.gen(function* () {
       }
       if (
         defaultsToAppend.length > 0 ||
+        customConfig.length !== runtimeConfig.keybindings.length ||
         customConfig.some((rule, index) => rule !== runtimeConfig.keybindings[index])
       ) {
         yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
@@ -726,10 +840,11 @@ const make = Effect.gen(function* () {
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),
       );
-      if (settledLateDefaults.length > 0) {
+      if (settledLateDefaults.length > 0 || migrateLeader) {
         yield* recordAppliedMigrations([
           ...appliedMigrationIds,
           ...settledLateDefaults.map((late) => late.id),
+          "weavewing.leader.v1",
         ]);
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -813,12 +928,33 @@ const make = Effect.gen(function* () {
     upsertKeybindingRule: (input) =>
       upsertSemaphore.withPermits(1)(
         Effect.gen(function* () {
-          const customConfig = yield* loadWritableCustomKeybindingsConfig();
+          let customConfig = yield* loadWritableCustomKeybindingsConfig();
           const rule = keybindingRuleFromInput(input);
           const replaceTarget = replaceTargetFromUpsertInput(input);
+          const switchingMode =
+            rule.command === "keybindings.leader" &&
+            leaderEnabled(
+              compileResolvedKeybindingsConfig(
+                customConfig.flatMap((entry) => (entry.rule ? [entry.rule] : [])),
+              ),
+            ) !==
+              (rule.when !== "false");
+          if (switchingMode) {
+            const unknownEntries = customConfig.filter((entry) => !entry.rule);
+            const migrated = switchTilePreset(
+              customConfig.flatMap((entry) =>
+                entry.rule && entry.rule.command !== "keybindings.leader" ? [entry.rule] : [],
+              ),
+              rule.when !== "false",
+              MAX_KEYBINDINGS_COUNT - unknownEntries.length - 1,
+            );
+            customConfig = [...unknownEntries, ...migrated.map((rule) => ({ value: rule, rule }))];
+          }
           const nextConfig = [
             ...customConfig.filter(({ rule: entry }) => {
               if (!entry) return true;
+              if (rule.command === "keybindings.leader" && entry.command === "keybindings.leader")
+                return false;
               if (replaceTarget) {
                 return (
                   !isSameKeybindingRule(entry, replaceTarget) && !isSameKeybindingRule(entry, rule)
@@ -828,6 +964,12 @@ const make = Effect.gen(function* () {
             }),
             { value: rule, rule },
           ];
+          if (rule.command === "keybindings.leader" && nextConfig.length > MAX_KEYBINDINGS_COUNT) {
+            return yield* new KeybindingsConfigError({
+              configPath: keybindingsConfigPath,
+              detail: "Remove a keybinding to make room for the leader setting.",
+            });
+          }
           const cappedConfig =
             nextConfig.length > MAX_KEYBINDINGS_COUNT
               ? nextConfig.slice(-MAX_KEYBINDINGS_COUNT)

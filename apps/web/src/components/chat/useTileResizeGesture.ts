@@ -1,4 +1,4 @@
-import { isMacPlatform } from "@t3tools/shared/keybindings";
+import { leaderEnabled, isMacPlatform } from "@t3tools/shared/keybindings";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
@@ -8,15 +8,21 @@ import {
   tileGeometry,
   displayTileRoot,
 } from "../../threadTileGeometry";
-import { registerCommands, registerMenuAction } from "../../shortcuts/dispatcher";
+import {
+  isLeaderSequenceEvent,
+  registerCommands,
+  registerMenuAction,
+} from "../../shortcuts/dispatcher";
 import type { TileNode } from "../../threadTileLayout";
 import type { TileSurfaceActions } from "../SurfaceTabContent";
+import { ownsTileInput } from "./ThreadTileWorkspace.logic";
 
 type Point = { x: number; y: number };
 export function useTileResizeGesture(input: {
   rootRef: RefObject<HTMLDivElement | null>;
   threadRef: ScopedThreadRef;
   panels: Pick<TileSurfaceActions, "keybindings" | "getShortcutContext">;
+  overlay: boolean;
 }) {
   const [preview, setPreview] = useState<Array<{ splitId: string; ratio: number }> | null>(null);
   const pointer = useRef<Point | null>(null);
@@ -28,6 +34,7 @@ export function useTileResizeGesture(input: {
     ratios: Array<{ splitId: string; ratio: number }>;
     key: string | null;
     releaseKey: string | null;
+    latched: boolean;
     modifiers: { ctrl: boolean; alt: boolean; shift: boolean; meta: boolean };
   } | null>(null);
   const { environmentId, threadId } = input.threadRef;
@@ -86,6 +93,7 @@ export function useTileResizeGesture(input: {
         ratios: splits.map((split) => ({ splitId: split.id, ratio: split.ratio })),
         key: event?.code ?? null,
         releaseKey: shortcut?.key ?? null,
+        latched: event ? isLeaderSequenceEvent(event) : leaderEnabled(input.panels.keybindings),
         modifiers: {
           ctrl: event?.ctrlKey ?? Boolean(shortcut?.ctrlKey || (shortcut?.modKey && !mac)),
           alt: event?.altKey ?? shortcut?.altKey ?? false,
@@ -117,11 +125,13 @@ export function useTileResizeGesture(input: {
       const current = session.current;
       if (!current) return false;
       if (event.key === "Escape") finish(false);
-      else if (event.key.startsWith("Arrow")) {
-        const axis =
-          event.key === "ArrowLeft" || event.key === "ArrowRight" ? "horizontal" : "vertical";
+      else if (event.key === "Enter") finish(true);
+      else if (event.key.startsWith("Arrow") || /^[hjkl]$/.test(event.key)) {
+        const axis = ["ArrowLeft", "ArrowRight", "h", "l"].includes(event.key)
+          ? "horizontal"
+          : "vertical";
         const amount =
-          (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) *
+          (["ArrowLeft", "ArrowUp", "h", "k"].includes(event.key) ? -1 : 1) *
           (event.shiftKey ? 0.01 : 0.03);
         current.splits = current.splits.map((split) =>
           split.axis === axis
@@ -138,7 +148,7 @@ export function useTileResizeGesture(input: {
     };
     const release = (event: KeyboardEvent) => {
       const current = session.current;
-      if (!current) return;
+      if (!current || current.latched) return;
       if (
         (current.key === null
           ? event.key.toLowerCase() === current.releaseKey
@@ -154,8 +164,34 @@ export function useTileResizeGesture(input: {
     const visibility = () => {
       if (document.hidden) cancel();
     };
+    const step = (key: "h" | "j" | "k" | "l") => {
+      begin();
+      if (!session.current) return;
+      keydown(new KeyboardEvent("keydown", { key }));
+      finish(true);
+    };
     const unregister = registerCommands(
       {
+        "workspace.tile.resizeLeft": (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          step("h");
+        },
+        "workspace.tile.resizeDown": (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          step("j");
+        },
+        "workspace.tile.resizeUp": (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          step("k");
+        },
+        "workspace.tile.resizeRight": (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          step("l");
+        },
         "workspace.tile.resize": (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -172,11 +208,33 @@ export function useTileResizeGesture(input: {
           !(
             event.target instanceof Element &&
             event.target.closest('[role="dialog"], [role="alertdialog"], [data-keybinding-capture]')
-          ),
+          ) &&
+          ownsTileInput(input.rootRef.current, event.target, input.overlay),
       },
     );
-    const unmenu = registerMenuAction("workspace.tile.resize", () => begin());
-    const unrelease = registerMenuAction("workspace.tile.resize.release", () => finish(true));
+    const owned = (run: () => void) => () =>
+      ownsTileInput(input.rootRef.current, document.activeElement, input.overlay) ? run() : false;
+    const unsteps = (
+      [
+        ["workspace.tile.resizeLeft", "h"],
+        ["workspace.tile.resizeDown", "j"],
+        ["workspace.tile.resizeUp", "k"],
+        ["workspace.tile.resizeRight", "l"],
+      ] as const
+    ).map(([command, key]) =>
+      registerMenuAction(
+        command,
+        owned(() => step(key)),
+      ),
+    );
+    const unmenu = registerMenuAction(
+      "workspace.tile.resize",
+      owned(() => begin()),
+    );
+    // Ends the held resize wherever it started.
+    const unrelease = registerMenuAction("workspace.tile.resize.release", () =>
+      session.current ? finish(true) : false,
+    );
     window.addEventListener("pointermove", move, true);
     window.addEventListener("keyup", release, true);
     window.addEventListener("blur", cancel);
@@ -184,6 +242,7 @@ export function useTileResizeGesture(input: {
     return () => {
       unregister();
       unmenu();
+      for (const unregisterStep of unsteps) unregisterStep();
       unrelease();
       window.removeEventListener("pointermove", move, true);
       window.removeEventListener("keyup", release, true);
@@ -197,6 +256,7 @@ export function useTileResizeGesture(input: {
     threadId,
     input.panels.keybindings,
     input.panels.getShortcutContext,
+    input.overlay,
   ]);
   return preview;
 }

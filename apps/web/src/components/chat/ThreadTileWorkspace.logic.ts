@@ -39,3 +39,32 @@ export function tileCloseConfirmation(input: {
     description: `${names} ${running.length === 1 ? "is" : "are"} still running and will be stopped.`,
   };
 }
+
+// A portaled menu or listbox belongs to the workspace of the trigger whose aria-controls names
+// it or its popup; submenus chain through their parent menu's trigger, a few levels at most.
+function tileOwnerOf(focused: EventTarget | null): Element | null {
+  let element = focused instanceof Element ? focused : null;
+  for (let hops = 0; element && hops < 8; hops += 1) {
+    const workspace = element.closest("[data-thread-tiling]");
+    if (workspace) return workspace;
+    let popup = element.closest('[role="menu"], [role="listbox"]');
+    element = null;
+    for (; popup && !element; popup = popup.parentElement) {
+      if (popup.id) element = document.querySelector(`[aria-controls="${CSS.escape(popup.id)}"]`);
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether a tile key or menu action belongs to this workspace: the one holding focus, or whose
+ * menu holds it, takes it; with focus elsewhere it goes to the one underneath, never an overlay.
+ */
+export function ownsTileInput(
+  workspace: Element | null,
+  focused: EventTarget | null,
+  overlay: boolean,
+): boolean {
+  const owner = tileOwnerOf(focused);
+  return owner ? workspace !== null && owner.contains(workspace) : !overlay;
+}

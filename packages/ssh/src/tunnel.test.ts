@@ -27,7 +27,12 @@ import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { captureLauncher, captureLauncherFor, runLauncher } from "./launcherTestHarness.ts";
+import {
+  captureLauncher,
+  captureLauncherFor,
+  capturePairingFor,
+  runLauncher,
+} from "./launcherTestHarness.ts";
 import * as SshAuth from "./auth.ts";
 import { remoteStateKey } from "./command.ts";
 import { SshCommandError, SshPasswordPromptError, SshReadinessError } from "./errors.ts";
@@ -1590,5 +1595,63 @@ describe("SSH launch during desktop update", () => {
       assert.equal(result.events.filter((event) => event.startsWith("marker ")).length, 1);
       assert.equal(result.events.filter((event) => event.startsWith("runtime ")).length, 1);
     }),
+  );
+});
+
+describe("SSH launch on a host running the desktop app", () => {
+  const unpublished = { archiveVersion: "1.2.3" } as const;
+
+  it.effect("connects to the app's server and pairs with its CLI without a download", () =>
+    Effect.gen(function* () {
+      const host = {
+        archive: true,
+        archiveMissing: true,
+        desktopApp: "running",
+        readyAt: 0,
+      } as const;
+      const launch = runLauncher(yield* captureLauncherFor(unpublished), host);
+      assert.deepEqual(launch.output, { remotePort: 4888, serverKind: "external" });
+      const pairing = runLauncher(yield* capturePairingFor(unpublished), host);
+      assert.deepEqual(pairing.output, { credential: "desktop" });
+      for (const { events } of [launch, pairing]) {
+        assert.notInclude(events, "download");
+        assert.isFalse(events.some((event) => event.startsWith("start ")));
+      }
+    }),
+  );
+
+  it.effect.each([
+    ["is not running", { desktopApp: "installed" }],
+    ["is not the app's but one an SSH launch started", { desktopApp: "installed", readyAt: 0 }],
+  ] as const)("installs this version when the home's server %s", ([, host]) =>
+    Effect.gen(function* () {
+      const result = runLauncher(yield* captureLauncherFor(unpublished), {
+        archive: true,
+        archiveMissing: true,
+        allowFailure: true,
+        ...host,
+      });
+      assert.equal(result.status, 1);
+      assert.include(result.events, "download");
+      assert.include(result.stderr, "Could not download t3 1.2.3");
+      assert.include(result.stderr, "No running T3 Code desktop app was found");
+    }),
+  );
+
+  it.effect(
+    "pairs with this version, and explains its failure, once the app's server is gone",
+    () =>
+      Effect.gen(function* () {
+        const result = runLauncher(yield* capturePairingFor(unpublished), {
+          archive: true,
+          archiveMissing: true,
+          allowFailure: true,
+          desktopApp: "installed",
+        });
+        assert.equal(result.status, 1);
+        assert.include(result.events, "download");
+        assert.include(result.stderr, "Could not download t3 1.2.3");
+        assert.include(result.stderr, "No running T3 Code desktop app was found");
+      }),
   );
 });

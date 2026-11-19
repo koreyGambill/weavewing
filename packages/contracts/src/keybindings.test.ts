@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 
-import { KeybindingCommand, ResolvedKeybindingsConfig } from "./keybindings.ts";
+import { KeybindingCommand, KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings.ts";
 
 const decode = <S extends Schema.Top>(
   schema: S,
@@ -74,6 +74,7 @@ const SHIPPED_DEFAULT_COMMANDS = [
   "chat.new",
   "chat.newLocal",
   "commandPalette.toggle",
+  "search.toggle",
   "composer.branch",
   "composer.dictation",
   "composer.effort",
@@ -104,6 +105,7 @@ const SHIPPED_DEFAULT_COMMANDS = [
   "pullRequest.copyNumber",
   "sidebar.toggle",
   "terminal.close",
+  "terminal.dropdown",
   "terminal.toggle",
   "themeEditor.toggle",
   "theme.select",
@@ -148,5 +150,37 @@ it.effect("still decodes every default command ID that main shipped", () =>
     for (const command of SHIPPED_DEFAULT_COMMANDS) {
       assert.strictEqual(yield* decode(KeybindingCommand, command), command);
     }
+  }),
+);
+
+it.effect("validates leader sequences and round-trips their resolved prefix", () =>
+  Effect.gen(function* () {
+    for (const key of [
+      "leader %",
+      'leader "',
+      "leader h",
+      "leader space",
+      "leader :",
+      "leader /",
+    ]) {
+      assert.equal(
+        (yield* decode(KeybindingRule, { key, command: "workspace.tile.splitRight" })).key,
+        key,
+      );
+    }
+    for (const key of ["leader", "leader ", "leader h j", "leader ctrl+h", "leader  h"]) {
+      assert.isTrue(
+        (yield* Effect.exit(decode(KeybindingRule, { key, command: "workspace.tile.splitRight" })))
+          ._tag === "Failure",
+      );
+    }
+    const codec = Schema.fromJsonString(ResolvedKeybindingsConfig);
+    const rules = [
+      {
+        command: "workspace.tile.splitRight" as const,
+        shortcut: { ...shortcut, modKey: false, key: "leader %", leader: true as const },
+      },
+    ];
+    assert.deepEqual(yield* decode(codec, yield* Schema.encodeEffect(codec)(rules)), rules);
   }),
 );

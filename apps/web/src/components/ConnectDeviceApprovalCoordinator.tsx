@@ -150,7 +150,7 @@ function ConnectDeviceRequestToasts({
               props: {
                 children: "Review",
                 onClick: () =>
-                  void navigate({ to: "/settings/access", search: { machine: environmentId } }),
+                  void navigate({ to: "/settings/privacy", search: { machine: environmentId } }),
               },
             },
           ],

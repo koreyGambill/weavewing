@@ -501,7 +501,7 @@ describe("ServerSettings tile layouts", () => {
     ).toThrow();
     expect(() => decodeServerSettingsPatch(layout({ kind: "group", areas: [] }))).toThrow();
     expect(() =>
-      decodeServerSettingsPatch(layout({ kind: "group", areas: ["side-chat"] })),
+      decodeServerSettingsPatch(layout({ kind: "group", areas: ["unknown"] })),
     ).toThrow();
     const deep = Array.from({ length: 16 }).reduce<unknown>(
       (node) => ({ kind: "split", axis: "vertical", ratio: 0.5, first: group, second: node }),

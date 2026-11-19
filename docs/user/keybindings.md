@@ -3,6 +3,59 @@
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 
+## Tiles and tabs
+
+The leader is **Ctrl+A** on every platform. Press it, release it, then press one
+of these keys within 1.5 seconds. A hint appears while the leader is waiting;
+Escape cancels it. Change **Use leader key** or **Leader Key** in
+**Settings → Keybindings**. Turning the leader off restores the classic
+Ctrl+Alt tile shortcuts. Custom bindings survive either choice.
+
+| After the leader      | Action                                                      |
+| --------------------- | ----------------------------------------------------------- |
+| `%` / `"`             | New tile right / below                                      |
+| `h` / `j` / `k` / `l` | Focus left / down / up / right                              |
+| `x`                   | Close tab; confirm if a terminal has a running process      |
+| `m`                   | Maximize or restore tile                                    |
+| `0` / Space           | Swap tiles / rotate docked tiles                            |
+| `t`                   | New tab                                                     |
+| `n` / `p`             | Next / previous tab                                         |
+| `1`–`9`               | Jump to tab N in the focused tile                           |
+| `f`                   | Float or dock tile                                          |
+| `r`                   | Resize mode: h/j/k/l or arrows; Enter keeps, Escape cancels |
+| `.`                   | Tile actions                                                |
+
+The leader works in a focused terminal or editor. **Ctrl+A, Ctrl+A** sends one
+literal Ctrl+A through, so a shell can still move to the start of its input.
+Other Control-letter keys retain their shell behavior, except Search, the command
+palette, and the close commands below. **Alt+H/J/K/L** always resizes the focused tile by a step, including in a
+terminal; terminal applications lose those four Alt shortcuts.
+
+Ctrl+Tab and Ctrl+Shift+Tab cycle tile tabs directly. The existing close,
+command palette, new-thread, and sidebar shortcuts remain available in their
+usual focus contexts. These tile bindings apply to web and desktop; native
+mobile clients use their own navigation and do not render this keybindings page.
+
+## Search and command palette
+
+Press `mod+k` to search. Threads searches thread titles, project names and finished
+user and assistant messages. Select a message result to open its thread at the
+match. Projects matches names and paths, and starts a new thread in the selected
+project. Files searches the active workspace and opens the selected file.
+
+Use Tab or Shift+Tab to switch between Threads, Projects and Files without losing
+the query. Ctrl+1, Ctrl+2 and Ctrl+3 select a tab directly. Search starts on the
+current machine. Use the machine control to include all connected machines.
+
+Press `mod+p` for commands and actions, including new threads, themes and adding
+projects. Files is available in Search instead of on `mod+p`.
+
+These shortcuts take priority while a terminal or vim is focused. On Linux and
+Windows, Ctrl+K and Ctrl+P no longer reach the shell for kill-line or previous
+history, or vim for its own commands. You can change the bindings in Settings.
+Optional leader alternatives are Ctrl+A then `/` for Search and Ctrl+A then `:`
+for the command palette when leader bindings are enabled.
+
 ## Composer controls
 
 `mod+shift+d` starts dictation in the focused editor, or the composer, and finishes it on the next press;
@@ -73,10 +126,9 @@ find only searches the files loaded so far.
 
 With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
 displayed threads. The shortcuts follow the current list filters and order.
-`Cmd+K` opens the command palette to search commands, projects, and threads.
-Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
-choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
-to show only actions.
+`Cmd+K` opens Search with Threads, Projects and Files tabs. `Cmd+P` opens the
+command palette. Use the arrow keys and Return to choose a result, or `Cmd+1`
+through `Cmd+9` to choose directly. Escape closes either dialog.
 
 In a new thread, `Cmd+Shift+H` moves the draft to the next machine.
 
@@ -120,6 +172,11 @@ Project scripts use `script.{id}.run`, such as `script.test.run`.
 Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 `mod` means Command on macOS and Control elsewhere. Other modifiers are
 `cmd` / `meta`, `ctrl` / `control`, `alt` / `option`, and `shift`.
+
+Use `leader %` or `leader h` for a two-key sequence. The second key is a typed
+character, so Shift is already part of `%` and `"`. Conditions apply when that
+second key is pressed. The `keybindings.leader` rule chooses the prefix; setting
+its `when` to `false` selects the classic preset.
 
 ## When conditions
 
@@ -192,22 +249,22 @@ through the pages you have visited, like a browser's back and forward buttons.
 ## Reserved shortcuts
 
 Use `workspace.tile.closeTab` (`Ctrl+W` on Windows and Linux, `Cmd+W` on macOS)
-to close the selected tile tab, including a focused terminal. `Ctrl+Alt+W` also
-closes the selected tab. `workspace.tile.closeAllTabs` (`Ctrl+Shift+W`, or
+to close the selected tile tab, including a focused terminal. Leader then `x` also
+closes the selected tab (`Ctrl+Alt+W` with the leader off). `workspace.tile.closeAllTabs` (`Ctrl+Shift+W`, or
 `Cmd+Shift+W` on macOS) closes every tab in the focused tile. Closing asks for
 confirmation only when a terminal has a running process; the prompt lists the
 running terminals that will stop. Both commands are in the command palette and
 Settings → Keybindings.
 
 In a regular web browser, the browser keeps `Ctrl+W` and `Ctrl+Shift+W` for
-closing its own tab and window, so use `Ctrl+Alt+W` there. While a terminal has
+closing its own tab and window, so use leader then `x` there. While a terminal has
 focus in the desktop app, the app menu's shortcuts (zoom, developer tools,
 fullscreen) pass through to the terminal; click outside the terminal to use them.
 
 These close shortcuts override terminal input. On Windows and Linux, vim's
 `Ctrl+W` window prefix and the shell's word-erase shortcut therefore close the
 tile tab. Remap the close commands in Settings if you want those keys in the
-terminal. Other Control keys, Escape, Tab, Shift+Tab, Alt combinations and function
+terminal. Apart from the leader and Alt+H/J/K/L overrides above, other Control keys, Escape, Tab, Shift+Tab, Alt combinations and function
 keys reach the focused terminal, including `Ctrl+R` for vim redo or shell history
 search, `Ctrl+Space` for completion, and `Ctrl+6` for vim's alternate buffer.
 Escape keeps working inside a maximized terminal or beside the tools overlay.

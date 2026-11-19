@@ -363,6 +363,7 @@ export class ThreadSearch extends Context.Service<
       /** The caller's name for this environment, which its palette also matches. */
       readonly environmentLabel?: string | undefined;
       readonly messageThreadIds: ReadonlyArray<ThreadId>;
+      readonly limit?: number | undefined;
     }) => Effect.Effect<ReadonlyArray<ThreadId>, ThreadSearchError>;
   }
 >()("t3/orchestration-v2/ThreadSearch") {}
@@ -669,7 +670,7 @@ export const make = Effect.gen(function* () {
 
   const searchOlderSettled: ThreadSearch["Service"]["searchOlderSettled"] = Effect.fn(
     "ThreadSearch.searchOlderSettled",
-  )(function* ({ query, before, projectIds, environmentLabel, messageThreadIds }) {
+  )(function* ({ query, before, projectIds, environmentLabel, messageThreadIds, limit }) {
     const normalizedQuery = foldSearchQuery(query);
     const now = DateTime.toEpochMillis(yield* DateTime.now);
     const candidates = yield* read(
@@ -712,7 +713,9 @@ export const make = Effect.gen(function* () {
           );
     return [
       ...titleIds,
-      ...messageCandidates.filter((id) => older.has(id)).slice(0, OLDER_SETTLED_MESSAGE_ROWS),
+      ...messageCandidates
+        .filter((id) => older.has(id))
+        .slice(0, limit ?? OLDER_SETTLED_MESSAGE_ROWS),
     ];
   });
 
@@ -753,6 +756,7 @@ export const searchThreadsWithOlderSettledRows = Effect.fn(
     projectIds,
     environmentLabel,
     messageThreadIds: messages.matches.map((match) => match.threadId),
+    limit: request.limit,
   });
   const older = yield* loadOlderSettledThreadsPage({
     sql: input.sql,

@@ -16,13 +16,14 @@ import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "../lib/utils";
 import { observeResize } from "../lib/observeResize";
 import { resolveToolSidebarWidth, TOOL_SIDEBAR_RAIL_WIDTH } from "./ToolSidebar.logic";
-import { WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
+import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "./WorkspaceTitlebar";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { CalendarTool } from "./CalendarTool";
+import { DropdownTerminalButton } from "./DropdownTerminal";
 import { StatusSourcesList, useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { Button } from "./ui/button";
@@ -39,6 +40,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
   const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
   const isWide = useMediaQuery("(min-width: 981px)");
   const [titlebarHost, setTitlebarHost] = useState<HTMLElement | null>(null);
+  const [titlebarControlsHost, setTitlebarControlsHost] = useState<HTMLElement | null>(null);
   const shortcut = shortcutLabelForCommand(keybindings, "toolSidebar.toggle");
   const toggle = () => {
     const state = useToolSidebarStore.getState();
@@ -137,7 +139,11 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
         className={cn("flex min-h-0 min-w-0 flex-1", maximized && isWide && "invisible")}
         inert={(maximized && isWide) || undefined}
       >
-        <WorkspaceTitlebarHost value={titlebarHost}>{children}</WorkspaceTitlebarHost>
+        <WorkspaceTitlebarHost value={titlebarHost}>
+          <WorkspaceTitlebarControlsHost value={titlebarControlsHost}>
+            {children}
+          </WorkspaceTitlebarControlsHost>
+        </WorkspaceTitlebarHost>
       </div>
       <div
         className={cn(
@@ -145,6 +151,8 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           mobileSidebarSheetMounted && "hidden",
         )}
       >
+        <DropdownTerminalButton />
+        <div ref={setTitlebarControlsHost} className="flex" />
         <Tooltip>
           <TooltipTrigger
             render={

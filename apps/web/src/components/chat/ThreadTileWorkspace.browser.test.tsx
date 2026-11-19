@@ -1,5 +1,12 @@
+import { BackgroundThreadContext } from "./backgroundThread";
+import { useState } from "react";
+import { WorkspaceTitlebarControlsHost } from "../WorkspaceTitlebar";
 import { dispatchMenuAction } from "../../shortcuts/dispatcher";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  compileResolvedKeybindingsConfig,
+  defaultKeybindingsForMode,
+  DEFAULT_RESOLVED_KEYBINDINGS,
+} from "@t3tools/shared/keybindings";
 import "../../index.css";
 import {
   DEFAULT_TILE_LAYOUTS,
@@ -37,7 +44,10 @@ vi.mock("./useSavedTileLayouts", () => ({
   }),
 }));
 
-async function setup(resizeScenario = false, newThread = false) {
+async function setup(resizeScenario = false, newThread = false, leader = false) {
+  const keybindings = leader
+    ? DEFAULT_RESOLVED_KEYBINDINGS
+    : compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
   savedLayouts.effectiveDefault = newThread ? DEFAULT_TILE_LAYOUTS[0]! : null;
   await using resources = new AsyncDisposableStack();
   const viewport = { width: window.innerWidth, height: window.innerHeight };
@@ -74,10 +84,11 @@ async function setup(resizeScenario = false, newThread = false) {
   }
   const noop = () => {};
   function Harness() {
+    const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
     const panel = useRightPanelStore((state) =>
       selectThreadRightPanelState(state.byThreadKey, threadRef),
     );
-    return (
+    const workspace = (
       <ThreadTileWorkspace
         threadRef={threadRef}
         projectId={null}
@@ -92,7 +103,7 @@ async function setup(resizeScenario = false, newThread = false) {
           surfaces: panel.surfaces,
           activeSurfaceId: panel.activeSurfaceId,
           environmentId: threadRef.environmentId,
-          keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+          keybindings,
           getShortcutContext: () => ({
             terminalFocus: false,
             terminalOpen: false,
@@ -137,14 +148,18 @@ async function setup(resizeScenario = false, newThread = false) {
         )}
       />
     );
+    return (
+      <WorkspaceTitlebarControlsHost value={controlsHost}>
+        <div ref={setControlsHost} aria-label="Title bar controls" />
+        {workspace}
+      </WorkspaceTitlebarControlsHost>
+    );
   }
-  // The layout owns DOM placement and has no navigation.
   const screen = resources.use(
     await render(
       <div style={{ display: "flex", width: "min(900px, 100vw)", height: 600 }}>
         <Harness />
       </div>,
-      { router: false },
     ),
   );
   const selectTab = async (name: string) => {
@@ -177,6 +192,7 @@ async function setup(resizeScenario = false, newThread = false) {
   const owned = resources.move();
   return {
     screen,
+    workspace: <Harness />,
     store,
     threadRef,
     layout,
@@ -506,6 +522,17 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
   expect(getTileGroups(layout()).find((group) => group.id === "chooser")?.tabs).toEqual([
     newTabId("chooser"),
   ]);
+  await userEvent.click(
+    screen
+      .getByRole("region", { name: "Tile: New tab", exact: true })
+      .getByRole("button", { name: "New tab", exact: true }),
+  );
+  await userEvent.keyboard("{Control>}{Alt>}o{/Alt}{/Control}");
+  const blanks = getTileGroups(layout()).find((group) => group.id === "chooser")!.tabs;
+  expect(blanks).toHaveLength(3);
+  expect(new Set(blanks).size).toBe(3);
+  for (const tabId of blanks.slice(1))
+    store.applyTileAction(threadRef, { type: "close-tab", tabId });
   await userEvent.click(screen.getByText("Choose an area", { exact: true }));
   await userEvent.keyboard("c");
   expect(layout().focusedGroupId).toBe(
@@ -545,7 +572,7 @@ it("moves and resizes floating tiles without docking, and drives the empty choos
   });
   await userEvent.click(screen.getByText("Choose an area", { exact: true }));
   // Main chat is highlighted, but Enter on a Tabbed-to choice presses that choice.
-  await userEvent.keyboard("{Tab}{Tab}{Tab}");
+  await userEvent.keyboard("{Tab}{Tab}{Tab}{Tab}{Tab}");
   await expect.element(screen.getByRole("button", { name: "Notes", exact: true })).toHaveFocus();
   await userEvent.keyboard("{Enter}");
   expect(getTileGroups(layout()).find((group) => group.id === "tabbed")?.tabs[0]).toMatch(
@@ -660,4 +687,263 @@ it("leaves Escape in a maximized terminal even when the shortcut context is stal
   await userEvent.click(terminal);
   await userEvent.keyboard("{Escape}");
   expect(layout().maximizedGroupId).toBe("terminal-group");
+});
+
+it("opens layout actions from the title bar and saves the current workspace", async () => {
+  await using fixture = await setup();
+  const { screen } = fixture;
+  const controls = document.querySelector('[aria-label="Title bar controls"]')!;
+  expect(controls.querySelector('button[aria-label="Layouts"]')).not.toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Layouts", exact: true }));
+  await page.viewport(390, 800);
+  await expect
+    .element(screen.getByRole("button", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("menu", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+  await page.viewport(1100, 800);
+  await userEvent.click(screen.getByRole("button", { name: "Layouts", exact: true }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "Save layout as…", exact: true }));
+  await expect
+    .element(screen.getByRole("dialog", { name: "Save layout", exact: true }))
+    .toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+  await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }).first());
+  await expect
+    .element(screen.getByRole("menuitem", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+  await screen.rerender(
+    <BackgroundThreadContext value={true}>{fixture.workspace}</BackgroundThreadContext>,
+  );
+  await expect
+    .element(screen.getByRole("button", { name: "Layouts", exact: true }))
+    .not.toBeInTheDocument();
+});
+
+it("runs leader commands from terminal focus and keeps keyboard resize active until Enter", async () => {
+  await using fixture = await setup(true, false, true);
+  const { screen, layout } = fixture;
+  const terminal = screen.getByRole("textbox", { name: "Editor terminal:new-terminal" });
+  await userEvent.click(terminal);
+  await userEvent.keyboard("{Control>}a{/Control}");
+  await userEvent.keyboard("h");
+  expect(layout().focusedGroupId).toBe("conversation-group");
+  await userEvent.click(terminal);
+  const before = JSON.stringify(layout().root);
+  await userEvent.keyboard("{Control>}a{/Control}r");
+  await expect.element(screen.getByRole("status", { name: "Resizing focused tile" })).toBeVisible();
+  await userEvent.keyboard("h");
+  expect(JSON.stringify(layout().root)).toBe(before);
+  await userEvent.keyboard("{Enter}");
+  expect(JSON.stringify(layout().root)).not.toBe(before);
+  await expect
+    .element(screen.getByRole("status", { name: "Resizing focused tile" }))
+    .not.toBeInTheDocument();
+  const beforeForwardedResize = JSON.stringify(layout().root);
+  dispatchMenuAction("workspace.tile.resizeLeft");
+  expect(JSON.stringify(layout().root)).not.toBe(beforeForwardedResize);
+  const target = terminal.element();
+  target.focus();
+  const first = new KeyboardEvent("keydown", {
+    key: "a",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  const second = new KeyboardEvent("keydown", {
+    key: "a",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(first);
+  target.dispatchEvent(second);
+  expect(first.defaultPrevented).toBe(true);
+  expect(second.defaultPrevented).toBe(false);
+});
+
+it("sends tile keys and menu actions only to the workspace that owns focus, else the one underneath", async () => {
+  const keybindings = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1100, 900);
+  await using _viewport = {
+    [Symbol.asyncDispose]: () => page.viewport(viewport.width, viewport.height),
+  };
+  const threadRef = {
+    environmentId: EnvironmentId.make("tiles"),
+    threadId: ThreadId.make("under"),
+  };
+  const overlayRef = {
+    environmentId: EnvironmentId.make("tiles"),
+    threadId: ThreadId.make("over"),
+  };
+  useRightPanelStore.setState({ byThreadKey: {} });
+  const store = useRightPanelStore.getState();
+  store.open(threadRef, "files");
+  store.openTerminal(overlayRef, "term-1");
+  store.applyTileAction(overlayRef, { type: "close-tab", tabId: "conversation" });
+  let terminals = 1;
+  const noop = () => {};
+  function Workspace(props: { threadRef: typeof threadRef; overlay?: boolean }) {
+    const panel = useRightPanelStore((state) =>
+      selectThreadRightPanelState(state.byThreadKey, props.threadRef),
+    );
+    return (
+      <ThreadTileWorkspace
+        threadRef={props.threadRef}
+        projectId={null}
+        newThread={false}
+        header={null}
+        runningTerminalIds={[]}
+        onCloseTileSurfaces={noop}
+        conversation={<textarea aria-label="Thread composer" defaultValue="" />}
+        {...(props.overlay ? { terminalsOnly: true, overlay: true } : {})}
+        panels={{
+          surfaces: panel.surfaces,
+          activeSurfaceId: panel.activeSurfaceId,
+          environmentId: props.threadRef.environmentId,
+          keybindings,
+          getShortcutContext: () => ({
+            terminalFocus: false,
+            terminalOpen: false,
+            previewFocus: false,
+            previewOpen: false,
+            isWeb: true,
+            isDesktop: false,
+          }),
+          pendingSurfaceIds: new Set(),
+          previewSessions: {},
+          desktopByTabId: {},
+          terminalLabelsById: new Map(),
+          onActivate: (surface) => store.activateSurface(props.threadRef, surface.id),
+          onCloseSurface: noop,
+          onCloseOtherSurfaces: noop,
+          onCloseSurfacesToRight: noop,
+          onCloseAllSurfaces: noop,
+          onCopyFilePath: noop,
+          onAddBrowser: noop,
+          onAddBrowserInProfile: noop,
+          onAddTerminal: () => store.openTerminal(props.threadRef, `term-${++terminals}`),
+          onAddDiff: noop,
+          onAddFiles: noop,
+          onAddPullRequest: noop,
+          onAddPullRequests: noop,
+          onAddDevice: noop,
+          browserAvailable: false,
+          terminalAvailable: true,
+          diffAvailable: false,
+          filesAvailable: false,
+          pullRequestAvailable: false,
+          pullRequestsAvailable: false,
+          deviceAvailable: false,
+        }}
+        renderSurface={(surface) => (
+          <textarea aria-label={`Editor ${surface.id}`} defaultValue="" />
+        )}
+      />
+    );
+  }
+  const tree = (withOverlay: boolean) => (
+    <div style={{ display: "flex", flexDirection: "column", width: 900, height: 800 }}>
+      <input aria-label="Outside both" />
+      <div role="group" aria-label="Thread" style={{ display: "flex", height: 380 }}>
+        <Workspace threadRef={threadRef} />
+      </div>
+      {withOverlay ? (
+        <div role="group" aria-label="Overlay" style={{ display: "flex", height: 380 }}>
+          <Workspace threadRef={overlayRef} overlay />
+        </div>
+      ) : null}
+    </div>
+  );
+  await using screen = await render(tree(true));
+  const groups = () => {
+    const { byThreadKey } = useRightPanelStore.getState();
+    return [
+      getTileGroups(selectThreadTileLayout(byThreadKey, threadRef)).length,
+      getTileGroups(selectThreadTileLayout(byThreadKey, overlayRef)).length,
+    ];
+  };
+  const splitByKey = () =>
+    userEvent.keyboard("{Control>}{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}{/Control}");
+  const focus = (name: string) => {
+    const element = screen.getByRole("textbox", { name, exact: true }).element();
+    (element as HTMLElement).focus();
+    expect(document.activeElement).toBe(element);
+  };
+  // A thread split focuses its new chooser; wait for it so it cannot steal the next focus.
+  const threadChooserFocused = () =>
+    vi.waitFor(() => expect(document.activeElement?.closest("[data-tile-chooser]")).not.toBeNull());
+  expect(groups()).toEqual([2, 1]);
+
+  focus("Editor terminal:term-1");
+  await splitByKey();
+  expect(groups()).toEqual([2, 2]);
+  focus("Editor terminal:term-1");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([2, 3]);
+
+  // The overlay re-rendered last, so its registrations are the newest.
+  focus("Thread composer");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([3, 3]);
+  await threadChooserFocused();
+  focus("Thread composer");
+  await splitByKey();
+  expect(groups()).toEqual([4, 3]);
+  await threadChooserFocused();
+
+  focus("Outside both");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([5, 3]);
+  await threadChooserFocused();
+  focus("Outside both");
+  await splitByKey();
+  expect(groups()).toEqual([6, 3]);
+
+  // A tile menu renders in a portal, yet its workspace still owns the input.
+  const openTileMenu = async (workspace: "Thread" | "Overlay") => {
+    await userEvent.click(
+      screen
+        .getByRole("group", { name: workspace, exact: true })
+        .getByRole("button", { name: "Tile actions", exact: true })
+        .first(),
+    );
+    await expect.element(screen.getByRole("menu")).toBeVisible();
+    await userEvent.keyboard("{ArrowDown}");
+    await vi.waitFor(() => expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull());
+  };
+  const closeTileMenu = async () => {
+    await userEvent.keyboard("{Escape}");
+    await expect.element(screen.getByRole("menu")).not.toBeInTheDocument();
+  };
+  await openTileMenu("Overlay");
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([6, 4]);
+  await closeTileMenu();
+  await openTileMenu("Overlay");
+  await splitByKey();
+  expect(groups()).toEqual([6, 5]);
+  await closeTileMenu();
+
+  // Maximize keeps focus in the thread's menu, unlike a split, which moves it to a new chooser.
+  const maximized = () => {
+    const { byThreadKey } = useRightPanelStore.getState();
+    return [
+      selectThreadTileLayout(byThreadKey, threadRef).maximizedGroupId !== null,
+      selectThreadTileLayout(byThreadKey, overlayRef).maximizedGroupId !== null,
+    ];
+  };
+  await openTileMenu("Thread");
+  dispatchMenuAction("workspace.tile.maximize");
+  expect(maximized()).toEqual([true, false]);
+  await userEvent.keyboard("{Control>}{Alt>}{Enter}{/Alt}{/Control}");
+  expect(maximized()).toEqual([false, false]);
+  await closeTileMenu();
+
+  focus("Editor terminal:term-1");
+  await screen.rerender(tree(false));
+  dispatchMenuAction("workspace.tile.splitRight");
+  expect(groups()).toEqual([7, 5]);
 });

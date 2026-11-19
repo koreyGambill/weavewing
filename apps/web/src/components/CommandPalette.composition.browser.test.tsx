@@ -2,8 +2,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
-import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
+  EnvironmentId,
+  ProjectId,
+} from "@t3tools/contracts";
+import type { Project } from "../types";
 import { act, render } from "../../test/render";
+import { dispatchCommandPalette } from "../commandPaletteStore";
 import { CommandPalette } from "./CommandPalette";
 import { openCommandPalette } from "../commandPaletteBus";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -11,10 +18,14 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 const scopes = vi.hoisted(() => ({
   denied: undefined as string | undefined,
   sourceControl: undefined as unknown,
+  composerFocus: undefined as (() => void) | undefined,
+  projects: [] as ReadonlyArray<Project>,
 }));
 const setup = (deniedScope?: string, sourceControl?: unknown) => {
   scopes.denied = deniedScope;
   scopes.sourceControl = sourceControl;
+  scopes.composerFocus = undefined;
+  scopes.projects = [];
 };
 const githubAvailable = {
   versionControlSystems: [],
@@ -41,6 +52,16 @@ vi.mock("@effect/atom-react", async (original) => ({
   useAtomValue: (atom: unknown) =>
     atom === primaryServerKeybindingsAtom ? DEFAULT_RESOLVED_KEYBINDINGS : [],
 }));
+vi.mock("../composerHandleContext", async (original) => {
+  const actual = await original<typeof import("../composerHandleContext")>();
+  return {
+    ...actual,
+    useComposerHandleContext: () => {
+      const ref = actual.useComposerHandleContext();
+      return scopes.composerFocus ? { current: { focusAtEnd: scopes.composerFocus } } : ref;
+    },
+  };
+});
 vi.mock("../hooks/useTheme", () => ({
   useRenderedAppearance: () => "light",
   useTheme: () => ({ theme: "t3-chat", resolvedTheme: "light", appearanceMode: "light" }),
@@ -99,7 +120,7 @@ vi.mock("../state/environments", async (original) => ({
 }));
 vi.mock("../state/entities", async (original) => ({
   ...(await original<typeof import("../state/entities")>()),
-  useProjects: () => [],
+  useProjects: () => scopes.projects,
   useThreadShells: () => [],
   useVisibleThreadShells: () => [],
   useHiddenThreadKeys: () => new Set(),
@@ -254,4 +275,72 @@ it("tells screen readers whether a new project will be published", async () => {
   await expect.element(option).toHaveAttribute("aria-checked", "false");
   await option.click();
   await expect.element(option).toHaveAttribute("aria-checked", "true");
+});
+
+it("keeps the query across search tabs and restores input focus", async () => {
+  setup();
+  scopes.projects = Array.from({ length: 11 }, (_, index) => ({
+    id: ProjectId.make(`project-${index}`),
+    environmentId: EnvironmentId.make("local"),
+    title: `Project ${index}`,
+    workspaceRoot: `/workspace/${index}`,
+    repositoryIdentity: null,
+    defaultModelSelection: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    scripts: [],
+  }));
+  await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+  await act(() => dispatchCommandPalette({ _tag: "ToggleMode", mode: "search" }));
+  await page.getByRole("combobox").fill("token refresh");
+  await userEvent.keyboard("{Tab}");
+  await expect
+    .element(page.getByRole("tab", { name: "Projects", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await expect.element(page.getByRole("combobox")).toHaveValue("token refresh");
+  await expect.element(page.getByRole("combobox")).toHaveFocus();
+  await userEvent.keyboard("{Tab}");
+  await expect
+    .element(page.getByRole("tab", { name: "Files", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await expect.element(page.getByRole("combobox")).toHaveValue("token refresh");
+  await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+  await expect
+    .element(page.getByRole("tab", { name: "Projects", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await page.getByRole("combobox").fill("");
+  await act(() => page.getByRole("button", { name: "Show more ▸" }).element().focus());
+  await userEvent.keyboard("{Enter}");
+  await expect.element(page.getByRole("combobox")).toHaveFocus();
+  await userEvent.keyboard("{Control>}3{/Control}");
+  await expect
+    .element(page.getByRole("tab", { name: "Files", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(page.getByRole("dialog", { name: "Search", exact: true }))
+    .not.toBeInTheDocument();
+});
+
+it("returns focus to the terminal after dismissing search or commands", async () => {
+  setup();
+  scopes.composerFocus = () => {
+    document.querySelector<HTMLButtonElement>("[data-composer-fixture]")?.focus();
+  };
+  await using _screen = await render(
+    <CommandPalette>
+      <div data-terminal-owner>
+        <textarea aria-label="Terminal input" />
+      </div>
+      <button data-composer-fixture>Composer</button>
+    </CommandPalette>,
+  );
+  const terminal = page.getByRole("textbox", { name: "Terminal input" });
+  for (const mode of ["search", "command"] as const) {
+    await terminal.click();
+    await act(() => dispatchCommandPalette({ _tag: "ToggleMode", mode }));
+    await expect.element(page.getByRole("combobox")).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(terminal).toHaveFocus();
+  }
 });

@@ -1,12 +1,7 @@
 import { SessionPermissions } from "./SessionPermissions";
-import {
-  ChevronRightIcon,
-  ChevronsLeftRightEllipsisIcon,
-  EllipsisIcon,
-  RouteIcon,
-} from "lucide-react";
+import { ChevronRightIcon, EllipsisIcon, RouteIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useEffectEvent, useState } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useState } from "react";
 import {
   AuthRelayWriteScope,
   type EnvironmentId,
@@ -42,7 +37,6 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button, InlineButton } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import {
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
@@ -78,6 +72,10 @@ type SavedBackendListRowProps = {
   onSetEnabled: (environmentId: EnvironmentId, enabled: boolean) => void;
   onRemove: (environment: EnvironmentPresentation) => void;
   onAddRoute: (environment: EnvironmentPresentation) => void;
+  /** Who has access to it, under the status line. */
+  access?: ReactNode;
+  accessDetail?: ReactNode;
+  menuItems?: ReactNode;
 };
 
 function savedBackendStatus(environment: EnvironmentPresentation): {
@@ -120,6 +118,9 @@ export function SavedBackendListRow({
   onSetEnabled,
   onRemove,
   onAddRoute,
+  access,
+  accessDetail,
+  menuItems,
 }: SavedBackendListRowProps) {
   const [routesOpen, setRoutesOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -322,10 +323,12 @@ export function SavedBackendListRow({
               <ServerUpdateProgress state={serverUpdateState} />
             </div>
           ) : null}
+          {access}
         </>
       }
       detail={
         <>
+          {accessDetail}
           {diagnosis && diagnosisOpen ? (
             <ConnectionDiagnosisPanel
               hostLabel={environment.label}
@@ -423,6 +426,7 @@ export function SavedBackendListRow({
           {errorTraceId ? (
             <MenuItem onClick={() => copyTraceId(errorTraceId)}>Copy trace ID</MenuItem>
           ) : null}
+          {menuItems}
           <MenuSeparator />
           <MenuItem variant="destructive" onClick={() => onRemove(environment)}>
             {isRemoving ? "Removing…" : "Remove from this device…"}
@@ -855,24 +859,6 @@ export function CloudLinkRow({
   );
 }
 
-function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
-  return (
-    <Empty className="min-h-52">
-      <EmptyMedia variant="icon">
-        <ChevronsLeftRightEllipsisIcon />
-      </EmptyMedia>
-      <EmptyHeader>
-        <EmptyTitle>No saved remote environments</EmptyTitle>
-        <EmptyDescription>
-          {cloudEnabled
-            ? "Click “Add environment” to pair another environment, or connect one from T3 Connect."
-            : "Click “Add environment” to pair another environment."}
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  );
-}
-
 export function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironments,
@@ -884,9 +870,7 @@ export function CloudRemoteEnvironmentRows({
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
-      empty={<EmptyRemoteEnvironments />}
+      empty={null}
     />
-  ) : savedEnvironments.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} />
   ) : null;
 }

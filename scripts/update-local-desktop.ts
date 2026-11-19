@@ -175,7 +175,7 @@ async function liveDatabaseBackupDecision(
   database: string,
 ) {
   const prepared = config.databaseBackup;
-  if (prepared?.required !== false || prepared.reason !== "migration-set-unchanged")
+  if (!prepared || !["migration-set-unchanged", "migration-set-changed"].includes(prepared.reason))
     return prepared;
   try {
     const receipt = JSON.parse(NodeFS.readFileSync(config.installedReceipt!, "utf8"));
@@ -190,21 +190,59 @@ async function liveDatabaseBackupDecision(
     return { required: true, reason: "installed-runtime-unverified" };
   }
   try {
-    const { recordedMigrations, migrationManifest } = await import(
+    const { recordedMigrations, migrationManifest, migrationClassifications } = await import(
       new URL("./database-migrations.mjs", import.meta.url).href
     );
     const recorded = recordedMigrations(database);
     if (recorded === null || !Array.isArray(migrationManifest) || migrationManifest.length === 0)
       throw new Error("Database migration history unavailable");
-    if (
-      JSON.stringify(recorded.map(({ id, name }: { id: number; name: string }) => [id, name])) !==
-      JSON.stringify(migrationManifest)
-    )
-      return { required: true, reason: "database-migrations-differ" };
-    return prepared;
+    return {
+      ...prepared,
+      ...classifyDatabaseBackup(migrationManifest, migrationClassifications, recorded),
+    };
   } catch {
     return { required: true, reason: "database-migrations-unavailable" };
   }
+}
+
+/** Requires a snapshot when the live history or the candidate's classifications are uncertain. */
+export function classifyDatabaseBackup(
+  manifest: ReadonlyArray<readonly [number, string]>,
+  classifications: ReadonlyArray<{ id: number; name: string; destructive: boolean }>,
+  recorded: ReadonlyArray<{ id: number; name: string }> | null,
+) {
+  const unsafe = { required: true, reason: "database-migrations-unavailable" };
+  if (
+    !Array.isArray(manifest) ||
+    manifest.length === 0 ||
+    !Array.isArray(classifications) ||
+    !Array.isArray(recorded)
+  )
+    return unsafe;
+  const known = new Map(manifest);
+  const classified = new Map(classifications.map((entry) => [entry.id, entry]));
+  if (
+    known.size !== manifest.length ||
+    classified.size !== manifest.length ||
+    manifest.some(
+      ([id, name]) =>
+        classified.get(id)?.name !== name || typeof classified.get(id)?.destructive !== "boolean",
+    )
+  )
+    return unsafe;
+  const live = new Map(recorded.map((entry) => [entry.id, entry.name]));
+  if (live.size !== recorded.length || recorded.some(({ id, name }) => known.get(id) !== name))
+    return { required: true, reason: "database-migrations-differ" };
+  const head = Math.max(0, ...live.keys());
+  const pending = manifest.filter(([id]) => !live.has(id));
+  if (pending.some(([id]) => id <= head))
+    return { required: true, reason: "database-migrations-differ" };
+  if (pending.some(([id]) => classified.get(id)!.destructive))
+    return { required: true, reason: "destructive-migrations" };
+  return {
+    required: false,
+    reason: pending.length ? "additive-migrations-only" : "migration-set-unchanged",
+  };
 }
 
 /** Packages the candidate's read-only migration reader without repository runtime dependencies. */
@@ -213,13 +251,14 @@ export async function writeLocalUpdateWorker(repo: string, output: string) {
   const { recordedMigrations } = await import(
     NodeURL.pathToFileURL(NodePath.join(persistence, "databaseMigrationHead.ts")).href
   );
-  const { migrationManifest } = await import(
+  const { migrationManifest, migrationClassifications } = await import(
     NodeURL.pathToFileURL(NodePath.join(persistence, "Migrations.ts")).href
   );
   NodeFS.writeFileSync(
     NodePath.join(output, "database-migrations.mjs"),
     `import * as NodeFS from "node:fs";\nimport * as NodeSqlite from "node:sqlite";\n` +
       `export const migrationManifest = ${JSON.stringify(migrationManifest)};\n` +
+      `export const migrationClassifications = ${JSON.stringify(migrationClassifications)};\n` +
       `export ${recordedMigrations.toString()}\n`,
   );
   NodeFS.writeFileSync(
@@ -240,7 +279,8 @@ async function backupState(
   try {
     const database = NodePath.join(source, "statev2.sqlite");
     const required =
-      databaseBackup?.required !== false || databaseBackup.reason !== "migration-set-unchanged";
+      databaseBackup?.required !== false ||
+      !["migration-set-unchanged", "additive-migrations-only"].includes(databaseBackup.reason);
     const ran = required && NodeFS.existsSync(database);
     if (ran) {
       await run(
@@ -270,7 +310,7 @@ async function backupState(
       databaseBackup: {
         ran,
         reason: !required
-          ? "migration-set-unchanged"
+          ? databaseBackup!.reason
           : !ran
             ? "database-missing"
             : (databaseBackup?.reason ?? "migration-status-unknown"),
@@ -282,7 +322,7 @@ async function backupState(
   }
 }
 
-/** Skips the database copy only when both revisions have the same known migration set. */
+/** Allows the live-ledger check only for unchanged migrations or appended registry entries. */
 export async function databaseBackupDecision(
   git: (...args: string[]) => Promise<string>,
   installedCommit: string | undefined,
@@ -323,6 +363,28 @@ export async function databaseBackupDecision(
     decision.reason = "migration-set-unavailable";
     const installed = await migrationSet(installedCommit);
     const candidate = await migrationSet(candidateCommit);
+    if (installed !== candidate) {
+      const changes = await git(
+        "diff",
+        "--name-status",
+        "--no-renames",
+        installedCommit,
+        candidateCommit,
+        "--",
+        ...paths,
+      );
+      const onlyAppended = changes
+        .split("\n")
+        .every(
+          (line) =>
+            line === "M\tapps/server/src/persistence/Migrations.ts" ||
+            /^A\tapps\/server\/src\/persistence\/Migrations\/\d+_[^/]+\.ts$/.test(line),
+        );
+      const installedEffect = JSON.parse(installed)[1];
+      const candidateEffect = JSON.parse(candidate)[1];
+      if (!onlyAppended || installedEffect !== candidateEffect)
+        return { ...decision, reason: "migration-runtime-changed" };
+    }
     return {
       ...decision,
       required: installed !== candidate,

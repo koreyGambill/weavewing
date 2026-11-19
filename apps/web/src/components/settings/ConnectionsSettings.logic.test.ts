@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
   isServerNetworkAccessible,
+  formatDesktopSshConnectionError,
   parseManualDesktopSshTarget,
   resolveAccessEnvironmentId,
   resolveTailscaleServeBaseUrl,
@@ -25,7 +26,13 @@ it.each([
     label: "remote environment",
     desktopLocal: false,
     hasTailnet: true,
-    expected: [],
+    expected: ["lan", "lan", "private-network"],
+  },
+  {
+    label: "remote environment without Tailscale",
+    desktopLocal: false,
+    hasTailnet: false,
+    expected: ["lan", "lan"],
   },
 ] as const)("builds pairing routes for $label", ({ desktopLocal, hasTailnet, expected }) => {
   const directEndpoints = [
@@ -39,9 +46,9 @@ it.each([
   );
   expect(endpoints.map((endpoint) => endpoint.reachability)).toEqual(expected);
   const selected = selectPairingEndpoint(endpoints);
-  if (!desktopLocal || !hasTailnet) {
+  if (expected.length === 0) {
     expect(selected).toBeNull();
-  } else {
+  } else if (desktopLocal) {
     expect(resolveAdvertisedEndpointPairingUrl(selected!, "test-token")).toBe(
       "http://100.84.12.7:3774/pair#token=test-token",
     );
@@ -90,6 +97,34 @@ describe("parseManualDesktopSshTarget", () => {
     expect(() => parseManualDesktopSshTarget({ host: "devbox", username: "", port })).toThrow(
       "SSH port must be between 1 and 65535.",
     );
+  });
+});
+
+describe("formatDesktopSshConnectionError", () => {
+  const download = (curl: string) =>
+    new Error(
+      `Could not prepare the SSH environment: Error invoking remote method 'desktop:ensure-ssh-environment': SshCommandError: ${curl}\nCould not download t3 0.1.9 from https://github.com/koreyGambill/weavewing/releases/download/weavewing-v0.1.9/SHA256SUMS. If this host cannot reach it, install t3 0.1.9 from https://github.com/koreyGambill/weavewing/releases.\nNo running T3 Code desktop app was found in /Users/me/.t3 to connect to instead. Open the app on this host and retry.`,
+    );
+  it.each([
+    [
+      "a version with no published server",
+      download("curl: (56) The requested URL returned error: 404"),
+      "This build of Weavewing (0.1.9) has no published server to install over SSH, and no running Weavewing was found on that computer. Open Weavewing there and retry, or connect with a link and code.",
+    ],
+    [
+      "a host that cannot reach the download",
+      download("curl: (6) Could not resolve host: github.com"),
+      "That computer could not download Weavewing 0.1.9, and no running Weavewing was found there. Open Weavewing there and retry, or connect with a link and code.",
+    ],
+    [
+      "any other failure, without the bridge's prefixes",
+      new Error(
+        "Error invoking remote method 'desktop:ensure-ssh-environment': SshCommandError: Permission denied",
+      ),
+      "Permission denied",
+    ],
+  ] as const)("explains %s", (_name, error, expected) => {
+    expect(formatDesktopSshConnectionError(error)).toBe(expected);
   });
 });
 

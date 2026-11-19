@@ -804,12 +804,17 @@ export const make = Effect.gen(function* () {
     window.webContents.on("before-input-event", (event, input) => {
       quitShortcutHandler(event, input);
       if (window.isDestroyed()) return;
-      // Native edit, quit and function-key accelerators must yield to terminal input.
+      // Ctrl+A must reach the renderer for the leader; terminals also own native accelerators.
       window.webContents.setIgnoreMenuShortcuts(
         (terminalFocused && !input.meta) ||
+          (input.control &&
+            !input.meta &&
+            !input.alt &&
+            !input.shift &&
+            input.key.toLowerCase() === "a") ||
           ((environment.platform === "darwin" ? input.meta : input.control) &&
             !input.alt &&
-            input.key.toLowerCase() === "w"),
+            ["w", "k", "p"].includes(input.key.toLowerCase())),
       );
     });
     window.webContents.on("input-event", (_event, input) => {

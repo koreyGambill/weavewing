@@ -4,6 +4,9 @@ import { useEffect } from "react";
 export type HardwareKeyboardCommand =
   | ThreadJumpKeybindingCommand
   | "commandPalette"
+  | "search"
+  | "searchNextTab"
+  | "searchPreviousTab"
   | "paletteNext"
   | "palettePrevious"
   | "paletteDismiss"

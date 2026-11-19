@@ -54,7 +54,7 @@ import {
   clampThreadSidebarWidth,
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
-  resolveThreadSidebarMinimumWidth,
+  THREAD_SIDEBAR_MIN_WIDTH,
   THREAD_MAIN_CONTENT_MIN_WIDTH,
   THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
 } from "./threadSidebarWidth";
@@ -466,9 +466,8 @@ export function AppSidebarLayout({
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // A clamped drag may not change width, so viewport changes need a separate subscription.
   const viewportWidth = useSyncExternalStore(subscribeToViewportWidth, readViewportWidth);
-  const [titlebarWidth, setTitlebarWidth] = useState(0);
   const [wordmarkWidth, setWordmarkWidth] = useState(0);
-  const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(titlebarWidth);
+  const sidebarMinimumWidth = THREAD_SIDEBAR_MIN_WIDTH;
   const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(viewportWidth, sidebarMinimumWidth);
   const resetSidebarWidth = () => {
     try {
@@ -508,10 +507,7 @@ export function AppSidebarLayout({
         >
           {showSidebar ? (
             <>
-              <TitlebarWidthProbe
-                onWidthChange={setTitlebarWidth}
-                onWordmarkWidthChange={setWordmarkWidth}
-              />
+              <TitlebarWidthProbe onWordmarkWidthChange={setWordmarkWidth} />
               <Sidebar
                 side="left"
                 collapsible="offcanvas"

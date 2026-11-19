@@ -8,6 +8,10 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_RESOLVED_KEYBINDINGS,
+  compileResolvedKeybindingsConfig,
+  defaultKeybindingsForMode,
+  leaderEnabled,
+  leaderShortcutKey,
   parseKeybindingShortcut,
   parseKeybindingWhenExpression,
   US_SHIFTED_TO_UNSHIFTED_KEYS,
@@ -79,6 +83,8 @@ export const DEFAULT_WHEN_VARIABLE =
 const KNOWN_WHEN_VARIABLES = new Set(DEFAULT_WHEN_VARIABLES);
 
 export function shortcutToKeybindingInput(shortcut: KeybindingShortcut): string {
+  if (shortcut.leader)
+    return `leader ${leaderShortcutKey(shortcut) === " " ? "space" : leaderShortcutKey(shortcut)}`;
   const parts: string[] = [];
   if (shortcut.modKey) parts.push("mod");
   if (shortcut.metaKey) parts.push("meta");
@@ -133,14 +139,17 @@ export function parseWhenExpressionDraft(
   return { ok: true, value: ast };
 }
 
-function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
+function sourceForBinding(
+  binding: ResolvedKeybindingRule,
+  defaults: ResolvedKeybindingsConfig,
+): KeybindingSource {
   if (String(binding.command).startsWith("script.")) {
     return "Project";
   }
 
   const bindingKey = shortcutToKeybindingInput(binding.shortcut);
   const bindingWhen = whenAstToExpression(binding.whenAst);
-  const isDefault = DEFAULT_RESOLVED_KEYBINDINGS.some(
+  const isDefault = defaults.some(
     (entry) =>
       entry.command === binding.command &&
       shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
@@ -152,22 +161,23 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
 
 function defaultBindingForBinding(
   binding: ResolvedKeybindingRule,
+  defaults: ResolvedKeybindingsConfig,
 ): ResolvedKeybindingRule | undefined {
   const bindingKey = shortcutToKeybindingInput(binding.shortcut);
   const bindingWhen = whenAstToExpression(binding.whenAst);
 
   return (
-    DEFAULT_RESOLVED_KEYBINDINGS.find(
+    defaults.find(
       (entry) =>
         entry.command === binding.command &&
         shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
         whenAstToExpression(entry.whenAst) === bindingWhen,
     ) ??
-    DEFAULT_RESOLVED_KEYBINDINGS.find(
+    defaults.find(
       (entry) =>
         entry.command === binding.command && whenAstToExpression(entry.whenAst) === bindingWhen,
     ) ??
-    DEFAULT_RESOLVED_KEYBINDINGS.find((entry) => entry.command === binding.command)
+    defaults.find((entry) => entry.command === binding.command)
   );
 }
 
@@ -209,6 +219,12 @@ export interface KeybindingGroup {
 }
 
 const KEYBINDING_GROUPS = [
+  { id: "tiles", title: "Tiles & tabs", prefixes: ["workspace"] },
+  {
+    id: "search",
+    title: "Search & palette",
+    prefixes: ["commandPalette", "search", "filePicker", "projectSearch"],
+  },
   {
     id: "navigation",
     title: "Navigation",
@@ -216,6 +232,7 @@ const KEYBINDING_GROUPS = [
       "sidebar",
       "threadContext",
       "commandPalette",
+      "search",
       "filePicker",
       "projectSearch",
       "editor",
@@ -258,9 +275,12 @@ export function buildKeybindingRows(
   keybindings: ResolvedKeybindingsConfig,
   platform = navigator.platform,
 ): ReadonlyArray<KeybindingRow> {
+  const defaults = compileResolvedKeybindingsConfig(
+    defaultKeybindingsForMode(leaderEnabled(keybindings)),
+  );
   const rowsById = new Map<string, KeybindingRow>();
   for (const binding of keybindings) {
-    const defaultBinding = defaultBindingForBinding(binding);
+    const defaultBinding = defaultBindingForBinding(binding, defaults);
     const key = shortcutToKeybindingInput(binding.shortcut);
     const when = whenAstToExpression(binding.whenAst);
     const id = keybindingRowId(binding.command, key, when);
@@ -269,7 +289,7 @@ export function buildKeybindingRows(
       command: binding.command,
       key,
       when,
-      source: sourceForBinding(binding),
+      source: sourceForBinding(binding, defaults),
       defaultKey: defaultBinding ? shortcutToKeybindingInput(defaultBinding.shortcut) : null,
       defaultWhen: whenAstToExpression(defaultBinding?.whenAst),
       binding,
@@ -381,6 +401,14 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "projectPicker.allMachines") return "Project Picker: Toggle All Machines";
   if (command === "workspace.focusNext") return "Focus Next Workspace Area";
   if (command === "workspace.focusPrevious") return "Focus Previous Workspace Area";
+  if (command === "keybindings.leader") return "Leader Key";
+  if (command === "terminal.dropdown") return "Toggle Drop-down Terminal";
+  if (command === "workspace.tile.rotate") return "Rotate Tiles";
+  if (/^workspace\.tile\.tab\.[1-9]$/.test(command)) return `Jump to Tab ${command.at(-1)}`;
+  if (command === "workspace.tile.resizeLeft") return "Resize Tile Left";
+  if (command === "workspace.tile.resizeDown") return "Resize Tile Down";
+  if (command === "workspace.tile.resizeUp") return "Resize Tile Up";
+  if (command === "workspace.tile.resizeRight") return "Resize Tile Right";
   if (command === "workspace.tile.focusLeft") return "Focus Tile Left";
   if (command === "workspace.tile.focusRight") return "Focus Tile Right";
   if (command === "workspace.tile.focusUp") return "Focus Tile Up";
@@ -392,13 +420,13 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "workspace.tile.maximize") return "Maximize Tile";
   if (command === "workspace.tile.focusPair")
     return "Maximize Tile, Show Another Beside It, or Restore";
-  if (command === "workspace.tile.swap") return "Swap Side-by-Side Tiles";
+  if (command === "workspace.tile.swap") return "Swap Tiles";
   if (command === "workspace.tile.float") return "Float or Dock Tile";
   if (command === "workspace.tile.newTab") return "New Tab in Tile";
   if (command === "workspace.tile.closeAllTabs") return "Close All Tabs in Tile";
   if (command === "workspace.tile.closeTab") return "Close Tab in Tile";
   if (command === "workspace.tile.actions") return "Tile Actions Menu";
-  if (command === "workspace.tile.resize") return "Resize Focused Tile (Hold)";
+  if (command === "workspace.tile.resize") return "Resize Focused Tile";
   if (command === "workspace.tile.previousTab") return "Previous Tab in Tile";
   if (command === "workspace.tile.nextTab") return "Next Tab in Tile";
   if (command === "composer.sendAlternate") return "Composer: Opposite Queue or Steer Action";

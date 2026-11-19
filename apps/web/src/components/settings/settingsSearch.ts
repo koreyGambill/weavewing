@@ -35,7 +35,6 @@ export type SettingsPath =
   | "/settings/worktrees"
   | "/settings/connections"
   | "/settings/privacy"
-  | "/settings/access"
   | "/settings/secrets"
   | "/settings/status-sources"
   | "/settings/maintenance"
@@ -112,7 +111,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/worktrees": msg("Worktrees"),
   "/settings/connections": msg("Environments"),
   "/settings/privacy": msg("Privacy"),
-  "/settings/access": msg("Sharing & access"),
   "/settings/secrets": msg("Secrets"),
   "/settings/status-sources": msg("Status sources"),
   "/settings/maintenance": msg("Maintenance"),
@@ -160,7 +158,6 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     paths: [
       "/settings/privacy",
       "/settings/connections",
-      "/settings/access",
       "/settings/status-sources",
       ...(isSecretsFeatureEnabled ? (["/settings/secrets"] as const) : []),
     ],
@@ -1277,8 +1274,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "environment-icon",
     title: "Environment icon",
-    to: "/settings/access",
-    targetId: "connections-environment",
+    to: "/settings/connections",
     searchTerms: ["machine glyph sidebar mac mini studio laptop desktop server cloud vm"],
   },
   {
@@ -1326,7 +1322,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "wsl-backend",
     title: "WSL backend",
-    to: "/settings/access",
+    to: "/settings/connections",
     searchTerms: [
       "windows subsystem linux distro second server projects stop windows backend restart wsl only",
     ],
@@ -1371,25 +1367,33 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "connections-environment",
-    title: "This machine",
-    to: "/settings/access",
+    title: "This computer",
+    to: "/settings/connections",
     searchTerms: [
-      "connections server backend local remote access administrative permissions scope pairing links qr code authorized clients sessions revoke endpoint",
+      "connections server backend local remote access administrative permissions scope pairing links authorized clients sessions revoke open to tailscale local network import conversations",
     ],
   },
   {
     id: "linked-environments",
     peerLinksOnly: true,
-    title: "Linked environments",
+    title: "Who can reach what",
     to: "/settings/connections",
     targetId: "linked-environments",
-    searchTerms: ["link peer another machine vps agents work there handoff pairing code"],
+    searchTerms: [
+      "linked environments link peer another machine vps agents work there access level full view only ask before changes trusted together grid",
+    ],
   },
   {
     id: "remote-environments",
-    title: "Environments",
+    title: "Servers",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved route"],
+  },
+  {
+    id: "connect",
+    title: "Connect a device or computer",
+    to: "/settings/connections",
+    searchTerms: ["pair phone tablet browser qr code link computer address ssh share access"],
   },
   {
     id: "preferred-environment",
@@ -1459,7 +1463,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/source-control": "environment-defaults",
   "/settings/worktrees": "project-defaults",
   "/settings/connections": "connections",
-  "/settings/access": "connections",
   "/settings/privacy": "connections",
   "/settings/secrets": null,
   "/settings/status-sources": "environment",
@@ -1486,7 +1489,7 @@ const SPLIT_SETTINGS_PATHS: ReadonlySet<string> = new Set([
 ]);
 // Section anchors that moved but are not search results themselves.
 const MOVED_SECTION_ANCHORS: Readonly<Record<string, SettingsPath>> = {
-  "authorized-clients": "/settings/access",
+  "authorized-clients": "/settings/connections",
   "text-generation": "/settings/threads",
   about: "/settings/about",
 };

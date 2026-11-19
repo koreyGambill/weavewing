@@ -247,6 +247,33 @@ export function createScratchProjectActions(
   };
 }
 
+/** The machine and folder default-folder work starts in, as new threads pick it; null when none. */
+export function useDefaultFolder(): {
+  readonly environmentId: EnvironmentId;
+  readonly root: string;
+  readonly label: string;
+  readonly machine: string;
+} | null {
+  const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const preferredEnvironmentId = usePreferredEnvironmentId();
+  const lookup = createScratchLookup({
+    environments: () => environments,
+    primaryEnvironmentId: () => primaryEnvironmentId,
+    preferredEnvironmentId: () => preferredEnvironmentId,
+  });
+  const environmentId = lookup.scratchEnvironmentId(null);
+  const root = lookup.scratchWorkspaceRootFor(environmentId);
+  const environment = environments.find((entry) => entry.environmentId === environmentId);
+  if (environmentId === null || root === null || !environment) return null;
+  return {
+    environmentId,
+    root,
+    label: lookup.scratchWorkspaceLabelFor(environmentId) ?? root,
+    machine: environment.label,
+  };
+}
+
 /** Scratch actions that read environments when called, for handlers outside render. */
 export function readScratchProjectActions(
   registry: AtomRegistry.AtomRegistry,

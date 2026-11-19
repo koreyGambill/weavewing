@@ -668,6 +668,8 @@ lock.close();
       { $_ -in @('digest-mismatch', 'missing-receipt', 'receipt-commit-mismatch') } { 'installed-runtime-unverified' }
       'missing-reader' { 'database-migrations-unavailable' }
       'matching-db' { 'migration-set-unchanged' }
+      'older-db' { 'destructive-migrations' }
+      'missing-ledger' { 'destructive-migrations' }
       default { 'database-migrations-differ' }
     }
     Assert ($ledgerResult.databaseBackup.reason -eq $expectedReason) "Wrong database-copy reason: $ledgerCase"

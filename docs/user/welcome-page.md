@@ -6,7 +6,8 @@ on one page: your agents, projects from your Claude Code, Codex, and Pi history,
 and the phone app. Only an agent is needed to start chatting.
 
 To see the page again, go to **Settings → About → Welcome page** and select
-**Open**, or choose **Import conversations and projects** in **Settings → Projects**. Direct links, such as Settings, open normally before setup is done.
+**Open**, or choose **Import conversations and projects** in **Settings → Projects**.
+Each server in **Settings → Environments** also offers **Import conversations**. Direct links, such as Settings, open normally before setup is done.
 
 The hosted app at app.t3.codes does not open the page. With no computer connected,
 it asks you to sign in to T3 Connect, then to install T3 Code and run

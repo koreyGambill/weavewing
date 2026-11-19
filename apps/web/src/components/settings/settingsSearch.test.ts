@@ -373,8 +373,8 @@ describe("movedSettingsPath", () => {
     expect(movedSettingsPath("/settings/general", "text-generation-model")).toBe(
       "/settings/threads",
     );
-    expect(movedSettingsPath("/settings/connections", "authorized-clients")).toBe(
-      "/settings/access",
+    expect(movedSettingsPath("/settings/access", "authorized-clients")).toBe(
+      "/settings/connections",
     );
     expect(movedSettingsPath("/settings/source-control", "worktree-branch-naming")).toBe(
       "/settings/worktrees",
