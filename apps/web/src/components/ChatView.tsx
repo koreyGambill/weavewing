@@ -74,6 +74,7 @@ import {
   type ResponseContextRecord,
   type ChatFileAttachment,
   isProviderNativeSubagentThread,
+  isStableForkRun,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -2769,6 +2770,9 @@ export default function ChatView(props: ChatViewProps) {
     canOperateThread &&
     !isSubagentThread &&
     serverConfig?.environment.capabilities.anchoredSideChats === true;
+  const stableSideChatRunIds = canBranchAssistantText
+    ? new Set(serverProjection?.runs.flatMap((run) => (isStableForkRun(run) ? [run.id] : [])))
+    : undefined;
   const sideChat = useSideChat({
     threadRef: sideChatsOffered && isServerThread ? activeThreadRef : null,
     anchoredThreadRef: canBranchAssistantText ? activeThreadRef : null,
@@ -3394,6 +3398,7 @@ export default function ChatView(props: ChatViewProps) {
                 citationHistory={citationHistory}
                 onCiteAssistantText={citeAssistantTextStable}
                 onBranchAssistantText={canBranchAssistantText ? branchAssistantText : undefined}
+                stableSideChatRunIds={stableSideChatRunIds}
                 renderInlineSideChats={inlineSideChats.size > 0 ? renderInlineSideChats : undefined}
                 branchOriginMessageIds={branchOriginMessageIds}
                 followUpMessageIds={followUpMessageIds}

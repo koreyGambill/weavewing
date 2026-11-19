@@ -234,9 +234,14 @@ export function AssistantSelectionToolbar({
           variant="glass"
           onClick={() => {
             const { messageId, text, start, end, prefix, suffix } = selection.citation;
-            window.getSelection()?.removeAllRanges();
-            dismiss();
-            void branch({ messageId, text, start, end, prefix, suffix });
+            const selected = window.getSelection();
+            const activeRange = selected?.rangeCount ? selected.getRangeAt(0) : undefined;
+            void branch({ messageId, text, start, end, prefix, suffix }).then((opened) => {
+              const current = window.getSelection();
+              if (!opened || !current?.rangeCount || current.getRangeAt(0) !== activeRange) return;
+              current.removeAllRanges();
+              dismiss();
+            });
           }}
         >
           <GitBranchIcon aria-hidden="true" className="size-3.5" />

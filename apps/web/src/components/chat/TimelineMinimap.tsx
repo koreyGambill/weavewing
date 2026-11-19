@@ -231,7 +231,11 @@ export function TimelineMinimap({
                     }
                   }}
                   style={{ top }}
-                />
+                >
+                  {item.followUp && item.branchOrigin ? (
+                    <span className="absolute inset-x-0 top-1 h-0.5 rounded-full bg-info" />
+                  ) : null}
+                </span>
               );
             })}
             {activeItem ? (

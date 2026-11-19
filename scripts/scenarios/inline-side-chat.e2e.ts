@@ -8,6 +8,9 @@ test(
     const project = await t3.project("side-chat-demo");
     const thread = await t3.thread({ project, title: "Main conversation", messages: ["Start"] });
     await t3.open(thread);
+    await expect(screen.getByRole("heading", "Main conversation")).toBeVisible({
+      timeout: 60_000,
+    });
     await expect(screen.getByText("first fixture turn complete", { exact: false })).toBeVisible();
     await browser.evaluate(() => {
       const source = [...document.querySelectorAll("[data-side-chat-source]")].find((node) =>

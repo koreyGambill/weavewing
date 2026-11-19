@@ -54,6 +54,7 @@ export interface TimelineRowSharedState {
   /** Absent hides "Reply", as in the guest view. */
   onReplyToResponse: ((response: ResponseContextRecord) => boolean) | undefined;
   renderInlineSideChats?: ((messageId: MessageId) => ReactNode) | undefined;
+  stableSideChatRunIds?: ReadonlySet<RunId> | undefined;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;

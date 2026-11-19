@@ -1330,7 +1330,9 @@ describe("MessagesTimeline citations", () => {
   it("branches from the nested timeline's normalized assistant selection", async () => {
     const fixture = makeStreamingTimelineFixture();
     const source = fixture.visibleTurnItems[2]!;
-    if (source.item.type !== "assistant_message") throw new Error("Expected fixture reply");
+    if (source.item.type !== "assistant_message" || source.item.runId === null)
+      throw new Error("Expected fixture reply and run");
+    const stableSideChatRunIds = new Set([source.item.runId]);
     const text = "Rendered punctuation 🚀";
     const innerEntries = deriveTimelineEntriesFromVisibleTurnItems({
       optimisticMessages: [],
@@ -1339,7 +1341,7 @@ describe("MessagesTimeline citations", () => {
       ],
     });
     const parentBranch = vi.fn(async () => true);
-    const childBranch = vi.fn(async () => true);
+    const childBranch = vi.fn(async () => false);
     await using screen = await renderTimeline(
       [message("Parent reply", { role: "assistant" }, "parent-reply")],
       {
@@ -1353,6 +1355,7 @@ describe("MessagesTimeline citations", () => {
               timelineEntries={innerEntries}
               onCiteAssistantText={() => true}
               onBranchAssistantText={childBranch}
+              stableSideChatRunIds={stableSideChatRunIds}
             />
           </div>
         ),
@@ -1374,6 +1377,7 @@ describe("MessagesTimeline citations", () => {
       suffix: "",
     });
     expect(parentBranch).not.toHaveBeenCalled();
+    expect(window.getSelection()?.toString().trim()).toBe(text);
   });
 
   it("lands a citation present at mount under StrictMode", async () => {

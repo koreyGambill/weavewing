@@ -98,6 +98,7 @@ export interface ContextHandoffServiceV2Shape {
     readonly toProviderInstanceId: ProviderInstanceId;
     readonly coveredRunOrdinals: OrchestrationV2ContextHandoff["coveredRunOrdinals"];
     readonly parentItems: ReadonlyArray<OrchestrationV2TurnItem>;
+    readonly selectedText?: string | undefined;
     readonly createdAt: DateTime.Utc;
   }) => Effect.Effect<OrchestrationV2ContextHandoff, ContextHandoffServiceV2Error>;
 }
@@ -265,17 +266,27 @@ const SIDE_CHAT_CONTEXT_MAX_CHARS = 8_000;
 export function makeSideChatContext(input: {
   readonly parentThreadId: ThreadId;
   readonly digest: ReadonlyArray<string | OrchestrationV2TurnItem>;
+  readonly selectedText?: string | undefined;
 }): string {
   const framing =
     "You are in a side chat beside the main thread. The main thread may still be running in the same worktree. Answer the user's questions; do not continue or redo the main thread's task.";
   const header = "Main thread activity since this side chat's starting point:";
   const truncated = "- Earlier items truncated.";
   const footer = `Use t3_thread_read on thread ${input.parentThreadId} to see the main thread's live state.`;
+  const passage =
+    input.selectedText === undefined
+      ? []
+      : [
+          "",
+          "Passage selected by the user for this side chat (JSON string):",
+          JSON.stringify(input.selectedText),
+        ];
   const kept: Array<string> = [];
   let omitted = false;
-  // The cap covers the whole block, so the fixed lines are reserved before any digest line.
+  // Fit the parent digest around the framing and the user's selected passage.
   let remaining =
-    SIDE_CHAT_CONTEXT_MAX_CHARS - [framing, "", header, truncated, "", footer].join("\n").length;
+    SIDE_CHAT_CONTEXT_MAX_CHARS -
+    [framing, ...passage, "", header, truncated, "", footer].join("\n").length;
   for (let index = input.digest.length - 1; index >= 0; index--) {
     const item = input.digest[index]!;
     const line = typeof item === "string" ? item : summarizeDeltaItem(item);
@@ -289,6 +300,7 @@ export function makeSideChatContext(input: {
   }
   return [
     framing,
+    ...passage,
     ...(kept.length === 0 ? [] : ["", header, ...(omitted ? [truncated] : []), ...kept]),
     "",
     footer,
@@ -616,6 +628,7 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
         summaryText: makeSideChatContext({
           parentThreadId: input.parentThreadId,
           digest: input.parentItems,
+          selectedText: input.selectedText,
         }),
         createdByProviderInstanceId: null,
         createdAt: input.createdAt,

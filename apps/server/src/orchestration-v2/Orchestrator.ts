@@ -57,6 +57,7 @@ import {
   type OrchestrationV2RemoteTaskChild,
   type OrchestrationV2ModelSwitch,
   type OrchestrationV2Run,
+  isStableForkRun,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadShellSnapshot,
@@ -1411,10 +1412,6 @@ function queuedRunCancellationEvents(
     });
   }
   return events;
-}
-
-function isStableForkRun(run: OrchestrationV2Run): boolean {
-  return run.status === "completed" && run.checkpointId !== null;
 }
 
 function latestStableRun(
@@ -9502,6 +9499,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               toProviderInstanceId: modelSelection.instanceId,
               coveredRunOrdinals: visibleDeltaRunOrdinals(sourceProjection, sideChatParentItems),
               parentItems: sideChatParentItems,
+              selectedText: projection.thread.lineage.sideChatAnchor?.text,
               createdAt: now,
             })
             .pipe(mapDispatchError(command));

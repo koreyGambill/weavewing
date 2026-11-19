@@ -1391,7 +1391,14 @@ it.effect("persists nested side-chat selections at the selected reply's stable r
     const userMessageId = MessageId.make(`${reply.runId}:message`);
     const userMessage = yield* fork(root, grandchild, userMessageId).pipe(Effect.flip);
     assert.include(String(userMessage.cause), "assistant reply");
-    const nestedReply = yield* seedReply(child, 1);
+    yield* askSideChat(child, "selection-child-first-message");
+    const childProjection = yield* orchestrator.getThreadProjection(child);
+    assert.include(
+      childProjection.contextHandoffs.find((handoff) => handoff.strategy === "manual_context")
+        ?.summaryText,
+      JSON.stringify(anchorFor(reply.messageId).text),
+    );
+    const nestedReply = yield* seedReply(child, 2);
     const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
     const forkReady = yield* Deferred.make<void>();
     const releaseFork = yield* Deferred.make<void>();

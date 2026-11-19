@@ -896,6 +896,10 @@ export const OrchestrationV2Run = Schema.Struct({
 });
 export type OrchestrationV2Run = typeof OrchestrationV2Run.Type;
 
+export function isStableForkRun(run: Pick<OrchestrationV2Run, "status" | "checkpointId">): boolean {
+  return run.status === "completed" && run.checkpointId !== null;
+}
+
 export function orchestrationV2RunWorkStartedAt(
   run: Pick<OrchestrationV2Run, "workStartedAt" | "startedAt" | "requestedAt">,
 ): OrchestrationV2Run["requestedAt"] {
