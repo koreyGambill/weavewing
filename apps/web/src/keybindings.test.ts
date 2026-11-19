@@ -424,11 +424,20 @@ describe("resolveShortcutCommand", () => {
       const mac = platform === "MacIntel";
       assert.equal(
         resolveShortcutCommand(
-          event({ key: "o", ctrlKey: !mac, metaKey: mac, altKey: true, shiftKey: true }),
+          event({ key: "o", ctrlKey: !mac, metaKey: mac, shiftKey: true }),
           DEFAULT_RESOLVED_KEYBINDINGS,
           { platform },
         ),
         "projectPicker.open",
+      );
+      // The default-folder command it replaced is gone; New thread covers it.
+      assert.equal(
+        resolveShortcutCommand(
+          event({ key: "n", ctrlKey: !mac, metaKey: mac, altKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform },
+        ),
+        null,
       );
       assert.equal(
         resolveShortcutCommand(

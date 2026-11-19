@@ -143,6 +143,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         "rightPanel.toggleMaximized",
         "rightPanel.new",
         "rightPanel.close",
+        "chat.newWithoutProject",
       ];
       yield* fs.writeFileString(
         keybindingsConfigPath,
@@ -795,6 +796,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "f6", command: "workspace.focusNext" },
         { key: "mod+6", command: "thread.jump.6", when: "!modelPickerOpen && isDesktop" },
         { key: "mod+shift+j", command: "preview.toggle" },
+        { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
+        { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
       ]);
       yield* fs.writeFileString(
         path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
@@ -825,6 +828,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         command: "preview.toggle",
         when: "isMac || !terminalFocus",
       });
+      // The old second New thread key becomes the project picker's.
+      assert.deepEqual(
+        upgraded.filter((rule) => rule.key === "mod+shift+o" || rule.key === "mod+alt+shift+o"),
+        [{ key: "mod+shift+o", command: "projectPicker.open", when: "!terminalFocus" }],
+      );
       yield* writeKeybindingsConfig(keybindingsConfigPath, [legacy, custom]);
       yield* keybindings.syncDefaultKeybindingsOnStartup;
       assert.deepEqual(

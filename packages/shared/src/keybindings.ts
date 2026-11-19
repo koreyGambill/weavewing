@@ -79,7 +79,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+alt+f", command: "workspace.tile.focusPair" },
   { key: "ctrl+alt+s", command: "workspace.tile.swap" },
   { key: "ctrl+alt+p", command: "workspace.tile.float" },
-  // Ctrl+Alt+T opens a terminal on GNOME, and mod+alt+n starts a new chat on Linux and Windows.
+  // Ctrl+Alt+T opens a terminal on GNOME.
   { key: "ctrl+alt+o", command: "workspace.tile.newTab" },
   { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
   { key: "mod+w", command: "workspace.tile.closeTab" },
@@ -132,9 +132,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "composerFocus && !draftThreadRoute",
   },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
-  { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
-  { key: "mod+alt+n", command: "chat.newWithoutProject", when: "!terminalFocus" },
   { key: "mod+f", command: "chat.find", when: "!terminalFocus && !previewFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
@@ -147,7 +145,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
   { key: "mod+o", command: "editor.openFavorite", when: "isMac || !terminalFocus" },
-  { key: "mod+alt+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
+  { key: "mod+shift+o", command: "projectPicker.open", when: "!terminalFocus" },
   { key: "ctrl+alt+m", command: "projectPicker.nextMachine", when: "!terminalFocus" },
   { key: "ctrl+alt+shift+m", command: "projectPicker.allMachines", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },

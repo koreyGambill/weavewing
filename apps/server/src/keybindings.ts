@@ -211,6 +211,7 @@ const removedWeavewingCommands = new Set([
   "rightPanel.toggleMaximized",
   "rightPanel.new",
   "rightPanel.close",
+  "chat.newWithoutProject",
 ]);
 function isRemovedWeavewingBinding(entry: unknown): boolean {
   return (
@@ -591,37 +592,55 @@ const make = Effect.gen(function* () {
           (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey)
         );
       });
-      const customConfig = runtimeConfig.keybindings.map((rule) => {
-        if (!migrateTerminalKeys) return rule;
-        if (
-          !closeConflict &&
-          isSameKeybindingRule(rule, {
-            key: "meta+w",
-            command: "workspace.tile.closeTab",
-            when: "isMac",
-          })
+      const customConfig = runtimeConfig.keybindings
+        // The old second New thread key now opens the project picker.
+        .filter(
+          (rule) =>
+            !isSameKeybindingRule(rule, {
+              key: "mod+shift+o",
+              command: "chat.new",
+              when: "!terminalFocus",
+            }),
         )
-          return { key: "mod+w", command: rule.command };
-        if (
-          ((rule.command === "workspace.focusNext" && rule.key === "f6") ||
-            (rule.command === "workspace.focusPrevious" && rule.key === "shift+f6")) &&
-          rule.when === undefined
-        )
-          return { ...rule, when: "!terminalFocus" };
-        if (
-          /^thread\.jump\.[1-9]$/.test(rule.command) &&
-          rule.key === `mod+${rule.command.at(-1)}` &&
-          rule.when === "!modelPickerOpen && isDesktop"
-        )
-          return { ...rule, when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)" };
-        if (
-          ((rule.command === "view.reopenClosed" && rule.key === "mod+shift+t") ||
-            (rule.command === "preview.toggle" && rule.key === "mod+shift+j")) &&
-          rule.when === undefined
-        )
-          return { ...rule, when: "isMac || !terminalFocus" };
-        return rule;
-      });
+        .map((rule) => {
+          if (!migrateTerminalKeys) return rule;
+          if (
+            !closeConflict &&
+            isSameKeybindingRule(rule, {
+              key: "meta+w",
+              command: "workspace.tile.closeTab",
+              when: "isMac",
+            })
+          )
+            return { key: "mod+w", command: rule.command };
+          if (
+            ((rule.command === "workspace.focusNext" && rule.key === "f6") ||
+              (rule.command === "workspace.focusPrevious" && rule.key === "shift+f6")) &&
+            rule.when === undefined
+          )
+            return { ...rule, when: "!terminalFocus" };
+          if (
+            /^thread\.jump\.[1-9]$/.test(rule.command) &&
+            rule.key === `mod+${rule.command.at(-1)}` &&
+            rule.when === "!modelPickerOpen && isDesktop"
+          )
+            return { ...rule, when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)" };
+          if (
+            ((rule.command === "view.reopenClosed" && rule.key === "mod+shift+t") ||
+              (rule.command === "preview.toggle" && rule.key === "mod+shift+j")) &&
+            rule.when === undefined
+          )
+            return { ...rule, when: "isMac || !terminalFocus" };
+          if (
+            isSameKeybindingRule(rule, {
+              key: "mod+alt+shift+o",
+              command: "projectPicker.open",
+              when: "!terminalFocus",
+            })
+          )
+            return { ...rule, key: "mod+shift+o" };
+          return rule;
+        });
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
