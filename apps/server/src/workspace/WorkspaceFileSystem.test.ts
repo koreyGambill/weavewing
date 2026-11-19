@@ -1177,11 +1177,16 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           const internal = path.join(config.secretsDir, "notes.md");
           yield* writeTextFile(config.secretsDir, "notes.md", "secret");
 
+          // Grants serve only sessions that may run host commands.
+          const grantedEdits = { grantedEdits: true };
           const read = (relativePath: string, workspace = cwd) =>
-            inHome(workspaceFileSystem.readFile({ cwd: workspace, relativePath }));
+            inHome(workspaceFileSystem.readFile({ cwd: workspace, relativePath }, grantedEdits));
           const write = (relativePath: string, workspace = cwd) =>
             inHome(
-              workspaceFileSystem.writeFile({ cwd: workspace, relativePath, contents: "edited" }),
+              workspaceFileSystem.writeFile(
+                { cwd: workspace, relativePath, contents: "edited" },
+                grantedEdits,
+              ),
             );
           const refuses = Effect.fn("refuses")(function* (relativePath: string, workspace = cwd) {
             const result = yield* read(relativePath, workspace).pipe(Effect.option);
@@ -1200,6 +1205,16 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             path: path.join(home, "ink", "skills", "choices", "SKILL.md"),
           });
           expect(yield* read(skill)).toMatchObject({ writable: true, editGrant: fileGrant });
+          // A session limited to files cannot read or write through a grant someone else made.
+          const fileOnlyRead = yield* inHome(
+            workspaceFileSystem.readFile({ cwd, relativePath: skill }),
+          );
+          expect(fileOnlyRead.writable).toBeUndefined();
+          expect(fileOnlyRead.editGrant).toBeUndefined();
+          yield* inHome(
+            workspaceFileSystem.writeFile({ cwd, relativePath: skill, contents: "pwned" }),
+          ).pipe(Effect.flip);
+          expect(yield* fileSystem.readFileString(fileGrant.path)).toBe("skill");
           // The grant follows the file wherever it is opened, and covers nothing else.
           yield* write(skill, otherWorkspace);
           expect(yield* fileSystem.readFileString(fileGrant.path)).toBe("edited");

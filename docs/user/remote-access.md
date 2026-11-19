@@ -533,7 +533,10 @@ link to change a client's permissions.
 
 `filesystem:read` allows browsing host files, opening workspace files, and viewing
 local changes. Add `filesystem:write` to allow editing files or saving plans to
-the workspace. These scopes control direct file access from the client.
+the workspace. These scopes control direct file access from the client. Editing
+files outside the workspace through a grant also requires `terminal:operate`,
+because shell and git configuration files can run commands. A client without it
+cannot create or remove grants, or save through a grant another client created.
 
 To remove an environment from T3 Connect, open your account menu's **T3 Connect**
 page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This

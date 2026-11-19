@@ -35,9 +35,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.developmentEnvironmentsSelectCheckout]: AuthOrchestrationOperateScope,
   [WS_METHODS.developmentEnvironmentsUnlink]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectsCreateFromThread]: AuthOrchestrationOperateScope,
-  // A grant makes host files writable to every client that can already write files.
-  [WS_METHODS.projectsAllowOutsideEdits]: AuthFilesystemWriteScope,
-  [WS_METHODS.projectsRevokeOutsideEdits]: AuthFilesystemWriteScope,
+  // A grant can make ~/.bashrc or ~/.gitconfig writable, which runs code like a terminal does.
+  // Callers also need filesystem:write; see clientRpcRequiredScopes.
+  [WS_METHODS.projectsAllowOutsideEdits]: AuthTerminalOperateScope,
+  [WS_METHODS.projectsRevokeOutsideEdits]: AuthTerminalOperateScope,
   // Creating and repairing make worktrees and branches and run the repository's installs.
   [WS_METHODS.developmentEnvironmentsCreate]: AuthSourceControlWriteScope,
   [WS_METHODS.developmentEnvironmentsAttach]: AuthSourceControlWriteScope,
@@ -139,6 +140,11 @@ export function clientRpcRequiredScopes(
     )
       return [AuthSourceControlWriteScope, AuthOrchestrationReadScope];
   }
+  if (
+    method === WS_METHODS.projectsAllowOutsideEdits ||
+    method === WS_METHODS.projectsRevokeOutsideEdits
+  )
+    return [AuthFilesystemWriteScope, AuthTerminalOperateScope];
   // A command source runs a shell command on the server, like a terminal.
   if (
     method === WS_METHODS.statusSourcesUpsert &&

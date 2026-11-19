@@ -38,7 +38,9 @@ import {
   authScopeResponse,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
+  AuthFilesystemWriteScope,
   AuthOrchestrationOperateScope,
+  AuthTerminalOperateScope,
   type AuthEnvironmentScope,
   type ScheduledTaskListResult,
   AuthSessionId,
@@ -1634,6 +1636,12 @@ export const layerWsRpc = (
               ...result,
               tasks: result.tasks.map(({ webhook: _webhook, ...task }) => task),
             };
+      // Checked per write, so another session's grant never widens a file-only session.
+      const outsideEditOptions = {
+        grantedEdits:
+          currentSession.scopes.includes(AuthFilesystemWriteScope) &&
+          currentSession.scopes.includes(AuthTerminalOperateScope),
+      };
       const authorizeEffect = <A, E, R>(
         requiredScope: AuthEnvironmentScope,
         effect: Effect.Effect<A, E, R>,
@@ -3091,7 +3099,7 @@ export const layerWsRpc = (
             ),
           ),
         [WS_METHODS.projectsReadFile]: (input) =>
-          workspaceFileSystem.readFile(input).pipe(
+          workspaceFileSystem.readFile(input, outsideEditOptions).pipe(
             Effect.mapError(
               (cause) =>
                 new ProjectReadFileError({
@@ -3102,7 +3110,7 @@ export const layerWsRpc = (
             ),
           ),
         [WS_METHODS.projectsWriteFile]: (input) =>
-          workspaceFileSystem.writeFile(input).pipe(
+          workspaceFileSystem.writeFile(input, outsideEditOptions).pipe(
             Effect.mapError(
               (cause) =>
                 new ProjectWriteFileError({

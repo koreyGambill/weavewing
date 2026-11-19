@@ -121,6 +121,14 @@ export const WorkspaceFileSystemError = Schema.Union([
 ]);
 export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 
+/**
+ * `grantedEdits` lets outside edit grants apply. Only sessions that may run host commands get
+ * it: a grant can make shell or git config writable, which runs code.
+ */
+export interface OutsideEditOptions {
+  readonly grantedEdits?: boolean;
+}
+
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   {
@@ -130,6 +138,7 @@ export class WorkspaceFileSystem extends Context.Service<
 
     readonly readFile: (
       input: ProjectReadFileInput,
+      options?: OutsideEditOptions,
     ) => Effect.Effect<
       ProjectReadFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
@@ -140,6 +149,7 @@ export class WorkspaceFileSystem extends Context.Service<
      */
     readonly writeFile: (
       input: ProjectWriteFileInput,
+      options?: OutsideEditOptions,
     ) => Effect.Effect<
       ProjectWriteFileResult,
       | WorkspaceFileSystemError
@@ -200,6 +210,7 @@ export const make = Effect.gen(function* () {
   const hostEditAccess = Effect.fn("WorkspaceFileSystem.hostEditAccess")(function* (
     cwd: string,
     requestedPath: string,
+    grantedEdits: boolean,
   ) {
     if (!isHostPath(requestedPath)) return null;
     const home = yield* HostProcess.HomeDirectory;
@@ -244,6 +255,7 @@ export const make = Effect.gen(function* () {
     )
       return { realPath, workspaceRoot, grant: "allowlist" as const };
     if (Option.isNone(serverSettings)) return null;
+    if (!grantedEdits) return { realPath, workspaceRoot, grant: null };
     const grants = yield* serverSettings.value.getSettings.pipe(
       Effect.map((settings) => settings.outsideWorkspaceEditGrants),
       Effect.orElseSucceed((): ReadonlyArray<OutsideWorkspaceEditGrant> => []),
@@ -261,8 +273,9 @@ export const make = Effect.gen(function* () {
   const editableHostPath = Effect.fn("WorkspaceFileSystem.editableHostPath")(function* (
     cwd: string,
     requestedPath: string,
+    grantedEdits: boolean,
   ) {
-    const access = yield* hostEditAccess(cwd, requestedPath);
+    const access = yield* hostEditAccess(cwd, requestedPath, grantedEdits);
     return access?.grant ? access.realPath : null;
   });
 
@@ -625,7 +638,7 @@ export const make = Effect.gen(function* () {
 
   const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
     "WorkspaceFileSystem.readFile",
-  )(function* (input) {
+  )(function* (input, options) {
     const target = yield* resolveReadTarget(input);
     const absentResult = {
       relativePath: target.relativePath,
@@ -744,7 +757,11 @@ export const make = Effect.gen(function* () {
             }),
     );
     if ("exists" in result || !isHostPath(input.relativePath)) return result;
-    const access = yield* hostEditAccess(input.cwd, input.relativePath);
+    const access = yield* hostEditAccess(
+      input.cwd,
+      input.relativePath,
+      options?.grantedEdits === true,
+    );
     if (access === null || access.realPath !== realTargetPath) return result;
     if (access.grant === null) return { ...result, canGrantEdit: true };
     return access.grant === "allowlist"
@@ -836,10 +853,14 @@ export const make = Effect.gen(function* () {
 
   const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
-  )(function* (input) {
+  )(function* (input, options) {
     yield* knownWorkspaces.assertContains(input.cwd);
     if (isHostPath(input.relativePath)) {
-      const realPath = yield* editableHostPath(input.cwd, input.relativePath);
+      const realPath = yield* editableHostPath(
+        input.cwd,
+        input.relativePath,
+        options?.grantedEdits === true,
+      );
       if (realPath === null) {
         return yield* new WorkspacePaths.WorkspacePathOutsideRootError({
           workspaceRoot: input.cwd,
@@ -907,7 +928,8 @@ export const make = Effect.gen(function* () {
     "WorkspaceFileSystem.allowOutsideEdits",
   )(function* (input) {
     yield* knownWorkspaces.assertContains(input.cwd);
-    const access = yield* hostEditAccess(input.cwd, input.relativePath);
+    // The RPC already requires the scopes that let grants apply.
+    const access = yield* hostEditAccess(input.cwd, input.relativePath, true);
     if (access === null) {
       return yield* new WorkspacePaths.WorkspacePathOutsideRootError({
         workspaceRoot: input.cwd,

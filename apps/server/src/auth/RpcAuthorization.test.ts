@@ -634,7 +634,7 @@ it.effect("denies manual cleanup before the handler without settings permission"
   }),
 );
 
-it.effect("lets only connections that can write files grant edits outside the workspace", () =>
+it.effect("lets only connections that can run host commands grant outside edits", () =>
   Effect.gen(function* () {
     type GrantMethod =
       | typeof WS_METHODS.projectsAllowOutsideEdits
@@ -677,7 +677,21 @@ it.effect("lets only connections that can write files grant edits outside the wo
     ).toMatchObject({ requiredPermission: AuthFilesystemWriteScope });
     expect(handled).toBe(0);
 
-    const writer = yield* clientWith([AuthOrchestrationOperateScope, AuthFilesystemWriteScope]);
+    // A grant can make ~/.bashrc or ~/.gitconfig writable, so file access alone is not enough.
+    const fileWriter = yield* clientWith([AuthOrchestrationOperateScope, AuthFilesystemWriteScope]);
+    expect(
+      yield* fileWriter[WS_METHODS.projectsAllowOutsideEdits](allow).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthTerminalOperateScope });
+    expect(
+      yield* fileWriter[WS_METHODS.projectsRevokeOutsideEdits]({ grant }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthTerminalOperateScope });
+    const terminalOnly = yield* clientWith([AuthTerminalOperateScope]);
+    expect(
+      yield* terminalOnly[WS_METHODS.projectsAllowOutsideEdits](allow).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthFilesystemWriteScope });
+    expect(handled).toBe(0);
+
+    const writer = yield* clientWith([AuthFilesystemWriteScope, AuthTerminalOperateScope]);
     expect(yield* writer[WS_METHODS.projectsAllowOutsideEdits](allow)).toEqual(grant);
     yield* writer[WS_METHODS.projectsRevokeOutsideEdits]({ grant });
     expect(handled).toBe(2);
