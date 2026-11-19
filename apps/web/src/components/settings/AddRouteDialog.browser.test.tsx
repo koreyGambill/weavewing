@@ -41,20 +41,26 @@ vi.mock(import("~/state/server"), async (original) => ({
   primaryServerKeybindingsAtom: Atom.make([]) as never,
 }));
 
-import { AddEnvironmentDialog } from "./AddEnvironmentDialog";
+import type { EnvironmentPresentation } from "~/state/environments";
+import { AddRouteDialog } from "./AddRouteDialog";
+
+const moonborn = {
+  environmentId: "moonborn",
+  label: "Moonborn",
+  relayManaged: false,
+} as unknown as EnvironmentPresentation;
 
 function Owner() {
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [routeTarget, setRouteTarget] = useState<EnvironmentPresentation | null>(null);
   return (
     <AppAtomRegistryProvider>
-      <AddEnvironmentDialog
-        open={open}
-        routeTarget={null}
-        error={error}
+      <button type="button" onClick={() => setRouteTarget(moonborn)}>
+        Open route dialog
+      </button>
+      <AddRouteDialog
+        routeTarget={routeTarget}
         savedEnvironments={[]}
-        onOpenChange={setOpen}
-        onErrorChange={setError}
+        onClose={() => setRouteTarget(null)}
       />
     </AppAtomRegistryProvider>
   );
@@ -65,39 +71,38 @@ function setup() {
   return stubGlobal("desktopBridge", {});
 }
 
-const remoteCard = () => page.getByRole("button", { name: /Remote link/ });
+const remoteCard = () => page.getByRole("button", { name: /Link or address/ });
 const sshCard = () => page.getByRole("button", { name: /^SSH/ });
+const addRoute = () => page.getByRole("dialog").getByRole("button", { name: "Add route" });
 
 async function openDialogOnSsh() {
-  await userEvent.click(page.getByRole("button", { name: "Add environment" }));
+  await userEvent.click(page.getByRole("button", { name: "Open route dialog" }));
   await userEvent.click(sshCard());
   await expect.element(sshCard()).toHaveAttribute("aria-pressed", "true");
 }
 
 async function expectDefaultModeAfterReopen() {
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
-  await userEvent.click(page.getByRole("button", { name: "Add environment" }));
+  await userEvent.click(page.getByRole("button", { name: "Open route dialog" }));
   await expect.element(remoteCard()).toHaveAttribute("aria-pressed", "true");
   await expect.element(sshCard()).toHaveAttribute("aria-pressed", "false");
   await expect.element(page.getByPlaceholder("backend.example.com")).toBeInTheDocument();
 }
 
-describe("AddEnvironmentDialog", () => {
-  it("reopens on Remote link after adding an SSH environment", async () => {
+describe("AddRouteDialog", () => {
+  it("reopens on Link or address after adding an SSH route", async () => {
     using _bridge = setup();
     await using _screen = await render(<Owner />);
 
     await openDialogOnSsh();
     await userEvent.fill(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
-    await userEvent.click(
-      page.getByRole("dialog").getByRole("button", { name: "Add environment" }),
-    );
+    await userEvent.click(addRoute());
     expect(mocks.connectSshEnvironment).toHaveBeenCalledOnce();
 
     await expectDefaultModeAfterReopen();
   });
 
-  it("drops an SSH error when switching to Remote link", async () => {
+  it("drops an SSH error when switching to Link or address", async () => {
     using _bridge = setup();
     await using _screen = await render(<Owner />);
 
@@ -106,24 +111,18 @@ describe("AddEnvironmentDialog", () => {
     );
     await openDialogOnSsh();
     await userEvent.type(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
-    await userEvent.click(
-      page.getByRole("dialog").getByRole("button", { name: "Add environment" }),
-    );
+    await userEvent.click(addRoute());
     await expect.element(page.getByText(/connection refused/)).toBeInTheDocument();
 
     await userEvent.click(remoteCard());
     await expect.element(page.getByText(/connection refused/)).not.toBeInTheDocument();
   });
 
-  it("clears the form after dismissing it on SSH", async () => {
+  it("clears the form after dismissing it, and ignores an add that finishes after", async () => {
     using _bridge = setup();
     await using _screen = await render(<Owner />);
 
     await openDialogOnSsh();
-    await userEvent.click(remoteCard());
-    await userEvent.fill(page.getByPlaceholder("backend.example.com"), "devbox.example.com");
-    await userEvent.fill(page.getByPlaceholder("PAIRCODE"), "PAIRCODE");
-    await userEvent.click(sshCard());
     await userEvent.fill(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
     await userEvent.fill(page.getByPlaceholder("root"), "maria");
     await userEvent.fill(page.getByPlaceholder("22"), "2222");
@@ -143,15 +142,11 @@ describe("AddEnvironmentDialog", () => {
     });
     mocks.connectSshEnvironment.mockImplementationOnce(() => pending);
     await userEvent.fill(page.getByPlaceholder("Search hosts or type devbox"), "devbox");
-    await userEvent.click(
-      page.getByRole("dialog").getByRole("button", { name: "Add environment" }),
-    );
+    await userEvent.click(addRoute());
     await userEvent.keyboard("{Escape}");
     await expectDefaultModeAfterReopen();
     finishConnection(AsyncResult.failure(Cause.fail(new Error("dismissed SSH attempt"))));
-    await expect
-      .element(page.getByRole("dialog").getByRole("button", { name: "Add environment" }))
-      .toBeEnabled();
+    await expect.element(addRoute()).toBeEnabled();
     await expect.element(page.getByText(/dismissed SSH attempt/)).not.toBeInTheDocument();
   });
 });

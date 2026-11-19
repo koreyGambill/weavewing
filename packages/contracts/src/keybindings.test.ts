@@ -106,6 +106,7 @@ const SHIPPED_DEFAULT_COMMANDS = [
   "pullRequest.copyNumber",
   "sidebar.toggle",
   "terminal.close",
+  "terminal.dropdown",
   "terminal.toggle",
   "themeEditor.toggle",
   "theme.select",

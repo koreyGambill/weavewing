@@ -1,7 +1,7 @@
 import { pipe } from "effect/Function";
-import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   type DesktopDiscoveredSshHost,
   type DesktopSshEnvironmentTarget,
@@ -16,7 +16,6 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import * as Option from "effect/Option";
 
-import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -28,20 +27,9 @@ import {
   AutocompleteList,
   AutocompletePopup,
 } from "../ui/autocomplete";
-import {
-  Dialog,
-  DialogDescription,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
-} from "../ui/dialog";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import { AnimatedHeight } from "../AnimatedHeight";
 import { environmentCatalog } from "~/connection/catalog";
 import {
   connectPairing as connectPairingAtom,
@@ -65,31 +53,29 @@ import {
   formatDesktopSshConnectionError,
 } from "./ConnectionsSettings.logic";
 
+export type AddComputerMode = "remote" | "ssh";
+
 const EMPTY_DISCOVERED_SSH_HOSTS: ReadonlyArray<DesktopDiscoveredSshHost> = [];
 // known_hosts can list one host on several ports. Its own bracketed form keeps an IPv6
 // host's port separate from the address; no portless known_hosts entry has that form.
 const sshHostSuggestionValue = (target: DesktopDiscoveredSshHost) =>
   target.port === null ? target.alias : `[${target.alias}]:${target.port}`;
 
-export function AddEnvironmentDialog({
-  open,
+/**
+ * The fields and Add button for one way of adding a computer: a link or address with a pairing
+ * code, or SSH. With `routeTarget` set it adds another route to that saved computer instead.
+ * Progress and errors show in place; `onAdded` runs once the computer is saved.
+ */
+export function AddComputerFields({
+  mode,
   routeTarget,
-  error,
   savedEnvironments,
-  onOpenChange,
-  onErrorChange,
-  initialMode = "remote",
-  showTrigger = true,
+  onAdded,
 }: {
-  readonly open: boolean;
+  readonly mode: AddComputerMode;
   readonly routeTarget: EnvironmentPresentation | null;
-  readonly error: string | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
-  readonly onOpenChange: (open: boolean) => void;
-  readonly onErrorChange: (error: string | null) => void;
-  readonly initialMode?: "remote" | "ssh";
-  /** Off when another control opens it, such as the Connect wizard or a row's Add route. */
-  readonly showTrigger?: boolean;
+  readonly onAdded: () => void;
 }) {
   const desktopBridge = window.desktopBridge;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -101,6 +87,28 @@ export function AddEnvironmentDialog({
     reportFailure: false,
   });
   const relayDiscoveryState = useRelayEnvironmentDiscovery();
+  const [error, onErrorChange] = useState<string | null>(null);
+  const [savedBackendHost, setSavedBackendHost] = useState("");
+  const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
+  const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
+  const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
+  const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
+  const [sshHostSuggestionsOpen, setSshHostSuggestionsOpen] = useState(false);
+  const highlightedSshHostRef = useRef<DesktopDiscoveredSshHost | undefined>(undefined);
+  const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
+  const savedBackendSessionRef = useRef(0);
+  const mounted = useRef(true);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an add still running when the fields close must not report into whatever opens next
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      savedBackendSessionRef.current += 1;
+    };
+  }, []);
+  const addedIfOpen = () => {
+    if (mounted.current) onAdded();
+  };
   const savedDesktopSshEnvironmentKeys = (() => {
     const keys = new Set<string>();
     for (const environment of savedEnvironments) {
@@ -118,22 +126,12 @@ export function AddEnvironmentDialog({
     }
     return keys;
   })();
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">(initialMode);
-  const [savedBackendHost, setSavedBackendHost] = useState("");
-  const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
-  const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
-  const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
-  const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
-  const [sshHostSuggestionsOpen, setSshHostSuggestionsOpen] = useState(false);
-  const highlightedSshHostRef = useRef<DesktopDiscoveredSshHost | undefined>(undefined);
-  const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
-  const savedBackendSessionRef = useRef(0);
-  const isSshDiscoveryActive = desktopBridge !== undefined && open && savedBackendMode === "ssh";
+  const isSshDiscoveryActive = desktopBridge !== undefined && mode === "ssh";
   const desktopSshHosts = useEnvironmentQuery(
     isSshDiscoveryActive ? desktopSshHostsStateAtom : null,
   );
-  // The discovery atom is kept alive across dialog opens, so re-read SSH config
-  // each time the SSH tab is shown; stale hosts stay visible while it refreshes.
+  // The discovery atom is kept alive across opens, so re-read SSH config
+  // each time the SSH fields are shown; stale hosts stay visible while it refreshes.
   const refreshDesktopSshHosts = desktopSshHosts.refresh;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads desktop SSH config through the bridge each time the SSH tab is shown
   useEffect(() => {
@@ -156,18 +154,6 @@ export function AddEnvironmentDialog({
   const hasSshHostSuggestionContent =
     desktopBridge !== undefined &&
     (isLoadingDiscoveredSshHosts || unsavedDiscoveredSshHosts.length > 0);
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen) {
-      savedBackendSessionRef.current += 1;
-      setSavedBackendMode(initialMode);
-      setSavedBackendHost("");
-      setSavedBackendPairingCode("");
-      setSavedBackendSshHost("");
-      setSavedBackendSshUsername("");
-      setSavedBackendSshPort("");
-    }
-    onOpenChange(nextOpen);
-  };
   const connectSavedBackendSshTarget = async (target: DesktopSshEnvironmentTarget) => {
     const session = savedBackendSessionRef.current;
     setIsAddingSavedBackend(true);
@@ -185,7 +171,7 @@ export function AddEnvironmentDialog({
       return;
     }
 
-    handleOpenChange(false);
+    addedIfOpen();
     toastManager.add({
       type: "success",
       title: routeTarget ? "Route added" : "Environment connected",
@@ -197,7 +183,7 @@ export function AddEnvironmentDialog({
   };
 
   const handleAddSavedBackend = async () => {
-    if (savedBackendMode === "ssh") {
+    if (mode === "ssh") {
       let target: DesktopSshEnvironmentTarget;
       try {
         target = parseManualDesktopSshTarget({
@@ -257,7 +243,7 @@ export function AddEnvironmentDialog({
       return;
     }
 
-    handleOpenChange(false);
+    addedIfOpen();
     toastManager.add(
       routeTarget
         ? {
@@ -357,49 +343,6 @@ export function AddEnvironmentDialog({
     }
     setSavedBackendHost(value);
   };
-  const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
-    readonly title: string;
-    readonly description: string;
-    readonly icon?: ReactNode;
-  }) => {
-    const selected = savedBackendMode === input.mode;
-    return (
-      <button
-        type="button"
-        aria-pressed={selected}
-        className={cn(
-          "group flex min-h-24 items-start gap-3 rounded-lg border p-4 text-left",
-          selected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-muted/40",
-        )}
-        disabled={isAddingSavedBackend}
-        onClick={() => {
-          if (!selected) onErrorChange(null);
-          setSavedBackendMode(input.mode);
-        }}
-      >
-        {input.icon ? (
-          <span
-            className={cn(
-              "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border",
-              selected
-                ? "border-primary/30 bg-primary/10 text-primary"
-                : "border-border/70 bg-background text-muted-foreground group-hover:text-foreground",
-            )}
-          >
-            {input.icon}
-          </span>
-        ) : null}
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-foreground">{input.title}</span>
-          <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-            {input.description}
-          </span>
-        </span>
-      </button>
-    );
-  };
-
   const renderRemoteFields = () => (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
@@ -456,7 +399,7 @@ export function AddEnvironmentDialog({
       }
       return;
     }
-    handleOpenChange(false);
+    addedIfOpen();
     toastManager.add({
       type: "success",
       title: "Route added",
@@ -489,7 +432,7 @@ export function AddEnvironmentDialog({
         onClick={() => void handleAddSavedBackend()}
       >
         <PlusIcon className="size-3.5" />
-        {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add environment"}
+        {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add computer"}
       </Button>
     </div>
   );
@@ -612,66 +555,11 @@ export function AddEnvironmentDialog({
           onClick={() => void handleAddSavedBackend()}
         >
           <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add environment"}
+          {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add computer"}
         </Button>
       </div>
     </div>
   );
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      {showTrigger ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <DialogTrigger
-                render={
-                  <Button size="xs" variant="ghost-muted" aria-label="Add environment">
-                    <PlusIcon className="size-3" />
-                    <span>Add environment</span>
-                  </Button>
-                }
-              />
-            }
-          />
-          <TooltipPopup side="top">Add environment</TooltipPopup>
-        </Tooltip>
-      ) : null}
-      <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>
-            {routeTarget ? `Add a route to ${routeTarget.label}` : "Add Environment"}
-          </DialogTitle>
-          <DialogDescription>
-            {routeTarget
-              ? "Pair this machine again over another address, such as its Tailscale name. It joins the existing routes instead of adding a second machine."
-              : "Pair another environment to this client."}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {renderConnectionModeCard({
-                mode: "remote",
-                title: "Remote link",
-                description: "Enter a backend host and pairing code.",
-                icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
-              })}
-              {desktopBridge
-                ? renderConnectionModeCard({
-                    mode: "ssh",
-                    title: "SSH",
-                    description: "Use local SSH config, agent, and tunnels for the backend.",
-                    icon: <TerminalIcon aria-hidden className="size-4" />,
-                  })
-                : null}
-            </div>
-            <AnimatedHeight>
-              {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
-            </AnimatedHeight>
-          </div>
-        </DialogPanel>
-      </DialogPopup>
-    </Dialog>
-  );
+  return mode === "ssh" ? renderSshFields() : renderRemoteModeBody();
 }

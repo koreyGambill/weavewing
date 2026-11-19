@@ -194,6 +194,34 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     alongside: { key: "ctrl+alt+]", command: "workspace.tile.nextTab" },
     rule: { key: "ctrl+tab", command: "workspace.tile.nextTab" },
   },
+  ...(
+    [
+      ["previous", "["],
+      ["next", "]"],
+    ] as const
+  ).flatMap(([direction, bracket]) => {
+    const alongside = {
+      key: `mod+shift+${bracket}`,
+      command: `thread.${direction}`,
+      when: "!isMac",
+    } as const;
+    return [
+      {
+        id: `weavewing.mac-tab-keys.thread-${direction}.v1`,
+        alongside,
+        rule: { key: `ctrl+meta+${bracket}`, command: `thread.${direction}`, when: "isMac" },
+      },
+      {
+        id: `weavewing.mac-tab-keys.tab-${direction}.v1`,
+        alongside,
+        rule: {
+          key: `mod+shift+${bracket}`,
+          command: `workspace.tile.${direction}Tab`,
+          when: "isMac",
+        },
+      },
+    ] as const;
+  }),
   {
     id: "weavewing.search-palette.v1",
     alongside: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
@@ -654,6 +682,9 @@ const make = Effect.gen(function* () {
       const migrateSearchKeys = pendingLateDefaults.some(
         (late) => late.id === "weavewing.search-palette.v1",
       );
+      const migrateMacTabKeys = pendingLateDefaults.some((late) =>
+        late.id.startsWith("weavewing.mac-tab-keys."),
+      );
       const migrateLeader = !appliedMigrationIds.has("weavewing.leader.v1");
       const enabled = leaderEnabled(compileResolvedKeybindingsConfig(runtimeConfig.keybindings));
       const defaults = defaultKeybindingsForMode(enabled);
@@ -666,6 +697,13 @@ const make = Effect.gen(function* () {
             if (rule.command === "filePicker.toggle" && rule.key === "mod+p")
               return { key: "mod+p", command: "commandPalette.toggle" } as const;
           }
+          if (
+            migrateMacTabKeys &&
+            rule.when === undefined &&
+            ((rule.command === "thread.previous" && rule.key === "mod+shift+[") ||
+              (rule.command === "thread.next" && rule.key === "mod+shift+]"))
+          )
+            return { ...rule, when: "!isMac" };
           if (!migrateTerminalKeys) return rule;
           if (
             !closeConflict &&

@@ -23,6 +23,7 @@ import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { CalendarTool } from "./CalendarTool";
+import { DropdownTerminalButton } from "./DropdownTerminal";
 import { StatusSourcesList, useStatusSignal } from "./statusSources/StatusSources";
 import { StatusSourceDot } from "./statusSources/StatusSourceIcon";
 import { Button } from "./ui/button";
@@ -150,6 +151,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           mobileSidebarSheetMounted && "hidden",
         )}
       >
+        <DropdownTerminalButton />
         <div ref={setTitlebarControlsHost} className="flex" />
         <Tooltip>
           <TooltipTrigger

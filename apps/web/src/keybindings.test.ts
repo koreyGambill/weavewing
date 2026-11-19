@@ -528,6 +528,41 @@ describe("resolveShortcutCommand", () => {
     },
   );
 
+  it("cycles tabs with Cmd+Shift+[ ] on Mac and keeps thread cycling elsewhere", () => {
+    for (const [key, code, tab, thread] of [
+      ["{", "BracketLeft", "workspace.tile.previousTab", "thread.previous"],
+      ["}", "BracketRight", "workspace.tile.nextTab", "thread.next"],
+    ] as const) {
+      for (const terminalFocus of [false, true]) {
+        const context = { terminalFocus };
+        assert.strictEqual(
+          resolveShortcutCommand(
+            event({ key, code, metaKey: true, shiftKey: true }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            { platform: "MacIntel", context },
+          ),
+          tab,
+        );
+        assert.strictEqual(
+          resolveShortcutCommand(
+            event({ key: key === "{" ? "[" : "]", code, metaKey: true, ctrlKey: true }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            { platform: "MacIntel", context },
+          ),
+          thread,
+        );
+        assert.strictEqual(
+          resolveShortcutCommand(
+            event({ key, code, ctrlKey: true, shiftKey: true }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            { platform: "Win32", context },
+          ),
+          thread,
+        );
+      }
+    }
+  });
+
   it("navigates history with mod+[ and mod+] outside the terminal", () => {
     const back = event({ key: "[", code: "BracketLeft", metaKey: true });
     const forward = event({ key: "]", code: "BracketRight", ctrlKey: true });

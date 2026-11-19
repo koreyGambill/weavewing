@@ -155,7 +155,7 @@ describe("ReachGrid", () => {
       .toHaveFocus();
     await userEvent.keyboard("{ArrowLeft}");
     await expect
-      .element(page.getByRole("button", { name: "From This app", exact: true }))
+      .element(page.getByRole("button", { name: "From This app (you)", exact: true }))
       .toHaveFocus();
     await userEvent.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}");
     await expect.element(page.getByRole("button", { name: "From WSL", exact: true })).toHaveFocus();

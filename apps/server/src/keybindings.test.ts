@@ -1000,3 +1000,37 @@ it.effect("moves shipped search shortcuts and preserves customized chords and co
     assert.deepInclude(yield* readKeybindingsConfig(keybindingsConfigPath), rebound);
   }).pipe(Effect.provide(layerKeybindings().pipe(Layer.provideMerge(NodeServices.layer)))),
 );
+
+it.effect("moves shipped thread bracket keys off Mac tab cycling and keeps customized ones", () =>
+  Effect.gen(function* () {
+    const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+    const keybindings = yield* Keybindings.Keybindings;
+    const customNext = {
+      key: "mod+shift+]",
+      command: "thread.next",
+      when: "!terminalFocus",
+    } as const;
+    yield* writeKeybindingsConfig(keybindingsConfigPath, [
+      { key: "mod+shift+[", command: "thread.previous" },
+      customNext,
+    ]);
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    const upgraded = yield* readKeybindingsConfig(keybindingsConfigPath);
+    const bracketRules = (rules: typeof upgraded) =>
+      rules.filter((rule) => rule.key.endsWith("[") || rule.key.endsWith("]"));
+    assert.deepEqual(
+      bracketRules(upgraded).filter(
+        (rule) => rule.command.startsWith("thread.") || rule.key.startsWith("mod+shift+"),
+      ),
+      [
+        { key: "ctrl+meta+[", command: "thread.previous", when: "isMac" },
+        { key: "mod+shift+[", command: "workspace.tile.previousTab", when: "isMac" },
+        { key: "mod+shift+]", command: "workspace.tile.nextTab", when: "isMac" },
+        { key: "mod+shift+[", command: "thread.previous", when: "!isMac" },
+        customNext,
+      ],
+    );
+    yield* keybindings.syncDefaultKeybindingsOnStartup;
+    assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), upgraded);
+  }).pipe(Effect.provide(layerKeybindings().pipe(Layer.provideMerge(NodeServices.layer)))),
+);
