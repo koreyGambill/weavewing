@@ -738,10 +738,14 @@ function TaskForm({
   const offersThreadModes = config?.environment.capabilities.scheduledTaskThreadModes === true;
   const worktreeProvider = config?.settings?.worktreeProvider ?? "t3";
   const workspace = draftWorkspace(draft, worktreeProvider);
+  const allowsNewWorktree = worktreeProvider === "t3";
+  const retainsWorktree = draft.task?.workspaceStrategy.type === "worktree";
+  const worktreeLabel = allowsNewWorktree ? "New worktree" : "Keep scheduled worktree";
   const save = async () => {
     const current = readEditor();
     if (!current || current.environmentId !== environmentId) return;
     const draft = current.draft;
+    const savedWorkspace = draft.task?.workspaceStrategy;
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
       submissionPending.current ||
@@ -821,11 +825,13 @@ function TaskForm({
           ? { type: "root" }
           : draftWorkspace(draft, worktreeProvider) === "existing_worktree"
             ? { type: "existing_worktree", worktreePath: draft.checkoutPath.trim() }
-            : {
-                type: "worktree",
-                baseRef: draft.baseRef.trim() || "main",
-                startFromOrigin: draft.startFromOrigin,
-              },
+            : !allowsNewWorktree && savedWorkspace?.type === "worktree"
+              ? savedWorkspace
+              : {
+                  type: "worktree",
+                  baseRef: draft.baseRef.trim() || "main",
+                  startFromOrigin: draft.startFromOrigin,
+                },
       // Tasks have no mode picker; a mode above the administrator's ceiling is refused.
       runtimeMode:
         clampManagedRuntimeMode(config?.managedPolicy, draft.runtimeMode) ?? draft.runtimeMode,
@@ -1010,17 +1016,17 @@ function TaskForm({
             label="Run in"
             value={
               workspace === "worktree"
-                ? "New worktree"
+                ? worktreeLabel
                 : workspace === "root"
                   ? "Project checkout"
                   : "Specific checkout"
             }
             actions={[
-              ...(worktreeProvider === "t3"
+              ...(allowsNewWorktree || retainsWorktree
                 ? [
                     {
                       id: "worktree",
-                      title: "New worktree",
+                      title: worktreeLabel,
                       state: workspace === "worktree" ? ("on" as const) : undefined,
                     },
                   ]
@@ -1050,7 +1056,13 @@ function TaskForm({
                 workspaceMode: "worktree",
               })}
               borderTop
-              disabled={!draft.projectId || saving || dictationPending || environmentUnavailable}
+              disabled={
+                !allowsNewWorktree ||
+                !draft.projectId ||
+                saving ||
+                dictationPending ||
+                environmentUnavailable
+              }
               onPress={() => navigation.navigate("SettingsScheduledTaskBranch")}
             />
           ) : null}

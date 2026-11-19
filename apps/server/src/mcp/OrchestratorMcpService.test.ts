@@ -13,6 +13,7 @@ import {
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
   type OrchestratorMcpCapabilitiesResult,
   type OrchestratorMcpListScheduledTasksInput,
+  OrchestratorMcpScheduleTaskInput,
   type Project,
   OrchestratorMcpTarget,
   type OrchestrationV2ThreadShell,
@@ -85,6 +86,7 @@ import type { ProjectionRecordFilter } from "../orchestration-v2/ProjectionStore
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 const decodeTarget = Schema.decodeUnknownEffect(OrchestratorMcpTarget);
+const decodeScheduleTask = Schema.decodeEffect(OrchestratorMcpScheduleTaskInput);
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(ThreadMarks.layerTest),
@@ -2756,7 +2758,10 @@ describe("OrchestratorMcpService provider resolution", () => {
             refused.message,
             `\`worktreeProvider\` server setting (${worktreeProvider})`,
           );
-          assert.include(refused.message, 'use isolation "shared"');
+          assert.include(refused.message, "Cannot start the requested isolated child");
+          assert.notInclude(refused.message, "shared");
+          assert.notInclude(refused.message, "t3_xwing_environment_list");
+          assert.notInclude(refused.message, "workspaceStrategy");
         }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
       }),
   );
@@ -4413,6 +4418,23 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
 
+    it.effect("uses the project checkout only when an unbound schedule opts in", () =>
+      Effect.gen(function* () {
+        const saved = yield* Ref.make<ReadonlyArray<ScheduledTask["workspaceStrategy"]>>([]);
+        const mcp = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+          Effect.provide(service(masterRepository, saved)),
+        );
+        const input = yield* decodeScheduleTask({
+          projectId,
+          prompt: "Check the build",
+          schedule,
+          useProjectRoot: true,
+        });
+        yield* mcp.scheduleTask(client, input);
+        assert.deepEqual(yield* Ref.get(saved), [{ type: "root" }]);
+      }),
+    );
+
     it.effect("uses the environment's default model when the project inherits it", () =>
       Effect.gen(function* () {
         const environmentDefault = {
@@ -4552,17 +4574,24 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
 
-    it.effect("keeps the saved workspace when an unbound task stays unbound", () =>
+    it.effect("keeps the saved workspace when disabling an unbound worktree task", () =>
       Effect.gen(function* () {
-        const saved = yield* Ref.make<ReadonlyArray<ScheduledTask["workspaceStrategy"]>>([]);
+        const oldStrategy = { type: "worktree", baseRef: "release" } as const;
+        const inputs = yield* Ref.make<ReadonlyArray<ScheduledTaskUpsertInput>>([]);
         const mcp = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
-          Effect.provide(service(masterRepository, saved)),
+          Effect.provide(
+            service(
+              masterRepository,
+              yield* Ref.make<ReadonlyArray<ScheduledTask["workspaceStrategy"]>>([]),
+              { ...existing, workspaceStrategy: oldStrategy },
+              inputs,
+            ),
+          ),
         );
-        yield* mcp.updateScheduledTask(client, {
-          scheduledTaskId: existing.id,
-          bindToCurrentThread: false,
-        });
-        assert.deepEqual(yield* Ref.get(saved), [{ type: "root" }]);
+        yield* mcp.updateScheduledTask(client, { scheduledTaskId: existing.id, enabled: false });
+        const [saved] = yield* Ref.get(inputs);
+        assert.isFalse(saved?.enabled);
+        assert.deepEqual(saved?.workspaceStrategy, oldStrategy);
       }),
     );
 

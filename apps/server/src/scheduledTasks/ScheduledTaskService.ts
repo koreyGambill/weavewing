@@ -79,7 +79,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { forkParked } from "../serverActivation.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
+import { readWorktreeProvider } from "../git/worktreeProvider.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -353,6 +353,10 @@ export class ScheduledTaskService extends Context.Service<
     ) => Effect.Effect<WebhookTriggerResult, ScheduledTaskError>;
   }
 >()("t3/scheduledTasks/ScheduledTaskService") {}
+
+function scheduledWorktreeRefusal(worktreeProvider: "xwing" | "off"): string {
+  return `The \`worktreeProvider\` server setting (${worktreeProvider}) blocks new scheduled worktrees. To use an isolated checkout, select T3 worktrees in Settings → Worktrees.`;
+}
 
 function taskError(message: string, input?: { taskId?: ScheduledTaskId; cause?: unknown }) {
   return new ScheduledTaskError({
@@ -1687,6 +1691,15 @@ export const layer = Layer.effect(
                       creationSource: active.creationSource,
                     })
                     .pipe(
+                      Effect.catchTags({
+                        ThreadLaunchWorktreeProviderError: (cause) =>
+                          Effect.fail(
+                            taskError(scheduledWorktreeRefusal(cause.worktreeProvider), {
+                              taskId: active.id,
+                              cause,
+                            }),
+                          ),
+                      }),
                       Effect.map((launched) => launched.threadId),
                       Effect.tap((threadId) =>
                         active.schedule.type === "event"
@@ -2303,6 +2316,30 @@ export const layer = Layer.effect(
           );
         }
       }
+      let workspaceStrategy = input.workspaceStrategy;
+      if (workspaceStrategy.type === "worktree") {
+        const previous = existingTask?.workspaceStrategy;
+        if (
+          existingTask?.projectId === input.projectId &&
+          previous?.type === "worktree" &&
+          previous.baseRef === workspaceStrategy.baseRef &&
+          previous.branch === workspaceStrategy.branch &&
+          (previous.startFromOrigin ?? false) === (workspaceStrategy.startFromOrigin ?? false)
+        ) {
+          workspaceStrategy = previous;
+        } else {
+          const worktreeProvider = yield* readWorktreeProvider(serverSettings);
+          if (worktreeProvider !== "t3") {
+            return yield* taskError(scheduledWorktreeRefusal(worktreeProvider), { taskId: id });
+          }
+          if (
+            (yield* managedFolders.isScratchProject(input.projectId)) ||
+            (yield* threadLaunch.isNonGitProject(input.projectId))
+          ) {
+            workspaceStrategy = { type: "root" };
+          }
+        }
+      }
       // Keep the existing next_run_at when the schedule itself is untouched:
       // editing a title or prompt must not postpone (or resurrect) a due
       // run — only schedule/enabled changes restart the clock.
@@ -2393,23 +2430,6 @@ export const layer = Layer.effect(
               return { token, secret, secretChanged };
             })
           : { token: null, secret: null, secretChanged: true };
-      // A folder that is not a Git repository, Scratch included, cannot hold a worktree.
-      const workspaceStrategy: ScheduledTask["workspaceStrategy"] =
-        input.workspaceStrategy.type === "worktree" &&
-        ((yield* managedFolders.isScratchProject(input.projectId)) ||
-          (yield* threadLaunch.isNonGitProject(input.projectId)))
-          ? { type: "root" }
-          : input.workspaceStrategy;
-      // Scheduled runs launch outside the composer's Xwing routing, so they need T3 worktrees.
-      if (workspaceStrategy.type === "worktree") {
-        const worktreeProvider = yield* readWorktreeProvider(serverSettings);
-        if (worktreeProvider !== "t3") {
-          return yield* taskError(
-            `Scheduled tasks cannot start in a new worktree on this machine. ${worktreeProviderRefusal(worktreeProvider)} Run the task in the project checkout or an existing checkout, or bind it to a thread.`,
-            { taskId: id },
-          );
-        }
-      }
       const scheduleUnchanged =
         existingTask !== null &&
         existingTask.enabled === input.enabled &&

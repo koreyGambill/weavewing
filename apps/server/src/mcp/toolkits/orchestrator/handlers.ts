@@ -120,12 +120,19 @@ const handlers = {
         enabled,
         freshSession,
         bindToCurrentThread,
+        useProjectRoot,
         target,
         review,
         limits,
       }) =>
         Effect.gen(function* () {
           if (scheduledTaskId === undefined) return yield* Effect.die("unreachable");
+          if (useProjectRoot !== undefined) {
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message: "`useProjectRoot` applies only when creating an unbound scheduled task.",
+            });
+          }
           const scope = yield* McpInvocationContext.McpInvocationContext;
           const service = yield* OrchestratorMcpService.OrchestratorMcpService;
           return yield* service.updateScheduledTask(scope, {

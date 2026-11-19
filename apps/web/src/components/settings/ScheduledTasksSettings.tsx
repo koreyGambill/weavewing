@@ -1877,9 +1877,14 @@ function ScheduledTaskEditorForm({
     : task;
   const selectedProjectId = draft.projectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  // A machine without T3 worktrees runs scheduled tasks in an existing checkout.
+  const allowsNewWorktree = settings.worktreeProvider === "t3";
+  const savedWorkspace = liveTask?.workspaceStrategy;
+  const retainsWorktree = savedWorkspace?.type === "worktree";
+  const worktreeLabel = allowsNewWorktree
+    ? WORKSPACE_MODE_LABELS.worktree
+    : "Keep scheduled worktree";
   const workspaceMode: WorkspaceMode =
-    settings.worktreeProvider !== "t3" && draft.workspaceMode === "worktree"
+    !allowsNewWorktree && !retainsWorktree && draft.workspaceMode === "worktree"
       ? "root"
       : draft.workspaceMode;
   const instanceEntries = providerInstanceEntriesFor(
@@ -2031,11 +2036,13 @@ function ScheduledTaskEditorForm({
         ? { type: "root" }
         : workspaceMode === "existing_worktree"
           ? { type: "existing_worktree", worktreePath: draft.existingWorktreePath.trim() }
-          : {
-              type: "worktree",
-              baseRef: draft.baseRef.trim() || "main",
-              startFromOrigin: draft.startFromOrigin,
-            };
+          : !allowsNewWorktree && retainsWorktree
+            ? savedWorkspace
+            : {
+                type: "worktree",
+                baseRef: draft.baseRef.trim() || "main",
+                startFromOrigin: draft.startFromOrigin,
+              };
     const input: ScheduledTaskUpsertInput = {
       ...(draft.editingId ? { id: draft.editingId as ScheduledTaskId, requireExisting: true } : {}),
       title: draft.title.trim(),
@@ -2278,11 +2285,15 @@ function ScheduledTaskEditorForm({
                   }
                 >
                   <SelectTrigger size="sm" id="scheduled-task-workspace">
-                    <SelectValue>{WORKSPACE_MODE_LABELS[workspaceMode]}</SelectValue>
+                    <SelectValue>
+                      {workspaceMode === "worktree"
+                        ? worktreeLabel
+                        : WORKSPACE_MODE_LABELS[workspaceMode]}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    {settings.worktreeProvider === "t3" ? (
-                      <SelectItem value="worktree">Create a new worktree</SelectItem>
+                    {allowsNewWorktree || retainsWorktree ? (
+                      <SelectItem value="worktree">{worktreeLabel}</SelectItem>
                     ) : null}
                     <SelectItem value="root">Use the project checkout</SelectItem>
                     <SelectItem value="existing_worktree">Use a specific checkout</SelectItem>
@@ -2305,7 +2316,7 @@ function ScheduledTaskEditorForm({
                 onStartFromOriginChange={(startFromOrigin) =>
                   setDraft((current) => ({ ...current, startFromOrigin }))
                 }
-                disabled={saving || !connected}
+                disabled={saving || !connected || !allowsNewWorktree}
               />
             </Field>
           ) : null}

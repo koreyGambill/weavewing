@@ -1,4 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
+import * as Schema from "effect/Schema";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import {
   DEFAULT_UNIFIED_SETTINGS,
@@ -6,17 +7,21 @@ import {
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskId,
+  ServerProvider,
   ThreadId,
   type ScheduledTask,
+  type WorktreeProvider,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
+import { CODEX_PROVIDER } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
 import { ScheduledTasksSettings } from "./ScheduledTasksSettings";
 import { ConfirmDialogHost } from "../ConfirmDialogHost";
 
+const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
 const environmentId = EnvironmentId.make("laptop");
 const projectId = ProjectId.make("project");
 const task: ScheduledTask = {
@@ -59,6 +64,10 @@ const state = vi.hoisted(() => ({
   tasksLoaded: true,
   secondary: false,
   allScope: false,
+  workspaceStrategy: { type: "root" } as ScheduledTask["workspaceStrategy"],
+  worktreeProvider: "t3" as WorktreeProvider,
+  providerAvailable: false,
+  upsert: vi.fn(),
   remove: vi.fn(),
 }));
 const secondaryId = EnvironmentId.make("secondary");
@@ -66,6 +75,10 @@ const permissions = new Map<string, Atom.Writable<boolean>>();
 
 function setup() {
   state.connected = true;
+  state.workspaceStrategy = task.workspaceStrategy;
+  state.worktreeProvider = "t3";
+  state.providerAvailable = false;
+  state.upsert.mockReset().mockResolvedValue({ _tag: "Success", value: { task } });
   state.tasksLoaded = true;
   state.remove.mockReset().mockResolvedValue({ _tag: "Success", value: { id: task.id } });
   state.secondary = false;
@@ -124,17 +137,22 @@ vi.mock(import("./SettingsScopeContext"), async (original) => {
 });
 vi.mock(import("../../state/server"), async (original) => {
   const actual = await original();
+  const providers = Atom.make<ReadonlyArray<ServerProvider>>(() =>
+    state.providerAvailable ? [decodeServerProvider(CODEX_PROVIDER)] : [],
+  );
 
   return {
     ...actual,
     serverEnvironment: {
       ...actual.serverEnvironment,
+      providersValueAtom: () => providers,
       deleteScheduledTask: {
         ...actual.serverEnvironment.deleteScheduledTask,
         run: state.remove,
       },
       upsertScheduledTask: {
         ...actual.serverEnvironment.upsertScheduledTask,
+        run: state.upsert,
         permissionAtom: (id: string | null) => permissions.get(id ?? "")!,
       },
     },
@@ -154,7 +172,11 @@ vi.mock(import("../../state/query"), async (original) => ({
     data:
       request === null || request === threadFamilyRead
         ? request
-        : { tasks: state.tasksLoaded ? [task] : [] },
+        : {
+            tasks: state.tasksLoaded
+              ? [{ ...task, workspaceStrategy: state.workspaceStrategy }]
+              : [],
+          },
     error: null,
     isPending: false,
     refresh: vi.fn(),
@@ -171,7 +193,10 @@ vi.mock(import("../../state/entities"), async (original) => ({
 }));
 vi.mock(import("../../hooks/useSettings"), async (original) => ({
   ...(await original()),
-  useEnvironmentSettings: (() => DEFAULT_UNIFIED_SETTINGS) as never,
+  useEnvironmentSettings: (() => ({
+    ...DEFAULT_UNIFIED_SETTINGS,
+    worktreeProvider: state.worktreeProvider,
+  })) as never,
 }));
 
 describe("ScheduledTasksSettings", () => {
@@ -271,6 +296,21 @@ describe("ScheduledTasksSettings", () => {
     state.connected = true;
     await screen.rerender(<ScheduledTasksSettings taskId={task.id} />);
     await expect.element(name).toHaveValue("Review stale issues");
+  });
+
+  it("keeps a saved worktree when editing a task with isolated checkouts off", async () => {
+    setup();
+    state.worktreeProvider = "off";
+    state.providerAvailable = true;
+    state.workspaceStrategy = { type: "worktree", baseRef: "release", branch: "scheduled/review" };
+    await using screen = await render(<ScheduledTasksSettings taskId={task.id} />);
+    await userEvent.click(screen.getByRole("button", { name: "Save task" }));
+    await vi.waitFor(() =>
+      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+        environmentId,
+        input: expect.objectContaining({ workspaceStrategy: state.workspaceStrategy }),
+      }),
+    );
   });
 
   it("offers no model choice for a task bound to a thread, whose runs use the thread's model", async () => {

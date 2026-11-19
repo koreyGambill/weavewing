@@ -206,12 +206,19 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
 
 type Workspace = "worktree" | "root" | "existing_worktree";
 
-/** What a draft runs in on a machine with `worktreeProvider`: without T3 worktrees, the project checkout. */
+/** Default new tasks to the project checkout when T3 worktrees are unavailable. */
 export function draftWorkspace(
-  draft: Pick<ScheduledTaskDraft, "workspace">,
+  draft: {
+    readonly workspace: Workspace;
+    readonly task?: Pick<ScheduledTask, "workspaceStrategy"> | null;
+  },
   worktreeProvider: WorktreeProvider,
 ): Workspace {
-  return draft.workspace === "worktree" && worktreeProvider !== "t3" ? "root" : draft.workspace;
+  return draft.workspace === "worktree" &&
+    worktreeProvider !== "t3" &&
+    draft.task?.workspaceStrategy.type !== "worktree"
+    ? "root"
+    : draft.workspace;
 }
 export type ScheduledTaskDraft = {
   readonly task: ScheduledTask | null;

@@ -296,7 +296,8 @@ offers **Xwing environment** in place of **New worktree**. **Off** keeps every t
 checkout. Under either of those, the server refuses anything else that would create a T3 worktree,
 including delegated tasks with worktree isolation, worktree handoffs, pull request checkouts in a
 worktree, pull request review guides, scheduled tasks that start in a new worktree, and restoring
-a deleted worktree. The refusal names the setting.
+a deleted worktree. The refusal names the setting. You can edit or pause a saved task while
+keeping its worktree settings. To run it, choose an existing checkout or re-enable T3 worktrees.
 
 ## Fast worktree checkout on macOS
 

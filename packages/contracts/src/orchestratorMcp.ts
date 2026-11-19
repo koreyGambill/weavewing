@@ -859,6 +859,12 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
         "Post here, else new thread per run. Unset: true in own project, else false; updates keep it.",
     }),
   ),
+  useProjectRoot: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Set true when creating an unbound task that should run in the project checkout. Unbound Git tasks otherwise request a new worktree.",
+    }),
+  ),
   freshSession: Schema.optional(
     Schema.Boolean.annotate({
       description:

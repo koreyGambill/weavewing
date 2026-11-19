@@ -134,7 +134,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as AutomationLimits from "../scheduledTasks/AutomationLimits.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { readWorktreeProvider, worktreeProviderRefusal } from "../git/worktreeProvider.ts";
+import { readWorktreeProvider } from "../git/worktreeProvider.ts";
 import {
   clientModeCeiling,
   type McpInvocationScope,
@@ -2538,8 +2538,8 @@ const make = Effect.gen(function* () {
 
   const scheduledTaskWorkspaceStrategy = Effect.fn(
     "OrchestratorMcpService.scheduledTaskWorkspaceStrategy",
-  )(function* (boundToThread: boolean, projectId: ProjectId) {
-    if (boundToThread) return { type: "root" as const };
+  )(function* (useRootStrategy: boolean, projectId: ProjectId) {
+    if (useRootStrategy) return { type: "root" as const };
     const { workspaceRoot } = yield* requireProject(projectId);
     return {
       type: "worktree" as const,
@@ -2741,6 +2741,12 @@ const make = Effect.gen(function* () {
             : "bindToCurrentThread binds to this thread, which belongs to a different project.",
         );
       }
+      if (input.useProjectRoot && bindToCurrentThread) {
+        return yield* failure(
+          "invalid_request",
+          "`useProjectRoot` needs an unbound task. Set `bindToCurrentThread` to false to run in the project checkout.",
+        );
+      }
       const commandId =
         input.clientRequestId === undefined
           ? undefined
@@ -2784,7 +2790,12 @@ const make = Effect.gen(function* () {
           : bindToCurrentThread
             ? "continue"
             : "new_thread",
-        workspaceStrategy: yield* scheduledTaskWorkspaceStrategy(bindToCurrentThread, projectId),
+        workspaceStrategy:
+          replayed?.workspaceStrategy ??
+          (yield* scheduledTaskWorkspaceStrategy(
+            bindToCurrentThread || input.useProjectRoot === true,
+            projectId,
+          )),
         modelSelection,
         ...(input.review === undefined ? {} : { agent: reviewAgent(input.review, undefined) }),
         runtimeMode: limits.runtimeMode,
@@ -3277,7 +3288,7 @@ const make = Effect.gen(function* () {
         if (worktreeProvider !== "t3") {
           return yield* failure(
             "invalid_request",
-            `Isolation "worktree" is unavailable: ${worktreeProviderRefusal(worktreeProvider)} For a delegated task, use isolation "shared".`,
+            `Cannot start the requested isolated child under the \`worktreeProvider\` server setting (${worktreeProvider}). To allow isolated delegation, select T3 worktrees in Settings → Worktrees.`,
           );
         }
         const project = yield* requireProject(parent.thread.projectId);

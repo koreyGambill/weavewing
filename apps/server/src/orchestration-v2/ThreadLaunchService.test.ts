@@ -1599,7 +1599,7 @@ it.effect.each([true, false])(
 );
 
 it.effect.each(["xwing", "off"] as const)(
-  "refuses to save a scheduled task that starts a new worktree under worktreeProvider %s",
+  "keeps existing worktree schedules editable and refuses new worktrees under worktreeProvider %s",
   (worktreeProvider) => {
     const harness = scratchHarness({ scratch: false, serverSettings: { worktreeProvider } });
     return Effect.gen(function* () {
@@ -1614,6 +1614,37 @@ it.effect.each(["xwing", "off"] as const)(
         workspaceStrategy: { type: "root" },
       });
       assert.deepEqual(root.task.workspaceStrategy, { type: "root" });
+
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const existing = {
+        ...scheduledTaskInput("scheduled-task:existing", otherProjectId),
+        enabled: true,
+      };
+      yield* settings.updateSettings({ worktreeProvider: "t3" });
+      yield* tasks.upsert(existing);
+      yield* settings.updateSettings({ worktreeProvider });
+      const edited = yield* tasks.upsert({ ...existing, title: "Edited summary" });
+      assert.equal(edited.task.title, "Edited summary");
+      assert.deepEqual(edited.task.workspaceStrategy, worktreeStrategy);
+      const changed = yield* tasks
+        .upsert({ ...existing, workspaceStrategy: { ...worktreeStrategy, branch: "other" } })
+        .pipe(Effect.flip);
+      assert.include(changed.message, `\`worktreeProvider\` server setting (${worktreeProvider})`);
+
+      const ran = yield* tasks.runNow({ id: existing.id });
+      assert.equal(ran.task.lastRunStatus, "failed");
+      assert.include(
+        ran.task.lastRunError ?? "",
+        `\`worktreeProvider\` server setting (${worktreeProvider})`,
+      );
+      assert.notInclude(ran.task.lastRunError ?? "", "workspaceStrategy");
+      assert.isNull(ran.threadId);
+      assert.equal(harness.createWorktree.mock.calls.length, 0);
+
+      const disabled = yield* tasks.upsert({ ...existing, enabled: false });
+      assert.isFalse(disabled.task.enabled);
+      assert.isNull(disabled.task.nextRunAt);
+      assert.deepEqual(disabled.task.workspaceStrategy, worktreeStrategy);
     }).pipe(Effect.provide(harness.layer));
   },
 );

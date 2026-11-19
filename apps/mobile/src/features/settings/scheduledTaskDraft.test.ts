@@ -20,6 +20,12 @@ describe("draftWorkspace", () => {
     expect(draftWorkspace({ workspace: "worktree" }, "xwing")).toBe("root");
     expect(draftWorkspace({ workspace: "worktree" }, "off")).toBe("root");
     expect(draftWorkspace({ workspace: "existing_worktree" }, "off")).toBe("existing_worktree");
+    const saved = {
+      workspace: "worktree",
+      task: { workspaceStrategy: { type: "worktree", baseRef: "main" } },
+    } as const;
+    expect(draftWorkspace(saved, "off")).toBe("worktree");
+    expect(draftWorkspace(saved, "xwing")).toBe("worktree");
   });
 });
 
