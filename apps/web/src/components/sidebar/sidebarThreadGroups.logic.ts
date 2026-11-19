@@ -230,6 +230,52 @@ export function addSidebarThreadGroup(
   };
 }
 
+/** The name a new group starts with; leaving it, or nothing, means the group was never named. */
+export const NEW_SIDEBAR_THREAD_GROUP_NAME = "New group";
+
+export function isUnnamedSidebarThreadGroup(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed === "" || trimmed === NEW_SIDEBAR_THREAD_GROUP_NAME;
+}
+
+/**
+ * Drops a group that was never named and puts any thread moved into it back where `previous`,
+ * the state before the group was made, had it. Other changes made meanwhile stay.
+ */
+export function discardNewSidebarThreadGroup(
+  state: SidebarThreadGroups,
+  previous: SidebarThreadGroups,
+  id: string,
+): SidebarThreadGroups {
+  const moved = state.groups.find((group) => group.id === id)?.threadKeys ?? [];
+  const insertAt = (keys: readonly string[], index: number, key: string) => {
+    const next = keys.filter((candidate) => candidate !== key);
+    next.splice(Math.min(index, next.length), 0, key);
+    return next;
+  };
+  let next = deleteSidebarThreadGroup(state, id);
+  for (const key of moved) {
+    const from = previous.groups.find((group) => group.threadKeys.includes(key));
+    if (from !== undefined) {
+      const index = from.threadKeys.indexOf(key);
+      next = {
+        ...next,
+        groups: next.groups.map((group) =>
+          group.id === from.id
+            ? { ...group, threadKeys: insertAt(group.threadKeys, index, key) }
+            : group,
+        ),
+      };
+      continue;
+    }
+    const index = previous.ungroupedOrder.indexOf(key);
+    if (index !== -1) {
+      next = { ...next, ungroupedOrder: insertAt(next.ungroupedOrder, index, key) };
+    }
+  }
+  return next;
+}
+
 export function renameSidebarThreadGroup(
   state: SidebarThreadGroups,
   id: string,

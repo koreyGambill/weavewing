@@ -3,6 +3,8 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   deleteSidebarThreadGroup,
+  discardNewSidebarThreadGroup,
+  isUnnamedSidebarThreadGroup,
   EMPTY_SIDEBAR_THREAD_GROUPS,
   moveSidebarThreadGroup,
   placeSidebarThread,
@@ -10,6 +12,7 @@ import {
   resolveSidebarGroupHit,
   resolveSidebarShelfHit,
   stepSidebarThread,
+  toggleSidebarThreadGroup,
   type SidebarThreadGroups,
 } from "./sidebarThreadGroups.logic";
 
@@ -299,5 +302,45 @@ describe("resolveSidebarShelfHit", () => {
     });
     expect(resolveSidebarShelfHit({ ...layout, y: 600 })).toBe(null);
     expect(resolveSidebarShelfHit({ ...layout, y: 40 })).toBe(null);
+  });
+});
+
+describe("discardNewSidebarThreadGroup", () => {
+  it("removes a group that was never named and puts its thread back where it was", () => {
+    const before = state([["old", ["a", "b"]]], ["c"]);
+    const created = addSidebarThreadGroup(before, { id: "g", name: "New group", threadKey: "b" });
+    expect(discardNewSidebarThreadGroup(created, before, "g")).toEqual(before);
+  });
+
+  it("returns a thread to its place in Ungrouped's order", () => {
+    const before = state([], ["x", "y", "z"]);
+    const created = addSidebarThreadGroup(before, { id: "g", name: "New group", threadKey: "y" });
+    expect(discardNewSidebarThreadGroup(created, before, "g").ungroupedOrder).toEqual([
+      "x",
+      "y",
+      "z",
+    ]);
+  });
+
+  it("keeps changes made elsewhere while the group was being named", () => {
+    const before = state([["old", ["a"]]]);
+    const created = addSidebarThreadGroup(before, { id: "g", name: "New group" });
+    const meanwhile = toggleSidebarThreadGroup(created, "old");
+    const discarded = discardNewSidebarThreadGroup(meanwhile, before, "g");
+    expect(discarded.groups).toEqual([
+      { id: "old", name: "old", collapsed: true, threadKeys: ["a"] },
+    ]);
+  });
+});
+
+describe("isUnnamedSidebarThreadGroup", () => {
+  it.each([
+    ["", true],
+    ["   ", true],
+    ["New group", true],
+    [" New group ", true],
+    ["Demo", false],
+  ])("%j is unnamed: %s", (name, unnamed) => {
+    expect(isUnnamedSidebarThreadGroup(name)).toBe(unnamed);
   });
 });

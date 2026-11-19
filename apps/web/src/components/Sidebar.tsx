@@ -275,7 +275,10 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   deleteSidebarThreadGroup,
+  discardNewSidebarThreadGroup,
   EMPTY_SIDEBAR_THREAD_GROUPS,
+  isUnnamedSidebarThreadGroup,
+  NEW_SIDEBAR_THREAD_GROUP_NAME,
   moveSidebarThreadGroup,
   placeSidebarThread,
   renameSidebarThreadGroup,
@@ -1369,6 +1372,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     SidebarThreadGroups,
   );
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
+  // A group made moments ago and the groups before it, until the user names it.
+  const [newThreadGroup, setNewThreadGroup] = useState<{
+    readonly id: string;
+    readonly previous: SidebarThreadGroups;
+  } | null>(null);
   const [groupDropStore] = useState(createSidebarGroupDropStore);
   const {
     pinnedThreads,
@@ -1431,19 +1439,36 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const toggleThreadGroup = useStableCallback((groupId: string | null) =>
     setThreadGroups((current) => toggleSidebarThreadGroup(current, groupId)),
   );
+  const discardNewThreadGroup = () => {
+    const created = newThreadGroup;
+    if (created === null) return;
+    setThreadGroups((current) =>
+      discardNewSidebarThreadGroup(current, created.previous, created.id),
+    );
+  };
   const commitThreadGroupRename = useStableCallback((groupId: string, name: string) => {
     setRenamingGroupId(null);
+    setNewThreadGroup(null);
+    if (newThreadGroup?.id === groupId && isUnnamedSidebarThreadGroup(name)) {
+      discardNewThreadGroup();
+      return;
+    }
     setThreadGroups((current) => renameSidebarThreadGroup(current, groupId, name));
   });
-  const cancelThreadGroupRename = useStableCallback(() => setRenamingGroupId(null));
+  const cancelThreadGroupRename = useStableCallback(() => {
+    setRenamingGroupId(null);
+    setNewThreadGroup(null);
+    discardNewThreadGroup();
+  });
   const createThreadGroup = (threadKey?: string) => {
     // A click on "New group" while one is being named only commits that name.
     if (threadKey === undefined && renamingGroupId !== null) return;
     const id = randomUUID();
+    setNewThreadGroup({ id, previous: threadGroups });
     setThreadGroups((current) =>
       addSidebarThreadGroup(current, {
         id,
-        name: "New group",
+        name: NEW_SIDEBAR_THREAD_GROUP_NAME,
         ...(threadKey === undefined ? {} : { threadKey }),
       }),
     );
