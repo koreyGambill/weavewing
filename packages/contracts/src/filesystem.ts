@@ -40,6 +40,8 @@ export type FilesystemBrowseEntry = typeof FilesystemBrowseEntry.Type;
 
 export const FilesystemBrowseResult = Schema.Struct({
   parentPath: TrimmedNonEmptyString,
+  /** parentPath with links resolved; absent when the folder cannot be resolved. */
+  realPath: Schema.optional(TrimmedNonEmptyString),
   entries: Schema.Array(FilesystemBrowseEntry),
 });
 export type FilesystemBrowseResult = typeof FilesystemBrowseResult.Type;

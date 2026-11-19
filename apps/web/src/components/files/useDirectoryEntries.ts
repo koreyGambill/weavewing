@@ -8,7 +8,12 @@ import { environmentCatalog } from "~/connection/catalog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 
-export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
+/** workspaceRoot, when cwd is a folder inside it, shows the links the workspace tree shows. */
+export function useDirectoryEntries(
+  environmentId: EnvironmentId,
+  cwd: string,
+  workspaceRoot?: string,
+) {
   const [directories, setDirectories] = useState(new Map<string, readonly ProjectEntry[]>());
   const [errors, setErrors] = useState(new Map<string, string>());
   const [pending, setPending] = useState(1);
@@ -29,7 +34,10 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
   const startRequest = (directoryPath: string, refresh: boolean): Promise<void> => {
     loaded.current.add(directoryPath);
     requested.current.add(directoryPath);
-    const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
+    const atom = projectEnvironment.listEntries({
+      environmentId,
+      input: { cwd, directoryPath, ...(workspaceRoot === undefined ? {} : { workspaceRoot }) },
+    });
     const detached = detachedRequests.current.get(directoryPath);
     const request = (async () => {
       // A shared query still waiting would join the removed folder's read.

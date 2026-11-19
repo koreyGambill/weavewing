@@ -185,6 +185,33 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       }),
     );
 
+    it.effect("shows a subfolder listing the links its workspace tree would show", () =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcess.Platform;
+        if (platform === "win32") return;
+        const cwd = yield* makeTempDir();
+        const outside = yield* makeTempDir();
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "src/app.ts");
+        yield* writeTextFile(cwd, "docs/guide.md");
+        yield* writeTextFile(outside, "outside.txt");
+        yield* fileSystem.symlink("../docs", path.join(cwd, "src/docs-link"));
+        yield* fileSystem.symlink(outside, path.join(cwd, "src/outside-link"));
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const paths = (input: { cwd: string; workspaceRoot?: string }) =>
+          workspaceEntries
+            .list({ ...input, directoryPath: "" })
+            .pipe(Effect.map(({ entries }) => entries.map((entry) => entry.path).toSorted()));
+        const src = path.join(cwd, "src");
+        expect(yield* paths({ cwd: src })).toEqual(["app.ts"]);
+        expect(yield* paths({ cwd: src, workspaceRoot: cwd })).toEqual(["app.ts", "docs-link"]);
+        // A boundary the listing is not inside is ignored.
+        expect(yield* paths({ cwd: src, workspaceRoot: outside })).toEqual(["app.ts"]);
+      }),
+    );
+
     it.effect("hides folder links that lead back to a folder on the listed path", () =>
       // "Expand all folders" loads every folder it expands, so a link that loops would
       // keep nesting the same entries without end.
@@ -1098,8 +1125,31 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         expect(directoryResult.entries.map((entry) => entry.name)).toEqual([".config", "config"]);
         expect(hiddenPrefixResult).toEqual({
           parentPath: cwd,
+          realPath: yield* Effect.promise(() => NodeFSP.realpath(cwd)),
           entries: [{ name: ".config", fullPath: path.join(cwd, ".config") }],
         });
+      }),
+    );
+
+    it.effect("reports the real path of a folder reached through a link", () =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcess.Platform;
+        if (platform === "win32") return;
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-link-" });
+        yield* writeTextFile(cwd, "real/file.txt");
+        yield* fileSystem.symlink("real", path.join(cwd, "alias"));
+
+        const result = yield* workspaceEntries.browse({
+          partialPath: `${path.join(cwd, "alias")}${path.sep}`,
+        });
+
+        expect(result.parentPath).toBe(path.join(cwd, "alias"));
+        expect(result.realPath).toBe(
+          yield* Effect.promise(() => NodeFSP.realpath(path.join(cwd, "real"))),
+        );
       }),
     );
 

@@ -5,6 +5,7 @@ import {
   newFilesTabRoot,
   filesRootBrowsePath,
   filesSearchRoot,
+  latestRequest,
   parentHostFolder,
   resolveFilesRoot,
   workspacePathOf,
@@ -44,8 +45,29 @@ describe("files tab roots", () => {
     ["~\\Documents", "~\\Documents/"],
     ["C:\\Users", "C:\\Users/"],
     ["/tmp/logs/", "/tmp/logs/"],
-  ])("asks the environment to resolve %j as %j", (input, partialPath) => {
-    expect(filesRootBrowsePath(input)).toBe(partialPath);
+  ])("asks a POSIX environment to resolve %j as %j", (input, partialPath) => {
+    expect(filesRootBrowsePath(input, false)).toBe(partialPath);
+  });
+
+  it.each([
+    ["Tools", "./Tools/"],
+    ["..\\Tools", "..\\Tools/"],
+    ["\\Tools", "\\Tools/"],
+    ["C:Tools", "C:Tools/"],
+    ["C:\\Tools", "C:\\Tools/"],
+    ["C:\\", "C:\\"],
+    ["//server/share", "//server/share/"],
+    ["\\\\server\\share", "\\\\server\\share/"],
+    ["~\\Documents", "~\\Documents/"],
+  ])("asks a Windows environment to resolve %j as %j", (input, partialPath) => {
+    expect(filesRootBrowsePath(input, true)).toBe(partialPath);
+  });
+
+  it("takes only the latest of overlapping requests", () => {
+    const begin = latestRequest();
+    const first = begin();
+    const second = begin();
+    expect([first(), second()]).toEqual([false, true]);
   });
 
   it.each([
@@ -60,11 +82,16 @@ describe("files tab roots", () => {
 describe("resolveFilesRoot", () => {
   const workspaceRoot = "/home/u/repo";
   // Mirrors the server's browse resolution: `~` expands to home, explicit relatives use cwd.
-  const resolveFolder = async (partialPath: string, cwd: string) => {
+  const resolvePath = (partialPath: string, cwd: string) => {
     const expanded = partialPath.replace(/^~(?=$|[\\/])/, "/home/u");
     const resolved = new URL(expanded, `file://${cwd}/`).pathname;
     return resolved.length > 1 ? resolved.replace(/\/+$/, "") : resolved;
   };
+  const resolveFolder = async (partialPath: string, cwd: string) => ({
+    path: resolvePath(partialPath, cwd),
+  });
+  const resolve = (input: string) =>
+    resolveFilesRoot(input, { workspaceRoot, windows: false, resolveFolder });
 
   it.each([
     { input: "..", root: "/home/u", search: null },
@@ -75,16 +102,40 @@ describe("resolveFilesRoot", () => {
     { input: "~/repo", root: null, search: workspaceRoot },
     { input: "/tmp/logs/", root: "/tmp/logs", search: null },
   ])("stores $input as $root and searches $search", async ({ input, root, search }) => {
-    const stored = await resolveFilesRoot(input, workspaceRoot, resolveFolder);
+    const stored = await resolve(input);
     expect(stored).toBe(root);
     expect(filesSearchRoot(stored ?? workspaceRoot, workspaceRoot)).toBe(search);
     if (stored !== null && stored !== undefined) {
-      expect(parentHostFolder(stored)).toBe(await resolveFolder(`${stored}/..`, "/"));
+      expect(parentHostFolder(stored)).toBe(resolvePath(`${stored}/..`, "/"));
     }
   });
 
   it("ignores an empty path", async () => {
-    expect(await resolveFilesRoot("  ", workspaceRoot, resolveFolder)).toBeUndefined();
+    expect(await resolve("  ")).toBeUndefined();
+  });
+
+  it.each([
+    { name: "a link into the workspace", input: "/home/u/link", root: "/ws/src" },
+    { name: "a workspace folder by its real path", input: "/real/ws/src", root: "/ws/src" },
+    { name: "the workspace by its real path", input: "/real/ws", root: null },
+    { name: "a workspace link that leaves it", input: "/ws/out", root: "/elsewhere" },
+  ])("classifies $name by real path", async ({ input, root }) => {
+    const realPaths: Record<string, string> = {
+      "/ws": "/real/ws",
+      "/home/u/link": "/real/ws/src",
+      "/real/ws/src": "/real/ws/src",
+      "/real/ws": "/real/ws",
+      "/ws/out": "/elsewhere",
+    };
+    const stored = await resolveFilesRoot(input, {
+      workspaceRoot: "/ws",
+      windows: false,
+      resolveFolder: async (partialPath) => {
+        const path = partialPath.replace(/\/$/, "");
+        return { path, realPath: realPaths[path] ?? path };
+      },
+    });
+    expect(stored).toBe(root);
   });
 });
 

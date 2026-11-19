@@ -97,7 +97,7 @@ import { PreviewImage } from "./PreviewImage";
 import FileBrowserPanel, { type FileBrowserPanelHandle } from "./FileBrowserPanel";
 import { FilesRootBar } from "./FilesRootBar";
 import { FileExplorerPane } from "./FileExplorerPane";
-import { workspacePathOf } from "./filesRoot";
+import { latestRequest, resolveFilesRoot, workspacePathOf } from "./filesRoot";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
@@ -1250,10 +1250,47 @@ export default function FilePreviewPanel({
     reportFailure: false,
     reportDefect: false,
   });
-  const resolveFolder = async (partialPath: string, folderCwd: string) => {
-    const result = await browseFolder({ environmentId, input: { partialPath, cwd: folderCwd } });
-    if (result._tag !== "Success") throw squashAtomCommandFailure(result);
-    return result.value.parentPath;
+  const resolveRoot = (input: string) =>
+    resolveFilesRoot(input, {
+      workspaceRoot: cwd,
+      windows: serverConfig?.environment.platform.os === "windows",
+      resolveFolder: async (partialPath, folderCwd) => {
+        const result = await browseFolder({
+          environmentId,
+          input: { partialPath, cwd: folderCwd },
+        });
+        if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+        return { path: result.value.parentPath, realPath: result.value.realPath };
+      },
+    });
+  const showRootError = (error: unknown) =>
+    toastManager.add({
+      type: "error",
+      title: "Unable to open folder",
+      description: error instanceof Error ? error.message : String(error),
+    });
+  // A slow lookup must not overwrite a root chosen after it.
+  const [beginRootChange] = useState(latestRequest);
+  const changeRoot = (input: string | null) => {
+    if (!onChangeFilesRoot) return;
+    const isLatest = beginRootChange();
+    if (input === null) {
+      onChangeFilesRoot(null);
+      return;
+    }
+    resolveRoot(input).then(
+      (root) => {
+        if (root !== undefined && isLatest()) onChangeFilesRoot(root);
+      },
+      (error: unknown) => {
+        if (isLatest()) showRootError(error);
+      },
+    );
+  };
+  const openFilesTabAt = (folder: string) => {
+    resolveRoot(folder).then((root) => {
+      if (root !== undefined) onOpenFilesTab(root);
+    }, showRootError);
   };
   // The server marks the host files a workspace may edit: instruction files it loads.
   const readOnlyHost = isHostFile && file.data?.writable !== true;
@@ -1811,13 +1848,10 @@ export default function FilePreviewPanel({
                   treeRoot={treeRoot}
                   workspaceRoot={cwd}
                   outsideWorkspace={workspaceRelativeFilePath(treeRoot, cwd) === null}
-                  onChangeRoot={onChangeFilesRoot}
+                  onChangeRoot={changeRoot}
                   onOpenTabHere={() =>
-                    onOpenFilesTab(
-                      fileBrowserRef.current?.selectedFolderRoot() ?? filesRoot ?? null,
-                    )
+                    openFilesTabAt(fileBrowserRef.current?.selectedFolder() ?? treeRoot)
                   }
-                  resolveFolder={resolveFolder}
                 />
               ) : null}
               <div
@@ -1843,8 +1877,8 @@ export default function FilePreviewPanel({
                   onOpenFile={(path) => onOpenFile(workspacePathOf(path, cwd))}
                   rootControls={{
                     workspaceRoot: cwd,
-                    ...(onChangeFilesRoot ? { onChangeRoot: onChangeFilesRoot } : {}),
-                    onOpenFilesTab,
+                    ...(onChangeFilesRoot ? { onChangeRoot: changeRoot } : {}),
+                    onOpenFilesTab: openFilesTabAt,
                   }}
                   answersPanelFind={!previewPath}
                   workspaceMutationId={workspaceMutationId}

@@ -245,8 +245,12 @@ export const make = Effect.gen(function* () {
         }
       }
 
+      const realPath = yield* Effect.promise(() =>
+        NodeFSP.realpath(parentPath).catch(() => undefined),
+      );
       return {
         parentPath,
+        ...(realPath === undefined ? {} : { realPath }),
         entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
       };
     },
@@ -393,6 +397,10 @@ export const make = Effect.gen(function* () {
           try: async () => {
             const root = await NodeFSP.realpath(normalizedCwd);
             const directory = await NodeFSP.realpath(target.absolutePath);
+            const workspaceRoot =
+              input.workspaceRoot === undefined
+                ? root
+                : await NodeFSP.realpath(input.workspaceRoot).catch(() => root);
             const relative = path.relative(root, directory);
             if (
               relative === ".." ||
@@ -412,6 +420,8 @@ export const make = Effect.gen(function* () {
                 !path.isAbsolute(relativeChild)
               );
             };
+            // A subfolder listing shows the links its workspace's tree would show.
+            const linkRoot = isSameOrInside(workspaceRoot, root) ? workspaceRoot : root;
             // Reject canonical ancestors so "Expand all folders" cannot follow a cycle.
             let visitedFolders: Promise<ReadonlyArray<string>> | undefined;
             const loadVisitedFolders = () =>
@@ -432,8 +442,8 @@ export const make = Effect.gen(function* () {
               );
               if (
                 resolved === undefined ||
-                !isSameOrInside(root, resolved) ||
-                path.relative(root, resolved).split(path.sep).includes(".git")
+                !isSameOrInside(linkRoot, resolved) ||
+                path.relative(linkRoot, resolved).split(path.sep).includes(".git")
               ) {
                 return undefined;
               }

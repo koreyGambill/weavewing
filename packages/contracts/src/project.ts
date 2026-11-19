@@ -298,6 +298,8 @@ export type ProjectSearchContentsResult = typeof ProjectSearchContentsResult.Typ
 export const ProjectListEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   directoryPath: Schema.optional(TrimmedString),
+  /** A workspace containing cwd; links resolving inside it show, as in the workspace's own tree. */
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 

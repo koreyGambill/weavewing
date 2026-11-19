@@ -27,7 +27,7 @@ import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { joinHostPath } from "./filePath";
-import { filesSearchRoot, filesTabRoot, newFilesTabRoot } from "./filesRoot";
+import { filesSearchRoot, newFilesTabRoot } from "./filesRoot";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import {
   areAllDirectoriesExpanded,
@@ -58,17 +58,17 @@ interface FileBrowserPanelProps {
   answersPanelFind?: boolean;
   /** Lets a Files tab's root bar open a tab at the folder selected in this tree. */
   ref?: Ref<FileBrowserPanelHandle>;
-  /** Folder actions for the context menu; onChangeRoot is present only in Files tabs. */
+  /** Folder actions for the context menu, given absolute folders; onChangeRoot is Files tabs only. */
   rootControls?: {
     workspaceRoot: string;
-    onChangeRoot?: (root: string | null) => void;
-    onOpenFilesTab: (root: string | null) => void;
+    onChangeRoot?: (folder: string) => void;
+    onOpenFilesTab: (folder: string) => void;
   };
 }
 
 export interface FileBrowserPanelHandle {
-  /** The tree's selected or focused folder, as a Files tab root (null at the workspace root). */
-  selectedFolderRoot: () => string | null;
+  /** The tree's selected or focused folder, or its root when nothing is chosen. */
+  selectedFolder: () => string;
 }
 
 function treePath(entry: ProjectEntry): string {
@@ -180,6 +180,11 @@ export default function FileBrowserPanel({
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
   const fileContextMenu = useFileContextMenu(environmentId);
+  const searchRoot = rootControls
+    ? filesSearchRoot(cwd, rootControls.workspaceRoot)
+    : hostFolder
+      ? null
+      : cwd;
   const {
     entries: directoryEntries,
     load,
@@ -188,14 +193,13 @@ export default function FileBrowserPanel({
     error,
     isPending,
     loadingDirectories,
-  } = useDirectoryEntries(environmentId, cwd);
+  } = useDirectoryEntries(
+    environmentId,
+    cwd,
+    hostFolder && searchRoot !== null ? rootControls?.workspaceRoot : undefined,
+  );
   const [query, setQuery] = useState("");
   const [expandAll, setExpandAll] = useState(false);
-  const searchRoot = rootControls
-    ? filesSearchRoot(cwd, rootControls.workspaceRoot)
-    : hostFolder
-      ? null
-      : cwd;
   const pathSearch = useProjectPathSearch(
     { environmentId, cwd: searchRoot, query: query.slice(0, 256) },
     200,
@@ -230,7 +234,7 @@ export default function FileBrowserPanel({
       const fileMenuItems = fileContextMenu.buildItems(fileTarget);
       const folderPath =
         rootControls && entryKindsRef.current.get(relativePath) === "directory"
-          ? filesTabRoot(joinHostPath(cwd, relativePath), rootControls.workspaceRoot)
+          ? joinHostPath(cwd, relativePath)
           : undefined;
       // The app menu owns focus; the tree's outside-click handler would dismiss it before click.
       context.close({ restoreFocus: !pointerIsFresh });
@@ -373,16 +377,13 @@ export default function FileBrowserPanel({
     search.close();
   };
   useImperativeHandle(ref, () => ({
-    selectedFolderRoot: () =>
-      filesTabRoot(
-        newFilesTabRoot({
-          treeRoot: cwd,
-          selectedPaths: model.getSelectedPaths(),
-          focusedPath: model.getFocusedPath(),
-          entryKinds: entryKindsRef.current,
-        }),
-        rootControls?.workspaceRoot ?? cwd,
-      ),
+    selectedFolder: () =>
+      newFilesTabRoot({
+        treeRoot: cwd,
+        selectedPaths: model.getSelectedPaths(),
+        focusedPath: model.getFocusedPath(),
+        entryKinds: entryKindsRef.current,
+      }),
   }));
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusSearch = () => {

@@ -2,12 +2,11 @@ import { ArrowUp, FolderSymlink, House } from "lucide-react";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 
 import { Badge } from "~/components/ui/badge";
-import { toastManager } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
-import { filesTabRoot, parentHostFolder, resolveFilesRoot } from "./filesRoot";
+import { filesTabRoot, parentHostFolder } from "./filesRoot";
 
 function RootBarButton(props: {
   label: string;
@@ -19,13 +18,16 @@ function RootBarButton(props: {
     <Tooltip>
       <TooltipTrigger
         render={
+          // aria-disabled keeps focus on a button that a press just disabled.
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
             aria-label={props.label}
-            disabled={props.disabled ?? false}
-            onClick={props.onClick}
+            aria-disabled={props.disabled ?? false}
+            onClick={() => {
+              if (!props.disabled) props.onClick();
+            }}
           />
         }
       >
@@ -42,10 +44,9 @@ export function FilesRootBar(props: {
   treeRoot: string;
   workspaceRoot: string;
   outsideWorkspace: boolean;
-  onChangeRoot: (root: string | null) => void;
+  /** A typed or absolute folder to resolve on the environment, or null for the workspace root. */
+  onChangeRoot: (folder: string | null) => void;
   onOpenTabHere: () => void;
-  /** Resolves a typed folder to its absolute path on the tab's environment. */
-  resolveFolder: (partialPath: string, cwd: string) => Promise<string>;
 }) {
   const { treeRoot, workspaceRoot, onChangeRoot } = props;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -56,19 +57,8 @@ export function FilesRootBar(props: {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const typed = draft;
+    if (draft.trim() !== "") onChangeRoot(draft);
     inputRef.current?.blur();
-    resolveFilesRoot(typed, workspaceRoot, props.resolveFolder).then(
-      (root) => {
-        if (root !== undefined) onChangeRoot(root);
-      },
-      (error: unknown) =>
-        toastManager.add({
-          type: "error",
-          title: "Unable to open folder",
-          description: error instanceof Error ? error.message : String(error),
-        }),
-    );
   };
 
   return (
@@ -82,7 +72,7 @@ export function FilesRootBar(props: {
         label="Up one folder"
         disabled={parent === null}
         onClick={() => {
-          if (parent !== null) onChangeRoot(filesTabRoot(parent, workspaceRoot));
+          if (parent !== null) onChangeRoot(parent);
         }}
       >
         <ArrowUp />
