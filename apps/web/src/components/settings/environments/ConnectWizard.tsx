@@ -30,6 +30,8 @@ import { Radio, RadioGroup } from "../../ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { WizardFooter, WizardHeader, WizardPanel, WizardPopup, WizardSteps } from "../../ui/wizard";
 import { AddEnvironmentDialog } from "../AddEnvironmentDialog";
+import { SettingsSearchTarget } from "../settingsLayout";
+import { searchableSetting } from "../settingsSearch";
 import { PairingClientsList } from "../AuthorizedClientsSettings";
 import { togglePairingScopeSelection } from "../ConnectionsSettings.logic";
 import { type DeviceLevel, deviceScopes, joinsTrusted, planConnect } from "./connectPlan.logic";
@@ -128,7 +130,7 @@ export function ConnectWizard({
     .filter((environment) => environment.entry.target._tag !== "PrimaryConnectionTarget");
 
   return (
-    <div id="connect" className="px-3 sm:px-4">
+    <SettingsSearchTarget {...searchableSetting("connect")} className="px-3 sm:px-4">
       <Dialog
         open={open}
         onOpenChange={(next) => {
@@ -237,7 +239,7 @@ export function ConnectWizard({
           onErrorChange={setAddError}
         />
       ) : null}
-    </div>
+    </SettingsSearchTarget>
   );
 }
 
@@ -561,7 +563,14 @@ function ConnectComputerForm({
   readonly change: SquareChangeState;
 }) {
   const [computerId, setComputerId] = useState<EnvironmentId | null>(
-    servers.find((server) => !server.input.onThisComputer)?.input.environmentId ?? null,
+    // The computer just added is the last one saved; the page's own server is never it.
+    servers
+      .filter(
+        (server) =>
+          !server.input.onThisComputer &&
+          server.environment.entry.target._tag !== "PrimaryConnectionTarget",
+      )
+      .at(-1)?.input.environmentId ?? null,
   );
   const computer =
     computerId === null
