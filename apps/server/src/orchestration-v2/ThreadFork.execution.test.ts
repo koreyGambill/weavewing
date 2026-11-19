@@ -21,9 +21,11 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Statement from "effect/sql/Statement";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import { vi } from "vite-plus/test";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
@@ -31,6 +33,7 @@ import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -1127,6 +1130,184 @@ it.effect("a side chat opens once a later run has worked in the project checkout
   }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 
+it.effect("persists nested side-chat selections at the selected reply's stable run", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sink = yield* EventSink.EventSinkV2;
+    const root = ThreadId.make("selection-root");
+    const child = ThreadId.make("selection-child");
+    const grandchild = ThreadId.make("selection-grandchild");
+    yield* createParent(root);
+    const seedReply = (threadId: ThreadId, ordinal: number, stable = true) =>
+      Effect.gen(function* () {
+        const runId = RunId.make(`${threadId}:run:${ordinal}`);
+        yield* writeParentRun({
+          threadId,
+          runId,
+          ordinal,
+          status: stable ? "completed" : "running",
+          stable,
+          text: "Question",
+        });
+        const messageId = MessageId.make(`${runId}:reply`);
+        const now = yield* DateTime.now;
+        yield* sink.write({
+          events: [
+            {
+              type: "message.updated",
+              id: EventId.make(`${messageId}:updated`),
+              threadId,
+              runId,
+              occurredAt: now,
+              payload: {
+                id: messageId,
+                threadId,
+                runId,
+                role: "assistant",
+                text: "**Selected text**",
+                nodeId: null,
+                attachments: [],
+                streaming: false,
+                createdAt: now,
+                updatedAt: now,
+                createdBy: "agent",
+                creationSource: "provider",
+              },
+            },
+          ],
+        });
+        return { runId, messageId };
+      });
+    const reply = yield* seedReply(root, 1);
+    yield* seedReply(root, 2);
+    const running = yield* seedReply(root, 3, false);
+    const anchorFor = (messageId: MessageId) => ({
+      messageId,
+      text: "Selected",
+      start: 0,
+      end: 8,
+      prefix: "",
+      suffix: " text",
+    });
+    const fork = (sourceThreadId: ThreadId, targetThreadId: ThreadId, messageId: MessageId) =>
+      orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make(`${targetThreadId}:fork:${messageId}`),
+        sourceThreadId,
+        targetThreadId,
+        sideChat: true,
+        sourcePoint: { type: "assistant_selection", anchor: anchorFor(messageId) },
+        createdBy: "user",
+        creationSource: "web",
+      });
+    const assertFork = (threadId: ThreadId, parentId: ThreadId, source: typeof reply) =>
+      Effect.gen(function* () {
+        const { thread, contextTransfers } = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepInclude(thread.lineage, {
+          sideChat: true,
+          parentThreadId: parentId,
+          rootThreadId: root,
+          sideChatAnchor: anchorFor(source.messageId),
+        });
+        assert.deepInclude(
+          contextTransfers.find((transfer) => transfer.targetThreadId === threadId)?.sourcePoint,
+          {
+            threadId: parentId,
+            runId: source.runId,
+          },
+        );
+      });
+
+    const unstable = yield* fork(root, child, running.messageId).pipe(Effect.flip);
+    assert.include(String(unstable.cause), "stable");
+    yield* fork(root, child, reply.messageId);
+    yield* assertFork(child, root, reply);
+    assert.deepEqual(
+      (yield* orchestrator.getThreadShell(child))?.lineage.sideChatAnchor,
+      anchorFor(reply.messageId),
+    );
+    const unrelated = yield* fork(child, grandchild, reply.messageId).pipe(Effect.flip);
+    assert.include(String(unrelated.cause), "assistant reply");
+    const userMessageId = MessageId.make(`${reply.runId}:message`);
+    const userMessage = yield* fork(root, grandchild, userMessageId).pipe(Effect.flip);
+    assert.include(String(userMessage.cause), "assistant reply");
+    const nestedReply = yield* seedReply(child, 1);
+    const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+    const forkReady = yield* Deferred.make<void>();
+    const releaseFork = yield* Deferred.make<void>();
+    const deletionQueued = yield* Deferred.make<void>();
+    const commitCommand = sink.commitCommand;
+    const { withDeletionLock, withLock } = executor;
+    const commitSpy = vi
+      .spyOn(sink, "commitCommand")
+      .mockImplementation((input) =>
+        input.threadId === grandchild
+          ? Deferred.succeed(forkReady, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseFork)),
+              Effect.andThen(commitCommand(input)),
+            )
+          : commitCommand(input),
+      );
+    const observeDeletion: ThreadCommandExecutor.ThreadCommandExecutor["Service"]["withDeletionLock"] =
+      (effect) =>
+        Deferred.isDone(forkReady).pipe(
+          Effect.flatMap((ready) =>
+            ready ? Deferred.succeed(deletionQueued, undefined) : Effect.void,
+          ),
+          Effect.andThen(withDeletionLock(effect)),
+        );
+    const deletionSpy = vi.spyOn(executor, "withDeletionLock").mockImplementation(observeDeletion);
+    const lockRequests: ThreadId[] = [];
+    const observeLock: ThreadCommandExecutor.ThreadCommandExecutor["Service"]["withLock"] = (
+      threadId,
+      effect,
+    ) =>
+      Effect.suspend(() => {
+        lockRequests.push(threadId);
+        return withLock(threadId, effect);
+      });
+    const lockSpy = vi.spyOn(executor, "withLock").mockImplementation(observeLock);
+    yield* Effect.gen(function* () {
+      const creating = yield* fork(child, grandchild, nestedReply.messageId).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Effect.raceFirst(
+        Deferred.await(forkReady),
+        Fiber.join(creating).pipe(Effect.andThen(Effect.die("Fork skipped its commit barrier."))),
+      );
+      assert.deepEqual(lockRequests, [child, grandchild]);
+      const deleting = yield* orchestrator
+        .dispatch({
+          type: "thread.delete",
+          commandId: CommandId.make("selection-delete-root"),
+          threadId: root,
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Effect.raceFirst(
+        Deferred.await(deletionQueued),
+        Fiber.join(deleting).pipe(
+          Effect.andThen(Effect.die("Delete bypassed the in-flight fork.")),
+        ),
+      );
+      yield* Deferred.succeed(releaseFork, undefined);
+      yield* Fiber.join(creating);
+      yield* Fiber.join(deleting);
+      assert.deepEqual(lockRequests.slice(0, 5), [child, grandchild, root, child, grandchild]);
+      yield* assertFork(grandchild, child, nestedReply);
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          lockSpy.mockRestore();
+          deletionSpy.mockRestore();
+          commitSpy.mockRestore();
+        }),
+      ),
+    );
+    assert.isNotNull((yield* orchestrator.getThreadProjection(child)).thread.deletedAt);
+    assert.isNotNull((yield* orchestrator.getThreadProjection(grandchild)).thread.deletedAt);
+  }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
 it.effect("closing a side chat deletes it only while unused; a deleted parent takes no more", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1245,7 +1426,6 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       ThreadId.make("side-chat-busy-nested"),
     ).pipe(Effect.flip);
     assert.equal(nested._tag, "OrchestratorDispatchError");
-    // Either would take the side chat's lock before the parent's, against the delete cascade.
     const ontoParent = yield* fork("side-chat-busy-onto-parent", sideChatId, parentId).pipe(
       Effect.flip,
     );

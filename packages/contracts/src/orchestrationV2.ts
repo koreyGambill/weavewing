@@ -1,3 +1,4 @@
+import { SideChatAnchor } from "./assistantCitations.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
 import * as DateTime from "effect/DateTime";
@@ -198,6 +199,7 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
   sideChat: Schema.optional(Schema.Boolean),
+  sideChatAnchor: Schema.optionalKey(SideChatAnchor),
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
 
@@ -3750,7 +3752,10 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     sourceThreadId: ThreadId,
     targetThreadId: ThreadId,
-    sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+    sourcePoint: Schema.Union([
+      OrchestrationV2ThreadForkSourcePoint,
+      Schema.Struct({ type: Schema.Literal("assistant_selection"), anchor: SideChatAnchor }),
+    ]),
     title: Schema.optional(TrimmedNonEmptyString),
     sideChat: Schema.optional(Schema.Boolean),
     createdAt: Schema.optional(Schema.DateTimeUtc),

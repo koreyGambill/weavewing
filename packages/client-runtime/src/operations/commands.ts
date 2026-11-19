@@ -25,6 +25,7 @@ import {
   type ProviderInteractionMode,
   type ProviderUserInputAnswers,
   type RunId,
+  type SideChatAnchor,
   type RuntimeMode,
   type RuntimeRequestId,
   type ThreadId,
@@ -253,6 +254,7 @@ export interface ForkSideChatInput extends CommandMetadata {
   readonly sourceThreadId: ThreadId;
   readonly targetThreadId: ThreadId;
   readonly title?: string;
+  readonly anchor?: SideChatAnchor;
 }
 
 export interface MergeThreadBackInput extends CommandMetadata {
@@ -1121,7 +1123,7 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
   });
 });
 
-/** Forks the thread's latest stable point into a hidden side chat; works while it runs. */
+/** Forks a hidden side chat from the selected reply, or the latest stable point. */
 export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(function* (
   input: ForkSideChatInput,
 ) {
@@ -1132,7 +1134,10 @@ export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(functi
     creationSource: input.creationSource ?? "web",
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
-    sourcePoint: { type: "latest_stable" },
+    sourcePoint:
+      input.anchor === undefined
+        ? { type: "latest_stable" }
+        : { type: "assistant_selection", anchor: input.anchor },
     sideChat: true,
     ...(input.title === undefined ? {} : { title: input.title }),
   });

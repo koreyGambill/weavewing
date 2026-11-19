@@ -40,6 +40,7 @@ import {
   type ThreadPullRequestLink,
   type ThreadPullRequestWatch,
   type OrchestrationV2AppThread,
+  type OrchestrationV2ThreadForkSourcePoint,
   type OrchestrationV2DevelopmentEnvironmentCheckout,
   type OrchestrationV2ContextHandoff,
   type OrchestrationV2ContextSourcePoint,
@@ -1411,22 +1412,23 @@ function queuedRunCancellationEvents(
   return events;
 }
 
+function isStableForkRun(run: OrchestrationV2Run): boolean {
+  return run.status === "completed" && run.checkpointId !== null;
+}
+
 function latestStableRun(
   projection: Pick<OrchestrationV2ThreadProjection, "runs">,
 ): OrchestrationV2Run | null {
   return (
     projection.runs
-      .filter((run) => run.status === "completed" && run.checkpointId !== null)
+      .filter(isStableForkRun)
       .toSorted((left, right) => right.ordinal - left.ordinal)[0] ?? null
   );
 }
 
 export function runForSourcePoint(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "checkpoints">,
-  sourcePoint: Extract<
-    OrchestrationV2Command,
-    { readonly type: "thread.fork" | "thread.merge_back" }
-  >["sourcePoint"],
+  sourcePoint: OrchestrationV2ThreadForkSourcePoint,
 ): OrchestrationV2Run | null {
   switch (sourcePoint.type) {
     case "latest_stable":
@@ -2049,33 +2051,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
     );
 
-  /** Side chats live inside their parent, so deleting the parent deletes them too. */
-  const liveSideChatIds = Effect.fn("Orchestrator.liveSideChatIds")(
-    function* (threadId: ThreadId) {
+  const liveSideChatDescendantIds = Effect.fn("Orchestrator.liveSideChatDescendantIds")(function* (
+    threadId: ThreadId,
+  ) {
+    const visited = new Set([threadId]);
+    const descendants: ThreadId[] = [];
+    for (const parentId of visited) {
       const { contextTransfers } = yield* projectionStore
-        .getThreadRecords(threadId, ["contextTransfers"])
+        .getThreadRecords(parentId, ["contextTransfers"])
         .pipe(
           Effect.catchTags({
             ProjectionStoreThreadNotFoundError: () => Effect.succeed({ contextTransfers: [] }),
           }),
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: parentId, cause }),
+          ),
         );
-      const sideChatIds: Array<ThreadId> = [];
       for (const transfer of contextTransfers) {
-        if (transfer.type !== "fork" || transfer.sourceThreadId !== threadId) continue;
-        const child = yield* projectionStore
-          .getThread(transfer.targetThreadId)
-          .pipe(
-            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
-          );
-        if (child?.lineage.sideChat === true && child.deletedAt === null) {
-          sideChatIds.push(child.id);
+        if (
+          transfer.type !== "fork" ||
+          transfer.sourceThreadId !== parentId ||
+          visited.has(transfer.targetThreadId)
+        )
+          continue;
+        const child = yield* findThread(transfer.targetThreadId);
+        if (
+          child?.lineage.sideChat === true &&
+          child.lineage.parentThreadId === parentId &&
+          child.deletedAt === null
+        ) {
+          visited.add(child.id);
+          descendants.push(child.id);
         }
       }
-      return sideChatIds;
-    },
-    (effect, threadId) =>
-      effect.pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
-  );
+    }
+    return descendants;
+  });
 
   const getProjectionWithPendingEvents =
     /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
@@ -6415,7 +6426,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
-    const sourceRun = runForSourcePoint(sourceProjection, command.sourcePoint);
+    const { sourcePoint } = command;
+    const sideChatAnchor =
+      sourcePoint.type === "assistant_selection" ? sourcePoint.anchor : undefined;
+    let sourceRun: OrchestrationV2Run | null;
+    if (sourcePoint.type === "assistant_selection") {
+      const invalidSelection = (cause: string) =>
+        new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause,
+        });
+      if (command.sideChat !== true) {
+        return yield* invalidSelection("An assistant selection requires a side chat.");
+      }
+      const messages = yield* projectionStore
+        .getMessagesById(command.sourceThreadId, [sourcePoint.anchor.messageId])
+        .pipe(mapDispatchError(command));
+      const reply = messages.get(sourcePoint.anchor.messageId);
+      // The selection describes rendered text, whose offsets differ from the stored Markdown.
+      if (reply?.role !== "assistant") {
+        return yield* invalidSelection("Select an assistant reply from the source thread.");
+      }
+      sourceRun = sourceProjection.runs.find((run) => run.id === reply.runId) ?? null;
+      if (reply.streaming || sourceRun === null || !isStableForkRun(sourceRun)) {
+        return yield* invalidSelection("Select an assistant reply from a stable run.");
+      }
+    } else {
+      sourceRun = runForSourcePoint(sourceProjection, sourcePoint);
+    }
 
     // A side chat may open during the parent's first turn; it starts from a digest instead.
     if (
@@ -6463,6 +6502,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         targetThreadId: command.targetThreadId,
         ...(command.title === undefined ? {} : { title: command.title }),
         ...(command.sideChat ? { sideChat: true } : {}),
+        ...(sideChatAnchor === undefined ? {} : { sideChatAnchor }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         createdAt: now,
@@ -9391,8 +9431,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Without a source run the digest covers the parent's whole history: inherited fork rows
     // first, so the cap truncates them first, then imported and run items.
     const sideChatParentRunIds = [
+      // Anchored chats start at the selected reply. Ordinary chats also get the parent's newer turns.
       // Queued messages have not reached the main thread yet.
-      ...sourceRunsAfterFork.filter((run) => run.status !== "queued").map((run) => run.id),
+      ...(projection.thread.lineage.sideChatAnchor === undefined
+        ? sourceRunsAfterFork.filter((run) => run.status !== "queued").map((run) => run.id)
+        : []),
       ...(sourceRun === null && sourceProjection?.thread.historyOrigin === "v1_import"
         ? [null]
         : []),
@@ -17103,27 +17146,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       commandThreadId(command),
       dispatchWithReceiptEffect(command),
     );
-    // A fork holds its source's lock, so a source deletion and its fork never interleave. A
-    // parent's lock comes before its side chats' locks. A side chat fork from a side chat or a
-    // fork onto an existing thread would invert that order; dispatch rejects both, so they skip it.
     if (command.type === "thread.fork" && command.sourceThreadId !== command.targetThreadId) {
-      const source = yield* findThread(command.sourceThreadId);
-      const target = yield* findThread(command.targetThreadId);
-      const skipsSourceLock =
-        source === null ||
-        target !== null ||
-        (command.sideChat === true && source.lineage.sideChat === true);
-      return yield* skipsSourceLock
-        ? dispatch
-        : threadDispatch.withLock(command.sourceThreadId, dispatch);
+      // An existing target already reserves its id. Never lock its source first: the
+      // target can be the source's ancestor, and deletion locks parents before children.
+      if ((yield* findThread(command.targetThreadId)) !== null) return yield* dispatch;
+      return yield* threadDispatch.withDeletionLock(
+        Effect.gen(function* () {
+          if ((yield* findThread(command.targetThreadId)) !== null) return yield* dispatch;
+          return yield* threadDispatch.withLock(command.sourceThreadId, dispatch);
+        }),
+      );
     }
     if (command.type === "thread.delete")
       return yield* threadDispatch.withDeletionLock(
         threadDispatch.withLock(
           command.threadId,
-          liveSideChatIds(command.threadId).pipe(
+          // No forks can add descendants while deletion holds the shared lock.
+          liveSideChatDescendantIds(command.threadId).pipe(
             Effect.flatMap((sideChatIds) =>
-              sideChatIds.reduce(
+              sideChatIds.reduceRight(
                 (locked, sideChatId) => threadDispatch.withLock(sideChatId, locked),
                 dispatchWithReceiptEffect(command, sideChatIds),
               ),

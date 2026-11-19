@@ -110,6 +110,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   pullRequestChecks: Schema.optionalKey(Schema.Boolean),
   /** Side chats: hidden `lineage.sideChat` forks. Older servers ignore the fork flag. */
   sideChats: Schema.optionalKey(Schema.Boolean),
+  /** Side chats can fork from an assistant selection and can contain side chats. */
+  anchoredSideChats: Schema.optionalKey(Schema.Boolean),
   reviewArtifacts: Schema.optionalKey(Schema.Boolean),
   workspaceVersion: Schema.optionalKey(Schema.Literal(2)),
   vcsBranchStatus: Schema.optionalKey(Schema.Boolean),
