@@ -436,11 +436,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["long lines code blocks diffs file previews"],
   },
   {
-    id: "composer-context",
-    title: "Composer context",
-    to: "/settings/appearance",
-  },
-  {
     id: "project-grouping",
     title: msg("Project grouping"),
     to: "/settings/general",

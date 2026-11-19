@@ -588,3 +588,9 @@ describe("server model preferences", () => {
     expect(decodeServerSettingsPatch(input)).toEqual(input);
   });
 });
+
+it("ignores a stored client setting this build removed and keeps the rest", () => {
+  const settings = decodeClientSettings({ persistComposerContextStrip: true, wordWrap: false });
+  expect("persistComposerContextStrip" in settings).toBe(false);
+  expect(settings.wordWrap).toBe(false);
+});
