@@ -380,6 +380,7 @@ const RunContextSelector = memo(function RunContextSelector({
                     <span className="flex min-w-0 items-center gap-1.5">
                       <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                       <span className="min-w-0 truncate">{env.label}</span>
+                      <BranchToolbarEnvironmentBadge environment={env} />
                     </span>
                   </MenuRadioItem>
                 ))}
