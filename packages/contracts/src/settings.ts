@@ -137,6 +137,9 @@ export const DEFAULT_SNOOZE_PRESETS: ReadonlyArray<SnoozePresetSetting> = [
 ];
 
 export const TileLayoutArea = Schema.Literals([
+  "device",
+  "side-chat",
+  "pull-request",
   "chat",
   "browser",
   "terminal",

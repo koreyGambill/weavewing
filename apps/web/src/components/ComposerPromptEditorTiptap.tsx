@@ -1,3 +1,4 @@
+import { LineEditingExtension } from "./LineEditingExtension";
 import { useAtomValue } from "@effect/atom-react";
 import { documentChipKindForFileName } from "~/pierre-icons";
 import { isProviderSkillUserInvocable } from "@t3tools/client-runtime/providerSkills";
@@ -834,6 +835,7 @@ function createComposerExtensions(richText: boolean) {
       bold: false,
       strike: false,
     }),
+    LineEditingExtension,
     ComposerUndoGroupingExtension,
     ComposerTextDirectionExtension,
     ComposerMentionExtension,

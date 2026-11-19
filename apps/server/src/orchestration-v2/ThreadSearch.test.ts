@@ -1259,7 +1259,7 @@ it.layer(layerTest)("ThreadSearch.searchThreadsWithOlderSettledRows", (it) => {
         projections.apply,
         { discard: true },
       );
-      const run = (request: { readonly titlesOnly?: boolean }) =>
+      const run = (request: { readonly titlesOnly?: boolean; readonly limit?: number }) =>
         ThreadSearch.searchThreadsWithOlderSettledRows({
           request: { query: "plover", olderSettledBefore: DateTime.formatIso(at(30)), ...request },
           search: search.search,
@@ -1285,6 +1285,24 @@ it.layer(layerTest)("ThreadSearch.searchThreadsWithOlderSettledRows", (it) => {
         titles.threads?.map((row) => row.id),
         [old],
       );
+      const messageProject = ProjectId.make("project:tern");
+      yield* createProject(messageProject);
+      const messageOnlyIds = Array.from({ length: 8 }, (_, index) =>
+        ThreadId.make(`thread:only-message-${index}`),
+      );
+      for (const [index, id] of messageOnlyIds.entries()) {
+        yield* projections.apply(
+          thread(id, messageProject, { title: "Message context", settledAt: at(10) }),
+        );
+        yield* projections.apply(
+          message(id, `only-message-${index}`, "assistant", "plover context"),
+        );
+      }
+      const expanded = yield* run({ limit: 50 });
+      assert.sameMembers(expanded.threads?.map((row) => row.id) ?? [], [old, ...messageOnlyIds]);
+      const limited = yield* run({ limit: 2 });
+      assert.lengthOf(limited.matches, 2);
+      assert.lengthOf((yield* run({})).threads ?? [], 6);
       // Without the cut it is the plain message search.
       assert.isUndefined(
         (yield* ThreadSearch.searchThreadsWithOlderSettledRows({

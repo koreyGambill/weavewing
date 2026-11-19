@@ -35,10 +35,16 @@ class T3KeyboardCommandsView(
   }
 
   private fun commandFor(event: KeyEvent): String? {
-    if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0 || !event.isCtrlPressed) {
+    if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) {
       return null
     }
+    if (event.keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed) {
+      return if (event.isShiftPressed) "searchPreviousTab" else "searchNextTab"
+    }
+    if (!event.isCtrlPressed) return null
     return when {
+      event.keyCode == KeyEvent.KEYCODE_K && !event.isShiftPressed && !event.isAltPressed -> "search"
+      event.keyCode == KeyEvent.KEYCODE_P && !event.isShiftPressed && !event.isAltPressed -> "commandPalette"
       event.keyCode == KeyEvent.KEYCODE_C && event.isShiftPressed && !event.isAltPressed ->
         "copyThreadReference"
       event.keyCode == KeyEvent.KEYCODE_H && event.isShiftPressed && !event.isAltPressed ->

@@ -56,6 +56,12 @@ const MODEL_PICKER_KEYBINDING_COMMANDS = [
 ] as const;
 
 export const WORKSPACE_TILE_KEYBINDING_COMMANDS = [
+  "workspace.tile.rotate",
+  "workspace.tile.resizeLeft",
+  "workspace.tile.resizeDown",
+  "workspace.tile.resizeUp",
+  "workspace.tile.resizeRight",
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => `workspace.tile.tab.${n}` as const),
   "workspace.tile.focusLeft",
   "workspace.tile.focusRight",
   "workspace.tile.focusUp",
@@ -78,6 +84,7 @@ export const WORKSPACE_TILE_KEYBINDING_COMMANDS = [
 ] as const;
 
 export const STATIC_KEYBINDING_COMMANDS = [
+  "keybindings.leader",
   "workspace.focusNext",
   "workspace.focusPrevious",
   ...WORKSPACE_TILE_KEYBINDING_COMMANDS,
@@ -100,6 +107,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "preview.resetZoom",
   "preview.find",
   "commandPalette.toggle",
+  "search.toggle",
   "filePicker.toggle",
   "projectSearch.toggle",
   "usage.open",
@@ -157,6 +165,9 @@ export type KeybindingCommand = typeof KeybindingCommand.Type;
 export const KeybindingValue = TrimmedString.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(MAX_KEYBINDING_VALUE_LENGTH),
+  Schema.isPattern(
+    /^(?!leader(?:$|\s)).+$|^leader (?:[^\s+]|space|escape|enter|tab|arrowleft|arrowright|arrowup|arrowdown)$/,
+  ),
 );
 
 export const KeybindingWhen = TrimmedString.check(
@@ -182,6 +193,7 @@ const KeybindingShortcutKey = Schema.String.check(
 );
 
 export const KeybindingShortcut = Schema.Struct({
+  leader: Schema.optional(Schema.Literal(true)),
   key: KeybindingShortcutKey,
   metaKey: Schema.Boolean,
   ctrlKey: Schema.Boolean,

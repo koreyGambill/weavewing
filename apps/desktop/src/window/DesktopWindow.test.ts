@@ -726,8 +726,25 @@ describe("DesktopWindow", () => {
             fakeWindow.setIgnoreMenuShortcuts.mock.calls.map(([ignore]) => ignore),
             [true, true, false],
           );
+          beforeInput(event, {
+            ...input,
+            key: "a",
+            meta: false,
+            control: true,
+            isAutoRepeat: false,
+          });
+          assert.isTrue(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          for (const key of ["c", "v"]) {
+            beforeInput(event, { ...input, key, meta: false, control: true, isAutoRepeat: false });
+            assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          }
+
           beforeInput(event, { ...input, key: "r", isAutoRepeat: false });
           assert.isFalse(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0]);
+          for (const key of ["k", "p"]) {
+            beforeInput(event, { ...input, key, isAutoRepeat: false });
+            assert.isTrue(fakeWindow.setIgnoreMenuShortcuts.mock.lastCall?.[0], key);
+          }
           const ipcMessage = fakeWindow.webContentsListeners.get("ipc-message");
           assert.isDefined(ipcMessage);
           ipcMessage?.({}, "desktop:terminal-focus", true);

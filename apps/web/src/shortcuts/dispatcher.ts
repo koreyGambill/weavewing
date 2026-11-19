@@ -1,5 +1,7 @@
 import type { KeybindingCommand, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
+import { createLeaderHandler } from "./leader";
+
 import { resolveShortcutCommand, type ShortcutMatchContext } from "../keybindings";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -34,6 +36,16 @@ export interface CommandScopeOptions {
   readonly observe?: (event: KeyboardEvent, consumed: boolean) => void;
 }
 
+const leaderEvents = new WeakSet<KeyboardEvent>();
+export const isLeaderSequenceEvent = (event: KeyboardEvent) => leaderEvents.has(event);
+const leader = createLeaderHandler({
+  keybindings: () =>
+    captureScopes.findLast((scope) => scope.options.keybindings)?.options.keybindings?.() ??
+    appAtomRegistry.get(primaryServerKeybindingsAtom),
+  platform: () => navigator.platform,
+  changed: () => {},
+});
+
 interface CommandScope {
   readonly commands: CommandHandlers;
   readonly options: CommandScopeOptions;
@@ -62,7 +74,10 @@ function scopeCommandHandler(scope: CommandScope, event: KeyboardEvent) {
   const command = resolveShortcutCommand(
     event,
     options.keybindings?.() ?? appAtomRegistry.get(primaryServerKeybindingsAtom),
-    { context: { ...readFocusContext(event), ...options.context?.() } },
+    {
+      leader: leaderEvents.has(event),
+      context: { ...readFocusContext(event), ...options.context?.() },
+    },
   );
   return command === null ? undefined : commands[command];
 }
@@ -102,6 +117,28 @@ function runScopes(scopes: readonly CommandScope[], event: KeyboardEvent): boole
 }
 
 function dispatchCaptureKeyDown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.isComposing) return;
+  if (
+    event.target instanceof Element &&
+    event.target.closest(
+      '[role="dialog"], [role="alertdialog"], [role="menu"], [data-keybinding-capture]',
+    )
+  ) {
+    leader.cancel();
+    runScopes(captureScopes, event);
+    return;
+  }
+  const result = leader.handle(event);
+  if (result === "passthrough") return;
+  if (result === "sequence") {
+    leaderEvents.add(event);
+    if (!runScopes(captureScopes, event)) runScopes(globalScopes, event);
+  }
+  if (result !== null) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
   runScopes(captureScopes, event);
 }
 
@@ -116,6 +153,10 @@ function ensureKeydownListener() {
   keydownInstalled = true;
   window.addEventListener("keydown", dispatchCaptureKeyDown, true);
   window.addEventListener("keydown", dispatchKeyDown);
+  window.addEventListener("blur", leader.cancel);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) leader.cancel();
+  });
 }
 
 function pushScope(list: CommandScope[], scope: CommandScope): () => void {

@@ -4,6 +4,12 @@ import { createPortal } from "react-dom";
 import { observeResize } from "../lib/observeResize";
 
 export const WorkspaceTitlebarHost = createContext<HTMLElement | null>(null);
+export const WorkspaceTitlebarControlsHost = createContext<HTMLElement | null>(null);
+
+export function WorkspaceTitlebarControls({ children }: { children: ReactNode }) {
+  const host = useContext(WorkspaceTitlebarControlsHost);
+  return host ? createPortal(children, host) : null;
+}
 
 export function WorkspaceTitlebar({ children }: { children: ReactNode }) {
   const sourceId = useId();
