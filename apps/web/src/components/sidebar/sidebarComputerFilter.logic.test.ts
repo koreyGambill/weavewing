@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   filterSidebarComputerThreads,
   groupSidebarComputers,
+  pruneSidebarComputerScope,
   resolveSidebarComputerScope,
   toggleSidebarComputerScope,
 } from "./sidebarComputerFilter.logic";
@@ -78,5 +79,29 @@ describe("toggleSidebarComputerScope", () => {
   it("adds and removes a server", () => {
     expect(toggleSidebarComputerScope(["a"], "b")).toEqual(["a", "b"]);
     expect(toggleSidebarComputerScope(["a", "b"], "a")).toEqual(["b"]);
+  });
+});
+
+describe("pruneSidebarComputerScope", () => {
+  it("drops a server that is no longer in the loaded catalog", () => {
+    expect(
+      pruneSidebarComputerScope({ storedIds: ["a", "removed"], knownIds: ["a"], ready: true }),
+    ).toEqual(["a"]);
+  });
+
+  it("keeps a saved server that is offline, since the catalog still lists it", () => {
+    expect(
+      pruneSidebarComputerScope({
+        storedIds: ["offline"],
+        knownIds: ["offline", "a"],
+        ready: true,
+      }),
+    ).toBe(null);
+  });
+
+  it("changes nothing before the catalog has loaded", () => {
+    expect(pruneSidebarComputerScope({ storedIds: ["later"], knownIds: [], ready: false })).toBe(
+      null,
+    );
   });
 });

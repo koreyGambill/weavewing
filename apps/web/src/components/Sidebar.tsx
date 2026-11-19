@@ -246,12 +246,13 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { readScratchProjectActions, useDefaultPlace } from "../hooks/useScratchProject";
-import { useEnvironments } from "../state/environments";
+import { useCatalogEnvironmentIds, useEnvironments } from "../state/environments";
 import { settingsScopeEnvironmentLabel } from "./settings/settingsScopeAxis";
 import { CheckboxMark } from "./ui/checkbox";
 import {
   filterSidebarComputerThreads,
   groupSidebarComputers,
+  pruneSidebarComputerScope,
   resolveSidebarComputerScope,
   toggleSidebarComputerScope,
 } from "./sidebar/sidebarComputerFilter.logic";
@@ -1098,12 +1099,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const setPersistedEnvironmentScopeIds = useUiStateStore(
     (store) => store.setSidebarEnvironmentScopeIds,
   );
-  const { environments: filterEnvironments, isReady: environmentCatalogReady } = useEnvironments();
+  const { environments: filterEnvironments } = useEnvironments();
+  // The catalog, not its presentations, says whether a server still exists.
+  const { ids: catalogEnvironmentIds, ready: environmentCatalogReady } = useCatalogEnvironmentIds();
   const environmentScope = resolveSidebarComputerScope({
     storedIds: persistedEnvironmentScopeIds,
-    knownIds: filterEnvironments.map((environment) => environment.environmentId),
+    knownIds: catalogEnvironmentIds,
     ready: environmentCatalogReady,
   });
+  const prunedEnvironmentScopeIds = pruneSidebarComputerScope({
+    storedIds: persistedEnvironmentScopeIds,
+    knownIds: catalogEnvironmentIds,
+    ready: environmentCatalogReady,
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- servers leave the catalog from settings, sign-out and other windows, so the stored filter follows the catalog here
+  useEffect(() => {
+    if (prunedEnvironmentScopeIds !== null) {
+      setPersistedEnvironmentScopeIds(prunedEnvironmentScopeIds);
+    }
+  }, [prunedEnvironmentScopeIds, setPersistedEnvironmentScopeIds]);
   const computerFilterServers = filterEnvironments.map((environment) => ({
     environmentId: environment.environmentId,
     label: settingsScopeEnvironmentLabel(environment, filterEnvironments),

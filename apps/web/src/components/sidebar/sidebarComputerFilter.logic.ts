@@ -36,6 +36,21 @@ export function resolveSidebarComputerScope(input: {
   return chosen.length === 0 ? null : new Set(chosen);
 }
 
+/**
+ * The stored choice without servers the loaded catalog no longer has, or null when nothing needs
+ * dropping. A saved server that is offline stays in the catalog, so it stays chosen.
+ */
+export function pruneSidebarComputerScope(input: {
+  readonly storedIds: readonly string[];
+  readonly knownIds: readonly string[];
+  readonly ready: boolean;
+}): string[] | null {
+  if (!input.ready) return null;
+  const known = new Set(input.knownIds);
+  const kept = input.storedIds.filter((id) => known.has(id));
+  return kept.length === input.storedIds.length ? null : kept;
+}
+
 /** Keeps threads on the chosen servers; the open thread always stays listed. */
 export function filterSidebarComputerThreads<
   T extends { readonly environmentId: string; readonly id: string },

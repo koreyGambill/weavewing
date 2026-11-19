@@ -57,6 +57,12 @@ export function useEnvironments() {
   };
 }
 
+/** Every saved server, whether or not its presentation has loaded, and whether the catalog has. */
+export function useCatalogEnvironmentIds() {
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
+  return { ids: [...catalog.entries.keys()], ready: catalog.isReady };
+}
+
 /** Provider statuses change on every push, so they live apart from the presentations. */
 export function useEnvironmentProviders() {
   return useAtomValue(environmentPresentations.providersByEnvironmentAtom);

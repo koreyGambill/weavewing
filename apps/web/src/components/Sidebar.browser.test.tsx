@@ -23,7 +23,7 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { useProjects, useServerConfigs, useQuietThreadShells } from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useCatalogEnvironmentIds, useEnvironments } from "../state/environments";
 import { useUiStateStore } from "../uiStateStore";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
@@ -290,6 +290,8 @@ describe("sidebar computer filter", () => {
       ]) as never,
     );
     stack.defer(() => vi.mocked(useServerConfigs).mockRestore());
+    vi.mocked(useCatalogEnvironmentIds).mockReturnValue({ ids: [laptop, desk], ready: true });
+    stack.defer(() => vi.mocked(useCatalogEnvironmentIds).mockRestore());
     vi.mocked(useEnvironments).mockReturnValue({
       isReady: true,
       environments: [
