@@ -5,10 +5,15 @@ also lists the command IDs and defaults available in your version.
 
 ## Tiles and tabs
 
-The leader is **Ctrl+A** on every platform. Press it, release it, then press one
-of these keys within 200 ms. Press Escape to cancel. Change **Use leader key**
-or **Leader Key** in **Settings → Keybindings**. Turning the leader off
-restores the classic Ctrl+Alt tile shortcuts. Custom bindings survive either choice.
+The default leader is **Ctrl+A** on every platform. Press **A** within 200 ms of
+pressing **Ctrl**, release the chord, then press a key below within 1.5 seconds.
+Press Escape to cancel. To use Select All or send Ctrl+A to a terminal, hold
+**Ctrl** for more than 200 ms before pressing **A**. Pressing **Ctrl+A** again
+while the leader is active also passes the chord through.
+
+Change **Use leader key** or **Leader Key** in **Settings → Keybindings**.
+Turning the leader off restores the classic Ctrl+Alt tile shortcuts.
+Custom bindings survive either choice.
 
 | After the leader      | Action                                                      |
 | --------------------- | ----------------------------------------------------------- |
@@ -24,9 +29,7 @@ restores the classic Ctrl+Alt tile shortcuts. Custom bindings survive either cho
 | `r`                   | Resize mode: h/j/k/l or arrows; Enter keeps, Escape cancels |
 | `.`                   | Tile actions                                                |
 
-The leader works in a focused terminal or editor. With the default leader, a
-single **Ctrl+A** reaches the terminal after 200 ms if it stays focused. Press
-**Ctrl+A, Ctrl+A** within that window to send one Ctrl+A immediately.
+The leader works in a focused terminal or editor.
 Other Control-letter keys retain their shell behavior, except Search, the command
 palette, and the close commands below. **Alt+H/J/K/L** always resizes the focused tile by a step, including in a
 terminal; terminal applications lose those four Alt shortcuts.

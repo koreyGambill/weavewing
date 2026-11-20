@@ -50,7 +50,6 @@ import { useClientSettings } from "../hooks/useSettings";
 import { getFileMetadataQueryAtom } from "../hooks/useFileMetadata";
 import { FileMetadataThreadContext } from "../hooks/FileMetadataThreadProvider";
 import { useLocalStorage } from "../hooks/useLocalStorage";
-import { registerTerminalLeaderInput } from "../shortcuts/dispatcher";
 import { attachedTerminalSessionAtom } from "../state/terminalSessions";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
@@ -474,7 +473,6 @@ function TerminalSessionViewport({
   const autoFocusedRef = useRef(false);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
   const visibleRef = useRef(visible);
-  const hiddenVersionRef = useRef(0);
   const environmentId = threadRef.environmentId;
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const hasTerminalWriteAccess = useEffectEvent(() =>
@@ -663,7 +661,6 @@ function TerminalSessionViewport({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes visibility into the terminal surface before paint and consumes focus requests made while hidden
   useLayoutEffect(() => {
     visibleRef.current = visible;
-    if (!visible) hiddenVersionRef.current += 1;
     terminalRef.current?.setVisible(visible);
     // A request made while this viewport was hidden could not focus it.
     if (visible) consumePendingTerminalFocus(threadRef, terminalId);
@@ -720,27 +717,6 @@ function TerminalSessionViewport({
       terminalRef.current = terminal;
       terminal.input.setAttribute("data-workspace-focus-default", "");
       terminal.input.readOnly = !hasTerminalWriteAccess();
-      setupCleanups.push(
-        registerTerminalLeaderInput(terminal.input, () => {
-          const session = readTerminalSession();
-          const generation = writableSessionGeneration(session, hasTerminalWriteAccess());
-          if (!visibleRef.current || generation === null) return;
-          const hiddenVersion = hiddenVersionRef.current;
-          return () => {
-            const current = readTerminalSession();
-            if (
-              cancelled ||
-              !visibleRef.current ||
-              hiddenVersionRef.current !== hiddenVersion ||
-              current.lifecycleVersion !== session.lifecycleVersion ||
-              writableSessionGeneration(current, hasTerminalWriteAccess()) !== generation
-            )
-              return;
-            terminal.revealPrompt();
-            handleData("\x01");
-          };
-        }),
-      );
       // Reapply font settings hydrated during loading, when terminalRef was null.
       const currentFont = terminalFontRef.current;
       if (currentFont.family !== setupFont.family || currentFont.size !== setupFont.size) {

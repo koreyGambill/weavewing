@@ -2,7 +2,8 @@ import type { KeybindingShortcut, ResolvedKeybindingsConfig } from "@t3tools/con
 import { leaderEnabled, matchesKeybindingShortcut } from "@t3tools/shared/keybindings";
 import type { ShortcutEventLike } from "../keybindings";
 
-const LEADER_TIMEOUT_MS = 200;
+const DEFAULT_LEADER_CHORD_MS = 200;
+const LEADER_TIMEOUT_MS = 1_500;
 
 function sameShortcut(left: KeybindingShortcut, right: KeybindingShortcut | undefined): boolean {
   return (
@@ -22,10 +23,10 @@ export function createLeaderHandler(input: {
   keybindings: () => ResolvedKeybindingsConfig;
   platform: () => string;
   changed: (active: boolean) => void;
-  prepareDefaultTimeout?: (event: ShortcutEventLike) => (() => void) | undefined;
 }) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: KeybindingShortcut | undefined;
+  let controlPressedAt: number | undefined;
   const readShortcut = () => {
     const config = input.keybindings();
     return leaderEnabled(config)
@@ -40,12 +41,24 @@ export function createLeaderHandler(input: {
     input.changed(false);
   };
   return {
-    cancel,
-    handle(event: ShortcutEventLike): "prefix" | "sequence" | "cancel" | "passthrough" | null {
+    cancel() {
+      controlPressedAt = undefined;
+      cancel();
+    },
+    releaseControl() {
+      controlPressedAt = undefined;
+    },
+    handle(
+      event: ShortcutEventLike & Pick<KeyboardEvent, "timeStamp">,
+    ): "prefix" | "sequence" | "cancel" | "passthrough" | null {
       const shortcut = readShortcut();
       if (pending && !sameShortcut(pending, shortcut)) cancel();
       if (!shortcut) return null;
-      if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
+      if (event.key === "Control") {
+        if (!event.repeat) controlPressedAt = event.timeStamp;
+        return null;
+      }
+      if (["Shift", "Alt", "Meta"].includes(event.key)) return null;
       const prefix = matchesKeybindingShortcut(event, shortcut, input.platform());
       if (pending) {
         if (event.repeat) return "prefix";
@@ -54,19 +67,19 @@ export function createLeaderHandler(input: {
         return event.key === "Escape" ? "cancel" : "sequence";
       }
       if (!prefix) return null;
+      const { key, ctrlKey, shiftKey, altKey, metaKey, modKey } = shortcut;
+      const isDefaultLeader = key === "a" && ctrlKey && !shiftKey && !altKey && !metaKey && !modKey;
+      if (
+        isDefaultLeader &&
+        (controlPressedAt === undefined ||
+          event.timeStamp - controlPressedAt > DEFAULT_LEADER_CHORD_MS)
+      ) {
+        return "passthrough";
+      }
       if (!event.repeat) {
         pending = shortcut;
         input.changed(true);
-        const { key, ctrlKey, shiftKey, altKey, metaKey, modKey } = shortcut;
-        const onTimeout =
-          key === "a" && ctrlKey && !shiftKey && !altKey && !metaKey && !modKey
-            ? input.prepareDefaultTimeout?.(event)
-            : undefined;
-        timer = setTimeout(() => {
-          const unchanged = sameShortcut(shortcut, readShortcut());
-          cancel();
-          if (unchanged) onTimeout?.();
-        }, LEADER_TIMEOUT_MS);
+        timer = setTimeout(cancel, LEADER_TIMEOUT_MS);
       }
       return "prefix";
     },

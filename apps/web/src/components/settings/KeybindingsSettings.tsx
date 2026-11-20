@@ -1547,7 +1547,7 @@ export function KeybindingsSettingsPanel() {
         <SettingsSection title="Leader">
           <SettingsRow
             title="Use leader key"
-            description="Press the leader, release it, then a tile or tab key. Press it twice to send it through. Turning this off restores classic shortcuts."
+            description="Press the leader, release it, then press a tile or tab key within 1.5 seconds. With the default Ctrl+A leader, hold Ctrl briefly before pressing A to use Select All."
             control={
               <Switch
                 aria-label="Use leader key"

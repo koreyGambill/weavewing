@@ -36,34 +36,6 @@ export interface CommandScopeOptions {
   readonly observe?: (event: KeyboardEvent, consumed: boolean) => void;
 }
 
-type PrepareTerminalLeaderInput = () => (() => void) | undefined;
-const terminalLeaderInputs = new WeakMap<HTMLElement, PrepareTerminalLeaderInput>();
-const dialogSelector = 'dialog[open], [role="dialog"], [role="alertdialog"]';
-
-function canReplayTerminalLeader(input: HTMLElement): boolean {
-  return (
-    document.activeElement === input &&
-    document.hasFocus() &&
-    !document.hidden &&
-    input.isConnected &&
-    input.closest("[inert]") === null &&
-    input.checkVisibility({ visibilityProperty: true }) &&
-    !Array.from(document.querySelectorAll(dialogSelector)).some((dialog) =>
-      dialog.checkVisibility({ visibilityProperty: true }),
-    )
-  );
-}
-
-/** Captures a write to the focused terminal's current session when the default leader is pressed. */
-export function registerTerminalLeaderInput(
-  input: HTMLElement,
-  prepare: PrepareTerminalLeaderInput,
-): () => void {
-  ensureKeydownListener();
-  terminalLeaderInputs.set(input, prepare);
-  return () => terminalLeaderInputs.delete(input);
-}
-
 const leaderEvents = new WeakSet<KeyboardEvent>();
 export const isLeaderSequenceEvent = (event: KeyboardEvent) => leaderEvents.has(event);
 const leader = createLeaderHandler({
@@ -72,17 +44,6 @@ const leader = createLeaderHandler({
     appAtomRegistry.get(primaryServerKeybindingsAtom),
   platform: () => navigator.platform,
   changed: () => {},
-  prepareDefaultTimeout: (event) => {
-    const input = event.target;
-    if (!(input instanceof HTMLElement)) return;
-    const prepare = terminalLeaderInputs.get(input);
-    if (prepare === undefined || !canReplayTerminalLeader(input)) return;
-    const write = prepare();
-    if (write === undefined) return;
-    return () => {
-      if (terminalLeaderInputs.get(input) === prepare && canReplayTerminalLeader(input)) write();
-    };
-  },
 });
 
 interface CommandScope {
@@ -194,11 +155,9 @@ function ensureKeydownListener() {
   window.addEventListener("keydown", dispatchKeyDown);
   window.addEventListener("blur", leader.cancel);
   window.addEventListener(
-    "focusout",
+    "keyup",
     (event) => {
-      if (event.target instanceof HTMLElement && terminalLeaderInputs.has(event.target)) {
-        leader.cancel();
-      }
+      if (event.key === "Control") leader.releaseControl();
     },
     true,
   );

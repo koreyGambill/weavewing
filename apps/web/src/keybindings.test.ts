@@ -949,8 +949,9 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
           platform: () => platform,
           changed: () => {},
         });
+        leader.handle({ ...event({ key: "Control", ctrlKey: true }), timeStamp: 0 });
         assert.equal(
-          leader.handle(event({ key, ctrlKey: true, shiftKey })),
+          leader.handle({ ...event({ key, ctrlKey: true, shiftKey }), timeStamp: 10 }),
           key === "a" && !shiftKey ? "prefix" : null,
         );
         leader.cancel();

@@ -304,16 +304,14 @@ it("drops input until the shell runs instead of failing a write for every key", 
   ]);
 });
 
-it("sends the default leader as terminal input only if the original session stays focused", async () => {
+it("leaves Ctrl+A with the terminal or editor when Ctrl has been held", async () => {
   const { other: threadRef } = setup();
-  const view = (visible: boolean) => (
+  await using screen = await render(
     <>
-      <Drawer threadRef={threadRef} visible={visible} onCloseTerminal={() => {}} />
+      <Drawer threadRef={threadRef} visible onCloseTerminal={() => {}} />
       <textarea aria-label="Editor" />
-      <dialog aria-label="Confirmation" />
-    </>
+    </>,
   );
-  await using screen = await render(view(true));
   await act(async () => {
     fixture.pendingSurfaces.shift()?.();
   });
@@ -326,58 +324,24 @@ it("sends the default leader as terminal input only if the original session stay
   const editor = screen.container.querySelector<HTMLTextAreaElement>(
     "textarea[aria-label=Editor]",
   )!;
-  const dialog = screen.container.querySelector("dialog")!;
-  const press = (target: Element, key = "a", ctrlKey = true) =>
-    target.dispatchEvent(
-      new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true }),
-    );
-  input.focus();
+  const press = (target: Element, key: string, timeStamp: number, ctrlKey = true) => {
+    const event = new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true });
+    Object.defineProperty(event, "timeStamp", { value: timeStamp });
+    return target.dispatchEvent(event);
+  };
 
-  expect(press(input)).toBe(false);
-  vi.advanceTimersByTime(100);
-  expect(press(input, "h", false)).toBe(false);
+  input.focus();
+  expect(press(input, "Control", 0)).toBe(true);
+  expect(press(input, "a", 201)).toBe(true);
+  expect(press(input, "Control", 1_000)).toBe(true);
+  expect(press(input, "a", 1_150)).toBe(false);
+  vi.advanceTimersByTime(1_000);
+  expect(press(input, "h", 2_150, false)).toBe(false);
   expect(focusLeft).toHaveBeenCalledOnce();
 
-  expect(press(input)).toBe(false);
-  expect(press(input)).toBe(true);
-  vi.advanceTimersByTime(200);
-  expect(fixture.writes).toEqual([]);
-
-  expect(press(input)).toBe(false);
-  vi.advanceTimersByTime(199);
-  expect(fixture.writes).toEqual([]);
-  vi.advanceTimersByTime(1);
-  expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\x01" }]);
-
-  expect(press(input)).toBe(false);
   editor.focus();
-  input.focus();
-  vi.advanceTimersByTime(200);
-
-  expect(press(input)).toBe(false);
-  fixture.sessionEvent(threadRef, "restarted");
-  vi.advanceTimersByTime(200);
-
-  expect(press(input)).toBe(false);
-  await screen.rerender(view(false));
-  await screen.rerender(view(true));
-  input.focus();
-  vi.advanceTimersByTime(200);
-
-  expect(press(input)).toBe(false);
-  dialog.setAttribute("open", "");
-  vi.advanceTimersByTime(200);
-  dialog.close();
-
-  expect(press(input)).toBe(false);
-  using _hidden = vi.spyOn(document, "hidden", "get").mockReturnValueOnce(true);
-  document.dispatchEvent(new Event("visibilitychange"));
-  vi.advanceTimersByTime(200);
-
-  editor.focus();
-  expect(press(editor)).toBe(false);
-  vi.advanceTimersByTime(200);
-  expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\x01" }]);
+  expect(press(editor, "Control", 3_000)).toBe(true);
+  expect(press(editor, "a", 3_201)).toBe(true);
 });
 
 it("closes an exited terminal on its own thread after navigating to one reusing its ID", async () => {
