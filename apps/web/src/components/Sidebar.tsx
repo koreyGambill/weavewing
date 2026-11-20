@@ -67,6 +67,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   FolderIcon,
+  EyeIcon,
   ListFilterIcon,
   PlusIcon,
   SettingsIcon,
@@ -297,8 +298,11 @@ import {
   isUnnamedSidebarThreadGroup,
   NEW_SIDEBAR_THREAD_GROUP_NAME,
   moveSidebarThreadGroup,
+  canMoveSidebarThreadGroup,
+  DEFAULT_UNGROUPED_NAME,
   placeSidebarThread,
   renameSidebarThreadGroup,
+  setSidebarUngroupedHeader,
   resolveSidebarGroupDrop,
   resolveSidebarGroupHit,
   resolveSidebarShelfHit,
@@ -309,6 +313,25 @@ import {
   type SidebarGroupHitRow,
   type SidebarThreadGroupArrangement,
 } from "./sidebar/sidebarThreadGroups.logic";
+import {
+  SIDEBAR_GROUP_BY_LABEL,
+  SidebarGroupBy,
+  sectionSidebarFamilies,
+} from "./sidebar/sidebarGroupBy.logic";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuRadioItemIndicator,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
+import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import {
   SidebarProjectFolderHeader,
   sidebarFolderRowId,
@@ -377,6 +400,14 @@ const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 // Per device: groups hold scoped thread keys and need no server support.
 const THREAD_GROUPS_KEY = "t3code:sidebar:thread-groups:v1";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const GROUP_BY_KEY = "t3code:sidebar:group-by";
+// Entries are `${groupBy}:${section key}`, so each grouping remembers its own closed sections.
+const GROUP_BY_COLLAPSED_KEY = "t3code:sidebar:group-by-collapsed";
+const DENSE_ROWS_KEY = "t3code:sidebar:dense-rows";
+const isSidebarGroupBy = Schema.is(SidebarGroupBy);
+const CollapsedGroupBySections = Schema.Array(Schema.String);
+// Group ids are UUIDs, so this never names a real group.
+const UNGROUPED_RENAME_ID = "ungrouped";
 const AUTOMATION_THREAD_FILTER_KEY = "t3code:sidebar:automation-threads";
 const AUTOMATION_FILTER_SUFFIX: Record<SidebarAutomationThreadFilter, string> = {
   show: "",
@@ -480,6 +511,14 @@ function useSidebarThreads(input: {
   // The user's own groups for active threads; null when folders own the active area.
   readonly threadGroups: SidebarThreadGroups | null;
   readonly renamingGroupId: string | null;
+  // Set when Group by is a thread property: sections active threads by it instead of groups.
+  readonly derivedGrouping: {
+    readonly sectionOf: (thread: EnvironmentThreadShell) => {
+      readonly key: string;
+      readonly label: string;
+    };
+    readonly collapsedKeys: ReadonlySet<string>;
+  } | null;
   readonly environmentScope: ReadonlySet<string> | null;
 }) {
   const {
@@ -496,6 +535,7 @@ function useSidebarThreads(input: {
     automationFilter,
     threadGroups,
     renamingGroupId,
+    derivedGrouping,
     environmentScope,
   } = input;
   const nowMinute = useNowMinute();
@@ -639,24 +679,54 @@ function useSidebarThreads(input: {
                 : EMPTY_THREADS,
             };
           };
-          return [
-            ...threadGroupArrangement.groups.map(({ group, families }) =>
-              section(group.id, group.name, group.collapsed, families),
-            ),
-            section(
+          const sections = threadGroupArrangement.groups.map(({ group, families }) => ({
+            ...section(group.id, group.name, group.collapsed, families),
+            headerless: false,
+          }));
+          const headerless = threadGroups.ungroupedName === null;
+          sections.splice(threadGroupArrangement.ungroupedAt, 0, {
+            ...section(
               null,
-              "Ungrouped",
-              threadGroups.ungroupedCollapsed,
+              threadGroups.ungroupedName ?? DEFAULT_UNGROUPED_NAME,
+              !headerless && threadGroups.ungroupedCollapsed,
               threadGroupArrangement.ungrouped,
             ),
-          ];
+            headerless,
+          });
+          return sections;
         })();
+  const derivedSections =
+    derivedGrouping === null
+      ? null
+      : sectionSidebarFamilies(
+          activeDepths.reduce<EnvironmentThreadShell[][]>((families, { thread, depth }) => {
+            if (depth === 0 || families.length === 0) families.push([thread]);
+            else families.at(-1)!.push(thread);
+            return families;
+          }, []),
+          derivedGrouping.sectionOf,
+        ).map(({ key, label, items }) => {
+          const collapsed = derivedGrouping.collapsedKeys.has(key);
+          return {
+            key,
+            label,
+            collapsed,
+            count: items.length,
+            // A closed section still shows the open thread, and hints at the rest.
+            threads: collapsed ? routeThreadOnly(items, routeRowThreadKey) : items,
+            hiddenThreads: collapsed
+              ? items.filter((thread) => threadShellKey(thread) !== routeRowThreadKey)
+              : EMPTY_THREADS,
+          };
+        });
   const displayedActiveThreads =
     threadGroupSections !== null
       ? threadGroupSections.flatMap((section) => section.threads)
-      : projectFolders === null
-        ? activeThreads
-        : projectFolders.flatMap((folder) => folder.threads);
+      : derivedSections !== null
+        ? derivedSections.flatMap((section) => section.threads)
+        : projectFolders === null
+          ? activeThreads
+          : projectFolders.flatMap((folder) => folder.threads);
   const orderedThreads = [
     ...pinnedThreads,
     ...displayedActiveThreads,
@@ -692,6 +762,7 @@ function useSidebarThreads(input: {
     projectFolders,
     threadGroupArrangement,
     threadGroupSections,
+    derivedSections,
     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
       const keys = sidebarFolderExpansionKeys(group);
       setProjectExpanded(keys, !resolveProjectExpanded(projectExpandedById, keys));
@@ -1076,7 +1147,20 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       );
     },
   });
-  const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
+  // The old Labs switch for project folders now only picks the default grouping.
+  const legacyProjectFolders = useClientSettings((settings) => settings.boringSidebarEnabled);
+  const [groupBy, setGroupBy] = useLocalStorage(
+    GROUP_BY_KEY,
+    legacyProjectFolders ? "project" : "named",
+    SidebarGroupBy,
+  );
+  const boringSidebarEnabled = groupBy === "project";
+  const [denseRows, setDenseRows] = useLocalStorage(DENSE_ROWS_KEY, false, Schema.Boolean);
+  const [collapsedGroupBySections, setCollapsedGroupBySections] = useLocalStorage(
+    GROUP_BY_COLLAPSED_KEY,
+    [],
+    CollapsedGroupBySections,
+  );
   const folderRowsMultiline = useClientSettings((settings) => settings.boringSidebarMultilineRows);
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
@@ -1483,6 +1567,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectFolders,
     threadGroupArrangement,
     threadGroupSections,
+    derivedSections,
     toggleProjectFolder,
     renderedSettledThreads,
     visibleSnoozedThreads,
@@ -1515,8 +1600,50 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       : null,
     keepEmptyFolders: (group) =>
       scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
-    threadGroups: boringSidebarEnabled ? null : threadGroups,
+    threadGroups: groupBy === "named" ? threadGroups : null,
     renamingGroupId,
+    derivedGrouping:
+      groupBy === "computer" || groupBy === "provider" || groupBy === "model"
+        ? {
+            sectionOf: (thread) => {
+              if (groupBy === "computer") {
+                const server = computerFilterServers.find(
+                  (candidate) => candidate.environmentId === thread.environmentId,
+                );
+                const label = server?.computer ?? server?.label ?? thread.environmentId;
+                return { key: label, label };
+              }
+              const instanceId =
+                thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
+              const entry = providerEntriesByEnvironment.get(thread.environmentId)?.get(instanceId);
+              if (groupBy === "provider") {
+                const label = entry?.displayName ?? instanceId;
+                return { key: label, label };
+              }
+              const model = entry?.models.find(
+                (candidate) => candidate.slug === thread.modelSelection.model,
+              );
+              const label = model
+                ? getTriggerDisplayModelName(model, entry?.driverKind)
+                : thread.modelSelection.model;
+              return { key: label, label };
+            },
+            collapsedKeys: new Set(
+              collapsedGroupBySections
+                .filter((entry) => entry.startsWith(`${groupBy}:`))
+                .map((entry) => entry.slice(groupBy.length + 1)),
+            ),
+          }
+        : null,
+  });
+  const toggleGroupBySection = useStableCallback((key: string | null) => {
+    if (key === null) return;
+    const entry = `${groupBy}:${key}`;
+    setCollapsedGroupBySections((current) =>
+      current.includes(entry)
+        ? current.filter((candidate) => candidate !== entry)
+        : [...current, entry],
+    );
   });
   // Stable for drag sensor options, which must keep their identity, yet reads the latest layout.
   const readThreadGroupArrangement = useStableCallback(() => threadGroupArrangement);
@@ -1531,10 +1658,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       discardNewSidebarThreadGroup(current, created.previous, created.id),
     );
   };
-  const commitThreadGroupRename = useStableCallback((groupId: string, name: string) => {
+  const commitThreadGroupRename = useStableCallback((groupId: string | null, name: string) => {
     setRenamingGroupId(null);
     setNewThreadGroup(null);
-    if (newThreadGroup?.id === groupId && isUnnamedSidebarThreadGroup(name)) {
+    if (groupId !== null && newThreadGroup?.id === groupId && isUnnamedSidebarThreadGroup(name)) {
       discardNewThreadGroup();
       return;
     }
@@ -1590,35 +1717,43 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     (groupId: string | null, position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
-      const index = threadGroups.groups.findIndex((group) => group.id === groupId);
       void (async () => {
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            groupId === null
-              ? [{ id: "new-group", label: "New group", icon: "folder-plus" }]
-              : [
-                  { id: "rename", label: "Rename group", icon: "pencil" },
-                  { id: "move-up", label: "Move group up", disabled: index <= 0 },
-                  {
-                    id: "move-down",
-                    label: "Move group down",
-                    disabled: index === -1 || index >= threadGroups.groups.length - 1,
-                  },
-                  {
-                    id: "new-group",
-                    label: "New group",
-                    icon: "folder-plus",
+            [
+              { id: "rename", label: "Rename group", icon: "pencil" },
+              {
+                id: "move-up",
+                label: "Move group up",
+                disabled: !canMoveSidebarThreadGroup(threadGroups, groupId, -1),
+              },
+              {
+                id: "move-down",
+                label: "Move group down",
+                disabled: !canMoveSidebarThreadGroup(threadGroups, groupId, 1),
+              },
+              {
+                id: "new-group",
+                label: "New group",
+                icon: "folder-plus",
+                separatorBefore: true,
+              },
+              groupId === null
+                ? {
+                    id: "hide-header",
+                    label: "Remove header",
+                    detail: "Ungrouped threads sit above the groups",
                     separatorBefore: true,
-                  },
-                  {
+                  }
+                : {
                     id: "delete",
                     label: "Delete group",
-                    detail: "Its threads move to Ungrouped",
+                    detail: `Its threads move to ${threadGroups.ungroupedName ?? DEFAULT_UNGROUPED_NAME}`,
                     icon: "trash",
                     destructive: true,
                     separatorBefore: true,
                   },
-                ],
+            ],
             position,
           ),
         );
@@ -1628,14 +1763,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             createThreadGroup();
             return;
           case "rename":
-            if (groupId !== null) setRenamingGroupId(groupId);
+            setRenamingGroupId(groupId ?? UNGROUPED_RENAME_ID);
             return;
           case "move-up":
           case "move-down":
-            if (groupId !== null)
-              setThreadGroups((current) =>
-                moveSidebarThreadGroup(current, groupId, clicked.value === "move-up" ? -1 : 1),
-              );
+            setThreadGroups((current) =>
+              moveSidebarThreadGroup(current, groupId, clicked.value === "move-up" ? -1 : 1),
+            );
+            return;
+          case "hide-header":
+            setThreadGroups((current) => setSidebarUngroupedHeader(current, false));
             return;
           case "delete":
             if (groupId !== null)
@@ -2035,6 +2172,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const isGroupDrag = threadGroupSections !== null;
   const isContextDrag =
     projectFolders !== null ||
+    derivedSections !== null ||
     isGroupDrag ||
     dragState?.contextDrag === true ||
     dragState?.activeSection === "working";
@@ -2423,6 +2561,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     threadGroupSections
       ?.map((group) => `${group.groupId}:${group.threads.map(threadShellKey).join(",")}`)
       .join("\n") ?? "",
+    derivedSections
+      ?.map((section) => `${section.key}:${section.threads.map(threadShellKey).join(",")}`)
+      .join("\n") ?? "",
     visibleDraftSessionCount,
     routeDraftIdForRows ?? "",
   ].join("\0");
@@ -2526,7 +2667,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         return;
       }
     }
-    if (projectFolders !== null) return;
+    if (projectFolders !== null || derivedSections !== null) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
     const target =
@@ -3086,11 +3227,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               ),
               canChangeFolder: true,
               groups:
-                boringSidebarEnabled || sectionByThreadKeyRef.current.get(threadKey) !== "active"
+                groupBy !== "named" || sectionByThreadKeyRef.current.get(threadKey) !== "active"
                   ? null
                   : {
                       options: threadGroups.groups,
                       current: sidebarThreadGroupOf(threadGroups, threadKey),
+                      ungroupedName: threadGroups.ungroupedName ?? DEFAULT_UNGROUPED_NAME,
                       canMoveUp:
                         threadGroupArrangement !== null &&
                         stepSidebarThread(threadGroups, threadGroupArrangement, threadKey, -1) !==
@@ -3723,8 +3865,67 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               }
               onNewThread={handleNewThreadClick}
               onNewThreadInProject={handleNewThreadInProjectClick}
-              onNewGroup={boringSidebarEnabled ? undefined : () => createThreadGroup()}
-              namingGroup={renamingGroupId !== null}
+              viewMenu={
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <SidebarHeaderIconButton
+                        label={`View: grouped by ${SIDEBAR_GROUP_BY_LABEL[groupBy].toLowerCase()}`}
+                      />
+                    }
+                  >
+                    <EyeIcon className="size-4" />
+                  </MenuTrigger>
+                  <MenuPopup align="end" className="min-w-52">
+                    <MenuGroup>
+                      <MenuGroupLabel>Group by</MenuGroupLabel>
+                      <MenuRadioGroup
+                        value={groupBy}
+                        onValueChange={(value) => {
+                          if (isSidebarGroupBy(value)) setGroupBy(value);
+                        }}
+                      >
+                        {SidebarGroupBy.literals.map((option) => (
+                          <MenuRadioItem key={option} value={option} closeOnClick>
+                            <span className="flex items-center justify-between gap-2">
+                              {SIDEBAR_GROUP_BY_LABEL[option]}
+                              <MenuRadioItemIndicator />
+                            </span>
+                          </MenuRadioItem>
+                        ))}
+                      </MenuRadioGroup>
+                    </MenuGroup>
+                    <MenuSeparator />
+                    {groupBy === "project" ? null : (
+                      <MenuCheckboxItem
+                        checked={denseRows}
+                        onCheckedChange={(checked) => setDenseRows(Boolean(checked))}
+                      >
+                        Dense rows
+                      </MenuCheckboxItem>
+                    )}
+                    {groupBy === "named" ? (
+                      <>
+                        <MenuCheckboxItem
+                          checked={threadGroups.ungroupedName !== null}
+                          onCheckedChange={(checked) =>
+                            setThreadGroups((current) =>
+                              setSidebarUngroupedHeader(current, Boolean(checked)),
+                            )
+                          }
+                        >
+                          Ungrouped header
+                        </MenuCheckboxItem>
+                        <MenuSeparator />
+                        <MenuItem onClick={() => createThreadGroup()}>
+                          <PlusIcon />
+                          New group
+                        </MenuItem>
+                      </>
+                    ) : null}
+                  </MenuPopup>
+                </Menu>
+              }
               newThreadDisabled={projects.length === 0 && defaultPlace.place.kind === "none"}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
@@ -3759,7 +3960,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             const target = event.target;
             if (
               event.defaultPrevented ||
-              boringSidebarEnabled ||
+              groupBy !== "named" ||
               isSearchingThreads ||
               (target !== event.currentTarget && target !== threadListRef.current)
             ) {
@@ -3955,7 +4156,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             ? "folder-multiline"
                             : "folder"
                           : isCard
-                            ? "card"
+                            ? denseRows && section !== "working"
+                              ? "dense"
+                              : "card"
                             : "slim";
                         return (
                           <SortableThreadRow
@@ -4084,7 +4287,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         if (item.kind === "thread") {
                           // Folders and groups draw active rows in their own place below.
                           if (
-                            (projectFolders !== null || threadGroupSections !== null) &&
+                            (projectFolders !== null ||
+                              threadGroupSections !== null ||
+                              derivedSections !== null) &&
                             item.section === "active"
                           )
                             continue;
@@ -4095,21 +4300,33 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           for (const group of threadGroupSections) {
                             const groupKey = group.groupId ?? "ungrouped";
                             items.push(
-                              <SidebarThreadGroupHeader
-                                key={`thread-group:${groupKey}`}
-                                groupId={group.groupId}
-                                name={group.name}
-                                count={group.count}
-                                collapsed={group.collapsed}
-                                renaming={
-                                  renamingGroupId !== null && renamingGroupId === group.groupId
-                                }
-                                hiddenThreads={group.hiddenThreads}
-                                onToggle={toggleThreadGroup}
-                                onContextMenu={handleThreadGroupContextMenu}
-                                onCommitRename={commitThreadGroupRename}
-                                onCancelRename={cancelThreadGroupRename}
-                              />,
+                              group.headerless ? (
+                                // Marks where Ungrouped starts for drops; its margin matches a group
+                                // header's, which leaves room above it to drop onto Pinned.
+                                <li
+                                  key={`thread-group:${groupKey}`}
+                                  aria-hidden
+                                  data-sidebar-group-header=""
+                                  className="pointer-events-none mt-2 h-0 list-none"
+                                />
+                              ) : (
+                                <SidebarThreadGroupHeader
+                                  key={`thread-group:${groupKey}`}
+                                  groupId={group.groupId}
+                                  name={group.name}
+                                  count={group.count}
+                                  collapsed={group.collapsed}
+                                  renaming={
+                                    renamingGroupId !== null &&
+                                    renamingGroupId === (group.groupId ?? UNGROUPED_RENAME_ID)
+                                  }
+                                  hiddenThreads={group.hiddenThreads}
+                                  onToggle={toggleThreadGroup}
+                                  onContextMenu={handleThreadGroupContextMenu}
+                                  onCommitRename={commitThreadGroupRename}
+                                  onCancelRename={cancelThreadGroupRename}
+                                />
+                              ),
                             );
                             if (group.groupId !== null && group.count === 0 && !group.collapsed) {
                               items.push(
@@ -4127,7 +4344,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                   thread,
                                   "active",
                                   undefined,
-                                  sidebarThreadGroupRowId(group.groupId),
+                                  group.headerless
+                                    ? undefined
+                                    : sidebarThreadGroupRowId(group.groupId),
                                 ),
                               );
                             }
@@ -4137,6 +4356,33 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 groupId={group.groupId}
                               />,
                             );
+                          }
+                          continue;
+                        }
+                        if (derivedSections !== null && item.marker === "active-placeholder") {
+                          for (const section of derivedSections) {
+                            items.push(
+                              <SidebarThreadGroupHeader
+                                key={`group-by:${section.key}`}
+                                groupId={section.key}
+                                name={section.label}
+                                count={section.count}
+                                collapsed={section.collapsed}
+                                renaming={false}
+                                hiddenThreads={section.hiddenThreads}
+                                onToggle={toggleGroupBySection}
+                              />,
+                            );
+                            for (const thread of section.threads) {
+                              items.push(
+                                renderThreadRow(
+                                  thread,
+                                  "active",
+                                  undefined,
+                                  sidebarThreadGroupRowId(section.key),
+                                ),
+                              );
+                            }
                           }
                           continue;
                         }
