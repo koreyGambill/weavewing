@@ -85,8 +85,9 @@ function GroupNameInput(props: {
 }
 
 /**
- * A user group, or Ungrouped when `groupId` is null. It reads like a shelf header with
- * a count; a closed group keeps a status dot so a hidden thread that needs you still shows.
+ * A user group, Ungrouped when `groupId` is null, or a Group by section when no menu is given.
+ * It reads like a shelf header with a count; a closed group keeps a status dot so a hidden
+ * thread that needs you still shows.
  */
 export const SidebarThreadGroupHeader = memo(function SidebarThreadGroupHeader(props: {
   groupId: string | null;
@@ -96,9 +97,9 @@ export const SidebarThreadGroupHeader = memo(function SidebarThreadGroupHeader(p
   renaming: boolean;
   hiddenThreads: readonly EnvironmentThreadShell[];
   onToggle: (groupId: string | null) => void;
-  onContextMenu: (groupId: string | null, position: { x: number; y: number }) => void;
-  onCommitRename: (groupId: string, name: string) => void;
-  onCancelRename: () => void;
+  onContextMenu?: (groupId: string | null, position: { x: number; y: number }) => void;
+  onCommitRename?: (groupId: string | null, name: string) => void;
+  onCancelRename?: () => void;
 }) {
   const { groupId, collapsed, hiddenThreads } = props;
   const rowId = sidebarThreadGroupRowId(groupId);
@@ -116,19 +117,23 @@ export const SidebarThreadGroupHeader = memo(function SidebarThreadGroupHeader(p
         })),
       )
     : null;
-  const openMenu = (position: { x: number; y: number }) => props.onContextMenu(groupId, position);
+  const { onContextMenu } = props;
+  const openMenu =
+    onContextMenu === undefined
+      ? undefined
+      : (position: { x: number; y: number }) => onContextMenu(groupId, position);
   return (
     <li
       data-sidebar-group-header={groupId ?? ""}
       data-testid="sidebar-thread-group"
       className="group/thread-group relative mt-2 list-none first:mt-0"
     >
-      {props.renaming && groupId !== null ? (
+      {props.renaming ? (
         <div className="flex h-8 items-center px-2">
           <GroupNameInput
             name={props.name}
-            onCommit={(name) => props.onCommitRename(groupId, name)}
-            onCancel={props.onCancelRename}
+            onCommit={(name) => props.onCommitRename?.(groupId, name)}
+            onCancel={() => props.onCancelRename?.()}
           />
         </div>
       ) : (
@@ -137,10 +142,14 @@ export const SidebarThreadGroupHeader = memo(function SidebarThreadGroupHeader(p
           data-sidebar-row={rowId}
           aria-expanded={!collapsed}
           onClick={() => props.onToggle(groupId)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openMenu({ x: event.clientX, y: event.clientY });
-          }}
+          onContextMenu={
+            openMenu === undefined
+              ? undefined
+              : (event) => {
+                  event.preventDefault();
+                  openMenu({ x: event.clientX, y: event.clientY });
+                }
+          }
           className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs font-medium text-sidebar-foreground/80 outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
         >
           <ChevronDownIcon
@@ -166,7 +175,7 @@ export const SidebarThreadGroupHeader = memo(function SidebarThreadGroupHeader(p
           </span>
         </button>
       )}
-      {groupId !== null && !props.renaming ? (
+      {openMenu !== undefined && !props.renaming ? (
         <span className="absolute inset-y-0 right-1 flex items-center opacity-0 focus-within:opacity-100 group-hover/thread-group:opacity-100 pointer-coarse:opacity-100">
           <Button
             data-sidebar-action-for={rowId}

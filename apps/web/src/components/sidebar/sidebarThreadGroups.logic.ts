@@ -1,9 +1,10 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 /**
  * The user's own groups of active threads, keyed by scoped thread key so a group can span
- * projects and servers. Threads missing from `ungroupedOrder` sit at the top of Ungrouped
- * in recency order, so a new thread never lands inside a group or below the manual order.
+ * projects and servers. Threads missing from `ungroupedOrder` top Ungrouped in recency order.
+ * Ungrouped is headerless above the groups until named, then sits before `groups[ungroupedIndex]`.
  */
 export const SidebarThreadGroups = Schema.Struct({
   groups: Schema.Array(
@@ -16,6 +17,10 @@ export const SidebarThreadGroups = Schema.Struct({
   ),
   ungroupedOrder: Schema.Array(Schema.String),
   ungroupedCollapsed: Schema.Boolean,
+  ungroupedName: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  ungroupedIndex: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
 });
 export type SidebarThreadGroups = typeof SidebarThreadGroups.Type;
 export type SidebarThreadGroup = SidebarThreadGroups["groups"][number];
@@ -24,7 +29,11 @@ export const EMPTY_SIDEBAR_THREAD_GROUPS: SidebarThreadGroups = {
   groups: [],
   ungroupedOrder: [],
   ungroupedCollapsed: false,
+  ungroupedName: null,
+  ungroupedIndex: 0,
 };
+
+export const DEFAULT_UNGROUPED_NAME = "Ungrouped";
 
 /** A thread with its visible forks; the head key places the whole family. */
 type Family = readonly string[];
@@ -35,6 +44,8 @@ export interface SidebarThreadGroupArrangement {
     readonly families: Family[];
   }>;
   readonly ungrouped: Family[];
+  /** How many of the shown groups sit above Ungrouped. */
+  readonly ungroupedAt: number;
 }
 
 /** `groupId` null is Ungrouped; `beforeKey` null is the end of the container. */
@@ -75,13 +86,19 @@ export function arrangeSidebarThreadGroups(
     (manualRank.has(head) ? ranked : fresh).push(family);
   }
   ranked.sort((left, right) => manualRank.get(left[0]!)! - manualRank.get(right[0]!)!);
+  const ungroupedIndex = state.ungroupedName === null ? 0 : state.ungroupedIndex;
+  const shown = groups
+    .map((entry, index) => ({ entry, index }))
+    .filter(
+      ({ entry }) =>
+        !options.hideEmptyGroups ||
+        entry.families.length > 0 ||
+        entry.group.id === options.keepGroupId,
+    );
   return {
-    groups: options.hideEmptyGroups
-      ? groups.filter(
-          (group) => group.families.length > 0 || group.group.id === options.keepGroupId,
-        )
-      : groups,
+    groups: shown.map(({ entry }) => entry),
     ungrouped: [...fresh, ...ranked],
+    ungroupedAt: shown.filter(({ index }) => index < ungroupedIndex).length,
   };
 }
 
@@ -276,13 +293,15 @@ export function discardNewSidebarThreadGroup(
   };
 }
 
+/** Renames a group; null renames Ungrouped. */
 export function renameSidebarThreadGroup(
   state: SidebarThreadGroups,
-  id: string,
+  id: string | null,
   name: string,
 ): SidebarThreadGroups {
   const trimmed = name.trim();
   if (trimmed.length === 0) return state;
+  if (id === null) return { ...state, ungroupedName: trimmed };
   return {
     ...state,
     groups: state.groups.map((group) => (group.id === id ? { ...group, name: trimmed } : group)),
@@ -293,7 +312,26 @@ export function deleteSidebarThreadGroup(
   state: SidebarThreadGroups,
   id: string,
 ): SidebarThreadGroups {
-  return { ...state, groups: state.groups.filter((group) => group.id !== id) };
+  const index = state.groups.findIndex((group) => group.id === id);
+  return {
+    ...state,
+    groups: state.groups.filter((group) => group.id !== id),
+    ungroupedIndex:
+      index !== -1 && index < state.ungroupedIndex
+        ? state.ungroupedIndex - 1
+        : state.ungroupedIndex,
+  };
+}
+
+/** Gives Ungrouped a header where it already sits, at the top, or takes the header away. */
+export function setSidebarUngroupedHeader(
+  state: SidebarThreadGroups,
+  shown: boolean,
+): SidebarThreadGroups {
+  if (shown === (state.ungroupedName !== null)) return state;
+  return shown
+    ? { ...state, ungroupedName: DEFAULT_UNGROUPED_NAME, ungroupedIndex: 0 }
+    : { ...state, ungroupedName: null, ungroupedIndex: 0, ungroupedCollapsed: false };
 }
 
 /** Toggles a group's collapse; null toggles Ungrouped. */
@@ -310,17 +348,39 @@ export function toggleSidebarThreadGroup(
   };
 }
 
+/** The groups in display order, with null standing for a named Ungrouped. */
+function sidebarGroupOrder(state: SidebarThreadGroups): Array<SidebarThreadGroup | null> {
+  const order: Array<SidebarThreadGroup | null> = [...state.groups];
+  if (state.ungroupedName !== null) {
+    order.splice(Math.min(Math.max(state.ungroupedIndex, 0), order.length), 0, null);
+  }
+  return order;
+}
+
+/** Whether a group, or a named Ungrouped for null, can move one place by `delta`. */
+export function canMoveSidebarThreadGroup(
+  state: SidebarThreadGroups,
+  id: string | null,
+  delta: -1 | 1,
+): boolean {
+  const order = sidebarGroupOrder(state);
+  const index = order.findIndex((group) => (group?.id ?? null) === id);
+  return index !== -1 && index + delta >= 0 && index + delta < order.length;
+}
+
+/** Moves a group, or a named Ungrouped for null, one place up or down. */
 export function moveSidebarThreadGroup(
   state: SidebarThreadGroups,
-  id: string,
+  id: string | null,
   delta: -1 | 1,
 ): SidebarThreadGroups {
-  const index = state.groups.findIndex((group) => group.id === id);
-  const target = index + delta;
-  if (index === -1 || target < 0 || target >= state.groups.length) return state;
-  const groups = [...state.groups];
-  [groups[index], groups[target]] = [groups[target]!, groups[index]!];
-  return { ...state, groups };
+  if (!canMoveSidebarThreadGroup(state, id, delta)) return state;
+  const order = sidebarGroupOrder(state);
+  const index = order.findIndex((group) => (group?.id ?? null) === id);
+  [order[index], order[index + delta]] = [order[index + delta]!, order[index]!];
+  const groups = order.filter((group): group is SidebarThreadGroup => group !== null);
+  const ungroupedIndex = order.indexOf(null);
+  return { ...state, groups, ungroupedIndex: ungroupedIndex === -1 ? 0 : ungroupedIndex };
 }
 
 export type SidebarGroupHitRow =

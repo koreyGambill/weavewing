@@ -1,4 +1,4 @@
-import { MessageSquareDashedIcon, PlusIcon, SquarePenIcon } from "lucide-react";
+import { MessageSquareDashedIcon, SquarePenIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -18,10 +18,8 @@ export interface SidebarThreadHeaderProps {
   projectScope: ReactNode;
   onNewThread: (event: ReactMouseEvent) => void;
   onNewThreadInProject: () => void;
-  /** Starts a new sidebar group; absent where groups are unavailable. */
-  onNewGroup?: (() => void) | undefined;
-  /** A group's name is being typed; a press on New group then leaves focus there. */
-  namingGroup: boolean;
+  /** Grouping, row density and new groups. */
+  viewMenu: ReactNode;
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
@@ -44,8 +42,7 @@ export function SidebarThreadHeader({
   projectScope,
   onNewThread,
   onNewThreadInProject,
-  onNewGroup,
-  namingGroup,
+  viewMenu,
   newThreadDisabled,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
@@ -115,17 +112,7 @@ export function SidebarThreadHeader({
           clearLabel="Clear thread search"
         />
         {hasProjects ? projectScope : null}
-        {onNewGroup ? (
-          <SidebarHeaderIconButton
-            label="New group"
-            onMouseDown={(event) => {
-              if (namingGroup) event.preventDefault();
-            }}
-            onClick={onNewGroup}
-          >
-            <PlusIcon />
-          </SidebarHeaderIconButton>
-        ) : null}
+        {hasProjects ? viewMenu : null}
       </div>
     </div>
   );

@@ -8,6 +8,8 @@ import {
   EMPTY_SIDEBAR_THREAD_GROUPS,
   moveSidebarThreadGroup,
   placeSidebarThread,
+  renameSidebarThreadGroup,
+  setSidebarUngroupedHeader,
   resolveSidebarGroupDrop,
   resolveSidebarGroupHit,
   resolveSidebarShelfHit,
@@ -28,6 +30,8 @@ const state = (
   })),
   ungroupedOrder,
   ungroupedCollapsed: false,
+  ungroupedName: null,
+  ungroupedIndex: 0,
 });
 
 const families = (...keys: string[]) => keys.map((key) => key.split("+"));
@@ -248,6 +252,42 @@ describe("group edits", () => {
       "one",
     ]);
     expect(moveSidebarThreadGroup(current, "one", -1)).toBe(current);
+  });
+
+  it("keeps Ungrouped above the groups until it is named, then moves it among them", () => {
+    const current = state([
+      ["one", ["a"]],
+      ["two", ["b"]],
+    ]);
+    const options = { hideEmptyGroups: false };
+    expect(arrangeSidebarThreadGroups(current, families("a", "b", "c"), options).ungroupedAt).toBe(
+      0,
+    );
+    // A headerless Ungrouped has no place among the groups to move from.
+    expect(moveSidebarThreadGroup(current, null, 1)).toBe(current);
+
+    const named = renameSidebarThreadGroup(setSidebarUngroupedHeader(current, true), null, "Inbox");
+    expect(named.ungroupedName).toBe("Inbox");
+    const lowered = moveSidebarThreadGroup(moveSidebarThreadGroup(named, null, 1), null, 1);
+    expect(lowered.ungroupedIndex).toBe(2);
+    expect(moveSidebarThreadGroup(lowered, null, 1)).toBe(lowered);
+    // A group moving down next to Ungrouped trades places with it.
+    const swapped = moveSidebarThreadGroup(lowered, "two", 1);
+    expect(swapped.groups.map((group) => group.id)).toEqual(["one", "two"]);
+    expect(swapped.ungroupedIndex).toBe(1);
+    // An empty group hidden by a filter does not count toward Ungrouped's place.
+    expect(
+      arrangeSidebarThreadGroups(lowered, families("b", "c"), { hideEmptyGroups: true })
+        .ungroupedAt,
+    ).toBe(1);
+    // Deleting a group above Ungrouped keeps Ungrouped below the same groups.
+    expect(deleteSidebarThreadGroup(lowered, "one").ungroupedIndex).toBe(1);
+
+    const hidden = setSidebarUngroupedHeader(lowered, false);
+    expect(hidden.ungroupedName).toBe(null);
+    expect(arrangeSidebarThreadGroups(hidden, families("a", "b", "c"), options).ungroupedAt).toBe(
+      0,
+    );
   });
 });
 

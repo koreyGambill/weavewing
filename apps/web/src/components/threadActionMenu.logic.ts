@@ -113,6 +113,8 @@ export interface ThreadActionMenuState {
   readonly groups?: {
     readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
     readonly current: string | null;
+    /** Ungrouped's header name, or "Ungrouped" when it has no header. */
+    readonly ungroupedName: string;
     readonly canMoveUp: boolean;
     readonly canMoveDown: boolean;
   } | null;
@@ -219,7 +221,7 @@ export function buildThreadActionMenuItems(
               })),
               {
                 id: "group-none" as const,
-                label: "Ungrouped",
+                label: state.groups.ungroupedName,
                 checked: state.groups.current === null,
               },
               {
