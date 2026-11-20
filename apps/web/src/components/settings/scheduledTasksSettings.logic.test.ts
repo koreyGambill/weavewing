@@ -288,11 +288,15 @@ describe("event scheduled tasks", () => {
     expect(
       scheduleFromDraft({
         ...draft,
-        eventProjectOnly: false,
+        eventProjectIds: null,
         eventThreadIds: [],
         eventCoalesceSeconds: "",
       }),
     ).toEqual({ type: "event", event: "run_ended", cooldownSeconds: 600 });
+    const projectIds = [ProjectId.make("project:other"), legacyTask.projectId];
+    expect(scheduleFromDraft({ ...draft, eventProjectIds: [] })).toBeNull();
+    const selected = { ...schedule, projectId: projectIds[0]!, projectIds };
+    expect(scheduleFromDraft(taskToDraft({ ...legacyTask, schedule: selected }))).toEqual(selected);
     expect(scheduleFromDraft({ ...draft, eventCoalesceSeconds: "3601" })).toBeNull();
   });
 });

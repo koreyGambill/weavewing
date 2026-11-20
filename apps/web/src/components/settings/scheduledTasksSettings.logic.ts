@@ -2,6 +2,7 @@ import {
   isListedThreadLineage,
   isWebhookDedupeTemplate,
   scheduledTaskEventLabel,
+  scheduledTaskEventProjectIds,
   scheduledWakeLabel,
   type ScheduledTaskEventKind,
   type StatusState,
@@ -154,8 +155,7 @@ export interface DraftState {
   readonly eventKind: ScheduledTaskEventKind;
   readonly eventThreadIds: ReadonlyArray<string>;
   readonly eventIncludeDescendants: boolean;
-  /** Match only threads in the task's project. */
-  readonly eventProjectOnly: boolean;
+  readonly eventProjectIds: ReadonlyArray<ProjectId> | null | undefined;
   readonly eventStatusSource: string;
   readonly eventToState: StatusState | "";
   readonly eventCooldownSeconds: string;
@@ -182,7 +182,7 @@ export const EVENT_DRAFT_DEFAULTS = {
   eventKind: "run_ended",
   eventThreadIds: [],
   eventIncludeDescendants: false,
-  eventProjectOnly: true,
+  eventProjectIds: undefined,
   eventStatusSource: "",
   eventToState: "",
   eventCooldownSeconds: "",
@@ -231,6 +231,11 @@ export function scheduleDraftErrors(draft: DraftState) {
       errors.push({
         title: "Invalid coalescing window",
         description: "Enter whole seconds from 0 to 3600, or leave it blank.",
+      });
+    if (draft.eventKind !== "status_transition" && draft.eventProjectIds?.length === 0)
+      errors.push({
+        title: "Select trigger projects",
+        description: "Choose at least one project or select All projects.",
       });
     if (draft.eventThreadIds.length > MAX_EVENT_FILTER_THREADS)
       errors.push({
@@ -362,12 +367,19 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
       };
     }
     const threadIds = draft.eventThreadIds.map((id) => id as ThreadId);
+    const projectIds =
+      draft.eventProjectIds === undefined
+        ? draft.projectId
+          ? [draft.projectId as ProjectId]
+          : []
+        : (draft.eventProjectIds ?? []);
+    const [firstProject] = projectIds;
     return {
       type: "event",
       event: draft.eventKind,
-      ...(draft.eventProjectOnly && draft.projectId
-        ? { projectId: draft.projectId as ProjectId }
-        : {}),
+      // Older servers honor the first project and ignore the rest of the selection.
+      ...(firstProject === undefined ? {} : { projectId: firstProject }),
+      ...(projectIds.length > 1 ? { projectIds } : {}),
       ...(threadIds.length > 0 ? { threadIds } : {}),
       ...(threadIds.length > 0 && draft.eventIncludeDescendants
         ? { includeDescendants: true }
@@ -458,7 +470,10 @@ export function taskToDraft(task: ScheduledTask): DraftState {
           eventKind: schedule.event,
           eventThreadIds: schedule.threadIds ?? [],
           eventIncludeDescendants: schedule.includeDescendants === true,
-          eventProjectOnly: schedule.projectId !== undefined,
+          eventProjectIds:
+            schedule.projectId === undefined && schedule.projectIds === undefined
+              ? null
+              : scheduledTaskEventProjectIds(schedule),
           eventStatusSource: schedule.statusSource ?? "",
           eventToState: schedule.toState ?? "",
           eventCooldownSeconds:
@@ -579,12 +594,12 @@ export function changeDraftProject(draft: DraftState, projectId: string): DraftS
   return { ...unbindDraftFromThread(draft), projectId };
 }
 
-/** Threads a task can move to. The current one is left out; the picker always shows it. */
-export function scheduledTaskDestinationThreads(
+/** Candidate threads in one environment. Omit project IDs to search all its projects. */
+export function scheduledTaskPickerThreads(
   threads: ReadonlyArray<EnvironmentThreadShell>,
   target: {
     readonly environmentId: EnvironmentId;
-    readonly projectId: string;
+    readonly projectIds?: ReadonlyArray<string>;
     readonly currentThreadId: ThreadId | null;
     readonly query: string;
   },
@@ -594,7 +609,7 @@ export function scheduledTaskDestinationThreads(
     .filter(
       (thread) =>
         thread.environmentId === target.environmentId &&
-        thread.projectId === target.projectId &&
+        (target.projectIds === undefined || target.projectIds.includes(thread.projectId)) &&
         thread.id !== target.currentThreadId &&
         thread.archivedAt === null &&
         isListedThreadLineage(thread.lineage) &&

@@ -1,4 +1,5 @@
 import {
+  scheduledTaskEventProjectIds,
   isEventDrivenWake,
   MIN_SCHEDULED_TASK_INTERVAL_MS,
   type ScheduledTaskSchedule,
@@ -73,7 +74,8 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
     return (
       b.type === "event" &&
       a.event === b.event &&
-      a.projectId === b.projectId &&
+      JSON.stringify([...new Set(scheduledTaskEventProjectIds(a))].sort()) ===
+        JSON.stringify([...new Set(scheduledTaskEventProjectIds(b))].sort()) &&
       (a.threadIds ?? []).join(",") === (b.threadIds ?? []).join(",") &&
       (a.includeDescendants ?? false) === (b.includeDescendants ?? false) &&
       a.statusSource === b.statusSource &&

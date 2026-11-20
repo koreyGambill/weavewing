@@ -82,7 +82,8 @@ branch name remains.
 
 Open **Settings → Scheduled tasks** to create scheduled tasks or manage existing
 ones across your connected environments. Use the settings filter to narrow the
-list by environment or project. Each task runs on the environment you choose,
+list by environment or project. For a thread event, use **Trigger projects** to
+choose which projects can start a run, or select **All projects**. Each task runs on the environment you choose,
 using its project, model, and workspace settings. Fixed-time schedules use that
 environment's time zone, which may differ from your phone's. Choose **Once**
 to run a task a single time at a date and time in your own time zone. If the
@@ -96,7 +97,7 @@ without the agent's context growing. To move a one-thread task, pick another
 thread in its project under **Destination**. Moving such a task to another
 project starts a new thread there on its next run.
 
-On web and desktop, open **Automations** in the sidebar to browse the inventory.
+On web and desktop, open **Automations** in the sidebar and choose **Manage** to browse automations.
 Finished one-time schedules are under **Completed**. Open **Run history** to
 see runs by server, then choose an automation to see only its runs.
 

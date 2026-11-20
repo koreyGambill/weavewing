@@ -70,8 +70,6 @@ interface ThreadContextSidebarState {
   inboxTab: InboxTab;
   inboxSelection: InboxSelection | null;
   automationSelection: AutomationSelection | null;
-  /** Null follows the context: Thread with a thread open, else Server. */
-  automationScope: "thread" | "project" | "server" | null;
   /** Null follows the context: Thread with a thread open, else All. */
   evidenceScope: "thread" | "all" | null;
   evidenceNeedsQa: boolean;
@@ -80,7 +78,6 @@ interface ThreadContextSidebarState {
   evidenceCoverageDismissed: Record<string, string>;
   dismissEvidenceCoverage: (key: string, head: string | null) => void;
   selectAutomation: (selection: AutomationSelection | null) => void;
-  setAutomationScope: (scope: "thread" | "project" | "server") => void;
   selectView: (view: SidebarView) => void;
   toggleTools: (sidebarVisible: boolean) => void;
   /** Opens a tool from outside the strip, unhiding it, and reveals a hidden sidebar. */
@@ -113,7 +110,6 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
       inboxTab: "inbox",
       inboxSelection: null,
       automationSelection: null,
-      automationScope: null,
       evidenceScope: null,
       evidenceNeedsQa: false,
       evidenceCoverageDismissed: {},
@@ -128,7 +124,6 @@ export const useThreadContextSidebarStore = create<ThreadContextSidebarState>()(
           evidenceNeedsQa: needsQa ?? state.evidenceNeedsQa,
         })),
       selectAutomation: (automationSelection) => set({ automationSelection }),
-      setAutomationScope: (automationScope) => set({ automationScope }),
       selectView: (view) =>
         set((state) => ({
           ...nextSidebarView(state, view),

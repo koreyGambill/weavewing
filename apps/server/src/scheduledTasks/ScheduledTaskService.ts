@@ -2289,6 +2289,7 @@ export const layer = Layer.effect(
         const statusEvent = input.schedule.event === "status_transition";
         const threadFilters =
           input.schedule.projectId !== undefined ||
+          input.schedule.projectIds !== undefined ||
           (input.schedule.threadIds?.length ?? 0) > 0 ||
           input.schedule.includeDescendants === true;
         const statusFilters =

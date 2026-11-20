@@ -110,7 +110,7 @@ import {
   changeDraftProject,
   moveDraftToThread,
   scheduleDraftErrors,
-  scheduledTaskDestinationThreads,
+  scheduledTaskPickerThreads,
   toDateTimeLocalValue,
   webhookDeliveryLabel,
   defaultScheduledTaskProjectId,
@@ -126,7 +126,14 @@ import {
   type WorkspaceMode,
 } from "./scheduledTasksSettings.logic";
 import { Label } from "../ui/label";
-import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
+import {
+  Menu,
+  MenuTrigger,
+  MenuPopup,
+  MenuItem,
+  MenuCheckboxItem,
+  MenuSeparator,
+} from "../ui/menu";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "../ui/empty";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -274,16 +281,16 @@ function EventThreadChip({
   );
 }
 
-/** Picks threads from the task's project by title; selected threads show as removable chips. */
+/** Selected threads show as removable chips. */
 function EventThreadPicker({
   environmentId,
-  projectId,
+  projectIds,
   selected,
   disabled,
   onChange,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly projectId: string;
+  readonly projectIds: ReadonlyArray<ProjectId> | null;
   readonly selected: ReadonlyArray<string>;
   readonly disabled: boolean;
   readonly onChange: (threadIds: ReadonlyArray<string>) => void;
@@ -292,13 +299,13 @@ function EventThreadPicker({
   const [query, setQuery] = useState("");
   const shells = useVisibleThreadShells(open);
   // Mounts older settled threads matching the query, which shells may leave out.
-  useThreadSearch(open && projectId ? [environmentId] : [], query, {
+  useThreadSearch(open && !disabled ? [environmentId] : [], query, {
     titlesOnly: true,
-    projectIds: [projectId as ProjectId],
+    ...(projectIds === null ? {} : { projectIds }),
   });
-  const threads = scheduledTaskDestinationThreads(shells, {
+  const threads = scheduledTaskPickerThreads(shells, {
     environmentId,
-    projectId,
+    ...(projectIds === null ? {} : { projectIds }),
     currentThreadId: null,
     query,
   }).filter((thread) => !selected.includes(thread.id));
@@ -352,7 +359,7 @@ function EventThreadPicker({
         <ComboboxPopup align="start" side="bottom" className="w-80">
           <ComboboxSearchInput
             aria-label="Search threads"
-            placeholder="Search threads in this project..."
+            placeholder="Search threads..."
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -382,6 +389,25 @@ function EventTriggerFields({
   setDraft: Dispatch<SetStateAction<DraftState>>;
 }) {
   const update = (patch: Partial<DraftState>) => setDraft((current) => ({ ...current, ...patch }));
+  const environment = useEnvironment(environmentId);
+  const supportsMultipleProjects =
+    environment?.serverConfig?.environment.capabilities.automationTriggerProjects === true;
+  const allProjects = useProjects();
+  const triggerProjects =
+    draft.eventProjectIds === undefined
+      ? draft.projectId
+        ? [draft.projectId as ProjectId]
+        : []
+      : draft.eventProjectIds;
+  const projects = allProjects.filter(
+    (project) =>
+      project.environmentId === environmentId &&
+      (project.archivedAt == null || triggerProjects?.includes(project.id)),
+  );
+  const projectItems = new Map(projects.map((project) => [project.id, project.title]));
+  for (const id of triggerProjects ?? []) {
+    if (!projectItems.has(id)) projectItems.set(id, `${id} (unavailable)`);
+  }
   const statusEvent = draft.eventKind === "status_transition";
   const sources = useEnvironmentQuery(
     statusEvent ? statusSources({ environmentId, input: {} }) : null,
@@ -463,20 +489,58 @@ function EventTriggerFields({
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="scheduled-task-event-project">Only threads in this project</Label>
-            <Switch
-              id="scheduled-task-event-project"
-              checked={draft.eventProjectOnly}
-              onCheckedChange={(eventProjectOnly) => update({ eventProjectOnly })}
-            />
-          </div>
+          <Field label="Trigger projects" htmlFor="scheduled-task-event-project">
+            <Menu>
+              <MenuTrigger
+                id="scheduled-task-event-project"
+                render={<Button variant="outline" size="sm" />}
+              >
+                {triggerProjects === null
+                  ? "All projects"
+                  : triggerProjects.length === 0
+                    ? "Select projects"
+                    : triggerProjects.length === 1 && triggerProjects[0] !== undefined
+                      ? projectItems.get(triggerProjects[0])
+                      : `${triggerProjects.length} projects selected`}
+                <ChevronDownIcon />
+              </MenuTrigger>
+              <MenuPopup align="start">
+                <MenuCheckboxItem
+                  checked={triggerProjects === null}
+                  closeOnClick={false}
+                  onCheckedChange={(checked) => update({ eventProjectIds: checked ? null : [] })}
+                >
+                  All projects
+                </MenuCheckboxItem>
+                <MenuSeparator />
+                {[...projectItems].map(([id, title]) => (
+                  <MenuCheckboxItem
+                    key={id}
+                    checked={triggerProjects?.includes(id) ?? false}
+                    closeOnClick={!supportsMultipleProjects}
+                    onCheckedChange={(checked) => {
+                      const selected = triggerProjects ?? [];
+                      update({
+                        eventProjectIds: checked
+                          ? supportsMultipleProjects
+                            ? [...selected, id]
+                            : [id]
+                          : selected.filter((projectId) => projectId !== id),
+                      });
+                    }}
+                  >
+                    {title}
+                  </MenuCheckboxItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+          </Field>
           <Field label="Only these threads" hint="optional" htmlFor="scheduled-task-event-threads">
             <EventThreadPicker
               environmentId={environmentId}
-              projectId={draft.projectId}
+              projectIds={triggerProjects}
               selected={draft.eventThreadIds}
-              disabled={!draft.projectId}
+              disabled={triggerProjects?.length === 0}
               onChange={(eventThreadIds) => update({ eventThreadIds })}
             />
           </Field>
@@ -1686,9 +1750,9 @@ function ScheduledTaskDestination({
     titlesOnly: true,
     projectIds: [projectId as ProjectId],
   });
-  const threads = scheduledTaskDestinationThreads(shells, {
+  const threads = scheduledTaskPickerThreads(shells, {
     environmentId,
-    projectId,
+    projectIds: [projectId],
     currentThreadId: threadId,
     query,
   });

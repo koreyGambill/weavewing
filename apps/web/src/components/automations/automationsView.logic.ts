@@ -10,7 +10,7 @@ import {
   type ScheduledTaskSchedule,
 } from "@t3tools/contracts";
 
-export type AutomationScope = "thread" | "project" | "server";
+export type AutomationStatusFilter = "all" | "active" | "paused";
 
 export interface AutomationRowModel {
   readonly task: ScheduledTask;
@@ -48,10 +48,9 @@ function isCompletedOnce(task: ScheduledTask): boolean {
 export function automationSections(
   tasks: ReadonlyArray<ScheduledTask>,
   options: {
-    readonly scope: AutomationScope;
     readonly thread: AutomationThreadContext | null;
     readonly filter: string;
-    readonly showPaused: boolean;
+    readonly status: AutomationStatusFilter;
   },
 ): AutomationSections {
   const on: AutomationRowModel[] = [];
@@ -60,21 +59,18 @@ export function automationSections(
   const { thread } = options;
   for (const task of tasks) {
     if (!matchesFilter(task, options.filter)) continue;
+    const applies = thread === null ? null : automationAppliesTo(task, thread);
+    if (thread !== null && applies === null) continue;
     const finished = isCompletedOnce(task);
-    if (!options.showPaused && (!task.enabled || finished)) continue;
-    const applies =
-      options.scope === "thread" && thread !== null ? automationAppliesTo(task, thread) : null;
-    if (options.scope === "thread" && applies === null) continue;
-    if (options.scope === "project" && task.projectId !== thread?.projectId) continue;
+    const offHere =
+      applies === "event" && thread !== null && automationOffForThread(task, thread.threadId);
+    const active = task.enabled && !offHere;
+    if (options.status !== "all" && (finished || active !== (options.status === "active")))
+      continue;
     const row = { task, applies };
     if (finished) completed.push(row);
-    else if (
-      applies === "event" &&
-      thread !== null &&
-      automationOffForThread(task, thread.threadId)
-    ) {
-      off.push(row);
-    } else on.push(row);
+    else if (offHere) off.push(row);
+    else on.push(row);
   }
   return { on, off, completed };
 }

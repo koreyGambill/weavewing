@@ -1,18 +1,27 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { PlusIcon, SettingsIcon } from "lucide-react";
+import { ListFilterIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
 import { useConnectedEnvironmentIds } from "../../state/environments";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { ToolFilterInput } from "../ThreadToolViews";
 import { Button } from "../ui/button";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AutomationDetail } from "./AutomationDetail";
 import { EnvironmentAutomationHistory } from "./AutomationHistory";
 import { EnvironmentAutomations } from "./AutomationList";
-import type { AutomationScope } from "./automationsView.logic";
+import type { AutomationStatusFilter } from "./automationsView.logic";
 import { automationRowKey, useThreadContext } from "./useAutomations";
 
 function backToList(list: RefObject<HTMLDivElement | null>, rowKey: string | null) {
@@ -27,22 +36,17 @@ function backToList(list: RefObject<HTMLDivElement | null>, rowKey: string | nul
 
 export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | null }) {
   const thread = useThreadContext(threadRef);
-  const storedScope = useThreadContextSidebarStore((state) => state.automationScope);
   const selection = useThreadContextSidebarStore((state) => state.automationSelection);
-  const [view, setView] = useState<"inventory" | "history">("inventory");
+  const [view, setView] = useState<"manage" | "history">("manage");
   const [filter, setFilter] = useState("");
-  const [showPaused, setShowPaused] = useState(true);
+  const [status, setStatus] = useState<AutomationStatusFilter>("all");
+  const [onlyThread, setOnlyThread] = useState(false);
   const connected = useConnectedEnvironmentIds();
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement>(null);
-  const scope: AutomationScope =
-    storedScope === null || (storedScope !== "server" && thread === null)
-      ? thread === null
-        ? "server"
-        : "thread"
-      : storedScope;
+  const threadFilter = onlyThread ? thread : null;
   const environmentIds =
-    scope === "server" || threadRef === null ? connected : [threadRef.environmentId];
+    threadFilter !== null && threadRef !== null ? [threadRef.environmentId] : connected;
   const newEnvironmentId = threadRef?.environmentId ?? connected[0];
   const selectedKey =
     selection === null ? null : automationRowKey(selection.environmentId, selection.taskId);
@@ -85,10 +89,10 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
           value={[view]}
           onValueChange={(value) => {
             const next = value[0];
-            if (next === "inventory" || next === "history") setView(next);
+            if (next === "manage" || next === "history") setView(next);
           }}
         >
-          <Toggle value="inventory">Inventory</Toggle>
+          <Toggle value="manage">Manage</Toggle>
           <Toggle value="history">Run history</Toggle>
         </ToggleGroup>
       </div>
@@ -107,86 +111,88 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
         </div>
       ) : (
         <>
-          <div className="space-y-2 px-2.5 pt-2.5 pb-2">
-            <ToggleGroup
-              aria-label="Automation scope"
-              size="segmented-compact"
-              className="w-full *:flex-1"
-              value={[scope]}
-              onValueChange={(value) => {
-                const next = value[0];
-                if (next === "thread" || next === "project" || next === "server") {
-                  useThreadContextSidebarStore.getState().setAutomationScope(next);
-                }
-              }}
-            >
-              <Toggle value="thread" disabled={thread === null}>
-                Thread
-              </Toggle>
-              <Toggle value="project" disabled={thread === null}>
-                Project
-              </Toggle>
-              <Toggle value="server">Server</Toggle>
-            </ToggleGroup>
-            <ToolFilterInput label="Filter automations" value={filter} onChange={setFilter} />
-            <div className="flex items-center gap-1">
-              <ToggleGroup
-                aria-label="Automation status"
-                size="segmented-compact"
-                className="min-w-0 flex-1 *:flex-1"
-                value={[showPaused ? "all" : "active"]}
-                onValueChange={(value) => {
-                  if (value[0]) setShowPaused(value[0] === "all");
-                }}
-              >
-                <Toggle value="all">All</Toggle>
-                <Toggle value="active">Active</Toggle>
-              </ToggleGroup>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="New automation"
-                      disabled={newEnvironmentId === undefined}
-                      onClick={() =>
-                        void navigate({
-                          to: "/settings/scheduled-tasks",
-                          search: {
-                            ...(newEnvironmentId ? { environmentId: newEnvironmentId } : {}),
-                            new: true,
-                          },
-                        })
-                      }
-                    />
-                  }
-                >
-                  <PlusIcon />
-                </TooltipTrigger>
-                <TooltipPopup>New automation</TooltipPopup>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Automation settings"
-                      onClick={() =>
-                        void navigate({
-                          to: "/settings/scheduled-tasks",
-                          search: newEnvironmentId ? { environmentId: newEnvironmentId } : {},
-                        })
-                      }
-                    />
-                  }
-                >
-                  <SettingsIcon />
-                </TooltipTrigger>
-                <TooltipPopup>Automation settings</TooltipPopup>
-              </Tooltip>
+          <div className="flex items-center gap-1 px-2.5 pt-2 pb-2">
+            <div className="min-w-0 flex-1">
+              <ToolFilterInput label="Filter automations" value={filter} onChange={setFilter} />
             </div>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    variant={status !== "all" || threadFilter !== null ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    aria-label="Automation filters"
+                  />
+                }
+              >
+                <ListFilterIcon />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuRadioGroup
+                  value={status}
+                  onValueChange={(value) => {
+                    if (value === "all" || value === "active" || value === "paused")
+                      setStatus(value);
+                  }}
+                >
+                  <MenuRadioItem value="all">All statuses</MenuRadioItem>
+                  <MenuRadioItem value="active">Active</MenuRadioItem>
+                  <MenuRadioItem value="paused">Paused</MenuRadioItem>
+                </MenuRadioGroup>
+                <MenuSeparator />
+                <MenuCheckboxItem
+                  checked={threadFilter !== null}
+                  disabled={thread === null}
+                  onCheckedChange={setOnlyThread}
+                >
+                  Applies to this thread
+                </MenuCheckboxItem>
+              </MenuPopup>
+            </Menu>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="New automation"
+                    disabled={newEnvironmentId === undefined}
+                    onClick={() =>
+                      void navigate({
+                        to: "/settings/scheduled-tasks",
+                        search: {
+                          ...(newEnvironmentId ? { environmentId: newEnvironmentId } : {}),
+                          new: true,
+                        },
+                      })
+                    }
+                  />
+                }
+              >
+                <PlusIcon />
+              </TooltipTrigger>
+              <TooltipPopup>New automation</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Automation settings"
+                    onClick={() =>
+                      void navigate({
+                        to: "/settings/scheduled-tasks",
+                        search: newEnvironmentId ? { environmentId: newEnvironmentId } : {},
+                      })
+                    }
+                  />
+                }
+              >
+                <SettingsIcon />
+              </TooltipTrigger>
+              <TooltipPopup>Automation settings</TooltipPopup>
+            </Tooltip>
           </div>
           <div
             ref={listRef}
@@ -200,10 +206,12 @@ export function AutomationsView({ threadRef }: { threadRef: ScopedThreadRef | nu
                 key={environmentId}
                 environmentId={environmentId}
                 grouped={environmentIds.length > 1}
-                scope={scope}
-                thread={thread}
+                thread={threadFilter}
+                contextThreadId={
+                  threadRef?.environmentId === environmentId ? thread?.threadId : undefined
+                }
                 filter={filter}
-                showPaused={showPaused}
+                status={status}
               />
             ))}
           </div>
