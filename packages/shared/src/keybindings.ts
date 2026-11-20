@@ -82,6 +82,8 @@ export const CLASSIC_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+alt+p", command: "workspace.tile.float" },
   // Ctrl+Alt+T opens a terminal on GNOME.
   { key: "ctrl+alt+o", command: "workspace.tile.newTab" },
+  // Browsers keep Cmd/Ctrl+T for their own tabs.
+  { key: "mod+t", command: "workspace.tile.newTab", when: "isDesktop" },
   { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
   { key: "mod+w", command: "workspace.tile.closeTab" },
   { key: "mod+shift+w", command: "workspace.tile.closeAllTabs" },

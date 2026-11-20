@@ -552,6 +552,26 @@ describe("resolveShortcutCommand", () => {
     },
   );
 
+  it("opens a tile tab with Cmd/Ctrl+T in the desktop app only", () => {
+    const keybindings = compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
+    for (const [platform, input] of [
+      ["MacIntel", event({ key: "t", metaKey: true })],
+      ["Linux", event({ key: "t", ctrlKey: true })],
+    ] as const) {
+      for (const terminalFocus of [false, true]) {
+        for (const isDesktop of [true, false]) {
+          assert.strictEqual(
+            resolveShortcutCommand(input, keybindings, {
+              platform,
+              context: { terminalFocus, isDesktop, isWeb: !isDesktop },
+            }),
+            isDesktop ? "workspace.tile.newTab" : null,
+          );
+        }
+      }
+    }
+  });
+
   it("cycles tabs with Cmd+Shift+[ ] on Mac and keeps thread cycling elsewhere", () => {
     for (const [key, code, tab, thread] of [
       ["{", "BracketLeft", "workspace.tile.previousTab", "thread.previous"],
