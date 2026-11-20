@@ -6858,15 +6858,17 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 window.freshRunIds.length === 0
                   ? sql`NULL`
                   : sql`(
-                SELECT json_extract(fresh.payload_json, '$.startedAt')
+                SELECT COALESCE(json_extract(fresh.payload_json, '$.startedAt'),
+                  fresh.completed_at, fresh.requested_at)
                 FROM orchestration_v2_projection_runs fresh
                   INDEXED BY sqlite_autoindex_orchestration_v2_projection_runs_1
                 JOIN orchestration_v2_projection_messages prompt
                   ON prompt.message_id = json_extract(fresh.payload_json, '$.userMessageId')
                 WHERE fresh.thread_id = ${threadId}
                   AND fresh.run_id IN ${sql.in(window.freshRunIds)}
-                  AND fresh.status <> 'rolled_back'
-                  AND json_extract(fresh.payload_json, '$.startedAt') IS NOT NULL
+                  AND fresh.status NOT IN ('queued', 'rolled_back')
+                  AND NOT (fresh.status = 'cancelled'
+                    AND json_extract(fresh.payload_json, '$.startedAt') IS NULL)
                   AND json_extract(prompt.payload_json, '$.scheduledTaskId') IS NULL
                 ORDER BY fresh.ordinal DESC
                 LIMIT 1

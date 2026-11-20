@@ -59,6 +59,7 @@ import * as EffectOutbox from "../EffectOutbox.ts";
 import * as ProjectionReplay from "./ProjectionReplay.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
+import { ProviderSessionManagerV2 } from "../ProviderSessionManager.ts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   CLAUDE_MODEL_SELECTION,
@@ -133,6 +134,7 @@ function makeTestAdapter(input: {
   readonly backgroundTasksEndWithProcess?: true;
   readonly backgroundWork?: Ref.Ref<boolean>;
   readonly closedSessions?: Ref.Ref<ReadonlyArray<string>>;
+  readonly failSessionOpen?: Ref.Ref<boolean>;
 }): ProviderAdapter.ProviderAdapterV2["Service"] {
   return {
     instanceId: input.instanceId,
@@ -141,6 +143,13 @@ function makeTestAdapter(input: {
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (sessionInput) =>
       Effect.gen(function* () {
+        if (input.failSessionOpen && (yield* Ref.get(input.failSessionOpen))) {
+          return yield* new ProviderAdapter.ProviderAdapterOpenSessionError({
+            driver: input.driver,
+            providerSessionId: sessionInput.providerSessionId,
+            requiresSignIn: true,
+          });
+        }
         const events = yield* PubSub.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
         if (input.closedSessions !== undefined) {
           const closedSessions = input.closedSessions;
@@ -575,6 +584,7 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
     const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
     const child = ThreadId.make("side-chat-auto-child");
     const failStartOnce = yield* Ref.make(false);
+    const failSessionOpen = yield* Ref.make(false);
     const releaseRunningStartFailure = yield* Deferred.make<void>();
     const heldTurn = yield* Deferred.make<void>();
     const releaseHeldTurn = yield* Deferred.make<void>();
@@ -596,6 +606,7 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
         },
         capturedTurns,
         failStartOnce,
+        failSessionOpen,
         releaseRunningStartFailure,
         holdRunOrdinal: 11,
         holdFirstTurn: heldTurn,
@@ -763,10 +774,44 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
         queued?.context?.sideChatRefresh ?? "",
         '"text":"Branch result while the main chat waits"',
       );
+      yield* submit(threadId, "Queue a legacy refresh", true, false, "queue_after_active");
+      const legacy = (yield* orchestrator.getThreadProjection(threadId)).messages.find(
+        (message) => message.id === MessageId.make("Queue a legacy refresh"),
+      );
+      assert.isDefined(legacy);
+      assert.isDefined(legacy.context);
+      const { sideChatRefreshBefore: _captureTime, ...legacyContext } = legacy.context;
+      const legacyUpdateAt = yield* DateTime.now;
+      yield* eventSink.write({
+        events: [
+          {
+            type: "message.updated",
+            id: EventId.make("side-chat-legacy-queued-snapshot"),
+            threadId,
+            occurredAt: legacyUpdateAt,
+            payload: { ...legacy, context: legacyContext },
+          },
+        ],
+      });
       yield* Deferred.succeed(releaseHeldTurn, undefined);
       const settled = yield* waitForIdle(threadId);
       assert.equal(settled.runs.at(-1)?.status, "completed");
-      assert.equal((yield* Ref.get(capturedTurns)).at(-1)?.text, "Queue a refresh");
+      assert.deepEqual(
+        (yield* Ref.get(capturedTurns)).slice(-2).map((turn) => turn.text),
+        ["Queue a refresh", "Queue a legacy refresh"],
+      );
+
+      yield* send(child, "Branch context before failed reset");
+      yield* (yield* ProviderSessionManagerV2).closeInstance(CODEX_MODEL_SELECTION.instanceId);
+      yield* Ref.set(failSessionOpen, true);
+      assert.equal(yield* dispatch(threadId, "Fresh session fails to open", false, true), "failed");
+      const failedReset = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1);
+      assert.equal(failedReset?.startedAt, null);
+      yield* Ref.set(failSessionOpen, false);
+      yield* send(child, "Branch context after failed reset");
+      const afterFailure = yield* send(threadId, "Continue after failed reset");
+      assert.include(afterFailure, '"text":"Branch context after failed reset"');
+      assert.notInclude(afterFailure, '"text":"Branch context before failed reset"');
     }).pipe(
       Effect.provide(
         ProviderReplayHarness.layerWithRegistry(

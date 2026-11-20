@@ -1645,13 +1645,16 @@ export const layer: Layer.Layer<
       const retryHandoff = resumedRetryHandoff ?? (yield* prepareRetryHandoff(handoffContext));
       const refreshBefore = providerMessage.context?.sideChatRefreshBefore;
       let explicitRefresh = providerMessage.context?.sideChatRefresh;
-      if (explicitRefresh !== undefined && refreshBefore !== undefined) {
+      if (explicitRefresh !== undefined) {
+        const capturedAt = refreshBefore ?? DateTime.formatIso(providerMessage.createdAt);
         const resetsSinceCapture = projection.runs.flatMap((prior) =>
           prior.ordinal < run.ordinal &&
+          prior.status !== "queued" &&
           prior.status !== "rolled_back" &&
           prior.freshContext === true &&
-          prior.startedAt !== null &&
-          DateTime.formatIso(prior.startedAt) >= refreshBefore
+          !(prior.status === "cancelled" && prior.startedAt === null) &&
+          DateTime.formatIso(prior.startedAt ?? prior.completedAt ?? prior.requestedAt) >=
+            capturedAt
             ? [prior.userMessageId]
             : [],
         );
