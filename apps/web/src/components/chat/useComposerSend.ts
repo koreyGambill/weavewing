@@ -1219,7 +1219,7 @@ export function useComposerSend(input: ComposerSendInput) {
     const pendingAtom = pendingTurnSubmissionAtom(routeThreadKey);
     appAtomRegistry.set(
       pendingAtom,
-      pendingTurn === null ? null : { submission: pendingTurn, accepted: false },
+      pendingTurn === null ? null : { submission: pendingTurn, acceptedMessageId: null },
     );
     if (sendQueuesBehindSetup) {
       setSetupQueueSendThreadKey(activeThreadKey);
@@ -1468,8 +1468,15 @@ export function useComposerSend(input: ComposerSendInput) {
         turnStartSucceeded = true;
         if (pendingTurn !== null) {
           // Wait for the receipt so Stop cannot overtake the send on the server.
-          if (pendingTurn.stopRequested) await input.interruptSubmittedTurn(threadIdForSend);
-          appAtomRegistry.set(pendingAtom, { submission: pendingTurn, accepted: true });
+          if (pendingTurn.stopRequested) {
+            await input.interruptSubmittedTurn(threadIdForSend);
+            appAtomRegistry.set(pendingAtom, null);
+          } else {
+            appAtomRegistry.set(pendingAtom, {
+              submission: pendingTurn,
+              acceptedMessageId: messageIdForSend,
+            });
+          }
         }
         if (checkoutPullRequestUrl) {
           linkCheckoutPullRequest(
@@ -1634,16 +1641,25 @@ export function useComposerSend(input: ComposerSendInput) {
   const onSendLatest = useStableCallback(onSend);
   const onSendWithRouting = async (...args: Parameters<typeof onSend>) => {
     args[0]?.preventDefault();
-    const refresh =
-      args[3] || sendInFlightRef.current || readPendingEnvironmentChange() !== null
-        ? null
-        : refreshBeforeSend();
+    if (
+      args[3] ||
+      sendInFlightRef.current ||
+      !activeThread ||
+      readPendingEnvironmentChange() !== null
+    ) {
+      return onSend(...args);
+    }
+    const submission = new PendingTurnSubmission(activeThread.id);
+    const refresh = refreshBeforeSend(() => submission.stopRequested);
     if (refresh === null) return onSend(...args);
+    const pendingAtom = pendingTurnSubmissionAtom(routeThreadKey);
+    appAtomRegistry.set(pendingAtom, { submission, acceptedMessageId: null });
     sendInFlightRef.current = true;
     const ready = await refresh.finally(() => {
       sendInFlightRef.current = false;
+      appAtomRegistry.set(pendingAtom, null);
     });
-    if (ready) return onSendLatest(...args);
+    if (ready && !submission.stopRequested) return onSendLatest(...args);
   };
   return { onSend: onSendWithRouting };
 }

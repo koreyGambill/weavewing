@@ -135,6 +135,7 @@ function setup() {
 interface HarnessProps {
   input: Parameters<typeof useDraftEnvironmentRouting>[0];
   onPrepared?: (ready: boolean | null) => void;
+  isCancelled?: () => boolean;
 }
 
 function Harness(props: HarnessProps) {
@@ -145,7 +146,7 @@ function Harness(props: HarnessProps) {
   );
 }
 
-function RoutingProbe({ input, onPrepared }: HarnessProps) {
+function RoutingProbe({ input, onPrepared, isCancelled }: HarnessProps) {
   const routing = useDraftEnvironmentRouting(input);
   const draft = useComposerDraftStore((state) => state.getDraftSession(input.draftId!));
   const selections = useAtomValue(
@@ -169,7 +170,7 @@ function RoutingProbe({ input, onPrepared }: HarnessProps) {
       <span>{draft?.environmentId}</span>
       <button
         onClick={async () => {
-          const ready = await routing.refreshBeforeSend();
+          const ready = await routing.refreshBeforeSend(isCancelled);
           onPrepared?.(ready);
         }}
       >
@@ -212,6 +213,18 @@ it("refreshes a stored automatic choice before sending an unsent draft", async (
   });
   expect(store.getComposerDraft(draftId)?.prompt).toBe("Keep this prompt");
   expect(appAtomRegistry.get(destinationSelections)).toEqual(selections);
+});
+
+it("keeps the draft on its machine when the pending send is cancelled", async () => {
+  const { a, draftId, input, store } = setup();
+  const onPrepared = vi.fn();
+  await using screen = await render(
+    <Harness input={input} onPrepared={onPrepared} isCancelled={() => true} />,
+  );
+  await screen.getByRole("button", { name: "Send" }).click();
+  await vi.waitFor(() => expect(onPrepared).toHaveBeenCalledWith(false));
+  expect(store.getDraftSession(draftId)?.environmentId).toBe(a);
+  expect(store.getComposerDraft(draftId)?.prompt).toBe("Keep this prompt");
 });
 
 it.each(["manual", "attachments", "promoted"] as const)(

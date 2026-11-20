@@ -147,7 +147,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     loadBalancingSettings.loadBalancingWeights,
   );
   const readRouting = useStableCallback(() => ({ input, loadBalancingCandidates }));
-  const refreshBeforeSend = () => {
+  const refreshBeforeSend = (isCancelled?: () => boolean) => {
     if (
       !automaticEnvironment ||
       !draftId ||
@@ -161,6 +161,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     return loadBalancing.refreshSelection(loadBalancingCandidates).then((environmentId) => {
       const current = readRouting();
       if (
+        isCancelled?.() ||
         current.input.draftId !== draftId ||
         !current.input.automaticEnvironment ||
         current.input.composerHasAttachments ||

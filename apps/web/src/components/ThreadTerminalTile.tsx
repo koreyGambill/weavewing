@@ -736,6 +736,7 @@ function TerminalSessionViewport({
               writableSessionGeneration(current, hasTerminalWriteAccess()) !== generation
             )
               return;
+            terminal.revealPrompt();
             handleData("\x01");
           };
         }),

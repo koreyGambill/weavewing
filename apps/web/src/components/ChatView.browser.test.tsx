@@ -527,41 +527,56 @@ it("a rejected send leaves the timeline when a new draft was typed meanwhile", a
   expect(editor.element().textContent).toContain("Next draft");
 });
 
-it("stops a submitted turn before a running update reaches the composer", async () => {
-  const thread = threadWithHistory("stop-submission", 1);
-  using _environment = installFakeEnvironment([thread], {
-    acceptCommands: true,
-    threadStop: true,
-    holdCommand: (command) => command.type === "message.dispatch",
-  });
-  __setClientSettingsForTests({
-    ...DEFAULT_CLIENT_SETTINGS,
-    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
-  });
-  const router = getRouter(
-    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
-  );
-  await router.load();
-  await using _app = await render(<AppRoot router={router} />, {
-    // AppRoot brings its own router.
-    router: false,
-  });
-  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
-  await page.getByTestId("composer-editor").click();
-  await userEvent.keyboard("Wrong model{Enter}");
-  await vi.waitFor(() =>
-    expect(dispatchedCommands().some((command) => command.type === "message.dispatch")).toBe(true),
-  );
-  await page.getByRole("button", { name: "Stop generation" }).click();
-  expect(dispatchedCommands().some((command) => command.type === "thread.stop")).toBe(false);
-
-  await acknowledgePendingCommand();
-  await vi.waitFor(() =>
-    expect(dispatchedCommands()).toContainEqual(
-      expect.objectContaining({ type: "thread.stop", threadId: thread.id }),
-    ),
-  );
-});
+it.each(["before receipt", "after reopening"] as const)(
+  "stops a submitted turn before its run arrives (%s)",
+  async (when) => {
+    const thread = threadWithHistory(`stop-submission-${when.replaceAll(" ", "-")}`, 1);
+    const other = threadWithHistory("other-thread", 1);
+    using _environment = installFakeEnvironment([thread, other], {
+      acceptCommands: true,
+      threadStop: true,
+      holdCommand: (command) => command.type === "message.dispatch",
+    });
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const router = getRouter(
+      createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+    );
+    await router.load();
+    await using _app = await render(<AppRoot router={router} />, {
+      // AppRoot brings its own router.
+      router: false,
+    });
+    await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+    await page.getByTestId("composer-editor").click();
+    await userEvent.keyboard("Wrong model{Enter}");
+    await vi.waitFor(() =>
+      expect(dispatchedCommands().some((command) => command.type === "message.dispatch")).toBe(
+        true,
+      ),
+    );
+    const stop = page.getByRole("button", { name: "Stop generation" });
+    if (when === "before receipt") {
+      await stop.click();
+      expect(dispatchedCommands().some((command) => command.type === "thread.stop")).toBe(false);
+    }
+    await acknowledgePendingCommand();
+    if (when === "after reopening") {
+      await act(() => router.navigate({ to: `/${ENVIRONMENT_ID}/${other.id}` }));
+      await expect.element(page.getByText(`Answer 0 for ${other.id}.`)).toBeVisible();
+      await act(() => router.navigate({ to: `/${ENVIRONMENT_ID}/${thread.id}` }));
+      await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+      await stop.click();
+    }
+    await vi.waitFor(() =>
+      expect(dispatchedCommands()).toContainEqual(
+        expect.objectContaining({ type: "thread.stop", threadId: thread.id }),
+      ),
+    );
+  },
+);
 
 it("Enter on an empty prompt resumes an interrupted thread", async () => {
   const history = threadWithHistory("interrupted", 1);

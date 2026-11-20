@@ -1,6 +1,7 @@
 import {
   CommandId,
   type EnvironmentId,
+  type MessageId,
   type ModelSelection,
   type ScopedThreadRef,
   type ThreadId,
@@ -66,7 +67,7 @@ export class PendingTurnSubmission {
 export const pendingTurnSubmissionAtom = Atom.family((_routeKey: string) =>
   Atom.make<{
     readonly submission: PendingTurnSubmission;
-    readonly accepted: boolean;
+    readonly acceptedMessageId: MessageId | null;
   } | null>(null).pipe(Atom.keepAlive),
 );
 const draftSendStateByRouteKey = new Map<

@@ -394,7 +394,9 @@ it("moves keyboard focus between split terminals with Leader+h", async () => {
   const terminal = page.getByRole("region", { name: "Drop-down terminal" });
   await userEvent.keyboard("{Control>}j{/Control}");
   const focusedTile = () =>
-    document.activeElement?.closest("[data-tile-content]")?.getAttribute("data-tile-content");
+    document.activeElement instanceof HTMLTextAreaElement
+      ? document.activeElement.closest("[data-tile-content]")?.getAttribute("data-tile-content")
+      : null;
   await expect.element(terminal.getByRole("tab", { name: "right", exact: true })).toBeVisible();
   await vi.waitFor(() => expect(focusedTile()).toBe("terminal:right"));
   expect(layout().focusedGroupId).toBe("right-group");

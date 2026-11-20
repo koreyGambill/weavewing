@@ -1867,9 +1867,20 @@ export default function ChatView(props: ChatViewProps) {
     activeThread !== undefined,
     activeRuntime,
   );
-  const pendingTurn = useAtomValue(pendingTurnSubmissionAtom(routeThreadKey));
-  const canStopSubmission = pendingTurn !== null && (isSendBusy || !pendingTurn.accepted);
+  const pendingTurnAtom = pendingTurnSubmissionAtom(routeThreadKey);
+  const pendingTurn = useAtomValue(pendingTurnAtom);
+  const submissionAcknowledged =
+    pendingTurn?.acceptedMessageId != null &&
+    serverProjection?.messages.some((message) => message.id === pendingTurn.acceptedMessageId);
+  const canStopSubmission = pendingTurn !== null && !submissionAcknowledged;
   const canInterruptRunningThread = canOperateThread && (hasInterruptibleRun || canStopSubmission);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- retires the submission once its persisted message reaches the thread
+  useEffect(() => {
+    if (!submissionAcknowledged) return;
+    if (appAtomRegistry.get(pendingTurnAtom) === pendingTurn) {
+      appAtomRegistry.set(pendingTurnAtom, null);
+    }
+  }, [pendingTurnAtom, pendingTurn, submissionAcknowledged]);
   const interruptSubmittedTurn = async (targetThreadId: ThreadId) => {
     if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
     const result = await interruptThreadTurn({
@@ -1887,11 +1898,10 @@ export default function ChatView(props: ChatViewProps) {
   const onInterrupt = () => {
     if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
     if (hasInterruptibleRun && activeThread) return interruptSubmittedTurn(activeThread.id);
-    const pending = canStopSubmission
-      ? appAtomRegistry.get(pendingTurnSubmissionAtom(routeThreadKey))
-      : null;
+    const pending = canStopSubmission ? appAtomRegistry.get(pendingTurnAtom) : null;
     if (pending === null) return;
-    if (pending.accepted) return interruptSubmittedTurn(pending.submission.threadId);
+    if (pending.acceptedMessageId !== null)
+      return interruptSubmittedTurn(pending.submission.threadId);
     pending.submission.requestStop();
   };
   const onInterruptStable = useStableCallback(onInterrupt);
