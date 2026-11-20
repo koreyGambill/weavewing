@@ -86,8 +86,7 @@ it("records a new shortcut in place and saves it to every connected environment"
   });
   const pill = screen.getByRole("button", { name: /^Edit shortcut for Chat: New:/ });
   await expect.element(pill).toBeVisible();
-  // The modal dialog's inert layer swallows pointer events in this harness, so drive the DOM.
-  (pill.element() as HTMLElement).click();
+  await userEvent.click(pill);
   await expect
     .element(screen.getByRole("textbox", { name: "Keybinding for Chat: New" }))
     .toHaveFocus();
@@ -95,7 +94,7 @@ it("records a new shortcut in place and saves it to every connected environment"
   await userEvent.keyboard("{Control>}k{/Control}");
   const save = screen.getByRole("button", { name: "Save" });
   await expect.element(save).toBeEnabled();
-  (save.element() as HTMLElement).click();
+  await userEvent.click(save);
 
   await vi.waitFor(() => expect(mocks.command).toHaveBeenCalledTimes(2));
   const input = {

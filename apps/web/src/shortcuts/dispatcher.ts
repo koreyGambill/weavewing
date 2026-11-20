@@ -118,11 +118,14 @@ function runScopes(scopes: readonly CommandScope[], event: KeyboardEvent): boole
 
 function dispatchCaptureKeyDown(event: KeyboardEvent): void {
   if (event.defaultPrevented || event.isComposing) return;
+  if (event.target instanceof Element && event.target.closest("[data-keybinding-capture]")) {
+    // A recorder owns every key, including ones bound to palette and app shortcuts.
+    leader.cancel();
+    return;
+  }
   if (
     event.target instanceof Element &&
-    event.target.closest(
-      '[role="dialog"], [role="alertdialog"], [role="menu"], [data-keybinding-capture]',
-    )
+    event.target.closest('[role="dialog"], [role="alertdialog"], [role="menu"]')
   ) {
     leader.cancel();
     runScopes(captureScopes, event);

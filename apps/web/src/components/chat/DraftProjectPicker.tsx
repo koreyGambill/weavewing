@@ -379,9 +379,7 @@ export function DraftProjectPicker({
         },
         {
           capture: true,
-          when: (event) =>
-            (inline || !isCommandPaletteOpen()) &&
-            !(event.target instanceof Element && event.target.closest("[data-keybinding-capture]")),
+          when: () => inline || !isCommandPaletteOpen(),
         },
       ),
     [open, cycleMachine, inline, routeTarget, setAllMachines],
