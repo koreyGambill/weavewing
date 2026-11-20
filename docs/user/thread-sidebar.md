@@ -458,8 +458,9 @@ answer its questions.
 When a thread is idle, choose **Rewind conversation context** beside the composer
 on web and desktop, or from **Git controls** in the mobile thread header.
 Messages through the latest finished turn move into **Earlier conversation**.
-Your next message starts with fresh context. The thread keeps its files, draft,
-and checkpoints.
+Your next message starts with fresh context. The thread keeps its files and
+draft. Earlier checkpoints remain in the thread’s history. Checkpoint restore
+works only within the current provider session.
 
 On web and desktop, expand **Earlier conversation** to read the archived
 messages inline. Open it as a side chat tab or full chat to continue it. On

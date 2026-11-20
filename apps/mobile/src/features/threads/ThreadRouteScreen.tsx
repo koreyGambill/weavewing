@@ -483,7 +483,7 @@ function ThreadRouteContent(
     Dialog.confirm({
       title: "Rewind conversation context?",
       message:
-        "Earlier messages will move into Earlier conversation, where you can reopen them or bring them back. Your files, draft, and checkpoints stay in this thread.",
+        "Earlier messages will move into Earlier conversation, where you can reopen them or bring them back. Your files and draft stay here. After the rewind, you can restore only checkpoints made in the new session.",
       confirmText: "Rewind context",
       onConfirm: () => {
         if (!readEnvironmentScope(selectedThread.environmentId, AuthOrchestrationOperateScope))

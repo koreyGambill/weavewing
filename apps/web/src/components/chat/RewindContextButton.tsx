@@ -30,7 +30,7 @@ export function RewindContextButton(props: {
     setBusy(true);
     const confirmed = await settlePromise(() =>
       api.dialogs.confirm(
-        "Rewind conversation context?\nEarlier messages will move into Earlier conversation, where you can reopen them or bring them back. Your files, draft, and checkpoints stay in this thread.",
+        "Rewind conversation context?\nEarlier messages will move into Earlier conversation, where you can reopen them or bring them back. Your files and draft stay here. After the rewind, you can restore only checkpoints made in the new session.",
       ),
     );
     if (confirmed._tag === "Failure" || !confirmed.value) {
