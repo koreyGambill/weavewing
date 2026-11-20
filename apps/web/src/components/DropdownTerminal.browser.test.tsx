@@ -16,9 +16,13 @@ import { installFakeEnvironment } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
 import { dropdownTerminalRef } from "../dropdownTerminal.logic";
 import { useDropdownTerminalStore } from "../dropdownTerminalStore";
-import { CONVERSATION_TAB_ID } from "../threadTileLayout";
+import { CONVERSATION_TAB_ID, getTileGroups } from "../threadTileLayout";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
-import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectThreadRightPanelState,
+  selectThreadTileLayout,
+  useRightPanelStore,
+} from "../rightPanelStore";
 import type { EnvironmentPresentation } from "../state/environments";
 import { ConfirmDialogHost } from "./ConfirmDialogHost";
 import { DropdownTerminalButton, DropdownTerminalHost } from "./DropdownTerminal";
@@ -274,9 +278,22 @@ it("handles an outside click and keeps the toggle, shell and dialogs working", a
   await page.getByRole("alertdialog").getByRole("button", { name: "Cancel", exact: true }).click();
   await expect.element(terminal.getByRole("tab", { name: "Terminal 1" })).toBeVisible();
 
+  const pin = terminal.getByRole("button", { name: "Pin drop-down terminal" });
+  await pin.click();
+  await expect.element(pin).toHaveAttribute("aria-pressed", "true");
+  await outside.click();
+  await expect.element(outside).toHaveFocus();
+  await expect.element(terminal).toBeVisible();
+  await toggle.click();
+  await expect.element(terminal).not.toBeInTheDocument();
+  await toggle.click();
+  await expect.element(pin).toHaveAttribute("aria-pressed", "true");
+  await userEvent.keyboard("{Control>}a{/Control}{Shift>}P{/Shift}");
+  await expect.element(pin).toHaveAttribute("aria-pressed", "false");
+
   await outside.click();
   await expect.element(terminal).not.toBeInTheDocument();
-  expect(outsideAction).toHaveBeenCalledTimes(1);
+  expect(outsideAction).toHaveBeenCalledTimes(2);
   await expect.element(outside).toHaveFocus();
 
   await toggle.click();
@@ -350,4 +367,39 @@ it("inherits the source tab directory for new tabs and splits on the selected ma
   await terminal.getByRole("button", { name: /Run on/ }).click();
   await page.getByRole("menuitem", { name: "Build machine", exact: true }).click();
   await expect.poll(() => terminalPaths(remote)).toEqual(["/home/remote"]);
+});
+
+it("moves keyboard focus between split terminals with Leader+h", async () => {
+  using _environment = installFakeEnvironment([]);
+  const { local } = setup();
+  const ref = dropdownTerminalRef(local);
+  const store = useRightPanelStore.getState();
+  store.openTerminal(ref, "left", { cwd: "/left", worktreePath: null });
+  store.openTerminal(ref, "right", { cwd: "/right", worktreePath: null });
+  const layout = () => selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, ref);
+  const leftGroup = getTileGroups(layout()).find((group) => group.tabs.includes("terminal:left"))!;
+  store.applyTileAction(ref, {
+    type: "split",
+    tabId: "terminal:right",
+    targetGroupId: leftGroup.id,
+    axis: "horizontal",
+    side: "after",
+    groupId: "right-group",
+    splitId: "terminal-split",
+  });
+  expect(getTileGroups(layout()).some((group) => group.id === "right-group")).toBe(true);
+  store.applyTileAction(ref, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
+
+  await using _screen = await render(fixtureApp());
+  const terminal = page.getByRole("region", { name: "Drop-down terminal" });
+  await userEvent.keyboard("{Control>}j{/Control}");
+  const focusedTile = () =>
+    document.activeElement?.closest("[data-tile-content]")?.getAttribute("data-tile-content");
+  await expect.element(terminal.getByRole("tab", { name: "right", exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(focusedTile()).toBe("terminal:right"));
+  expect(layout().focusedGroupId).toBe("right-group");
+
+  await userEvent.keyboard("{Control>}a{/Control}h");
+  expect(layout().focusedGroupId).toBe(leftGroup.id);
+  await vi.waitFor(() => expect(focusedTile()).toBe("terminal:left"));
 });

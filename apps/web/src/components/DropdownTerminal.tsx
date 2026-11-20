@@ -12,6 +12,8 @@ import {
   ChevronDown,
   Maximize2,
   Minimize2,
+  Pin,
+  PinOff,
   SquareTerminal,
   TriangleAlert,
 } from "lucide-react";
@@ -65,6 +67,7 @@ import { Menu, MenuItem, MenuItemDetail, MenuPopup, MenuSeparator, MenuTrigger }
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const HEIGHT_STORAGE_KEY = "t3code:dropdown-terminal-height";
+const PIN_STORAGE_KEY = "t3code:dropdown-terminal-pinned";
 const NO_PENDING_SURFACES: ReadonlySet<string> = new Set();
 const noop = () => {};
 
@@ -139,13 +142,20 @@ function HeaderControl(props: {
   label: string;
   keys: string | null;
   onClick: () => void;
+  pressed?: boolean;
   children: ReactNode;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button variant="ghost" size="icon-sm" aria-label={props.label} onClick={props.onClick} />
+          <Button
+            variant={props.pressed === undefined ? "ghost" : "ghost-toggle"}
+            size="icon-sm"
+            aria-label={props.label}
+            aria-pressed={props.pressed}
+            onClick={props.onClick}
+          />
         }
       >
         {props.children}
@@ -160,6 +170,21 @@ function HeaderControl(props: {
 
 function DropdownTerminalPanel() {
   const expanded = useDropdownTerminalStore((state) => state.expanded);
+  const [pinned, setPinned] = useLocalStorage(PIN_STORAGE_KEY, false, Schema.Boolean);
+  const togglePinFromShortcut = useEffectEvent(() => setPinned((value) => !value));
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the pin command is available while the panel is open
+  useEffect(
+    () =>
+      registerCommands(
+        {
+          "terminal.dropdownPin": (event) => {
+            if (!event.repeat) togglePinFromShortcut();
+          },
+        },
+        { capture: true },
+      ),
+    [],
+  );
   const [height, setHeight] = useLocalStorage(
     HEIGHT_STORAGE_KEY,
     DROPDOWN_TERMINAL_DEFAULT_HEIGHT,
@@ -212,6 +237,7 @@ function DropdownTerminalPanel() {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- dismisses on document clicks, including controls that stop propagation
   useEffect(() => {
+    if (pinned) return;
     let pending: number | undefined;
     const isOutside = (event: MouseEvent) =>
       !event
@@ -246,7 +272,7 @@ function DropdownTerminalPanel() {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("click", onClick, true);
     };
-  }, []);
+  }, [pinned]);
   const drag = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
 
   // Moves the edge directly so a drag re-renders nothing until it ends.
@@ -341,6 +367,14 @@ function DropdownTerminalPanel() {
             onClick={() => useDropdownTerminalStore.getState().toggleExpanded()}
           >
             {expanded ? <Minimize2 /> : <Maximize2 />}
+          </HeaderControl>
+          <HeaderControl
+            label="Pin drop-down terminal"
+            keys={shortcutLabelForCommand(keybindings, "terminal.dropdownPin")}
+            pressed={pinned}
+            onClick={() => setPinned((value) => !value)}
+          >
+            {pinned ? <PinOff /> : <Pin />}
           </HeaderControl>
         </div>
       </header>
@@ -501,7 +535,10 @@ function DropdownTerminalWorkspace({
     previewSessions: {},
     desktopByTabId: {},
     terminalLabelsById,
-    onActivate: (surface) => useRightPanelStore.getState().activateSurface(ref, surface.id),
+    onActivate: (surface) => {
+      useRightPanelStore.getState().activateSurface(ref, surface.id);
+      if (surface.kind === "terminal") focusTerminal(ref, surface.resourceId);
+    },
     onCloseSurface: close.closeSurface,
     onCloseOtherSurfaces: close.closeOtherSurfaces,
     onCloseSurfacesToRight: close.closeSurfacesToRight,

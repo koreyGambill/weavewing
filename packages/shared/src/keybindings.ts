@@ -193,6 +193,7 @@ const LEADER_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "leader x", command: "workspace.tile.closeTab" },
   { key: "leader m", command: "workspace.tile.maximize" },
   { key: "leader shift+m", command: "terminal.dropdownExpand" },
+  { key: "leader shift+p", command: "terminal.dropdownPin" },
   { key: "leader 0", command: "workspace.tile.swap" },
   { key: "leader space", command: "workspace.tile.rotate" },
   { key: "leader t", command: "workspace.tile.newTab" },
