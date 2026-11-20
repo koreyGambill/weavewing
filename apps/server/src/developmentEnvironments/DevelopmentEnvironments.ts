@@ -10,6 +10,8 @@ import {
   DevelopmentEnvironmentProjectNotFoundError,
   DevelopmentEnvironmentSelectionRejectedError,
   type ProjectId,
+  type OrchestrationV2ServerCommand,
+  type OrchestrationV2AppThread,
   type ThreadId,
   type OrchestrationV2DevelopmentEnvironmentCheckout,
   type OrchestrationV2DevelopmentEnvironmentUsage,
@@ -18,12 +20,12 @@ import {
   type OrchestrationV2WorktreeThreadIds,
 } from "@t3tools/contracts";
 
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
-import * as FileSystem from "effect/FileSystem";
+import { normalizeProjectPathForComparison, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
@@ -31,6 +33,7 @@ import { WorktreeRemovalOwnership } from "../vcs/worktreeRemoval.ts";
 
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -59,6 +62,7 @@ export interface DevelopmentEnvironmentSelectionInput {
   readonly commandId: CommandId;
   /** The checkout the caller saw; selection is rejected if the thread has moved since. */
   readonly expected: {
+    readonly projectId?: ProjectId | undefined;
     readonly worktreePath: string | null;
     readonly xwingEnvironmentId: string | null;
   };
@@ -163,13 +167,15 @@ const isThreadNotFound = Schema.is(ProjectionStore.ProjectionStoreThreadNotFound
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
+  const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const checkouts = yield* DevelopmentEnvironmentCheckouts.DevelopmentEnvironmentCheckouts;
   const terminals = yield* TerminalManager.TerminalManager;
   const holds = yield* DevelopmentEnvironmentHolds.DevelopmentEnvironmentHolds;
   const paths = yield* WorkspacePaths.WorkspacePaths;
   const git = yield* GitVcsDriver.GitVcsDriver;
-  const fileSystem = yield* FileSystem.FileSystem;
+  const { canonical, repositoryOf } = yield* DevelopmentEnvironmentCheckouts.makeGitCheckoutLookup;
+  const path = yield* Path.Path;
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
   const ownership = yield* WorktreeRemovalOwnership;
 
@@ -226,9 +232,107 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const selectCheckout: DevelopmentEnvironments["Service"]["selectCheckout"] = Effect.fn(
-    "DevelopmentEnvironments.selectCheckout",
-  )(function* (input) {
+  const folderKey = (target: string) =>
+    canonical(target).pipe(Effect.map(normalizeProjectPathForComparison));
+
+  const projectForFolder = Effect.fn("DevelopmentEnvironments.projectForFolder")(
+    function* (folder: string) {
+      const destination = yield* folderKey(folder);
+      const registered = yield* projects.listShells();
+      const roots = (yield* Effect.forEach(
+        registered.filter((project) => project.archivedAt == null),
+        (project) =>
+          Effect.gen(function* () {
+            if (yield* managedFolders.isScratchProject(project.id)) return null;
+            return { id: project.id, root: yield* folderKey(project.workspaceRoot) };
+          }),
+        { concurrency: 8 },
+      )).filter((project) => project !== null);
+      let matching = roots.filter(
+        ({ root }) => workspaceRelativeFilePath(destination, root) !== null,
+      );
+      const exact = matching.filter(({ root }) => root === destination);
+      if (exact.length === 1) return exact[0]!.id;
+      if (exact.length === 0 && roots.length > 0) {
+        const repository = yield* repositoryOf(destination);
+        if (repository !== null) {
+          const translated = (yield* Effect.forEach(
+            roots.filter((project) => !matching.includes(project)),
+            ({ id, root }) =>
+              Effect.gen(function* () {
+                const candidate = yield* repositoryOf(root);
+                if (
+                  candidate === null ||
+                  normalizeProjectPathForComparison(candidate.commonDir) !==
+                    normalizeProjectPathForComparison(repository.commonDir)
+                )
+                  return null;
+                const relativeRoot = workspaceRelativeFilePath(root, candidate.topLevel);
+                if (relativeRoot === null) return null;
+                const checkoutRoot = yield* folderKey(
+                  path.resolve(repository.topLevel, relativeRoot),
+                );
+                return workspaceRelativeFilePath(destination, checkoutRoot) === null
+                  ? null
+                  : { id, root: checkoutRoot };
+              }),
+            { concurrency: 8 },
+          )).filter((project) => project !== null);
+          matching = [...matching, ...translated];
+        }
+      }
+      matching.sort((a, b) => b.root.length - a.root.length);
+      const [deepest, next] = matching;
+      if (deepest && deepest.root.length !== next?.root.length) return deepest.id;
+      return (yield* managedFolders.ensureScratchProject).projectId;
+    },
+    Effect.mapError(
+      () => new DevelopmentEnvironmentPersistenceError({ operation: "select-workspace" }),
+    ),
+  );
+
+  const dispatchSelection = (
+    command: Extract<OrchestrationV2ServerCommand, { type: "thread.workspace.select" }>,
+  ) =>
+    threads.dispatch(command).pipe(
+      Effect.catchTags({
+        OrchestratorWorkspaceSelectionRejectedError: (cause) =>
+          Effect.fail(
+            new DevelopmentEnvironmentSelectionRejectedError({
+              threadId: command.threadId,
+              reason: cause.reason,
+            }),
+          ),
+      }),
+      Effect.mapError((cause) =>
+        cause._tag === "DevelopmentEnvironmentSelectionRejectedError"
+          ? cause
+          : new DevelopmentEnvironmentPersistenceError({ operation: "select-workspace" }),
+      ),
+    );
+
+  const selectionResult = (
+    dispatched: Orchestrator.OrchestratorV2DispatchResult,
+    thread: Pick<OrchestrationV2AppThread, "worktreePath" | "branch" | "developmentEnvironment">,
+  ): DevelopmentEnvironmentSelectionResult => {
+    const selected = dispatched.storedEvents.findLast(
+      (stored) => stored.event.type === "thread.metadata-updated",
+    );
+    const after =
+      selected?.event.type === "thread.metadata-updated" ? selected.event.payload : thread;
+    return {
+      changed: selected !== undefined,
+      sequence: dispatched.sequence,
+      worktreePath: after.worktreePath,
+      branch: after.branch,
+      developmentEnvironment: after.developmentEnvironment ?? null,
+    };
+  };
+
+  const selectWorkspace = Effect.fn("DevelopmentEnvironments.selectCheckout")(function* (
+    input: DevelopmentEnvironmentSelectionInput,
+    associateProject = false,
+  ) {
     const reject = (reason: DevelopmentEnvironmentSelectionRejectedError["reason"]) =>
       new DevelopmentEnvironmentSelectionRejectedError({
         threadId: input.threadId,
@@ -244,11 +348,24 @@ const make = Effect.gen(function* () {
         ),
       );
     const { thread } = records;
+    if (associateProject && (yield* threads.hasReceipt(input.commandId))) {
+      const dispatched = yield* dispatchSelection({
+        type: "thread.workspace.select",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        expected: input.expected,
+        worktreePath: thread.worktreePath,
+        branch: thread.branch,
+        developmentEnvironment: thread.developmentEnvironment ?? null,
+      });
+      return selectionResult(dispatched, thread);
+    }
     if (thread.deletedAt !== null) return yield* reject("deleted");
     if (isProviderNativeSubagentThread(thread)) return yield* reject("provider-native-subagent");
     // Checked again under the orchestrator's lock; checking first keeps a rejected move from
     // leaving a hold behind.
     if (
+      (input.expected.projectId !== undefined && input.expected.projectId !== thread.projectId) ||
       input.expected.worktreePath !== thread.worktreePath ||
       input.expected.xwingEnvironmentId !==
         (thread.developmentEnvironment?.xwingEnvironmentId ?? null)
@@ -288,26 +405,20 @@ const make = Effect.gen(function* () {
       return yield* reject("work-in-progress");
     }
     const current = thread.developmentEnvironment ?? null;
-    const dispatch = threads
-      .dispatch({
-        type: "thread.workspace.select",
-        commandId: input.commandId,
-        threadId: input.threadId,
-        expected: input.expected,
-        worktreePath: target.worktreePath,
-        branch: target.branch,
-        developmentEnvironment: target.developmentEnvironment,
-      })
-      .pipe(
-        Effect.catchTags({
-          OrchestratorWorkspaceSelectionRejectedError: (cause) => Effect.fail(reject(cause.reason)),
-        }),
-        Effect.mapError((cause) =>
-          cause._tag === "DevelopmentEnvironmentSelectionRejectedError"
-            ? cause
-            : new DevelopmentEnvironmentPersistenceError({ operation: "select-workspace" }),
-        ),
-      );
+    const projectId =
+      associateProject && target.worktreePath !== null
+        ? yield* projectForFolder(target.worktreePath)
+        : undefined;
+    const dispatch = dispatchSelection({
+      type: "thread.workspace.select",
+      commandId: input.commandId,
+      threadId: input.threadId,
+      expected: { ...input.expected, projectId: input.expected.projectId ?? thread.projectId },
+      worktreePath: target.worktreePath,
+      branch: target.branch,
+      developmentEnvironment: target.developmentEnvironment,
+      ...(projectId === undefined ? {} : { projectId }),
+    });
     // A new binding commits holding its own period's key; a failed dispatch releases it.
     const dispatched = yield* target.developmentEnvironment !== null &&
     (current?.xwingEnvironmentId !== target.developmentEnvironment.xwingEnvironmentId ||
@@ -322,34 +433,31 @@ const make = Effect.gen(function* () {
           dispatch,
         )
       : dispatch;
-    const selected = dispatched.storedEvents.findLast(
-      (stored) => stored.event.type === "thread.metadata-updated",
-    );
-    const after =
-      selected?.event.type === "thread.metadata-updated" ? selected.event.payload : thread;
-    return {
-      changed: selected !== undefined,
-      sequence: dispatched.sequence,
-      worktreePath: after.worktreePath,
-      branch: after.branch,
-      developmentEnvironment: after.developmentEnvironment ?? null,
-    };
+    return selectionResult(dispatched, thread);
   });
+
+  const selectCheckout: DevelopmentEnvironments["Service"]["selectCheckout"] = (input) =>
+    selectWorkspace(input);
 
   const changeFolder: DevelopmentEnvironments["Service"]["changeFolder"] = Effect.fn(
     "DevelopmentEnvironments.changeFolder",
   )(function* (input) {
+    if (yield* threads.hasReceipt(input.commandId)) {
+      // Replaying a committed move must work even if its folder is gone now.
+      return yield* selectWorkspace(
+        {
+          ...input,
+          target: { type: "native", worktreePath: null, branch: null },
+        },
+        true,
+      );
+    }
     const folder = yield* paths
       .normalizeWorkspaceRoot(input.folder)
       .pipe(
         Effect.mapError(
           (cause) => new ThreadFolderUnavailableError({ folder: input.folder, cause }),
         ),
-      );
-    const folderKey = (target: string) =>
-      fileSystem.realPath(target).pipe(
-        Effect.orElseSucceed(() => target),
-        Effect.map(normalizeProjectPathForComparison),
       );
     let xwingEnvironmentId = input.xwingEnvironmentId;
     if (xwingEnvironmentId === undefined) {
@@ -376,15 +484,18 @@ const make = Effect.gen(function* () {
         Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() || null : null)),
         Effect.orElseSucceed(() => null),
       );
-    return yield* selectCheckout({
-      threadId: input.threadId,
-      commandId: input.commandId,
-      expected: input.expected,
-      target:
-        xwingEnvironmentId === undefined
-          ? { type: "native", worktreePath: folder, branch }
-          : { type: "xwing", xwingEnvironmentId, workspaceRoot: folder },
-    });
+    return yield* selectWorkspace(
+      {
+        threadId: input.threadId,
+        commandId: input.commandId,
+        expected: input.expected,
+        target:
+          xwingEnvironmentId === undefined
+            ? { type: "native", worktreePath: folder, branch }
+            : { type: "xwing", xwingEnvironmentId, workspaceRoot: folder },
+      },
+      true,
+    );
   });
 
   const listCheckouts: DevelopmentEnvironments["Service"]["listCheckouts"] = Effect.fn(

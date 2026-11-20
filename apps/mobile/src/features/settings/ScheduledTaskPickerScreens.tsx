@@ -23,7 +23,7 @@ import { ThreadSettingsPickerScreen } from "../threads/ThreadSettingsSheet";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
   NEW_THREAD_DESTINATION_LABEL,
-  useScheduledTaskDestinationLabel,
+  useScheduledTaskThread,
   useScheduledTaskEditor,
 } from "./scheduled-task-editor";
 import { moveDraftToThread, unbindDraftFromThread } from "./scheduledTaskDraft";
@@ -124,12 +124,13 @@ export function ScheduledTaskModelPickerRouteScreen() {
 export function ScheduledTaskBranchPickerRouteScreen() {
   const navigation = useNavigation();
   const { editor, setEditor } = useScheduledTaskEditor();
+  const environmentId = editor?.environmentId ?? null;
+  const boundThread = useScheduledTaskThread(environmentId, editor?.draft.threadId ?? null);
+  const projectId = boundThread?.projectId ?? editor?.draft.projectId ?? null;
   const projects = useProjects();
   const project =
-    projects.find(
-      (entry) =>
-        entry.environmentId === editor?.environmentId && entry.id === editor.draft.projectId,
-    ) ?? null;
+    projects.find((entry) => entry.environmentId === environmentId && entry.id === projectId) ??
+    null;
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 150);
   const branches = usePaginatedBranches({
@@ -189,9 +190,10 @@ export function ScheduledTaskThreadPickerRouteScreen() {
   const insets = useSafeAreaInsets();
   const { editor, setEditor } = useScheduledTaskEditor();
   const environmentId = editor?.environmentId ?? null;
-  const projectId = editor?.draft.projectId ?? null;
   const threadId = editor?.draft.threadId ?? null;
-  const currentLabel = useScheduledTaskDestinationLabel(environmentId, threadId);
+  const boundThread = useScheduledTaskThread(environmentId, threadId);
+  const projectId = boundThread?.projectId ?? editor?.draft.projectId ?? null;
+  const currentLabel = boundThread?.title.trim() || `Thread ${threadId}`;
   const shells = useVisibleThreadShells();
   const [query, setQuery] = useState("");
   const search = {
@@ -278,7 +280,14 @@ export function ScheduledTaskThreadPickerRouteScreen() {
                         ...current,
                         draft: item.thread
                           ? moveDraftToThread(current.draft, item.thread)
-                          : { ...unbindDraftFromThread(current.draft), threadMode: "new_thread" },
+                          : {
+                              ...unbindDraftFromThread(current.draft),
+                              projectId:
+                                boundThread?.id === current.draft.threadId
+                                  ? boundThread.projectId
+                                  : current.draft.projectId,
+                              threadMode: "new_thread",
+                            },
                       }
                     : current,
                 );

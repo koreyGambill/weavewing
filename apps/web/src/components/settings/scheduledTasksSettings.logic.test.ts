@@ -28,6 +28,7 @@ import {
   grantFromDraft,
   limitsDraftErrors,
   unbindDraftFromThread,
+  moveDraftToThread,
 } from "./scheduledTasksSettings.logic";
 
 const laptopId = EnvironmentId.make("laptop");
@@ -203,11 +204,19 @@ describe("scheduled task destination", () => {
       threadId: ThreadId.make("thread:bound"),
       workspaceStrategy: { type: "root" },
     });
-    expect(unbindDraftFromThread(rootBound)).toMatchObject({
+    const detached = unbindDraftFromThread(rootBound);
+    expect(detached).toMatchObject({
       threadId: "",
+      detachFromThread: true,
       workspaceMode: "worktree",
       startFromOrigin: true,
     });
+    expect(
+      moveDraftToThread(detached, {
+        id: ThreadId.make("thread:replacement"),
+        projectId: ProjectId.make("project:replacement"),
+      }),
+    ).toMatchObject({ threadId: "thread:replacement", detachFromThread: false });
   });
 });
 

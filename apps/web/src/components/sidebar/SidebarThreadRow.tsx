@@ -1,3 +1,5 @@
+import { scratchThreadFolder } from "@t3tools/client-runtime/state/projects";
+import { fileBasename } from "@t3tools/shared/path";
 import { ThreadGlyph } from "../ThreadGlyph";
 import { useAtomMount } from "@effect/atom-react";
 import { asLaunchingThread } from "@t3tools/client-runtime/state/thread-inbox";
@@ -119,7 +121,7 @@ import {
 } from "../ThreadStatusIndicators";
 import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Sidebar.snooze";
 import { useThreadShell } from "../../state/entities";
-import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -260,7 +262,7 @@ function SidebarThreadTooltip({
   terminalProcessCount,
 }: {
   thread: SidebarThreadSummary;
-  project: ProjectFaviconProject | null;
+  project: EnvironmentProject | null;
   projectDisplayName: string | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
@@ -276,6 +278,8 @@ function SidebarThreadTooltip({
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
 }) {
+  const scratchFolder = scratchThreadFolder(project, thread.worktreePath);
+  const projectLabel = scratchFolder ?? projectDisplayName;
   const driverKind = providerEntry?.driverKind ?? null;
   const previousProviderNames = thread.providerInstanceHistory
     .filter((instanceId) => instanceId !== modelInstanceId)
@@ -293,10 +297,14 @@ function SidebarThreadTooltip({
           ) : null
         }
       >
-        {projectDisplayName ? (
+        {projectLabel ? (
           <div className="flex min-w-0 items-center gap-2">
             {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
-            <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
+            <div
+              className={cn("min-w-0 text-foreground/75", scratchFolder ? "break-all" : "truncate")}
+            >
+              {projectLabel}
+            </div>
           </div>
         ) : null}
         {environmentLabel ? (
@@ -882,6 +890,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     : thread.modelSelection.model;
 
   const localityLabel = sidebarComputerLocalityLabel(props.onThisComputer, props.environmentLabel);
+  const scratchFolder = scratchThreadFolder(props.project, thread.worktreePath);
+  const projectDisplayName =
+    scratchFolder === null ? props.projectDisplayName : fileBasename(scratchFolder);
   const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
@@ -1235,6 +1246,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const metaLineEmpty =
     !checkoutThread.branch &&
     !showsScratchMachine &&
+    scratchFolder === null &&
     prBadge === null &&
     diff === null &&
     runningTerminalIds.length === 0;
@@ -1259,6 +1271,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+      {scratchFolder !== null ? (
+        <span className="min-w-0 flex-1 truncate">{projectDisplayName}</span>
+      ) : null}
       {checkoutThread.branch ? (
         <>
           <ThreadWorktreeIndicator thread={checkoutThread} />
@@ -1275,9 +1290,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           />
           <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
         </>
-      ) : (
+      ) : scratchFolder === null ? (
         <span className="flex-1" />
-      )}
+      ) : null}
       {clippedIndicators(
         <>
           {terminalStatusIcon}
@@ -1336,6 +1351,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-sidebar-row={threadKey}
                 data-sidebar-parent={props.navigationParent}
                 aria-label={accessibility.label}
+                aria-description={scratchFolder ?? undefined}
                 aria-current={accessibility.current}
                 data-testid={inFolder ? "sidebar-row-folder" : "sidebar-row-slim"}
                 aria-busy={isRegeneratingTitle || undefined}
@@ -1365,6 +1381,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               />
               {draftIndicator}
               {title}
+              {!multiline && scratchFolder !== null ? (
+                <span className="max-w-1/4 shrink truncate text-secondary-label text-xs">
+                  {projectDisplayName}
+                </span>
+              ) : null}
               {multiline ? titleLineIcons : automationMarker}
               {pinIndicator}
               {multiline ? null : terminalStatusIcon}
@@ -1529,6 +1550,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               data-sidebar-row={threadKey}
               data-sidebar-parent={props.navigationParent}
               aria-label={accessibility.label}
+              aria-description={scratchFolder ?? undefined}
               aria-current={accessibility.current}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || undefined}
@@ -1549,11 +1571,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName ? (
+              {projectDisplayName ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
-                  {props.projectDisplayName}
+                  {projectDisplayName}
                 </span>
               ) : (
                 <span className="flex-1" />

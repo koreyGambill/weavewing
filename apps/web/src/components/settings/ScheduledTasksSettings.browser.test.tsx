@@ -24,6 +24,7 @@ import { ConfirmDialogHost } from "../ConfirmDialogHost";
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
 const environmentId = EnvironmentId.make("laptop");
 const projectId = ProjectId.make("project");
+const movedProjectId = ProjectId.make("moved-project");
 const task: ScheduledTask = {
   id: ScheduledTaskId.make("nightly"),
   title: "Review issues",
@@ -54,6 +55,9 @@ const threadFamilyRead = {
     {
       id: task.threadId,
       title: "Fix login bug",
+      get projectId() {
+        return state.boundProjectId;
+      },
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5" },
     },
   ],
@@ -61,6 +65,7 @@ const threadFamilyRead = {
 
 const state = vi.hoisted(() => ({
   connected: true,
+  boundProjectId: null as ProjectId | null,
   tasksLoaded: true,
   secondary: false,
   allScope: false,
@@ -75,6 +80,7 @@ const permissions = new Map<string, Atom.Writable<boolean>>();
 
 function setup() {
   state.connected = true;
+  state.boundProjectId = projectId;
   state.workspaceStrategy = task.workspaceStrategy;
   state.worktreeProvider = "t3";
   state.providerAvailable = false;
@@ -190,7 +196,10 @@ vi.mock(import("../../state/environments"), async (original) => ({
 }));
 vi.mock(import("../../state/entities"), async (original) => ({
   ...(await original()),
-  useProjects: (() => [{ id: projectId, environmentId, title: "Project" }]) as never,
+  useProjects: (() => [
+    { id: projectId, environmentId, title: "Project" },
+    { id: movedProjectId, environmentId, title: "Moved project" },
+  ]) as never,
 }));
 vi.mock(import("../../hooks/useSettings"), async (original) => ({
   ...(await original()),
@@ -299,17 +308,47 @@ describe("ScheduledTasksSettings", () => {
     await expect.element(name).toHaveValue("Review stale issues");
   });
 
-  it("keeps a saved worktree when editing a task with isolated checkouts off", async () => {
+  it("edits a moved task in its thread's live project and keeps its saved worktree", async () => {
     setup();
+    state.boundProjectId = movedProjectId;
     state.worktreeProvider = "off";
     state.providerAvailable = true;
     state.workspaceStrategy = { type: "worktree", baseRef: "release", branch: "scheduled/review" };
     await using screen = await render(<ScheduledTasksSettings taskId={task.id} />);
+    await expect
+      .element(screen.getByRole("combobox", { name: "Project" }))
+      .toHaveTextContent("Moved project");
     await userEvent.click(screen.getByRole("button", { name: "Save task" }));
     await vi.waitFor(() =>
       expect(state.upsert).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
         environmentId,
-        input: expect.objectContaining({ workspaceStrategy: state.workspaceStrategy }),
+        input: expect.objectContaining({
+          projectId: movedProjectId,
+          threadId: task.threadId,
+          workspaceStrategy: state.workspaceStrategy,
+        }),
+      }),
+    );
+  });
+
+  it("sends an explicit detach when the project picker returns to the stored project", async () => {
+    setup();
+    state.boundProjectId = movedProjectId;
+    state.providerAvailable = true;
+    await using screen = await render(<ScheduledTasksSettings taskId={task.id} />);
+    const project = screen.getByRole("combobox", { name: "Project" });
+    await expect.element(project).toHaveTextContent("Moved project");
+    await userEvent.click(project);
+    await userEvent.click(page.getByRole("option", { name: "Project", exact: true }));
+    await userEvent.click(screen.getByRole("button", { name: "Save task" }));
+    await vi.waitFor(() =>
+      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+        environmentId,
+        input: expect.objectContaining({
+          projectId,
+          threadId: null,
+          detachFromThread: true,
+        }),
       }),
     );
   });

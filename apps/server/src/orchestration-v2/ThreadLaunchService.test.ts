@@ -1405,6 +1405,9 @@ function xwingIntake(options: { readonly checkoutUnavailable?: boolean } = {}) {
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(NodeServices.layer),
     Layer.provide(Layer.mock(WorkspacePaths.WorkspacePaths)({})),
+    Layer.provide(
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
+    ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
     Layer.provide(DevelopmentEnvironmentHolds.layer),
     Layer.provide(

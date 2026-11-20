@@ -1,4 +1,5 @@
 import { createMemoryHistory } from "@tanstack/react-router";
+import { ProjectId } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
 import { expect, it, vi } from "vite-plus/test";
@@ -9,8 +10,10 @@ import { AppRoot } from "~/AppRoot";
 import "~/components/ChatView";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 import {
   ENVIRONMENT_ID,
+  emitThreadShell,
   installFakeEnvironment,
   threadWithHistory,
   type FakeDriver,
@@ -140,4 +143,39 @@ it("keeps focus in the search box when a click picks a search result", async () 
   expect(onSelect).toHaveBeenCalledOnce();
   // Picking clears the results; a focused result would drop focus, and its recovery scrolls the list.
   await expect.element(search).toHaveFocus();
+});
+
+it("shows the current Scratch folder and updates the project on the same thread route", async () => {
+  // AppRoot's registry outlives its mount.
+  await act(() => appAtomRegistry.reset());
+  await page.viewport(1400, 900);
+  const thread = { ...threadWithHistory("folder-move", 1), worktreePath: "/workspace/loose-notes" };
+  const destination = { id: ProjectId.make("destination"), title: "Destination project" };
+  using _environment = installFakeEnvironment([thread], {
+    extraProjects: [destination],
+    scratchWorkspaceRoot: "/workspace/render",
+  });
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    boringSidebarEnabled: false,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const pathname = `/${ENVIRONMENT_ID}/${thread.id}`;
+  const router = getRouter(createMemoryHistory({ initialEntries: [pathname] }));
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  const row = page.getByTestId("sidebar-row-card").filter({ hasText: thread.title });
+  const scratchLabel = row.getByText("loose-notes", { exact: true });
+  await expect.element(scratchLabel).toBeVisible();
+  await expect.element(row).toHaveAttribute("aria-description", thread.worktreePath);
+  await emitThreadShell({
+    ...thread,
+    projectId: destination.id,
+    worktreePath: "/workspace/Destination project/src",
+  });
+  await expect.element(row.getByText(destination.title, { exact: true })).toBeVisible();
+  expect(router.state.location.pathname).toBe(pathname);
 });

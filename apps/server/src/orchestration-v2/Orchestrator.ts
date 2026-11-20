@@ -402,13 +402,20 @@ export class OrchestratorWorkspaceSelectionRejectedError extends Schema.TaggedEr
   {
     commandId: CommandId,
     threadId: ThreadId,
-    reason: Schema.Literals(["deleted", "workspace-changed", "work-in-progress"]),
+    reason: Schema.Literals([
+      "deleted",
+      "project-missing",
+      "workspace-changed",
+      "work-in-progress",
+    ]),
   },
 ) {
   override get message(): string {
     switch (this.reason) {
       case "deleted":
         return "This thread was deleted.";
+      case "project-missing":
+        return "The destination project no longer exists.";
       case "workspace-changed":
         return "This thread's checkout changed. Review the current checkout and try again.";
       case "work-in-progress":
@@ -4732,6 +4739,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }),
       ),
     );
+    const projectChanged =
+      command.type === "thread.workspace.select" &&
+      command.projectId !== undefined &&
+      command.projectId !== thread.projectId;
     // Server preparation and an agent's handoff may move a running thread; clients may not.
     const clientWorkspaceChange =
       command.type === "thread.metadata.update" &&
@@ -4754,11 +4765,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (thread.deletedAt !== null) return yield* rejectSelection("deleted");
       if (
         command.type === "thread.workspace.select" &&
-        (command.expected.worktreePath !== thread.worktreePath ||
+        ((command.expected.projectId !== undefined &&
+          command.expected.projectId !== thread.projectId) ||
+          command.expected.worktreePath !== thread.worktreePath ||
           command.expected.xwingEnvironmentId !==
             (thread.developmentEnvironment?.xwingEnvironmentId ?? null))
       ) {
         return yield* rejectSelection("workspace-changed");
+      }
+      if (command.type === "thread.workspace.select" && command.projectId !== undefined) {
+        const project = yield* projects.get(command.projectId).pipe(mapDispatchError(command));
+        if (
+          Option.isNone(project) ||
+          project.value.deletedAt !== null ||
+          project.value.archivedAt != null
+        ) {
+          return yield* rejectSelection("project-missing");
+        }
       }
       const records = yield* projectionStore
         .getThreadRecords(
@@ -4781,7 +4804,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return yield* rejectSelection("work-in-progress");
       }
       // Moving detaches every session, which would end background agents and commands.
-      if (command.worktreePath !== thread.worktreePath) {
+      if (projectChanged || command.worktreePath !== thread.worktreePath) {
         for (const session of records.providerSessions) {
           if (session.status === "stopped" || session.status === "error") continue;
           if (yield* sessionHasBackgroundWork(session, records.providerThreads)) {
@@ -4791,6 +4814,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       if (
         command.type === "thread.workspace.select" &&
+        !projectChanged &&
         command.worktreePath === thread.worktreePath &&
         command.branch === thread.branch &&
         sameDevelopmentEnvironmentCheckout(
@@ -5102,7 +5126,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (command.type === "thread.metadata.update" &&
         command.worktreePath !== undefined &&
         command.worktreePath !== thread.worktreePath) ||
-      (command.type === "thread.workspace.select" && command.worktreePath !== thread.worktreePath);
+      (command.type === "thread.workspace.select" &&
+        (projectChanged || command.worktreePath !== thread.worktreePath));
     const providerContext = needsProviderState
       ? yield* projectionStore
           .getThreadProviderContext(
@@ -5156,7 +5181,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               command.worktreePath !== undefined &&
               command.worktreePath !== thread.worktreePath) ||
             (command.type === "thread.workspace.select" &&
-              command.worktreePath !== thread.worktreePath)
+              (projectChanged || command.worktreePath !== thread.worktreePath))
           ? (providerContext?.providerSessions ?? []).map((session) => session.id)
           : command.type === "thread.runtime-mode.set"
             ? (providerContext?.providerSessions ?? [])
@@ -5623,6 +5648,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.workspace.select":
           return {
             ...thread,
+            projectId: command.projectId ?? thread.projectId,
             unlinkedDevelopmentEnvironmentIds: (
               thread.unlinkedDevelopmentEnvironmentIds ?? []
             ).filter((id) => id !== command.developmentEnvironment?.xwingEnvironmentId),
@@ -5638,7 +5664,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             developmentEnvironment:
               command.developmentEnvironment === null
                 ? null
-                : { ...command.developmentEnvironment, selectedAt: now },
+                : {
+                    ...command.developmentEnvironment,
+                    selectedAt:
+                      thread.developmentEnvironment &&
+                      sameDevelopmentEnvironmentCheckout(
+                        command.developmentEnvironment,
+                        thread.developmentEnvironment,
+                      )
+                        ? thread.developmentEnvironment.selectedAt
+                        : now,
+                  },
             updatedAt: now,
           };
         case "thread.pull-request.link":
@@ -17209,6 +17245,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
       );
     }
+    // Project deletion reads its threads before committing, so ownership changes share its lock.
+    if (command.type === "thread.workspace.select" && command.projectId !== undefined)
+      return yield* threadDispatch.withDeletionLock(dispatch);
     if (command.type === "thread.delete")
       return yield* threadDispatch.withDeletionLock(
         threadDispatch.withLock(

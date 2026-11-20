@@ -660,13 +660,13 @@ function TaskForm({
   environmentId,
   environmentLabel,
   availableTargets,
-  draft,
+  draft: storedDraft,
   saving,
   setSaving,
   dictationPending,
   promptField,
-  setDraft,
-  setEnvironmentDraft,
+  setDraft: updateDraft,
+  setEnvironmentDraft: updateEnvironmentDraft,
   onSaved,
   onChangeEnvironment,
 }: {
@@ -688,6 +688,16 @@ function TaskForm({
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
+  const boundThread = useScheduledTaskThread(environmentId, storedDraft.threadId);
+  const withLiveProject = (current: Draft) =>
+    boundThread !== null && boundThread.id === current.threadId
+      ? { ...current, projectId: boundThread.projectId }
+      : current;
+  const draft = withLiveProject(storedDraft);
+  const setDraft = (update: (current: Draft) => Draft) =>
+    updateDraft((current) => update(withLiveProject(current)));
+  const setEnvironmentDraft = (update: (current: Draft) => Draft) =>
+    updateEnvironmentDraft((current) => update(withLiveProject(current)));
   // Pinned first. The chosen project stays listed after it is archived.
   const projects = useProjects()
     .filter(
@@ -700,7 +710,6 @@ function TaskForm({
     .sort((left, right) => Number(right.pinnedAt != null) - Number(left.pinnedAt != null));
   const config = useEnvironmentServerConfig(environmentId);
   const destinationLabel = useScheduledTaskDestinationLabel(environmentId, draft.threadId);
-  const boundThread = useScheduledTaskThread(environmentId, draft.threadId);
   // Bound runs use the thread's current model, so the locked row shows that one.
   const shownSelection =
     draft.threadId === null ? draft.modelSelection : (boundThread?.modelSelection ?? null);
@@ -744,7 +753,7 @@ function TaskForm({
   const save = async () => {
     const current = readEditor();
     if (!current || current.environmentId !== environmentId) return;
-    const draft = current.draft;
+    const draft = withLiveProject(current.draft);
     const savedWorkspace = draft.task?.workspaceStrategy;
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
@@ -819,6 +828,7 @@ function TaskForm({
       schedule,
       enabled: draft.enabled,
       threadId: draft.threadId,
+      ...(draft.task !== null && draft.detachFromThread ? { detachFromThread: true } : {}),
       ...(offersThreadModes ? { threadMode: draft.threadMode } : {}),
       workspaceStrategy:
         draftWorkspace(draft, worktreeProvider) === "root"
