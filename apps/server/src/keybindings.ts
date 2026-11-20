@@ -233,6 +233,16 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     rule: { key: "ctrl+k", command: "search.toggle", when: "isMac" },
   },
   {
+    id: "weavewing.mod-t-new-tab.leader.v1",
+    alongside: { key: "leader t", command: "workspace.tile.newTab" },
+    rule: { key: "mod+t", command: "workspace.tile.newTab", when: "isDesktop" },
+  },
+  {
+    id: "weavewing.mod-t-new-tab.classic.v1",
+    alongside: { key: "ctrl+alt+o", command: "workspace.tile.newTab" },
+    rule: { key: "mod+t", command: "workspace.tile.newTab", when: "isDesktop" },
+  },
+  {
     id: "weavewing.terminal-keys.v1",
     alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
     rule: { key: "mod+w", command: "workspace.tile.closeTab" },
@@ -970,7 +980,9 @@ const make = Effect.gen(function* () {
         if (id === "weavewing.terminal-keys.v1" && closeConflict) continue;
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
-          !customConfig.some((entry) => hasSameShortcutContext(entry, rule))
+          ![...customConfig, ...missingDefaults].some((entry) =>
+            hasSameShortcutContext(entry, rule),
+          )
         ) {
           missingDefaults.push(rule);
         }

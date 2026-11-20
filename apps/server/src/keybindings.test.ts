@@ -470,6 +470,64 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect.each([
+    { name: "leader", enabled: true },
+    { name: "classic", enabled: false },
+  ])("adds Cmd/Ctrl+T to a migrated $name config once", ({ enabled }) =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const keybindings = yield* Keybindings.Keybindings;
+      const modT = { key: "mod+t", command: "workspace.tile.newTab", when: "isDesktop" } as const;
+      yield* writeKeybindingsConfig(
+        keybindingsConfigPath,
+        SharedKeybindings.defaultKeybindingsForMode(enabled).filter(
+          (rule) => rule.key !== modT.key,
+        ),
+      );
+      // The ledger of a config saved before Cmd/Ctrl+T existed.
+      yield* fs.writeFileString(
+        path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations"),
+        [
+          "composer.sendBackground:mod+enter",
+          "workspace.tile.focusLeft:ctrl+alt+h",
+          "workspace.tile.focusDown:ctrl+alt+j",
+          "workspace.tile.focusUp:ctrl+alt+k",
+          "workspace.tile.focusRight:ctrl+alt+l",
+          "workspace.tile.previousTab:ctrl+shift+tab",
+          "workspace.tile.nextTab:ctrl+tab",
+          "weavewing.search-palette.v1",
+          "weavewing.terminal-keys.v1",
+          "weavewing.leader.v1",
+          "weavewing.leader-arrow-left.v1",
+          "weavewing.leader-arrow-down.v1",
+          "weavewing.leader-arrow-up.v1",
+          "weavewing.leader-arrow-right.v1",
+          "weavewing.mac-tab-keys.thread-previous.v1",
+          "weavewing.mac-tab-keys.tab-previous.v1",
+          "weavewing.mac-tab-keys.thread-next.v1",
+          "weavewing.mac-tab-keys.tab-next.v1",
+          "weavewing.new-thread-mod-n.v2",
+          "weavewing.dropdown-mod-j.v1",
+          "weavewing.leader-tile-focus.v1",
+          "weavewing.mac-ctrl-k.v1",
+          "",
+        ].join("\n"),
+      );
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const newTab = (yield* readKeybindingsConfig(keybindingsConfigPath)).filter(
+        (rule) => rule.command === "workspace.tile.newTab",
+      );
+      assert.sameDeepMembers(newTab, [
+        modT,
+        { key: enabled ? "leader t" : "ctrl+alt+o", command: "workspace.tile.newTab" },
+      ]);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
