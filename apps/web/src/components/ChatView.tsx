@@ -486,8 +486,8 @@ export default function ChatView(props: ChatViewProps) {
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = scopeThreadRef(environmentId, threadId);
-  const workspaceThreadRef =
-    useContext(RelatedThreadWorkspaceContext) ?? parentPanel?.hostRef ?? routeThreadRef;
+  const relatedWorkspace = useContext(RelatedThreadWorkspaceContext);
+  const workspaceThreadRef = relatedWorkspace ?? parentPanel?.hostRef ?? routeThreadRef;
   const routeThreadKey = scopedThreadKey(routeThreadRef);
   const currentRouteThreadKeyRef = useRef<string | null>(routeThreadKey);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the committed route thread key to a ref that async handlers check before applying results
@@ -1153,10 +1153,11 @@ export default function ChatView(props: ChatViewProps) {
     selectActiveRightPanel(state.byThreadKey, activeThreadRef),
   );
   const diffOpen = activeRightPanelKind === "diff";
-  const tiledWorkspace = !embedded;
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
+  const tiledWorkspace =
+    !embedded && (relatedWorkspace === null || rightPanelState.surfaces.length > 0);
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
@@ -2794,6 +2795,7 @@ export default function ChatView(props: ChatViewProps) {
   useChatShortcuts({
     enabled: activeThreadId !== null && !backgroundThread,
     embedded,
+    relatedPaneKey: relatedWorkspace === null ? null : routeThreadKey,
     composerElement: composerOverlayElement,
     keybindings,
     scriptKeybindings,

@@ -122,7 +122,9 @@ test(
       return null;
     });
     await app.screenshot("collapsed-parent-open-descendants");
-    await rails.first().tap();
+    await screen.getByRole("button", /^Bring back to Explain that/).tap();
+    await expect(rails.first()).toHaveAttribute("aria-expanded", "true");
+    await expect(screen.getByRole("link", "Thread, Go one level deeper.")).toBeVisible();
     await expect(fullChat).toHaveCount(3);
     await screen.getByRole("button", "Open as side chat tab").last().tap();
     await expect(screen.getByRole("button", "Close side chat")).toBeVisible();

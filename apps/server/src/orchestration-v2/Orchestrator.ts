@@ -9652,11 +9652,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             );
     const parentRewindOrdinal = sourceProjection?.thread.contextRewind?.runOrdinal;
     const canIncludeLiveParentTurns =
-      sideChatFork &&
+      sideChatWithoutSource &&
       sourceProjection !== null &&
       sourceRunsAfterFork.length > 0 &&
       contextArchive === undefined &&
-      projection.thread.lineage.sideChatAnchor === undefined &&
       (parentRewindOrdinal === undefined ||
         (yield* projectionStore
           .getForkSourceRewindOrdinal(sourceProjection.thread.id, projection.thread.id)
@@ -9664,7 +9663,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Without a source run the digest covers the parent's whole history: inherited fork rows
     // first, so the cap truncates them first, then imported and run items.
     const sideChatParentRunIds = [
-      // Anchored chats start at the selected reply. Ordinary chats also get the parent's newer turns.
+      // Only a chat without a finished source turn starts from the current transcript.
       // Queued messages have not reached the main thread yet.
       ...(canIncludeLiveParentTurns
         ? sourceRunsAfterFork

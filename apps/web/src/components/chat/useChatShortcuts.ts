@@ -37,6 +37,7 @@ interface ChatShortcutsInput {
    * composer chords, for keys pressed inside `composerElement`.
    */
   readonly embedded?: boolean;
+  readonly relatedPaneKey?: string | null;
   readonly composerElement?: HTMLElement | null;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly scriptKeybindings: ResolvedKeybindingsConfig;
@@ -61,6 +62,15 @@ interface ChatShortcutsInput {
 export function useChatShortcuts(input: ChatShortcutsInput) {
   const embedded = input.embedded === true;
   const composerElement = embedded ? (input.composerElement ?? null) : null;
+  const ownsShortcut = (target: EventTarget | null, command?: KeybindingCommand) => {
+    const paneKey =
+      target instanceof Element
+        ? (target.closest("[data-related-thread-pane]")?.getAttribute("data-related-thread-pane") ??
+          null)
+        : null;
+    const owner = input.relatedPaneKey ?? null;
+    return command?.startsWith("workspace.") ? owner === null : owner === paneKey;
+  };
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     const { keybindings } = input;
     if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
@@ -80,6 +90,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
 
     if (
       !inSideChatPane &&
+      ownsShortcut(event.target) &&
       !shortcutContext.terminalFocus &&
       !shortcutContext.modelPickerOpen &&
       shouldTypeToFocusComposer(event) &&
@@ -93,7 +104,12 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     const command = resolveChatShortcutCommand(event, keybindings, input.scriptKeybindings, {
       context: shortcutContext,
     });
-    if (!command || (inSideChatPane && !SIDE_CHAT_PANE_COMMANDS.has(command))) return;
+    if (
+      !command ||
+      !ownsShortcut(event.target, command) ||
+      (inSideChatPane && !SIDE_CHAT_PANE_COMMANDS.has(command))
+    )
+      return;
     const run =
       input.commands[command] ??
       composerShortcutCommands(input.composerRef, input.branchToolbarRef)[command] ??
@@ -109,11 +125,11 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       leader: true,
       context: input.getShortcutContext(event.target),
     });
-    const run = command
-      ? (input.commands[command] ??
-        composerShortcutCommands(input.composerRef, input.branchToolbarRef)[command] ??
-        input.fallback(command))
-      : undefined;
+    if (!command || !ownsShortcut(event.target, command)) return false;
+    const run =
+      input.commands[command] ??
+      composerShortcutCommands(input.composerRef, input.branchToolbarRef)[command] ??
+      input.fallback(command);
     if (!run || run({ event, terminalFocusOwner: getTerminalFocusOwner() }) === false) return false;
     event.preventDefault();
   });
@@ -121,6 +137,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     if (
       event.key !== "Escape" ||
       !input.threadFindActive ||
+      !ownsShortcut(event.target) ||
       event.defaultPrevented ||
       event.isComposing ||
       event.keyCode === 229 ||

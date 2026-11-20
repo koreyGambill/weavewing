@@ -1479,7 +1479,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               : [
                   [
                     threadKey,
-                    { ...threadState, surfaces: threadState.surfaces.map(withoutReveal) },
+                    {
+                      ...threadState,
+                      surfaces: threadState.surfaces
+                        .filter((surface) => surface.kind !== "related-thread")
+                        .map(withoutReveal),
+                    },
                   ],
                 ],
           ),

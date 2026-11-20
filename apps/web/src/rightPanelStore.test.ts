@@ -44,7 +44,7 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
-  it("opens related threads beside the main chat and reuses their tabs", () => {
+  it("opens related threads beside the main chat and keeps them in the current browser session", async () => {
     const store = useRightPanelStore.getState();
     const agentRef = scopeThreadRef("env-2" as EnvironmentId, refB.threadId);
     store.add(refA, "notes");
@@ -61,6 +61,14 @@ describe("rightPanelStore", () => {
     );
     expect(main?.tabs).toEqual([CONVERSATION_TAB_ID, tabs[1]!.id, tabs[0]!.id]);
     expect(main?.activeTabId).toBe(tabs[0]!.id);
+    await reloadRightPanelStore();
+    const restored = useRightPanelStore.getState().byThreadKey;
+    expect(
+      selectThreadRightPanelState(restored, refA).surfaces.map((surface) => surface.kind),
+    ).toEqual(["notes"]);
+    expect(
+      getTileGroups(selectThreadTileLayout(restored, refA)).flatMap((group) => group.tabs),
+    ).toContain(CONVERSATION_TAB_ID);
   });
 
   it("adds independent area instances, retains their placement, and restores closed instances", async () => {

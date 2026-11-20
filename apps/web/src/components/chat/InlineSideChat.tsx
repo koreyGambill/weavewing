@@ -1,7 +1,11 @@
 import type { OrchestrationV2ThreadShell, ScopedThreadRef } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ChevronDownIcon, ChevronRightIcon, GitBranchIcon, PanelsTopLeftIcon } from "lucide-react";
-import type { InlineSideChatExpansion, SideChatParentPanel } from "~/lib/sideChatPane";
+import {
+  focusThreadDraft,
+  type InlineSideChatExpansion,
+  type SideChatParentPanel,
+} from "~/lib/sideChatPane";
 import { useSideChatShells } from "~/state/entities";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
@@ -36,6 +40,10 @@ export function InlineSideChat({
   const onToggle = () => expansion.setOpen(child.id, !expanded);
   const childRef = scopeThreadRef(parentRef.environmentId, child.id);
   const showPane = expanded && !tab;
+  const showInline = () => {
+    if (tab) useRightPanelStore.getState().closeSurface(parentPanel.hostRef, tab.id);
+    expansion.setOpen(child.id, true);
+  };
   const children = useSideChatShells(showPane ? null : childRef).filter(
     (branch) => branch.lineage.contextArchive === undefined,
   );
@@ -53,10 +61,8 @@ export function InlineSideChat({
         aria-expanded={showPane}
         className="absolute inset-y-0 left-[-1px] z-10 w-1.5 cursor-pointer rounded-sm hover:bg-current/15 focus-visible:outline-2 focus-visible:outline-ring"
         onClick={() => {
-          if (tab) {
-            useRightPanelStore.getState().closeSurface(parentPanel.hostRef, tab.id);
-            expansion.setOpen(child.id, true);
-          } else onToggle();
+          if (tab) showInline();
+          else onToggle();
         }}
       />
       <Tooltip>
@@ -108,7 +114,10 @@ export function InlineSideChat({
               expansion={expansion}
               parentRef={childRef}
               parentPanel={parentPanel}
-              onFocusParentComposer={onFocusParentComposer}
+              onFocusParentComposer={() => {
+                showInline();
+                focusThreadDraft(childRef);
+              }}
             />
           ))}
         </div>

@@ -1074,6 +1074,11 @@ it.effect.each([false, true])(
       assert.isFalse(
         started.contextHandoffs.some((item) => item.strategy === "full_thread_summary"),
       );
+      assert.isFalse(
+        started.contextHandoffs.some((item) =>
+          item.summaryText?.includes("Parent is still working"),
+        ),
+      );
     }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 

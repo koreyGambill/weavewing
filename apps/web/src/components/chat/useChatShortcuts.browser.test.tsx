@@ -143,6 +143,48 @@ const sideChatKeybindings: ResolvedKeybindingsConfig = [
   ctrlShift("x", "thread.stop"),
 ];
 
+function RelatedShortcuts(props: { paneKey?: string; events: string[] }) {
+  const name = props.paneKey ?? "main";
+  useChatShortcuts({
+    enabled: true,
+    relatedPaneKey: props.paneKey ?? null,
+    keybindings: [
+      ctrlShift("y", "thread.copyReference"),
+      ctrlShift("x", "workspace.tile.closeTab"),
+    ],
+    scriptKeybindings: [],
+    getShortcutContext: () => shortcutContext,
+    threadFindActive: false,
+    composerRef: { current: null },
+    branchToolbarRef: { current: null },
+    closeThreadFind: () => {},
+    commands: {
+      "thread.copyReference": () => void props.events.push(`${name} copy`),
+      "workspace.tile.closeTab": () => void props.events.push(`${name} close`),
+    },
+    fallback: () => undefined,
+  });
+  return <textarea aria-label={name} />;
+}
+
+it("routes thread shortcuts to the focused tab and workspace shortcuts to the host", async () => {
+  const events: string[] = [];
+  await using screen = await render(
+    <>
+      <RelatedShortcuts events={events} />
+      <div data-related-thread-pane="fork">
+        <RelatedShortcuts paneKey="fork" events={events} />
+      </div>
+    </>,
+    options,
+  );
+  await userEvent.click(screen.getByLabelText("fork"));
+  await userEvent.keyboard("{Control>}{Shift>}YX{/Shift}{/Control}");
+  await userEvent.click(screen.getByLabelText("main"));
+  await userEvent.keyboard("{Control>}{Shift>}Y{/Shift}{/Control}");
+  expect(events).toEqual(["fork copy", "main close", "main copy"]);
+});
+
 // A side chat in the main chat's panel: no window listeners, only its composer's own chords.
 function SideChat(props: { toggles: string[]; stops: string[] }) {
   const [composerElement, setComposerElement] = useState<HTMLDivElement | null>(null);

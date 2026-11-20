@@ -10,6 +10,8 @@ provider supports a native fork from that point, the new chat inherits the
 provider's history through it. The new question and any side chat instructions
 are appended. The provider decides which input tokens it can reuse from its
 cache. A native fork can preserve history and still have a cold first request.
+Use **Get newest context** when you want a side chat to also see activity
+that happened after its fork point.
 
 When native forking is unavailable, T3 Code builds a portable handoff from its
 saved transcript. No model writes this handoff. A side chat opened before the
