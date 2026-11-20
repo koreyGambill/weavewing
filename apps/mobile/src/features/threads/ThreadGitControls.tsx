@@ -86,6 +86,7 @@ export type ThreadGitMenuProps = {
   readonly gitOperationLabel: string | null;
   readonly onOpenFilesInspector?: () => void;
   readonly onOpenGitInspector?: () => void;
+  readonly onBringBack?: () => void;
   readonly onMergeBack?: () => void;
   readonly onPull: () => Promise<void>;
   readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>;
@@ -338,6 +339,17 @@ export function useThreadGitMenuDefinition(props: ThreadGitMenuProps): AppBarMen
             : "Turn diffs and worktree changes",
         onPress: model.openReview,
       },
+      ...(props.onBringBack
+        ? [
+            {
+              id: "bring-back",
+              title: "Bring back",
+              icon: "arrow.turn.down.left",
+              subtitle: "Add a removable reference to the parent draft",
+              onPress: props.onBringBack,
+            },
+          ]
+        : []),
       ...(props.onMergeBack
         ? [
             {

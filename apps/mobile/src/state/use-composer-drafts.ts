@@ -40,6 +40,7 @@ import {
   formatComposerContextReference,
   sanitizeComposerContextLabel,
   replaceComposerContextReferences,
+  threadContextRecord,
 } from "@t3tools/shared/composerContextReferences";
 import { imageMimeType } from "@t3tools/shared/image";
 import { videoMimeType } from "@t3tools/shared/video";
@@ -396,6 +397,28 @@ export function insertComposerDraftContext(
   });
   scheduleUnusedComposerAttachmentCleanup(inserted ? removed : (content.attachments ?? []));
   return inserted;
+}
+
+/** Adds a thread reference to a saved conversation draft. */
+export async function stageThreadContextInDraft(
+  target: ScopedThreadRef,
+  source: ScopedThreadRef,
+  title: string,
+): Promise<boolean> {
+  await waitForComposerDraftsLoaded();
+  const draftKey = scopedThreadKey(target);
+  const record = threadContextRecord(source, title);
+  const draft = getComposerDraftSnapshot(draftKey);
+  if (draft.context?.records.some((item) => item.contextId === record.contextId)) return true;
+
+  return insertComposerDraftContext(
+    draftKey,
+    {
+      text: formatComposerContextReference(record),
+      context: { version: 1, records: [record] },
+    },
+    { text: draft.text, start: draft.text.length, end: draft.text.length },
+  );
 }
 
 function draftWithInsertedContext(

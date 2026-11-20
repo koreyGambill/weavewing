@@ -432,8 +432,10 @@ takes you back to the passage, or to the fork turn for a side chat opened withou
 selection.
 
 A branch starts with context through its fork point. Choose **Get newest context**
-in a branch or its parent to include recent discussion from elsewhere in the tree
-with your next message. Choose it again before sending to cancel the refresh.
+in a branch to include recent discussion from elsewhere in the tree with your
+next message. Choose it again before sending to cancel the refresh. The main chat
+adds a short update from its branches when you send a regular message and there
+is new discussion to include.
 
 A side chat works in the same folder as the thread and starts with the permissions,
 model, and reasoning level shown in the thread's composer, including for its first

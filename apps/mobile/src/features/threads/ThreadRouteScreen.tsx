@@ -90,6 +90,7 @@ import { useSelectedThreadGitActions } from "../../state/use-selected-thread-git
 import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-state";
 import { useSelectedThreadRequests } from "../../state/use-selected-thread-requests";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import { stageThreadContextInDraft } from "../../state/use-composer-drafts";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { resolveMergeBackTargetThreadId } from "@t3tools/client-runtime/state/thread-relationships";
 import { resolveLatestMergeBackRun } from "@t3tools/client-runtime/state/thread-workflows";
@@ -454,8 +455,37 @@ function ThreadRouteContent(
   const navigation = useNavigation();
   const selectDetail = useSelectWorkspaceDetail();
   const openPullRequest = useOpenPullRequest();
+  const isSideChat = selectedThread?.lineage.sideChat === true;
+  const sideChatParentId = isSideChat ? selectedThread.lineage.parentThreadId : null;
+  const handleBringBack = async () => {
+    if (
+      !selectedThread ||
+      sideChatParentId === null ||
+      selectedThread.latestUserMessageAt === null ||
+      !readEnvironmentScope(selectedThread.environmentId, AuthOrchestrationOperateScope)
+    ) {
+      return;
+    }
+    const parent = scopeThreadRef(selectedThread.environmentId, sideChatParentId);
+    const child = scopeThreadRef(selectedThread.environmentId, selectedThread.id);
+    try {
+      if (!(await stageThreadContextInDraft(parent, child, selectedThread.title))) {
+        Dialog.alert("Too many context items", "Remove some context from the draft and try again.");
+        return;
+      }
+    } catch (error) {
+      Dialog.alert(
+        "Could not load the parent draft",
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+    selectDetail({ name: "Thread", params: parent });
+  };
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack, "merge thread back");
-  const mergeBackTargetThreadId = resolveMergeBackTargetThreadId(selectedThreadDetail);
+  const mergeBackTargetThreadId = isSideChat
+    ? null
+    : resolveMergeBackTargetThreadId(selectedThreadDetail);
   const mergeBackRun =
     selectedThreadDetail === null ? null : resolveLatestMergeBackRun(selectedThreadDetail);
   const mergeBackBusyRef = useRef(false);
@@ -805,6 +835,10 @@ function ThreadRouteContent(
     threadId: threadId ?? "",
     onOpenFilesInspector: selectedThreadCwd !== null ? handleOpenFilesInspector : undefined,
     onOpenGitInspector: handleOpenGitInspector,
+    onBringBack:
+      sideChatParentId !== null && selectedThread?.latestUserMessageAt != null && canOperateThread
+        ? () => void handleBringBack()
+        : undefined,
     onMergeBack:
       mergeBackTargetThreadId !== null && mergeBackRun !== null
         ? () => void handleMergeBack()

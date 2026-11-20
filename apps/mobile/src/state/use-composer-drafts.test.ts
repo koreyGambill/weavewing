@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { PrimaryConnectionTarget } from "@t3tools/client-runtime/connection";
 import { createEnvironmentThreadShellAtoms } from "@t3tools/client-runtime/state/threads";
 import {
@@ -172,6 +173,7 @@ import type { DraftComposerAttachment } from "../lib/composerImages";
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
+  threadContextRecord,
 } from "@t3tools/shared/composerContextReferences";
 import { appAtomRegistry } from "./atom-registry";
 import { startComposerDraftOperation } from "./composerDraftOperations";
@@ -211,6 +213,7 @@ import {
   retargetSavedNewTaskDraft,
   setComposerDraftText,
   insertComposerDraftContext,
+  stageThreadContextInDraft,
   insertComposerDraftText,
   rememberComposerDraftSelection,
   setComposerDraftAttachmentUpload,
@@ -974,6 +977,32 @@ describe("mobile composer drafts", () => {
     );
     expect(getComposerDraftSnapshot(key).attachments).toEqual([file]);
     expect(getComposerDraftSnapshot(key).text).toBe(`replaced ${link}`);
+  });
+
+  it("stages a removable thread reference after the saved parent draft", async () => {
+    const environmentId = EnvironmentId.make("nested-side-chat-environment");
+    const parent = scopeThreadRef(environmentId, ThreadId.make("parent-side-chat"));
+    const child = scopeThreadRef(environmentId, ThreadId.make("child-side-chat"));
+    const draftKey = `${environmentId}:${parent.threadId}`;
+    const text = "Keep the selected words";
+    composerDraftFileMocks.setDocument({
+      schemaVersion: 1,
+      drafts: { [draftKey]: { text, attachments: [], runtimeMode: "approval-required" } },
+    });
+    rememberComposerDraftSelection(draftKey, text, { start: 9, end: 17 });
+
+    const record = threadContextRecord(child, "Child side chat");
+    expect(await stageThreadContextInDraft(parent, child, "Child side chat")).toBe(true);
+    expect(await stageThreadContextInDraft(parent, child, "Child side chat")).toBe(true);
+    expect(getComposerDraftSnapshot(draftKey)).toMatchObject({
+      text: `${text} ${formatComposerContextReference(record)} `,
+      context: { version: 1, records: [record] },
+      runtimeMode: "approval-required",
+    });
+    expect(getComposerDraftSnapshot(`${environmentId}:${child.threadId}`).text).toBe("");
+
+    setComposerDraftText(draftKey, text);
+    expect(getComposerDraftSnapshot(draftKey).context).toBeUndefined();
   });
 
   it("inserts context at the saved caret and retains its payload through persistence and restore", () => {
