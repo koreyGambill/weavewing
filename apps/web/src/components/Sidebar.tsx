@@ -1434,6 +1434,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       }
       if (
         draftKey !== routeDraftIdForRows &&
+        !session.terminalUsed &&
         !composerDraftHasUserContent(store.draftsByThreadKey[draftKey])
       ) {
         continue;

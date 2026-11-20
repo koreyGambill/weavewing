@@ -29,6 +29,8 @@ const testState = vi.hoisted(() => {
       router.state.location.href = `/draft/${request.params.draftId}`;
     }),
   };
+  const cleanup = vi.fn();
+  const prepareCleanup = vi.fn(() => cleanup);
   const draftStore = {
     getComposerDraft: vi.fn((draftId: string) => ({ draftId })),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
@@ -55,6 +57,8 @@ const testState = vi.hoisted(() => {
   return {
     completeProjectFileRead: (value: null) => completeProjectFileRead(value),
     draftStore,
+    cleanup,
+    prepareCleanup,
     get projectFileRead() {
       return projectFileRead;
     },
@@ -92,6 +96,8 @@ const testState = vi.hoisted(() => {
       },
     ) {
       storedDraft = nextStoredDraft;
+      cleanup.mockClear();
+      prepareCleanup.mockClear();
       openDraftRoute = null;
       draftsWithUserText = new Set();
       projectRemoved = false;
@@ -237,6 +243,9 @@ vi.mock("../state/entities", () => {
 vi.mock("../state/preferredEnvironment", () => ({ usePreferredEnvironmentId: () => null }));
 vi.mock("../state/projects", () => ({ defaultProjectFallbackReadyAtom: () => true }));
 vi.mock("../state/olderSettledShelf", () => ({ readUnloadedThreadCount: () => 0 }));
+vi.mock("../lib/draftWorkspaceCleanup", () => ({
+  prepareDraftWorkspaceCleanup: testState.prepareCleanup,
+}));
 vi.mock("../state/presentation", () => ({
   environmentSummaries: { connectedEnvironmentIdsAtom: "connected-environment-ids" },
 }));
@@ -340,6 +349,33 @@ describe("useNewThreadHandler", () => {
 
     expect(opened?.draftId).toBe("draft-raced");
     expect(testState.draftStore.setPrompt).not.toHaveBeenCalled();
+  });
+
+  it("opens a fresh draft after leaving an untouched project draft", async () => {
+    testState.reset({
+      draftId: "draft-existing",
+      environmentId: "environment-ssh",
+      promotedTo: null,
+      threadId: "thread-existing",
+    });
+    const opening = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+
+    await expect(opening).resolves.toEqual({
+      draftId: "draft-delayed",
+      threadId: "thread-delayed",
+    });
+    expect(testState.router.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ params: { draftId: "draft-delayed" } }),
+    );
+    expect(testState.prepareCleanup).toHaveBeenCalledWith({
+      environmentId: "environment-ssh",
+      threadId: "thread-existing",
+    });
+    expect(testState.cleanup).toHaveBeenCalledOnce();
   });
 
   it("seeds the prompt into the empty draft that is already open", async () => {

@@ -412,6 +412,7 @@ const PersistedDraftThreadState = Schema.Struct({
   environmentId: Schema.String,
   projectId: ProjectId,
   logicalProjectKey: Schema.optionalKey(Schema.String),
+  terminalUsed: Schema.optionalKey(Schema.Literal(true)),
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
@@ -516,6 +517,7 @@ export interface DraftSessionState {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   logicalProjectKey: string;
+  terminalUsed?: true;
   environmentSelection?: "auto" | "manual";
   loadBalancedEnvironmentId?: EnvironmentId | null;
   createdAt: string;
@@ -1783,6 +1785,7 @@ function createDraftThreadState(
     environmentId: projectRef.environmentId,
     projectId: projectRef.projectId,
     logicalProjectKey,
+    ...(existingThread?.terminalUsed ? { terminalUsed: true } : {}),
     ...(environmentSelection ? { environmentSelection } : {}),
     ...(options?.loadBalancedEnvironmentId !== undefined
       ? { loadBalancedEnvironmentId: options.loadBalancedEnvironmentId }
@@ -2033,6 +2036,7 @@ function normalizePersistedDraftThreads(
             ? { loadBalancedEnvironmentId: null }
             : {}),
         ...(checkoutPullRequest ? { checkoutPullRequest } : {}),
+        ...(candidateDraftThread.terminalUsed === true ? { terminalUsed: true } : {}),
         promotedTo,
       };
     }
@@ -2408,6 +2412,7 @@ export function partializeComposerDraftStoreState(
         ([threadKey, draftThread]) =>
           mappedDraftKeys.has(threadKey) ||
           isDraftThreadPromoting(draftThread) ||
+          draftThread.terminalUsed === true ||
           composerDraftHasUserContent(state.draftsByThreadKey[threadKey]) ||
           draftThreadHasOpenPreview(draftThread),
       )
@@ -2813,6 +2818,7 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    ...(persistedDraftThread.terminalUsed ? { terminalUsed: true } : {}),
     ...(persistedDraftThread.xwingEnvironment
       ? { xwingEnvironment: persistedDraftThread.xwingEnvironment }
       : {}),
@@ -3016,6 +3022,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 previousThreadKeyForLogicalProject,
               ) &&
               !isDraftThreadPromoting(previousDraftThread) &&
+              !previousDraftThread?.terminalUsed &&
+              !state.backgroundSubmissionThreadKeys[previousThreadKeyForLogicalProject] &&
               !composerDraftHasUserContent(
                 state.draftsByThreadKey[previousThreadKeyForLogicalProject],
               ) &&
@@ -3103,6 +3111,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               environmentId: nextProjectRef.environmentId,
               projectId: nextProjectRef.projectId,
               logicalProjectKey: existing.logicalProjectKey,
+              ...(existing.terminalUsed ? { terminalUsed: true } : {}),
               ...(environmentSelection ? { environmentSelection } : {}),
               loadBalancedEnvironmentId:
                 options.loadBalancedEnvironmentId === undefined
@@ -4985,4 +4994,19 @@ export function subscribeDraftThreadPromotion(input: {
     unsubscribeMilestones();
     unsubscribeDrafts();
   };
+}
+
+/** A terminal with user input belongs to a recoverable draft even without a prompt. */
+export function markDraftTerminalUsed(ref: ScopedThreadRef): void {
+  const store = useComposerDraftStore.getState();
+  const draftId = store.getDraftIdByRef(ref);
+  if (draftId === null) return;
+  const draft = store.draftThreadsByThreadKey[draftId];
+  if (!draft || draft.terminalUsed || draft.promotedTo) return;
+  useComposerDraftStore.setState({
+    draftThreadsByThreadKey: {
+      ...store.draftThreadsByThreadKey,
+      [draftId]: { ...draft, terminalUsed: true },
+    },
+  });
 }

@@ -74,7 +74,7 @@ export function isSidebarDraftInScope(input: {
 
 /**
  * The open draft is listed from the moment it opens, even empty. Any other draft is listed only once
- * it holds something the user typed or attached, so leaving an untouched draft drops its row.
+ * it holds composer content or a terminal the user worked in, so leaving an untouched draft drops its row.
  */
 export function selectSidebarDraftRows(input: {
   readonly sessions: Readonly<Record<string, DraftSessionState>>;
@@ -103,8 +103,8 @@ export function selectSidebarDraftRows(input: {
       }
       continue;
     }
-    const composer = input.composers[draftKey];
-    if (!composer || !composerDraftHasUserContent(composer)) continue;
+    const composer = input.composers[draftKey] ?? null;
+    if (!session.terminalUsed && !composerDraftHasUserContent(composer)) continue;
     rows.push({ draftId: DraftId.make(draftKey), session, composer });
   }
   rows.sort((left, right) => right.session.createdAt.localeCompare(left.session.createdAt));

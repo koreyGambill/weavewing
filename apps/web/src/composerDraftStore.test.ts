@@ -94,6 +94,7 @@ import {
   type ComposerImageAttachment,
   composerFileNeedsReattach,
   hydrateImagesFromPersisted,
+  markDraftTerminalUsed,
   partializeComposerDraftStoreState,
   useComposerDraftStore,
   DraftId,
@@ -1076,6 +1077,21 @@ describe("composerDraftStore project draft thread mapping", () => {
     );
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.threadId).toBe(threadId);
     expect(draftByKey(draftId)?.prompt).toBe("keep me around");
+  });
+
+  it("retains an unmapped draft after its terminal received input", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    markDraftTerminalUsed(scopeThreadRef(TEST_ENVIRONMENT_ID, threadId));
+
+    store.setProjectDraftThreadId(projectRef, otherDraftId, { threadId: otherThreadId });
+
+    const current = useComposerDraftStore.getState();
+    expect(current.getDraftThreadByProjectRef(projectRef)?.threadId).toBe(otherThreadId);
+    expect(current.getDraftSession(draftId)?.terminalUsed).toBe(true);
+    expect(
+      partializeComposerDraftStoreState(current).draftThreadsByThreadKey[draftId]?.terminalUsed,
+    ).toBe(true);
   });
 
   it("clears every session for a project, including unmapped invested drafts", () => {
