@@ -10,6 +10,7 @@ import { resolveShortcutCommand } from "../../keybindings";
 import {
   buildKeybindingRows,
   buildWhenVariableOptions,
+  canRemoveKeybindingRow,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
@@ -37,6 +38,25 @@ describe("KeybindingsSettings.logic", () => {
     expect(after.find((row) => row.command === "chat.new")?.id).not.toBe(
       before.find((row) => row.command === "chat.new")?.id,
     );
+  });
+
+  it("removes a default only while its command keeps another binding", () => {
+    const defaults = { key: "mod+n", command: "chat.new", when: "!terminalFocus" } as const;
+    const solo = buildKeybindingRows(compileResolvedKeybindingsConfig([defaults]));
+    const withAlias = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([defaults, { key: "mod+shift+y", command: "chat.new" }]),
+    );
+    const defaultRow = (rows: typeof solo) => {
+      const row = rows.find((entry) => entry.key === "mod+n");
+      assert(row?.source === "Default");
+      return row;
+    };
+    const aliasRow = withAlias.find((entry) => entry.key === "mod+shift+y");
+    assert(aliasRow?.source === "Custom");
+
+    expect(canRemoveKeybindingRow(defaultRow(solo), solo)).toBe(false);
+    expect(canRemoveKeybindingRow(defaultRow(withAlias), withAlias)).toBe(true);
+    expect(canRemoveKeybindingRow(aliasRow, withAlias)).toBe(true);
   });
 
   it("shares a stable editor for resolved duplicates but separates commands, shortcuts, and conditions", () => {

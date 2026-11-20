@@ -63,6 +63,7 @@ import {
   filterKeybindingRows,
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
+  canRemoveKeybindingRow,
   commandLabel,
   DEFAULT_WHEN_VARIABLE,
   isKnownWhenVariable,
@@ -953,17 +954,18 @@ function WhenClauseControl({
 
 function KeybindingRowMenu({
   row,
+  canRemove,
   isSaving,
   onReset,
   onRemove,
 }: {
   row: KeybindingRow;
+  canRemove: boolean;
   isSaving: boolean;
   onReset: (row: KeybindingRow) => void;
   onRemove: (row: KeybindingRow) => void;
 }) {
   const canReset = row.source === "Custom" && row.defaultKey !== null;
-  const canRemove = row.source !== "Default";
   if (!canReset && !canRemove) return null;
 
   return (
@@ -1044,6 +1046,7 @@ function KeybindingRowWhen({
 
 function KeybindingHoverRowMenu(props: {
   row: KeybindingRow;
+  canRemove: boolean;
   isSaving: boolean;
   onReset: (row: KeybindingRow) => void;
   onRemove: (row: KeybindingRow) => void;
@@ -1055,7 +1058,7 @@ function KeybindingHoverRowMenu(props: {
   );
 }
 
-function KeybindingSettingsRow(props: KeybindingRowProps) {
+export function KeybindingSettingsRow(props: KeybindingRowProps) {
   const { row, isSaving, anchorId, allRows, variables, onSave, onReset, onRemove } = props;
   const editor = useKeybindingRowEditor({ row, allRows, onSave });
 
@@ -1076,6 +1079,7 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
           <KeybindingConflictWarning labels={editor.conflictLabels} />
           <KeybindingHoverRowMenu
             row={row}
+            canRemove={canRemoveKeybindingRow(row, allRows)}
             isSaving={isSaving}
             onReset={onReset}
             onRemove={onRemove}
@@ -1291,7 +1295,7 @@ function NewKeybindingCancelIcon({
   );
 }
 
-function NewKeybindingSettingsRow(props: NewKeybindingProps) {
+export function NewKeybindingSettingsRow(props: NewKeybindingProps) {
   const { commandOptions, allRows, variables, isSaving, onSave, onCancel } = props;
   const draft = useNewKeybindingDraft({ allRows, onSave });
 
@@ -1388,18 +1392,13 @@ function useKeybindingCatalog() {
   };
 }
 
-export function KeybindingsSettingsPanel() {
+/** Edits keybindings on every environment in the settings scope, since each keeps its own file. */
+export function useKeybindingEditing() {
   const { environment: primaryEnvironment, connectedEnvironments } = useSettingsScope();
-  const canOpenKeybindingsFile = useEnvironmentScope(
-    primaryEnvironment?.environmentId ?? null,
-    AuthOrchestrationOperateScope,
-  );
   const writableIds = useEnvironmentsWithScope(connectedEnvironments, AuthSettingsWriteScope);
   const canWriteSettings =
     connectedEnvironments.length > 0 &&
     connectedEnvironments.every((target) => writableIds.has(target.environmentId));
-  const keybindingsConfigPath = primaryEnvironment?.serverConfig?.keybindingsConfigPath ?? null;
-  const availableEditors = primaryEnvironment?.serverConfig?.availableEditors ?? [];
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
@@ -1410,58 +1409,19 @@ export function KeybindingsSettingsPanel() {
     reportFailure: false,
   });
   const [isResettingAll, setIsResettingAll] = useState(false);
-  const openInPreferredEditor = useOpenInPreferredEditor(
-    primaryEnvironment?.environmentId ?? null,
-    availableEditors,
-  );
-  const [query, setQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);
-  const searchTargetId = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
-  const [handledSearchTargetId, setHandledSearchTargetId] = useState(searchTargetId);
-
-  if (searchTargetId !== handledSearchTargetId) {
-    setHandledSearchTargetId(searchTargetId);
-    if (searchTargetId.startsWith("keybinding-")) setQuery("");
-  }
   const whenVariables = buildWhenVariableOptions();
   const { commandOptions, allRows, leaderOn } = useKeybindingCatalog();
-  const leaderRow = allRows.find((row) => row.command === "keybindings.leader");
-  const rows = filterKeybindingRows(allRows, query);
-  const groups = groupKeybindingRows(rows.filter((row) => row.command !== "keybindings.leader"));
-  const anchorIds = keybindingAnchorIds(rows);
 
-  const openKeybindingsFile = () => {
-    if (
-      !keybindingsConfigPath ||
-      !primaryEnvironment ||
-      !readEnvironmentScope(primaryEnvironment.environmentId, AuthOrchestrationOperateScope)
-    )
-      return;
-    void (async () => {
-      const result = await openInPreferredEditor(keybindingsConfigPath);
-      if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
-        return;
-      }
-      const error = squashAtomCommandFailure(result);
-      toastManager.add({
-        title: "Unable to open keybindings file",
-        description:
-          error instanceof Error ? error.message : "The keybindings file was not opened.",
-        type: "error",
-      });
-    })();
-  };
+  const canWriteNow = () =>
+    primaryEnvironment !== null &&
+    connectedEnvironments.every((target) =>
+      readEnvironmentScope(target.environmentId, AuthSettingsWriteScope),
+    );
 
   const saveKeybinding = (input: ServerUpsertKeybindingInput) => {
-    if (
-      !primaryEnvironment ||
-      !connectedEnvironments.every((target) =>
-        readEnvironmentScope(target.environmentId, AuthSettingsWriteScope),
-      )
-    )
-      return;
+    if (!canWriteNow()) return;
     setSavingCommand(input.command);
     const payload: ServerUpsertKeybindingInput = {
       command: input.command,
@@ -1493,13 +1453,7 @@ export function KeybindingsSettingsPanel() {
   };
 
   const removeKeybinding = (row: KeybindingRow) => {
-    if (
-      !primaryEnvironment ||
-      !connectedEnvironments.every((target) =>
-        readEnvironmentScope(target.environmentId, AuthSettingsWriteScope),
-      )
-    )
-      return;
+    if (!canWriteNow()) return;
     setSavingCommand(row.command);
     void (async () => {
       const results = await Promise.all(
@@ -1529,29 +1483,18 @@ export function KeybindingsSettingsPanel() {
       command: row.command,
       key: row.defaultKey,
       when: row.defaultWhen.trim().length > 0 ? row.defaultWhen : undefined,
-      replace: {
-        command: row.command,
-        key: row.key,
-        ...(row.when.trim().length > 0 ? { when: row.when } : {}),
-      },
+      replace: rowKeybindingTarget(row),
     });
   };
 
   const resetAllKeybindings = async () => {
-    if (
-      !primaryEnvironment ||
-      !connectedEnvironments.every((target) =>
-        readEnvironmentScope(target.environmentId, AuthSettingsWriteScope),
-      )
-    )
-      return;
+    if (!canWriteNow()) return;
     const confirmed = await ensureLocalApi().dialogs.confirm(
       "Reset all keybindings to their defaults? Every custom keybinding will be removed.",
       { variant: "destructive" },
     );
     if (!confirmed) return;
     setIsResettingAll(true);
-    // Each environment keeps its own keybindings file, so saves go to all of them.
     const results = await Promise.all(
       connectedEnvironments.map((target) =>
         resetKeybindingsMutation({ environmentId: target.environmentId, input: {} }),
@@ -1569,8 +1512,6 @@ export function KeybindingsSettingsPanel() {
     }
   };
 
-  const cancelAdd = () => setIsAddingBinding(false);
-
   const rowActions: KeybindingRowActions = {
     allRows,
     variables: whenVariables,
@@ -1578,6 +1519,88 @@ export function KeybindingsSettingsPanel() {
     onReset: resetKeybinding,
     onRemove: removeKeybinding,
   };
+
+  return {
+    canWriteSettings,
+    connectedEnvironments,
+    commandOptions,
+    allRows,
+    leaderOn,
+    whenVariables,
+    rowActions,
+    savingCommand,
+    isAddingBinding,
+    setIsAddingBinding,
+    isResettingAll,
+    saveKeybinding,
+    resetAllKeybindings,
+  };
+}
+
+export function KeybindingsSettingsPanel() {
+  const { environment: primaryEnvironment } = useSettingsScope();
+  const {
+    canWriteSettings,
+    connectedEnvironments,
+    commandOptions,
+    allRows,
+    leaderOn,
+    whenVariables,
+    rowActions,
+    savingCommand,
+    isAddingBinding,
+    setIsAddingBinding,
+    isResettingAll,
+    saveKeybinding,
+    resetAllKeybindings,
+  } = useKeybindingEditing();
+  const canOpenKeybindingsFile = useEnvironmentScope(
+    primaryEnvironment?.environmentId ?? null,
+    AuthOrchestrationOperateScope,
+  );
+  const keybindingsConfigPath = primaryEnvironment?.serverConfig?.keybindingsConfigPath ?? null;
+  const availableEditors = primaryEnvironment?.serverConfig?.availableEditors ?? [];
+  const openInPreferredEditor = useOpenInPreferredEditor(
+    primaryEnvironment?.environmentId ?? null,
+    availableEditors,
+  );
+  const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTargetId = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
+  const [handledSearchTargetId, setHandledSearchTargetId] = useState(searchTargetId);
+
+  if (searchTargetId !== handledSearchTargetId) {
+    setHandledSearchTargetId(searchTargetId);
+    if (searchTargetId.startsWith("keybinding-")) setQuery("");
+  }
+  const leaderRow = allRows.find((row) => row.command === "keybindings.leader");
+  const rows = filterKeybindingRows(allRows, query);
+  const groups = groupKeybindingRows(rows.filter((row) => row.command !== "keybindings.leader"));
+  const anchorIds = keybindingAnchorIds(rows);
+
+  const openKeybindingsFile = () => {
+    if (
+      !keybindingsConfigPath ||
+      !primaryEnvironment ||
+      !readEnvironmentScope(primaryEnvironment.environmentId, AuthOrchestrationOperateScope)
+    )
+      return;
+    void (async () => {
+      const result = await openInPreferredEditor(keybindingsConfigPath);
+      if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+        return;
+      }
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        title: "Unable to open keybindings file",
+        description:
+          error instanceof Error ? error.message : "The keybindings file was not opened.",
+        type: "error",
+      });
+    })();
+  };
+
+  const cancelAdd = () => setIsAddingBinding(false);
 
   return (
     <SettingsPageContainer>
@@ -1606,11 +1629,7 @@ export function KeybindingsSettingsPanel() {
               key={leaderRow.id}
               row={leaderRow}
               isSaving={savingCommand === "keybindings.leader"}
-              allRows={allRows}
-              variables={whenVariables}
-              onSave={saveKeybinding}
-              onReset={resetKeybinding}
-              onRemove={removeKeybinding}
+              {...rowActions}
             />
           ) : null}
         </SettingsSection>

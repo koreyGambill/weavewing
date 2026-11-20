@@ -1,7 +1,12 @@
 # Keybindings
 
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
-also lists the command IDs and defaults available in your version.
+also lists the command IDs and defaults available in your version. You can make
+the same edits from **Shortcut reference** in the sidebar. Changes apply to every
+connected environment.
+
+To drop a default shortcut, first give its command another shortcut. To turn a
+command's only shortcut off, set its When condition to `false`.
 
 ## Tiles and tabs
 

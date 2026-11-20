@@ -220,6 +220,17 @@ export function keybindingConflictLabels(
   return [...new Set(conflicts)].toSorted();
 }
 
+// A command left with no binding falls back to all its defaults, so its last default stays.
+export function canRemoveKeybindingRow(
+  row: KeybindingRow,
+  rows: ReadonlyArray<KeybindingRow>,
+): boolean {
+  return (
+    row.source !== "Default" ||
+    rows.some((candidate) => candidate.command === row.command && candidate.id !== row.id)
+  );
+}
+
 export interface KeybindingGroup {
   readonly id: string;
   readonly title: string;
