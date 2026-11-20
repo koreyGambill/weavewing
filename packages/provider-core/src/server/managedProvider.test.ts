@@ -776,7 +776,13 @@ describe("makeManagedServerProvider", () => {
         assert.deepStrictEqual(update?.usageLimits, {
           checkedAt: "2026-04-10T00:05:00.000Z",
           windows: [
-            { id: "five_hour", kind: "session", label: "Session", usedPercent: 10 },
+            {
+              id: "five_hour",
+              kind: "session",
+              label: "Session",
+              usedPercent: 10,
+              observedAt: "2026-04-10T00:00:01.000Z",
+            },
             {
               id: "seven_day",
               kind: "weekly",

@@ -291,7 +291,13 @@ export interface LimitAccount {
 /** Group reports by subscription. Include unreadable subscriptions for status-only surfaces. */
 export function collectLimitAccounts(
   presentations: LimitPresentations,
-  { includeUnavailable = false }: { readonly includeUnavailable?: boolean } = {},
+  {
+    includeUnavailable = false,
+    preferWindowObservation = false,
+  }: {
+    readonly includeUnavailable?: boolean;
+    readonly preferWindowObservation?: boolean;
+  } = {},
 ): readonly LimitAccount[] {
   const include = (limits: ServerProviderUsageLimits) =>
     limitsNotice(limits) === null ||
@@ -331,7 +337,9 @@ export function collectLimitAccounts(
       accounts.set(key, next);
       return;
     }
-    const fresher = Date.parse(next.limits.checkedAt) > Date.parse(previous.limits.checkedAt);
+    const fresher = preferWindowObservation
+      ? preferSubscriptionReading(next.limits, previous.limits)
+      : Date.parse(next.limits.checkedAt) > Date.parse(previous.limits.checkedAt);
     const environments = [
       ...previous.environments,
       ...next.environments.filter(
@@ -722,6 +730,39 @@ export function limitsNotice(limits: ServerProviderUsageLimits): string | null {
     return limits.unavailable.message ?? "Could not read limits.";
   }
   return limits.windows.length === 0 ? "No limits reported." : null;
+}
+
+/** Select the subscription window and its observation. Older reports use the snapshot time. */
+export function subscriptionLimitReading(limits: ServerProviderUsageLimits) {
+  if (limitsNotice(limits) !== null) return null;
+
+  const window =
+    limits.windows.find(
+      (window) =>
+        window.kind === "weekly" && !window.modelIds?.length && !window.providerIds?.length,
+    ) ??
+    limits.windows.find((window) => window.kind === "weekly") ??
+    limits.windows[0];
+  if (!window) return null;
+
+  const observedAt = Date.parse(window.observedAt ?? limits.checkedAt);
+  return Number.isFinite(observedAt) ? { window, observedAt } : null;
+}
+
+function preferSubscriptionReading(
+  next: ServerProviderUsageLimits,
+  previous: ServerProviderUsageLimits,
+): boolean {
+  const nextReading = subscriptionLimitReading(next);
+  const previousReading = subscriptionLimitReading(previous);
+  if (!nextReading) return false;
+  if (!previousReading) return true;
+
+  const nextWeekly = nextReading.window.kind === "weekly";
+  const previousWeekly = previousReading.window.kind === "weekly";
+  return nextWeekly === previousWeekly
+    ? nextReading.observedAt > previousReading.observedAt
+    : nextWeekly;
 }
 
 export function remainingPercent(window: ServerProviderUsageWindow): number {

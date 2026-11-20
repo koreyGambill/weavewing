@@ -47,6 +47,16 @@ export function makeUnavailableUsageLimits(input: {
   };
 }
 
+function preserveWindowObservation(
+  window: ServerProviderUsageWindow,
+  previousCheckedAt: string,
+  checkedAt: string,
+): ServerProviderUsageWindow {
+  return window.observedAt === undefined && previousCheckedAt !== checkedAt
+    ? { ...window, observedAt: previousCheckedAt }
+    : window;
+}
+
 export function applyUsageLimitsUpdate(input: {
   readonly previous: ServerProviderUsageLimits | undefined;
   readonly update: ProviderUsageLimitsUpdate;
@@ -78,6 +88,16 @@ export function applyUsageLimitsUpdate(input: {
   }
   if (!changed && previous !== undefined) {
     return previous;
+  }
+  if (previous && previous.checkedAt !== input.checkedAt) {
+    for (const window of previous.windows) {
+      if (merged.get(window.id) === window) {
+        merged.set(
+          window.id,
+          preserveWindowObservation(window, previous.checkedAt, input.checkedAt),
+        );
+      }
+    }
   }
   const unavailable =
     previous === undefined ? { reason: "probeFailed" as const } : previous.unavailable;
@@ -164,7 +184,11 @@ export function mergeProbedUsageLimits(input: {
   if (newer.size === 0) {
     return { limits: probed, sequences: nextSequences };
   }
-  const windows = probed.windows.map((window) => newer.get(window.id) ?? window);
+  const windows = probed.windows.map(
+    (window) =>
+      newer.get(window.id) ??
+      preserveWindowObservation(window, probed.checkedAt, published.checkedAt),
+  );
   const probedIds = new Set(probed.windows.map((window) => window.id));
   for (const window of newer.values()) {
     if (!probedIds.has(window.id)) windows.push(window);

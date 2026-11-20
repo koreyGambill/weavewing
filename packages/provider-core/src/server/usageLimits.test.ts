@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./usageLimits.ts";
+import {
+  applyUsageLimitsUpdate,
+  mergeProbedUsageLimits,
+  resolveUsageLimitsAfterProbe,
+} from "./usageLimits.ts";
 
 const checkedAt = "2026-09-03T12:00:00.000Z";
 const session = {
@@ -58,18 +62,21 @@ describe("applyUsageLimitsUpdate", () => {
     ).toEqual(["opencode/b"]);
   });
 
-  it("upserts by id and keeps the reset a percent-only update omits", () => {
+  it("updates the session without refreshing the weekly reading or dropping the reset", () => {
     const next = applyUsageLimitsUpdate({
       previous: published,
-      checkedAt: "2026-09-03T12:00:05.000Z",
+      checkedAt: "2026-09-03T14:00:00.000Z",
       update: {
         windows: [{ id: "five_hour", kind: "session", label: "Session", usedPercent: 55 }],
       },
     });
     expect(next).not.toBe(published);
     expect(next).toEqual({
-      checkedAt: "2026-09-03T12:00:05.000Z",
-      windows: [{ ...session, usedPercent: 55 }, weekly],
+      checkedAt: "2026-09-03T14:00:00.000Z",
+      windows: [
+        { ...session, usedPercent: 55 },
+        { ...weekly, observedAt: checkedAt },
+      ],
     });
   });
 
@@ -99,11 +106,38 @@ describe("applyUsageLimitsUpdate", () => {
 
     expect(next).toEqual({
       checkedAt: "2026-09-03T12:00:05.000Z",
-      windows: [{ ...session, usedPercent: 55 }, weekly],
+      windows: [
+        { ...session, usedPercent: 55 },
+        { ...weekly, observedAt: checkedAt },
+      ],
       resetCredits,
       zeroSpendCap: true,
     });
   });
+});
+
+it("preserves the observation of each window across a probe and a live update", () => {
+  const liveAt = "2026-09-03T14:00:00.000Z";
+  const probedAt = "2026-09-03T13:00:00.000Z";
+  const live = { checkedAt: liveAt, windows: [{ ...session, usedPercent: 80 }] };
+  const probed = { checkedAt: probedAt, windows: [session, weekly] };
+  const input = {
+    published: live,
+    probed,
+    sequences: new Map([[session.id, 2]]),
+    probeSequence: 1,
+  };
+  const merged = mergeProbedUsageLimits(input);
+  expect(merged.limits).toEqual({
+    ...live,
+    windows: [...live.windows, { ...weekly, observedAt: probedAt }],
+  });
+  expect(
+    mergeProbedUsageLimits({ ...input, published: merged.limits, cachedUsageSample: true }).limits,
+  ).toEqual(merged.limits);
+  expect(
+    mergeProbedUsageLimits({ ...input, published: merged.limits, probeSequence: 3 }).limits,
+  ).toBe(probed);
 });
 
 describe("resolveUsageLimitsAfterProbe", () => {

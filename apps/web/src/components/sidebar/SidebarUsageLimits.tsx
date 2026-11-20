@@ -64,7 +64,10 @@ function SubscriptionIndicator({ account }: { readonly account: LimitAccount }) 
 /** Show each subscription once, using the same grouping as Usage → Limits. */
 export function SidebarUsageLimits() {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
-  const accounts = collectLimitAccounts(presentations, { includeUnavailable: true });
+  const accounts = collectLimitAccounts(presentations, {
+    includeUnavailable: true,
+    preferWindowObservation: true,
+  });
   if (accounts.length === 0) return null;
 
   return (
