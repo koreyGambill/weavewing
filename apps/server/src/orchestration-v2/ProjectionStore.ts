@@ -592,6 +592,7 @@ export interface ProjectionStoreV2Shape {
   >;
   readonly getSideChatRefresh: (
     threadId: ThreadId,
+    window?: { readonly after: string | undefined; readonly before: string },
   ) => Effect.Effect<string | undefined, ProjectionStoreV2Error>;
   readonly getThreadRecords: <K extends ProjectionRecordField>(
     threadId: ThreadId,
@@ -6803,8 +6804,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
     );
 
-    const getSideChatRefresh = Effect.fn("ProjectionStore.getSideChatRefresh")(
-      function* (threadId: ThreadId) {
+    const getSideChatRefresh: ProjectionStoreV2Shape["getSideChatRefresh"] = Effect.fn(
+      "ProjectionStore.getSideChatRefresh",
+    )(
+      function* (threadId, window) {
+        const finalizedAt = sql`MAX(COALESCE(run.completed_at, message.updated_at), message.updated_at)`;
         // A normal fork starts its own side-chat tree, even if it has the same lineage root.
         const rows = yield* sql<{ excerpt: string }>`
           WITH RECURSIVE
@@ -6849,13 +6853,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           JOIN orchestration_v2_projection_messages message ON message.thread_id = tree.thread_id
           JOIN orchestration_v2_projection_runs run ON run.run_id = message.run_id
             AND run.thread_id = tree.thread_id
-            AND message.node_id = json_extract(run.payload_json, '$.rootNodeId')
+          LEFT JOIN orchestration_v2_projection_nodes node ON node.node_id = message.node_id
+            AND node.thread_id = tree.thread_id AND node.run_id = run.run_id
           LEFT JOIN ancestors ancestor ON ancestor.thread_id = tree.thread_id
           LEFT JOIN orchestration_v2_projection_runs fork
             ON fork.run_id = ancestor.cutoff_run_id AND fork.thread_id = tree.thread_id
           WHERE tree.thread_id <> ${threadId} AND message.streaming = 0
             AND run.status = 'completed'
             AND (ancestor.cutoff_run_id IS NULL OR run.ordinal > fork.ordinal)
+            AND (
+              message.node_id = json_extract(run.payload_json, '$.rootNodeId') OR (
+                message.role = 'assistant' AND node.kind = 'assistant_message'
+                AND node.parent_node_id = json_extract(run.payload_json, '$.rootNodeId')
+              )
+            )
             AND (
               message.role = 'assistant' OR (
                 message.role = 'user' AND json_extract(message.payload_json, '$.origin.kind') = 'user'
@@ -6865,8 +6876,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               )
             )
             AND trim(json_extract(message.payload_json, '$.text')) <> ''
-          ORDER BY message.created_at DESC, message.message_id DESC
-          LIMIT 8
+            ${
+              window === undefined
+                ? sql``
+                : sql`AND ${finalizedAt} >= ${window.after ?? ""} AND ${finalizedAt} < ${window.before}`
+            }
+          ORDER BY ${window === undefined ? sql`` : sql`${finalizedAt} DESC,`}
+            message.created_at DESC, message.message_id DESC
+          LIMIT ${window === undefined ? 8 : 4}
         `;
         // A JSON line keeps embedded newlines and delimiters inside their source excerpt.
         const excerpts: string[] = [];

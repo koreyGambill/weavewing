@@ -7,6 +7,7 @@ import {
   EventId,
   MessageId,
   type ModelSelection,
+  NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderCapabilities,
@@ -352,10 +353,19 @@ function makeTestAdapter(input: {
                   : input.cancelledRunOrdinals?.has(turnInput.runOrdinal)
                     ? "cancelled"
                     : "completed";
+              const scriptedResponse =
+                input.responseByThreadId?.[turnInput.threadId]?.[turnInput.runOrdinal];
               const response =
-                input.responseByThreadId?.[turnInput.threadId]?.[turnInput.runOrdinal] ??
+                scriptedResponse ??
                 input.responseByRunOrdinal[turnInput.runOrdinal] ??
                 `${input.driver} response for run ${turnInput.runOrdinal}`;
+              const messageId = MessageId.make(
+                `message:${input.driver}:${turnInput.threadId}:${turnInput.runOrdinal}:assistant`,
+              );
+              const messageNodeId =
+                scriptedResponse === undefined
+                  ? turnInput.rootNodeId
+                  : NodeId.make(`node:${messageId}`);
               const providerEvents: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event> = [
                 {
                   type: "provider_turn.updated",
@@ -376,6 +386,49 @@ function makeTestAdapter(input: {
                     completedAt: eventTime,
                   },
                 },
+                ...(scriptedResponse === undefined
+                  ? []
+                  : [
+                      {
+                        type: "node.updated" as const,
+                        driver: input.driver,
+                        node: {
+                          id: messageNodeId,
+                          threadId: turnInput.threadId,
+                          runId: turnInput.runId,
+                          parentNodeId: turnInput.rootNodeId,
+                          rootNodeId: turnInput.rootNodeId,
+                          kind: "assistant_message" as const,
+                          status: "completed" as const,
+                          countsForRun: false,
+                          providerThreadId: turnInput.providerThread.id,
+                          providerTurnId,
+                          nativeItemRef: null,
+                          runtimeRequestId: null,
+                          checkpointScopeId: null,
+                          startedAt: eventTime,
+                          completedAt: eventTime,
+                        },
+                      },
+                      {
+                        type: "message.updated" as const,
+                        driver: input.driver,
+                        message: {
+                          id: messageId,
+                          threadId: turnInput.threadId,
+                          runId: turnInput.runId,
+                          nodeId: messageNodeId,
+                          role: "assistant" as const,
+                          text: scriptedResponse,
+                          attachments: [],
+                          streaming: false,
+                          createdBy: "agent" as const,
+                          creationSource: "provider" as const,
+                          createdAt: eventTime,
+                          updatedAt: eventTime,
+                        },
+                      },
+                    ]),
                 {
                   type: "turn_item.updated",
                   driver: input.driver,
@@ -385,7 +438,7 @@ function makeTestAdapter(input: {
                     ),
                     threadId: turnInput.threadId,
                     runId: turnInput.runId,
-                    nodeId: turnInput.rootNodeId,
+                    nodeId: messageNodeId,
                     providerThreadId: turnInput.providerThread.id,
                     providerTurnId,
                     nativeItemRef: null,
@@ -397,9 +450,7 @@ function makeTestAdapter(input: {
                     completedAt: eventTime,
                     updatedAt: eventTime,
                     type: "assistant_message",
-                    messageId: MessageId.make(
-                      `message:${input.driver}:${turnInput.threadId}:${turnInput.runOrdinal}:assistant`,
-                    ),
+                    messageId,
                     text: response,
                     streaming: false,
                   },
@@ -423,7 +474,7 @@ function makeTestAdapter(input: {
                           }),
                       }
                     : { status: terminalStatus, failure: null }),
-                  threadDisposition: "reusable",
+                  threadDisposition: "reusable" as const,
                 },
               ];
               const reportedUsage = input.tokenUsageByRunOrdinal?.[turnInput.runOrdinal];
@@ -595,7 +646,14 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
     }).pipe(
       Effect.provide(
         ProviderReplayHarness.layerWithRegistry(
-          { name: "side-chat-auto-context", cwd },
+          {
+            name: "side-chat-auto-context",
+            runtimePolicyOverride: {
+              cwd,
+              approvalPolicy: "never",
+              sandboxPolicy: { type: "readOnly" },
+            },
+          },
           layerRegistry,
         ),
       ),

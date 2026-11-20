@@ -234,6 +234,7 @@ export const make = Effect.gen(function* () {
       linkedThreadRefreshes: true,
       sideChats: true,
       sideChatContextRefresh: true,
+      sideChatAutoContext: true,
       anchoredSideChats: true,
       reviewArtifacts: true,
       workspaceVersion: 2,
