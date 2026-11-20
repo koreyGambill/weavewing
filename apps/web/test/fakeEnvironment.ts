@@ -219,12 +219,14 @@ function run(
 }
 
 export interface FakeThread {
+  readonly worktreePath?: string;
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
   /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
   readonly olderSettled?: true;
   readonly id: ThreadId;
   readonly title: string;
+  readonly projectId?: ProjectId;
   /** Defaults to GPT-5.4 on Codex. */
   readonly modelSelection?: ModelSelection;
   /** The first is the thread's active provider thread. */
@@ -307,14 +309,14 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
   const modelSelection = thread.modelSelection ?? MODEL;
   return {
     id: thread.id,
-    projectId: PROJECT_ID,
+    projectId: thread.projectId ?? PROJECT_ID,
     title: thread.title,
     providerInstanceId: modelSelection.instanceId,
     modelSelection,
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: "main",
-    worktreePath: null,
+    worktreePath: thread.worktreePath ?? null,
     activeProviderThreadId: thread.providerThreads?.[0]?.id ?? null,
     lineage: {
       rootThreadId: thread.sideChatOf ?? thread.id,
@@ -405,6 +407,7 @@ const json = (body: unknown, status = 200) =>
 
 // Keyed by thread id: a live thread subscription's queue, for pushing events to it.
 const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStreamItem>>();
+let shellSubscriber: Queue.Queue<OrchestrationV2ShellStreamItem> | null = null;
 let terminalMetadataSubscriber: Queue.Queue<TerminalMetadataStreamEvent> | null = null;
 let threads: ReadonlyArray<FakeThread> = [];
 let dispatched: OrchestrationV2Command[] = [];
@@ -413,10 +416,11 @@ let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
 let holdCommand: (command: OrchestrationV2Command) => boolean = () => false;
 let pendingDispatches: Array<{
   readonly command: OrchestrationV2Command;
-  readonly reply: Deferred.Deferred<never, OrchestrationV2DispatchCommandError>;
+  readonly reply: Deferred.Deferred<{ sequence: number }, OrchestrationV2DispatchCommandError>;
 }> = [];
 let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
 let sequence = 1;
+let vcsStatusSnapshot: Extract<VcsStatusStreamEvent, { _tag: "snapshot" }> | undefined;
 let vcsStatusSubscriber: Queue.Queue<VcsStatusStreamEvent> | null = null;
 
 const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>) => () => void) =>
@@ -440,7 +444,10 @@ const handlers: Record<string, (input: never) => unknown> = {
       dispatched.push(command);
       if (acceptCommands && !holdCommand(command))
         return Effect.succeed({ sequence: sequence + 1 });
-      const reply = Deferred.makeUnsafe<never, OrchestrationV2DispatchCommandError>();
+      const reply = Deferred.makeUnsafe<
+        { sequence: number },
+        OrchestrationV2DispatchCommandError
+      >();
       pendingDispatches.push({ command, reply });
       return Deferred.await(reply);
     }),
@@ -459,19 +466,27 @@ const handlers: Record<string, (input: never) => unknown> = {
       };
     }),
   [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () =>
-    subscribe<OrchestrationV2ShellStreamItem>([
-      {
-        kind: "snapshot",
-        snapshot: {
-          schemaVersion: 1,
-          snapshotSequence: sequence,
-          projects,
-          threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
-          archivedThreads: [],
+    subscribe<OrchestrationV2ShellStreamItem>(
+      [
+        {
+          kind: "snapshot",
+          snapshot: {
+            schemaVersion: 1,
+            snapshotSequence: sequence,
+            projects,
+            threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
+            archivedThreads: [],
+          },
         },
+        { kind: "synchronized" },
+      ],
+      (queue) => {
+        shellSubscriber = queue;
+        return () => {
+          if (shellSubscriber === queue) shellSubscriber = null;
+        };
       },
-      { kind: "synchronized" },
-    ]),
+    ),
   [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: { readonly threadId: ThreadId }) => {
     const thread = threads.find((candidate) => candidate.id === input.threadId);
     if (!thread) return Stream.never;
@@ -501,7 +516,7 @@ const handlers: Record<string, (input: never) => unknown> = {
     });
   },
   [WS_METHODS.subscribeVcsStatus]: () =>
-    subscribe<VcsStatusStreamEvent>([], (queue) => {
+    subscribe<VcsStatusStreamEvent>(vcsStatusSnapshot ? [vcsStatusSnapshot] : [], (queue) => {
       vcsStatusSubscriber = queue;
       return () => {
         if (vcsStatusSubscriber === queue) vcsStatusSubscriber = null;
@@ -563,18 +578,34 @@ export function installFakeEnvironment(
   fixtures: ReadonlyArray<FakeThread>,
   options?: {
     readonly acceptCommands?: boolean;
+    readonly threadStop?: boolean;
+    readonly vcsStatus?: typeof vcsStatusSnapshot;
     readonly keybindings?: ResolvedKeybindingsConfig;
     readonly extraProjects?: ReadonlyArray<Pick<OrchestrationProjectShell, "id" | "title">>;
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
     readonly holdCommand?: (command: OrchestrationV2Command) => boolean;
     readonly providers?: ReadonlyArray<unknown>;
+    readonly scratchWorkspaceRoot?: string;
   },
 ): Disposable {
   threads = fixtures;
+  vcsStatusSnapshot = options?.vcsStatus;
   baseServerConfig = {
     ...makeServerConfig(options?.providers ?? [CODEX_PROVIDER]),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
+    ...(options?.scratchWorkspaceRoot === undefined
+      ? {}
+      : { scratchWorkspaceRoot: options.scratchWorkspaceRoot }),
   };
+  if (options?.threadStop) {
+    baseServerConfig = {
+      ...baseServerConfig,
+      environment: {
+        ...baseServerConfig.environment,
+        capabilities: { ...baseServerConfig.environment.capabilities, threadStop: true },
+      },
+    };
+  }
   dispatched = [];
   acceptCommands = options?.acceptCommands === true;
   projects = [
@@ -619,6 +650,12 @@ export function installFakeEnvironment(
 }
 
 /** Answers the oldest unanswered command with the server's rejection. */
+export async function acknowledgePendingCommand(): Promise<void> {
+  const pending = pendingDispatches.shift();
+  if (!pending) throw new Error("No pending command");
+  await Effect.runPromise(Deferred.succeed(pending.reply, { sequence: sequence + 1 }));
+}
+
 export async function rejectPendingCommand(message: string): Promise<void> {
   const pending = pendingDispatches.shift();
   if (!pending) throw new Error("No pending command");
@@ -676,6 +713,18 @@ export async function emitTerminalMetadata(event: TerminalMetadataStreamEvent): 
 /** Whether the app holds a live subscription to the thread, so events reach it. */
 export function isThreadSubscribed(threadId: ThreadId): boolean {
   return threadSubscribers.has(threadId);
+}
+
+export async function emitThreadShell(thread: FakeThread): Promise<void> {
+  if (shellSubscriber === null) throw new Error("No live shell subscription");
+  await Effect.runPromise(
+    Queue.offer(shellSubscriber, {
+      kind: "thread.updated",
+      sequence: ++sequence,
+      location: "active",
+      thread: shellOf(thread),
+    }),
+  );
 }
 
 /** Delivers one domain event, such as a run or turn-item update, to the thread's subscription. */

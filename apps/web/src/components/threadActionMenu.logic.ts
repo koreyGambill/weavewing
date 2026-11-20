@@ -3,6 +3,10 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 
 export type ThreadActionMenuId =
   | "find"
+  | "changes"
+  | "todos"
+  | "automations"
+  | "side-chat"
   | "new-thread-on-branch"
   | "filter-by-project"
   | "change-folder"
@@ -77,6 +81,9 @@ export function buildDraftActionMenuItems(options: {
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
   readonly canFind?: boolean;
+  readonly canOpenChanges?: boolean;
+  readonly showThreadTools?: boolean;
+  readonly canOpenSideChat?: boolean;
   readonly branch: string | null;
   readonly projectFilter: {
     readonly label: string;
@@ -106,6 +113,8 @@ export interface ThreadActionMenuState {
   readonly groups?: {
     readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
     readonly current: string | null;
+    /** Ungrouped's header name, or "Ungrouped" when it has no header. */
+    readonly ungroupedName: string;
     readonly canMoveUp: boolean;
     readonly canMoveDown: boolean;
   } | null;
@@ -118,6 +127,9 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
     "move-up",
     "move-down",
     "find",
+    "changes",
+    "todos",
+    "automations",
     "new-thread-on-branch",
     "project-settings",
     "mark-unread",
@@ -136,6 +148,16 @@ export function buildThreadActionMenuItems(
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
     ...(state.canFind
       ? [{ id: "find" as const, label: "Find in thread", icon: "text-search" }]
+      : []),
+    ...(state.canOpenChanges ? [{ id: "changes" as const, label: "Changes" }] : []),
+    ...(state.showThreadTools
+      ? [
+          { id: "todos" as const, label: "Todos" },
+          { id: "automations" as const, label: "Automations" },
+        ]
+      : []),
+    ...(state.canOperate && state.canOpenSideChat
+      ? [{ id: "side-chat" as const, label: "New side chat" }]
       : []),
     ...(state.branch
       ? [
@@ -199,7 +221,7 @@ export function buildThreadActionMenuItems(
               })),
               {
                 id: "group-none" as const,
-                label: "Ungrouped",
+                label: state.groups.ungroupedName,
                 checked: state.groups.current === null,
               },
               {

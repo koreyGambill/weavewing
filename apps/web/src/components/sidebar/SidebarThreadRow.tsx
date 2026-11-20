@@ -1,3 +1,5 @@
+import { scratchThreadFolder } from "@t3tools/client-runtime/state/projects";
+import { fileBasename } from "@t3tools/shared/path";
 import { ThreadGlyph } from "../ThreadGlyph";
 import { useAtomMount } from "@effect/atom-react";
 import { asLaunchingThread } from "@t3tools/client-runtime/state/thread-inbox";
@@ -40,7 +42,6 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
-  ArrowUpRightIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -87,6 +88,10 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
+  SidebarComputerLocalityIcon,
+  sidebarComputerLocalityLabel,
+} from "./SidebarComputerLocalityIcon";
+import {
   animateSidebarLayoutChanges,
   hasUnseenCompletion,
   isThreadGlyphWorking,
@@ -116,7 +121,7 @@ import {
 } from "../ThreadStatusIndicators";
 import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Sidebar.snooze";
 import { useThreadShell } from "../../state/entities";
-import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -257,7 +262,7 @@ function SidebarThreadTooltip({
   terminalProcessCount,
 }: {
   thread: SidebarThreadSummary;
-  project: ProjectFaviconProject | null;
+  project: EnvironmentProject | null;
   projectDisplayName: string | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
@@ -273,6 +278,8 @@ function SidebarThreadTooltip({
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
 }) {
+  const scratchFolder = scratchThreadFolder(project, thread.worktreePath);
+  const projectLabel = scratchFolder ?? projectDisplayName;
   const driverKind = providerEntry?.driverKind ?? null;
   const previousProviderNames = thread.providerInstanceHistory
     .filter((instanceId) => instanceId !== modelInstanceId)
@@ -290,10 +297,14 @@ function SidebarThreadTooltip({
           ) : null
         }
       >
-        {projectDisplayName ? (
+        {projectLabel ? (
           <div className="flex min-w-0 items-center gap-2">
             {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
-            <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
+            <div
+              className={cn("min-w-0 text-foreground/75", scratchFolder ? "break-all" : "truncate")}
+            >
+              {projectLabel}
+            </div>
           </div>
         ) : null}
         {environmentLabel ? (
@@ -587,9 +598,9 @@ function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS; className: 
 
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
-  // "folder" is a one-line row inside a boring sidebar project folder;
-  // "folder-multiline" adds a branch and PR line under it.
-  variant: "card" | "slim" | "folder" | "folder-multiline";
+  // "folder" is a one-line row inside a project folder; "folder-multiline" adds a branch and
+  // PR line under it. "dense" is the folder row outside a folder, for the Dense rows view.
+  variant: "card" | "slim" | "folder" | "folder-multiline" | "dense";
   navigationParent?: string | undefined;
   familyDepth?: number | undefined;
   variantAction: SidebarSweepAction;
@@ -613,7 +624,7 @@ type SidebarThreadRowProps = {
   // Read at click time; a prop would re-render every row on entering or leaving a thread route.
   readOpensPullRequestsInRightPanel: () => boolean;
   jumpLabel: string | null;
-  currentEnvironmentId: string | null;
+  onThisComputer: boolean | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   scratchMachineLabel: string | null;
@@ -878,9 +889,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? getTriggerDisplayModelName(selectedModel, providerEntry?.driverKind)
     : thread.modelSelection.model;
 
-  // Matches the composer's External badge: anything but this client's primary environment.
-  const isExternal = thread.environmentId !== props.currentEnvironmentId;
-  const externalLabel = isExternal ? `On ${props.environmentLabel ?? "another machine"}` : null;
+  const localityLabel = sidebarComputerLocalityLabel(props.onThisComputer, props.environmentLabel);
+  const scratchFolder = scratchThreadFolder(props.project, thread.worktreePath);
+  const projectDisplayName =
+    scratchFolder === null ? props.projectDisplayName : fileBasename(scratchFolder);
   const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
@@ -1069,7 +1081,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     statusLabel: topStatus?.label ?? null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
-    externalLabel,
+    localityLabel,
   });
 
   const title = isRenaming ? (
@@ -1136,7 +1148,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           prText: prPresentation === null ? null : String(prPresentation.text),
           hasTerminal,
           hasAutomation: Boolean(thread.automationTaskId),
-          isExternal,
           providerCount: providerStack.length,
         })
       : null;
@@ -1221,33 +1232,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   ) : null;
 
   // Cards have no branch line, so the scratch machine label never names the machine there.
-  const remoteMachineIcon =
-    isExternal && (variant === "card" || !showsScratchMachine) ? (
+  const machineIcon =
+    variant === "card" || !showsScratchMachine ? (
       <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
         <EnvironmentMachineIcon aria-hidden kind={props.environmentMachine} className="size-3.5" />
       </span>
     ) : null;
-  const externalMarker = externalLabel ? (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            role="img"
-            aria-label={externalLabel}
-            className="inline-flex shrink-0 items-center text-warning-foreground"
-          />
-        }
-      >
-        <ArrowUpRightIcon aria-hidden className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{externalLabel}</TooltipPopup>
-    </Tooltip>
-  ) : null;
+  const computerLocalityIcon = (
+    <SidebarComputerLocalityIcon onThisComputer={props.onThisComputer} label={localityLabel} />
+  );
   const diff = latestRunDiff(thread);
   // Only the trailing icons would remain, so the row moves them to the title line instead.
   const metaLineEmpty =
     !checkoutThread.branch &&
     !showsScratchMachine &&
+    scratchFolder === null &&
     prBadge === null &&
     diff === null &&
     runningTerminalIds.length === 0;
@@ -1257,7 +1256,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       aria-hidden
       className={cn("pointer-events-none inline-flex shrink-0 items-center gap-1", className)}
     >
-      {remoteMachineIcon}
+      {machineIcon}
       <SidebarProviderStack
         stack={providerStack}
         providerEntryByInstanceId={props.providerEntryByInstanceId}
@@ -1272,6 +1271,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+      {scratchFolder !== null ? (
+        <span className="min-w-0 flex-1 truncate">{projectDisplayName}</span>
+      ) : null}
       {checkoutThread.branch ? (
         <>
           <ThreadWorktreeIndicator thread={checkoutThread} />
@@ -1288,9 +1290,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           />
           <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
         </>
-      ) : (
+      ) : scratchFolder === null ? (
         <span className="flex-1" />
-      )}
+      ) : null}
       {clippedIndicators(
         <>
           {terminalStatusIcon}
@@ -1309,14 +1311,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         </>,
       )}
       {automationMarker}
-      {externalMarker}
+      {computerLocalityIcon}
     </div>
   );
   const titleLineIcons = metaLineEmpty ? (
     <>
       {clippedIndicators(decorationIcons())}
       {automationMarker}
-      {externalMarker}
+      {computerLocalityIcon}
     </>
   ) : null;
 
@@ -1326,7 +1328,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
-    const inFolder = variant === "folder" || multiline;
+    const inFolder = variant === "folder" || multiline || variant === "dense";
     return (
       <li
         data-thread-item={threadKey}
@@ -1349,6 +1351,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-sidebar-row={threadKey}
                 data-sidebar-parent={props.navigationParent}
                 aria-label={accessibility.label}
+                aria-description={scratchFolder ?? undefined}
                 aria-current={accessibility.current}
                 data-testid={inFolder ? "sidebar-row-folder" : "sidebar-row-slim"}
                 aria-busy={isRegeneratingTitle || undefined}
@@ -1358,7 +1361,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     ? "flex flex-col justify-center px-2.5 py-1.5"
                     : "flex h-9 items-center gap-2.5 px-2.5",
                   // Lines titles up with the folder name, past its chevron and icon.
-                  inFolder && "ps-9",
+                  inFolder && variant !== "dense" && "ps-9",
                 )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
@@ -1378,6 +1381,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               />
               {draftIndicator}
               {title}
+              {!multiline && scratchFolder !== null ? (
+                <span className="max-w-1/4 shrink truncate text-secondary-label text-xs">
+                  {projectDisplayName}
+                </span>
+              ) : null}
               {multiline ? titleLineIcons : automationMarker}
               {pinIndicator}
               {multiline ? null : terminalStatusIcon}
@@ -1508,6 +1516,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </span>
               )}
               {props.sweepAction !== null ? dragDestination : null}
+              {/* Last on the line, so the locality marker never moves as the status changes. */}
+              {multiline ? null : computerLocalityIcon}
             </div>
             {multiline ? metaLine : null}
           </TooltipTrigger>
@@ -1540,6 +1550,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               data-sidebar-row={threadKey}
               data-sidebar-parent={props.navigationParent}
               aria-label={accessibility.label}
+              aria-description={scratchFolder ?? undefined}
               aria-current={accessibility.current}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || undefined}
@@ -1560,11 +1571,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName ? (
+              {projectDisplayName ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
-                  {props.projectDisplayName}
+                  {projectDisplayName}
                 </span>
               ) : (
                 <span className="flex-1" />
@@ -1733,7 +1744,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </>,
               )}
               {automationMarker}
-              {externalMarker}
+              {computerLocalityIcon}
             </div>
           </div>
         </TooltipTrigger>
@@ -1743,7 +1754,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
-// Glyph, 3rem title, PR icon, automation button and external arrow with their gaps, plus a card's
+// Glyph, 3rem title, PR icon, automation button and locality arrow with their gaps, plus a card's
 // 10px content inset on each side.
 const ROW_MIN_WIDTH = 136 + 20;
 
@@ -1790,12 +1801,10 @@ function resolveCardTitleLineLayout(input: {
   prText: string | null;
   hasTerminal: boolean;
   hasAutomation: boolean;
-  isExternal: boolean;
   providerCount: number;
 }) {
   const gap = 6;
-  const fixed =
-    20 + gap + 48 + (input.hasAutomation ? gap + 14 : 0) + (input.isExternal ? gap + 14 : 0);
+  const fixed = 20 + gap + 48 + (input.hasAutomation ? gap + 14 : 0) + gap + 14;
   const group = (...items: ReadonlyArray<number | null>) => {
     const present = items.filter((item) => item !== null);
     if (present.length === 0) return 0;
@@ -1804,8 +1813,7 @@ function resolveCardTitleLineLayout(input: {
   const terminal = input.hasTerminal ? 14 : null;
   const prIcon = input.prText === null ? null : 12;
   const prFull = input.prText === null ? null : 12 + 2 + 8 * input.prText.length;
-  const decoration =
-    (input.isExternal ? 14 + 4 : 0) + 14 + 18 * (Math.max(input.providerCount, 1) - 1);
+  const decoration = 14 + 4 + 14 + 18 * (Math.max(input.providerCount, 1) - 1);
   return {
     decoration: cardTitleLineBreakpoint(fixed + group(terminal, prFull, decoration)),
     prNumber: cardTitleLineBreakpoint(fixed + group(terminal, prFull)),
@@ -1843,6 +1851,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   environmentLabel: string | null;
+  onThisComputer: boolean | null;
   environmentMachine: EnvironmentMachineKind;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   isHighlighted: boolean;
@@ -1859,11 +1868,13 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
 }) {
   const thread =
     useThreadShell(scopeThreadRef(props.thread.environmentId, props.thread.id)) ?? props.thread;
+  const localityLabel = sidebarComputerLocalityLabel(props.onThisComputer, props.environmentLabel);
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel: null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isRouteActive,
+    localityLabel,
   });
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   // Results only drag out as chat context; the row keeps its own listbox attributes.
@@ -1994,6 +2005,10 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                   settled={props.isSettled}
                 />
               </span>
+              <SidebarComputerLocalityIcon
+                onThisComputer={props.onThisComputer}
+                label={localityLabel}
+              />
               <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
                 <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
               </span>

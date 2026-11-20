@@ -61,6 +61,7 @@ export function ChatCanvas({
 }) {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const widthProbeRef = useRef<HTMLDivElement | null>(null);
+  const [detailsBarElement, registerDetailsBar] = useState<HTMLElement | null>(null);
   const [timelineElement, registerTimeline] = useState<HTMLElement | null>(null);
   const measurements = useStore(store, (state) => state.measurements);
   const detailsCardMeasurement = useStore(store, (state) => state.detailsCardMeasurement);
@@ -100,17 +101,19 @@ export function ChatCanvas({
         }
       }
       const canvasBounds = element.getBoundingClientRect();
-      const findBarBounds = findBar?.getBoundingClientRect();
+      const canvasEdges = (node: HTMLElement | null) => {
+        if (!node) return null;
+        const bounds = node.getBoundingClientRect();
+        return {
+          left: bounds.left - canvasBounds.left,
+          right: bounds.right - canvasBounds.left,
+          bottom: bounds.bottom - canvasBounds.top,
+        };
+      };
       const styles = getComputedStyle(probe);
       store.getState().setMeasurements({
-        findBar:
-          detailsCardTopInset > 0
-            ? {
-                left: findBarBounds ? findBarBounds.left - canvasBounds.left : 0,
-                right: findBarBounds ? findBarBounds.right - canvasBounds.left : 0,
-                bottom: findBarBounds ? findBarBounds.bottom - canvasBounds.top : 0,
-              }
-            : null,
+        findBar: canvasEdges(findBar),
+        detailsBar: canvasEdges(detailsBarElement),
         width,
         narrowestWidth: transitionWidths?.narrowestWidth ?? width,
         height: element.clientHeight,
@@ -126,6 +129,7 @@ export function ChatCanvas({
     measure();
     const observed: Element[] = [element, probe];
     if (findBar) observed.push(findBar);
+    if (detailsBarElement) observed.push(detailsBarElement);
     if (composerOverlayElement) observed.push(composerOverlayElement);
     if (timelineElement) observed.push(timelineElement);
     const stopObserving = observeResize(observed, measure);
@@ -133,7 +137,7 @@ export function ChatCanvas({
       disposed = true;
       stopObserving();
     };
-  }, [store, composerOverlayElement, timelineElement, detailsCardTopInset]);
+  }, [store, composerOverlayElement, timelineElement, detailsCardTopInset, detailsBarElement]);
   const detailsCardInlineOpen = useRightPanelStore((state) =>
     threadRef === null
       ? false
@@ -154,6 +158,8 @@ export function ChatCanvas({
     registerTimeline,
     measureDetailsCard: store.getState().measureDetailsCard,
     detailsCardTopInset: model.detailsCardTopInset,
+    detailsBar: model.detailsBar,
+    registerDetailsBar,
     preferredDetailsCard: model.preferredDetailsCard,
     detailsCardPlacement: model.detailsCardPlacement,
   };

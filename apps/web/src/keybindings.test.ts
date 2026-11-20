@@ -1057,6 +1057,7 @@ it.each(["Linux", "Win32", "MacIntel"])(
       ["x", "workspace.tile.closeTab"],
       ["m", "workspace.tile.maximize"],
       ["M", "terminal.dropdownExpand"],
+      ["P", "terminal.dropdownPin"],
       ["0", "workspace.tile.swap"],
       [" ", "workspace.tile.rotate"],
       ["t", "workspace.tile.newTab"],
@@ -1072,7 +1073,7 @@ it.each(["Linux", "Win32", "MacIntel"])(
     for (const [key, command] of sequences) {
       const input = event({
         key: key!,
-        shiftKey: key === "%" || key === '"' || key === ":" || key === "M",
+        shiftKey: key === "%" || key === '"' || key === ":" || key === "M" || key === "P",
       });
       for (const terminalFocus of [false, true]) {
         const options = {

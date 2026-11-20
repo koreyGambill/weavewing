@@ -1,11 +1,6 @@
 import { pipe } from "effect/Function";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import type {
-  EnvironmentId,
-  ScopedThreadRef,
-  ThreadPullRequestLink,
-  VcsStatusResult,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef, ThreadPullRequestLink } from "@t3tools/contracts";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   pullRequestListLines,
@@ -24,6 +19,8 @@ import {
 
 import type { ComposerThreadTarget } from "~/composerDraftStore";
 import { useProjects, useQuietThreadShell } from "~/state/entities";
+import { useEnvironmentQuery } from "~/state/query";
+import { vcsEnvironment } from "~/state/vcs";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 
@@ -31,6 +28,7 @@ import { useOpenPrLink } from "../../lib/openPullRequestLink";
 import {
   linkedPullRequestSnapshotStatus,
   prStatusIndicator,
+  resolveDisplayedThreadPr,
   useThreadDisplayedPullRequest,
 } from "../ThreadStatusIndicators";
 
@@ -159,24 +157,34 @@ function ThreadDetailsPrRows({
 export function ThreadDetailsThreadPrRows({
   threadRef,
   project,
-  branchPr = null,
-  branchSourceControlProvider,
-  onActed,
+  branchCwd = null,
+  branchOverride,
   composerTarget,
 }: {
   threadRef: ScopedThreadRef;
   project: EnvironmentProject | null;
-  branchPr?: VcsStatusResult["pr"];
-  branchSourceControlProvider?: VcsStatusResult["sourceControlProvider"];
-  onActed?: () => void;
+  branchCwd?: string | null;
+  branchOverride?: string | null;
   composerTarget?: ComposerThreadTarget | undefined;
 }) {
   const thread = useQuietThreadShell(threadRef);
+  const branchStatus = useEnvironmentQuery(
+    branchCwd === null
+      ? null
+      : vcsEnvironment.status({
+          environmentId: threadRef.environmentId,
+          input: { cwd: branchCwd },
+        }),
+  );
+  const branchPr = resolveDisplayedThreadPr({
+    threadBranch: branchOverride !== undefined ? branchOverride : (thread?.branch ?? null),
+    gitStatus: branchStatus.data,
+  });
   const displayed = useThreadDisplayedPullRequest(
     threadRef.environmentId,
     thread,
     branchPr,
-    branchSourceControlProvider,
+    branchStatus.data?.sourceControlProvider,
   );
   const openPrLink = useOpenPrLink(threadRef);
   const { currentLink, pr, number, url } = displayed;
@@ -210,7 +218,7 @@ export function ThreadDetailsThreadPrRows({
       openAriaLabel={url}
       onOpen={(event) => openPrLink(event, url)}
       composerTarget={composerTarget}
-      {...(onActed ? { onActed } : {})}
+      {...(branchCwd === null ? {} : { onActed: branchStatus.refresh })}
     />
   );
 }

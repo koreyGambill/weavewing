@@ -1,4 +1,5 @@
 import {
+  AuthOrchestrationOperateScope,
   buildRemoteOpenUrl,
   type EditorId,
   type EnvironmentId,
@@ -8,10 +9,10 @@ import { useEffect } from "react";
 
 import { usePreferredEditor } from "../../editorPreferences";
 import { editorLabelForPlatform } from "../../editorLabels";
-import { isOpenFavoriteEditorShortcut } from "../../keybindings";
 import { announce } from "../../lib/announce";
 import { openRemoteEditorUrl, useRemoteCapableEditors, useRemoteOpenState } from "../../remoteOpen";
 import { registerCommands } from "../../shortcuts/dispatcher";
+import { readEnvironmentScope } from "../../state/session";
 import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 
@@ -21,7 +22,7 @@ export const OPEN_FAVORITE_EDITOR_ATTRIBUTE = "data-open-favorite-editor";
 /**
  * `editor.openFavorite` presses the marked OpenInPicker primary button, so the shortcut opens
  * exactly what the button on screen would. A missing or disabled button leaves the chord to the
- * bubble-phase fallback below. Capture phase, so a focused terminal does not swallow the chord.
+ * thread fallback below. Capture phase, so a focused terminal does not swallow the chord.
  */
 export function registerOpenFavoriteEditorCommand(): () => void {
   return registerCommands(
@@ -61,44 +62,39 @@ export function useOpenFavoriteEditorShortcut({
     remote.mode === "local-exec" ? availableEditors : remoteCapableEditors,
   );
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes a window keydown listener for the open-in-editor shortcut while enabled
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the active thread's fallback with the shortcut dispatcher
   useEffect(() => {
     if (!enabled || remote.mode === "remote-unavailable") return;
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.repeat ||
-        event.defaultPrevented ||
-        !isOpenFavoriteEditorShortcut(event, keybindings)
-      )
-        return;
-      if (!openInCwd || !preferredEditor) return;
-
-      event.preventDefault();
-      const label = editorLabelForPlatform(preferredEditor, navigator.platform);
-      if (remote.mode === "remote-links") {
-        const url = buildRemoteOpenUrl({
-          editor: preferredEditor,
-          ...remote.host,
-          absolutePath: openInCwd,
-        });
-        if (url === undefined) return;
-        void openRemoteEditorUrl(url).then((opened) => {
-          if (opened) announce(`Opened in ${label}`);
-        });
-        return;
-      }
-      void openInEditorMutation({
-        environmentId,
-        input: {
-          cwd: openInCwd,
-          editor: preferredEditor,
+    return registerCommands(
+      {
+        "editor.openFavorite": (event) => {
+          if (event.repeat || !openInCwd || !preferredEditor) return false;
+          const label = editorLabelForPlatform(preferredEditor, navigator.platform);
+          if (remote.mode === "remote-links") {
+            const url = buildRemoteOpenUrl({
+              editor: preferredEditor,
+              ...remote.host,
+              absolutePath: openInCwd,
+            });
+            if (url === undefined) return false;
+            event.preventDefault();
+            void openRemoteEditorUrl(url).then((opened) => {
+              if (opened) announce(`Opened in ${label}`);
+            });
+            return;
+          }
+          if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;
+          event.preventDefault();
+          void openInEditorMutation({
+            environmentId,
+            input: { cwd: openInCwd, editor: preferredEditor },
+          }).then((result) => {
+            if (result._tag === "Success") announce(`Opened in ${label}`);
+          });
         },
-      }).then((result) => {
-        if (result._tag === "Success") announce(`Opened in ${label}`);
-      });
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+      },
+      { keybindings: () => keybindings },
+    );
   }, [
     enabled,
     environmentId,

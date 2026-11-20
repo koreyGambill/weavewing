@@ -432,6 +432,7 @@ function DelegatedFromRow(props: {
 export function ThreadRelationshipsPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly empty?: ReactNode;
   readonly showLineage: boolean;
   readonly showSideChats: boolean;
 }) {
@@ -637,7 +638,7 @@ export function ThreadRelationshipsPanel(props: {
   const runningSideChats = sideChats.filter(({ edge }) => edge.status === "running").length;
 
   if (!lineageVisible && !sideChatsVisible) {
-    return null;
+    return props.empty ?? null;
   }
 
   // Idle children can be omitted from the shell; opening one loads its own detail.

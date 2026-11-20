@@ -1,6 +1,7 @@
 import {
   CommandId,
   type EnvironmentId,
+  type MessageId,
   type ModelSelection,
   type ScopedThreadRef,
   type ThreadId,
@@ -52,6 +53,22 @@ import { recallComposerMessage } from "./composerPromptHistory";
 // ChatView remounting while the user navigates.
 export const draftFanoutSelectionsAtom = Atom.family((_routeKey: string) =>
   Atom.make<ReadonlyArray<ModelSelection> | null>(null).pipe(Atom.keepAlive),
+);
+export class PendingTurnSubmission {
+  stopRequested = false;
+
+  constructor(readonly threadId: ThreadId) {}
+
+  requestStop() {
+    this.stopRequested = true;
+  }
+}
+
+export const pendingTurnSubmissionAtom = Atom.family((_routeKey: string) =>
+  Atom.make<{
+    readonly submission: PendingTurnSubmission;
+    readonly acceptedMessageId: MessageId | null;
+  } | null>(null).pipe(Atom.keepAlive),
 );
 const draftSendStateByRouteKey = new Map<
   string,

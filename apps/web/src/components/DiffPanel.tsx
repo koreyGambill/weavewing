@@ -37,7 +37,6 @@ import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { toolCallDiff } from "../lib/toolCallDiff";
 import { useCheckpointDiff, useTurnItemDetail } from "~/state/queries";
-import { revisionedQuery } from "~/state/revisionedQuery";
 import { cn } from "~/lib/utils";
 import {
   resolveToolCallDiffTarget,
@@ -104,6 +103,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import { serverEnvironment } from "../state/server";
+import { gitDiffPreviewQuery } from "../state/gitDiffPreviewQuery";
 import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
@@ -390,12 +390,11 @@ export default function DiffPanel({
   // mounted while hidden, so a mutation made then is already reflected when it shows.
   const branchDiffPreview = useEnvironmentQuery(
     branchDiffPreviewInput && activeThread
-      ? revisionedQuery(
-          reviewEnvironment.diffPreview({
-            environmentId: activeThread.environmentId,
-            input: branchDiffPreviewInput,
-          }),
+      ? gitDiffPreviewQuery(
+          activeThread.environmentId,
+          branchDiffPreviewInput,
           canRefreshGitDiff ? workspaceMutationId : undefined,
+          gitStatusQuery.data,
         )
       : null,
   );

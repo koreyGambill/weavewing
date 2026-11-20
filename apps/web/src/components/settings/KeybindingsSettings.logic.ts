@@ -412,6 +412,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "keybindings.leader") return "Leader Key";
   if (command === "terminal.dropdown") return "Toggle Drop-down Terminal";
   if (command === "terminal.dropdownExpand") return "Fill Window with Drop-down Terminal";
+  if (command === "terminal.dropdownPin") return "Pin Drop-down Terminal";
   if (command === "workspace.tile.rotate") return "Rotate Tiles";
   if (/^workspace\.tile\.tab\.[1-9]$/.test(command)) return `Jump to Tab ${command.at(-1)}`;
   if (command === "workspace.tile.resizeLeft") return "Resize Tile Left";

@@ -135,6 +135,18 @@ export function findProjectByPath<T extends { workspaceRoot?: string; cwd?: stri
   });
 }
 
+export function scratchThreadFolder(
+  project: { readonly workspaceRoot: string; readonly isScratch?: boolean } | null,
+  worktreePath: string | null,
+): string | null {
+  return project?.isScratch === true &&
+    worktreePath !== null &&
+    normalizeProjectPathForComparison(worktreePath) !==
+      normalizeProjectPathForComparison(project.workspaceRoot)
+    ? worktreePath
+    : null;
+}
+
 export function isScratchProject(
   project: { readonly workspaceRoot: string; readonly isScratch?: boolean },
   scratchWorkspaceRoot: string | null | undefined,

@@ -10,6 +10,8 @@ import {
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
+import type { ReviewDiffPreviewInput } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 
@@ -38,6 +40,7 @@ import {
   emitThreadEvent,
   hasPendingAssetUrl,
   installFakeEnvironment,
+  acknowledgePendingCommand,
   rejectPendingCommand,
   threadWithHistory,
   threadWithQuestion,
@@ -524,6 +527,57 @@ it("a rejected send leaves the timeline when a new draft was typed meanwhile", a
   expect(editor.element().textContent).toContain("Next draft");
 });
 
+it.each(["before receipt", "after reopening"] as const)(
+  "stops a submitted turn before its run arrives (%s)",
+  async (when) => {
+    const thread = threadWithHistory(`stop-submission-${when.replaceAll(" ", "-")}`, 1);
+    const other = threadWithHistory("other-thread", 1);
+    using _environment = installFakeEnvironment([thread, other], {
+      acceptCommands: true,
+      threadStop: true,
+      holdCommand: (command) => command.type === "message.dispatch",
+    });
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const router = getRouter(
+      createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+    );
+    await router.load();
+    await using _app = await render(<AppRoot router={router} />, {
+      // AppRoot brings its own router.
+      router: false,
+    });
+    await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+    await page.getByTestId("composer-editor").click();
+    await userEvent.keyboard("Wrong model{Enter}");
+    await vi.waitFor(() =>
+      expect(dispatchedCommands().some((command) => command.type === "message.dispatch")).toBe(
+        true,
+      ),
+    );
+    const stop = page.getByRole("button", { name: "Stop generation" });
+    if (when === "before receipt") {
+      await stop.click();
+      expect(dispatchedCommands().some((command) => command.type === "thread.stop")).toBe(false);
+    }
+    await acknowledgePendingCommand();
+    if (when === "after reopening") {
+      await act(() => router.navigate({ to: `/${ENVIRONMENT_ID}/${other.id}` }));
+      await expect.element(page.getByText(`Answer 0 for ${other.id}.`)).toBeVisible();
+      await act(() => router.navigate({ to: `/${ENVIRONMENT_ID}/${thread.id}` }));
+      await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+      await stop.click();
+    }
+    await vi.waitFor(() =>
+      expect(dispatchedCommands()).toContainEqual(
+        expect.objectContaining({ type: "thread.stop", threadId: thread.id }),
+      ),
+    );
+  },
+);
+
 it("Enter on an empty prompt resumes an interrupted thread", async () => {
   const history = threadWithHistory("interrupted", 1);
   const interruptedRun = { ...history.runs[0]!, status: "interrupted" as const };
@@ -698,4 +752,242 @@ it("selecting a side-chat tab focuses that side chat's composer", async () => {
   await userEvent.click(screen.getByRole("tab", { name: side.title, exact: true }));
   await expect.element(sideEditor).toHaveFocus();
   await expect.element(mainEditor).toHaveTextContent("main draft");
+});
+
+it("preserves chat width, details visibility and focus as the tile resizes", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1560, 860);
+  const thread = threadWithHistory("responsive-details", 3);
+  using _environment = installFakeEnvironment([thread]);
+  useRightPanelStore
+    .getState()
+    .setThreadPanelOpen(scopeThreadRef(ENVIRONMENT_ID, thread.id), "inline", true);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  const answer = page.getByText(`Answer 0 for ${thread.id}.`);
+  await expect.element(answer).toBeVisible();
+  const tile = document.querySelector<HTMLElement>("[data-chat-canvas]")!;
+  const composer = document.querySelector<HTMLElement>("[data-chat-composer-stack]")!;
+  const resize = async (width: number, mode: "inline" | "bar") => {
+    tile.style.width = `${width}px`;
+    tile.style.flex = "none";
+    await vi.waitFor(() => {
+      expect(tile.clientWidth).toBe(width);
+      expect(tile.querySelector(`[data-thread-details-panel="${mode}"]`)).not.toBeNull();
+      expect(composer.clientWidth).toBe(736);
+    });
+  };
+  await resize(1300, "inline");
+  await resize(1108, "inline");
+  await resize(1107, "bar");
+  await resize(1050, "bar");
+  const disclosure = page
+    .getByRole("region", { name: "Thread details" })
+    .getByRole("button", { name: "Details", exact: true });
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "true");
+  const control = tile.querySelector<HTMLButtonElement>(
+    "[data-thread-details-card] button:not(:disabled)",
+  )!;
+  control.focus();
+  expect(document.activeElement).toBe(control);
+  await resize(1300, "inline");
+  expect(document.activeElement).toBe(control);
+  await resize(1050, "bar");
+  expect(document.activeElement).toBe(control);
+  await disclosure.click();
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
+  await resize(1300, "inline");
+  expect(document.activeElement).toBe(tile.querySelector('[data-thread-details-panel="inline"]'));
+  await page.getByRole("button", { name: "Toggle thread details panel" }).first().click();
+  tile.style.width = "1050px";
+  await vi.waitFor(() => {
+    expect(tile.querySelector("[data-thread-details-panel]")).toBeNull();
+    expect(composer.clientWidth).toBe(736);
+  });
+});
+
+it("opens workspace actions, lineage and changes with the card closed", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1560, 860);
+
+  const thread = threadWithHistory("workspace-actions", 1);
+  const child = {
+    ...threadWithHistory("workspace-side-chat", 1),
+    sideChatOf: thread.id,
+    olderSettled: true as const,
+  };
+  const threadRef = scopeThreadRef(ENVIRONMENT_ID, thread.id);
+  using _environment = installFakeEnvironment([thread, child]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  const card = page.getByRole("region", { name: "Thread details" });
+  await expect.element(card).not.toBeInTheDocument();
+
+  const actions = page.getByRole("button", { name: "Workspace actions", exact: true });
+  const commands = page.getByRole("dialog", { name: "Workspace actions" });
+  await actions.click();
+  await expect.element(commands.getByText("Add project script")).toBeVisible();
+  await expect.element(commands.getByText("Commit", { exact: true })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(commands, { timeout: 2500 }).not.toBeInTheDocument();
+
+  await page.getByRole("button", { name: "Lineage", exact: true }).click();
+  const lineage = page.getByRole("dialog", { name: "Thread lineage" });
+  await expect.element(lineage.getByText(child.title), { timeout: 2500 }).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+
+  await expect.element(lineage, { timeout: 2500 }).not.toBeInTheDocument();
+  await page.viewport(690, 860);
+  await actions.click();
+  await expect.element(commands.getByText("Add project script")).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+
+  const actionMenu = page.getByRole("button", { name: `Thread actions for ${thread.title}` });
+  await actionMenu.click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Todos", exact: true }), { timeout: 3000 })
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Automations", exact: true }))
+    .toBeVisible();
+  await page.getByRole("menuitem", { name: "Changes", exact: true }).click();
+  await vi.waitFor(() =>
+    expect(
+      useRightPanelStore.getState().byThreadKey[`${ENVIRONMENT_ID}:${thread.id}`]?.surfaces,
+    ).toContainEqual(expect.objectContaining({ kind: "diff" })),
+  );
+  useRightPanelStore.getState().close(threadRef);
+  await page.viewport(1300, 860);
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  const hosted = page.getByRole("navigation", { name: "Threads" });
+  await expect.element(hosted.getByText("Add project script")).toBeVisible();
+  await expect.element(card).not.toBeInTheDocument();
+});
+
+it("uses the remembered base and whitespace-filtered Diff counts beside the branch", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1400, 860);
+
+  const thread = {
+    ...threadWithHistory("branch-counts", 1),
+    olderSettled: true as const,
+    worktreePath: "/workspace/branch-counts",
+  };
+  const threadRef = scopeThreadRef(ENVIRONMENT_ID, thread.id);
+  using _environment = installFakeEnvironment([thread], {
+    vcsStatus: {
+      _tag: "snapshot",
+      local: {
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: true,
+        refName: "main",
+        hasWorkingTreeChanges: true,
+        workingTree: {
+          files: [{ path: "src/app.ts", insertions: 12, deletions: 3 }],
+          insertions: 12,
+          deletions: 3,
+        },
+      },
+      remote: null,
+    },
+  });
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    diffIgnoreWhitespace: true,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  useDiffPanelStore.getState().selectBranchBaseRef(threadRef, "origin/stable");
+  useDiffPanelStore.getState().selectGitScope(threadRef, "unstaged");
+  const branchPreview = vi.fn((input: ReviewDiffPreviewInput) =>
+    Effect.succeed({
+      cwd: input.cwd,
+      generatedAt: DateTime.makeUnsafe("2026-03-17T19:12:28.000Z"),
+      sources: [
+        {
+          id: "branch",
+          kind: "branch-range",
+          title: "Changes",
+          baseRef: input.baseRef ?? null,
+          headRef: "main",
+          diff: "",
+          diffHash: "filtered-diff",
+          truncated: false,
+          patchesDeferred: true,
+          files: [{ path: "src/app.ts", previousPath: null, additions: 2, deletions: 1 }],
+        },
+      ],
+    }),
+  );
+  using _branchPreview = answerRpc(WS_METHODS.reviewGetDiffPreview, branchPreview);
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  const counts = page.getByRole("button", { name: "Changes: 2 additions, 1 deletions" });
+  await expect.element(counts, { timeout: 3000 }).toBeVisible();
+  expect(branchPreview).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      sourceKind: "branch-range",
+      baseRef: "origin/stable",
+      ignoreWhitespace: true,
+      metadataOnly: true,
+    }),
+  );
+  const metadataRequests = () =>
+    branchPreview.mock.calls.filter(([input]) => input.metadataOnly === true);
+  expect(metadataRequests()).toHaveLength(1);
+  await counts.click();
+  await expect
+    .element(page.getByRole("tab", { name: "Diff", exact: true }), { timeout: 2500 })
+    .toBeVisible();
+  await expect
+    .element(page.getByText("origin/stable", { exact: true }).first(), { timeout: 2500 })
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("group", { name: "2 additions, 1 deletions", exact: true }).first(), {
+      timeout: 2500,
+    })
+    .toBeVisible();
+  expect(metadataRequests()).toHaveLength(1);
+  expect(
+    selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, threadRef),
+  ).toEqual({ kind: "branch", baseRef: "origin/stable" });
 });

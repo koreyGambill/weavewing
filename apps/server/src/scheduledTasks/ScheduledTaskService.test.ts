@@ -1023,6 +1023,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       // A form opened before the first run saves no thread; the binding stays.
       const { task } = yield* service.upsert({
         ...input,
+        requireExisting: true,
         threadId: null,
         threadMode: "fresh_session",
       });
@@ -1498,11 +1499,13 @@ it.effect("checks a task's destination thread only when the destination changes"
     );
     const consumed = yield* Ref.make(0);
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provideMerge(ServerSettings.layerTest()),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
-          ServerSettings.layerTest(),
-          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+            isNonGitProject: () => Effect.succeed(false),
+          }),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             streamDomainEvents: Stream.empty,
             streamDomainEventsFrom: () => Stream.empty,
@@ -1572,6 +1575,75 @@ it.effect("checks a task's destination thread only when the destination changes"
         new Map(all).set(destination, threadShell(project, { archivedAt })),
       );
       assert.equal((yield* save(destination)).task.threadId, destination);
+      const settings = yield* ServerSettings.ServerSettingsService;
+      for (const schedule of [
+        { type: "interval", everyMs: 60_000 },
+        { type: "interval", everyMs: 1_800_000, idleCheckin: true },
+      ] as const) {
+        const input: ScheduledTaskUpsertInput = {
+          id: ScheduledTaskId.make(`task:moved:${schedule.everyMs}`),
+          title: "Follow up",
+          prompt: "Check progress",
+          enabled: true,
+          schedule,
+          projectId: project,
+          threadId: destination,
+          threadMode: "continue",
+          workspaceStrategy:
+            "idleCheckin" in schedule ? { type: "root" } : { type: "worktree", baseRef: "main" },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        };
+        yield* Ref.update(shells, (all) => new Map(all).set(destination, threadShell(project)));
+        yield* settings.updateSettings({ worktreeProvider: "t3" });
+        yield* service.upsert(input);
+        yield* settings.updateSettings({ worktreeProvider: "off" });
+        yield* Ref.update(shells, (all) =>
+          new Map(all).set(destination, threadShell(otherProject)),
+        );
+        const reset = { ...input, threadId: null, detachFromThread: true };
+        if ("idleCheckin" in schedule) {
+          const refused = yield* service.upsert(reset).pipe(Effect.flip);
+          assert.include(refused.message, "Idle check-ins require an existing main thread");
+        } else {
+          for (const threadMode of ["continue", "fresh_session"] as const) {
+            const { task } = yield* service.upsert({ ...reset, threadMode });
+            assert.isNull(task.threadId);
+            assert.equal(task.threadMode, threadMode);
+            assert.equal(task.projectId, project);
+            assert.isNull(
+              (yield* service.upsert({
+                ...input,
+                threadId: null,
+                threadMode,
+                title: "Edited again",
+              })).task.threadId,
+            );
+            yield* Ref.update(shells, (all) => new Map(all).set(destination, threadShell(project)));
+            yield* service.upsert(input);
+            yield* Ref.update(shells, (all) =>
+              new Map(all).set(destination, threadShell(otherProject)),
+            );
+          }
+        }
+        const edit = { ...input, projectId: otherProject };
+        const moved = (yield* service.upsert(edit)).task;
+        assert.equal(moved.threadId, destination);
+        assert.deepEqual(moved.workspaceStrategy, input.workspaceStrategy);
+        assert.equal(
+          (yield* service.upsert({ ...edit, title: "Edited again" })).task.threadId,
+          destination,
+        );
+        const { task } = yield* service.upsert({
+          ...edit,
+          schedule: { type: "interval", everyMs: 60_000 },
+          threadId: null,
+          threadMode: "new_thread",
+        });
+        assert.isNull(task.threadId);
+        assert.equal(task.projectId, otherProject);
+      }
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

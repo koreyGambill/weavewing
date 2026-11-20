@@ -54,6 +54,7 @@ function ChangeThreadFolderDialog({ threadRef }: { readonly threadRef: ScopedThr
   const [xwingEnvironmentId, setXwingEnvironmentId] = useState<XwingEnvironmentId | undefined>();
   const [pending, setPending] = useState(false);
   const [expected] = useState({
+    projectId: thread?.projectId,
     worktreePath: thread?.worktreePath ?? null,
     xwingEnvironmentId: thread?.developmentEnvironment?.xwingEnvironmentId ?? null,
   });

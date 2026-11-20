@@ -18,9 +18,11 @@ export const ChatCanvasContext = createContext<{
   registerTimeline: (element: HTMLElement | null) => void;
   measureDetailsCard: (measurement: DetailsCardMeasurement) => void;
   detailsCardTopInset: number;
+  detailsBar?: boolean;
+  registerDetailsBar?: (element: HTMLElement | null) => void;
   /** Where an inline card sits when nothing overlaps it; null when the canvas is too narrow. */
   preferredDetailsCard: ReturnType<typeof resolveThreadDetailsCardLayout>;
-  /** Where the inline card sits now; null when it shows as a popover. */
+  /** Where the inline card sits now; null when it uses the bar or popover. */
   detailsCardPlacement: ReturnType<typeof resolveThreadDetailsCardLayout>;
 } | null>(null);
 

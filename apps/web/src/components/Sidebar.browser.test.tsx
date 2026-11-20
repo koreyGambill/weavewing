@@ -1,5 +1,8 @@
 import appCss from "../index.css?inline";
-import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
+import {
+  BearerConnectionTarget,
+  type EnvironmentServerConfig,
+} from "@t3tools/client-runtime/connection";
 import * as shelfHooks from "../state/olderSettledShelf";
 import { createWorkspaceFocusController, workspaceAreaProps } from "../lib/workspaceFocus";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -14,7 +17,8 @@ import { isMacPlatform } from "@t3tools/shared/keybindings";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
-import { act, fakeTimers, render } from "../../test/render";
+import { act, fakeTimers, render, stubGlobal } from "../../test/render";
+import { desktopLocalConnectionId } from "../connection/desktopLocal";
 import { openCommandPalette } from "../commandPaletteBus";
 import { makeThreadFixture } from "../test-fixtures";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -23,7 +27,11 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { useProjects, useServerConfigs, useQuietThreadShells } from "../state/entities";
-import { useCatalogEnvironmentIds, useEnvironments } from "../state/environments";
+import {
+  useCatalogEnvironmentIds,
+  useEnvironmentMachines,
+  useEnvironments,
+} from "../state/environments";
 import { useUiStateStore } from "../uiStateStore";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
@@ -334,7 +342,11 @@ describe("sidebar computer filter", () => {
   // Two servers on two computers, one project and one thread on each.
   function computerFixture(
     stack: DisposableStack,
-    options: { routeThreadRef?: ScopedThreadRef; chosen?: readonly string[] } = {},
+    options: {
+      routeThreadRef?: ScopedThreadRef;
+      chosen?: readonly string[];
+      desktop?: boolean;
+    } = {},
   ) {
     const projects = [
       { ...project("alpha"), environmentId: laptop },
@@ -378,11 +390,52 @@ describe("sidebar computer filter", () => {
     stack.defer(() => vi.mocked(useServerConfigs).mockRestore());
     vi.mocked(useCatalogEnvironmentIds).mockReturnValue({ ids: [laptop, desk], ready: true });
     stack.defer(() => vi.mocked(useCatalogEnvironmentIds).mockRestore());
+    stack.use(
+      stubGlobal(
+        "desktopBridge",
+        options.desktop === false
+          ? undefined
+          : {
+              getLocalEnvironmentEnabled: () => true,
+              getLocalEnvironmentBootstraps: () => [],
+              getClientSettings: async () => DEFAULT_CLIENT_SETTINGS,
+            },
+      ),
+    );
+    vi.mocked(useEnvironmentMachines).mockReturnValue(
+      new Map([
+        [laptop, "linux"],
+        [desk, "linux"],
+      ]),
+    );
+    stack.defer(() => vi.mocked(useEnvironmentMachines).mockRestore());
     vi.mocked(useEnvironments).mockReturnValue({
       isReady: true,
       environments: [
-        { environmentId: laptop, label: "WSL", displayUrl: null },
-        { environmentId: desk, label: "Windows", displayUrl: null },
+        {
+          environmentId: laptop,
+          label: "WSL",
+          displayUrl: null,
+          entry: {
+            target: new BearerConnectionTarget({
+              environmentId: laptop,
+              label: "WSL",
+              connectionId: desktopLocalConnectionId("wsl:Ubuntu"),
+            }),
+          },
+        },
+        {
+          environmentId: desk,
+          label: "Remote WSL",
+          displayUrl: null,
+          entry: {
+            target: new BearerConnectionTarget({
+              environmentId: desk,
+              label: "Remote WSL",
+              connectionId: "paired-wsl",
+            }),
+          },
+        },
       ],
     } as never);
     stack.defer(() => vi.mocked(useEnvironments).mockRestore());
@@ -409,13 +462,37 @@ describe("sidebar computer filter", () => {
     using stack = new DisposableStack();
     computerFixture(stack);
     await using screen = await render(sidebar());
-    await expect.element(screen.getByText("Desk thread").first()).toBeVisible();
+    const laptopRow = screen
+      .getByText("Laptop thread")
+      .first()
+      .element()
+      .closest("[data-sidebar-row]");
+    const deskRow = screen.getByText("Desk thread").first().element().closest("[data-sidebar-row]");
+    expect(laptopRow).toHaveAttribute("aria-label", expect.stringContaining("On this computer"));
+    expect(deskRow).toHaveAttribute("aria-label", expect.stringContaining("On another computer"));
+
+    const search = screen.getByRole("combobox", { name: "Search threads" });
+    await userEvent.fill(search, "Laptop thread");
+    await expect
+      .element(screen.getByRole("option", { name: /^Laptop thread/ }))
+      .toHaveAccessibleName(/On this computer/);
+    await userEvent.fill(search, "Desk thread");
+    await expect
+      .element(screen.getByRole("option", { name: /^Desk thread/ }))
+      .toHaveAccessibleName(/On another computer/);
+    await userEvent.keyboard("{Escape}");
 
     await openFilter(screen);
     const computers = page.getByRole("group", { name: "Computers" });
     await expect.element(computers.getByText("laptop")).toBeVisible();
     await expect.element(computers.getByText("desk-pc")).toBeVisible();
-    await userEvent.click(computers.getByRole("button", { name: "WSL" }));
+    const local = computers.getByRole("button", { name: "WSL", exact: true });
+    expect(local.element()).toHaveAttribute("aria-description", "On this computer");
+    expect(computers.getByRole("button", { name: "Remote WSL" }).element()).toHaveAttribute(
+      "aria-description",
+      "On another computer",
+    );
+    await userEvent.click(local);
 
     await expect.element(screen.getByText("Desk thread")).not.toBeInTheDocument();
     await expect.element(screen.getByText("Laptop thread").first()).toBeVisible();
@@ -423,6 +500,20 @@ describe("sidebar computer filter", () => {
     await expect
       .element(screen.getByRole("combobox", { name: /computers: WSL/ }))
       .toBeInTheDocument();
+  });
+
+  it("reports unknown computer locality when the browser has no desktop registration", async () => {
+    using stack = new DisposableStack();
+    computerFixture(stack, { desktop: false });
+    await using screen = await render(sidebar());
+    const row = screen.getByText("Laptop thread").first().element().closest("[data-sidebar-row]");
+    expect(row).toHaveAttribute("aria-label", expect.stringContaining("Computer locality unknown"));
+
+    await openFilter(screen);
+    const computers = page.getByRole("group", { name: "Computers" });
+    await expect
+      .element(computers.getByRole("button", { name: "WSL", exact: true }))
+      .toHaveAttribute("aria-description", "Computer locality unknown");
   });
 
   it("keeps a remembered choice, needs the project filter to match too, and clears on Show all", async () => {

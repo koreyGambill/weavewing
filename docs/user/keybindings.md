@@ -283,8 +283,11 @@ has focus.
 
 `mod+j` opens and hides the drop-down terminal from any view, including from
 inside it. Leader then Shift+M makes it fill the window or returns it to its
-height, opening it first if it is hidden. To open or focus the thread's own
-terminal with a shortcut, assign **Terminal: Toggle** in Settings.
+height, opening it first if it is hidden. While the drop-down is open, Leader
+then Shift+P toggles its pin. A pinned drop-down stays open when you click
+elsewhere and remembers its pin when you reopen it. Use `mod+j` or the
+titlebar button to hide it. To open or focus the thread's own terminal with a
+shortcut, assign **Terminal: Toggle** in Settings.
 
 On Windows and Linux, Ctrl+Left and Ctrl+Right jump to the start or end of the
 line in text fields and at a shell prompt, and Ctrl+Backspace deletes back to the

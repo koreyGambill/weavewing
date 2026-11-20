@@ -173,7 +173,10 @@ export type DevelopmentEnvironmentListCheckoutsError =
 export const ThreadChangeFolderInput = Schema.Struct({
   threadId: ThreadId,
   commandId: CommandId,
-  expected: DevelopmentEnvironmentSelectCheckoutInput.fields.expected,
+  expected: Schema.Struct({
+    ...DevelopmentEnvironmentSelectCheckoutInput.fields.expected.fields,
+    projectId: Schema.optional(ProjectId),
+  }),
   folder: TrimmedNonEmptyString,
   xwingEnvironmentId: Schema.optional(XwingEnvironmentId),
 });

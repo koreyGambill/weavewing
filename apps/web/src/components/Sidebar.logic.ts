@@ -78,10 +78,10 @@ export function resolveSidebarRowAccessibility(input: {
   readonly statusLabel: string | null;
   readonly projectDisplayName: string | null;
   readonly isActive: boolean;
-  readonly externalLabel?: string | null;
+  readonly localityLabel?: string | null;
 }): { readonly label: string; readonly current: "page" | undefined } {
   return {
-    label: [input.title, input.statusLabel, input.projectDisplayName, input.externalLabel]
+    label: [input.title, input.statusLabel, input.projectDisplayName, input.localityLabel]
       .filter(Boolean)
       .join(", "),
     current: input.isActive ? "page" : undefined,

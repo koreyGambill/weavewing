@@ -127,6 +127,7 @@ export interface DraftState {
   readonly weekdays: ReadonlySet<number>;
   readonly projectId: string;
   readonly threadId: string;
+  readonly detachFromThread?: boolean;
   readonly threadMode: ScheduledTaskThreadMode;
   readonly workspaceMode: WorkspaceMode;
   readonly baseRef: string;
@@ -554,6 +555,7 @@ export function moveDraftToThread(
   return {
     ...draft,
     threadId: thread.id,
+    detachFromThread: false,
     projectId: thread.projectId,
     threadMode: draft.threadMode === "new_thread" ? "continue" : draft.threadMode,
   };
@@ -565,6 +567,7 @@ export function unbindDraftFromThread(draft: DraftState): DraftState {
   return {
     ...draft,
     threadId: "",
+    detachFromThread: true,
     ...(draft.workspaceMode === "root"
       ? { workspaceMode: "worktree" as const, startFromOrigin: true }
       : {}),

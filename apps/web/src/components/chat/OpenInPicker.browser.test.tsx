@@ -1,7 +1,10 @@
 import { AuthOrchestrationOperateScope, EnvironmentId, type EditorId } from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  compileResolvedKeybindingsConfig,
+  DEFAULT_RESOLVED_KEYBINDINGS,
+} from "@t3tools/shared/keybindings";
 import { Cause } from "effect";
-import { AsyncResult } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { act, fakeTimers, render as renderUi } from "../../../test/render";
@@ -65,6 +68,20 @@ vi.mock(import("../../remoteOpen"), async (importOriginal) => ({
   openRemoteEditorUrl: state.openUrl,
 }));
 
+vi.mock(import("../../state/server"), async (importOriginal) => {
+  const { compileResolvedKeybindingsConfig } = await import("@t3tools/shared/keybindings");
+  return {
+    ...(await importOriginal()),
+    primaryServerKeybindingsAtom: Atom.make(
+      compileResolvedKeybindingsConfig([
+        { key: "ctrl+a", command: "keybindings.leader" },
+        { key: "mod+o", command: "editor.openFavorite" },
+        { key: "leader o", command: "editor.openFavorite" },
+      ]),
+    ),
+  };
+});
+
 import { OpenInPicker } from "./OpenInPicker";
 import {
   registerOpenFavoriteEditorCommand,
@@ -75,7 +92,12 @@ const primary = EnvironmentId.make("primary");
 const selected = EnvironmentId.make("selected");
 const editors: readonly EditorId[] = ["vscode"];
 
-async function setup() {
+const leaderKeybindings = compileResolvedKeybindingsConfig([
+  { key: "ctrl+a", command: "keybindings.leader" },
+  { key: "leader o", command: "editor.openFavorite" },
+]);
+
+async function setup(keybindings = DEFAULT_RESOLVED_KEYBINDINGS) {
   state.allowed.clear();
   state.remote = { mode: "local-exec" };
   state.clientEditors = editors;
@@ -146,7 +168,7 @@ async function setup() {
     useOpenFavoriteEditorShortcut({
       enabled: true,
       environmentId: selected,
-      keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+      keybindings,
       availableEditors: editors,
       openInCwd: "/work/project",
     });
@@ -201,6 +223,48 @@ describe("remote editor links", () => {
     expect((await pressOpenFavorite()).defaultPrevented).toBe(true);
     expect(state.openUrl).toHaveBeenCalledWith(expect.stringContaining("ssh-remote+sol"));
     expect(state.run).not.toHaveBeenCalled();
+  });
+
+  it("dispatches Leader to the thread fallback and prefers a visible file picker", async () => {
+    await using fixture = await setup(leaderKeybindings);
+    state.allowed.add(selected);
+    const pressLeader = () =>
+      act(() => {
+        for (const [key, ctrlKey] of [
+          ["a", true],
+          ["o", false],
+        ] as const) {
+          document.body.dispatchEvent(
+            new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true }),
+          );
+        }
+      });
+    const fallback = <fixture.FavoriteEditorFallback />;
+    await fixture.screen.rerender(fallback);
+    await pressLeader();
+    expect(state.run).toHaveBeenCalledExactlyOnceWith({
+      environmentId: selected,
+      input: { cwd: "/work/project", editor: "vscode" },
+    });
+
+    state.run.mockClear();
+    await fixture.screen.rerender(
+      <>
+        <fixture.FavoriteEditorFallback />
+        <OpenInPicker
+          environmentId={selected}
+          keybindings={leaderKeybindings}
+          availableEditors={editors}
+          openInCwd="/work/project/file.ts"
+          openInCwdIsFile
+        />
+      </>,
+    );
+    await pressLeader();
+    expect(state.run).toHaveBeenCalledExactlyOnceWith({
+      environmentId: selected,
+      input: { cwd: "/work/project/file.ts", editor: "vscode" },
+    });
   });
 
   it("explains why a phone or tablet browser has no editor to open", async () => {
