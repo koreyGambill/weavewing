@@ -1525,12 +1525,12 @@ describe("runtime command runner", () => {
     registry.dispose();
   });
 
-  it.effect("interrupts the underlying effect when a waiting command is aborted", () =>
-    Effect.gen(function* () {
+  it.effect("interrupts the underlying effect when a waiting command is aborted", () => {
+    const controller = new AbortController();
+    return Effect.gen(function* () {
       const registry = AtomRegistry.make();
       const started = Latch.makeUnsafe();
       const released = Latch.makeUnsafe();
-      const controller = new AbortController();
       const command = createRuntimeCommand(Atom.runtime(Layer.empty), {
         label: "test.abort",
         execute: () =>
@@ -1546,8 +1546,8 @@ describe("runtime command runner", () => {
       if (result._tag === "Failure") expect(Cause.hasInterruptsOnly(result.cause)).toBe(true);
       yield* released.await;
       registry.dispose();
-    }),
-  );
+    });
+  });
 
   it("serializes commands that share a scheduler and lane", async () => {
     const firstLatch = Latch.makeUnsafe();
