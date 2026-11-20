@@ -821,7 +821,7 @@ it("preserves chat width, details visibility and focus as the tile resizes", asy
   });
 });
 
-it("opens workspace actions, lineage and changes with the card closed", async () => {
+it("opens footer lineage and changes with the card closed", async () => {
   await import("~/index.css");
   await using viewport = new AsyncDisposableStack();
   const initial = { width: window.innerWidth, height: window.innerHeight };
@@ -852,23 +852,16 @@ it("opens workspace actions, lineage and changes with the card closed", async ()
   const card = page.getByRole("region", { name: "Thread details" });
   await expect.element(card).not.toBeInTheDocument();
 
-  const actions = page.getByRole("button", { name: "Workspace actions", exact: true });
-  const commands = page.getByRole("dialog", { name: "Workspace actions" });
-  await actions.click();
-  await expect.element(commands.getByText("Add project script")).toBeVisible();
-  await expect.element(commands.getByText("Commit", { exact: true })).toBeVisible();
-  await userEvent.keyboard("{Escape}");
-  await expect.element(commands, { timeout: 2500 }).not.toBeInTheDocument();
-
-  await page.getByRole("button", { name: "Lineage", exact: true }).click();
+  const footer = page.locator("[data-chat-footer]");
+  await footer.getByRole("button", { name: "Lineage", exact: true }).click();
   const lineage = page.getByRole("dialog", { name: "Thread lineage" });
   await expect.element(lineage.getByText(child.title), { timeout: 2500 }).toBeVisible();
   await userEvent.keyboard("{Escape}");
 
   await expect.element(lineage, { timeout: 2500 }).not.toBeInTheDocument();
   await page.viewport(690, 860);
-  await actions.click();
-  await expect.element(commands.getByText("Add project script")).toBeVisible();
+  await footer.getByRole("button", { name: "Lineage", exact: true }).click();
+  await expect.element(lineage.getByText(child.title)).toBeVisible();
   await userEvent.keyboard("{Escape}");
 
   const actionMenu = page.getByRole("button", { name: `Thread actions for ${thread.title}` });

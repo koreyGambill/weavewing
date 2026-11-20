@@ -98,9 +98,7 @@ interface ThreadDetailsPanelProps extends Pick<
   ) => Promise<ProjectScriptActionResult>;
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   usage: ThreadDetailsUsageInput;
-  actionsHandle?: ThreadDetailsPanelProps["handle"];
   lineageHandle?: ThreadDetailsPanelProps["handle"];
-  composerContextAvailable?: boolean;
 }
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
@@ -108,18 +106,11 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const canChangeFolder = useAtomValue(changeThreadFolder.permissionAtom(props.environmentId));
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const threadKey = `${props.environmentId}:${props.threadId}`;
-  const [flyout, setFlyout] = useState<{ threadKey: string; kind: "actions" | "lineage" } | null>(
-    null,
-  );
-  const flyoutKind = flyout?.threadKey === threadKey ? flyout.kind : null;
-  const onFlyoutChange = (kind: "actions" | "lineage", open: boolean) => {
-    setFlyout((current) => (open ? { threadKey, kind } : current?.kind === kind ? null : current));
-  };
+  const [lineageThreadKey, setLineageThreadKey] = useState<string | null>(null);
+  const lineageOpen = lineageThreadKey === threadKey;
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
-    props.activeProjectScripts && (visible.scripts || flyoutKind === "actions")
-      ? props.gitCwd
-      : null,
+    props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
@@ -157,35 +148,25 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       : {}),
   };
 
-  const renderItems = (density: "full" | "compact" | "essential", surface: "card" | "actions") => {
-    const card = surface === "card";
-    const actions = !card || flyoutKind !== "actions";
-    const workspaceFallback = !props.composerContextAvailable && Boolean(props.actionsHandle);
-    const showCheckout = card
-      ? !(workspaceFallback && flyoutKind === "actions")
-      : workspaceFallback;
+  const renderItems = (density: "full" | "compact" | "essential") => {
     const show = {
-      environment:
-        showCheckout && (card ? density === "full" && visible.environment : workspaceFallback),
-      openIn:
-        actions && (!card || (density !== "essential" && visible.openIn)) && props.showOpenInPicker,
-      scripts: actions && (!card || visible.scripts) && props.activeProjectScripts !== undefined,
-      branch:
-        showCheckout && (card ? visible.branch : workspaceFallback) && offersGit && props.isGitRepo,
-      pullRequests: actions && (!card || visible.branch),
+      environment: density === "full" && visible.environment,
+      openIn: density !== "essential" && visible.openIn && props.showOpenInPicker,
+      scripts: visible.scripts && props.activeProjectScripts !== undefined,
+      branch: visible.branch && offersGit && props.isGitRepo,
+      pullRequests: visible.branch,
       git:
-        actions &&
         offersGit &&
         props.activeProjectName !== undefined &&
-        (!card || visible.gitActions || (visible.changes && props.isGitRepo)),
+        (visible.gitActions || (visible.changes && props.isGitRepo)),
     };
     return (
       <>
         <div className="group/details-items">
-          {card ? <ThreadListSummary threadRef={activeThreadRef} /> : null}
+          <ThreadListSummary threadRef={activeThreadRef} />
           {show.environment || show.openIn || show.scripts ? (
             <ThreadDetailsSection
-              headingId={`thread-details-workspace-${surface}-heading`}
+              headingId="thread-details-workspace-card-heading"
               title="Workspace"
               separated={false}
               showHeading={false}
@@ -235,7 +216,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
           {show.branch || show.pullRequests || show.git ? (
             <ThreadDetailsSection
-              headingId={`thread-details-version-control-${surface}-heading`}
+              headingId="thread-details-version-control-card-heading"
               title="Version Control"
               showHeading={false}
               separated={density === "full"}
@@ -258,10 +239,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 {show.git && props.gitCwd ? (
                   <GitActionsControl
                     compact={density !== "full"}
-                    showActions={!card || visible.gitActions}
-                    showChanges={
-                      card ? visible.changes : workspaceFallback || !props.isServerThread
-                    }
+                    showActions={visible.gitActions}
+                    showChanges={visible.changes}
                     gitCwd={props.gitCwd}
                     workspaceMutationId={props.workspaceMutationId}
                     activeThreadRef={activeThreadRef}
@@ -273,9 +252,9 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             </ThreadDetailsSection>
           ) : null}
 
-          {!props.draftId && (card || workspaceFallback) && showCheckout ? (
+          {!props.draftId ? (
             <ThreadDetailsSection
-              headingId={`thread-details-folder-${surface}-heading`}
+              headingId="thread-details-folder-card-heading"
               title="Folder"
               showHeading={false}
             >
@@ -288,16 +267,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               </ThreadDetailsControl>
             </ThreadDetailsSection>
           ) : null}
-          {actions && density === "full" && !props.draftId && (!card || visible.servers) ? (
+          {density === "full" && !props.draftId && visible.servers ? (
             <ThreadServersPanel environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
 
-          {actions && density === "full" && !props.draftId && (!card || visible.automations) ? (
+          {density === "full" && !props.draftId && visible.automations ? (
             <ThreadAutomationsPanel environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
 
-          {card &&
-          flyoutKind !== "lineage" &&
+          {!lineageOpen &&
           density === "full" &&
           !props.draftId &&
           (visible.lineage || visible.sideChats) ? (
@@ -309,56 +287,46 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             />
           ) : null}
 
-          {visible.usage && actions ? <ThreadDetailsUsage {...props.usage} /> : null}
+          {visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
 
-          {(card
-            ? visible.context && !(workspaceFallback && flyoutKind === "actions")
-            : workspaceFallback) && props.usage.contextWindow ? (
+          {visible.context && props.usage.contextWindow ? (
             <ThreadDetailsContext usage={props.usage.contextWindow} />
           ) : null}
 
-          {card ? (
-            <div className="p-2 group-has-[>section>:last-child:not(:empty)]/details-items:hidden">
-              <ThreadDetailsControl
-                size="xs"
-                variant="ghost"
-                part="row"
-                panel
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setMenuPosition({ x: rect.left, y: rect.bottom });
-                }}
-              >
-                <SlidersHorizontalIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-                <span className={cn("ml-0.5", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-                  Choose what to show
-                </span>
-              </ThreadDetailsControl>
-            </div>
-          ) : null}
+          <div className="p-2 group-has-[>section>:last-child:not(:empty)]/details-items:hidden">
+            <ThreadDetailsControl
+              size="xs"
+              variant="ghost"
+              part="row"
+              panel
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setMenuPosition({ x: rect.left, y: rect.bottom });
+              }}
+            >
+              <SlidersHorizontalIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+              <span className={cn("ml-0.5", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+                Choose what to show
+              </span>
+            </ThreadDetailsControl>
+          </div>
         </div>
 
-        {card ? (
-          <Menu
-            open={menuPosition !== null}
-            onOpenChange={(open) => !open && setMenuPosition(null)}
+        <Menu open={menuPosition !== null} onOpenChange={(open) => !open && setMenuPosition(null)}>
+          <MenuPopup
+            anchor={
+              menuPosition
+                ? {
+                    getBoundingClientRect: () => new DOMRect(menuPosition.x, menuPosition.y, 0, 0),
+                  }
+                : undefined
+            }
+            align="start"
+            side="bottom"
           >
-            <MenuPopup
-              anchor={
-                menuPosition
-                  ? {
-                      getBoundingClientRect: () =>
-                        new DOMRect(menuPosition.x, menuPosition.y, 0, 0),
-                    }
-                  : undefined
-              }
-              align="start"
-              side="bottom"
-            >
-              <ThreadDetailsItemsMenuItems />
-            </MenuPopup>
-          </Menu>
-        ) : null}
+            <ThreadDetailsItemsMenuItems />
+          </MenuPopup>
+        </Menu>
       </>
     );
   };
@@ -391,27 +359,22 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
           setMenuPosition({ x: event.clientX, y: event.clientY });
         }}
       >
-        {(density) => renderItems(density, "card")}
+        {(density) => renderItems(density)}
       </ThreadDetailsLocation>
-      {props.actionsHandle ? (
-        <Popover
-          handle={props.actionsHandle}
-          open={flyoutKind === "actions"}
-          onOpenChange={(open) => onFlyoutChange("actions", open)}
-        >
-          <PopoverPopup aria-label="Workspace actions" width="md" padding="none" align="end">
-            {flyoutKind === "actions" ? renderItems("full", "actions") : null}
-          </PopoverPopup>
-        </Popover>
-      ) : null}
       {props.lineageHandle ? (
         <Popover
           handle={props.lineageHandle}
-          open={flyoutKind === "lineage"}
-          onOpenChange={(open) => onFlyoutChange("lineage", open)}
+          open={lineageOpen}
+          onOpenChange={(open) => setLineageThreadKey(open ? threadKey : null)}
         >
-          <PopoverPopup aria-label="Thread lineage" width="md" padding="none" align="end">
-            {flyoutKind === "lineage" ? (
+          <PopoverPopup
+            aria-label="Thread lineage"
+            width="md"
+            padding="none"
+            side="top"
+            align="start"
+          >
+            {lineageOpen ? (
               <ThreadRelationshipsPanel
                 environmentId={props.environmentId}
                 threadId={props.threadId}

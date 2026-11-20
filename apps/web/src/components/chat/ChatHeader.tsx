@@ -1,5 +1,4 @@
 import { Button } from "../ui/button";
-import { PopoverTrigger, type PopoverCreateHandle } from "../ui/popover";
 import { ThreadGlyph } from "../ThreadGlyph";
 import { nextThreadGlyphSeed, resolveThreadGlyph } from "@t3tools/client-runtime/thread-glyphs";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
@@ -16,7 +15,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon, NetworkIcon, WrenchIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import {
   memo,
   useEffect,
@@ -68,9 +67,6 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
-  actionsHandle?: ReturnType<typeof PopoverCreateHandle>;
-  lineageHandle?: ReturnType<typeof PopoverCreateHandle>;
-  runningAgents?: number;
   onOpenSideChat?: (() => void) | undefined;
   onOpenChanges?: (() => void) | undefined;
   onFindInThread?: ((threadRef: ScopedThreadRef) => void) | undefined;
@@ -101,9 +97,6 @@ export const ChatHeader = memo(function ChatHeader({
   onFindInThread,
   onOpenChanges,
   onOpenSideChat,
-  actionsHandle,
-  lineageHandle,
-  runningAgents = 0,
 }: ChatHeaderProps) {
   const activeProjectServerConfig = useServerConfigs().get(activeThreadEnvironmentId);
   const activeProjectName = activeProject?.isScratch
@@ -469,41 +462,6 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      {lineageHandle ? (
-        <Tooltip>
-          <TooltipTrigger render={<span className="flex shrink-0 [-webkit-app-region:no-drag]" />}>
-            <PopoverTrigger
-              handle={lineageHandle}
-              render={
-                <Button
-                  size={runningAgents > 0 ? "compact" : "icon-sm"}
-                  variant="ghost-muted"
-                  aria-label={runningAgents > 0 ? `Lineage, ${runningAgents} running` : "Lineage"}
-                />
-              }
-            >
-              <NetworkIcon />
-              {runningAgents > 0 ? runningAgents : null}
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipPopup>Thread lineage and side chats</TooltipPopup>
-        </Tooltip>
-      ) : null}
-      {actionsHandle ? (
-        <Tooltip>
-          <TooltipTrigger render={<span className="flex shrink-0 [-webkit-app-region:no-drag]" />}>
-            <PopoverTrigger
-              handle={actionsHandle}
-              render={
-                <Button size="icon-sm" variant="ghost-muted" aria-label="Workspace actions" />
-              }
-            >
-              <WrenchIcon />
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipPopup>Workspace actions</TooltipPopup>
-        </Tooltip>
-      ) : null}
       {isServerThread ? (
         <>
           <GuestShareIndicator threadRef={activeThreadRef} />

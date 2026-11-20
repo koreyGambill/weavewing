@@ -328,6 +328,7 @@ import { PanelLayoutControls, type PanelLayoutControlsProps } from "./chat/Panel
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
+import { ChatFooterLineage } from "./chat/ChatFooterLineage";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
@@ -1156,7 +1157,6 @@ export default function ChatView(props: ChatViewProps) {
     activeRightPanelSurface,
   );
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
-  const [threadActionsHandle] = useState(PopoverCreateHandle);
   const [threadLineageHandle] = useState(PopoverCreateHandle);
   const [chatCanvasStore] = useState(createChatCanvasStore);
 
@@ -3342,15 +3342,6 @@ export default function ChatView(props: ChatViewProps) {
           parentThreadLink={headerParentThreadLink}
           onOpenThread={onOpenRelatedThreadStable}
           rightPanelOpen={false}
-          actionsHandle={threadActionsHandle}
-          {...(isServerThread
-            ? {
-                lineageHandle: threadLineageHandle,
-                runningAgents:
-                  serverProjection?.subagents.filter((agent) => agent.status === "running")
-                    .length ?? 0,
-              }
-            : {})}
           onOpenSideChat={sideChatsOffered && sideChat.available ? openSideChatStable : undefined}
           onOpenChanges={isServerThread && isGitRepo ? openChangesFromThreadPanelStable : undefined}
           onNewThreadInProject={handleNewThreadInActiveProjectStable}
@@ -3402,13 +3393,7 @@ export default function ChatView(props: ChatViewProps) {
               <ThreadDetailsPanel
                 anchor={threadPanelPopoverAnchorRef}
                 handle={threadPanelPopoverHandle}
-                {...(!embedded
-                  ? {
-                      actionsHandle: threadActionsHandle,
-                      composerContextAvailable: showComposerContextStrip,
-                      ...(isServerThread ? { lineageHandle: threadLineageHandle } : {}),
-                    }
-                  : {})}
+                {...(!embedded && isServerThread ? { lineageHandle: threadLineageHandle } : {})}
                 forceNewWorktree={multipleModelSelections !== null}
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}
@@ -4009,13 +3994,29 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     ) : null}
                   </div>
-                  <div
-                    aria-hidden
-                    className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
-                  />
+                  {embedded || !isServerThread ? (
+                    <div
+                      aria-hidden
+                      className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
+                    />
+                  ) : null}
                 </div>
               </div>
             </div>
+            {!embedded && isServerThread ? (
+              <div
+                data-chat-footer
+                className="pointer-events-auto flex w-fit pl-(--workspace-gutter-start) pb-safe"
+              >
+                <ChatFooterLineage
+                  lineageHandle={threadLineageHandle}
+                  runningAgents={
+                    serverProjection?.subagents.filter((agent) => agent.status === "running")
+                      .length ?? 0
+                  }
+                />
+              </div>
+            ) : null}
           </div>
 
           {canOperatePreview && activeThreadRef && activeEnvironmentServerBrowser && !embedded ? (

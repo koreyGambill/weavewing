@@ -188,7 +188,7 @@ import { render } from "../../../test/render";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
-import { PopoverCreateHandle, PopoverTrigger } from "../ui/popover";
+import { PopoverCreateHandle } from "../ui/popover";
 import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout } from "./chatCanvasLayout";
@@ -233,7 +233,6 @@ function setup(input: {
   return {
     anchor: { current: anchor },
     handle: PopoverCreateHandle(),
-    actionsHandle: PopoverCreateHandle(),
     [Symbol.dispose]: () => anchor.remove(),
   };
 }
@@ -270,10 +269,7 @@ function Panel({
           onStartFromOriginChange={noop}
         />
       ) : null}
-      <PopoverTrigger handle={fixture.actionsHandle}>Workspace actions</PopoverTrigger>
       <ThreadDetailsPanel
-        actionsHandle={fixture.actionsHandle}
-        composerContextAvailable={composerContextAvailable}
         anchor={fixture.anchor}
         handle={fixture.handle}
         environmentId={threadRef.environmentId}
@@ -348,27 +344,23 @@ it("offers no Initialize Git before the server config says where No project live
     .not.toBeInTheDocument();
 });
 
-it("offers Ready for a branch-discovered draft in Workspace actions with external PR links", async () => {
+it("offers Ready for a branch-discovered draft in Thread Details with external PR links", async () => {
   using fixture = setup({ workspaceRoot: "/work/project", folder: "/work/project", git: true });
-  useRightPanelStore.getState().setThreadPanelOpen(threadRef, "inline", false);
   await using _screen = await render(<Panel fixture={fixture} />);
-  await page.getByRole("link", { name: /#7/ }).click();
+  const card = page.getByRole("region", { name: "Thread details" });
+  await card.getByRole("link", { name: /#7/ }).click();
   expect(state.openLink).toHaveBeenCalledWith(
     "https://github.com/owner/repo/pull/7",
     expect.anything(),
   );
-  await page.getByRole("button", { name: "Workspace actions" }).click();
-  const actions = page.getByRole("dialog", { name: "Workspace actions" });
-  await expect.element(actions.getByRole("button", { name: "Ready", exact: true })).toBeEnabled();
+  await expect.element(card.getByRole("button", { name: "Ready", exact: true })).toBeEnabled();
 });
 
-it("shows counted Changes in Workspace actions when there is no composer strip", async () => {
+it("shows counted Changes in Thread Details when there is no composer strip", async () => {
   using fixture = setup({ workspaceRoot: "/work/project", folder: "/work/project", git: true });
-  useRightPanelStore.getState().setThreadPanelOpen(threadRef, "inline", false);
   await using _screen = await render(<Panel fixture={fixture} composerContextAvailable={false} />);
-  await page.getByRole("button", { name: "Workspace actions" }).click();
-  const actions = page.getByRole("dialog", { name: "Workspace actions" });
-  const changes = actions.getByRole("button", { name: /Changes.*\+12.*-3/ });
+  const card = page.getByRole("region", { name: "Thread details" });
+  const changes = card.getByRole("button", { name: /Changes.*\+12.*-3/ });
   await expect.element(changes, { timeout: 2500 }).toBeVisible();
   await changes.click();
   expect(state.openChanges).toHaveBeenCalledOnce();
