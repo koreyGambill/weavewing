@@ -194,12 +194,25 @@ export const OrchestrationV2ProviderRef = Schema.Struct({
 });
 export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
+const OrchestrationV2ContextArchive = Schema.Struct({
+  fromRunOrdinal: NonNegativeInt,
+  throughRunOrdinal: NonNegativeInt,
+});
+
+const OrchestrationV2ContextRewind = Schema.Struct({
+  runId: RunId,
+  runOrdinal: NonNegativeInt,
+  archiveThreadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
   sideChat: Schema.optional(Schema.Boolean),
   sideChatAnchor: Schema.optionalKey(SideChatAnchor),
+  contextArchive: Schema.optionalKey(OrchestrationV2ContextArchive),
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
 
@@ -596,6 +609,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
   lineage: OrchestrationV2AppThreadLineage,
+  contextRewind: Schema.optionalKey(OrchestrationV2ContextRewind),
   forkedFrom: Schema.NullOr(
     Schema.Union([
       Schema.Struct({
@@ -1429,6 +1443,19 @@ export function isQueuedProviderThreadPlaceholder(
     providerThread.firstRunOrdinal === null &&
     providerThread.nativeThreadRef === null &&
     providerThread.providerSessionId === null
+  );
+}
+
+/** A provider update can activate only a conversation started after the thread's last rewind. */
+export function canActivateProviderThread(
+  thread: Pick<OrchestrationV2AppThread, "id" | "contextRewind">,
+  providerThread: OrchestrationV2ProviderThread,
+): boolean {
+  return (
+    providerThread.appThreadId === thread.id &&
+    !isQueuedProviderThreadPlaceholder(providerThread) &&
+    (thread.contextRewind === undefined ||
+      (providerThread.firstRunOrdinal ?? 0) > thread.contextRewind.runOrdinal)
   );
 }
 
@@ -2391,6 +2418,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   lineage: OrchestrationV2AppThreadLineage,
+  contextRewind: Schema.optionalKey(OrchestrationV2ContextRewind),
   forkedFrom: Schema.NullOr(OrchestrationV2AppThread.fields.forkedFrom),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
@@ -3765,6 +3793,7 @@ export const OrchestrationV2Command = Schema.Union([
     sourcePoint: Schema.Union([
       OrchestrationV2ThreadForkSourcePoint,
       Schema.Struct({ type: Schema.Literal("assistant_selection"), anchor: SideChatAnchor }),
+      Schema.Struct({ type: Schema.Literal("rewind"), runId: RunId }),
     ]),
     title: Schema.optional(TrimmedNonEmptyString),
     sideChat: Schema.optional(Schema.Boolean),

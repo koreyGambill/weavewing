@@ -166,13 +166,19 @@ const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHis
   },
 );
 
-/** History `thread` shows from its fork ancestors, oldest first. Side chats inherit no rows. */
+/** History `thread` shows from its fork ancestors, oldest first. */
 export const readInheritedHandoffItems = Effect.fn(
   "orchestrationV2.contextHandoff.readInheritedHandoffItems",
 )(function* (
-  projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords">,
+  projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords" | "getThreadProjection">,
   thread: OrchestrationV2AppThread,
 ) {
+  if (thread.lineage.contextArchive !== undefined) {
+    const projection = yield* projectionStore.getThreadProjection(thread.id);
+    return projection.visibleTurnItems
+      .filter((row) => row.visibility === "inherited")
+      .map((row) => row.item);
+  }
   const segments: Array<ReadonlyArray<OrchestrationV2TurnItem>> = [];
   const seen = new Set([thread.id]);
   let current = thread;
@@ -210,7 +216,7 @@ export const readInheritedHandoffItems = Effect.fn(
 export const readForkHistoryItems = Effect.fn(
   "orchestrationV2.contextHandoff.readForkHistoryItems",
 )(function* (
-  projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords">,
+  projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords" | "getThreadProjection">,
   source: ForkHistorySource,
   throughRun: Pick<OrchestrationV2Run, "ordinal">,
 ) {

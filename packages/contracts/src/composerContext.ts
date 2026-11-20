@@ -333,6 +333,7 @@ export const OrchestrationMessageContext = Schema.Struct({
   sideChatRefresh: Schema.optional(Schema.String.check(Schema.isMaxLength(16_000))),
   /** Root refresh capture time, before which excerpts were considered for the snapshot. */
   sideChatRefreshBefore: Schema.optional(IsoDateTime),
+  sideChatRefreshAfterArchive: Schema.optional(ThreadId),
   records: Schema.Array(Schema.Unknown)
     .check(
       Schema.isMaxLength(COMPOSER_CONTEXT_MAX_RECORDS),

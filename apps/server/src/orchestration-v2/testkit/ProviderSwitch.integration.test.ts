@@ -4038,6 +4038,209 @@ describe("orchestration v2 provider switching", () => {
       }),
   );
 
+  it.live("rewinds provider context and exposes each finished range before an archive sends", () =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace("context-rewind");
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const failResumeOnce = yield* Ref.make(false);
+      const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+        makeTestAdapter({
+          instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+          driver: CLAUDE_DRIVER,
+          capabilities: ClaudeProviderCapabilitiesV2,
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+          failResumeOnce,
+          nativeThreadGeneration: yield* Ref.make(0),
+        }),
+        makeTestAdapter({
+          instanceId: CODEX_MODEL_SELECTION.instanceId,
+          driver: CODEX_DRIVER,
+          capabilities: CodexProviderCapabilitiesV2,
+          modelSelection: CODEX_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+          nativeThreadGeneration: yield* Ref.make(0),
+        }),
+      ]);
+      const root = ThreadId.make("thread:rewind-root");
+      const archive = ThreadId.make("thread:rewind-archive");
+      const nextArchive = ThreadId.make("thread:rewind-next-archive");
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const read = (id = root) => orchestrator.getThreadProjection(id);
+        const send = (id: ThreadId, text: string, modelSelection = CLAUDE_MODEL_SELECTION) =>
+          Effect.gen(function* () {
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              origin: { kind: "user" },
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make(`rewind:send:${text}`),
+              threadId: id,
+              messageId: MessageId.make(`rewind:message:${text}`),
+              text,
+              attachments: [],
+              modelSelection,
+              deliveryIntent: "auto",
+              dispatchMode: { type: "start_immediately" },
+            });
+            yield* worker.drain();
+            yield* waitForIdle(id);
+          });
+        const rewind = (
+          runId: OrchestrationV2ThreadProjection["runs"][number]["id"],
+          id: ThreadId,
+        ) =>
+          orchestrator.dispatch({
+            type: "thread.fork",
+            commandId: CommandId.make(`rewind:${runId}:${id}`),
+            createdBy: "user",
+            creationSource: "web",
+            sourceThreadId: root,
+            targetThreadId: id,
+            sourcePoint: { type: "rewind", runId },
+            sideChat: true,
+          });
+        const messages = (id: ThreadId) =>
+          orchestrator
+            .getTimelinePage(id, { view: "messages", limit: 20 })
+            .pipe(
+              Effect.map((page) =>
+                page.items.flatMap(({ item }) => (item.type === "user_message" ? [item.text] : [])),
+              ),
+            );
+
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("rewind:create"),
+          threadId: root,
+          projectId,
+          title: "Context rewind",
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: cwd,
+        });
+        yield* send(root, "archived Codex history", CODEX_MODEL_SELECTION);
+        yield* send(root, "archived Claude history");
+        const before = yield* read();
+        const stale = ThreadId.make("thread:rewind-stale");
+        const error = yield* rewind(before.runs[0]!.id, stale).pipe(Effect.flip);
+        assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
+        assert.isUndefined((yield* read()).thread.contextRewind);
+        assert.isTrue(yield* read(stale).pipe(Effect.isFailure));
+
+        yield* rewind(before.runs[1]!.id, archive);
+        assert.equal(
+          (yield* orchestrator.getThreadShell(root))?.contextRewind?.archiveThreadId,
+          archive,
+        );
+        assert.deepEqual((yield* orchestrator.getThreadShell(archive))?.lineage.contextArchive, {
+          fromRunOrdinal: 1,
+          throughRunOrdinal: 2,
+        });
+        assert.deepEqual((yield* read()).checkpoints, before.checkpoints);
+        assert.deepEqual(yield* messages(archive), [
+          "archived Codex history",
+          "archived Claude history",
+        ]);
+        assert.deepEqual((yield* read(archive)).runs, []);
+        yield* orchestrator.dispatch({
+          type: "thread.delete",
+          commandId: CommandId.make("rewind:close-archive"),
+          threadId: archive,
+          onlyIfUnused: true,
+        });
+        assert.isNull((yield* read(archive)).thread.deletedAt);
+        yield* send(archive, "continue archived history");
+        const oldProvider = before.providerThreads.find(
+          (thread) => thread.id === before.thread.activeProviderThreadId,
+        )!;
+        yield* (yield* EventSink.EventSinkV2).write({
+          events: [
+            {
+              id: EventId.make("rewind:late-provider-update"),
+              type: "provider-thread.updated",
+              threadId: root,
+              occurredAt: yield* DateTime.now,
+              payload: oldProvider,
+            },
+          ],
+        });
+        yield* send(root, "plain prompt after rewind");
+
+        const current = yield* read();
+        const providerThread = current.providerThreads.find(
+          (thread) => thread.id === current.thread.activeProviderThreadId,
+        );
+        assert.exists(providerThread?.providerSessionId);
+        yield* orchestrator.dispatch({
+          type: "provider-session.detach",
+          commandId: CommandId.make("rewind:detach"),
+          threadId: root,
+          providerSessionId: providerThread!.providerSessionId!,
+        });
+        yield* worker.drain();
+        yield* Ref.set(failResumeOnce, true);
+        yield* send(root, "recover native conversation");
+        yield* send(root, "switch to Codex", CODEX_MODEL_SELECTION);
+
+        const turns = yield* Ref.get(capturedTurns);
+        const turn = (prompt: string) => turns.find(({ text }) => text.endsWith(prompt))!;
+        assert.include(turn("continue archived history").text, "archived Claude history");
+        const plainPrompt = turn("plain prompt after rewind");
+        assert.equal(plainPrompt.text, "plain prompt after rewind");
+        assert.notEqual(plainPrompt.nativeThreadId, turn("archived Claude history").nativeThreadId);
+        assert.notEqual(
+          turn("switch to Codex").nativeThreadId,
+          turn("archived Codex history").nativeThreadId,
+        );
+        for (const prompt of ["recover native conversation", "switch to Codex"]) {
+          assert.include(turn(prompt).text, "plain prompt after rewind");
+          assert.notInclude(turn(prompt).text, "archived Claude history");
+          assert.notInclude(turn(prompt).text, "archived Codex history");
+          assert.notInclude(turn(prompt).text, "continue archived history");
+        }
+        const latest = (yield* read()).runs.at(-1)!;
+        yield* rewind(latest.id, nextArchive);
+        assert.deepEqual(yield* messages(nextArchive), [
+          "plain prompt after rewind",
+          "recover native conversation",
+          "switch to Codex",
+        ]);
+        assert.deepEqual(yield* messages(archive), [
+          "archived Codex history",
+          "archived Claude history",
+          "continue archived history",
+        ]);
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: "context-rewind",
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            layerRegistry,
+          ),
+        ),
+      );
+    }),
+  );
+
   it.live(
     "starts a scheduled fresh run while the previous run's session still has background work",
     () =>

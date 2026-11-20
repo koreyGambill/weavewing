@@ -162,6 +162,7 @@ export interface EnvironmentThreadShell {
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
   readonly forkedFrom: OrchestrationV2ThreadShell["forkedFrom"];
+  readonly contextRewind?: OrchestrationV2ThreadShell["contextRewind"];
   readonly linkOrigin: OrchestrationV2ThreadShell["linkOrigin"] | null;
   /** The thread in a linked environment that delegated this one, if one did. */
   readonly delegatedFrom: OrchestrationV2ThreadShell["delegatedFrom"] | null;
@@ -323,6 +324,7 @@ export function presentThreadShell(
           },
     lineage: thread.lineage,
     forkedFrom: thread.forkedFrom,
+    ...(thread.contextRewind === undefined ? {} : { contextRewind: thread.contextRewind }),
     linkOrigin: thread.linkOrigin ?? null,
     delegatedFrom: thread.delegatedFrom ?? null,
     ...(thread.automationTaskId === undefined ? {} : { automationTaskId: thread.automationTaskId }),

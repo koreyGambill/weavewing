@@ -103,6 +103,7 @@ export interface ThreadForkServiceV2Shape {
     readonly targetThreadId: ThreadId;
     readonly title?: string;
     readonly sideChat?: boolean;
+    readonly contextArchive?: OrchestrationV2AppThread["lineage"]["contextArchive"];
     readonly sideChatAnchor?: SideChatAnchor;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
@@ -121,7 +122,12 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
     plan: Effect.fn("ThreadForkService.plan")(function* (input) {
       const { sourceRun } = input;
       const sourceLineage = input.sourceProjection.thread.lineage;
-      if (input.sideChat && sourceLineage.sideChat && input.sideChatAnchor === undefined) {
+      if (
+        input.sideChat &&
+        sourceLineage.sideChat &&
+        input.sideChatAnchor === undefined &&
+        input.contextArchive === undefined
+      ) {
         return yield* new ThreadForkPlanError({
           sourceThreadId: input.sourceProjection.thread.id,
           targetThreadId: input.targetThreadId,
@@ -148,7 +154,11 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         });
       }
       // The remote parent delegated the source thread, not its forks.
-      const { delegatedFrom: _delegatedFrom, ...inherited } = input.sourceProjection.thread;
+      const {
+        delegatedFrom: _delegatedFrom,
+        contextRewind: _contextRewind,
+        ...inherited
+      } = input.sourceProjection.thread;
       const targetThread: OrchestrationV2AppThread = {
         ...inherited,
         ...(inherited.developmentEnvironment == null
@@ -175,6 +185,7 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           relationshipToParent: "fork",
           rootThreadId: input.sourceProjection.thread.lineage.rootThreadId,
           ...(input.sideChat ? { sideChat: true } : {}),
+          ...(input.contextArchive === undefined ? {} : { contextArchive: input.contextArchive }),
           ...(input.sideChatAnchor === undefined ? {} : { sideChatAnchor: input.sideChatAnchor }),
         },
         forkedFrom:

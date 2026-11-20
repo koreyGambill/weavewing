@@ -1166,6 +1166,23 @@ export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(functi
   });
 });
 
+/** Archives context through the expected latest stable run. */
+export const rewindThreadContext = Effect.fn("EnvironmentCommands.rewindThreadContext")(function* (
+  input: ForkThreadFromRunInput,
+) {
+  return yield* dispatch({
+    type: "thread.fork",
+    commandId: yield* allocateCommandId(input),
+    createdBy: "user",
+    creationSource: input.creationSource ?? "web",
+    sourceThreadId: input.sourceThreadId,
+    targetThreadId: input.targetThreadId,
+    sourcePoint: { type: "rewind", runId: input.runId },
+    sideChat: true,
+    ...(input.title === undefined ? {} : { title: input.title }),
+  });
+});
+
 export const mergeThreadBack = Effect.fn("EnvironmentCommands.mergeThreadBack")(function* (
   input: MergeThreadBackInput,
 ) {

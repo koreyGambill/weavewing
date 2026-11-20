@@ -228,6 +228,8 @@ it.effect(
       assert.strictEqual(fork?.resolution?.strategy, "portable_context");
       const inherited = yield* ContextHandoffService.readInheritedHandoffItems(
         {
+          getThreadProjection: (threadId) =>
+            orchestrator.getThreadProjection(threadId).pipe(Effect.orDie),
           getThreadRecords: (threadId, fields, filter) =>
             orchestrator.getThreadRecords(threadId, fields, filter).pipe(Effect.orDie),
         },

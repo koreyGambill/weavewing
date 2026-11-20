@@ -490,8 +490,18 @@ export const layer: Layer.Layer<
           .filter((transfer) => transfer.type === "subagent_result")
           .map((transfer) => transfer.id),
       );
+      const rewind = projection.thread.contextRewind;
+      const archivedRunIds =
+        rewind === undefined
+          ? undefined
+          : new Set(
+              projection.runs
+                .filter((prior) => prior.ordinal <= rewind.runOrdinal)
+                .map((prior) => prior.id),
+            );
       const isPendingForRun = (handoff: OrchestrationV2ContextHandoff, anyProviderThread = false) =>
         handoff.status === "ready" &&
+        !archivedRunIds?.has(handoff.targetRunId) &&
         (handoff.targetRunId === run.id ||
           ((anyProviderThread || handoff.toProviderThreadId === run.providerThreadId) &&
             projection.runs.some(
@@ -1098,6 +1108,7 @@ export const layer: Layer.Layer<
         const missedRuns = projection.runs.filter(
           (source) =>
             !resumeFellBack &&
+            !archivedRunIds?.has(source.id) &&
             source.ordinal < run.ordinal &&
             source.providerThreadId === providerThread.id &&
             (source.status === "failed" || source.status === "interrupted") &&
@@ -1185,15 +1196,19 @@ export const layer: Layer.Layer<
             toProviderThreadId: providerThread.id,
             fromProviderInstanceId: providerThread.providerInstanceId,
             toProviderInstanceId: run.providerInstanceId,
-            coveredRunOrdinals: { from: 1, to: Math.max(1, run.ordinal - 1) },
+            coveredRunOrdinals: {
+              from: (rewind?.runOrdinal ?? 0) + 1,
+              to: Math.max((rewind?.runOrdinal ?? 0) + 1, run.ordinal - 1),
+            },
             strategy: "full_thread_summary",
             runs: projection.runs,
-            items: (yield* projectionStore.getTurnStartHistory(input.threadId)).filter(
-              (item) =>
-                item.runId === null ||
-                projection.runs.some(
-                  (source) => source.id === item.runId && source.ordinal < run.ordinal,
-                ),
+            items: (yield* projectionStore.getTurnStartHistory(input.threadId)).filter((item) =>
+              item.runId === null
+                ? rewind === undefined
+                : !archivedRunIds?.has(item.runId) &&
+                  projection.runs.some(
+                    (source) => source.id === item.runId && source.ordinal < run.ordinal,
+                  ),
             ),
             createdAt,
           });
@@ -1644,7 +1659,10 @@ export const layer: Layer.Layer<
       }
       const retryHandoff = resumedRetryHandoff ?? (yield* prepareRetryHandoff(handoffContext));
       const refreshBefore = providerMessage.context?.sideChatRefreshBefore;
-      let explicitRefresh = providerMessage.context?.sideChatRefresh;
+      let explicitRefresh =
+        providerMessage.context?.sideChatRefreshAfterArchive === rewind?.archiveThreadId
+          ? providerMessage.context?.sideChatRefresh
+          : undefined;
       if (explicitRefresh !== undefined) {
         const capturedAt = refreshBefore ?? DateTime.formatIso(providerMessage.createdAt);
         const resetsSinceCapture = projection.runs.flatMap((prior) =>

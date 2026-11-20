@@ -220,6 +220,7 @@ export const make = Effect.gen(function* () {
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     ...(databaseMigration === undefined ? {} : { databaseMigration }),
     capabilities: {
+      conversationContextRewind: true,
       statusSources: true,
       automations: true,
       automationRunHistory: true,

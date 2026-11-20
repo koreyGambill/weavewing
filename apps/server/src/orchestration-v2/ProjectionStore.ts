@@ -57,6 +57,7 @@ import type {
 import {
   IDLE_COMPACTION_TEXT,
   idleCompactionOf,
+  canActivateProviderThread,
   isQueuedProviderThreadPlaceholder,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
@@ -1097,14 +1098,12 @@ export function applyToProjection(
     case "provider-thread.updated":
       return {
         ...base,
-        thread:
-          event.payload.appThreadId === base.thread.id &&
-          !isQueuedProviderThreadPlaceholder(event.payload)
-            ? {
-                ...base.thread,
-                activeProviderThreadId: event.payload.id,
-              }
-            : base.thread,
+        thread: canActivateProviderThread(base.thread, event.payload)
+          ? {
+              ...base.thread,
+              activeProviderThreadId: event.payload.id,
+            }
+          : base.thread,
         providerThreads: upsertById(base.providerThreads, event.payload),
       };
     case "provider-turn.updated":
@@ -1580,12 +1579,15 @@ function isTurnItemAtOrBeforeRun(input: {
   readonly itemRunId: OrchestrationV2TurnItem["runId"];
   readonly runOrdinalById: ReadonlyMap<NonNullable<OrchestrationV2TurnItem["runId"]>, number>;
   readonly sourceRunOrdinal: number;
+  readonly fromRunOrdinal: number;
 }): boolean {
   if (input.itemRunId === null) {
-    return input.historyOrigin === "v1_import";
+    return input.fromRunOrdinal <= 1 && input.historyOrigin === "v1_import";
   }
   const ordinal = input.runOrdinalById.get(input.itemRunId);
-  return ordinal !== undefined && ordinal <= input.sourceRunOrdinal;
+  return (
+    ordinal !== undefined && ordinal >= input.fromRunOrdinal && ordinal <= input.sourceRunOrdinal
+  );
 }
 
 // Run ordinals enforce the fork cutoff; this keeps later rollbacks from hiding
@@ -1637,6 +1639,7 @@ function visibleTurnItemsThroughRun(input: {
   readonly sourceProjection: OrchestrationV2ThreadProjection;
   readonly sourceRunId: NonNullable<OrchestrationV2TurnItem["runId"]>;
   readonly forkCreatedAt: DateTime.Utc;
+  readonly fromRunOrdinal: number;
 }): Array<Omit<OrchestrationV2ProjectedTurnItem, "position">> {
   const sourceRun = input.sourceProjection.runs.find((run) => run.id === input.sourceRunId);
   if (sourceRun === undefined) {
@@ -1649,7 +1652,7 @@ function visibleTurnItemsThroughRun(input: {
     attempts: input.sourceProjection.attempts,
     items: input.sourceProjection.turnItems,
   });
-  const inheritedPrefix = input.sourceProjection.visibleTurnItems
+  const inheritedPrefix = (input.fromRunOrdinal > 1 ? [] : input.sourceProjection.visibleTurnItems)
     .filter(
       (row) => row.item.threadId !== input.sourceProjection.thread.id || row.item.type === "fork",
     )
@@ -1668,6 +1671,7 @@ function visibleTurnItemsThroughRun(input: {
           itemRunId: item.runId,
           runOrdinalById,
           sourceRunOrdinal: sourceRun.ordinal,
+          fromRunOrdinal: input.fromRunOrdinal,
         }),
     ),
   );
@@ -1675,9 +1679,10 @@ function visibleTurnItemsThroughRun(input: {
   return [...inheritedPrefix, ...localPrefix];
 }
 
-// Side chats show only their own rows; the fork transfer carries the parent's context to the model.
+// Ordinary side chats show local rows. Rewind archives also expose their fixed source range.
 function inheritedRunFork(thread: Pick<OrchestrationV2AppThread, "forkedFrom" | "lineage">) {
-  return thread.forkedFrom?.type === "run" && thread.lineage.sideChat !== true
+  return thread.forkedFrom?.type === "run" &&
+    (thread.lineage.sideChat !== true || thread.lineage.contextArchive !== undefined)
     ? thread.forkedFrom
     : null;
 }
@@ -1702,6 +1707,7 @@ function buildVisibleTurnItems(input: {
           sourceProjection: input.sourceProjection,
           sourceRunId: forkedFrom.runId,
           forkCreatedAt: input.projection.thread.createdAt,
+          fromRunOrdinal: input.projection.thread.lineage.contextArchive?.fromRunOrdinal ?? 1,
         });
   const markerItem = makeForkMarkerTurnItem({
     targetProjection: input.projection,
@@ -1894,6 +1900,9 @@ export function threadShellFromProjection(
       : { activeOrderKey: projection.thread.activeOrderKey }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
+    ...(projection.thread.contextRewind === undefined
+      ? {}
+      : { contextRewind: projection.thread.contextRewind }),
     activeProviderThreadId: projection.thread.activeProviderThreadId,
     ...(projection.thread.historyOrigin === undefined
       ? {}
@@ -2117,17 +2126,23 @@ function itemCountThroughRun(input: {
   readonly state: ShellThreadState;
   readonly runId: RunId;
   readonly forkCreatedAt: DateTime.Utc;
+  readonly fromRunOrdinal?: number;
 }): number {
   const runOrdinal = input.state.runsById.get(input.runId)?.ordinal;
+  const from = input.fromRunOrdinal ?? 1;
   if (runOrdinal === undefined) {
     return 0;
   }
 
-  let count = input.state.thread.historyOrigin === "v1_import" ? input.state.runlessItemCount : 0;
+  let count =
+    from <= 1 && input.state.thread.historyOrigin === "v1_import"
+      ? input.state.runlessItemCount
+      : 0;
   for (const [runId, itemCount] of input.state.itemCountByRunId) {
     const itemRun = input.state.runsById.get(runId);
     if (
       itemRun !== undefined &&
+      itemRun.ordinal >= from &&
       itemRun.ordinal <= runOrdinal &&
       !isRolledBackBeforeFork(itemRun.rolledBackAt, input.forkCreatedAt)
     ) {
@@ -2176,8 +2191,9 @@ function visibleItemCountForShell(input: {
     return state.itemCount;
   }
 
+  const archiveStart = state.thread.lineage.contextArchive?.fromRunOrdinal ?? 1;
   const inheritedPrefixCount =
-    inheritedRunFork(sourceState.thread) !== null
+    archiveStart <= 1 && inheritedRunFork(sourceState.thread) !== null
       ? visibleItemCountForShell({
           threadId: sourceState.thread.id,
           statesByThreadId: input.statesByThreadId,
@@ -2191,6 +2207,7 @@ function visibleItemCountForShell(input: {
       state: sourceState,
       runId: forkedFrom.runId,
       forkCreatedAt: state.thread.createdAt,
+      fromRunOrdinal: archiveStart,
     }) +
     1 +
     state.itemCount
@@ -2229,6 +2246,9 @@ function shellFromState(input: {
       : { activeOrderKey: input.state.thread.activeOrderKey }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
+    ...(input.state.thread.contextRewind === undefined
+      ? {}
+      : { contextRewind: input.state.thread.contextRewind }),
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
     ...(input.state.thread.historyOrigin === undefined
       ? {}
@@ -2903,6 +2923,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 const threadRow = threadRows[0];
                 if (threadRow !== undefined) {
                   const thread = yield* decodeThreadPayload(threadRow.payload_json);
+                  if (!canActivateProviderThread(thread, event.payload)) break;
                   const updatedThread = {
                     ...thread,
                     activeProviderThreadId: event.payload.id,
@@ -4742,6 +4763,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           window.historyAnchor === undefined &&
           seenThreadIds.size === 0 &&
           sourceWindow !== undefined &&
+          projection.thread.lineage.contextArchive === undefined &&
           activeLocalTurnItems(projection).filter((row) => isThreadHistoryUserTurn(row.item))
             .length >= Math.max(window.userTurnLimit, THREAD_HISTORY_PAGE_POLICY.maxUserTurns)
         ) {
@@ -6819,34 +6841,48 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         // A normal fork starts its own side-chat tree, even if it has the same lineage root.
         const rows = yield* sql<{ excerpt: string }>`
           WITH RECURSIVE
-            ancestors(thread_id, parent_id, is_side_chat, fork_run_id, cutoff_run_id) AS (
+            ancestors(thread_id, parent_id, is_side_chat, fork_run_id, cutoff_run_id, is_archive) AS (
               SELECT thread_id,
                 json_extract(payload_json, '$.lineage.parentThreadId'),
                 json_extract(payload_json, '$.lineage.sideChat'),
-                json_extract(payload_json, '$.forkedFrom.runId'), NULL
+                json_extract(payload_json, '$.forkedFrom.runId'), NULL,
+                json_extract(payload_json, '$.lineage.contextArchive') IS NOT NULL
               FROM orchestration_v2_projection_threads
               WHERE thread_id = ${threadId} AND deleted_at IS NULL
               UNION
               SELECT parent.thread_id,
                 json_extract(parent.payload_json, '$.lineage.parentThreadId'),
                 json_extract(parent.payload_json, '$.lineage.sideChat'),
-                json_extract(parent.payload_json, '$.forkedFrom.runId'), child.fork_run_id
+                json_extract(parent.payload_json, '$.forkedFrom.runId'), child.fork_run_id,
+                json_extract(parent.payload_json, '$.lineage.contextArchive') IS NOT NULL
               FROM ancestors child
               JOIN orchestration_v2_projection_threads parent ON parent.thread_id = child.parent_id
-              WHERE child.is_side_chat = 1 AND parent.deleted_at IS NULL
+              WHERE child.is_side_chat = 1 AND child.is_archive = 0 AND parent.deleted_at IS NULL
             ),
-            tree(thread_id, title) AS (
-              SELECT root.thread_id, substr(thread.title, 1, 120)
+            tree(thread_id, title, rewind_ordinal, rewind_at) AS (
+              SELECT root.thread_id, substr(thread.title, 1, 120),
+                json_extract(thread.payload_json, '$.contextRewind.runOrdinal'),
+                json_extract(thread.payload_json, '$.contextRewind.createdAt')
               FROM ancestors root
               JOIN orchestration_v2_projection_threads thread ON thread.thread_id = root.thread_id
-              WHERE root.is_side_chat IS NOT 1
+              WHERE root.is_side_chat IS NOT 1 OR root.is_archive = 1
               UNION
-              SELECT child.thread_id, substr(child.title, 1, 120)
+              SELECT child.thread_id, substr(child.title, 1, 120),
+                json_extract(child.payload_json, '$.contextRewind.runOrdinal'),
+                json_extract(child.payload_json, '$.contextRewind.createdAt')
               FROM tree parent
               JOIN orchestration_v2_projection_context_transfers transfer
                 ON transfer.source_thread_id = parent.thread_id AND transfer.type = 'fork'
               JOIN orchestration_v2_projection_threads child ON child.thread_id = transfer.target_thread_id
+              LEFT JOIN orchestration_v2_projection_runs anchor
+                ON anchor.thread_id = parent.thread_id
+                AND anchor.run_id = json_extract(child.payload_json, '$.forkedFrom.runId')
               WHERE json_extract(child.payload_json, '$.lineage.sideChat') = 1
+                AND json_extract(child.payload_json, '$.lineage.contextArchive') IS NULL
+                AND (parent.rewind_at IS NULL OR (
+                  child.created_at >= parent.rewind_at
+                  AND (anchor.ordinal IS NULL OR anchor.ordinal > parent.rewind_ordinal)
+                ))
                 AND json_extract(child.payload_json, '$.lineage.parentThreadId') = parent.thread_id
                 AND child.deleted_at IS NULL
             )${
@@ -6908,6 +6944,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ON fork.run_id = ancestor.cutoff_run_id AND fork.thread_id = tree.thread_id
           WHERE tree.thread_id <> ${threadId} AND message.streaming = 0
             AND run.status = 'completed'
+            AND (tree.rewind_ordinal IS NULL OR run.ordinal > tree.rewind_ordinal)
             AND (ancestor.cutoff_run_id IS NULL OR run.ordinal > fork.ordinal)
             AND (
               message.node_id = json_extract(run.payload_json, '$.rootNodeId') OR (
@@ -7098,13 +7135,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         let inherited: Array<TimelineIndexRow> = [];
         if (sourceRun !== undefined) {
           const ordinals = forkInheritedRunOrdinals(source.records.runs, records.thread.createdAt);
+          const fromRunOrdinal = records.thread.lineage.contextArchive?.fromRunOrdinal ?? 1;
           const isInheritedVisible = createInheritedTurnItemVisibility({
             runs: source.records.runs,
             attempts: source.records.attempts,
             items: source.local.map((row) => row.item),
           });
           inherited = [
-            ...source.visible.filter(
+            ...(fromRunOrdinal > 1 ? [] : source.visible).filter(
               (row) => row.item.threadId !== fork.threadId || row.item.type === "fork",
             ),
             ...source.local.filter(
@@ -7115,6 +7153,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   itemRunId: row.item.runId,
                   runOrdinalById: ordinals,
                   sourceRunOrdinal: sourceRun.ordinal,
+                  fromRunOrdinal,
                 }),
             ),
           ].map((row) => ({ ...row, visibility: "inherited" }));
@@ -7283,7 +7322,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         SELECT 1 FROM orchestration_v2_projection_threads
         WHERE thread_id = ${threadId}
           AND NOT (json_extract(payload_json, '$.forkedFrom.type') IS 'run'
-            AND json_extract(payload_json, '$.lineage.sideChat') IS NOT 1)`;
+            AND (json_extract(payload_json, '$.lineage.sideChat') IS NOT 1
+              OR json_extract(payload_json, '$.lineage.contextArchive') IS NOT NULL))`;
       if (ownRowsOnly.length === 0) return null;
       const records = yield* getThreadRecords(threadId, ["runs", "attempts"]);
       if (inheritedRunFork(records.thread) !== null) return null;
@@ -8311,7 +8351,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               t.payload_json,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
-                  AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
+                  AND (json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
+                    OR json_extract(t.payload_json, '$.lineage.contextArchive') IS NOT NULL)
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
                 ELSE NULL
               END AS forked_from_run_source_thread_id,
