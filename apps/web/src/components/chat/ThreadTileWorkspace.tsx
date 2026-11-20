@@ -283,7 +283,9 @@ export function ThreadTileWorkspace(props: {
     return observeResize(root, () => setWorkspaceWidth(root.clientWidth));
   }, []);
   const tileLayouts = useSavedTileLayouts(props.threadRef.environmentId, props.projectId);
-  const [saveLayout, setSaveLayout] = useState<{ dropped: boolean; tiles: number } | null>(null);
+  const [saveLayout, setSaveLayout] = useState<
+    (ReturnType<typeof toSavedTileNode> & { replaceId: string | null }) | null
+  >(null);
   const defaultLayout = props.newThread ? tileLayouts.effectiveDefault : null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lays out a new draft once the environment's settings name a default layout
   useEffect(() => {
@@ -701,9 +703,8 @@ export function ThreadTileWorkspace(props: {
     0,
     areaChoices.findIndex((choice) => !choice.openElsewhere),
   );
-  const saveLayoutAs = () => {
-    const { root, dropped } = toSavedTileNode(currentLayout());
-    setSaveLayout({ dropped, tiles: root ? savedTileGroupCount(root) : 0 });
+  const saveLayoutAs = (replaceId: string | null = null) => {
+    setSaveLayout({ ...toSavedTileNode(currentLayout()), replaceId });
   };
   const applySavedLayout = (layout: SavedTileLayout) => {
     useRightPanelStore.getState().applySavedTileLayout(props.threadRef, layout.root);
@@ -1158,7 +1159,8 @@ export function ThreadTileWorkspace(props: {
           <TileLayoutsMenu
             api={tileLayouts}
             hasProject={tileLayouts.projectId !== null}
-            onSaveAs={saveLayoutAs}
+            onSaveAs={() => saveLayoutAs()}
+            onReplace={saveLayoutAs}
             onApply={applySavedLayout}
           />
         </WorkspaceTitlebarControls>
@@ -2070,11 +2072,12 @@ export function ThreadTileWorkspace(props: {
             if (!open) setSaveLayout(null);
           }}
           layouts={tileLayouts.layouts}
+          replaceId={saveLayout.replaceId}
           dropped={saveLayout.dropped}
-          tiles={saveLayout.tiles}
+          tiles={saveLayout.root ? savedTileGroupCount(saveLayout.root) : 0}
           onSave={(name) => {
-            const { root } = toSavedTileNode(currentLayout());
-            if (root) tileLayouts.save(name, root);
+            const { root, replaceId } = saveLayout;
+            if (root) tileLayouts.save(name, root, replaceId);
           }}
         />
       )}
