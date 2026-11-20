@@ -21,6 +21,9 @@ live in the maintainer's private notes. See
 
 1. Use a clean checkout at the revision to install, usually merged `main`. Invoke the script with
    the repository's pinned Node by full path if `node` on `PATH` is older.
+   The script runs `powershell.exe`. Shells without WSL's Windows `PATH` entries fail with
+   `spawn powershell.exe ENOENT`; append `/mnt/c/Windows/System32/WindowsPowerShell/v1.0` and
+   `/mnt/c/Windows/System32` to `PATH` for the command.
 2. Run the normal build command with `--prepare-only` and a new `--output-dir` under
    `~/.local/share/weavewing-builds/<short-sha>`. Preparation builds, smoke-tests and stages a candidate
    without backing up state or changing the running install. It can run after each merge.

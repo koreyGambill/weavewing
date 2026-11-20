@@ -821,12 +821,19 @@ async function worker(mode: string, configFile: string, extra: string[]) {
     }
   }
   if (mode === "notify") {
+    // --activate writes the thread beside the sealed config, which it cannot change.
+    const notifyThread =
+      config.notifyThread ??
+      NodeFS.readFileSync(
+        NodePath.join(NodePath.dirname(configFile), "notify-thread"),
+        "utf8",
+      ).trim();
     const current = await runtimeHealth(config.wslHome, extra[0]!);
     if (!current.healthy || !current.executable)
       throw new Error("No healthy runtime for notification");
     await run(
       current.executable,
-      ["thread", "send", "--base-dir", config.wslHome, "--json", config.notifyThread, extra[1]!],
+      ["thread", "send", "--base-dir", config.wslHome, "--json", notifyThread, extra[1]!],
       { stdio: "pipe", timeout: 30000 },
     );
     return { sent: true };
