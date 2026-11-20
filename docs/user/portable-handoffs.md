@@ -3,7 +3,7 @@
 T3 Code transfers conversation context when you switch providers, continue through a portable
 restart, or use a fork that the provider cannot resume itself.
 
-## Forks and side chats
+## Forks, side chats, and drill-ins
 
 A fork or side chat starts from a particular reply or finished turn. When the
 provider supports a native fork from that point, the new chat inherits the
@@ -13,9 +13,25 @@ cache. A native fork can preserve history and still have a cold first request.
 Use **Get newest context** when you want a side chat to also see activity
 that happened after its fork point.
 
-When native forking is unavailable, T3 Code builds a portable handoff from its
-saved transcript. No model writes this handoff. A side chat opened before the
-parent finishes its first turn uses the available saved history.
+Keep **Automatic** in the **Conversation history** section of **Thread details** to use a portable
+handoff when native forking is unavailable. A side chat opened before the parent
+finishes its first turn uses the available saved history. Choose **Require native
+history** to stop the fork if its provider cannot preserve native history. Use the
+source provider and a supported finished turn, or choose **Automatic** and create
+the fork again. The fork’s details show which kind of history it received.
+
+## Hand off a summary
+
+Choose **Hand off summary** in the source thread’s **Conversation history** section.
+Review the prepared text, choose a destination on the same environment, and add
+it to the draft. The handoff is appended to any existing draft text. Send it from
+the destination when you’re ready.
+
+Weavewing prepares the summary in a temporary native fork of the latest completed
+turn using the source model and reasoning settings. If native preparation is
+unavailable, choose **Use saved conversation** to prepare a summary from a
+bounded portion of saved messages. When that model is unavailable, edit the
+excerpt or write the handoff yourself.
 
 ## What a portable handoff carries
 

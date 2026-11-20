@@ -6877,6 +6877,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           AND archive.application_event_version = 2
           AND archive.aggregate_kind = 'thread'
           AND archive.event_type = 'thread.created'
+          AND json_extract(archive.payload_json, '$.lineage.contextArchive.splitAfterRunOrdinal') IS NULL
           AND archive.sequence < (
             SELECT fork.sequence
             FROM orchestration_events AS fork INDEXED BY idx_orchestration_events_agent_stream_sequence

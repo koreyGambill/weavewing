@@ -5,6 +5,7 @@ export interface ContextArchiveRange {
   readonly threadId: ThreadId;
   readonly fromRunOrdinal: number;
   readonly throughRunOrdinal: number;
+  readonly splitAfterRunOrdinal?: number;
   readonly createdAt: string;
 }
 
@@ -20,25 +21,34 @@ export function groupContextArchiveEntries(input: {
   if (!input.archives?.length) return input.entries;
 
   const ordinalByRun = new Map(input.runs.map((run) => [run.id, run.ordinal]));
+  const splitArchives = input.archives.filter(
+    (archive) => archive.splitAfterRunOrdinal !== undefined,
+  );
   const sections = input.archives
+    .filter((archive) => archive.splitAfterRunOrdinal === undefined)
     .toSorted((left, right) => left.fromRunOrdinal - right.fromRunOrdinal)
     .map((archive) => ({ archive, entries: new Array<TimelineEntry>() }));
   const recent: TimelineEntry[] = [];
   const first = sections[0];
+  const entryRunId = (entry: TimelineEntry) =>
+    entry.kind === "message"
+      ? entry.message.runId
+      : entry.kind === "work"
+        ? entry.entry.runId
+        : entry.kind === "event"
+          ? entry.projectedItem.item.runId
+          : entry.kind === "proposed-plan"
+            ? entry.proposedPlan.runId
+            : entry.kind === "context-archive"
+              ? null
+              : entry.runId;
+  const entryOrdinal = (entry: TimelineEntry) => {
+    const runId = entryRunId(entry);
+    return runId == null ? undefined : ordinalByRun.get(runId);
+  };
   for (const entry of input.entries) {
-    const runId =
-      entry.kind === "message"
-        ? entry.message.runId
-        : entry.kind === "work"
-          ? entry.entry.runId
-          : entry.kind === "event"
-            ? entry.projectedItem.item.runId
-            : entry.kind === "proposed-plan"
-              ? entry.proposedPlan.runId
-              : entry.kind === "context-archive"
-                ? null
-                : entry.runId;
-    const ordinal = runId == null ? undefined : ordinalByRun.get(runId);
+    const runId = entryRunId(entry);
+    const ordinal = entryOrdinal(entry);
     const section =
       ordinal === undefined
         ? first?.archive.fromRunOrdinal === 1 &&
@@ -72,5 +82,28 @@ export function groupContextArchiveEntries(input: {
     });
     if (expanded) for (const entry of entries) result.push(entry);
   }
-  return result.concat(recent);
+  const timeline = result.concat(recent);
+  for (const archive of splitArchives.toSorted((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
+  )) {
+    const boundary = archive.splitAfterRunOrdinal!;
+    const nextIndex = timeline.findIndex((entry) => {
+      const ordinal =
+        entry.kind === "context-archive" ? entry.splitAfterRunOrdinal : entryOrdinal(entry);
+      return (
+        ordinal !== undefined &&
+        ordinal >= (entry.kind === "context-archive" ? boundary : boundary + 1)
+      );
+    });
+    timeline.splice(nextIndex < 0 ? timeline.length : nextIndex, 0, {
+      id: `context-archive:${archive.threadId}`,
+      kind: "context-archive",
+      createdAt: archive.createdAt,
+      threadId: archive.threadId,
+      expanded: input.expanded.has(archive.threadId),
+      hasLoadedEntries: true,
+      splitAfterRunOrdinal: boundary,
+    });
+  }
+  return timeline;
 }

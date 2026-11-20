@@ -324,6 +324,7 @@ import {
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2CommandOutputError,
   OrchestrationV2GetThreadProjectionError,
+  OrchestrationV2PrepareSummaryHandoffError,
   OrchestrationV2RpcSchemas,
   OrchestrationV2ThreadLaunchError,
 } from "./orchestrationV2.ts";
@@ -2424,6 +2425,15 @@ const WsOrchestrationV2GetOlderSettledThreadsRpc = Rpc.make(
   },
 );
 
+const WsOrchestrationV2PrepareSummaryHandoffRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.prepareSummaryHandoff,
+  {
+    payload: OrchestrationV2RpcSchemas.prepareSummaryHandoff.input,
+    success: OrchestrationV2RpcSchemas.prepareSummaryHandoff.output,
+    error: Schema.Union([OrchestrationV2PrepareSummaryHandoffError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsOrchestrationV2GetThreadProjectionRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getThreadProjection,
   {
@@ -3029,6 +3039,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetWorktreeThreadIdsRpc,
   WsOrchestrationV2GetOlderSettledThreadsRpc,
   WsOrchestrationV2GetThreadProjectionRpc,
+  WsOrchestrationV2PrepareSummaryHandoffRpc,
   WsOrchestrationV2LaunchThreadRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,

@@ -220,7 +220,10 @@ export const make = Effect.gen(function* () {
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     ...(databaseMigration === undefined ? {} : { databaseMigration }),
     capabilities: {
+      forkHistoryPolicy: true,
+      summaryHandoff: true,
       conversationContextRewind: true,
+      rewindToReply: true,
       statusSources: true,
       statusSourceSharing: true,
       statusSourceOrder: true,

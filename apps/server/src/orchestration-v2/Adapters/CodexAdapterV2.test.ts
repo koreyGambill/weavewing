@@ -10592,122 +10592,159 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
-  it.effect("unarchives an archived Codex source thread before forking it", () =>
-    Effect.gen(function* () {
-      const nativeThreadId = "archived-fork-source";
-      const forkThreadId = "archived-fork-target";
-      const forkParams = {
-        threadId: nativeThreadId,
-        lastTurnId: "native-turn-first",
-        excludeTurns: true,
-        config: CodexAdapterV2.CODEX_THREAD_CONFIG,
-      };
-      const exchange = (
-        id: number,
-        method: string,
-        params: unknown,
-        reply: { readonly result: unknown } | { readonly error: unknown },
-      ): Array<CodexReplay.CodexAppServerReplayEntry> => [
-        { type: "expect_outbound", label: method, frame: { id, method, params } },
-        { type: "emit_inbound", label: method, frame: { id, ...reply } },
-      ];
-      const transcript = makeCodexReplayTranscript({
-        scenario: "codex-archived-fork",
-        entries: [
-          ...codexReplayPreamble({
-            nativeThreadId,
-            nativeTurnId: "archived-fork-turn",
-            prompt: "unused",
-          }).slice(0, 5),
-          ...exchange(3, "thread/fork", forkParams, {
-            error: {
-              code: -32600,
-              message: `session ${nativeThreadId} is archived. Run \`codex unarchive ${nativeThreadId}\` to unarchive it first.`,
-            },
-          }),
-          ...exchange(
-            4,
-            "thread/unarchive",
-            { threadId: nativeThreadId },
-            { result: codexReplayThreadResult({ nativeThreadId, forkedFromId: null }) },
-          ),
-          ...exchange(5, "thread/fork", forkParams, {
-            result: {
-              ...codexReplayThreadResult({
-                nativeThreadId: forkThreadId,
-                forkedFromId: nativeThreadId,
-              }),
-              instructionSources: ["/workspace/fork/AGENTS.md"],
-            },
-          }),
-          ...codexReplayPreamble({
-            nativeThreadId: forkThreadId,
-            nativeTurnId: "fork-context-turn",
-            prompt: "work",
-          })
-            .slice(5)
-            .map((entry) =>
-              entry.type === "emit_inbound" && entry.label === "turn/started"
-                ? entry
-                : withReplayRequestId(entry, 6),
+  it.effect.each([true, false])(
+    "unarchives a Codex source and verifies the native fork boundary (matching head %s)",
+    (matchingHead) =>
+      Effect.gen(function* () {
+        const nativeThreadId = "archived-fork-source";
+        const forkThreadId = "archived-fork-target";
+        const forkParams = {
+          threadId: nativeThreadId,
+          lastTurnId: "native-turn-first",
+          excludeTurns: true,
+          config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+        };
+        const exchange = (
+          id: number,
+          method: string,
+          params: unknown,
+          reply: { readonly result: unknown } | { readonly error: unknown },
+        ): Array<CodexReplay.CodexAppServerReplayEntry> => [
+          { type: "expect_outbound", label: method, frame: { id, method, params } },
+          { type: "emit_inbound", label: method, frame: { id, ...reply } },
+        ];
+        const transcript = makeCodexReplayTranscript({
+          scenario: "codex-archived-fork",
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId: "archived-fork-turn",
+              prompt: "unused",
+            }).slice(0, 5),
+            ...exchange(3, "thread/fork", forkParams, {
+              error: {
+                code: -32600,
+                message: `session ${nativeThreadId} is archived. Run \`codex unarchive ${nativeThreadId}\` to unarchive it first.`,
+              },
+            }),
+            ...exchange(
+              4,
+              "thread/unarchive",
+              { threadId: nativeThreadId },
+              { result: codexReplayThreadResult({ nativeThreadId, forkedFromId: null }) },
             ),
-          ...exchange(
-            7,
-            "mcpServerStatus/list",
-            { threadId: forkThreadId, detail: "toolsAndAuthOnly", limit: 100 },
-            { result: { data: [], nextCursor: null } },
-          ),
-        ],
-      });
-      const harness = yield* makeCodexReplayHarness(transcript);
-      const now = yield* DateTime.now;
-      const firstTurn = codexReplaySourceTurn({
-        id: "provider-turn-first",
-        ordinal: 1,
-        nativeId: "native-turn-first",
-        providerThreadId: harness.providerThread.id,
-        now,
-      });
-
-      const forkedProviderThread = yield* harness.runtime.forkThread({
-        sourceProviderThread: harness.providerThread,
-        sourceProviderTurns: [firstTurn],
-        providerTurnId: firstTurn.id,
-        targetThreadId: ThreadId.make("thread-archived-fork-target"),
-      });
-
-      assert.equal(forkedProviderThread.nativeThreadRef?.nativeId, forkThreadId);
-      assert.equal(forkedProviderThread.forkedFrom?.providerTurnId, firstTurn.id);
-      const footprint =
-        yield* Deferred.make<
-          Parameters<
-            NonNullable<ProviderAdapter.ProviderAdapterV2TurnInput["onContextPrepared"]>
-          >[0]
-        >();
-      yield* harness.runtime.startTurn({
-        ...makeCodexTestTurnInput({
-          threadId: ThreadId.make("thread-archived-fork-target"),
-          providerThread: forkedProviderThread,
+            ...exchange(5, "thread/fork", forkParams, {
+              result: {
+                ...codexReplayThreadResult({
+                  nativeThreadId: forkThreadId,
+                  forkedFromId: nativeThreadId,
+                }),
+                instructionSources: ["/workspace/fork/AGENTS.md"],
+              },
+            }),
+            ...exchange(
+              6,
+              "thread/turns/list",
+              {
+                threadId: forkThreadId,
+                cursor: null,
+                limit: 1,
+                sortDirection: "desc",
+                itemsView: "summary",
+              },
+              {
+                result: {
+                  data: [
+                    {
+                      id: matchingHead ? "native-turn-first" : "native-turn-second",
+                      items: [],
+                      status: "completed",
+                      error: null,
+                    },
+                  ],
+                  nextCursor: null,
+                },
+              },
+            ),
+            ...(matchingHead
+              ? [
+                  ...codexReplayPreamble({
+                    nativeThreadId: forkThreadId,
+                    nativeTurnId: "fork-context-turn",
+                    prompt: "work",
+                  })
+                    .slice(5)
+                    .map((entry) =>
+                      entry.type === "emit_inbound" && entry.label === "turn/started"
+                        ? entry
+                        : withReplayRequestId(entry, 7),
+                    ),
+                  ...exchange(
+                    8,
+                    "mcpServerStatus/list",
+                    { threadId: forkThreadId, detail: "toolsAndAuthOnly", limit: 100 },
+                    { result: { data: [], nextCursor: null } },
+                  ),
+                ]
+              : []),
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript);
+        const now = yield* DateTime.now;
+        const firstTurn = codexReplaySourceTurn({
+          id: "provider-turn-first",
+          ordinal: 1,
+          nativeId: "native-turn-first",
+          providerThreadId: harness.providerThread.id,
           now,
-          attemptId: RunAttemptId.make("fork-context-turn"),
-          text: "work",
-        }),
-        onContextPrepared: (context) => Deferred.succeed(footprint, context).pipe(Effect.asVoid),
-      });
-      assert.deepEqual((yield* Deferred.await(footprint)).instructionSources, [
-        "/workspace/fork/AGENTS.md",
-      ]);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(
-          IdAllocator.layer,
-          McpProviderSessions.layer,
-          NodeServices.layer,
-          NodeCrypto.layer,
+        });
+
+        const fork = harness.runtime.forkThread({
+          sourceProviderThread: harness.providerThread,
+          sourceProviderTurns: [firstTurn],
+          providerTurnId: firstTurn.id,
+          verifyTurnBoundary: true,
+          targetThreadId: ThreadId.make("thread-archived-fork-target"),
+        });
+
+        if (!matchingHead) {
+          const failure = yield* Effect.flip(fork);
+          assert.instanceOf(failure, ProviderAdapter.ProviderAdapterForkThreadError);
+          return;
+        }
+        const forkedProviderThread = yield* fork;
+        assert.equal(forkedProviderThread.nativeThreadRef?.nativeId, forkThreadId);
+        assert.equal(forkedProviderThread.forkedFrom?.providerTurnId, firstTurn.id);
+        const footprint =
+          yield* Deferred.make<
+            Parameters<
+              NonNullable<ProviderAdapter.ProviderAdapterV2TurnInput["onContextPrepared"]>
+            >[0]
+          >();
+        yield* harness.runtime.startTurn({
+          ...makeCodexTestTurnInput({
+            threadId: ThreadId.make("thread-archived-fork-target"),
+            providerThread: forkedProviderThread,
+            now,
+            attemptId: RunAttemptId.make("fork-context-turn"),
+            text: "work",
+          }),
+          onContextPrepared: (context) => Deferred.succeed(footprint, context).pipe(Effect.asVoid),
+        });
+        assert.deepEqual((yield* Deferred.await(footprint)).instructionSources, [
+          "/workspace/fork/AGENTS.md",
+        ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
-    ),
   );
 
   it.effect.each([

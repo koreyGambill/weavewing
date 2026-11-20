@@ -72,6 +72,7 @@ export function forkContextTransfer(input: {
   readonly sourceProviderThread: OrchestrationV2ProviderThread | undefined;
   readonly sourceProviderInstanceId: OrchestrationV2ContextTransfer["sourceProviderInstanceId"];
   readonly sourceTokenUsage?: OrchestrationV2ProviderTurnTokenUsage | undefined;
+  readonly forkHistoryPolicy?: OrchestrationV2ContextTransfer["forkHistoryPolicy"];
   readonly canonicalSourcePoint: OrchestrationV2ContextSourcePoint;
   readonly createdBy: OrchestrationV2Actor;
   readonly createdAt: DateTime.Utc;
@@ -91,6 +92,9 @@ export function forkContextTransfer(input: {
       strongNativeSource
         ? input.sourceTokenUsage
         : undefined,
+    ...(input.forkHistoryPolicy === undefined
+      ? {}
+      : { forkHistoryPolicy: input.forkHistoryPolicy }),
     targetProviderInstanceId: null,
     targetRunId: null,
     status: "pending",
@@ -117,6 +121,7 @@ export interface ThreadForkServiceV2Shape {
     readonly targetThreadId: ThreadId;
     readonly title?: string;
     readonly sideChat?: boolean;
+    readonly forkHistoryPolicy?: OrchestrationV2ContextTransfer["forkHistoryPolicy"];
     readonly contextArchive?: OrchestrationV2AppThread["lineage"]["contextArchive"];
     readonly sideChatAnchor?: SideChatAnchor;
     readonly createdBy: OrchestrationV2Actor;
@@ -171,6 +176,7 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
       const {
         delegatedFrom: _delegatedFrom,
         contextRewind: _contextRewind,
+        contextSplit: _contextSplit,
         ...inherited
       } = input.sourceProjection.thread;
       const targetThread: OrchestrationV2AppThread = {

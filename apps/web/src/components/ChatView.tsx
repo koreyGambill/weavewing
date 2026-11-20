@@ -1,6 +1,7 @@
 import { WorkspaceTitlebar } from "./WorkspaceTitlebar";
 import * as DateTime from "effect/DateTime";
 import { ContextArchiveRow } from "./chat/ContextArchiveRow";
+import SideChatPane from "./chat/SideChatPane";
 import { RewindContextButton } from "./chat/RewindContextButton";
 import { Button } from "./ui/button";
 import { ForkConversationButton } from "./chat/ForkConversationButton";
@@ -2881,6 +2882,9 @@ export default function ChatView(props: ChatViewProps) {
   const stableSideChatRunIds = canBranchAssistantText
     ? new Set(serverProjection?.runs.flatMap((run) => (isStableForkRun(run) ? [run.id] : [])))
     : undefined;
+  const forkHistoryPolicy = useClientSettings((settings) => settings.forkHistoryPolicy);
+  const forkHistoryPolicySupported =
+    serverConfig?.environment.capabilities.forkHistoryPolicy === true;
   const sideChat = useSideChat({
     threadRef: sideChatsOffered && isServerThread ? activeThreadRef : null,
     anchoredThreadRef: canBranchAssistantText ? activeThreadRef : null,
@@ -2889,6 +2893,8 @@ export default function ChatView(props: ChatViewProps) {
     },
     readSettings: () => ({
       runtimeMode,
+      forkHistoryPolicy,
+      forkHistoryPolicySupported,
       modelSelection: composerRef.current?.getSendContext().selectedModelSelection,
     }),
     onError: (message) => {
@@ -2924,27 +2930,47 @@ export default function ChatView(props: ChatViewProps) {
   );
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
-  const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
-    useTimelineRewind({
-      environmentId,
-      routeThreadRef,
-      routeThreadKey,
-      workspaceThreadRef,
-      currentRouteThreadKeyRef,
-      serverProjection,
-      activeThread,
-      timelineMessages,
-      phase,
-      isSendBusy,
-      isRevertingCheckpoint,
-      supportsConversationRollback,
-      activeEnvironmentUnavailable,
-      activeEnvironmentUnavailableLabel,
-      promptRef,
-      composerRef,
-      composerDraftTarget,
-      setThreadError,
-    });
+  const {
+    onConfirmRevertStable,
+    onForkFromRunStable: forkFromRun,
+    onRevertTimelineTurnStable,
+    rewindToReply,
+  } = useTimelineRewind({
+    environmentId,
+    routeThreadRef,
+    routeThreadKey,
+    workspaceThreadRef,
+    currentRouteThreadKeyRef,
+    serverProjection,
+    activeThread,
+    timelineMessages,
+    phase,
+    isSendBusy,
+    isRevertingCheckpoint,
+    supportsConversationRollback,
+    supportsRewindToReply: serverConfig?.environment.capabilities.rewindToReply === true,
+    activeEnvironmentUnavailable,
+    activeEnvironmentUnavailableLabel,
+    promptRef,
+    composerRef,
+    composerDraftTarget,
+    setThreadError,
+    ...(forkHistoryPolicy === "require_native" ? { forkHistoryPolicy } : {}),
+  });
+  const onForkFromRunStable = useStableCallback(
+    async (input: Parameters<typeof forkFromRun>[0]) => {
+      if (forkHistoryPolicy === "require_native" && !forkHistoryPolicySupported) {
+        if (activeThread) {
+          setThreadError(
+            activeThread.id,
+            "Update this environment to require native history, or choose Automatic.",
+          );
+        }
+        return;
+      }
+      await forkFromRun(input);
+    },
+  );
   const onCompactContext = () => {
     if (compactDisabled) return;
     void sendStandaloneCommand("/compact", "Failed to compact context.");
@@ -3668,6 +3694,27 @@ export default function ChatView(props: ChatViewProps) {
                           threadId={row.threadId}
                           expanded={row.expanded}
                           onToggle={onToggle}
+                          content={
+                            row.expanded && row.splitAfterRunOrdinal !== undefined ? (
+                              <SideChatPane
+                                hostRef={(parentPanel ?? sideChatParentPanel).hostRef}
+                                threadId={row.threadId}
+                                inlineParentRef={displayedThreadRef}
+                                inlineDepth={inlineSideChatDepth + 1}
+                                inlineExpansion={inlineExpansion}
+                                onFocusParentComposer={scheduleComposerFocusStable}
+                                onOpenTab={() =>
+                                  useRightPanelStore
+                                    .getState()
+                                    .openSideChat(
+                                      (parentPanel ?? sideChatParentPanel).hostRef,
+                                      row.threadId,
+                                    )
+                                }
+                                parentPanel={parentPanel ?? sideChatParentPanel}
+                              />
+                            ) : undefined
+                          }
                           onBringBack={
                             canOperateThread
                               ? () =>
@@ -3699,6 +3746,12 @@ export default function ChatView(props: ChatViewProps) {
                 inlineSideChatMarkers={inlineSideChatMarkers}
                 followUpMessageIds={followUpMessageIds}
                 onReplyToResponse={replyToResponseStable}
+                {...(isServerThread &&
+                canOperateThread &&
+                !isSubagentThread &&
+                !activeThread.lineage.sideChat
+                  ? { rewindToReply }
+                  : {})}
                 {...(activeProject
                   ? { onRunShellCommand: parentPanel?.runShellCommand ?? runShellCommandStable }
                   : {})}

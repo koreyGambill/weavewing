@@ -1138,7 +1138,7 @@ function makeLocalCommandHarness(input: {
       strength: "strong" as const,
     },
   };
-  const forkThread = vi.fn((_fork: ProviderAdapter.ProviderAdapterV2ForkThreadInput) =>
+  const forkThread = vi.fn<ProviderAdapter.ProviderAdapterV2SessionRuntime["forkThread"]>(() =>
     Effect.succeed(sideChatThread),
   );
   const sideChatSession = {
@@ -2347,6 +2347,45 @@ effectIt.effect.each([
         !forks,
       );
       expect(harness.projection().providerThreads[0]?.handoffIds).toEqual(handoffIds);
+    }),
+);
+
+effectIt.effect(
+  "native-required side chats keep their fork pending after the provider rejects it",
+  () =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "What is the main thread doing?",
+        sideChat: { contextRun: "current", nativeForkFrom: "idle" },
+      });
+      const projection = harness.projection();
+      harness.setProjection({
+        ...projection,
+        contextTransfers: projection.contextTransfers.map((transfer) => ({
+          ...transfer,
+          forkHistoryPolicy: "require_native",
+        })),
+      });
+      harness.forkThread.mockReturnValue(
+        Effect.fail(
+          new ProviderAdapter.ProviderAdapterForkThreadError({
+            driver: ProviderDriverKind.make("codex"),
+            providerThreadId: projection.providerThreads[0]!.id,
+            cause: "Native session missing",
+          }),
+        ),
+      );
+      yield* harness.start;
+      expect(harness.projection().runs.at(-1)?.status).toBe("failed");
+      expect(harness.projection().contextTransfers).toMatchObject([
+        {
+          id: "side-chat-fork",
+          status: "pending",
+          resolution: null,
+          error: expect.stringContaining("Automatic"),
+        },
+      ]);
+      expect(harness.startTurn).not.toHaveBeenCalled();
     }),
 );
 

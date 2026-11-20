@@ -1,3 +1,4 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, vi } from "vite-plus/test";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { assert, describe, it } from "@effect/vitest";
@@ -30,6 +31,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
@@ -135,6 +137,7 @@ function makeTestAdapter(input: {
   readonly backgroundWork?: Ref.Ref<boolean>;
   readonly closedSessions?: Ref.Ref<ReadonlyArray<string>>;
   readonly failSessionOpen?: Ref.Ref<boolean>;
+  readonly forkThread?: ProviderAdapter.ProviderAdapterV2SessionRuntime["forkThread"];
 }): ProviderAdapter.ProviderAdapterV2["Service"] {
   return {
     instanceId: input.instanceId,
@@ -535,8 +538,9 @@ function makeTestAdapter(input: {
               messages: [],
               runtimeRequests: [],
             }),
-          forkThread: () =>
-            unimplemented(input.driver, "forkThread unused in provider switch test"),
+          forkThread:
+            input.forkThread ??
+            (() => unimplemented(input.driver, "forkThread unused in provider switch test")),
         };
         return runtime;
       }),
@@ -4038,6 +4042,212 @@ describe("orchestration v2 provider switching", () => {
       }),
   );
 
+  it.live(
+    "splits native conversation history through a selected reply before either branch sends",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace("reply-rewind");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const workspaceFile = `${cwd}/rewind-test.txt`;
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const forkRequests = yield* Ref.make<
+          ReadonlyArray<ProviderAdapter.ProviderAdapterV2ForkThreadInput>
+        >([]);
+        const failPrefixFork = yield* Ref.make(true);
+        const registry = ProviderAdapterRegistry.layerFromAdapters([
+          makeTestAdapter({
+            instanceId: CODEX_MODEL_SELECTION.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: CODEX_MODEL_SELECTION,
+            responseByRunOrdinal: {},
+            capturedTurns,
+            forkThread: (input) =>
+              Effect.gen(function* () {
+                const index = yield* Ref.getAndUpdate(forkRequests, (requests) => [
+                  ...requests,
+                  input,
+                ]);
+                if (input.providerTurnId && (yield* Ref.get(failPrefixFork))) {
+                  return yield* unimplemented(CODEX_DRIVER, "native prefix fork failed");
+                }
+                const nativeId = `native-split:${index.length}`;
+                return {
+                  ...input.sourceProviderThread,
+                  appThreadId: input.targetThreadId,
+                  id: ProviderThreadId.make(nativeId),
+                  nativeThreadRef: { driver: CODEX_DRIVER, nativeId, strength: "strong" },
+                  nativeConversationHeadRef: null,
+                  firstRunOrdinal: null,
+                  lastRunOrdinal: null,
+                  handoffIds: [],
+                  contextUsage: null,
+                  forkedFrom: { providerThreadId: input.sourceProviderThread.id },
+                };
+              }),
+          }),
+        ]);
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const root = ThreadId.make("thread:reply-rewind");
+          const archive = ThreadId.make("thread:reply-rewind-archive");
+          const priorFork = ThreadId.make("thread:reply-rewind-ordinary-fork");
+          const send = (threadId: ThreadId, text: string) =>
+            Effect.gen(function* () {
+              yield* orchestrator.dispatch({
+                type: "message.dispatch",
+                commandId: CommandId.make(`reply-rewind:send:${text}`),
+                origin: { kind: "user" },
+                createdBy: "user",
+                creationSource: "web",
+                threadId,
+                messageId: MessageId.make(`reply-rewind:message:${text}`),
+                text,
+                attachments: [],
+                modelSelection: CODEX_MODEL_SELECTION,
+                deliveryIntent: "auto",
+                dispatchMode: { type: "start_immediately" },
+              });
+              yield* worker.drain();
+              yield* waitForIdle(threadId);
+            });
+          const messages = (threadId: ThreadId) =>
+            orchestrator
+              .getTimelinePage(threadId, { view: "messages", limit: 20 })
+              .pipe(
+                Effect.map((page) =>
+                  page.items.flatMap(({ item }) =>
+                    item.type === "assistant_message" || item.type === "user_message"
+                      ? [item.text]
+                      : [],
+                  ),
+                ),
+              );
+
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make("reply-rewind:create"),
+            createdBy: "user",
+            creationSource: "web",
+            threadId: root,
+            projectId,
+            title: "Reply rewind",
+            modelSelection: CODEX_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+          });
+          yield* send(root, "keep this prefix");
+          yield* send(root, "move this later turn");
+          yield* fileSystem.writeFileString(workspaceFile, "Keep this edit through the split.");
+          const before = yield* orchestrator.getThreadProjection(root);
+          const replies = before.visibleTurnItems.flatMap(({ item }) =>
+            item.type === "assistant_message" ? [item] : [],
+          );
+          assert.lengthOf(replies, 2);
+          const boundaryRun = before.runs[0]!;
+          const activeBefore = before.thread.activeProviderThreadId;
+          const rewind = (commandId: string, messageId = replies[0]!.messageId) =>
+            orchestrator.dispatch({
+              type: "thread.fork",
+              commandId: CommandId.make(commandId),
+              createdBy: "user",
+              creationSource: "web",
+              sourceThreadId: root,
+              targetThreadId: archive,
+              sourcePoint: { type: "rewind_to_reply", runId: boundaryRun.id, messageId },
+              sideChat: true,
+            });
+
+          yield* orchestrator.dispatch({
+            type: "thread.fork",
+            commandId: CommandId.make("reply-rewind:ordinary-fork"),
+            createdBy: "user",
+            creationSource: "web",
+            sourceThreadId: root,
+            targetThreadId: priorFork,
+            sourcePoint: { type: "run", runId: before.runs[1]!.id },
+          });
+
+          assert.isTrue(
+            yield* rewind("reply-rewind:wrong-reply", replies[1]!.messageId).pipe(Effect.isFailure),
+          );
+          assert.lengthOf(yield* Ref.get(forkRequests), 0);
+          assert.isTrue(yield* rewind("reply-rewind:failed").pipe(Effect.isFailure));
+          assert.equal(
+            (yield* orchestrator.getThreadProjection(root)).thread.activeProviderThreadId,
+            activeBefore,
+          );
+          assert.isTrue(yield* orchestrator.getThreadProjection(archive).pipe(Effect.isFailure));
+          assert.include(yield* messages(root), "move this later turn");
+
+          yield* Ref.set(failPrefixFork, false);
+          yield* rewind("reply-rewind:succeeded");
+          const main = yield* orchestrator.getThreadProjection(root);
+          const branch = yield* orchestrator.getThreadProjection(archive);
+          assert.deepEqual(main.checkpoints, before.checkpoints);
+          assert.equal(
+            yield* fileSystem.readFileString(workspaceFile),
+            "Keep this edit through the split.",
+          );
+          assert.notEqual(main.thread.activeProviderThreadId, activeBefore);
+          assert.deepEqual(yield* messages(root), ["keep this prefix", replies[0]!.text]);
+          for (const id of [archive, priorFork]) {
+            assert.deepEqual(yield* messages(id), [
+              "keep this prefix",
+              replies[0]!.text,
+              "move this later turn",
+              replies[1]!.text,
+            ]);
+          }
+          assert.equal(branch.thread.lineage.contextArchive?.splitAfterRunOrdinal, 1);
+          const [, , fullFork, prefixFork] = yield* Ref.get(forkRequests);
+          assert.isUndefined(fullFork?.providerTurnId);
+          assert.equal(prefixFork?.providerTurnId, replies[0]!.providerTurnId);
+          assert.equal(prefixFork?.sourceProviderThread.id, activeBefore);
+
+          yield* send(root, "continue main");
+          yield* send(archive, "continue archive");
+          const continuations = (yield* Ref.get(capturedTurns)).slice(-2);
+          assert.deepEqual(
+            continuations.map(({ threadId, providerThreadId, text }) => [
+              threadId,
+              providerThreadId,
+              text,
+            ]),
+            [
+              [root, main.thread.activeProviderThreadId, "continue main"],
+              [archive, branch.thread.activeProviderThreadId, "continue archive"],
+            ],
+          );
+          yield* send(priorFork, "continue prior fork");
+          const priorForkRequest = (yield* Ref.get(forkRequests)).at(-1);
+          assert.equal(priorForkRequest?.providerTurnId, replies[1]!.providerTurnId);
+          assert.equal(priorForkRequest?.sourceProviderThread.id, activeBefore);
+        }).pipe(
+          Effect.provide(
+            ProviderReplayHarness.layerWithRegistry(
+              {
+                name: "reply-rewind",
+                runtimePolicyOverride: {
+                  cwd,
+                  approvalPolicy: "never",
+                  sandboxPolicy: {
+                    type: "readOnly",
+                    access: { type: "fullAccess" },
+                    networkAccess: false,
+                  },
+                },
+              },
+              registry,
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live("rewinds provider context and exposes each finished range before an archive sends", () =>
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace("context-rewind");
@@ -4337,7 +4547,7 @@ describe("orchestration v2 provider switching", () => {
         assert.notInclude(secondArchive, "archived Claude history");
         const secondSideChat = turn("portable side chat after second rewind").text;
         assert.include(secondSideChat, "plain prompt after second rewind");
-        assert.include(secondSideChat, "live parent turn in the same segment");
+        assert.notInclude(secondSideChat, "live parent turn in the same segment");
         for (const prompt of ["continue fork archive", "recover fork archive"]) {
           expect.soft(turn(prompt).text).toContain("plain prompt after rewind");
           expect.soft(turn(prompt).text).toContain("prompt on the normal fork");

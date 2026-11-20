@@ -1,3 +1,5 @@
+import { ForkHistoryStatus } from "./ThreadHistoryControls";
+import { SummaryHandoffAction } from "./SummaryHandoffAction";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   type BringBackRecord,
@@ -215,6 +217,8 @@ export default function SideChatPane(props: {
             {shell?.title ?? "Side chat"}
           </span>
         )}
+        <ForkHistoryStatus threadRef={threadRef} />
+        <SummaryHandoffAction source={threadRef} compact />
         {refreshAvailable ? (
           <SideChatContextButton threadKey={scopedThreadKey(threadRef)} showLabel />
         ) : null}

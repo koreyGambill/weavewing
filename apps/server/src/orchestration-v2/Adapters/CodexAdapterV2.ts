@@ -8904,6 +8904,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             function* (threadInput) {
               const threadId = yield* getNativeThreadId(threadInput.sourceProviderThread);
               const boundary = yield* resolveCodexForkBoundary(threadInput);
+              if (threadInput.verifyTurnBoundary && boundary.lastTurnId === undefined) {
+                return yield* new ProviderAdapter.ProviderAdapterForkThreadError({
+                  driver: CODEX_PROVIDER,
+                  providerThreadId: threadInput.sourceProviderThread.id,
+                  cause: "The selected reply has no native Codex turn boundary.",
+                });
+              }
               const fork = client.request("thread/fork", {
                 threadId,
                 excludeTurns: true,
@@ -8966,6 +8973,33 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       }),
                   ),
                 )).thread;
+              }
+              if (threadInput.verifyTurnBoundary) {
+                const forkedId = forkedThread.id;
+                // Older app servers can ignore an unknown lastTurnId when decoding thread/fork.
+                const headTurnId = yield* client
+                  .request("thread/turns/list", {
+                    threadId: forkedId,
+                    cursor: null,
+                    limit: 1,
+                    sortDirection: "desc",
+                    itemsView: "summary",
+                  })
+                  .pipe(
+                    Effect.map((page) => page.data[0]?.id),
+                    Effect.catch(() =>
+                      client
+                        .request("thread/read", { threadId: forkedId, includeTurns: true })
+                        .pipe(Effect.map((snapshot) => snapshot.thread.turns.at(-1)?.id)),
+                    ),
+                  );
+                if (headTurnId !== boundary.lastTurnId) {
+                  return yield* new ProviderAdapter.ProviderAdapterForkThreadError({
+                    driver: CODEX_PROVIDER,
+                    providerThreadId: threadInput.sourceProviderThread.id,
+                    cause: "Codex did not end the fork at the selected reply.",
+                  });
+                }
               }
               instructionSourcesByThread.set(forkedThread.id, response.instructionSources ?? []);
               return providerThreadFromCodexThread({

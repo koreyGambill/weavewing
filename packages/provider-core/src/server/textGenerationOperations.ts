@@ -215,7 +215,12 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
         ...(input.onCost === undefined ? {} : { onCost: input.onCost }),
         ...buildMessageSummaryPrompt(input),
       });
-      return { summary: sanitizeMessageSummary(generated.summary) };
+      return {
+        summary:
+          input.purpose === "handoff"
+            ? generated.summary.trim()
+            : sanitizeMessageSummary(generated.summary),
+      };
     }),
     generateMonitoringAssessment: Effect.fn(`${name}.generateMonitoringAssessment`)(
       function (input) {

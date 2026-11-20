@@ -404,6 +404,22 @@ it.effect.each(forkCases)(
           ],
         });
       }
+      const requiredTarget = ThreadId.make("fork-boundary-required");
+      const required = yield* Effect.result(
+        orchestrator.dispatch({
+          type: "thread.fork",
+          commandId: CommandId.make("fork-source-required"),
+          sourceThreadId,
+          targetThreadId: requiredTarget,
+          sourcePoint: { type: "run", runId: sourceRunId },
+          forkHistoryPolicy: "require_native",
+          createdBy: "user",
+          creationSource: "web",
+        }),
+      );
+      assert.equal(required._tag, "Failure");
+      assert.isNull(yield* orchestrator.getThreadShell(requiredTarget));
+
       yield* orchestrator.dispatch({
         type: "thread.fork",
         commandId: CommandId.make("fork-source"),

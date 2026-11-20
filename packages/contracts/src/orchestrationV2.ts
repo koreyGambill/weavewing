@@ -197,6 +197,7 @@ export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 const OrchestrationV2ContextArchive = Schema.Struct({
   fromRunOrdinal: NonNegativeInt,
   throughRunOrdinal: NonNegativeInt,
+  splitAfterRunOrdinal: Schema.optionalKey(NonNegativeInt),
 });
 
 const OrchestrationV2ContextRewind = Schema.Struct({
@@ -316,6 +317,9 @@ export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
 export type OrchestrationV2ProviderTurnTokenUsage =
   typeof OrchestrationV2ProviderTurnTokenUsage.Type;
 
+export const OrchestrationV2ForkHistoryPolicy = Schema.Literals(["automatic", "require_native"]);
+export type OrchestrationV2ForkHistoryPolicy = typeof OrchestrationV2ForkHistoryPolicy.Type;
+
 export const OrchestrationV2ContextTransfer = Schema.Struct({
   id: ContextTransferId,
   type: OrchestrationV2ContextTransferType,
@@ -326,6 +330,7 @@ export const OrchestrationV2ContextTransfer = Schema.Struct({
   sourceProviderInstanceId: Schema.NullOr(ProviderInstanceId),
   sourceTokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
   mergeBackScope: Schema.optional(OrchestrationV2MergeBackScope),
+  forkHistoryPolicy: Schema.optionalKey(OrchestrationV2ForkHistoryPolicy),
   targetProviderInstanceId: Schema.NullOr(ProviderInstanceId),
   targetRunId: Schema.NullOr(RunId),
   status: Schema.Literals([
@@ -610,6 +615,12 @@ export const OrchestrationV2AppThread = Schema.Struct({
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
   lineage: OrchestrationV2AppThreadLineage,
   contextRewind: Schema.optionalKey(OrchestrationV2ContextRewind),
+  contextSplit: Schema.optionalKey(
+    Schema.Struct({
+      continuationProviderThreadId: ProviderThreadId,
+      firstNewRunOrdinal: PositiveInt,
+    }),
+  ),
   forkedFrom: Schema.NullOr(
     Schema.Union([
       Schema.Struct({
@@ -881,6 +892,9 @@ export const OrchestrationV2Run = Schema.Struct({
   rootNodeId: Schema.NullOr(NodeId),
   activeAttemptId: Schema.NullOr(RunAttemptId),
   status: OrchestrationV2RunStatus,
+  contextSplitArchivedStatus: Schema.optionalKey(
+    Schema.Literals(["completed", "failed", "interrupted", "cancelled"]),
+  ),
   queuePosition: Schema.optional(Schema.NullOr(PositiveInt)),
   queueHeld: Schema.optional(Schema.Boolean),
   steerWhenReadyRunId: Schema.optional(RunId),
@@ -1446,14 +1460,27 @@ export function isQueuedProviderThreadPlaceholder(
   );
 }
 
+/** Tests whether a provider conversation belongs to the current side of a split. */
+export function providerThreadSurvivesContextSplit(
+  thread: Pick<OrchestrationV2AppThread, "contextSplit">,
+  providerThread: Pick<OrchestrationV2ProviderThread, "id" | "firstRunOrdinal">,
+): boolean {
+  return (
+    thread.contextSplit === undefined ||
+    thread.contextSplit.continuationProviderThreadId === providerThread.id ||
+    (providerThread.firstRunOrdinal ?? 0) >= thread.contextSplit.firstNewRunOrdinal
+  );
+}
+
 /** A provider update can activate only a conversation started after the thread's last rewind. */
 export function canActivateProviderThread(
-  thread: Pick<OrchestrationV2AppThread, "id" | "contextRewind">,
+  thread: Pick<OrchestrationV2AppThread, "id" | "contextRewind" | "contextSplit">,
   providerThread: OrchestrationV2ProviderThread,
 ): boolean {
   return (
     providerThread.appThreadId === thread.id &&
     !isQueuedProviderThreadPlaceholder(providerThread) &&
+    providerThreadSurvivesContextSplit(thread, providerThread) &&
     (thread.contextRewind === undefined ||
       (providerThread.firstRunOrdinal ?? 0) > thread.contextRewind.runOrdinal)
   );
@@ -3794,9 +3821,15 @@ export const OrchestrationV2Command = Schema.Union([
       OrchestrationV2ThreadForkSourcePoint,
       Schema.Struct({ type: Schema.Literal("assistant_selection"), anchor: SideChatAnchor }),
       Schema.Struct({ type: Schema.Literal("rewind"), runId: RunId }),
+      Schema.Struct({
+        type: Schema.Literal("rewind_to_reply"),
+        runId: RunId,
+        messageId: MessageId,
+      }),
     ]),
     title: Schema.optional(TrimmedNonEmptyString),
     sideChat: Schema.optional(Schema.Boolean),
+    forkHistoryPolicy: Schema.optionalKey(OrchestrationV2ForkHistoryPolicy),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -4146,6 +4179,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getWorktreeThreadIds: "orchestration.getWorktreeThreadIds",
   getOlderSettledThreads: "orchestration.getOlderSettledThreads",
   getThreadProjection: "orchestration.getThreadProjection",
+  prepareSummaryHandoff: "orchestration.prepareSummaryHandoff",
   getWorkflowScript: "orchestration.getWorkflowScript",
   getNativeChildWork: "orchestration.getNativeChildWork",
   stopWorkflow: "orchestration.stopWorkflow",
@@ -4806,7 +4840,30 @@ export class OrchestrationV2SearchThreadError extends Schema.TaggedError<Orchest
   }
 }
 
+export class OrchestrationV2PrepareSummaryHandoffError extends Schema.TaggedError<OrchestrationV2PrepareSummaryHandoffError>()(
+  "OrchestrationV2PrepareSummaryHandoffError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not read this conversation. Retry from an available thread.";
+  }
+}
+
 export const OrchestrationV2RpcSchemas = {
+  prepareSummaryHandoff: {
+    input: Schema.Struct({
+      threadId: ThreadId,
+      strategy: Schema.optionalKey(Schema.Literal("portable")),
+    }),
+    output: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literals(["native_summary", "summary", "excerpt", "empty"]),
+        text: Schema.String,
+        truncated: Schema.Boolean,
+      }),
+      Schema.Struct({ kind: Schema.Literal("native_unavailable"), reason: Schema.String }),
+    ]),
+  },
   searchThread: {
     input: OrchestrationV2SearchThreadInput,
     output: OrchestrationV2SearchThreadResult,

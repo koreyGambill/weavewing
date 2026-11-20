@@ -16,6 +16,7 @@ import {
   AuthSourceControlWriteScope,
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
+  ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,
   clientRpcRequiredScopes,
   WsRpcGroup,
@@ -38,7 +39,7 @@ describe("RPC authorization scopes", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
 
-  it("keeps review drafts and sends under their read and operate scopes", () => {
+  it("requires operate scope for draft changes, explicit generation, and sends", () => {
     for (const method of [
       WS_METHODS.threadDefaultContextGet,
       WS_METHODS.threadWorkspaceGet,
@@ -56,6 +57,7 @@ describe("RPC authorization scopes", () => {
       AuthFilesystemReadScope,
     );
     for (const method of [
+      ORCHESTRATION_V2_WS_METHODS.prepareSummaryHandoff,
       WS_METHODS.threadListUpdate,
       WS_METHODS.threadListRewrite,
       WS_METHODS.threadArtifactWrite,

@@ -16,6 +16,7 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2ForkHistoryPolicy,
   type OrchestrationV2MergeBackScope,
   type PlanId,
   type ProjectId,
@@ -250,6 +251,7 @@ export interface ForkThreadFromRunInput extends CommandMetadata {
   readonly targetThreadId: ThreadId;
   readonly runId: RunId;
   readonly title?: string;
+  readonly forkHistoryPolicy?: OrchestrationV2ForkHistoryPolicy;
 }
 
 export interface ForkSideChatInput extends CommandMetadata {
@@ -257,6 +259,7 @@ export interface ForkSideChatInput extends CommandMetadata {
   readonly targetThreadId: ThreadId;
   readonly title?: string;
   readonly anchor?: SideChatAnchor;
+  readonly forkHistoryPolicy?: OrchestrationV2ForkHistoryPolicy;
 }
 
 export interface MergeThreadBackInput extends CommandMetadata {
@@ -1142,6 +1145,9 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
     sourcePoint: { type: "run", runId: input.runId },
+    ...(input.forkHistoryPolicy === undefined
+      ? {}
+      : { forkHistoryPolicy: input.forkHistoryPolicy }),
     ...(input.title === undefined ? {} : { title: input.title }),
   });
 });
@@ -1162,13 +1168,16 @@ export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(functi
         ? { type: "latest_stable" }
         : { type: "assistant_selection", anchor: input.anchor },
     sideChat: true,
+    ...(input.forkHistoryPolicy === undefined
+      ? {}
+      : { forkHistoryPolicy: input.forkHistoryPolicy }),
     ...(input.title === undefined ? {} : { title: input.title }),
   });
 });
 
-/** Archives context through the expected latest stable run. */
+/** Archives the finished conversation, or splits it after a selected reply. */
 export const rewindThreadContext = Effect.fn("EnvironmentCommands.rewindThreadContext")(function* (
-  input: ForkThreadFromRunInput,
+  input: ForkThreadFromRunInput & { readonly replyMessageId?: MessageId },
 ) {
   return yield* dispatch({
     type: "thread.fork",
@@ -1177,7 +1186,10 @@ export const rewindThreadContext = Effect.fn("EnvironmentCommands.rewindThreadCo
     creationSource: input.creationSource ?? "web",
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
-    sourcePoint: { type: "rewind", runId: input.runId },
+    sourcePoint:
+      input.replyMessageId === undefined
+        ? { type: "rewind", runId: input.runId }
+        : { type: "rewind_to_reply", runId: input.runId, messageId: input.replyMessageId },
     sideChat: true,
     ...(input.title === undefined ? {} : { title: input.title }),
   });

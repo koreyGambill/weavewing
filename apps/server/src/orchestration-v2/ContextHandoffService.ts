@@ -147,6 +147,21 @@ export function visibleConversationItems(
   return items.filter(visible);
 }
 
+/** Restores the status a pre-existing fork saw before a later conversation split. */
+export function restoreArchivedRunsForFork(
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  forkCreatedAt: DateTime.Utc,
+): ReadonlyArray<OrchestrationV2Run> {
+  return runs.map((run) =>
+    run.status === "rolled_back" &&
+    run.contextSplitArchivedStatus !== undefined &&
+    run.completedAt !== null &&
+    !DateTime.isLessThan(run.completedAt, forkCreatedAt)
+      ? { ...run, status: run.contextSplitArchivedStatus }
+      : run,
+  );
+}
+
 type ForkHistorySource = Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "attempts">;
 
 type ForkHistoryStore = Pick<
@@ -173,6 +188,7 @@ const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHis
     source: ForkHistorySource,
     throughRunOrdinal: number,
     fromRunOrdinal: number,
+    forkCreatedAt: DateTime.Utc,
   ) {
     const { turnItems } = yield* projectionStore.getThreadRecords(source.thread.id, ["turnItems"], {
       turnItemRunIds: [
@@ -182,7 +198,10 @@ const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHis
         ...(fromRunOrdinal === 1 && source.thread.historyOrigin === "v1_import" ? [null] : []),
       ],
     });
-    return visibleConversationItems(source, turnItems);
+    return visibleConversationItems(
+      { ...source, runs: restoreArchivedRunsForFork(source.runs, forkCreatedAt) },
+      turnItems,
+    );
   },
 );
 
@@ -234,7 +253,13 @@ export const readInheritedHandoffItems = Effect.fn(
       current.id,
     );
     segments.unshift(
-      yield* readOwnHistoryItems(projectionStore, source, forkRun.ordinal, fromRunOrdinal),
+      yield* readOwnHistoryItems(
+        projectionStore,
+        source,
+        forkRun.ordinal,
+        fromRunOrdinal,
+        current.createdAt,
+      ),
     );
     if (fromRunOrdinal > 1) break;
     current = source.thread;
@@ -249,19 +274,25 @@ export const readForkHistoryItems = Effect.fn(
   projectionStore: ForkHistoryStore,
   source: ForkHistorySource,
   throughRun: Pick<OrchestrationV2Run, "ordinal">,
-  targetThreadId: ThreadId,
+  targetThread: Pick<OrchestrationV2AppThread, "id" | "createdAt">,
 ) {
   const fromRunOrdinal = yield* forkHistoryStartOrdinal(
     projectionStore,
     source.thread,
     throughRun.ordinal,
-    targetThreadId,
+    targetThread.id,
   );
   return [
     ...(fromRunOrdinal === 1
       ? yield* readInheritedHandoffItems(projectionStore, source.thread)
       : []),
-    ...(yield* readOwnHistoryItems(projectionStore, source, throughRun.ordinal, fromRunOrdinal)),
+    ...(yield* readOwnHistoryItems(
+      projectionStore,
+      source,
+      throughRun.ordinal,
+      fromRunOrdinal,
+      targetThread.createdAt,
+    )),
   ];
 });
 

@@ -28,6 +28,7 @@ export const CommandPolicyCapability = Schema.Literals([
   "interrupt",
   "interrupt_restart_steering",
   "native_fork",
+  "required_native_history",
   "fork_from_turn",
   "rollback",
   "rollback_snapshot",
@@ -220,6 +221,7 @@ export interface CommandPolicyV2Shape {
       readonly sameProvider: boolean;
       readonly hasStrongNativeSource: boolean;
       readonly sourceRunStatus: OrchestrationV2Run["status"];
+      readonly requireNative?: boolean;
       readonly fromSpecificTurn: boolean;
       /** Later source runs prevent this provider from forking at the requested boundary. */
       readonly sourceBusy: boolean;
@@ -393,6 +395,16 @@ const decideForkExecution: CommandPolicyV2Shape["decideForkExecution"] = (input)
 
   if (canForkNatively) {
     return Effect.succeed("native_fork");
+  }
+
+  if (input.requireNative) {
+    return Effect.fail(
+      unsupported(
+        input,
+        "required_native_history",
+        "Native history is unavailable at this point. Use the source provider and a finished turn with native history, or choose Automatic and create the fork again.",
+      ),
+    );
   }
 
   return ensureContextHandoff({

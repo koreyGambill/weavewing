@@ -38,6 +38,7 @@ import { environmentThreadDetails } from "../../state/threads";
 import { act, fakeTimers, render, stubGlobal } from "../../../test/render";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { MessagesTimeline } from "./MessagesTimeline";
+import { ContextArchiveRow } from "./ContextArchiveRow";
 import { createWorkspaceFocusController, workspaceAreaProps } from "../../lib/workspaceFocus";
 import { resolveTimelineIsAtEnd } from "./MessagesTimeline.logic";
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
@@ -237,6 +238,69 @@ function setup({ scheduledTasks = [] as ReadonlyArray<{ id: string; title: strin
 
 const TASK_ID = ScheduledTaskId.make("task-1");
 const AUTOMATION_PROMPT = "Triage the inbox\n\nLabel every new issue and close duplicates.";
+
+it("keeps the selected reply above the expandable Earlier conversation", async () => {
+  const fixture = makeStreamingTimelineFixture();
+  const reply = fixture.visibleTurnItems[2]!.item;
+  if (reply.type !== "assistant_message" || reply.runId === null) {
+    throw new Error("Expected a completed assistant reply");
+  }
+  const parent = { environmentId: ENVIRONMENT_ID, threadId: fixture.threadId };
+  const archive = ThreadId.make("split-archive");
+  const rewind = vi.fn(async () => {});
+  const providerInstanceId = ProviderInstanceId.make("codex");
+  const entries = deriveTimelineEntriesFromVisibleTurnItems({
+    optimisticMessages: [],
+    visibleTurnItems: fixture.visibleTurnItems.slice(0, 3),
+  });
+  await using screen = await renderTimeline(entries, {
+    routeThreadKey: `${ENVIRONMENT_ID}:${fixture.threadId}`,
+    runs: [
+      {
+        id: reply.runId,
+        ordinal: 1,
+        providerInstanceId,
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-6.2-sol" },
+      },
+    ],
+    rewindToReply: { disabledReason: () => null, run: rewind },
+    contextArchives: [
+      {
+        threadId: archive,
+        fromRunOrdinal: 1,
+        throughRunOrdinal: 2,
+        splitAfterRunOrdinal: 1,
+        createdAt: fixture.time(10),
+      },
+    ],
+    renderContextArchive: (row, onToggle) => (
+      <ContextArchiveRow
+        parent={parent}
+        host={parent}
+        threadId={row.threadId}
+        expanded={row.expanded}
+        onToggle={onToggle}
+        content={row.expanded ? <p>Moved reply from branch</p> : undefined}
+      />
+    ),
+  });
+
+  const rewindButton = screen.getByRole("button", { name: "Rewind to here" });
+  (rewindButton.element() as HTMLElement).focus();
+  await userEvent.keyboard("{Enter}");
+  expect(rewind).toHaveBeenCalledWith(reply.runId, reply.messageId);
+  const disclosure = screen.getByRole("button", { name: "Earlier conversation", exact: true });
+  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(disclosure);
+  const kept = screen.getByText(reply.text).element();
+  const moved = screen.getByText("Moved reply from branch");
+  await expect.element(moved).toBeVisible();
+  expect(kept.getBoundingClientRect().bottom).toBeLessThan(
+    moved.element().getBoundingClientRect().top,
+  );
+  await userEvent.click(disclosure);
+  await expect.element(moved).not.toBeInTheDocument();
+});
 
 describe("MessagesTimeline work rows", () => {
   it("keeps a tall HTML preview in place when its last accordion opens at the bottom", async () => {

@@ -2973,8 +2973,6 @@ export function sameRowsInput(
     // Grouping archives recreates the disclosure rows even when the visible entries are unchanged.
     if (
       key === "timelineEntries" &&
-      left.timelineEntries[0]?.kind === "context-archive" &&
-      right.timelineEntries[0]?.kind === "context-archive" &&
       left.timelineEntries.length === right.timelineEntries.length &&
       left.timelineEntries.every((entry, index) => {
         const candidate = right.timelineEntries[index];

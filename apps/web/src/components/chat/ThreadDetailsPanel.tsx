@@ -27,6 +27,7 @@ import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
+import { ThreadHistoryControls } from "./ThreadHistoryControls";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
 import {
@@ -264,6 +265,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               showSideChats={visible.sideChats}
             />
           ) : null}
+
+          {props.isServerThread ? <ThreadHistoryControls threadRef={activeThreadRef} /> : null}
 
           {visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
 

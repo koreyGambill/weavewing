@@ -118,7 +118,8 @@ export interface TranscriptionPostProcessingResult {
 
 export interface MessageSummaryGenerationInput {
   cwd: string;
-  /** The card's origin label, such as "Report from child thread". */
+  purpose?: "handoff";
+  /** The source label, such as "Report from child thread". */
   source: string;
   message: string;
   modelSelection: ModelSelection;

@@ -1,6 +1,7 @@
 import type {
   ModelSelection,
   RuntimeMode,
+  OrchestrationV2ForkHistoryPolicy,
   ScopedThreadRef,
   SideChatAnchor,
   ThreadId,
@@ -33,6 +34,8 @@ export function useSideChat(input: {
   readonly anchoredThreadRef: ScopedThreadRef | null;
   readonly readSettings: () => {
     readonly runtimeMode: RuntimeMode;
+    readonly forkHistoryPolicy: OrchestrationV2ForkHistoryPolicy;
+    readonly forkHistoryPolicySupported: boolean;
     readonly modelSelection: ModelSelection | undefined;
   };
   readonly onOpenAnchored: (threadId: ThreadId) => void;
@@ -60,7 +63,12 @@ export function useSideChat(input: {
     prompt: string | undefined,
     anchor: SideChatAnchor | undefined,
   ) => {
-    const { runtimeMode, modelSelection } = input.readSettings();
+    const { runtimeMode, modelSelection, forkHistoryPolicy, forkHistoryPolicySupported } =
+      input.readSettings();
+    if (forkHistoryPolicy === "require_native" && !forkHistoryPolicySupported) {
+      input.onError("Update this environment to require native history, or choose Automatic.");
+      return false;
+    }
     const targetThreadId = newThreadId();
     const fork = await forkSideChat({
       environmentId: threadRef.environmentId,
@@ -68,6 +76,7 @@ export function useSideChat(input: {
         sourceThreadId: threadRef.threadId,
         targetThreadId,
         title: "Side chat",
+        ...(forkHistoryPolicy === "require_native" ? { forkHistoryPolicy } : {}),
         ...(anchor === undefined ? {} : { anchor }),
       },
     });

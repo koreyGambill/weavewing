@@ -481,6 +481,11 @@ mobile, open **Earlier conversation** from the side chat list above the composer
 **Bring back** adds a removable reference to your original thread’s draft, even
 before you send a message in the archive.
 
+On web and desktop, **Rewind to here** under a completed Codex reply keeps the
+conversation through that reply and moves later turns into **Earlier
+conversation**. The thread keeps its files and draft. Finish queued work first,
+then choose a reply with a native turn boundary in the active conversation.
+
 ## Snooze until later
 
 To change the choices in the snooze menu, open **Settings → Threads → Snooze options**.

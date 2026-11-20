@@ -8,6 +8,7 @@ import {
   latestProviderTurnForAttempt,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ContextHandoff,
+  type OrchestrationV2ContextTransfer,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
@@ -373,6 +374,7 @@ export const layer: Layer.Layer<
               "type" | "title" | "input" | "output" | "exitCode"
             >;
         readonly providerThreadUpdate?: OrchestrationV2ProviderThread;
+        readonly forkTransferUpdate?: OrchestrationV2ContextTransfer;
       }) {
         const { run, rootNode, attempt, turnItems, now, status } = input;
         const runId = run.id;
@@ -416,6 +418,9 @@ export const layer: Layer.Layer<
                   payload: input.providerThreadUpdate,
                 },
               ]),
+          ...(input.forkTransferUpdate === undefined
+            ? []
+            : [{ type: "context-transfer.updated" as const, payload: input.forkTransferUpdate }]),
         ] as const;
         const events = yield* Effect.forEach(eventPayloads, (event) =>
           Effect.gen(function* () {
@@ -1259,13 +1264,44 @@ export const layer: Layer.Layer<
             sourceProjection.providerTurns.find(
               (candidate) => candidate.id === sourceAttempt?.providerTurnId,
             );
+          const requireNative = nativeForkTransfer.forkHistoryPolicy === "require_native";
+          const failRequiredFork = Effect.fn("ProviderTurnStartService.failRequiredFork")(
+            function* (cause: unknown) {
+              const now = yield* DateTime.now;
+              const message =
+                "Native history could not be forked. Retry with the source provider, or choose Automatic in the source thread and create a new fork.";
+              yield* settleRunBeforeStart({
+                run,
+                rootNode,
+                attempt,
+                turnItems: projection.turnItems,
+                signal: "required-native-fork-failed",
+                status: "failed",
+                now,
+                providerInstanceId: run.providerInstanceId,
+                itemProviderThreadId: providerThread.id,
+                item: {
+                  type: "error",
+                  title: "Native history unavailable",
+                  failure: makeProviderFailure({ cause, message, class: "provider_error" }),
+                },
+                forkTransferUpdate: { ...nativeForkTransfer, error: message, updatedAt: now },
+              });
+              return undefined;
+            },
+          );
           if (sourceRun === undefined || sourceProviderThread === undefined) {
+            if (requireNative)
+              return yield* failRequiredFork("Source provider execution is missing.");
             return yield* new ProviderTurnStartError({
               runId,
               cause: `Native fork transfer ${nativeForkTransfer.id} has no source provider execution.`,
             });
           }
           // The source may have started a later turn between planning and executing the fork.
+          if (requireNative && sourceProviderTurn === undefined) {
+            return yield* failRequiredFork("The source provider turn is missing.");
+          }
           const sourceBusy = sourceProjection.runs.some(
             (candidate) => candidate.ordinal > sourceRun.ordinal && isActiveRun(candidate),
           );
@@ -1277,7 +1313,9 @@ export const layer: Layer.Layer<
                 .filter((attempt) =>
                   sourceProjection.runs.some(
                     (candidate) =>
-                      candidate.id === attempt.runId && candidate.status === "rolled_back",
+                      candidate.id === attempt.runId &&
+                      candidate.status === "rolled_back" &&
+                      candidate.contextSplitArchivedStatus === undefined,
                   ),
                 )
                 .map((attempt) => attempt.id),
@@ -1297,8 +1335,16 @@ export const layer: Layer.Layer<
                   : { providerTurnId: sourceProviderTurn.id }),
               }),
             );
-            if (forked._tag === "Success") return forked.success;
+            if (forked._tag === "Success") {
+              if (requireNative && forked.success.nativeThreadRef?.strength !== "strong") {
+                return yield* failRequiredFork(
+                  "The provider returned no strong native thread reference.",
+                );
+              }
+              return forked.success;
+            }
             if (input.willRetry === true && !sourceBusy) return yield* forked.failure;
+            if (requireNative) return yield* failRequiredFork(forked.failure);
             if (!(yield* isCurrentAttemptInStatus("starting"))) return undefined;
             // Retries are spent (e.g. the source's native session is gone): start fresh with portable history.
             yield* Effect.logWarning("Starting a native fork in a fresh native session", {
@@ -1314,12 +1360,13 @@ export const layer: Layer.Layer<
               class: "provider_error",
             }).message;
           }
+          if (requireNative) return yield* failRequiredFork("The source provider thread is busy.");
           const nativeForkFailed = nativeForkFailure !== undefined;
           const sourceItems = yield* ContextHandoffService.readForkHistoryItems(
             projectionStore,
             sourceProjection,
             sourceRun,
-            projection.thread.id,
+            projection.thread,
           );
           const createdAt = yield* DateTime.now;
           const handoff = yield* contextHandoffService.prepareProviderHandoff({

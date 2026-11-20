@@ -9,7 +9,7 @@ import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basen
 import { memo, use, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { GitForkIcon, ReplyIcon } from "lucide-react";
+import { GitForkIcon, HistoryIcon, ReplyIcon } from "lucide-react";
 import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
 import { responseContextRecord } from "~/lib/composerContextRecords";
 import { Button } from "../ui/button";
@@ -265,6 +265,16 @@ function AssistantMessageMeta({
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}
+      {ctx.rewindToReply &&
+      projectedItem?.sourceThreadId === ctx.threadRef?.threadId &&
+      projectedItem?.item.type === "assistant_message" &&
+      projectedItem.item.status === "completed" &&
+      projectedItem.item.phase !== "commentary" &&
+      projectedItem.item.phase !== "partial_answer" &&
+      projectedItem.item.runId !== null &&
+      !message.streaming ? (
+        <AssistantRewindButton runId={projectedItem.item.runId} messageId={message.id} />
+      ) : null}
       {!message.streaming && projectedItem ? (
         <AssistantReplyButton message={message} itemId={projectedItem.sourceItemId} />
       ) : null}
@@ -279,6 +289,36 @@ function AssistantMessageMeta({
         </Tooltip>
       )}
     </div>
+  );
+}
+
+function AssistantRewindButton({ runId, messageId }: { runId: RunId; messageId: MessageId }) {
+  const { rewindToReply } = use(TimelineRowCtx);
+  const [busy, setBusy] = useState(false);
+  if (!rewindToReply) return null;
+  const disabledReason = rewindToReply.disabledReason(runId, messageId);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            aria-label="Rewind to here"
+            aria-disabled={busy || disabledReason !== null || undefined}
+            onClick={() => {
+              if (busy || disabledReason !== null) return;
+              setBusy(true);
+              void rewindToReply.run(runId, messageId).finally(() => setBusy(false));
+            }}
+          />
+        }
+      >
+        <HistoryIcon className={cn("size-3", busy && "animate-pulse")} />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{disabledReason ?? "Rewind to here"}</TooltipPopup>
+    </Tooltip>
   );
 }
 

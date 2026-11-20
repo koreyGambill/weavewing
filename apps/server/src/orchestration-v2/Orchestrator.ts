@@ -53,6 +53,7 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
+  providerThreadSurvivesContextSplit,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RemoteTaskChild,
   type OrchestrationV2ModelSwitch,
@@ -127,6 +128,7 @@ import { CommandReceiptStoreV2, type CommandReceiptV2 } from "./CommandReceiptSt
 import {
   ContextHandoffServiceV2,
   readForkHistoryItems,
+  restoreArchivedRunsForFork,
   readInheritedHandoffItems,
   visibleConversationItems,
   visibleDeltaRunOrdinals,
@@ -1678,6 +1680,7 @@ function conversationProviderThread(
           candidate.appThreadId === projection.thread.id &&
           candidate.ownerNodeId === null &&
           candidate.lastRunOrdinal !== null &&
+          providerThreadSurvivesContextSplit(projection.thread, candidate) &&
           !providerThreadPredatesBoundary(candidate, boundary) &&
           !startedByScheduledFreshRun(candidate),
       )
@@ -1753,6 +1756,7 @@ function rootProviderThreadsForProvider(
         providerThread.appThreadId === projection.thread.id &&
         providerThread.ownerNodeId === null &&
         providerThread.status !== "closed" &&
+        providerThreadSurvivesContextSplit(projection.thread, providerThread) &&
         !providerThreadPredatesBoundary(providerThread, boundary),
     )
     .toSorted(
@@ -6433,7 +6437,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         "providerThreads",
         "providerTurns",
         "attempts",
-        ...(command.sourcePoint.type === "rewind"
+        ...(command.sourcePoint.type === "rewind" || command.sourcePoint.type === "rewind_to_reply"
           ? (["runtimeRequests", "contextTransfers", "subagents", "providerSessions"] as const)
           : []),
       ])
@@ -6474,6 +6478,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
 
     const { sourcePoint } = command;
+    const split = sourcePoint.type === "rewind_to_reply" ? sourcePoint : undefined;
     const sideChatAnchor =
       sourcePoint.type === "assistant_selection" ? sourcePoint.anchor : undefined;
     let sourceRun: OrchestrationV2Run | null;
@@ -6502,7 +6507,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     } else {
       sourceRun = runForSourcePoint(
         sourceProjection,
-        sourcePoint.type === "rewind" ? { type: "run", runId: sourcePoint.runId } : sourcePoint,
+        sourcePoint.type === "rewind" || sourcePoint.type === "rewind_to_reply"
+          ? { type: "run", runId: sourcePoint.runId }
+          : sourcePoint,
       );
     }
 
@@ -6532,28 +6539,36 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause,
       });
     const now =
-      command.sourcePoint.type === "rewind"
+      command.sourcePoint.type === "rewind" || split !== undefined
         ? yield* DateTime.now
         : (command.createdAt ?? (yield* DateTime.now));
-    const contextArchive =
+    let contextArchive: OrchestrationV2AppThread["lineage"]["contextArchive"] =
       command.sourcePoint.type === "rewind" && sourceRun !== null
         ? {
             fromRunOrdinal: (previousRewind?.runOrdinal ?? 0) + 1,
             throughRunOrdinal: sourceRun.ordinal,
           }
         : undefined;
-    if (command.sourcePoint.type === "rewind") {
+    if (command.sourcePoint.type === "rewind" || split !== undefined) {
       if (
         command.sideChat !== true ||
         sourceRun === null ||
-        latestStableRun(sourceProjection)?.id !== sourceRun.id ||
-        sourceProjection.runs.some(
-          (run) =>
-            run.ordinal > (contextArchive?.throughRunOrdinal ?? 0) && isHandoffSourceRun(run),
-        ) ||
         sourceRun.ordinal <= (previousRewind?.runOrdinal ?? 0)
       ) {
+        return yield* invalidRewind("The finished conversation point has changed.");
+      }
+      const rewindOrdinal = sourceRun.ordinal;
+      if (
+        split === undefined &&
+        (latestStableRun(sourceProjection)?.id !== sourceRun.id ||
+          sourceProjection.runs.some(
+            (run) => run.ordinal > rewindOrdinal && isHandoffSourceRun(run),
+          ))
+      ) {
         return yield* invalidRewind("The latest finished conversation point has changed.");
+      }
+      if (split !== undefined && sourceProjection.runs.some((run) => run.status === "queued")) {
+        return yield* invalidRewind("Send or cancel the queued messages before rewinding.");
       }
       if (
         sourceProjection.runs.some(isActiveRun) ||
@@ -6581,6 +6596,76 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
     }
+    const splitRun = split === undefined ? null : sourceRun;
+    type ArchivedRun = OrchestrationV2Run & {
+      readonly status: NonNullable<OrchestrationV2Run["contextSplitArchivedStatus"]>;
+    };
+    let suffix: ReadonlyArray<ArchivedRun> = [];
+    let splitSource: OrchestrationV2ProviderThread | undefined;
+    let splitBoundary: OrchestrationV2ProviderTurn | undefined;
+    if (split !== undefined && splitRun !== null) {
+      const thread = sourceProjection.thread;
+      const { turnItems } = yield* projectionStore
+        .getThreadRecords(thread.id, ["turnItems"], {
+          turnItemRunIds: [splitRun.id],
+          turnItemTypes: ["assistant_message"],
+        })
+        .pipe(mapDispatchError(command));
+      const reply = turnItems.findLast(
+        (item) =>
+          item.type === "assistant_message" &&
+          item.phase !== "commentary" &&
+          item.phase !== "partial_answer",
+      );
+      if (
+        splitRun.status !== "completed" ||
+        reply?.type !== "assistant_message" ||
+        reply.messageId !== split.messageId ||
+        reply.streaming ||
+        reply.status !== "completed"
+      ) {
+        return yield* invalidRewind("Choose the final reply of a completed turn.");
+      }
+      splitSource = providerThreadForRun(sourceProjection, splitRun);
+      splitBoundary = providerTurnForRun(sourceProjection, splitRun);
+      suffix = sourceProjection.runs.filter(
+        (run): run is ArchivedRun =>
+          run.ordinal > splitRun.ordinal &&
+          (run.status === "completed" ||
+            run.status === "failed" ||
+            run.status === "interrupted" ||
+            run.status === "cancelled"),
+      );
+      const tip = suffix.findLast(isHandoffSourceRun);
+      if (tip === undefined) {
+        return yield* invalidRewind("There is no later conversation to move.");
+      }
+      if (
+        splitSource?.driver !== "codex" ||
+        splitSource.id !== thread.activeProviderThreadId ||
+        splitSource.providerInstanceId !== thread.modelSelection.instanceId ||
+        splitSource.nativeThreadRef?.strength !== "strong" ||
+        splitSource.nativeThreadRef.nativeId === null ||
+        splitSource.providerSessionId === null ||
+        splitSource.goal?.status === "active" ||
+        (splitSource.pendingBackgroundTasks?.length ?? 0) > 0 ||
+        splitBoundary?.status !== "completed" ||
+        splitBoundary.nativeTurnRef?.strength !== "strong" ||
+        splitBoundary.nativeTurnRef.nativeId === null ||
+        splitBoundary.providerThreadId !== splitSource.id ||
+        suffix.some((run) => isHandoffSourceRun(run) && run.providerThreadId !== splitSource?.id)
+      ) {
+        return yield* invalidRewind(
+          "This reply and the later conversation need to share the active Codex session and have a native turn boundary.",
+        );
+      }
+      contextArchive = {
+        fromRunOrdinal: (previousRewind?.runOrdinal ?? 0) + 1,
+        throughRunOrdinal: tip.ordinal,
+        splitAfterRunOrdinal: splitRun.ordinal,
+      };
+      sourceRun = tip;
+    }
     const initialSideChatRun = command.sideChat === true && sourcePoint.type === "latest_stable";
     if (
       initialSideChatRun &&
@@ -6592,6 +6677,40 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     const sourceProviderThread =
       sourceRun === null ? undefined : providerThreadForRun(sourceProjection, sourceRun);
+    if (command.forkHistoryPolicy === "require_native") {
+      if (sourceRun === null || contextArchive !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Native history needs a finished source turn. Wait for one or choose Automatic.",
+        });
+      }
+      const providerInstanceId = sourceRun.providerInstanceId;
+      const adapter = yield* providerAdapters
+        .get(providerInstanceId)
+        .pipe(mapDispatchError(command));
+      const capabilities = yield* adapter.getCapabilities().pipe(mapDispatchError(command));
+      const sourceOrdinal = sourceRun.ordinal;
+      const sourceProviderTurn = providerTurnForRun(sourceProjection, sourceRun);
+      yield* commandPolicy
+        .decideForkExecution({
+          commandId: command.commandId,
+          threadId: command.targetThreadId,
+          providerInstanceId,
+          capabilities,
+          sameProvider: true,
+          hasStrongNativeSource:
+            sourceProviderThread?.nativeThreadRef?.strength === "strong" &&
+            sourceProviderTurn !== undefined,
+          sourceRunStatus: sourceRun.status,
+          fromSpecificTurn: true,
+          sourceBusy:
+            sourceProjection.runs.some((run) => run.ordinal > sourceOrdinal && isActiveRun(run)) &&
+            !canForkFromBusySource(sourceProviderThread, sourceProviderTurn),
+          requireNative: true,
+        })
+        .pipe(mapDispatchError(command));
+    }
     const emitEvent = emit(events, command);
     const transferId = yield* mapDispatchError(command)(
       idAllocator.allocate.contextTransfer({
@@ -6617,6 +6736,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         targetThreadId: command.targetThreadId,
         ...(command.title === undefined ? {} : { title: command.title }),
         ...(command.sideChat ? { sideChat: true } : {}),
+        forkHistoryPolicy: command.forkHistoryPolicy,
         ...(contextArchive === undefined
           ? {}
           : { contextArchive, title: command.title ?? "Earlier conversation" }),
@@ -6626,6 +6746,163 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         createdAt: now,
       })
       .pipe(mapDispatchError(command));
+
+    if (
+      splitRun !== null &&
+      splitSource?.providerSessionId != null &&
+      splitBoundary !== undefined
+    ) {
+      const providerSessionId = splitSource.providerSessionId;
+      const thread = sourceProjection.thread;
+      const modelSelection = thread.modelSelection;
+      const selection = yield* providerAdapters
+        .get(modelSelection.instanceId)
+        .pipe(mapDispatchError(command));
+      const capabilities = yield* selection.getCapabilities().pipe(mapDispatchError(command));
+      if (!capabilities.threads.canForkThread || !capabilities.threads.canForkFromTurn) {
+        return yield* invalidRewind(
+          "This Codex installation does not support native forks at a turn boundary.",
+        );
+      }
+      const resolvedRuntimePolicy = yield* runtimePolicy
+        .resolve({ thread, modelSelection })
+        .pipe(mapDispatchError(command));
+      const existingSession = sourceProjection.providerSessions.find(
+        (session) => session.id === providerSessionId,
+      );
+      const session = yield* providerSessions
+        .open({
+          threadId: thread.id,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy: {
+            ...resolvedRuntimePolicy,
+            cwd: existingSession?.cwd ?? resolvedRuntimePolicy.cwd,
+          },
+          ...(existingSession === undefined ? {} : { resumeFromSession: existingSession }),
+        })
+        .pipe(mapDispatchError(command));
+
+      // Prepare both native histories before committing the split. A failed fork leaves the original usable.
+      const forkInput = {
+        sourceProviderThread: splitSource,
+        modelSelection,
+        runtimePolicy: resolvedRuntimePolicy,
+      };
+      const archiveProvider = yield* session
+        .forkThread({
+          ...forkInput,
+          targetThreadId: targetThread.id,
+        })
+        .pipe(mapDispatchError(command));
+      const continuation = yield* session
+        .forkThread({
+          ...forkInput,
+          targetThreadId: thread.id,
+          providerTurnId: splitBoundary.id,
+          verifyTurnBoundary: true,
+          sourceProviderTurns: sourceProjection.providerTurns,
+        })
+        .pipe(
+          Effect.tapError((cause) =>
+            Effect.logWarning("Codex could not verify the rewind boundary", {
+              threadId: thread.id,
+              cause,
+            }),
+          ),
+          Effect.mapError(() =>
+            invalidRewind("Codex could not create a native continuation ending at this reply."),
+          ),
+        );
+      const archiveRef = archiveProvider.nativeThreadRef;
+      const continuationRef = continuation.nativeThreadRef;
+      if (
+        archiveRef?.strength !== "strong" ||
+        archiveRef.nativeId === null ||
+        continuationRef?.strength !== "strong" ||
+        continuationRef.nativeId === null ||
+        new Set([
+          splitSource.nativeThreadRef?.nativeId,
+          archiveRef.nativeId,
+          continuationRef.nativeId,
+        ]).size !== 3
+      ) {
+        return yield* invalidRewind("Codex did not create two independent native conversations.");
+      }
+
+      const firstNewRunOrdinal =
+        sourceProjection.runs.reduce((max, run) => Math.max(max, run.ordinal), 0) + 1;
+      yield* emitEvent({
+        type: "thread.metadata-updated",
+        threadId: thread.id,
+        occurredAt: now,
+        payload: {
+          ...thread,
+          activeProviderThreadId: continuation.id,
+          contextSplit: { continuationProviderThreadId: continuation.id, firstNewRunOrdinal },
+          updatedAt: now,
+        },
+      });
+      yield* emitEvent({
+        type: "provider-thread.updated",
+        threadId: thread.id,
+        driver: continuation.driver,
+        providerInstanceId: continuation.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...continuation,
+          nativeConversationHeadRef: splitBoundary.nativeTurnRef,
+          firstRunOrdinal: splitSource.firstRunOrdinal,
+          lastRunOrdinal: splitRun.ordinal,
+          updatedAt: now,
+        },
+      });
+      for (const run of suffix) {
+        yield* emitEvent({
+          type: "run.updated",
+          threadId: thread.id,
+          runId: run.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...run,
+            status: "rolled_back",
+            contextSplitArchivedStatus: run.status,
+            completedAt: now,
+          },
+        });
+      }
+      yield* emitEvent({
+        type: "thread.created",
+        threadId: targetThread.id,
+        providerInstanceId: targetThread.providerInstanceId,
+        occurredAt: now,
+        payload: targetThread,
+      });
+      yield* emitEvent({
+        type: "provider-thread.updated",
+        threadId: targetThread.id,
+        driver: archiveProvider.driver,
+        providerInstanceId: archiveProvider.providerInstanceId,
+        occurredAt: now,
+        payload: { ...archiveProvider, updatedAt: now },
+      });
+      yield* emitEvent({
+        type: "context-transfer.created",
+        threadId: targetThread.id,
+        providerInstanceId: archiveProvider.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...transfer,
+          status: "consumed",
+          targetProviderInstanceId: archiveProvider.providerInstanceId,
+          resolution: { strategy: "native_fork", providerThreadRef: archiveRef },
+          error: null,
+          consumedAt: now,
+        },
+      });
+      return;
+    }
 
     if (contextArchive !== undefined && sourceRun !== null) {
       yield* emitEvent({
@@ -9424,6 +9701,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     cause,
                   }),
               ),
+              Effect.map((source) => ({
+                ...source,
+                runs: restoreArchivedRunsForFork(source.runs, projection.thread.createdAt),
+              })),
             );
     const sourceRun =
       pendingForkTransfer?.sourcePoint.runId === undefined || sourceProjection === null
@@ -9450,6 +9731,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const sideChatWithoutSource =
       sideChatFork && pendingForkTransfer.sourcePoint.runId === undefined;
     if (pendingForkTransfer !== undefined) {
+      if (
+        pendingForkTransfer.forkHistoryPolicy === "require_native" &&
+        (contextArchive !== undefined || sourceRun === null || sourceProviderThread === undefined)
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "The source native history is unavailable. Choose Automatic in the source thread and create a new fork.",
+        });
+      }
       if (
         contextArchive === undefined &&
         !sideChatWithoutSource &&
@@ -9537,8 +9829,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               capabilities,
               sameProvider:
                 pendingForkTransfer.sourceProviderInstanceId === modelSelection.instanceId,
-              hasStrongNativeSource: sourceProviderThread?.nativeThreadRef?.strength === "strong",
+              hasStrongNativeSource:
+                sourceProviderThread?.nativeThreadRef?.strength === "strong" &&
+                (pendingForkTransfer.forkHistoryPolicy !== "require_native" ||
+                  sourceProviderTurnId !== undefined),
               sourceRunStatus: sourceRun.status,
+              requireNative: pendingForkTransfer.forkHistoryPolicy === "require_native",
               fromSpecificTurn: sourceRun !== null,
               sourceBusy:
                 sourceRunsAfterFork.some(isActiveRun) &&
@@ -9609,7 +9905,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               projectionStore,
               sourceProjection,
               sourceRun,
-              projection.thread.id,
+              projection.thread,
             ).pipe(
               Effect.mapError(
                 (cause) =>

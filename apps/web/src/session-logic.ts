@@ -122,6 +122,7 @@ export type TimelineEntry = (
       readonly threadId: ThreadId;
       readonly expanded: boolean;
       readonly hasLoadedEntries: boolean;
+      readonly splitAfterRunOrdinal?: number;
     }
   | {
       readonly id: string;
