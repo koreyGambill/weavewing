@@ -15,8 +15,7 @@ import {
 import {
   isSelectionRectVisible,
   observeSelectionActions,
-  resolveSelectionActionPosition,
-  type SelectionActionPoint,
+  resolveSelectionMenuPlacement,
 } from "~/lib/selectionActions";
 import { Button } from "../ui/button";
 import { BackgroundThreadContext } from "./backgroundThread";
@@ -36,20 +35,34 @@ export function AssistantSelectionToolbar({
 }) {
   const [selection, setSelection] = useState<{
     citation: AssistantCitation;
-    position: SelectionActionPoint;
+    layout: Omit<
+      Parameters<typeof resolveSelectionMenuPlacement>[0],
+      "viewport" | "columnSize" | "rowSize"
+    >;
     sourceAnchor: AssistantCitationSourceAnchor;
   } | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
   const backgroundThread = use(BackgroundThreadContext);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the toolbar DOM node and clamps its position inside the window before paint
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the menu in both orientations and places it before paint
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
     if (!toolbar || !selection) return;
-    const rect = toolbar.getBoundingClientRect();
-    toolbar.style.left = `${Math.max(8, Math.min(selection.position.x, window.innerWidth - rect.width - 8))}px`;
-    toolbar.style.top = `${Math.max(8, Math.min(selection.position.y, window.innerHeight - rect.height - 8))}px`;
+    const measure = (orientation: "column" | "row") => {
+      toolbar.dataset.orientation = orientation;
+      const { width, height } = toolbar.getBoundingClientRect();
+      return { width, height };
+    };
+    const placement = resolveSelectionMenuPlacement({
+      ...selection.layout,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      columnSize: measure("column"),
+      rowSize: measure("row"),
+    });
+    toolbar.dataset.orientation = placement.orientation;
+    toolbar.style.left = `${placement.x}px`;
+    toolbar.style.top = `${placement.y}px`;
   }, [selection]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to document selectionchange and keydown to track text selections in the viewport
@@ -59,7 +72,7 @@ export function AssistantSelectionToolbar({
       ? viewport.closest<HTMLElement>(".messages-timeline-scroll")
       : null;
     const clear = () => setSelection(null);
-    const update = (pointer: SelectionActionPoint | null) => {
+    const update = () => {
       const nativeSelection = window.getSelection();
       const captured = captureAssistantTextSelection(viewport, nativeSelection);
       const messageId = captured?.source.dataset.assistantCitationSource;
@@ -123,16 +136,9 @@ export function AssistantSelectionToolbar({
         clear();
         return;
       }
-      const rects = captured.range.getClientRects();
-      const pointerOnText =
-        pointer !== null &&
-        Array.from(rects).some(
-          (line) =>
-            pointer.x >= line.left - 8 &&
-            pointer.x <= line.right + 8 &&
-            pointer.y >= line.top - 8 &&
-            pointer.y <= line.bottom + 8,
-        );
+      const rects = Array.from(captured.range.getClientRects()).filter(
+        (line) => line.width > 0 && line.height > 0,
+      );
       setSelection({
         sourceAnchor: { source: captured.source, range: captured.range, viewport },
         citation: {
@@ -141,12 +147,12 @@ export function AssistantSelectionToolbar({
           messageId: MessageId.make(messageId),
           ...captured.selector,
         },
-        position: resolveSelectionActionPosition({
+        layout: {
+          firstLine: rects[0] ?? rect,
+          lastLine: rects.at(-1) ?? rect,
+          textColumn: captured.source.getBoundingClientRect(),
           bounds: viewportRect,
-          selectionRect: rects.item(rects.length - 1) ?? rect,
-          pointer: pointerOnText ? pointer : null,
-          viewport: { width: window.innerWidth, height: window.innerHeight },
-        }),
+        },
       });
     };
     const actions = observeSelectionActions({
@@ -211,8 +217,8 @@ export function AssistantSelectionToolbar({
       ref={toolbarRef}
       role="group"
       aria-label="Selected text actions"
-      className="fixed z-50 flex max-w-[calc(100vw-1rem)] gap-1"
-      style={{ left: selection.position.x, top: selection.position.y }}
+      data-orientation="column"
+      className="group fixed z-50 flex max-w-[calc(100vw-1rem)] gap-0.5 rounded-lg border border-primary/45 bg-popover bg-linear-to-b from-primary/15 to-primary/15 p-0.5 shadow-lg data-[orientation=column]:flex-col data-[orientation=row]:flex-row"
       onPointerDown={(event) => event.preventDefault()}
       onKeyDown={(event) => {
         event.stopPropagation();
@@ -225,34 +231,41 @@ export function AssistantSelectionToolbar({
       <Button
         type="button"
         size="xs"
-        variant="glass"
+        variant="ghost"
         disabled={tooLong}
         aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
         onClick={cite}
       >
-        <QuoteIcon aria-hidden="true" className="size-3.5" />
+        <QuoteIcon aria-hidden="true" className="size-3.5 text-primary" />
         {tooLong ? "Shorten selection" : "Cite"}
       </Button>
       {branch ? (
-        <Button
-          type="button"
-          size="xs"
-          variant="glass"
-          onClick={() => {
-            const { messageId, text, start, end, prefix, suffix } = selection.citation;
-            const selected = window.getSelection();
-            const activeRange = selected?.rangeCount ? selected.getRangeAt(0) : undefined;
-            void branch({ messageId, text, start, end, prefix, suffix }).then((opened) => {
-              const current = window.getSelection();
-              if (!opened || !current?.rangeCount || current.getRangeAt(0) !== activeRange) return;
-              current.removeAllRanges();
-              dismiss();
-            });
-          }}
-        >
-          <GitBranchIcon aria-hidden="true" className="size-3.5" />
-          Drill in
-        </Button>
+        <>
+          <div
+            aria-hidden="true"
+            className="bg-primary/35 group-data-[orientation=column]:mx-1 group-data-[orientation=column]:h-px group-data-[orientation=row]:my-1 group-data-[orientation=row]:w-px"
+          />
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              const { messageId, text, start, end, prefix, suffix } = selection.citation;
+              const selected = window.getSelection();
+              const activeRange = selected?.rangeCount ? selected.getRangeAt(0) : undefined;
+              void branch({ messageId, text, start, end, prefix, suffix }).then((opened) => {
+                const current = window.getSelection();
+                if (!opened || !current?.rangeCount || current.getRangeAt(0) !== activeRange)
+                  return;
+                current.removeAllRanges();
+                dismiss();
+              });
+            }}
+          >
+            <GitBranchIcon aria-hidden="true" className="size-3.5 text-primary" />
+            Drill in
+          </Button>
+        </>
       ) : null}
     </div>,
     document.body,

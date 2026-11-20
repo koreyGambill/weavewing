@@ -3,26 +3,43 @@ export type SelectionActionPoint = { x: number; y: number };
 export const SELECTION_MULTI_CLICK_INTERVAL_MS = 500;
 const SELECTION_SCROLL_SETTLE_MS = 150;
 
-export function resolveSelectionActionPosition(options: {
-  bounds: { left: number; top: number; width: number; height: number };
-  selectionRect: { right: number; bottom: number } | null;
-  pointer: SelectionActionPoint | null;
-  viewport: { width: number; height: number };
-}): SelectionActionPoint {
-  const { bounds, selectionRect, pointer, viewport } = options;
-  const preferred = pointer ?? {
-    x: selectionRect?.right ?? bounds.left + bounds.width - 140,
-    y: selectionRect ? selectionRect.bottom + 4 : bounds.top + 12,
-  };
+type Box = { left: number; top: number; right: number; bottom: number };
+type Size = { width: number; height: number };
+export type SelectionMenuPlacement = SelectionActionPoint & { orientation: "column" | "row" };
+
+const SELECTION_MENU_GAP = 6;
+const SELECTION_MENU_EDGE = 8;
+
+/**
+ * Keeps the selected text readable: a column in the margin beside the text when it fits,
+ * otherwise a row above the first selected line, or below the last when there is no room above.
+ */
+export function resolveSelectionMenuPlacement(options: {
+  firstLine: Box;
+  lastLine: Box;
+  textColumn: Pick<Box, "right">;
+  bounds: Box;
+  viewport: Size;
+  columnSize: Size;
+  rowSize: Size;
+}): SelectionMenuPlacement {
+  const { firstLine, lastLine, textColumn, bounds, viewport, columnSize, rowSize } = options;
+  const right = Math.min(bounds.right, viewport.width) - SELECTION_MENU_EDGE;
+  const clampY = (y: number, height: number) =>
+    Math.max(
+      Math.max(bounds.top, SELECTION_MENU_EDGE),
+      Math.min(y, Math.min(bounds.bottom, viewport.height) - SELECTION_MENU_EDGE - height),
+    );
+  const marginX = textColumn.right + SELECTION_MENU_GAP * 2;
+  if (marginX + columnSize.width <= right) {
+    return { orientation: "column", x: marginX, y: clampY(firstLine.top, columnSize.height) };
+  }
+  const above = firstLine.top - SELECTION_MENU_GAP - rowSize.height;
+  const top = Math.max(bounds.top, SELECTION_MENU_EDGE);
   return {
-    x: Math.max(
-      8,
-      Math.min(Math.max(bounds.left, preferred.x), bounds.left + bounds.width, viewport.width - 8),
-    ),
-    y: Math.max(
-      8,
-      Math.min(Math.max(bounds.top, preferred.y), bounds.top + bounds.height, viewport.height - 8),
-    ),
+    orientation: "row",
+    x: Math.max(SELECTION_MENU_EDGE, Math.min(firstLine.left, right - rowSize.width)),
+    y: above >= top ? above : clampY(lastLine.bottom + SELECTION_MENU_GAP, rowSize.height),
   };
 }
 
