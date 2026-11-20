@@ -48,6 +48,7 @@ export function SummaryHandoffAction({
   const prepare = useAtomCommand(threadEnvironment.prepareSummaryHandoff, { reportFailure: false });
   const navigate = useNavigate();
   const request = useRef<AbortController | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancel the in-flight summary RPC when the action unmounts
   useEffect(() => () => request.current?.abort(), []);
   const [open, setOpen] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);

@@ -1525,27 +1525,29 @@ describe("runtime command runner", () => {
     registry.dispose();
   });
 
-  it("interrupts the underlying effect when a waiting command is aborted", async () => {
-    const registry = AtomRegistry.make();
-    const started = Latch.makeUnsafe();
-    const released = Latch.makeUnsafe();
-    const controller = new AbortController();
-    const command = createRuntimeCommand(Atom.runtime(Layer.empty), {
-      label: "test.abort",
-      execute: () =>
-        started.open.pipe(Effect.andThen(Effect.never), Effect.ensuring(released.open)),
-    });
+  it.effect("interrupts the underlying effect when a waiting command is aborted", () =>
+    Effect.gen(function* () {
+      const registry = AtomRegistry.make();
+      const started = Latch.makeUnsafe();
+      const released = Latch.makeUnsafe();
+      const controller = new AbortController();
+      const command = createRuntimeCommand(Atom.runtime(Layer.empty), {
+        label: "test.abort",
+        execute: () =>
+          started.open.pipe(Effect.andThen(Effect.never), Effect.ensuring(released.open)),
+      });
 
-    const pending = runAtomCommand(registry, command, undefined, { signal: controller.signal });
-    await Effect.runPromise(started.await);
-    controller.abort();
+      const pending = runAtomCommand(registry, command, undefined, { signal: controller.signal });
+      yield* started.await;
+      controller.abort();
 
-    const result = await pending;
-    expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") expect(Cause.hasInterruptsOnly(result.cause)).toBe(true);
-    await Effect.runPromise(released.await);
-    registry.dispose();
-  });
+      const result = yield* Effect.promise(() => pending);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(Cause.hasInterruptsOnly(result.cause)).toBe(true);
+      yield* released.await;
+      registry.dispose();
+    }),
+  );
 
   it("serializes commands that share a scheduler and lane", async () => {
     const firstLatch = Latch.makeUnsafe();
