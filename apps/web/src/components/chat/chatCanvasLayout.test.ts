@@ -171,7 +171,7 @@ describe("chat canvas layout", () => {
         detailsCard: { left: width - 292, right: width - 12, bottom: 339 },
         preview: null,
       }).chat.left;
-    for (let width = 1300; width < 1800; width += 1) {
+    for (let width = 900; width < 1800; width += 1) {
       expect(Math.abs(leftAt(width + 1) - leftAt(width))).toBeLessThanOrEqual(1);
     }
   });
@@ -337,10 +337,10 @@ describe("workspace card beside chat", () => {
   it("keeps chat centered while the card fits beside it", () => {
     expect(withCard(1500).chat).toEqual({ left: 382, width: 736, insetStart: 0, insetEnd: 0 });
   });
-  it("lets the card cover the chat when side-by-side would narrow it", () => {
+  it("keeps chat at the left gutter when the card must overlap it", () => {
     expect(withCard(1108).chat).toMatchObject({ left: 48, width: 736 });
-    expect(withCard(1028).chat).toEqual({ left: 146, width: 736, insetStart: 0, insetEnd: 0 });
-    expect(withCard(900).chat).toMatchObject({ left: 82, width: 736 });
+    expect(withCard(1028).chat).toEqual({ left: 48, width: 736, insetStart: 0, insetEnd: 196 });
+    expect(withCard(900).chat).toMatchObject({ left: 48, width: 736 });
     expect(withCard(800).chat).toMatchObject({ left: 48, width: 704 });
   });
 });

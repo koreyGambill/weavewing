@@ -130,6 +130,23 @@ describe("command dispatcher", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it("leaves keys pressed in a shortcut recorder to the recorder", () => {
+    const command = vi.fn();
+    const recorder = document.createElement("input");
+    recorder.setAttribute("data-keybinding-capture", "");
+    document.body.append(recorder);
+    using stack = new DisposableStack();
+    stack.defer(() => recorder.remove());
+    stack.defer(registerCommands({ "chat.new": command }, { keybindings, capture: true }));
+    recorder.focus();
+
+    const event = new KeyboardEvent("keydown", { key: "k", cancelable: true, bubbles: true });
+    recorder.dispatchEvent(event);
+
+    expect(command).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it("routes a menu action to its newest handler", () => {
     const older = vi.fn();
     const newer = vi.fn();

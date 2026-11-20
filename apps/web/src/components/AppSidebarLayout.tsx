@@ -199,7 +199,6 @@ function registerWorkspaceFocusCommands(router: AnyRouter): () => void {
       { "workspace.focusNext": move(1), "workspace.focusPrevious": move(-1) },
       {
         capture: true,
-        when: (event) => !isKeybindingCaptureTarget(event),
         context: () => readRoutePanelsOpen(router),
       },
     ),

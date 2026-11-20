@@ -65,11 +65,7 @@ export function ToolSidebarLayout({ children }: { children: ReactNode }) {
           toggle();
         },
       },
-      {
-        capture: true,
-        when: (event) =>
-          !(event.target instanceof Element && event.target.closest("[data-keybinding-capture]")),
-      },
+      { capture: true },
     );
     const stopEscape = registerCommands(
       {},

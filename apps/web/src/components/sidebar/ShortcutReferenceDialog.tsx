@@ -1,13 +1,18 @@
-import { leaderShortcutKey } from "@t3tools/shared/keybindings";
-import { useAtomValue } from "@effect/atom-react";
 import type { KeybindingCommand } from "@t3tools/contracts";
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
-import { formatShortcutLabel, formatShortcutKeyLabel } from "../../keybindings";
-import { primaryServerKeybindingsAtom } from "../../state/server";
+import {
+  KeybindingSettingsRow,
+  NewKeybindingSettingsRow,
+  useKeybindingEditing,
+} from "../settings/KeybindingsSettings";
 import { commandLabel } from "../settings/KeybindingsSettings.logic";
+import { SettingsGroup } from "../settings/SettingsGroup";
+import { SettingsScopeProvider } from "../settings/SettingsScopeContext";
+import { SettingsSection } from "../settings/settingsLayout";
+import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { Kbd } from "../ui/kbd";
 
 const workspaceOrder: readonly KeybindingCommand[] = [
   "workspace.tile.focusLeft",
@@ -32,6 +37,8 @@ const workspaceOrder: readonly KeybindingCommand[] = [
   "workspace.focusPrevious",
 ];
 
+const noScopeChange = () => {};
+
 export function ShortcutReferenceDialog({
   open,
   onOpenChange,
@@ -41,36 +48,40 @@ export function ShortcutReferenceDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup>
+      <DialogPopup className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Shortcut reference</DialogTitle>
         </DialogHeader>
-        {open ? <ShortcutReferenceContent /> : null}
+        {open ? (
+          // The unscoped Settings view: edits reach every connected environment.
+          <SettingsScopeProvider search={{}} onChange={noScopeChange}>
+            <ShortcutReferenceContent />
+          </SettingsScopeProvider>
+        ) : null}
       </DialogPopup>
     </Dialog>
   );
 }
 
 function ShortcutReferenceContent() {
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const {
+    canWriteSettings,
+    connectedEnvironments,
+    commandOptions,
+    allRows,
+    whenVariables,
+    rowActions,
+    savingCommand,
+    isAddingBinding,
+    setIsAddingBinding,
+    saveKeybinding,
+  } = useKeybindingEditing();
   const [query, setQuery] = useState("");
-  const shortcuts = new Map<KeybindingCommand, Set<string>>();
-  for (const binding of keybindings) {
-    const keys = shortcuts.get(binding.command) ?? new Set<string>();
-    const leader = keybindings.findLast((rule) => rule.command === "keybindings.leader")?.shortcut;
-    keys.add(
-      binding.shortcut.leader
-        ? `${leader ? formatShortcutLabel(leader) : "Ctrl+A"} then ${formatShortcutKeyLabel(leaderShortcutKey(binding.shortcut))}`
-        : formatShortcutLabel(binding.shortcut),
-    );
-    shortcuts.set(binding.command, keys);
-  }
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const rows = [...shortcuts]
-    .map(([command, keys]) => ({ command, keys: [...keys], label: commandLabel(command) }))
+  const rows = allRows
     .filter((row) =>
       words.every((word) =>
-        `${row.label} ${row.command} ${row.keys.join(" ")}`.toLowerCase().includes(word),
+        `${commandLabel(row.command)} ${row.command} ${row.key}`.toLowerCase().includes(word),
       ),
     )
     .toSorted((a, b) => {
@@ -78,7 +89,9 @@ function ShortcutReferenceContent() {
       const bIndex = workspaceOrder.indexOf(b.command);
       return (
         (aIndex < 0 ? workspaceOrder.length : aIndex) -
-          (bIndex < 0 ? workspaceOrder.length : bIndex) || a.label.localeCompare(b.label)
+          (bIndex < 0 ? workspaceOrder.length : bIndex) ||
+        commandLabel(a.command).localeCompare(commandLabel(b.command)) ||
+        a.key.localeCompare(b.key)
       );
     });
   const sections = [
@@ -87,36 +100,63 @@ function ShortcutReferenceContent() {
   ];
   return (
     <>
-      <div className="px-6 pb-4">
+      <div className="flex items-center gap-2 px-6 pb-4">
         <Input
           aria-label="Search shortcuts"
           placeholder="Search shortcuts…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isAddingBinding || !canWriteSettings}
+          onClick={() => setIsAddingBinding(true)}
+        >
+          <PlusIcon aria-hidden className="size-4" />
+          Add keybinding
+        </Button>
       </div>
       <DialogPanel>
-        {sections
-          .filter((section) => section.rows.length)
-          .map((section) => (
-            <section key={section.label} aria-label={section.label}>
-              <h2 className="mb-2 text-xs font-medium text-muted-foreground">{section.label}</h2>
-              <dl className="divide-y divide-border/50">
-                {section.rows.map((row) => (
-                  <div key={row.command} className="flex items-center justify-between gap-4 py-2">
-                    <dt className="min-w-0 text-sm">{row.label}</dt>
-                    <dd className="flex max-w-3/5 shrink-0 flex-wrap justify-end gap-1">
-                      {row.keys.map((key) => (
-                        <Kbd key={key}>{key}</Kbd>
-                      ))}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
+        <div inert={!canWriteSettings} className="flex flex-col gap-6">
+          {isAddingBinding ? (
+            <SettingsGroup>
+              <NewKeybindingSettingsRow
+                commandOptions={commandOptions}
+                allRows={allRows}
+                variables={whenVariables}
+                isSaving={savingCommand !== null}
+                onSave={saveKeybinding}
+                onCancel={() => setIsAddingBinding(false)}
+              />
+            </SettingsGroup>
+          ) : null}
+          {sections
+            .filter((section) => section.rows.length)
+            .map((section) => (
+              <SettingsSection key={section.label} title={section.label} aria-label={section.label}>
+                <SettingsGroup>
+                  {section.rows.map((row) => (
+                    <KeybindingSettingsRow
+                      key={row.id}
+                      row={row}
+                      isSaving={savingCommand === row.command}
+                      {...rowActions}
+                    />
+                  ))}
+                </SettingsGroup>
+              </SettingsSection>
+            ))}
+        </div>
         {!rows.length ? (
           <p className="text-sm text-muted-foreground">No matching shortcuts.</p>
+        ) : null}
+        {!canWriteSettings ? (
+          <p className="text-xs text-muted-foreground">
+            {connectedEnvironments.length === 0
+              ? "Connect an environment to change keybindings."
+              : "This connection can view keybindings but cannot change them."}
+          </p>
         ) : null}
       </DialogPanel>
     </>
