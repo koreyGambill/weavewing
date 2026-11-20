@@ -39,6 +39,7 @@ export function allocateThreadTerminalId(
   knownSessions: ReadonlyArray<KnownTerminalSession> | null,
   drawerTerminalIds: readonly string[],
   panelSurfaces: readonly RightPanelSurface[],
+  freshSession = false,
 ): string {
   const ids = new Set([
     ...(knownSessions ?? []).map((session) => session.target.terminalId),
@@ -49,6 +50,7 @@ export function allocateThreadTerminalId(
     ...(threadRef ? closingTerminalIds(threadRef) : []),
   ]);
   const canReuse =
+    !freshSession &&
     knownSessions !== null &&
     threadRef !== null &&
     readEnvironmentScope(threadRef.environmentId, AuthTerminalReadScope);
@@ -85,8 +87,14 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
   const canWrite = () =>
     threadRef !== null && readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope);
 
-  const allocateTerminalId = () =>
-    allocateThreadTerminalId(threadRef, knownSessions, drawerTerminalIds, panelSurfaces);
+  const allocateTerminalId = (freshSession = false) =>
+    allocateThreadTerminalId(
+      threadRef,
+      knownSessions,
+      drawerTerminalIds,
+      panelSurfaces,
+      freshSession,
+    );
 
   const defaultLaunchLocation = (): TerminalLaunchLocation | null =>
     project
@@ -103,6 +111,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
   const launchTerminal = (input: {
     readonly place: (terminalId: string) => void;
     readonly terminalId?: string;
+    readonly freshSession?: boolean;
     readonly location?: TerminalLaunchLocation | null;
     readonly extraEnv?: Record<string, string>;
     readonly stopOnSettle?: boolean;
@@ -111,7 +120,7 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
     if (!threadRef || !canWrite() || !project) return null;
     const location = input.location ?? defaultLaunchLocation();
     if (!location) return null;
-    const terminalId = input.terminalId ?? allocateTerminalId();
+    const terminalId = input.terminalId ?? allocateTerminalId(input.freshSession);
     input.place(terminalId);
     const result = openTerminalCommand({
       environmentId: threadRef.environmentId,

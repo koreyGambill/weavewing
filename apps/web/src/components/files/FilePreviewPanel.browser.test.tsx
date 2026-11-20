@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   file: null as ProjectReadFileResult | null,
   optimistic: null as ProjectReadFileResult | null,
   writeFile: vi.fn(),
+  canWrite: true,
   assetUrl: { _tag: "Loading" } as import("~/assets/assetUrls").AssetUrlState,
   mintUrl: vi.fn<() => Promise<string | null>>(),
 }));
@@ -29,7 +30,7 @@ vi.mock(import("@t3tools/client-runtime/state/runtime"), async (original) => ({
 vi.mock(import("~/state/session"), async (original) => ({
   ...(await original()),
   readEnvironmentScope: () => true,
-  useEnvironmentScope: () => true,
+  useEnvironmentScope: (_environmentId, scope) => scope !== "filesystem:write" || state.canWrite,
 }));
 vi.mock(import("~/state/filesystem"), async (original) => ({
   ...(await original()),
@@ -118,6 +119,7 @@ function setup() {
   const previous = keys.map((key) => localStorage.getItem(key));
   localStorage.setItem(keys[0]!, "false");
   localStorage.setItem(keys[1]!, "true");
+  state.canWrite = true;
   state.file = null;
   state.optimistic = null;
   state.assetUrl = { _tag: "Loading" };
@@ -224,6 +226,34 @@ describe("source file focus", () => {
       isMacPlatform(navigator.platform) ? "{Meta>}f{/Meta}" : "{Control>}f{/Control}",
     );
     await vi.waitFor(() => expect(deepActiveElement()).toBeInstanceOf(HTMLInputElement));
+  });
+
+  it("opens find and replace from a rendered file without changing the saved preview preference", async () => {
+    using _settings = setup();
+    await preloadHighlighter({ themes: Object.values(DEFAULT_THEMES), langs: ["markdown"] });
+    await using screen = await render(markdownPreview(false, "# Find this heading\n"));
+    const find = screen.getByRole("button", { name: "Find in file", exact: true });
+    await expect.element(find).toBeVisible();
+    find.element().focus();
+    const mod = isMacPlatform(navigator.platform)
+      ? ["{Meta>}", "{/Meta}"]
+      : ["{Control>}", "{/Control}"];
+    await userEvent.keyboard(`${mod[0]}{Alt>}f{/Alt}${mod[1]}`);
+    await vi.waitFor(() => expect(deepActiveElement()?.matches("input[data-search]")).toBe(true));
+    const root = deepActiveElement()?.getRootNode();
+    expect(root instanceof ShadowRoot && root.querySelector("input[data-replace]")).not.toBeNull();
+    expect(localStorage.getItem("t3code.renderMarkdown")).toBe("true");
+  });
+
+  it("opens source search for a read-only file", async () => {
+    using _settings = setup();
+    state.canWrite = false;
+    await using screen = await render(markdownPreview(false, "# Find this heading\n"));
+    await userEvent.click(screen.getByRole("button", { name: "Find in file", exact: true }));
+    await expect.element(screen.getByText("Find in source", { exact: true })).toBeVisible();
+    await vi.waitFor(() => expect(deepActiveElement()?.matches("input[data-search]")).toBe(true));
+    await userEvent.click(screen.getByRole("button", { name: "Close file find" }));
+    await expect.element(screen.getByRole("heading", { name: "Find this heading" })).toBeVisible();
   });
 
   it("focuses the editor when a file row is clicked or activated with Enter", async () => {

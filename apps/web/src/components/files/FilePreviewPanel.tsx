@@ -1,8 +1,17 @@
-import { DownloadIcon, CopyIcon, CheckIcon, Code2Icon, EyeIcon, Table2Icon } from "lucide-react";
+import {
+  DownloadIcon,
+  CopyIcon,
+  CheckIcon,
+  Code2Icon,
+  EyeIcon,
+  SearchIcon,
+  Table2Icon,
+} from "lucide-react";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { Spinner } from "~/components/ui/spinner";
 import {
   AuthPreviewOperateScope,
+  AuthTerminalOperateScope,
   type EditorId,
   type EnvironmentId,
   type ProjectId,
@@ -32,6 +41,7 @@ import {
 } from "@pierre/diffs";
 import {
   Editor,
+  resolveSearchShortcut,
   type EditorChangeEvent,
   type EditorFactory,
   type EditorOptions,
@@ -71,6 +81,7 @@ import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hoo
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn, isMacPlatform } from "~/lib/utils";
+import { focusTerminal } from "~/lib/terminalFocus";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import type { ChatFileAttachment } from "~/types";
 import { isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
@@ -89,6 +100,10 @@ import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
+import { useThreadTerminalActions } from "../terminal/useThreadTerminalActions";
+import { useRightPanelStore } from "../../rightPanelStore";
+import { openEditorFind, SearchableSource } from "./fileFind";
+import { fileVimCommand } from "./fileVimCommand";
 import { AttachmentFilePreview } from "./AttachmentFilePreview";
 import { AudioPreview } from "./AudioPreview";
 import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
@@ -1223,6 +1238,8 @@ export default function FilePreviewPanel({
   const fileAccess = useFilesystemReadAccess(environmentId);
   const { canReadFiles } = fileAccess;
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
+  const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
+  const terminalActions = useThreadTerminalActions(threadRef);
   const file = useProjectFileQuery(
     environmentId,
     cwd,
@@ -1345,10 +1362,23 @@ export default function FilePreviewPanel({
   const revealHandled =
     revealLine === null ||
     (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId);
-  const renderMarkdown = isMarkdown && renderMarkdownPreferred && revealHandled;
-  const renderMermaid = isMermaid && renderMermaidPreferred && revealHandled;
-  const renderBrowserFile = isPdf || (isHtml && renderBrowserFilePreferred && revealHandled);
-  const renderTable = tableDelimiter !== null && renderTablePreferred && revealHandled;
+  const [fileFindPath, setFileFindPath] = useState<string | null>(null);
+  if (fileFindPath !== null && fileFindPath !== previewPath) setFileFindPath(null);
+  const canFindFile =
+    previewPath !== null &&
+    attachment === undefined &&
+    file.data !== null &&
+    !file.data.truncated &&
+    !isMedia &&
+    !isDocument &&
+    !isPdf;
+  const sourceForFind = canFindFile && fileFindPath === previewPath;
+  const renderMarkdown = isMarkdown && renderMarkdownPreferred && revealHandled && !sourceForFind;
+  const renderMermaid = isMermaid && renderMermaidPreferred && revealHandled && !sourceForFind;
+  const renderBrowserFile =
+    isPdf || (isHtml && renderBrowserFilePreferred && revealHandled && !sourceForFind);
+  const renderTable =
+    tableDelimiter !== null && renderTablePreferred && revealHandled && !sourceForFind;
   const renderedMode = isMermaid
     ? ("mermaid" as const)
     : isMarkdown
@@ -1382,6 +1412,22 @@ export default function FilePreviewPanel({
     !(tableDelimiter && renderTable);
   const contentFocusRef = useRef<HTMLDivElement>(null);
   const fileEditorRef = useRef<FileEditor | null>(null);
+  const pendingFind = useRef<{ path: string; mode: "find" | "replace" } | null>(null);
+  const sourceSearchRef = useRef<{ openSearch: (options: { mode: "find" }) => void } | null>(null);
+  const requestFileFind = (mode: "find" | "replace" = "find") => {
+    if (!canFindFile || !previewPath || (mode === "replace" && (!canWriteFiles || readOnlyHost)))
+      return;
+    if (fileEditorRef.current && mayOpenEditor) {
+      openEditorFind(fileEditorRef.current, mode);
+      return;
+    }
+    if (sourceSearchRef.current && sourceForFind) {
+      sourceSearchRef.current.openSearch({ mode: "find" });
+      return;
+    }
+    pendingFind.current = { path: previewPath, mode };
+    setFileFindPath(previewPath);
+  };
   const focusEditorFromContent = () => {
     const editor = fileEditorRef.current;
     if (!editor || document.activeElement !== contentFocusRef.current) return;
@@ -1396,6 +1442,14 @@ export default function FilePreviewPanel({
   };
   const handleEditorChange = (editor: FileEditor | null) => {
     fileEditorRef.current = editor;
+    const request = pendingFind.current;
+    if (editor && request?.path === previewPath) {
+      pendingFind.current = null;
+      queueMicrotask(() => {
+        if (fileEditorRef.current === editor) openEditorFind(editor, request.mode);
+      });
+      return;
+    }
     focusEditorFromContent();
   };
   const handleEditorChangeStable = useStableCallback(handleEditorChange);
@@ -1452,6 +1506,22 @@ export default function FilePreviewPanel({
       : relativePath && attachment === undefined
         ? resolvePathLinkTarget(relativePath, cwd)
         : null;
+  const vimCommand =
+    previewPath && absolutePath && !attachment && canOperateTerminal
+      ? fileVimCommand(absolutePath, serverConfig?.environment.platform.os === "windows")
+      : null;
+  const openInVim = async () => {
+    if (!vimCommand) return;
+    const launched = terminalActions.launchTerminal({
+      freshSession: true,
+      place: (terminalId) => useRightPanelStore.getState().openTerminal(threadRef, terminalId),
+    });
+    if (!launched) return;
+    focusTerminal(threadRef, launched.terminalId);
+    if ((await launched.result)._tag === "Success") {
+      await terminalActions.writeToTerminal(launched.terminalId, vimCommand);
+    }
+  };
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   // Mounting the file read under the workspace mutation id refetches it after each mutation.
   useAtomMount(
@@ -1533,7 +1603,38 @@ export default function FilePreviewPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
+      data-file-find-scope=""
+      tabIndex={canFindFile ? -1 : undefined}
+      data-workspace-focus-default={canFindFile && !mayOpenEditor ? "" : undefined}
+      onKeyDownCapture={(event) => {
+        if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+        const path = event.nativeEvent.composedPath();
+        if (!path.includes(event.currentTarget)) return;
+        if (
+          path.some((node) => node instanceof Element && node.matches("[data-file-browser-panel]"))
+        )
+          return;
+        if (event.key === "Escape" && sourceForFind && sourceSearchRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          setFileFindPath(null);
+          return;
+        }
+        const mode = resolveSearchShortcut(event.nativeEvent);
+        if (!canFindFile || (mode !== "find" && mode !== "replace")) return;
+        if (mode === "replace" && (!canWriteFiles || readOnlyHost)) return;
+        if (
+          mayOpenEditor &&
+          path.some((node) => node instanceof Element && node.matches("diffs-container"))
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        requestFileFind(mode);
+      }}
+    >
       {breadcrumbPath !== null && breadcrumbTrail !== null ? (
         <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>
           <ScrollArea
@@ -1585,7 +1686,13 @@ export default function FilePreviewPanel({
               openInCwdIsFile={file.isFile}
               compact
               revealFileManager={revealsInFileManager}
+              {...(vimCommand ? { onOpenInVim: () => void openInVim() } : {})}
             />
+          ) : null}
+          {canFindFile ? (
+            <FileSurfaceAction label="Find in file" onPress={() => requestFileFind()}>
+              <SearchIcon className="size-3.5" />
+            </FileSurfaceAction>
           ) : null}
           {canToggleRendered && renderedMode ? (
             <FileSurfaceAction
@@ -1593,6 +1700,8 @@ export default function FilePreviewPanel({
               pressed={rendered}
               onPress={() => {
                 const pressed = !rendered;
+                setFileFindPath(null);
+                pendingFind.current = null;
                 setRenderedPreferred(pressed);
                 setHandledReveal(
                   pressed && relativePath !== null
@@ -1791,7 +1900,17 @@ export default function FilePreviewPanel({
               <Spinner size="lg" />
             </div>
           ) : relativePath && file.data ? (
-            renderMermaid ? (
+            sourceForFind && !mayOpenEditor ? (
+              <SearchableSource
+                key={relativePath}
+                name={relativePath}
+                text={file.data.contents}
+                theme={resolvedTheme}
+                wordWrap={wordWrap}
+                searchRef={sourceSearchRef}
+                onClose={() => setFileFindPath(null)}
+              />
+            ) : renderMermaid ? (
               <Suspense fallback={<FileSurfaceLoading />}>
                 <MermaidFilePreview text={file.data.contents} />
               </Suspense>

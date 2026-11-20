@@ -19,7 +19,12 @@ import {
   useRemoteOpenState,
 } from "../../remoteOpen";
 import { useEnvironment } from "../../state/environments";
-import { ChevronDownIcon, FolderClosedIcon, SquareArrowOutUpRightIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  FolderClosedIcon,
+  SquareArrowOutUpRightIcon,
+  TerminalIcon,
+} from "lucide-react";
 
 import { Group, GroupSeparator } from "../ui/group";
 import {
@@ -215,6 +220,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   enableShortcut = true,
   displayMode = "toolbar",
   revealFileManager = false,
+  onOpenInVim,
 }: {
   environmentId: EnvironmentId;
   keybindings: ResolvedKeybindingsConfig;
@@ -226,6 +232,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   enableShortcut?: boolean;
   displayMode?: "toolbar" | "panel";
   revealFileManager?: boolean;
+  onOpenInVim?: () => void;
 }) {
   const isPanel = displayMode === "panel";
   const ActionGroup = isPanel ? "div" : Group;
@@ -296,6 +303,12 @@ export const OpenInPicker = memo(function OpenInPicker({
 
   const editorItems = (
     <>
+      {onOpenInVim ? (
+        <MenuItem onClick={onOpenInVim}>
+          <TerminalIcon aria-hidden="true" />
+          <MenuItemLabel>Open in Vim</MenuItemLabel>
+        </MenuItem>
+      ) : null}
       {unavailableReason !== null ? (
         <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
           {unavailableReason}
@@ -354,7 +367,7 @@ export const OpenInPicker = memo(function OpenInPicker({
           </MenuItem>
         )}
         <MenuSub>
-          <MenuSubTrigger density="touch" disabled={isHostEditorDenied}>
+          <MenuSubTrigger density="touch" disabled={isHostEditorDenied && !onOpenInVim}>
             <SquareArrowOutUpRightIcon className="size-4" />
             <MenuItemLabel>Open in…</MenuItemLabel>
           </MenuSubTrigger>
@@ -430,7 +443,7 @@ export const OpenInPicker = memo(function OpenInPicker({
           <TooltipTrigger
             render={
               <MenuTrigger
-                disabled={isHostEditorDenied}
+                disabled={isHostEditorDenied && !onOpenInVim}
                 render={
                   <ThreadDetailsControl
                     aria-label="Choose editor"

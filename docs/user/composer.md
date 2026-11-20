@@ -449,6 +449,16 @@ credential folders, git metadata, hard-linked files, or its own state.
 An HTML file outside the workspace cannot load scripts, styles, or images from
 neighboring files.
 
+## Finding and editing text in the file viewer
+
+With a text file focused on web or desktop, press **Ctrl+F** or **Cmd+F** to find
+text. Editable files also offer Find and Replace with **Ctrl+Alt+F** or
+**Cmd+Option+F**. The file viewer searches the source of rendered text files.
+
+Choose **Open in Vim** from the editor menu to open the file in a new terminal
+tab on its environment. The terminal uses your shell's `vim` command, including
+aliases such as `vim=nvim`.
+
 ## HTML and PDF files in the file viewer
 
 On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML

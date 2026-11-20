@@ -230,12 +230,14 @@ describe("remote editor links", () => {
     state.allowed.add(selected);
     const pressLeader = () =>
       act(() => {
-        for (const [key, ctrlKey] of [
-          ["a", true],
-          ["o", false],
+        for (const [type, key, ctrlKey] of [
+          ["keydown", "Control", true],
+          ["keydown", "a", true],
+          ["keyup", "Control", false],
+          ["keydown", "o", false],
         ] as const) {
           document.body.dispatchEvent(
-            new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true }),
+            new KeyboardEvent(type, { key, ctrlKey, bubbles: true, cancelable: true }),
           );
         }
       });
