@@ -784,6 +784,31 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("resets a customized config to defaults that startup sync leaves alone", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+k", command: "filePicker.toggle", when: "!terminalFocus" },
+        { key: "ctrl+a", command: "keybindings.leader", when: "false" },
+        { key: "not a shortcut", command: "chat.new" },
+      ]);
+
+      const reset = yield* keybindings.resetKeybindings;
+      assert.deepEqual(reset.issues, []);
+      assert.deepEqual(
+        yield* readKeybindingsConfig(keybindingsConfigPath),
+        SharedKeybindings.DEFAULT_KEYBINDINGS,
+      );
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepEqual(
+        yield* readKeybindingsConfig(keybindingsConfigPath),
+        SharedKeybindings.DEFAULT_KEYBINDINGS,
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("removes a hand-written keybinding targeted by its settings spelling", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

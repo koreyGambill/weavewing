@@ -1,3 +1,4 @@
+import { ensureLocalApi } from "../../localApi";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentsWithScope, readEnvironmentScope } from "../../state/session";
 import {
@@ -7,6 +8,7 @@ import {
   FileJsonIcon,
   MinusIcon,
   PlusIcon,
+  RotateCcwIcon,
   SearchIcon,
   TriangleAlertIcon,
   XIcon,
@@ -1404,6 +1406,10 @@ export function KeybindingsSettingsPanel() {
   const removeKeybindingMutation = useAtomCommand(serverEnvironment.removeKeybinding, {
     reportFailure: false,
   });
+  const resetKeybindingsMutation = useAtomCommand(serverEnvironment.resetKeybindings, {
+    reportFailure: false,
+  });
+  const [isResettingAll, setIsResettingAll] = useState(false);
   const openInPreferredEditor = useOpenInPreferredEditor(
     primaryEnvironment?.environmentId ?? null,
     availableEditors,
@@ -1531,6 +1537,38 @@ export function KeybindingsSettingsPanel() {
     });
   };
 
+  const resetAllKeybindings = async () => {
+    if (
+      !primaryEnvironment ||
+      !connectedEnvironments.every((target) =>
+        readEnvironmentScope(target.environmentId, AuthSettingsWriteScope),
+      )
+    )
+      return;
+    const confirmed = await ensureLocalApi().dialogs.confirm(
+      "Reset all keybindings to their defaults? Every custom keybinding will be removed.",
+      { variant: "destructive" },
+    );
+    if (!confirmed) return;
+    setIsResettingAll(true);
+    // Each environment keeps its own keybindings file, so saves go to all of them.
+    const results = await Promise.all(
+      connectedEnvironments.map((target) =>
+        resetKeybindingsMutation({ environmentId: target.environmentId, input: {} }),
+      ),
+    );
+    setIsResettingAll(false);
+    const failed = results.find((result) => result._tag === "Failure");
+    if (failed && !isAtomCommandInterrupted(failed)) {
+      const error = squashAtomCommandFailure(failed);
+      toastManager.add({
+        title: "Unable to reset keybindings",
+        description: error instanceof Error ? error.message : "The keybindings were not reset.",
+        type: "error",
+      });
+    }
+  };
+
   const cancelAdd = () => setIsAddingBinding(false);
 
   const rowActions: KeybindingRowActions = {
@@ -1608,6 +1646,23 @@ export function KeybindingsSettingsPanel() {
               }
             />
             <TooltipPopup side="top">Open keybindings.json</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={!canWriteSettings || isResettingAll || savingCommand !== null}
+                  onClick={() => void resetAllKeybindings()}
+                  aria-label="Reset all keybindings"
+                >
+                  <RotateCcwIcon aria-hidden className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipPopup side="top">Reset all keybindings</TooltipPopup>
           </Tooltip>
         </div>
       </SettingsSection>

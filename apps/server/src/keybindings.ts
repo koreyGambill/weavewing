@@ -276,6 +276,14 @@ function restoreNewThreadKey(rules: readonly KeybindingRule[]): readonly Keybind
 const DROPDOWN_KEY_MIGRATION = "weavewing.dropdown-mod-j.v1";
 const LEADER_TILE_FOCUS_MIGRATION = "weavewing.leader-tile-focus.v1";
 const dropdownKey: KeybindingRule = { key: "mod+j", command: "terminal.dropdown" };
+// Every migration a freshly written default file already satisfies.
+const DEFAULT_KEYBINDINGS_MIGRATION_IDS = [
+  ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
+  "weavewing.leader.v1",
+  NEW_THREAD_KEY_MIGRATION,
+  DROPDOWN_KEY_MIGRATION,
+  LEADER_TILE_FOCUS_MIGRATION,
+];
 
 /** Whether a rule fires on plain Ctrl+<key> or Cmd+<key> on some platform, however it is spelled. */
 function takesModKey(rule: KeybindingRule, key: string): boolean {
@@ -580,6 +588,9 @@ export class Keybindings extends Context.Service<
     readonly removeKeybindingRule: (
       input: ServerRemoveKeybindingInput,
     ) => Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
+
+    /** Replaces the whole config with the defaults, dropping every customization. */
+    readonly resetKeybindings: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
   }
 >()("t3/keybindings") {}
 
@@ -821,19 +832,10 @@ const make = Effect.gen(function* () {
       const configExists = yield* readConfigExists;
       if (!configExists) {
         yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
-        if (
-          pendingLateDefaults.length > 0 ||
-          !appliedMigrationIds.has(NEW_THREAD_KEY_MIGRATION) ||
-          !appliedMigrationIds.has(DROPDOWN_KEY_MIGRATION) ||
-          !appliedMigrationIds.has(LEADER_TILE_FOCUS_MIGRATION)
-        ) {
+        if (DEFAULT_KEYBINDINGS_MIGRATION_IDS.some((id) => !appliedMigrationIds.has(id))) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
-            ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
-            "weavewing.leader.v1",
-            NEW_THREAD_KEY_MIGRATION,
-            DROPDOWN_KEY_MIGRATION,
-            LEADER_TILE_FOCUS_MIGRATION,
+            ...DEFAULT_KEYBINDINGS_MIGRATION_IDS,
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -1198,6 +1200,17 @@ const make = Effect.gen(function* () {
           return yield* reloadAndEmit;
         }),
       ),
+    resetKeybindings: upsertSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const appliedMigrationIds = yield* readAppliedMigrationIds;
+        yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
+        yield* recordAppliedMigrations([
+          ...appliedMigrationIds,
+          ...DEFAULT_KEYBINDINGS_MIGRATION_IDS,
+        ]);
+        return yield* reloadAndEmit;
+      }),
+    ),
   } satisfies Keybindings["Service"];
 });
 
