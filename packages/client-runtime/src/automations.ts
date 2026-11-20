@@ -1,4 +1,4 @@
-import type { ScheduledTask } from "@t3tools/contracts";
+import { scheduledTaskEventMatchesProject, type ScheduledTask } from "@t3tools/contracts";
 
 export interface AutomationThreadContext {
   readonly threadId: string;
@@ -18,7 +18,7 @@ export function automationAppliesTo(
   if (task.threadId === thread.threadId) return "bound";
   const schedule = task.schedule;
   if (schedule.type !== "event" || schedule.event === "status_transition") return null;
-  if (schedule.projectId !== undefined && schedule.projectId !== thread.projectId) return null;
+  if (!scheduledTaskEventMatchesProject(schedule, thread.projectId)) return null;
   if (schedule.threadIds === undefined || schedule.threadIds.length === 0) return "event";
   const watched = new Set<string>(schedule.threadIds);
   const matches =

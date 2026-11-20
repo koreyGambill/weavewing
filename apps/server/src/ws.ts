@@ -2470,9 +2470,11 @@ export const layerWsRpc = (
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
         [WS_METHODS.scheduledTasksListRuns]: (input) =>
-          Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
-            Effect.andThen(scheduledTasks.listRuns(input)),
-          ),
+          input.id === undefined
+            ? scheduledTasks.listRuns(input)
+            : Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
+                Effect.andThen(scheduledTasks.listRuns(input)),
+              ),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({

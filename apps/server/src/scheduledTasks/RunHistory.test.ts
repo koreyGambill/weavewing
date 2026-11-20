@@ -1,5 +1,11 @@
 import { assert, it } from "@effect/vitest";
-import { RunId, ScheduledTaskId, ScheduledTaskRunId, ThreadId } from "@t3tools/contracts";
+import {
+  RunId,
+  ScheduledTaskId,
+  type ScheduledTaskListRunsResult,
+  ScheduledTaskRunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -98,6 +104,16 @@ it.effect("keeps the newest runs per task and pages through them newest first", 
     assert.equal(seen[1], `run:${total - 1}`);
     assert.equal(seen.at(-1), "run:5");
     assert.equal(new Set(seen).size, seen.length);
+
+    const allRuns: Array<string> = [];
+    before = undefined;
+    for (;;) {
+      const page: ScheduledTaskListRunsResult = yield* RunHistory.listRuns(undefined, before);
+      allRuns.push(...page.runs.map((run) => run.id));
+      if (!page.hasMore) break;
+      before = page.runs.at(-1)?.id;
+    }
+    assert.deepEqual(allRuns, [...seen, "run:other-task"]);
 
     const [skipped] = yield* sql<{
       last_run_ended_at: string | null;

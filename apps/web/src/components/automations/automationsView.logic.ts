@@ -10,7 +10,7 @@ import {
   type ScheduledTaskSchedule,
 } from "@t3tools/contracts";
 
-export type AutomationScope = "thread" | "project" | "server";
+export type AutomationStatusFilter = "all" | "active" | "paused";
 
 export interface AutomationRowModel {
   readonly task: ScheduledTask;
@@ -22,6 +22,7 @@ export interface AutomationSections {
   readonly on: ReadonlyArray<AutomationRowModel>;
   /** Thread scope only: automations switched off for the open thread. */
   readonly off: ReadonlyArray<AutomationRowModel>;
+  readonly completed: ReadonlyArray<AutomationRowModel>;
 }
 
 function matchesFilter(task: ScheduledTask, filter: string) {
@@ -33,32 +34,45 @@ function matchesFilter(task: ScheduledTask, filter: string) {
   );
 }
 
+function isCompletedOnce(task: ScheduledTask): boolean {
+  return (
+    task.schedule.type === "once" &&
+    task.nextRunAt === null &&
+    task.lastRunStatus !== "running" &&
+    task.lastRunAt !== null &&
+    Date.parse(task.lastRunAt) >= Date.parse(task.schedule.runAt)
+  );
+}
+
 /** Rows for one environment's automations in the chosen scope. */
 export function automationSections(
   tasks: ReadonlyArray<ScheduledTask>,
   options: {
-    readonly scope: AutomationScope;
     readonly thread: AutomationThreadContext | null;
     readonly filter: string;
-    readonly showPaused: boolean;
+    readonly status: AutomationStatusFilter;
   },
 ): AutomationSections {
   const on: AutomationRowModel[] = [];
   const off: AutomationRowModel[] = [];
+  const completed: AutomationRowModel[] = [];
   const { thread } = options;
   for (const task of tasks) {
-    if (!matchesFilter(task, options.filter) || (!options.showPaused && !task.enabled)) continue;
-    if (options.scope === "thread") {
-      const applies = thread === null ? null : automationAppliesTo(task, thread);
-      if (thread === null || applies === null) continue;
-      const row = { task, applies };
-      if (applies === "event" && automationOffForThread(task, thread.threadId)) off.push(row);
-      else on.push(row);
-    } else if (options.scope === "server" || task.projectId === thread?.projectId) {
-      on.push({ task, applies: null });
-    }
+    if (!matchesFilter(task, options.filter)) continue;
+    const applies = thread === null ? null : automationAppliesTo(task, thread);
+    if (thread !== null && applies === null) continue;
+    const finished = isCompletedOnce(task);
+    const offHere =
+      applies === "event" && thread !== null && automationOffForThread(task, thread.threadId);
+    const active = task.enabled && !offHere;
+    if (options.status !== "all" && (finished || active !== (options.status === "active")))
+      continue;
+    const row = { task, applies };
+    if (finished) completed.push(row);
+    else if (offHere) off.push(row);
+    else on.push(row);
   }
-  return { on, off };
+  return { on, off, completed };
 }
 
 /** Where "Open thread" goes: the thread a one-thread automation keeps, or the newest run's. */

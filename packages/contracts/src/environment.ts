@@ -220,8 +220,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   idleWorkCheckins: Schema.optionalKey(Schema.Boolean),
   /** Server records automation runs and answers scheduledTasks.listRuns. */
   automations: Schema.optionalKey(Schema.Boolean),
+  /** Server can list automation runs without filtering by automation. */
+  automationRunHistory: Schema.optionalKey(Schema.Boolean),
   /** Server saves and runs scheduled tasks with an `event` schedule. */
   eventTriggers: Schema.optionalKey(Schema.Boolean),
+  /** Server honors more than one trigger project for a thread event. */
+  automationTriggerProjects: Schema.optionalKey(Schema.Boolean),
   /**
    * Server answers xwingEnvironments.* and developmentEnvironments.*, and launches accept an
    * `xwing_environment` workspace strategy. The host may still lack Xwing.

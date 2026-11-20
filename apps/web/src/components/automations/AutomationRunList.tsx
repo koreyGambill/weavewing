@@ -1,4 +1,4 @@
-import type { EnvironmentId, ScheduledTaskRun } from "@t3tools/contracts";
+import type { EnvironmentId, ScheduledTaskId, ScheduledTaskRun } from "@t3tools/contracts";
 import {
   BanIcon,
   CheckIcon,
@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { runCostLabel, runOutcomeLabel } from "./automationsView.logic";
 import { useOpenThread } from "./useAutomations";
 
@@ -38,11 +39,12 @@ function runTimeLabel(iso: string): string {
   return `${dateFormat.format(date)} ${time}`;
 }
 
-/** The newest page of an automation's runs; each row with a thread opens it. */
+/** A page of runs with links to their threads. */
 export function AutomationRunList(props: {
   environmentId: EnvironmentId;
   runs: ReadonlyArray<ScheduledTaskRun>;
-  hasMore: boolean;
+  hasMore?: boolean;
+  taskTitles?: ReadonlyMap<ScheduledTaskId, string>;
 }) {
   const openThread = useOpenThread();
   return (
@@ -50,7 +52,15 @@ export function AutomationRunList(props: {
       <ul className="m-0 list-none space-y-0.5 p-0">
         {props.runs.map((run) => {
           const { icon, tone } = RUN_ICONS[run.status] ?? FAILED_ICON;
-          const detail = [runOutcomeLabel(run), runCostLabel(run), run.error ?? run.trigger.summary]
+          const title =
+            props.taskTitles && (props.taskTitles.get(run.taskId) ?? "Unknown automation");
+          const time = runTimeLabel(run.startedAt);
+          const detail = [
+            runOutcomeLabel(run),
+            ...(title ? [time] : []),
+            runCostLabel(run),
+            run.error ?? run.trigger.summary,
+          ]
             .filter(Boolean)
             .join(" · ");
           const content = (
@@ -58,19 +68,24 @@ export function AutomationRunList(props: {
               <span aria-hidden className={cn("mt-0.5 shrink-0 [&_svg]:size-3.5", tone)}>
                 {icon}
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-foreground">
-                  {runTimeLabel(run.startedAt)}
-                </span>
-                <span
-                  className={cn(
-                    "block text-muted-foreground",
-                    run.error ? "line-clamp-3 break-words" : "truncate",
-                  )}
-                >
-                  {detail}
-                </span>
-              </span>
+              <Tooltip>
+                <TooltipTrigger render={<span className="min-w-0 flex-1" />}>
+                  <span className="block truncate text-foreground">{title ?? time}</span>
+                  <span
+                    className={cn(
+                      "block text-muted-foreground",
+                      run.error ? "line-clamp-3 break-words" : "truncate",
+                    )}
+                  >
+                    {detail}
+                  </span>
+                </TooltipTrigger>
+                <TooltipPopup side="right">
+                  {title ? <span className="block">{title}</span> : null}
+                  <span className="block">{new Date(run.startedAt).toLocaleString()}</span>
+                  <span className="block">{detail}</span>
+                </TooltipPopup>
+              </Tooltip>
             </>
           );
           return (

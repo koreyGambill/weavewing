@@ -1,4 +1,5 @@
 import {
+  scheduledTaskEventMatchesProject,
   eventCooldownSeconds,
   isListedThreadLineage,
   type OrchestrationV2DomainEvent,
@@ -119,7 +120,7 @@ function matchesEventSchedule(
     );
   }
   if (thread === null) return false;
-  if (schedule.projectId !== undefined && schedule.projectId !== thread.projectId) return false;
+  if (!scheduledTaskEventMatchesProject(schedule, thread.projectId)) return false;
   if (schedule.threadIds === undefined || schedule.threadIds.length === 0) return true;
   const watched = new Set<string>(schedule.threadIds);
   return schedule.includeDescendants === true

@@ -2289,6 +2289,7 @@ export const layer = Layer.effect(
         const statusEvent = input.schedule.event === "status_transition";
         const threadFilters =
           input.schedule.projectId !== undefined ||
+          input.schedule.projectIds !== undefined ||
           (input.schedule.threadIds?.length ?? 0) > 0 ||
           input.schedule.includeDescendants === true;
         const statusFilters =
@@ -2744,7 +2745,10 @@ export const layer = Layer.effect(
       RunHistory.listRuns(input.id, input.before).pipe(
         withSql,
         Effect.mapError((cause) =>
-          taskError("Could not list automation runs.", { taskId: input.id, cause }),
+          taskError("Could not list automation runs.", {
+            ...(input.id === undefined ? {} : { taskId: input.id }),
+            cause,
+          }),
         ),
       );
 

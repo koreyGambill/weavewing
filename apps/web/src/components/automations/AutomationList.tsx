@@ -1,25 +1,29 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { AutomationThreadContext } from "@t3tools/client-runtime/automations";
-import type { EnvironmentId, ScheduledTask } from "@t3tools/contracts";
-import { formatModelSlugName } from "@t3tools/shared/model";
+import {
+  scheduledTaskEventProjectIds,
+  type EnvironmentId,
+  type ProjectId,
+} from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
+import { useProjects } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
-import { ScheduledRelativeLabel } from "../settings/ScheduledTasksSettings";
 import { scheduleLabel } from "../settings/scheduledTasksSettings.logic";
 import { SectionHeading } from "../ThreadToolViews";
 import { Button } from "../ui/button";
+import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Empty, EmptyContent, EmptyDescription } from "../ui/empty";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   type AutomationRowModel,
-  type AutomationScope,
+  type AutomationStatusFilter,
   automationSections,
   compactScheduleLabel,
 } from "./automationsView.logic";
@@ -28,10 +32,10 @@ import { type AutomationActions, automationRowKey, useAutomationActions } from "
 export function EnvironmentAutomations(props: {
   environmentId: EnvironmentId;
   grouped: boolean;
-  scope: AutomationScope;
   thread: AutomationThreadContext | null;
   filter: string;
-  showPaused: boolean;
+  status: AutomationStatusFilter;
+  contextThreadId: string | undefined;
 }) {
   const environment = useEnvironment(props.environmentId);
   const query = useEnvironmentQuery(
@@ -39,14 +43,26 @@ export function EnvironmentAutomations(props: {
   );
   const actions = useAutomationActions(props.environmentId);
   const navigate = useNavigate();
+  const [showCompleted, setShowCompleted] = useState(false);
+  const projects = useProjects();
+  const projectTitles = new Map(
+    projects
+      .filter((project) => project.environmentId === props.environmentId)
+      .map((project) => [project.id, project.title] as const),
+  );
   const sections = automationSections(query.data?.tasks ?? [], props);
-  const empty = sections.on.length === 0 && sections.off.length === 0;
-  const unfiltered = props.filter.trim() === "" && props.showPaused;
-  const row = (model: AutomationRowModel, offHere: boolean) => (
+  const empty =
+    sections.on.length === 0 && sections.off.length === 0 && sections.completed.length === 0;
+  const unfiltered = props.filter.trim() === "" && props.status === "all" && props.thread === null;
+  const completedExpanded = showCompleted || props.filter.trim() !== "";
+  const row = (model: AutomationRowModel, offHere: boolean, completed = false) => (
     <AutomationRow
       key={model.task.id}
       row={model}
       offHere={offHere}
+      completed={completed}
+      projectTitles={projectTitles}
+      contextThreadId={props.contextThreadId}
       environmentId={props.environmentId}
       timeZone={query.data?.timeZone}
       thread={props.thread}
@@ -64,15 +80,11 @@ export function EnvironmentAutomations(props: {
         <p className="text-muted-foreground">Loading automations…</p>
       ) : empty && !unfiltered ? (
         <p className="text-muted-foreground">No automations match.</p>
+      ) : empty && props.grouped ? (
+        <p className="text-muted-foreground">No automations on this server.</p>
       ) : empty ? (
         <Empty size="compact">
-          <EmptyDescription>
-            {props.scope === "thread"
-              ? "No automations apply to this thread."
-              : props.scope === "project"
-                ? "No automations run in this project."
-                : "Automations run agents on a schedule, a webhook or an event."}
-          </EmptyDescription>
+          <EmptyDescription>No automations on this server.</EmptyDescription>
           <EmptyContent>
             <Button
               size="xs"
@@ -92,7 +104,7 @@ export function EnvironmentAutomations(props: {
       ) : (
         // One keyed list, so a row that changes section keeps its instance and focus target.
         [
-          props.scope === "thread" && sections.on.length > 0 ? (
+          props.thread !== null && sections.on.length > 0 ? (
             <SectionHeading key="heading:on">For this thread</SectionHeading>
           ) : null,
           ...sections.on.map((model) => row(model, false)),
@@ -102,23 +114,30 @@ export function EnvironmentAutomations(props: {
             </div>
           ) : null,
           ...sections.off.map((model) => row(model, true)),
+          sections.completed.length > 0 ? (
+            <CollapsibleSectionHeader
+              key="heading:completed"
+              expanded={completedExpanded}
+              onClick={() => setShowCompleted(!completedExpanded)}
+              disabled={props.filter.trim() !== ""}
+              accessory={<span>{sections.completed.length}</span>}
+            >
+              Completed
+            </CollapsibleSectionHeader>
+          ) : null,
+          ...(completedExpanded ? sections.completed.map((model) => row(model, false, true)) : []),
         ]
       )}
     </section>
   );
 }
 
-const LAST_RUN_LABELS: Record<ScheduledTask["lastRunStatus"], string> = {
-  never: "Not run yet",
-  running: "Running",
-  succeeded: "Ran",
-  failed: "Failed",
-  skipped: "Skipped",
-};
-
 function AutomationRow({
   row,
   offHere,
+  completed,
+  projectTitles,
+  contextThreadId,
   environmentId,
   timeZone,
   thread,
@@ -126,6 +145,9 @@ function AutomationRow({
 }: {
   row: AutomationRowModel;
   offHere: boolean;
+  completed: boolean;
+  projectTitles: ReadonlyMap<ProjectId, string>;
+  contextThreadId: string | undefined;
   environmentId: EnvironmentId;
   timeZone: string | undefined;
   thread: AutomationThreadContext | null;
@@ -133,7 +155,7 @@ function AutomationRow({
 }) {
   const { task, applies } = row;
   const perThread = applies === "event" && thread !== null;
-  const lit = task.enabled && !offHere;
+  const lit = task.enabled && !offHere && !completed;
   const switchRef = useRef<HTMLButtonElement>(null);
   const refocusSwitch = useRef(false);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Moving the row to the other section re-inserts its DOM node, which drops focus; the switch that moved it takes focus back.
@@ -146,8 +168,37 @@ function AutomationRow({
     offHere,
   ]);
   const offCount = task.disabledThreadIds?.length ?? 0;
-  // Rows are narrow; the vendor prefix costs the trigger its room. Detail shows the full name.
-  const model = formatModelSlugName(task.modelSelection.model).replace(/^Claude /, "");
+  const status = [
+    !task.enabled ? "Paused" : offHere ? "Off for this thread" : null,
+    task.lastRunStatus === "running" ? "Running" : null,
+    !perThread && offCount > 0 ? `Off for ${offCount} thread${offCount === 1 ? "" : "s"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const event =
+    task.schedule.type === "event" && task.schedule.event !== "status_transition"
+      ? task.schedule
+      : null;
+  const eventThreads = event?.threadIds ?? [];
+  const eventProjects = event === null ? [] : scheduledTaskEventProjectIds(event);
+  const scopeLabel =
+    eventThreads.length > 0
+      ? eventThreads.length === 1 && eventThreads[0] === contextThreadId
+        ? "This thread"
+        : eventThreads.length === 1
+          ? "One thread"
+          : `${eventThreads.length} threads`
+      : event !== null
+        ? eventProjects.length === 0
+          ? "All projects"
+          : eventProjects.length === 1 && eventProjects[0] !== undefined
+            ? (projectTitles.get(eventProjects[0]) ?? "Selected project")
+            : `${eventProjects.length} projects`
+        : task.threadId === contextThreadId
+          ? "This thread"
+          : task.threadId !== null
+            ? "One thread"
+            : (projectTitles.get(task.projectId) ?? "Project");
   const trigger =
     compactScheduleLabel(task.schedule) ?? scheduleLabel(task.schedule, timeZone, task.nextRunAt);
   const pausedEverywhere = perThread && !task.enabled;
@@ -204,39 +255,26 @@ function AutomationRow({
           <span className="flex min-w-0 text-muted-foreground">
             <span className="min-w-0 truncate">{trigger}</span>
             <span className="shrink-0 whitespace-pre"> · </span>
-            <span className="max-w-[40%] shrink-0 truncate">{model}</span>
+            <span className="max-w-[40%] shrink-0 truncate">{scopeLabel}</span>
           </span>
-          <span
-            className={cn(
-              "block truncate",
-              task.lastRunStatus === "failed" ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {task.enabled ? (offHere ? "off here · " : "") : "paused · "}
-            {LAST_RUN_LABELS[task.lastRunStatus]}
-            {task.lastRunAt !== null && task.lastRunStatus !== "running" ? (
-              <>
-                {" "}
-                <ScheduledRelativeLabel value={task.lastRunAt} />
-              </>
-            ) : null}
-            {!perThread && offCount > 0
-              ? ` · off for ${offCount} thread${offCount === 1 ? "" : "s"}`
-              : ""}
-          </span>
+          {!completed && status ? (
+            <span className="block truncate text-muted-foreground">{status}</span>
+          ) : null}
         </span>
       </button>
-      <span className="absolute top-1.5 right-1.5 flex">
-        {pausedEverywhere ? (
-          <Tooltip>
-            {/* A disabled switch takes no pointer events, so the wrapper carries the hint. */}
-            <TooltipTrigger render={<span className="flex" />}>{toggle}</TooltipTrigger>
-            <TooltipPopup side="left">Paused everywhere. Resume it in its detail.</TooltipPopup>
-          </Tooltip>
-        ) : (
-          toggle
-        )}
-      </span>
+      {!completed ? (
+        <span className="absolute top-1.5 right-1.5 flex">
+          {pausedEverywhere ? (
+            <Tooltip>
+              {/* A disabled switch takes no pointer events, so the wrapper carries the hint. */}
+              <TooltipTrigger render={<span className="flex" />}>{toggle}</TooltipTrigger>
+              <TooltipPopup side="left">Paused everywhere. Resume it in its detail.</TooltipPopup>
+            </Tooltip>
+          ) : (
+            toggle
+          )}
+        </span>
+      ) : null}
     </div>
   );
 }

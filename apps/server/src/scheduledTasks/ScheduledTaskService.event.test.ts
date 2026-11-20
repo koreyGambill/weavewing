@@ -272,18 +272,23 @@ const threadEvent = (
     } as unknown as OrchestrationV2DomainEvent;
   });
 
-it.effect("run_ended fires once per run, only for matching threads", () =>
+it.effect("run_ended fires once per run, only for threads in selected projects", () =>
   Effect.gen(function* () {
     const f = yield* fixture;
     yield* insertThread("thread:a");
-    yield* insertThread("thread:b");
+    yield* insertThread("thread:b", "project:second");
     yield* insertThread("thread:elsewhere", "project:other");
     yield* withService(f, (service, queued) =>
       Effect.gen(function* () {
         const { task } = yield* service.upsert(
           yield* decode({
             ...input,
-            schedule: { type: "event", event: "run_ended", projectId: "project:test" },
+            schedule: {
+              type: "event",
+              event: "run_ended",
+              projectId: "project:test",
+              projectIds: ["project:test", "project:second"],
+            },
           }),
         );
         expect(task.nextRunAt).toBeNull();

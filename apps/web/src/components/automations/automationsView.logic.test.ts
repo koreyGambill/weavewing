@@ -16,7 +16,7 @@ const task = (id: string, fields: Partial<Record<keyof ScheduledTask, unknown>> 
   }) as unknown as ScheduledTask;
 
 const thread = { threadId: "thread:1", projectId: "project:a", lineage: ["thread:1"] };
-const options = { scope: "thread", thread, filter: "", showPaused: true } as const;
+const options = { thread, filter: "", status: "all" } as const;
 const ids = (rows: ReadonlyArray<{ task: ScheduledTask }>) => rows.map((row) => row.task.id);
 
 describe("automationSections", () => {
@@ -35,23 +35,43 @@ describe("automationSections", () => {
     expect(ids(sections.off)).toEqual(["off"]);
   });
 
-  it("lists the project's or every automation outside thread scope", () => {
-    expect(ids(automationSections(tasks, { ...options, scope: "project" }).on)).toEqual([
-      "bound",
-      "event",
-      "off",
-      "daily",
-      "paused",
-    ]);
-    const server = automationSections(tasks, { ...options, scope: "server", thread: null });
-    expect(server.on).toHaveLength(6);
+  it("lists every automation by default and combines search and status filters", () => {
+    const all = { ...options, thread: null };
+    expect(automationSections(tasks, all).on).toHaveLength(6);
+    expect(ids(automationSections(tasks, { ...all, filter: "task d" }).on)).toEqual(["daily"]);
+    expect(ids(automationSections(tasks, { ...all, status: "paused" }).on)).toEqual(["paused"]);
+    const active = automationSections(tasks, { ...options, status: "active" });
+    expect(ids(active.on)).toEqual(["bound", "event"]);
+    expect(active.off).toEqual([]);
   });
 
-  it("filters by title or prompt and can hide paused ones", () => {
-    const filtered = automationSections(tasks, { ...options, scope: "server", filter: "task d" });
-    expect(ids(filtered.on)).toEqual(["daily"]);
-    const active = automationSections(tasks, { ...options, scope: "server", showPaused: false });
-    expect(ids(active.on)).not.toContain("paused");
+  it("folds finished one-time schedules out of the active inventory", () => {
+    const runAt = "2026-11-19T20:00:00.000Z";
+    const schedule = { type: "once", runAt };
+    const once = (id: string, fields: Partial<ScheduledTask>) =>
+      task(id, {
+        schedule,
+        nextRunAt: null,
+        lastRunAt: runAt,
+        lastRunStatus: "succeeded",
+        ...fields,
+      });
+    const scheduled = [
+      once("finished", {}),
+      once("running", { lastRunStatus: "running" }),
+      once("manual-before-due", { lastRunAt: "2026-11-19T19:00:00.000Z", nextRunAt: runAt }),
+      once("paused-before-due", {
+        enabled: false,
+        lastRunAt: "2026-11-19T19:00:00.000Z",
+      }),
+    ];
+    const server = { ...options, thread: null } as const;
+    const all = automationSections(scheduled, server);
+    expect(ids(all.completed)).toEqual(["finished"]);
+    expect(ids(all.on)).toEqual(["running", "manual-before-due", "paused-before-due"]);
+    const active = automationSections(scheduled, { ...server, status: "active" });
+    expect(ids(active.on)).toEqual(["running", "manual-before-due"]);
+    expect(active.completed).toEqual([]);
   });
 });
 

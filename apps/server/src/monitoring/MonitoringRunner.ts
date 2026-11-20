@@ -8,6 +8,7 @@ import {
   MonitoringReviewOutput,
   ProjectId,
   isProviderAvailable,
+  scheduledTaskEventProjectIds,
   type ModelSelection,
   type MonitoringFinding,
   type ScheduledTask,
@@ -312,10 +313,12 @@ const make = Effect.gen(function* () {
     running.set(id, active);
     return yield* Effect.gen(function* () {
       const schedule = input.task.schedule;
-      const everyProject = schedule.type === "event" && schedule.projectId === undefined;
+      const projects = schedule.type === "event" ? scheduledTaskEventProjectIds(schedule) : null;
+      const useThreadProject =
+        projects !== null && (projects.length !== 1 || projects[0] !== stored.projectId);
       const project =
-        threadId !== undefined && everyProject ? yield* threadProject(threadId) : null;
-      // An every-project turn-end review runs as if it belonged to the reviewed thread's project.
+        threadId !== undefined && useThreadProject ? yield* threadProject(threadId) : null;
+      // A review spanning projects uses the reviewed thread’s project.
       const profile: ReviewProfile =
         threadId !== undefined && project !== null
           ? { ...stored, projectId: project, targets: { ...stored.targets, threadIds: [threadId] } }

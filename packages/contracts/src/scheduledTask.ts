@@ -238,6 +238,9 @@ export const ScheduledTaskEventSchedule = Schema.Struct({
   type: Schema.Literal("event"),
   event: ScheduledTaskEventKind,
   projectId: Schema.optional(ProjectId).annotate({ description: "Only threads in this project." }),
+  projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMinLength(1))).annotate({
+    description: "Only threads in these projects. Takes precedence over projectId.",
+  }),
   threadIds: Schema.optional(
     Schema.Array(ThreadId).check(Schema.isMaxLength(MAX_EVENT_FILTER_THREADS)),
   ).annotate({ description: "Only these threads." }),
@@ -264,6 +267,22 @@ export const ScheduledTaskEventSchedule = Schema.Struct({
     "Run on a server event; the prompt gets it appended. The task's own turns and threads never trigger it.",
 });
 export type ScheduledTaskEventSchedule = typeof ScheduledTaskEventSchedule.Type;
+
+/** Projects whose threads can trigger the automation. An empty list matches all projects. */
+export function scheduledTaskEventProjectIds(
+  schedule: Pick<ScheduledTaskEventSchedule, "projectId" | "projectIds">,
+): ReadonlyArray<ProjectId> {
+  return schedule.projectIds ?? (schedule.projectId === undefined ? [] : [schedule.projectId]);
+}
+
+/** Whether a thread's project matches the event trigger's project filter. */
+export function scheduledTaskEventMatchesProject(
+  schedule: Pick<ScheduledTaskEventSchedule, "projectId" | "projectIds">,
+  projectId: string | null,
+): boolean {
+  const projects = scheduledTaskEventProjectIds(schedule);
+  return projects.length === 0 || projects.some((id) => id === projectId);
+}
 
 /** Accept legacy sub-minute schedules so users can still manage them. */
 export const ScheduledTaskSchedule = Schema.Union([
@@ -602,7 +621,7 @@ export const ScheduledTaskRun = Schema.Struct({
 export type ScheduledTaskRun = typeof ScheduledTaskRun.Type;
 
 export const ScheduledTaskListRunsInput = Schema.Struct({
-  id: ScheduledTaskId,
+  id: Schema.optional(ScheduledTaskId),
   /** A run id from the previous page; returns the runs that started before it. */
   before: Schema.optional(ScheduledTaskRunId),
 });
