@@ -219,7 +219,6 @@ function run(
 }
 
 export interface FakeThread {
-  readonly projectId?: ProjectId;
   readonly worktreePath?: string;
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
@@ -227,6 +226,7 @@ export interface FakeThread {
   readonly olderSettled?: true;
   readonly id: ThreadId;
   readonly title: string;
+  readonly projectId?: ProjectId;
   /** Defaults to GPT-5.4 on Codex. */
   readonly modelSelection?: ModelSelection;
   /** The first is the thread's active provider thread. */
@@ -574,12 +574,12 @@ export function installFakeEnvironment(
   fixtures: ReadonlyArray<FakeThread>,
   options?: {
     readonly acceptCommands?: boolean;
-    readonly scratchWorkspaceRoot?: string;
     readonly keybindings?: ResolvedKeybindingsConfig;
     readonly extraProjects?: ReadonlyArray<Pick<OrchestrationProjectShell, "id" | "title">>;
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
     readonly holdCommand?: (command: OrchestrationV2Command) => boolean;
     readonly providers?: ReadonlyArray<unknown>;
+    readonly scratchWorkspaceRoot?: string;
   },
 ): Disposable {
   threads = fixtures;
@@ -693,7 +693,6 @@ export function isThreadSubscribed(threadId: ThreadId): boolean {
   return threadSubscribers.has(threadId);
 }
 
-/** Delivers one domain event, such as a run or turn-item update, to the thread's subscription. */
 export async function emitThreadShell(thread: FakeThread): Promise<void> {
   if (shellSubscriber === null) throw new Error("No live shell subscription");
   await Effect.runPromise(
@@ -706,6 +705,7 @@ export async function emitThreadShell(thread: FakeThread): Promise<void> {
   );
 }
 
+/** Delivers one domain event, such as a run or turn-item update, to the thread's subscription. */
 export async function emitThreadEvent(
   threadId: ThreadId,
   event: Pick<ThreadEvent, "type" | "payload">,

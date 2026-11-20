@@ -4106,7 +4106,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
               }),
               Layer.mock(ProjectService.ProjectService)({
                 getById: () => Effect.succeedSome({ workspaceRoot: "/workspace/xwing" } as never),
-                listShells: projectStore.listShells,
+                listShells: () => projectStore.listShells().pipe(Effect.orDie),
               }),
               Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
                 isScratchProject: (id) => Effect.succeed(id === scratchProjectId),
