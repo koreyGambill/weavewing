@@ -64,6 +64,113 @@ interface TimelineRewindInput {
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
 }
 
+function getRewindToReplyDisabledReason({
+  supportsRewindToReply,
+  activeEnvironmentUnavailable,
+  serverProjection,
+  isSendBusy,
+  isRevertingCheckpoint,
+  phase,
+}: Pick<
+  TimelineRewindInput,
+  | "supportsRewindToReply"
+  | "activeEnvironmentUnavailable"
+  | "serverProjection"
+  | "isSendBusy"
+  | "isRevertingCheckpoint"
+  | "phase"
+>): RewindToReply["disabledReason"] {
+  if (!supportsRewindToReply) return () => "Update the environment to rewind to a reply.";
+  if (activeEnvironmentUnavailable) return () => "Reconnect to this environment to rewind.";
+  if (!serverProjection) return () => "Wait for the conversation to load.";
+  const {
+    thread,
+    runs,
+    providerThreads,
+    providerTurns,
+    providerSessions,
+    turnItems,
+    runtimeRequests,
+    contextTransfers,
+    subagents,
+  } = serverProjection;
+  if (
+    isSendBusy ||
+    isRevertingCheckpoint ||
+    phase === "running" ||
+    runs.some((run) =>
+      ["queued", "preparing", "starting", "running", "waiting"].includes(run.status),
+    ) ||
+    runtimeRequests.some((request) => request.status === "pending") ||
+    contextTransfers.some(
+      (transfer) =>
+        transfer.type === "merge_back" &&
+        transfer.targetThreadId === thread.id &&
+        transfer.status === "pending",
+    ) ||
+    subagents.some((task) => isOrchestrationV2WorkActive(task.status))
+  ) {
+    return () => "Finish the current turn and queued work before rewinding.";
+  }
+  return (runId, messageId) => {
+    const run = runs.find((run) => run.id === runId);
+    const reply = turnItems.findLast(
+      (item) =>
+        item.runId === runId &&
+        item.type === "assistant_message" &&
+        item.phase !== "commentary" &&
+        item.phase !== "partial_answer",
+    );
+    if (
+      run?.status !== "completed" ||
+      reply?.type !== "assistant_message" ||
+      reply.messageId !== messageId
+    ) {
+      return "Choose the final reply of a completed turn.";
+    }
+    const laterRuns = runs.filter(
+      (later) =>
+        later.ordinal > run.ordinal && later.startedAt !== null && later.status !== "rolled_back",
+    );
+    if (laterRuns.length === 0) return "There is no later conversation to move.";
+    if (run.ordinal <= (thread.contextRewind?.runOrdinal ?? 0)) {
+      return "This reply belongs to an earlier conversation.";
+    }
+    const provider = providerThreads.find(
+      (provider) => provider.id === thread.activeProviderThreadId,
+    );
+    if (provider?.driver !== "codex") return "Rewind to here requires native Codex history.";
+    if (provider.goal?.status === "active") return "Pause the active goal before rewinding.";
+    if (provider.pendingBackgroundTasks?.length)
+      return "Finish provider background work before rewinding.";
+    const boundary = latestProviderTurnForAttempt(providerTurns, run.activeAttemptId);
+    if (
+      run.providerThreadId !== provider.id ||
+      laterRuns.some((later) => later.providerThreadId !== provider.id) ||
+      provider.providerInstanceId !== thread.modelSelection.instanceId ||
+      provider.nativeThreadRef?.strength !== "strong" ||
+      provider.nativeThreadRef.nativeId === null ||
+      provider.providerSessionId === null ||
+      boundary?.status !== "completed" ||
+      boundary.providerThreadId !== provider.id ||
+      boundary.nativeTurnRef?.strength !== "strong" ||
+      boundary.nativeTurnRef.nativeId === null
+    ) {
+      return "This reply and the later conversation need to share the active Codex session and have a native turn boundary.";
+    }
+    const capabilities = providerSessions.find(
+      (session) => session.id === provider.providerSessionId,
+    )?.capabilities;
+    if (
+      capabilities &&
+      (!capabilities.threads.canForkThread || !capabilities.threads.canForkFromTurn)
+    ) {
+      return "This Codex installation does not support native forks at a turn boundary.";
+    }
+    return null;
+  };
+}
+
 /**
  * Going back in a thread's timeline: reverting to an earlier turn (restoring that message into
  * the composer) and forking a new thread from a run.
@@ -234,94 +341,14 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     void onRevertToTurnCountStable(targetTurnCount, messageId);
   };
   const onRevertTimelineTurnStable = useStableCallback(onRevertTimelineTurn);
-  const rewindToReplyDisabledReason: RewindToReply["disabledReason"] = (runId, messageId) => {
-    if (!supportsRewindToReply) return "Update the environment to rewind to a reply.";
-    if (activeEnvironmentUnavailable) return "Reconnect to this environment to rewind.";
-    if (!serverProjection) return "Wait for the conversation to load.";
-    const {
-      thread,
-      runs,
-      providerThreads,
-      providerTurns,
-      turnItems,
-      runtimeRequests,
-      contextTransfers,
-      subagents,
-    } = serverProjection;
-    if (
-      isSendBusy ||
-      isRevertingCheckpoint ||
-      phase === "running" ||
-      runs.some((run) =>
-        ["queued", "preparing", "starting", "running", "waiting"].includes(run.status),
-      ) ||
-      runtimeRequests.some((request) => request.status === "pending") ||
-      contextTransfers.some(
-        (transfer) =>
-          transfer.type === "merge_back" &&
-          transfer.targetThreadId === thread.id &&
-          transfer.status === "pending",
-      ) ||
-      subagents.some((task) => isOrchestrationV2WorkActive(task.status))
-    ) {
-      return "Finish the current turn and queued work before rewinding.";
-    }
-    const run = runs.find((run) => run.id === runId);
-    const reply = turnItems.findLast(
-      (item) =>
-        item.runId === runId &&
-        item.type === "assistant_message" &&
-        item.phase !== "commentary" &&
-        item.phase !== "partial_answer",
-    );
-    if (
-      run?.status !== "completed" ||
-      reply?.type !== "assistant_message" ||
-      reply.messageId !== messageId
-    ) {
-      return "Choose the final reply of a completed turn.";
-    }
-    const laterRuns = runs.filter(
-      (later) =>
-        later.ordinal > run.ordinal && later.startedAt !== null && later.status !== "rolled_back",
-    );
-    if (laterRuns.length === 0) return "There is no later conversation to move.";
-    if (run.ordinal <= (thread.contextRewind?.runOrdinal ?? 0)) {
-      return "This reply belongs to an earlier conversation.";
-    }
-    const provider = providerThreads.find(
-      (provider) => provider.id === thread.activeProviderThreadId,
-    );
-    if (provider?.driver !== "codex") return "Rewind to here requires native Codex history.";
-    if (provider.goal?.status === "active") return "Pause the active goal before rewinding.";
-    if (provider.pendingBackgroundTasks?.length)
-      return "Finish provider background work before rewinding.";
-    const boundary = latestProviderTurnForAttempt(providerTurns, run.activeAttemptId);
-    if (
-      run.providerThreadId !== provider.id ||
-      laterRuns.some((later) => later.providerThreadId !== provider.id) ||
-      provider.providerInstanceId !== thread.modelSelection.instanceId ||
-      provider.nativeThreadRef?.strength !== "strong" ||
-      provider.nativeThreadRef.nativeId === null ||
-      provider.providerSessionId === null ||
-      boundary?.status !== "completed" ||
-      boundary.providerThreadId !== provider.id ||
-      boundary.nativeTurnRef?.strength !== "strong" ||
-      boundary.nativeTurnRef.nativeId === null
-    ) {
-      return "This reply and the later conversation need to share the active Codex session and have a native turn boundary.";
-    }
-    const capabilities = serverProjection.providerSessions.find(
-      (session) => session.id === provider.providerSessionId,
-    )?.capabilities;
-    if (
-      capabilities &&
-      (!capabilities.threads.canForkThread || !capabilities.threads.canForkFromTurn)
-    ) {
-      return "This Codex installation does not support native forks at a turn boundary.";
-    }
-    return null;
-  };
+  const rewindToReplyDisabledReason = getRewindToReplyDisabledReason({
+    supportsRewindToReply,
+    activeEnvironmentUnavailable,
+    serverProjection,
+    isSendBusy,
+    isRevertingCheckpoint,
+    phase,
+  });
   const onRewindToReply = useStableCallback(async (runId: RunId, messageId: MessageId) => {
     const api = readLocalApi();
     if (

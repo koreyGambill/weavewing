@@ -101,6 +101,9 @@ interface ThreadDetailsPanelProps extends Pick<
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
+  const requireNativeHistory = useClientSettings(
+    (settings) => settings.forkHistoryPolicy === "require_native",
+  );
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const threadKey = `${props.environmentId}:${props.threadId}`;
   const [lineageThreadKey, setLineageThreadKey] = useState<string | null>(null);
@@ -112,6 +115,11 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
   const serverConfig = useServerConfigs().get(props.environmentId);
+  const showHistoryControls =
+    props.isServerThread &&
+    (serverConfig?.environment.capabilities.forkHistoryPolicy ||
+      serverConfig?.environment.capabilities.summaryHandoff ||
+      requireNativeHistory);
   // A No project thread's folder sits inside the shared scratch root, so it must never get git.
   // Until the config and project load, a No project thread looks like any other folder.
   const offersGit =
@@ -266,7 +274,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             />
           ) : null}
 
-          {props.isServerThread ? <ThreadHistoryControls threadRef={activeThreadRef} /> : null}
+          {showHistoryControls ? <ThreadHistoryControls threadRef={activeThreadRef} /> : null}
 
           {visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
 

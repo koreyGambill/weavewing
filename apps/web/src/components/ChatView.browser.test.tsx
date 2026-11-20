@@ -662,7 +662,7 @@ it("a mounted thread view lets go of the thread structures it has replaced", asy
   const items = [...history.items];
   const updated = { ...history, items };
   const other = threadWithHistory("other", 3);
-  using _environment = installFakeEnvironment([updated, other]);
+  using _environment = installFakeEnvironment([updated, other], { rewindToReply: true });
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",

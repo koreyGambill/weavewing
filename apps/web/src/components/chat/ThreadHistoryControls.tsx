@@ -34,7 +34,11 @@ export function ThreadHistoryControls({ threadRef }: { readonly threadRef: Scope
   const supported = useServerConfigs().get(threadRef.environmentId)?.environment.capabilities
     .forkHistoryPolicy;
   return (
-    <ThreadDetailsSection title="Conversation history" headingId={headingId}>
+    <ThreadDetailsSection
+      title="Conversation history"
+      headingId={headingId}
+      data-thread-details-history
+    >
       <div className="flex flex-col items-start gap-1 px-2 pb-2">
         <Select
           value={policy}

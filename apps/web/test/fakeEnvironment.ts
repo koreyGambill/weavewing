@@ -579,6 +579,7 @@ export function installFakeEnvironment(
   options?: {
     readonly acceptCommands?: boolean;
     readonly threadStop?: boolean;
+    readonly rewindToReply?: boolean;
     readonly vcsStatus?: typeof vcsStatusSnapshot;
     readonly keybindings?: ResolvedKeybindingsConfig;
     readonly extraProjects?: ReadonlyArray<Pick<OrchestrationProjectShell, "id" | "title">>;
@@ -597,12 +598,16 @@ export function installFakeEnvironment(
       ? {}
       : { scratchWorkspaceRoot: options.scratchWorkspaceRoot }),
   };
-  if (options?.threadStop) {
+  if (options?.threadStop || options?.rewindToReply) {
     baseServerConfig = {
       ...baseServerConfig,
       environment: {
         ...baseServerConfig.environment,
-        capabilities: { ...baseServerConfig.environment.capabilities, threadStop: true },
+        capabilities: {
+          ...baseServerConfig.environment.capabilities,
+          ...(options.threadStop ? { threadStop: true } : {}),
+          ...(options.rewindToReply ? { rewindToReply: true } : {}),
+        },
       },
     };
   }
