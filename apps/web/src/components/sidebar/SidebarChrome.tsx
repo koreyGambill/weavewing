@@ -1,7 +1,7 @@
 import { WorkspaceHistoryButton } from "../reviews/WorkspaceHistoryButton";
 import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useState } from "react";
+import { lazy, Suspense, memo, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
@@ -43,6 +43,8 @@ import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
+
+const QuickHelp = lazy(() => import("./QuickHelp"));
 
 function useSidebarChromeStage() {
   const { isMobile } = useSidebar();
@@ -273,6 +275,7 @@ function SidebarUtilityItem({
 const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
   const isOnUtilityPage = useLocation({
@@ -315,6 +318,22 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         label="Shortcut reference"
         onClick={() => setShortcutsOpen(true)}
       />
+      <SidebarUtilityItem
+        icon={<span>?</span>}
+        label="Quick help"
+        onClick={() => setHelpOpen(true)}
+      />
+      {helpOpen ? (
+        <Suspense fallback={null}>
+          <QuickHelp
+            onClose={() => setHelpOpen(false)}
+            onShortcuts={() => {
+              setHelpOpen(false);
+              setShortcutsOpen(true);
+            }}
+          />
+        </Suspense>
+      ) : null}
       <ShortcutReferenceDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       {isOnUtilityPage ? (
         <SidebarMenuItem className="min-w-0 flex-1">
