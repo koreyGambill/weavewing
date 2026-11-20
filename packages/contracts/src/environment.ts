@@ -98,6 +98,7 @@ export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type;
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   forkHistoryPolicy: Schema.optionalKey(Schema.Literal(true)),
   summaryHandoff: Schema.optionalKey(Schema.Literal(true)),
+  summaryHandoffOptions: Schema.optionalKey(Schema.Literal(true)),
   conversationContextRewind: Schema.optionalKey(Schema.Literal(true)),
   rewindToReply: Schema.optionalKey(Schema.Literal(true)),
   statusSources: Schema.optionalKey(Schema.Boolean),

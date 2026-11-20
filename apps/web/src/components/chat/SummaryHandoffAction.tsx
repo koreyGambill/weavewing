@@ -74,7 +74,9 @@ export function SummaryHandoffAction({
   const cacheCold = useDeadlinePassed(
     expiresAt !== null && Number.isFinite(expiresAt) ? expiresAt : null,
   );
-  const supported = useServerConfigs().get(environmentId)?.environment.capabilities.summaryHandoff;
+  const capabilities = useServerConfigs().get(environmentId)?.environment.capabilities;
+  const supported = capabilities?.summaryHandoff;
+  const supportsOptions = capabilities?.summaryHandoffOptions;
   const canPrepare = useAtomValue(
     threadEnvironment.prepareSummaryHandoff.permissionAtom(environmentId),
   );
@@ -91,7 +93,7 @@ export function SummaryHandoffAction({
   const targetRef = destination === null ? null : scopeThreadRef(environmentId, destination);
   const targetShell = useThreadShell(targetRef);
 
-  if (!supported || !canPrepare) return null;
+  if (!supported || !canPrepare || (throughRunId !== undefined && !supportsOptions)) return null;
 
   const prepareHandoff = async (useSavedConversation: boolean, override = modelOverride) => {
     request.current?.abort();
@@ -185,7 +187,7 @@ export function SummaryHandoffAction({
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-3">
-            {selection ? (
+            {selection && supportsOptions ? (
               <ProviderModelPicker
                 environmentId={environmentId}
                 activeInstanceId={selection.instanceId}

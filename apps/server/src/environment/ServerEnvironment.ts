@@ -222,6 +222,7 @@ export const make = Effect.gen(function* () {
     capabilities: {
       forkHistoryPolicy: true,
       summaryHandoff: true,
+      summaryHandoffOptions: true,
       conversationContextRewind: true,
       rewindToReply: true,
       statusSources: true,
