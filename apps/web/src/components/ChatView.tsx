@@ -215,7 +215,7 @@ import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "~/lib/utils";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { WORKSPACE_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
@@ -3320,6 +3320,7 @@ export default function ChatView(props: ChatViewProps) {
     <WorkspaceTitlebar>
       <header
         data-chat-header
+        data-sidebar-resize-width="left"
         className={cn(
           "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
           isElectron
@@ -3328,7 +3329,7 @@ export default function ChatView(props: ChatViewProps) {
                 reserveTitleBarControlInset && "wco:pr-(--workspace-native-controls-inset)",
               )
             : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
-          COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+          WORKSPACE_TITLEBAR_INSET_CLASS,
         )}
       >
         <ChatHeader

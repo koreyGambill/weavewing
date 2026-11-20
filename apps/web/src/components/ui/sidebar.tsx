@@ -499,7 +499,8 @@ function SidebarRail({
         element.style.setProperty("width", `${value}px`);
       });
     };
-    widthTargets.forEach((element) => {
+    const resizeElements = [...widthTargets, ...widthFollowers];
+    resizeElements.forEach((element) => {
       element.style.setProperty("transition-duration", "0ms");
     });
     setTargetWidth(width);
@@ -542,6 +543,8 @@ function SidebarRail({
         });
         widthTargets.forEach((element) => {
           element.style.removeProperty("width");
+        });
+        resizeElements.forEach((element) => {
           element.style.removeProperty("transition-duration");
         });
       },
