@@ -212,6 +212,7 @@ it.effect(
         ProjectionStore.ProjectionStoreV2,
         ProjectionStore.ProjectionStoreV2.of({
           apply: () => Effect.void,
+          getForkSourceRewindOrdinal: () => Effect.die("unused getForkSourceRewindOrdinal"),
           getSideChatRefresh: () => Effect.die("unused getSideChatRefresh"),
           getLimitRecoveryCandidates: () => Effect.die("unused getLimitRecoveryCandidates"),
           getLimitRecoveryWakeAt: () => Effect.die("unused getLimitRecoveryWakeAt"),

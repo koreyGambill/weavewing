@@ -591,6 +591,10 @@ export interface ProjectionStoreV2Shape {
     ReadonlyMap<MessageId, OrchestrationV2ConversationMessage>,
     ProjectionStoreV2Error
   >;
+  readonly getForkSourceRewindOrdinal: (
+    sourceThreadId: ThreadId,
+    targetThreadId: ThreadId,
+  ) => Effect.Effect<number | undefined, ProjectionStoreV2Error>;
   readonly getSideChatRefresh: (
     threadId: ThreadId,
     window?: {
@@ -6832,6 +6836,36 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
     );
 
+    const getForkSourceRewindOrdinal: ProjectionStoreV2Shape["getForkSourceRewindOrdinal"] = (
+      sourceThreadId,
+      targetThreadId,
+    ) =>
+      // Creation events survive compaction and order a rewind and fork even in the same millisecond.
+      sql<{ readonly ordinal: number | null }>`
+        SELECT MAX(json_extract(archive.payload_json, '$.lineage.contextArchive.throughRunOrdinal')) AS ordinal
+        FROM orchestration_v2_projection_context_transfers AS transfer
+        JOIN orchestration_events AS archive INDEXED BY idx_orchestration_events_agent_stream_sequence
+          ON archive.stream_id = transfer.target_thread_id
+        WHERE transfer.source_thread_id = ${sourceThreadId}
+          AND transfer.type = 'fork'
+          AND archive.application_event_version = 2
+          AND archive.aggregate_kind = 'thread'
+          AND archive.event_type = 'thread.created'
+          AND archive.sequence < (
+            SELECT fork.sequence
+            FROM orchestration_events AS fork INDEXED BY idx_orchestration_events_agent_stream_sequence
+            WHERE fork.application_event_version = 2
+              AND fork.aggregate_kind = 'thread'
+              AND fork.stream_id = ${targetThreadId}
+              AND fork.event_type = 'thread.created'
+            ORDER BY fork.sequence
+            LIMIT 1
+          )
+      `.pipe(
+        Effect.map((rows) => rows[0]?.ordinal ?? undefined),
+        Effect.mapError(controlReadError(sourceThreadId)),
+      );
+
     const getSideChatRefresh: ProjectionStoreV2Shape["getSideChatRefresh"] = Effect.fn(
       "ProjectionStore.getSideChatRefresh",
     )(
@@ -9857,6 +9891,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getNextTurnItemOrdinal: readOnReader(getNextTurnItemOrdinal),
       getTurnItem: readOnReader(getTurnItem),
       getMessagesById: readOnReader(getMessagesById),
+      getForkSourceRewindOrdinal: readOnReader(getForkSourceRewindOrdinal),
       getSideChatRefresh: readOnReader(getSideChatRefresh),
       getThreadRecords: (threadId, fields, filter) =>
         getThreadRecords(threadId, fields, filter).pipe(NodeSqliteClient.readOnly),

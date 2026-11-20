@@ -319,6 +319,7 @@ it.effect("inherited history stops at a missing fork ancestor", () =>
     const items = yield* ContextHandoffService.readInheritedHandoffItems(
       {
         getThreadProjection: () => Effect.die("Expected ancestor lookup"),
+        getForkSourceRewindOrdinal: () => Effect.die("Expected ancestor lookup"),
         getThreadRecords: (missing) =>
           Effect.fail(new ProjectionStoreThreadNotFoundError({ threadId: missing })),
       },

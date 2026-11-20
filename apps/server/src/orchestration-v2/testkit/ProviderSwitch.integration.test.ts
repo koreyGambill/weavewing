@@ -4104,16 +4104,25 @@ describe("orchestration v2 provider switching", () => {
             sourcePoint: { type: "rewind", runId },
             sideChat: true,
           });
-        const forkSideChat = (id: ThreadId) =>
+        const fork = (
+          id: ThreadId,
+          options: Partial<
+            Pick<
+              Extract<OrchestrationV2Command, { type: "thread.fork" }>,
+              "sourceThreadId" | "sourcePoint" | "sideChat"
+            >
+          > = {},
+        ) =>
           orchestrator.dispatch({
             type: "thread.fork",
-            commandId: CommandId.make(`rewind:side-chat:${id}`),
+            commandId: CommandId.make(`rewind:fork:${id}`),
             createdBy: "user",
             creationSource: "web",
             sourceThreadId: root,
             targetThreadId: id,
             sourcePoint: { type: "latest_stable" },
             sideChat: true,
+            ...options,
           });
         const detach = (id: ThreadId) =>
           Effect.gen(function* () {
@@ -4204,17 +4213,14 @@ describe("orchestration v2 provider switching", () => {
         });
         yield* send(root, "plain prompt after rewind");
 
+        const forkRun = (yield* read()).runs.at(-1)!;
         const portableSideChat = ThreadId.make("thread:rewind-portable-side-chat");
-        yield* forkSideChat(portableSideChat);
-        yield* send(portableSideChat, "portable side chat after rewind", CODEX_MODEL_SELECTION);
+        yield* fork(portableSideChat);
         const nativeSideChat = ThreadId.make("thread:rewind-native-side-chat");
-        yield* forkSideChat(nativeSideChat);
-        yield* send(nativeSideChat, "native fallback side chat after rewind");
-        assert.isTrue(
-          (yield* read(nativeSideChat)).turnItems.some(
-            (item) => item.type === "system_notice" && item.title === "Native fork failed",
-          ),
-        );
+        yield* fork(nativeSideChat);
+        const branch = ThreadId.make("thread:rewind-branch");
+        yield* fork(branch, { sideChat: false });
+        yield* send(branch, "prompt on the normal fork", CODEX_MODEL_SELECTION);
 
         yield* detach(root);
         yield* Ref.set(failResumeOnce, true);
@@ -4223,6 +4229,19 @@ describe("orchestration v2 provider switching", () => {
 
         const latest = (yield* read()).runs.at(-1)!;
         yield* rewind(latest.id, nextArchive);
+        yield* send(portableSideChat, "portable delayed side chat", CODEX_MODEL_SELECTION);
+        yield* send(nativeSideChat, "native fallback delayed side chat");
+        const descendant = ThreadId.make("thread:rewind-descendant");
+        yield* fork(descendant, { sourceThreadId: branch });
+        yield* send(descendant, "portable side chat from normal fork");
+        const historical = ThreadId.make("thread:rewind-historical");
+        yield* fork(historical, { sourcePoint: { type: "run", runId: forkRun.id } });
+        yield* send(historical, "explicit historical side chat", CODEX_MODEL_SELECTION);
+        assert.isTrue(
+          (yield* read(nativeSideChat)).turnItems.some(
+            (item) => item.type === "system_notice" && item.title === "Native fork failed",
+          ),
+        );
         assert.deepEqual(yield* messages(nextArchive), [
           "plain prompt after rewind",
           "recover native conversation",
@@ -4231,7 +4250,7 @@ describe("orchestration v2 provider switching", () => {
         yield* send(nextArchive, "continue second archive");
         yield* send(root, "plain prompt after second rewind");
         const nextSideChat = ThreadId.make("thread:rewind-next-side-chat");
-        yield* forkSideChat(nextSideChat);
+        yield* fork(nextSideChat);
         yield* send(nextSideChat, "portable side chat after second rewind", CODEX_MODEL_SELECTION);
 
         const turns = yield* Ref.get(capturedTurns);
@@ -4246,13 +4265,25 @@ describe("orchestration v2 provider switching", () => {
         expect.soft(archiveRecovery.text).toContain("archived Codex history");
         expect.soft(archiveRecovery.text).toContain("archived Claude history");
         for (const prompt of [
-          "portable side chat after rewind",
-          "native fallback side chat after rewind",
+          "portable delayed side chat",
+          "native fallback delayed side chat",
+          "portable side chat from normal fork",
         ]) {
           assert.include(turn(prompt).text, "plain prompt after rewind");
           expect.soft(turn(prompt).text).not.toContain("archived Claude history");
           expect.soft(turn(prompt).text).not.toContain("archived Codex history");
+          expect.soft(turn(prompt).text).not.toContain("recover native conversation");
+          expect.soft(turn(prompt).text).not.toContain("switch to Codex");
         }
+        assert.include(
+          turn("portable side chat from normal fork").text,
+          "prompt on the normal fork",
+        );
+        const historicalPrompt = turn("explicit historical side chat").text;
+        assert.include(historicalPrompt, "archived Codex history");
+        assert.include(historicalPrompt, "archived Claude history");
+        assert.include(historicalPrompt, "plain prompt after rewind");
+        assert.notInclude(historicalPrompt, "recover native conversation");
         const plainPrompt = turn("plain prompt after rewind");
         assert.equal(plainPrompt.text, "plain prompt after rewind");
         assert.notEqual(plainPrompt.nativeThreadId, turn("archived Claude history").nativeThreadId);

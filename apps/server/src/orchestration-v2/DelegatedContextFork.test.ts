@@ -228,6 +228,7 @@ it.effect(
       assert.strictEqual(fork?.resolution?.strategy, "portable_context");
       const inherited = yield* ContextHandoffService.readInheritedHandoffItems(
         {
+          getForkSourceRewindOrdinal: () => Effect.die("Expected source without rewinds"),
           getThreadProjection: (threadId) =>
             orchestrator.getThreadProjection(threadId).pipe(Effect.orDie),
           getThreadRecords: (threadId, fields, filter) =>

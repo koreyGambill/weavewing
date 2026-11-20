@@ -9599,7 +9599,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? []
         : contextArchive !== undefined
           ? yield* readInheritedItems(projection.thread)
-          : yield* readForkHistoryItems(projectionStore, sourceProjection, sourceRun).pipe(
+          : yield* readForkHistoryItems(
+              projectionStore,
+              sourceProjection,
+              sourceRun,
+              projection.thread.id,
+            ).pipe(
               Effect.mapError(
                 (cause) =>
                   new OrchestratorProjectionError({ threadId: sourceProjection.thread.id, cause }),
