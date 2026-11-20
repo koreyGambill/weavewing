@@ -18,9 +18,11 @@ import type {
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
+  BotIcon,
   FileDiff,
   Files,
   Globe2,
+  GitForkIcon,
   MessagesSquare,
   NotebookPen,
   Smartphone,
@@ -134,6 +136,8 @@ export function surfaceTitle(
       return surface.title ?? surface.target?.name ?? "Device";
     case "side-chat":
       return sideChatTitles?.get(surface.threadId) || "Side chat";
+    case "related-thread":
+      return sideChatTitles?.get(surface.threadRef.threadId) || surface.title;
     case "notes":
       return "Notes";
     case "preview": {
@@ -205,6 +209,12 @@ export function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
+    case "related-thread":
+      return surface.relation === "fork" ? (
+        <GitForkIcon className="size-3 shrink-0" />
+      ) : (
+        <BotIcon className="size-3 shrink-0" />
+      );
     case "notes":
       return <NotebookPen className="size-3 shrink-0" />;
     case "device":

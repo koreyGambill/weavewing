@@ -107,6 +107,7 @@ function RestoreBranchHarness(props: {
   const lifecycle = useThreadLifecycle({
     ...props.thread,
     environmentId,
+    workspaceThreadRef: props.thread.activeThreadRef,
     currentRouteThreadKeyRef: props.currentRouteThreadKeyRef,
     canOperateThread: true,
     clientSettingsHydrated: true,

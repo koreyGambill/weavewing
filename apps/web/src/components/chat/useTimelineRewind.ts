@@ -12,7 +12,6 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { useNavigate } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -21,7 +20,7 @@ import { readLocalApi } from "../../localApi";
 import { findRevertCheckpoint } from "../../session-logic";
 import { type ChatMessage } from "../../types";
 import { newThreadId } from "~/lib/utils";
-import { buildThreadRouteParams } from "../../threadRoutes";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { threadEnvironment } from "../../state/threads";
 import { waitForThreadShell } from "../../state/entities";
@@ -36,6 +35,7 @@ import { makeThreadErrorSetter } from "../ChatView.logic";
 interface TimelineRewindInput {
   readonly environmentId: EnvironmentId;
   readonly routeThreadRef: ScopedThreadRef;
+  readonly workspaceThreadRef: ScopedThreadRef;
   readonly routeThreadKey: string;
   readonly currentRouteThreadKeyRef: { readonly current: string | null };
   readonly serverProjection: ThreadStructure | null;
@@ -61,6 +61,7 @@ export function useTimelineRewind(input: TimelineRewindInput) {
   const {
     environmentId,
     routeThreadRef,
+    workspaceThreadRef,
     routeThreadKey,
     currentRouteThreadKeyRef,
     serverProjection,
@@ -77,7 +78,6 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     composerDraftTarget,
     setThreadError,
   } = input;
-  const navigate = useNavigate();
   const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
     refresh: true,
@@ -178,13 +178,14 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     if (!activeThread || activeEnvironmentUnavailable) return;
     const targetThreadId = newThreadId();
     const targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
+    const title = `${activeThread.title} fork`;
     const result = await forkThreadFromRun({
       environmentId,
       input: {
         sourceThreadId: input.sourceThreadId,
         targetThreadId,
         runId: input.runId,
-        title: `${activeThread.title} fork`,
+        title,
       },
     });
     if (result._tag === "Failure") {
@@ -205,10 +206,11 @@ export function useTimelineRewind(input: TimelineRewindInput) {
       );
       return;
     }
-    await navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(targetThreadRef),
-    });
+    if (currentRouteThreadKeyRef.current === routeThreadKey) {
+      useRightPanelStore
+        .getState()
+        .openRelatedThread(workspaceThreadRef, targetThreadRef, "fork", title);
+    }
   };
   const onForkFromRunStable = useStableCallback(onForkFromRun);
   const onRevertTimelineTurn = (targetTurnCount: number, messageId: MessageId) => {

@@ -422,11 +422,14 @@ On web and desktop, start a message with `/side` or `/btw`, then your question.
 You can also choose **Side chat** from a tile’s **+** menu. The side
 chat opens as a tab there, with its own composer. Side chats do not show in the
 sidebar. Open **Lineage** in the thread header to find its side chats and subagents.
+Click **How conversation context is shared** in Lineage to see how the branch
+started. The colored rail in the main chat opens the side chat inline.
 
 Select text in an assistant reply and choose **Drill in** to start a side chat under
-that reply. Expand the annotation to ask a question, and select text in its reply
-to drill further. **Open as side chat tab** puts the branch in a tab on the chat
-you’re viewing. You can also reopen nested branches under **Side chats** in
+that reply. Click its colored rail to expand or collapse the chat. A collapsed chat
+keeps its nested branches visible, and you can open them independently. Blue marks
+on the timeline rail show where the branches start. **Open as side chat tab** puts
+the branch in a tab on the chat you’re viewing. You can also reopen nested branches under **Side chats** in
 **Lineage**. **Open full chat** gives the branch its own page. **Jump to source**
 takes you back to the passage, or to the fork turn for a side chat opened without a
 selection.
@@ -449,6 +452,16 @@ the reference when you send the draft.
 Closing a side chat you never sent a message in deletes it. To delete one you used,
 choose **Delete** at the top of the side chat. Deleting a thread also deletes its
 side chats.
+
+### Forks and subagent tabs
+
+Choose **Fork from this response** to start a separate thread with the conversation
+through that reply. It opens beside **Main chat** and also appears in the sidebar
+and in **Lineage**. Opening a subagent from the chat or **Lineage** also opens a
+tab beside **Main chat**.
+
+After sending a message in a fork, choose **Bring back** in its header to add a
+removable reference to the source thread’s draft.
 
 On mobile, a thread lists its side chats above the composer. Tap one to open it and
 answer its questions.

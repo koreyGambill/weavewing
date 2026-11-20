@@ -75,6 +75,7 @@ test(
     });
     await screen.getByRole("button", "Drill in").tap();
     await expect(fullChat).toHaveCount(3);
+    await expect(browser.locator("[data-minimap-side-chat]")).toHaveCount(3);
     const layout = await browser.evaluate(() => {
       const transcripts = [...document.querySelectorAll("[data-inline-side-chat-transcript]")];
       const scrollOwners = transcripts.map((transcript) => {
@@ -102,6 +103,27 @@ test(
       throw new Error(`Expected three rails in one scroller: ${JSON.stringify(layout)}`);
     }
     await app.screenshot("three-levels-one-scroll");
+    const rails = screen.getByRole("button", /^Toggle drill-in:/);
+    await rails.first().tap();
+    await expect(rails).toHaveCount(3);
+    await expect(rails.first()).toHaveAttribute("aria-expanded", "false");
+    await expect(fullChat).toHaveCount(2);
+    await rails.nth(1).tap();
+    await expect(fullChat).toHaveCount(1);
+    await rails.nth(1).tap();
+    await expect(fullChat).toHaveCount(2);
+    await expect(rails.first()).toHaveAttribute("aria-expanded", "false");
+    await browser.evaluate(() => {
+      document
+        .querySelector('[aria-label^="Toggle drill-in:"]')
+        ?.nextElementSibling?.scrollIntoView({
+          block: "start",
+        });
+      return null;
+    });
+    await app.screenshot("collapsed-parent-open-descendants");
+    await rails.first().tap();
+    await expect(fullChat).toHaveCount(3);
     await screen.getByRole("button", "Open as side chat tab").last().tap();
     await expect(screen.getByRole("button", "Close side chat")).toBeVisible();
     await screen.getByRole("button", "Close side chat").tap();
@@ -110,5 +132,16 @@ test(
     await screen.getByRole("button", /^Bring back to Explain that/).tap();
     await expect(firstBranchDraft).toContainText("Compare this with the first approach.");
     await expect(screen.getByRole("link", "Thread, Go one level deeper.")).toBeVisible();
+
+    const mainComposer = screen.getByRole("textbox", "Message Main conversation");
+    await mainComposer.fill("/side Check this next.");
+    await mainComposer.press("Enter");
+    await expect(screen.getByRole("button", "Close side chat")).toBeVisible();
+    await screen.getByRole("tab", "Main chat").tap();
+    const plainRail = screen.getByRole("button", /^Toggle side chat:/);
+    await plainRail.tap();
+    await expect(plainRail).toHaveAttribute("aria-expanded", "true");
+    await plainRail.tap();
+    await expect(plainRail).toHaveAttribute("aria-expanded", "false");
   },
 );

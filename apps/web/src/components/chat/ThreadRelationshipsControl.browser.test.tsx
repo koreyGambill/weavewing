@@ -167,7 +167,7 @@ it.each([
   }
 });
 
-it("opens an idle child from Lineage when its shell has not been loaded", async () => {
+it("opens an idle child in a workspace tab when its shell has not been loaded", async () => {
   setup();
   const projection = makeThreadProjectionFixture();
   const childId = ThreadId.make("omitted-child");
@@ -210,8 +210,17 @@ it("opens an idle child from Lineage when its shell has not been loaded", async 
   const child = screen.getByRole("button", { name: /Idle child/ });
   await expect.element(child).toBeEnabled();
   await child.click();
-  await vi.waitFor(() =>
-    expect(screen.router?.state.location.pathname).toBe("/local/omitted-child"),
+  const panel = selectThreadRightPanelState(
+    useRightPanelStore.getState().byThreadKey,
+    scopeThreadRef(environmentId, projection.thread.id),
+  );
+  expect(panel.surfaces).toContainEqual(
+    expect.objectContaining({
+      id: panel.activeSurfaceId,
+      kind: "related-thread",
+      relation: "subagent",
+      threadRef: scopeThreadRef(environmentId, childId),
+    }),
   );
 });
 

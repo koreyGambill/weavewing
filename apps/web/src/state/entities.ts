@@ -203,6 +203,34 @@ export function useSideChatShells(ref: ScopedThreadRef | null) {
   );
 }
 
+type InlineSideChatFamily = {
+  readonly branch: OrchestrationV2ThreadShell;
+  readonly members: ReadonlyArray<OrchestrationV2ThreadShell>;
+};
+
+const EMPTY_INLINE_SIDE_CHAT_FAMILIES = Atom.make<ReadonlyArray<InlineSideChatFamily>>([]);
+const inlineSideChatFamiliesAtom = Atom.family((key: string) => {
+  const { environmentId } = parseThreadKey(key);
+  return Atom.make((get): ReadonlyArray<InlineSideChatFamily> => {
+    const anchoredChildren = (parentKey: string) =>
+      get(sideChatShellsAtomFamily(parentKey)).filter(
+        (shell) => shell.lineage.sideChatAnchor !== undefined,
+      );
+    const membersOf = (shell: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell[] => [
+      shell,
+      ...anchoredChildren(threadKey({ environmentId, threadId: shell.id })).flatMap(membersOf),
+    ];
+    return anchoredChildren(key).map((branch) => ({ branch, members: membersOf(branch) }));
+  });
+});
+
+/** Collects nested drill-ins for the outermost timeline's minimap. */
+export function useInlineSideChatFamilies(ref: ScopedThreadRef | null) {
+  return useAtomValue(
+    ref === null ? EMPTY_INLINE_SIDE_CHAT_FAMILIES : inlineSideChatFamiliesAtom(threadKey(ref)),
+  );
+}
+
 export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThread | null {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_PROJECTION_ATOM : environmentThreadDetails.threadAtom(ref),

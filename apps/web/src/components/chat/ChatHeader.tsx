@@ -64,6 +64,7 @@ interface ChatHeaderProps {
     open?: () => void;
   } | null;
   onOpenThread: (threadId: ThreadId) => void;
+  onBringBack?: (() => void) | undefined;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
@@ -91,6 +92,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeProject,
   parentThreadLink,
   onOpenThread,
+  onBringBack,
   rightPanelOpen,
   onNewThreadInProject,
   onOpenProjectSettings,
@@ -462,6 +464,14 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {onBringBack ? (
+        <Tooltip>
+          <TooltipTrigger render={<Button size="xs" variant="ghost" onClick={onBringBack} />}>
+            Bring back
+          </TooltipTrigger>
+          <TooltipPopup>Add this fork as a removable reference in the parent draft</TooltipPopup>
+        </Tooltip>
+      ) : null}
       {isServerThread ? (
         <>
           <GuestShareIndicator threadRef={activeThreadRef} />

@@ -7,6 +7,7 @@ import type {
   WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useState } from "react";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useEnvironmentQuery } from "../../state/query";
@@ -73,13 +74,14 @@ export function useWorktreeSetup(input: {
       : null,
   );
   const latestSnapshot = snapshotQuery.data;
+  const routeKey = scopedThreadKey(routeThreadRef);
   const [heldFor, setHeldFor] = useState<{
-    readonly routeThreadRef: ScopedThreadRef;
+    readonly routeKey: string;
     readonly latestSnapshot: WorktreeSetupSnapshot | null | undefined;
-  }>({ routeThreadRef, latestSnapshot: null });
-  if (heldFor.routeThreadRef !== routeThreadRef || heldFor.latestSnapshot !== latestSnapshot) {
-    const routeChanged = heldFor.routeThreadRef !== routeThreadRef;
-    setHeldFor({ routeThreadRef, latestSnapshot });
+  }>({ routeKey, latestSnapshot: null });
+  const routeChanged = heldFor.routeKey !== routeKey;
+  if (routeChanged || heldFor.latestSnapshot !== latestSnapshot) {
+    setHeldFor({ routeKey, latestSnapshot });
     if (routeChanged) {
       setHeldSnapshot(null);
     } else if (latestSnapshot) {

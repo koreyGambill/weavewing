@@ -11,9 +11,12 @@ import type {
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { lazy, Suspense } from "react";
 import SideChatPane from "./SideChatPane";
+import ChatView from "../ChatView";
+import { ComposerHandleContext } from "../../composerHandleContext";
+import { WorkspaceTitlebarControlsHost, WorkspaceTitlebarHost } from "../WorkspaceTitlebar";
 import type { ComposerImageAttachment, DraftId } from "../../composerDraftStore";
 import type { ShortcutMatchContext } from "../../keybindings";
-import type { SideChatParentPanel } from "../../lib/sideChatPane";
+import { RelatedThreadWorkspaceContext, type SideChatParentPanel } from "../../lib/sideChatPane";
 import { type RightPanelSurface, useRightPanelStore } from "../../rightPanelStore";
 import {
   PersistentThreadTerminalPanel,
@@ -193,6 +196,29 @@ export function RightPanelSurfaceContent(props: {
     }
     case "pull-requests":
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
+    case "related-thread":
+      return (
+        <div
+          key={surface.id}
+          data-related-thread-pane={scopedThreadKey(surface.threadRef)}
+          className="flex min-h-0 flex-1"
+        >
+          <RelatedThreadWorkspaceContext value={threadRef}>
+            <WorkspaceTitlebarHost value={null}>
+              <WorkspaceTitlebarControlsHost value={null}>
+                <ComposerHandleContext value={null}>
+                  <ChatView
+                    environmentId={surface.threadRef.environmentId}
+                    threadId={surface.threadRef.threadId}
+                    routeKind="server"
+                    reserveTitleBarControlInset={false}
+                  />
+                </ComposerHandleContext>
+              </WorkspaceTitlebarControlsHost>
+            </WorkspaceTitlebarHost>
+          </RelatedThreadWorkspaceContext>
+        </div>
+      );
     case "side-chat":
       // Not lazy: revealing a suspended tiptap editor tears down its view and crashes the composer.
       return (

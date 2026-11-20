@@ -3,6 +3,20 @@
 T3 Code transfers conversation context when you switch providers, continue through a portable
 restart, or use a fork that the provider cannot resume itself.
 
+## Forks and side chats
+
+A fork or side chat starts from a particular reply or finished turn. When the
+provider supports a native fork from that point, the new chat inherits the
+provider's history through it. The new question and any side chat instructions
+are appended. The provider decides which input tokens it can reuse from its
+cache. A native fork can preserve history and still have a cold first request.
+
+When native forking is unavailable, T3 Code builds a portable handoff from its
+saved transcript. No model writes this handoff. A side chat opened before the
+parent finishes its first turn uses the available saved history.
+
+## What a portable handoff carries
+
 Short conversations transfer intact. For longer conversations, T3 Code favors recent requests and
 answers, the original request, and relevant activity such as command outcomes. Selected messages
 keep their full text, order, and user or assistant role, including partial work from failed or

@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { getTileGroups } from "./threadTileLayout";
+import { CONVERSATION_TAB_ID, getTileGroups } from "./threadTileLayout";
 
 import { useClosedViewStore } from "./closedViewStore";
 import { reopenClosedView } from "./reopenClosedView";
@@ -44,6 +44,25 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
+  it("opens related threads beside the main chat and reuses their tabs", () => {
+    const store = useRightPanelStore.getState();
+    const agentRef = scopeThreadRef("env-2" as EnvironmentId, refB.threadId);
+    store.add(refA, "notes");
+    store.openRelatedThread(refA, refB, "fork", "Fork");
+    store.openRelatedThread(refA, agentRef, "subagent", "Subagent");
+    store.openRelatedThread(refA, refB, "fork", "Fork");
+
+    const { byThreadKey } = useRightPanelStore.getState();
+    const panel = selectThreadRightPanelState(byThreadKey, refA);
+    const tabs = panel.surfaces.filter((surface) => surface.kind === "related-thread");
+    expect(tabs.map((tab) => tab.threadRef)).toEqual([refB, agentRef]);
+    const main = getTileGroups(selectThreadTileLayout(byThreadKey, refA)).find((group) =>
+      group.tabs.includes(CONVERSATION_TAB_ID),
+    );
+    expect(main?.tabs).toEqual([CONVERSATION_TAB_ID, tabs[1]!.id, tabs[0]!.id]);
+    expect(main?.activeTabId).toBe(tabs[0]!.id);
+  });
+
   it("adds independent area instances, retains their placement, and restores closed instances", async () => {
     const store = useRightPanelStore.getState();
     store.add(refA, "notes");

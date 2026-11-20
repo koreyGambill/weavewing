@@ -1,12 +1,17 @@
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { OrchestrationV2ThreadShell, ScopedThreadRef } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadShell, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { createContext } from "react";
 
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { CONVERSATION_TAB_ID, getTileGroups } from "../threadTileLayout";
 import { requestWorkspaceFocus } from "./workspaceFocus";
 import type { ToolCallDiffTarget } from "../diffPanelStore";
-import { selectThreadTileLayout, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectThreadRightPanelState,
+  selectThreadTileLayout,
+  useRightPanelStore,
+} from "../rightPanelStore";
 
 /** Whether an event started in the side chat pane (`data-side-chat-pane`), which the main chat ignores. */
 export function isInSideChatPane(target: EventTarget | null): boolean {
@@ -23,6 +28,13 @@ export interface SideChatParentPanel {
   readonly openToolDiff: (target: ToolCallDiffTarget) => void;
   readonly runShellCommand: (command: string) => void;
 }
+
+export interface InlineSideChatExpansion {
+  readonly children: ReadonlySet<ThreadId>;
+  readonly setOpen: (id: ThreadId, open: boolean) => void;
+}
+
+export const RelatedThreadWorkspaceContext = createContext<ScopedThreadRef | null>(null);
 
 /**
  * Opens a tab-based side chat on its parent route. Other threads have their own routes.
@@ -42,11 +54,7 @@ export function resolveThreadOpenRoute(
 }
 
 /** Stages the side chat in its parent's draft using the composer’s removable thread reference. */
-export function bringSideChatToDraft(
-  parent: ScopedThreadRef,
-  child: ScopedThreadRef,
-  title: string,
-) {
+export function bringThreadToDraft(parent: ScopedThreadRef, child: ScopedThreadRef, title: string) {
   useComposerDraftStore.getState().addThreadContexts(parent, [threadContextRecord(child, title)], {
     insertAtCaret: false,
   });
@@ -72,4 +80,21 @@ export function focusThreadDraft(ref: ScopedThreadRef) {
     area: "document",
     selector: `[data-chat-composer-thread="${CSS.escape(scopedThreadKey(ref))}"] [contenteditable="true"]`,
   });
+}
+
+/** Reveals a thread already in the workspace so its draft can be focused. */
+export function revealWorkspaceThread(host: ScopedThreadRef, target: ScopedThreadRef): boolean {
+  if (scopedThreadKey(host) === scopedThreadKey(target)) {
+    showThreadConversation(host);
+    return true;
+  }
+  const panels = useRightPanelStore.getState();
+  const tab = selectThreadRightPanelState(panels.byThreadKey, host).surfaces.find(
+    (surface) =>
+      surface.kind === "related-thread" &&
+      scopedThreadKey(surface.threadRef) === scopedThreadKey(target),
+  );
+  if (!tab) return false;
+  panels.activateSurface(host, tab.id);
+  return true;
 }

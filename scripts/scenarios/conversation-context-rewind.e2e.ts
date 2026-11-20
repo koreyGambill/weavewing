@@ -26,7 +26,7 @@ test(
     await expect(archive).toHaveAttribute("aria-expanded", "false");
     await expect(reply).toHaveCount(0);
     await app.screenshot("history-collapsed");
-    await archive.tap();
+    await screen.getByRole("button", "Toggle earlier conversation").tap();
     await expect(reply).toBeVisible();
     await app.screenshot("history-expanded");
     await screen.getByRole("button", "Bring back").tap();

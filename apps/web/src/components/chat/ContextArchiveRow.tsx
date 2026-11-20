@@ -21,7 +21,14 @@ export function ContextArchiveRow(props: {
 }) {
   const navigate = useNavigate();
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1 border-l border-info/60 pl-1">
+    <div className="relative flex min-w-0 flex-wrap items-center gap-1 border-l border-info/60 pl-2">
+      <button
+        type="button"
+        aria-label="Toggle earlier conversation"
+        aria-expanded={props.expanded}
+        className="absolute inset-y-0 left-[-1px] w-1.5 cursor-pointer rounded-sm hover:bg-current/15 focus-visible:outline-2 focus-visible:outline-ring"
+        onClick={props.onToggle}
+      />
       <Button variant="ghost" size="xs" aria-expanded={props.expanded} onClick={props.onToggle}>
         <HistoryIcon aria-hidden="true" />
         Earlier conversation

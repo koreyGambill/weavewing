@@ -13,7 +13,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveViewedImageAsset,
@@ -218,7 +218,6 @@ export function ViewedImagesTimelineRow({
 
 function WorkEntryLogRow(props: WorkEntryRowProps) {
   const { workEntry, workspaceRoot, displayLabel } = props;
-  const navigate = useNavigate();
   const notificationSource =
     workEntry.projectedItem?.item.type === "notification"
       ? workEntry.projectedItem.item.source
@@ -582,18 +581,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               aria-label="Open subagent thread"
               onClick={(event) => {
                 event.stopPropagation();
-                if (
-                  notificationSource?.kind === "thread_reply" &&
-                  notificationSource.environmentId !== undefined
-                ) {
-                  void navigate({
-                    to: "/$environmentId/$threadId",
-                    params: {
-                      environmentId: notificationSource.environmentId,
-                      threadId: notifiedSubagentThreadId,
-                    },
-                  });
-                } else ctx.onOpenThread(notifiedSubagentThreadId);
+                ctx.onOpenThread(
+                  notifiedSubagentThreadId,
+                  notificationSource?.kind === "thread_reply"
+                    ? notificationSource.environmentId
+                    : undefined,
+                  "subagent",
+                );
               }}
               onKeyDown={stopRowToggle}
             >

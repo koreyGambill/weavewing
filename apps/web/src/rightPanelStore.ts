@@ -111,6 +111,13 @@ export type RightPanelSurface =
     }
   | { id: "pull-requests" | `pull-requests:${string}`; kind: "pull-requests" }
   | { id: "notes" | `notes:${string}`; kind: "notes" }
+  | {
+      id: `related-thread:${string}`;
+      kind: "related-thread";
+      threadRef: ScopedThreadRef;
+      relation: "fork" | "subagent";
+      title: string;
+    }
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
@@ -172,6 +179,12 @@ interface RightPanelStoreState {
     kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-chat">,
   ) => void;
   openSideChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
+  openRelatedThread: (
+    host: ScopedThreadRef,
+    target: ScopedThreadRef,
+    relation: "fork" | "subagent",
+    title: string,
+  ) => void;
   openDevice: (
     ref: ScopedThreadRef,
     target: DeviceTabTarget,
@@ -961,6 +974,47 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             upsertSurface(current, { id: `side-chat:${threadId}`, kind: "side-chat", threadId }),
           ),
         ),
+      openRelatedThread: (host, threadRef, relation, title) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(host), (current) => {
+            const id = `related-thread:${scopedThreadKey(threadRef)}` as const;
+            const existing = current.surfaces.some((surface) => surface.id === id);
+            const next = upsertSurface(current, {
+              id,
+              kind: "related-thread",
+              threadRef,
+              relation,
+              title,
+            });
+            if (existing) return next;
+            const layout = syncTileLayout(
+              current.tileLayout,
+              current.surfaces.map((surface) => surface.id),
+              next.surfaces.map((surface) => surface.id),
+              id,
+              false,
+              false,
+            );
+            const main = getTileGroups(layout).find((group) =>
+              group.tabs.includes(CONVERSATION_TAB_ID),
+            );
+            if (!main) return next;
+            const beside = reduceTileAction(layout, {
+              type: "move",
+              tabId: id,
+              targetGroupId: main.id,
+              index: main.tabs.indexOf(CONVERSATION_TAB_ID) + 1,
+            });
+            return {
+              ...next,
+              tileLayout: reduceTileAction(beside, {
+                type: "activate",
+                groupId: main.id,
+                tabId: id,
+              }),
+            };
+          }),
+        ),
       renameDevice: (ref, surfaceId, title) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => ({
@@ -1502,7 +1556,7 @@ export function selectThreadPanelOpen(
 export function selectActiveRightPanel(
   byThreadKey: Record<string, ThreadRightPanelState>,
   ref: ScopedThreadRef | null | undefined,
-): RightPanelKind | null {
+): RightPanelSurface["kind"] | null {
   const state = selectThreadRightPanelState(byThreadKey, ref);
   if (!state.isOpen) return null;
   return state.surfaces.find((surface) => surface.id === state.activeSurfaceId)?.kind ?? null;

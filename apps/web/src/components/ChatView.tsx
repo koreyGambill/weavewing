@@ -82,6 +82,7 @@ import {
   isStableForkRun,
   type EnvironmentId,
   type MessageId,
+  type RunId,
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ServerProvider,
@@ -141,6 +142,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type SetStateAction,
   use,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -224,10 +226,13 @@ import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
 import {
-  bringSideChatToDraft,
+  bringThreadToDraft,
   focusThreadDraft,
   isInSideChatPane,
+  RelatedThreadWorkspaceContext,
   resolveThreadOpenRoute,
+  revealWorkspaceThread,
+  type InlineSideChatExpansion,
   type SideChatParentPanel,
 } from "~/lib/sideChatPane";
 import {
@@ -292,6 +297,7 @@ import {
   useProject,
   useQuietThreadProjection,
   useSideChatShells,
+  useInlineSideChatFamilies,
   useThreadUpdatedAt,
   useThreadLastVisitedAt,
   useQuietThreadVisibleTurnItems,
@@ -440,6 +446,7 @@ type ChatViewProps =
       /** A side chat in its parent's right panel; the parent keeps the keyboard and workspace UI. */
       embedded?: SideChatParentPanel;
       inlineSideChatDepth?: number;
+      inlineSideChatExpansion?: InlineSideChatExpansion | undefined;
       routeKind: "server";
       draftId?: never;
     }
@@ -451,6 +458,7 @@ type ChatViewProps =
       forceExpandedMobileComposer?: boolean;
       embedded?: never;
       inlineSideChatDepth?: never;
+      inlineSideChatExpansion?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -469,6 +477,7 @@ export default function ChatView(props: ChatViewProps) {
     forceExpandedMobileComposer = false,
     embedded: parentPanel,
     inlineSideChatDepth = 0,
+    inlineSideChatExpansion,
   } = props;
   const embedded = parentPanel !== undefined;
   const inlineSideChat = inlineSideChatDepth > 0;
@@ -477,6 +486,8 @@ export default function ChatView(props: ChatViewProps) {
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = scopeThreadRef(environmentId, threadId);
+  const workspaceThreadRef =
+    useContext(RelatedThreadWorkspaceContext) ?? parentPanel?.hostRef ?? routeThreadRef;
   const routeThreadKey = scopedThreadKey(routeThreadRef);
   const currentRouteThreadKeyRef = useRef<string | null>(routeThreadKey);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the committed route thread key to a ref that async handlers check before applying results
@@ -638,13 +649,17 @@ export default function ChatView(props: ChatViewProps) {
   if (inlineOpen.revealKey !== revealKey) {
     setInlineOpen({ revealKey, children: inlineOpenChildren });
   }
-  const setInlineChildOpen = (id: ThreadId, open: boolean) => {
+  const setLocalInlineChildOpen = (id: ThreadId, open: boolean) => {
     setInlineOpen((current) => {
       const children = new Set(current.children);
       if (open) children.add(id);
       else children.delete(id);
       return { ...current, children };
     });
+  };
+  const inlineExpansion = inlineSideChatExpansion ?? {
+    children: inlineOpenChildren,
+    setOpen: setLocalInlineChildOpen,
   };
   const locationReveal = messageRevealFromLocation(citationLocation.href);
   const citationRequest = (
@@ -1652,6 +1667,9 @@ export default function ChatView(props: ChatViewProps) {
   const displayedThreadRef = parseScopedThreadKey(displayedTimelineKey);
   const canReadTurns = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   const sideChatShells = useSideChatShells(isServerThread ? displayedThreadRef : null);
+  const inlineSideChatFamilies = useInlineSideChatFamilies(
+    isServerThread && !inlineSideChat ? displayedThreadRef : null,
+  );
   const contextArchives = sideChatShells.flatMap((shell) =>
     shell.lineage.contextArchive
       ? [
@@ -1672,7 +1690,9 @@ export default function ChatView(props: ChatViewProps) {
   const followUpMessageIds = new Set(followUps.map((item) => item.messageId));
   const branchRunIds = new Set(
     sideChatShells.flatMap((shell) =>
-      shell.forkedFrom?.type === "run" && shell.forkedFrom.threadId === displayedThreadRef?.threadId
+      shell.lineage.sideChatAnchor === undefined &&
+      shell.forkedFrom?.type === "run" &&
+      shell.forkedFrom.threadId === displayedThreadRef?.threadId
         ? [shell.forkedFrom.runId]
         : [],
     ),
@@ -1680,6 +1700,20 @@ export default function ChatView(props: ChatViewProps) {
   const branchOriginMessageIds = new Set(
     serverProjection?.runs.flatMap((run) => (branchRunIds.has(run.id) ? [run.userMessageId] : [])),
   );
+  const inlineSideChatMarkers = inlineSideChatFamilies.flatMap(({ branch, members }) => {
+    const anchor = branch.lineage.sideChatAnchor;
+    if (!anchor) return [];
+    const sourceRunId = branch.forkedFrom?.type === "run" ? branch.forkedFrom.runId : null;
+    const sourceUserMessageId = serverProjection?.runs.find(
+      (run) => run.id === sourceRunId,
+    )?.userMessageId;
+    return members.map((member) => ({
+      threadId: member.id,
+      title: member.title,
+      sourceMessageId: anchor.messageId,
+      sourceUserMessageId,
+    }));
+  });
   const userTurnsRef = isServerThread && canReadTurns ? displayedThreadRef : null;
   const userTurns = useEnvironmentQuery(
     userTurnsRef === null
@@ -2500,6 +2534,7 @@ export default function ChatView(props: ChatViewProps) {
   } = useThreadLifecycle({
     environmentId,
     routeThreadKey,
+    workspaceThreadRef,
     currentRouteThreadKeyRef,
     canOperateThread,
     clientSettingsHydrated,
@@ -2848,7 +2883,7 @@ export default function ChatView(props: ChatViewProps) {
     threadRef: sideChatsOffered && isServerThread ? activeThreadRef : null,
     anchoredThreadRef: canBranchAssistantText ? activeThreadRef : null,
     onOpenAnchored: (id) => {
-      if (currentRouteThreadKeyRef.current === routeThreadKey) setInlineChildOpen(id, true);
+      if (currentRouteThreadKeyRef.current === routeThreadKey) inlineExpansion.setOpen(id, true);
     },
     readSettings: () => ({
       runtimeMode,
@@ -2892,6 +2927,7 @@ export default function ChatView(props: ChatViewProps) {
       environmentId,
       routeThreadRef,
       routeThreadKey,
+      workspaceThreadRef,
       currentRouteThreadKeyRef,
       serverProjection,
       activeThread,
@@ -3261,7 +3297,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const bringArchiveBack = async (parent: ScopedThreadRef, archive: ScopedThreadRef) => {
     if (!readEnvironmentScope(parent.environmentId, AuthOrchestrationOperateScope)) return;
-    bringSideChatToDraft(parent, archive, "Earlier conversation");
+    bringThreadToDraft(parent, archive, "Earlier conversation");
     if (parent.threadId !== routeThreadRef.threadId) {
       await navigate({ to: "/$environmentId/$threadId", params: parent });
     }
@@ -3269,15 +3305,36 @@ export default function ChatView(props: ChatViewProps) {
   };
 
   const inlineSideChats = new Map<MessageId, Array<(typeof sideChatShells)[number]>>();
-  for (const child of sideChatShells) {
-    const anchor = child.lineage.sideChatAnchor;
-    if (!anchor) continue;
-    const branches = inlineSideChats.get(anchor.messageId);
-    if (branches) branches.push(child);
-    else inlineSideChats.set(anchor.messageId, [child]);
+  const unplacedSideChats: Array<(typeof sideChatShells)[number]> = [];
+  const hasUnanchoredSideChats = sideChatShells.some(
+    (child) => !child.lineage.sideChatAnchor && !child.lineage.contextArchive,
+  );
+  const assistantRepliesByRun = new Map<RunId, MessageId>();
+  if (hasUnanchoredSideChats) {
+    for (const message of timelineMessages) {
+      if (message.role === "assistant" && message.runId && !message.streaming) {
+        assistantRepliesByRun.set(message.runId, message.id);
+      }
+    }
   }
-  const renderInlineSideChats = (messageId: MessageId) => {
-    const branches = inlineSideChats.get(messageId);
+  for (const child of sideChatShells) {
+    if (child.lineage.contextArchive !== undefined) continue;
+    const source =
+      child.lineage.sideChatAnchor?.messageId ??
+      (child.forkedFrom?.type === "run"
+        ? assistantRepliesByRun.get(child.forkedFrom.runId)
+        : undefined);
+    if (!source) {
+      unplacedSideChats.push(child);
+      continue;
+    }
+    const branches = inlineSideChats.get(source);
+    if (branches) branches.push(child);
+    else inlineSideChats.set(source, [child]);
+  }
+  const renderInlineBranches = (
+    branches: ReadonlyArray<(typeof sideChatShells)[number]> | undefined,
+  ) => {
     if (!displayedThreadRef || !branches?.length) return null;
     return (
       <div className="mt-1.5 flex flex-col gap-1">
@@ -3288,9 +3345,8 @@ export default function ChatView(props: ChatViewProps) {
             depth={inlineSideChatDepth + 1}
             parentRef={displayedThreadRef}
             parentPanel={parentPanel ?? sideChatParentPanel}
-            expanded={inlineOpenChildren.has(child.id)}
+            expansion={inlineExpansion}
             onFocusParentComposer={scheduleComposerFocusStable}
-            onToggle={() => setInlineChildOpen(child.id, !inlineOpenChildren.has(child.id))}
           />
         ))}
       </div>
@@ -3371,6 +3427,26 @@ export default function ChatView(props: ChatViewProps) {
     addFolders: addDroppedFoldersToComposer,
   });
 
+  const forkParentId =
+    activeThreadShell?.source.lineage.relationshipToParent === "fork" &&
+    !activeThreadShell.source.lineage.sideChat
+      ? activeThreadShell.source.forkedFrom?.type === "run"
+        ? activeThreadShell.source.forkedFrom.threadId
+        : activeThreadShell.source.lineage.parentThreadId
+      : null;
+  const canBringBackFork =
+    canOperateThread &&
+    forkParentId !== null &&
+    serverProjection?.runs.some((run) => run.userMessageId !== null) === true;
+  const bringForkBack = async () => {
+    if (!canBringBackFork || forkParentId === null) return;
+    const parent = scopeThreadRef(environmentId, forkParentId);
+    bringThreadToDraft(parent, routeThreadRef, activeThread.title);
+    if (!revealWorkspaceThread(workspaceThreadRef, parent)) {
+      await navigate({ to: "/$environmentId/$threadId", params: parent });
+    }
+    focusThreadDraft(parent);
+  };
   const conversationHeader = embedded ? null : (
     <WorkspaceTitlebar>
       <header
@@ -3395,6 +3471,7 @@ export default function ChatView(props: ChatViewProps) {
           activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
           activeProject={activeProject ?? null}
           parentThreadLink={headerParentThreadLink}
+          onBringBack={canBringBackFork ? () => void bringForkBack() : undefined}
           onOpenThread={onOpenRelatedThreadStable}
           rightPanelOpen={false}
           onOpenSideChat={sideChatsOffered && sideChat.available ? openSideChatStable : undefined}
@@ -3610,8 +3687,14 @@ export default function ChatView(props: ChatViewProps) {
                 onCiteAssistantText={citeAssistantTextStable}
                 onBranchAssistantText={canBranchAssistantText ? branchAssistantText : undefined}
                 stableSideChatRunIds={stableSideChatRunIds}
-                renderInlineSideChats={inlineSideChats.size > 0 ? renderInlineSideChats : undefined}
+                renderInlineSideChats={
+                  inlineSideChats.size > 0
+                    ? (messageId) => renderInlineBranches(inlineSideChats.get(messageId))
+                    : undefined
+                }
+                inlineBranchHeader={renderInlineBranches(unplacedSideChats)}
                 branchOriginMessageIds={branchOriginMessageIds}
+                inlineSideChatMarkers={inlineSideChatMarkers}
                 followUpMessageIds={followUpMessageIds}
                 onReplyToResponse={replyToResponseStable}
                 {...(activeProject

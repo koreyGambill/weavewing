@@ -76,7 +76,8 @@ import { useAtomValue } from "@effect/atom-react";
 import type { RunStopPresentation } from "@t3tools/client-runtime/state/thread-execution";
 import { Atom } from "effect/reactivity";
 import { environmentThreadDetails } from "../../state/threads";
-import { resolveThreadOpenRoute } from "../../lib/sideChatPane";
+import { resolveThreadOpenRoute, revealWorkspaceThread } from "../../lib/sideChatPane";
+import { useRightPanelStore } from "../../rightPanelStore";
 import type { useLocalDispatchState } from "./useLocalDispatchState";
 const RELATED_THREAD_SHELL_WAIT_MS = 1_000;
 const NO_RUN_STOP_ATOM = Atom.make<RunStopPresentation | null>(null).pipe(
@@ -89,6 +90,7 @@ type LocalDispatchState = ReturnType<typeof useLocalDispatchState>;
 interface ThreadLifecycleInput {
   readonly environmentId: EnvironmentId;
   readonly routeThreadKey: string;
+  readonly workspaceThreadRef: ScopedThreadRef;
   readonly currentRouteThreadKeyRef: { readonly current: string | null };
   readonly canOperateThread: boolean;
   readonly clientSettingsHydrated: boolean;
@@ -146,6 +148,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
   const {
     environmentId,
     routeThreadKey,
+    workspaceThreadRef,
     currentRouteThreadKeyRef,
     canOperateThread,
     clientSettingsHydrated,
@@ -469,6 +472,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
   const onOpenRelatedThread = async (
     threadId: ThreadId,
     threadEnvironmentId: EnvironmentId = environmentId,
+    relation?: "subagent",
   ) => {
     const generation = ++openRelatedThreadGenerationRef.current;
     const threadRef = scopeThreadRef(threadEnvironmentId, threadId);
@@ -494,6 +498,28 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     const shell = readThreadShell(threadRef);
     if (shell === null ? !shellOmitsChildren && isEnvironmentLive() : shell.deletedAt != null) {
       toastManager.add({ type: "info", title: "This thread is no longer available" });
+      return;
+    }
+    if (revealWorkspaceThread(workspaceThreadRef, threadRef)) return;
+    const agent = input.projection?.subagents.find((candidate) =>
+      threadEnvironmentId === environmentId
+        ? candidate.childThreadId === threadId
+        : candidate.remoteChild?.environmentId === threadEnvironmentId &&
+          candidate.remoteChild.threadId === threadId,
+    );
+    if (
+      relation === "subagent" ||
+      agent ||
+      shell?.source.lineage.relationshipToParent === "subagent"
+    ) {
+      useRightPanelStore
+        .getState()
+        .openRelatedThread(
+          workspaceThreadRef,
+          threadRef,
+          "subagent",
+          shell?.title ?? agent?.title ?? "Subagent",
+        );
       return;
     }
     const routeRef = resolveThreadOpenRoute(threadRef, shell);

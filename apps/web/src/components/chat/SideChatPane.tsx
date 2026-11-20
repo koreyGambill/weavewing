@@ -22,10 +22,11 @@ import { ComposerHandleContext } from "../../composerHandleContext";
 import { useClientSettings } from "../../hooks/useSettings";
 import { releaseComposerDraftUploads } from "../../lib/composerDraftUploads";
 import {
-  bringSideChatToDraft,
+  bringThreadToDraft,
   focusThreadDraft,
   showThreadConversation,
   type SideChatParentPanel,
+  type InlineSideChatExpansion,
 } from "../../lib/sideChatPane";
 import { cn } from "../../lib/utils";
 import { useEnvironment } from "../../state/environments";
@@ -101,6 +102,7 @@ export default function SideChatPane(props: {
   readonly hostRef: ScopedThreadRef;
   readonly inlineParentRef?: ScopedThreadRef;
   readonly inlineDepth?: number;
+  readonly inlineExpansion?: InlineSideChatExpansion;
   readonly onFocusParentComposer?: () => void;
   readonly onOpenTab?: () => void;
   readonly threadId: ThreadId;
@@ -150,7 +152,7 @@ export default function SideChatPane(props: {
 
   const bringBack = async () => {
     if (unavailableReason !== null || parentRef === null || shell === null) return;
-    bringSideChatToDraft(parentRef, threadRef, shell.title);
+    bringThreadToDraft(parentRef, threadRef, shell.title);
     if (inlineParentRef?.threadId === parentRef.threadId) {
       props.onFocusParentComposer?.();
       return;
@@ -345,6 +347,7 @@ export default function SideChatPane(props: {
               routeKind="server"
               embedded={props.parentPanel}
               inlineSideChatDepth={props.inlineDepth ?? 0}
+              inlineSideChatExpansion={props.inlineExpansion}
             />
           </ComposerHandleContext>
         </BackgroundThreadContext>

@@ -9,7 +9,12 @@ import { WorkLogBlock } from "./WorkLog";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { groupContextArchiveEntries, type ContextArchiveRange } from "./contextArchiveEntries";
-import { deriveTimelineMinimapItems, mergeUnloadedUserTurns } from "./timelineMinimapItems";
+import {
+  deriveTimelineMinimapItems,
+  insertInlineSideChatMinimapItems,
+  mergeUnloadedUserTurns,
+  type InlineSideChatMarker,
+} from "./timelineMinimapItems";
 import {
   type AssistantCitation,
   type SideChatAnchor,
@@ -236,7 +241,9 @@ interface MessagesTimelineProps {
   onBranchAssistantText?: ((anchor: SideChatAnchor) => Promise<boolean>) | undefined;
   stableSideChatRunIds?: ReadonlySet<RunId> | undefined;
   renderInlineSideChats?: ((messageId: MessageId) => ReactNode) | undefined;
+  inlineBranchHeader?: ReactNode;
   branchOriginMessageIds?: ReadonlySet<string> | undefined;
+  inlineSideChatMarkers?: ReadonlyArray<InlineSideChatMarker>;
   followUpMessageIds?: ReadonlySet<string> | undefined;
   onCiteAssistantText?: (
     citation: AssistantCitation,
@@ -288,6 +295,7 @@ interface MessagesTimelineProps {
   onOpenThread: (
     threadId: OrchestrationV2TurnItem["threadId"],
     environmentId?: EnvironmentId,
+    relation?: "subagent",
   ) => void;
   renderHtmlRender?: TimelineRowSharedState["renderHtmlRender"];
   turnItemSource?: TimelineRowSharedState["turnItemSource"];
@@ -378,7 +386,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onBranchAssistantText,
   stableSideChatRunIds,
   renderInlineSideChats,
+  inlineBranchHeader,
   branchOriginMessageIds,
+  inlineSideChatMarkers,
   followUpMessageIds,
   onReplyToResponse,
   isWorking,
@@ -863,12 +873,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
     (approval) =>
       isVisiblePendingApproval(approval) && !matchedApprovalRequestIds.has(approval.requestId),
   );
-  const minimapItems = mergeUnloadedUserTurns(deriveTimelineMinimapItems(rows), userTurns);
+  const minimapItems = insertInlineSideChatMinimapItems(
+    mergeUnloadedUserTurns(deriveTimelineMinimapItems(rows), userTurns),
+    rows,
+    inlineSideChatMarkers,
+  );
   const markedMinimapItems =
     branchOriginMessageIds?.size || followUpMessageIds?.size
       ? minimapItems.map((item) => ({
           ...item,
-          branchOrigin: branchOriginMessageIds?.has(item.id),
+          branchOrigin: item.branchOrigin || branchOriginMessageIds?.has(item.id),
           followUp: followUpMessageIds?.has(item.id),
         }))
       : minimapItems;
@@ -1336,6 +1350,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
       {parentThreadLink === null ? listHeaderLeadingContent : null}
       {historyControls ? <TimelineHistoryControl {...historyControls} /> : null}
       {parentThreadLink !== null ? listHeaderLeadingContent : null}
+      {inlineBranchHeader ? (
+        <div className="messages-timeline-row-frame">
+          <div className="chat-content-lane">{inlineBranchHeader}</div>
+        </div>
+      ) : null}
     </>
   );
 
@@ -1619,7 +1638,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   onWheel={forwardMinimapWheel}
                   onSelect={(item) => {
                     if (item.rowIndex < 0) {
-                      onRevealMessage?.(MessageId.make(item.id));
+                      onRevealMessage?.(item.revealMessageId ?? MessageId.make(item.id));
                       return;
                     }
                     navigateTimeline();

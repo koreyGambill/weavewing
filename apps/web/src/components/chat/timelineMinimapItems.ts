@@ -1,7 +1,7 @@
 import { nonUserMessageOrigin } from "@t3tools/client-runtime/user-message";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
-import type { ThreadUserTurn } from "@t3tools/contracts";
+import type { MessageId, ThreadId, ThreadUserTurn } from "@t3tools/contracts";
 import type { Nodes } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -16,7 +16,61 @@ export interface TimelineMinimapItem {
   readonly userText: string | null;
   readonly assistantText: string | null;
   readonly branchOrigin?: boolean | undefined;
+  readonly sideChat?: true;
+  readonly revealMessageId?: MessageId;
   readonly followUp?: boolean | undefined;
+}
+
+export interface InlineSideChatMarker {
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly sourceMessageId: MessageId;
+  readonly sourceUserMessageId?: MessageId | undefined;
+}
+
+/** Places each drill-in at its source reply, even when a turn has no user minimap entry. */
+export function insertInlineSideChatMinimapItems(
+  items: ReadonlyArray<TimelineMinimapItem>,
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  markers: ReadonlyArray<InlineSideChatMarker> | undefined,
+): ReadonlyArray<TimelineMinimapItem> {
+  if (!markers?.length) return items;
+  const replyRows = new Map<MessageId, number>();
+  for (const [index, row] of rows.entries()) {
+    if (row.kind === "message" && row.message.role === "assistant") {
+      replyRows.set(row.message.id, index);
+    }
+  }
+  const turns = new Map(items.map((item) => [item.id, item]));
+  const additions: TimelineMinimapItem[] = [];
+  for (const marker of markers) {
+    const sourceTurn = marker.sourceUserMessageId
+      ? turns.get(marker.sourceUserMessageId)
+      : undefined;
+    const rowIndex = replyRows.get(marker.sourceMessageId) ?? sourceTurn?.rowIndex;
+    if (rowIndex === undefined) continue;
+    additions.push({
+      id: `side-chat:${marker.threadId}`,
+      rowIndex,
+      userText: marker.title,
+      assistantText: null,
+      branchOrigin: true,
+      sideChat: true,
+      ...(rowIndex < 0 && marker.sourceUserMessageId
+        ? { revealMessageId: marker.sourceUserMessageId }
+        : {}),
+    });
+  }
+  // Sort unloaded items by their original turn as they all have row index -1.
+  const olderOrder = new Map(items.map((item, index) => [item.id, index]));
+  return [...items, ...additions].sort(
+    (a, b) =>
+      a.rowIndex - b.rowIndex ||
+      (a.rowIndex < 0
+        ? (olderOrder.get(a.revealMessageId ?? a.id) ?? 0) -
+          (olderOrder.get(b.revealMessageId ?? b.id) ?? 0)
+        : 0),
+  );
 }
 
 export function deriveTimelineMinimapItems(

@@ -39,6 +39,7 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadShell,
   type ServerProvider,
+  type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
@@ -51,13 +52,14 @@ import {
   ChevronDownIcon,
   CornerLeftUpIcon,
   GitForkIcon,
+  InfoIcon,
   MessagesSquareIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SquareIcon,
   UnplugIcon,
 } from "lucide-react";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useContext, useId, useRef, useState, type ReactNode } from "react";
 
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -87,12 +89,15 @@ import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadR
 import { ThreadLineageWorkflowRow } from "./ThreadLineageWorkflowRow";
 import { useRightPanelStore } from "../../rightPanelStore";
 import {
-  bringSideChatToDraft,
+  bringThreadToDraft,
   focusThreadDraft,
+  RelatedThreadWorkspaceContext,
   resolveThreadOpenRoute,
+  revealWorkspaceThread,
 } from "../../lib/sideChatPane";
 
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { Spinner } from "../ui/spinner";
@@ -276,8 +281,8 @@ function RemoteSubagentRow(props: {
   readonly agent: RemoteSubagent;
   readonly provider: ServerProvider | undefined;
   readonly anyInstanceBadge: boolean;
+  readonly workspaceThreadRef: ScopedThreadRef;
 }) {
-  const navigate = useNavigate();
   const environment = useEnvironment(props.agent.remoteChild.environmentId);
   const { remoteChild } = props.agent;
   const status = props.agent.status;
@@ -299,12 +304,14 @@ function RemoteSubagentRow(props: {
               aria-disabled={environment === null || undefined}
               onClick={() => {
                 if (environment === null) return;
-                void navigate({
-                  to: "/$environmentId/$threadId",
-                  params: buildThreadRouteParams(
+                useRightPanelStore
+                  .getState()
+                  .openRelatedThread(
+                    props.workspaceThreadRef,
                     scopeThreadRef(remoteChild.environmentId, remoteChild.threadId),
-                  ),
-                });
+                    "subagent",
+                    title,
+                  );
               }}
             />
           }
@@ -490,6 +497,7 @@ export function ThreadRelationshipsPanel(props: {
 }) {
   const headingId = useId();
   const ref = scopeThreadRef(props.environmentId, props.threadId);
+  const workspaceThreadRef = useContext(RelatedThreadWorkspaceContext) ?? ref;
   const projection = useQuietThreadProjection(ref)?.projection ?? null;
   const providersByEnvironment = useEnvironmentProviders();
   const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.environmentId));
@@ -738,10 +746,9 @@ export function ThreadRelationshipsPanel(props: {
 
   // Idle children can be omitted from the shell; opening one loads its own detail.
   const openThread = (threadId: ThreadId) => {
-    const routeRef = resolveThreadOpenRoute(
-      scopeThreadRef(props.environmentId, threadId),
-      graph.nodes.get(threadId)?.thread ?? null,
-    );
+    const target = scopeThreadRef(props.environmentId, threadId);
+    if (revealWorkspaceThread(workspaceThreadRef, target)) return;
+    const routeRef = resolveThreadOpenRoute(target, graph.nodes.get(threadId)?.thread ?? null);
     if (routeRef.threadId === ref.threadId) return;
     void navigate({
       to: "/$environmentId/$threadId",
@@ -754,7 +761,7 @@ export function ThreadRelationshipsPanel(props: {
     if (sideChat) {
       if (!canMerge) return;
       const parent = scopeThreadRef(props.environmentId, mergeTargetThreadId);
-      bringSideChatToDraft(parent, ref, sideChat.title);
+      bringThreadToDraft(parent, ref, sideChat.title);
       await navigate({ to: "/$environmentId/$threadId", params: parent });
       focusThreadDraft(parent);
       return;
@@ -976,6 +983,15 @@ export function ThreadRelationshipsPanel(props: {
               onClick={() => {
                 if (!isParent && descendants.has(threadId)) {
                   useRightPanelStore.getState().openSideChat(ref, threadId);
+                } else if (!isParent && (edge.kind === "subagent" || edge.kind === "fork")) {
+                  useRightPanelStore
+                    .getState()
+                    .openRelatedThread(
+                      workspaceThreadRef,
+                      scopeThreadRef(props.environmentId, threadId),
+                      edge.kind,
+                      threadTitle,
+                    );
                 } else {
                   openThread(threadId);
                 }
@@ -1116,29 +1132,65 @@ export function ThreadRelationshipsPanel(props: {
           }
           data-thread-relationships-panel
           actions={
-            canDetach ? (
-              <Menu>
-                <MenuTrigger
+            <>
+              <Popover>
+                <PopoverTrigger
                   render={
                     <ThreadDetailsControl
                       size="icon-xs"
                       variant="ghost"
                       part="icon"
-                      aria-label="More thread actions"
-                      disabled={busyAction !== null}
+                      aria-label="How conversation context is shared"
                     />
                   }
                 >
-                  <MoreHorizontalIcon className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
-                  <MenuItem onClick={() => void detach()}>
-                    <UnplugIcon className="size-3.5" />
-                    Disconnect agent session
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
-            ) : null
+                  <InfoIcon className="size-3.5" />
+                </PopoverTrigger>
+                <PopoverPopup width="sm" align="end">
+                  <div className="space-y-2 text-xs">
+                    <PopoverTitle>How conversation context is shared</PopoverTitle>
+                    <p>
+                      A fork or side chat starts from a point in the parent conversation. When the
+                      provider can fork that history, the new chat inherits its context through that
+                      point. The provider decides how much it can reuse from its cache.
+                    </p>
+                    <p>
+                      When native forking is unavailable, Weavewing sends a selection of saved
+                      messages and activity. Long histories may leave items out. The handoff
+                      includes references the agent can use to read those items when thread tools
+                      are available.
+                    </p>
+                    <p>
+                      Rewind moves the earlier conversation into an archive. The next main-chat
+                      message starts with fresh context.
+                    </p>
+                  </div>
+                </PopoverPopup>
+              </Popover>
+              {canDetach ? (
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <ThreadDetailsControl
+                        size="icon-xs"
+                        variant="ghost"
+                        part="icon"
+                        aria-label="More thread actions"
+                        disabled={busyAction !== null}
+                      />
+                    }
+                  >
+                    <MoreHorizontalIcon className="size-3.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
+                    <MenuItem onClick={() => void detach()}>
+                      <UnplugIcon className="size-3.5" />
+                      Disconnect agent session
+                    </MenuItem>
+                  </MenuPopup>
+                </Menu>
+              ) : null}
+            </>
           }
         >
           {contextFork === undefined ? null : (
@@ -1180,6 +1232,7 @@ export function ThreadRelationshipsPanel(props: {
                     <RemoteSubagentRow
                       key={row.remote.id}
                       agent={row.remote}
+                      workspaceThreadRef={workspaceThreadRef}
                       // Its provider instance belongs to the environment it runs in.
                       provider={providersByEnvironment
                         .get(row.remote.remoteChild.environmentId)

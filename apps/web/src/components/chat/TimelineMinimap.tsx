@@ -221,6 +221,7 @@ export function TimelineMinimap({
                           : "scale-x-[0.333]",
                   )}
                   data-in-view="false"
+                  data-minimap-side-chat={item.sideChat}
                   data-minimap-strip
                   key={item.id}
                   ref={(node) => {
