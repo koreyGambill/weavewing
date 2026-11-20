@@ -6,6 +6,7 @@ import {
   ForwardCompatibleArray,
   GuestMessageId,
   GuestShareId,
+  IsoDateTime,
   NonNegativeInt,
   PositiveInt,
   ThreadId,
@@ -330,6 +331,8 @@ export const OrchestrationMessageContext = Schema.Struct({
   guest: Schema.optional(GuestMessageAttribution),
   /** The bounded conversation snapshot captured when a refresh was submitted. */
   sideChatRefresh: Schema.optional(Schema.String.check(Schema.isMaxLength(16_000))),
+  /** Root refresh capture time, before which excerpts were considered for the snapshot. */
+  sideChatRefreshBefore: Schema.optional(IsoDateTime),
   records: Schema.Array(Schema.Unknown)
     .check(
       Schema.isMaxLength(COMPOSER_CONTEXT_MAX_RECORDS),

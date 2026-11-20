@@ -832,6 +832,33 @@ it.effect("idle compaction filters keep the latest run, live work and the newest
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("side-chat context seeks a recent completion range before reading messages", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const { tracer, statements } = traceSqlStatements();
+    const refresh = yield* store
+      .getSideChatRefresh(ThreadId.make("empty-side-chat-tree"), {
+        kind: "automatic",
+        freshRunIds: [],
+        after: "2026-01-02T00:00:00.000Z",
+        before: "2026-01-03T00:00:00.000Z",
+      })
+      .pipe(Effect.withTracer(tracer));
+    assert.isUndefined(refresh);
+    const query = statements.find((statement) => statement.includes("recent_window"));
+    assert.isDefined(query);
+    const plan = (yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${query}`))
+      .map((row) => row.detail)
+      .join("\n");
+    assert.include(
+      plan,
+      "runs_last_executed_idx (thread_id=? AND <expr>=? AND completed_at>? AND completed_at<?)",
+    );
+    assert.include(plan, "messages_run_idx (run_id=?)");
+  }).pipe(Effect.provide(layerTest)),
+);
+
 // One thread holds every way a run can still matter after a compaction. A run is requested at
 // its ordinal in minutes and ends 30 seconds later, unless the table says otherwise.
 it.effect("a compacted thread reads every run, and run records only for its recent runs", () =>

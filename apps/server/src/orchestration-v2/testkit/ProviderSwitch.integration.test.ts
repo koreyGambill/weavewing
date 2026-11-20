@@ -103,6 +103,7 @@ function makeTestAdapter(input: {
   readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
   readonly injectedHistory?: Ref.Ref<ReadonlyArray<unknown>>;
   readonly failStartOnce?: Ref.Ref<boolean>;
+  readonly releaseRunningStartFailure?: Deferred.Deferred<void>;
   readonly refuseStarts?: Ref.Ref<number>;
   readonly refusalCause?: unknown;
   readonly failInjectionOnce?: Ref.Ref<boolean>;
@@ -259,11 +260,33 @@ function makeTestAdapter(input: {
           compactThread: (turnInput) => runtime.startTurn(turnInput),
           startTurn: (turnInput) =>
             Effect.gen(function* () {
+              const providerTurnId = ProviderTurnId.make(
+                `provider-turn:${input.driver}:${turnInput.threadId}:${turnInput.runOrdinal}`,
+              );
               if (
                 input.failStartOnce !== undefined &&
                 (yield* Ref.getAndSet(input.failStartOnce, false))
-              )
+              ) {
+                if (input.releaseRunningStartFailure !== undefined) {
+                  yield* PubSub.publish(events, {
+                    type: "provider_turn.updated",
+                    driver: input.driver,
+                    providerTurn: {
+                      id: providerTurnId,
+                      providerThreadId: turnInput.providerThread.id,
+                      nodeId: turnInput.rootNodeId,
+                      runAttemptId: turnInput.attemptId,
+                      nativeTurnRef: null,
+                      ordinal: turnInput.runOrdinal,
+                      status: "running",
+                      startedAt: yield* DateTime.now,
+                      completedAt: null,
+                    },
+                  });
+                  yield* Deferred.await(input.releaseRunningStartFailure);
+                }
                 return yield* unimplemented(input.driver, "turn start failed after injection");
+              }
               if (
                 input.refuseStarts !== undefined &&
                 (yield* Ref.getAndUpdate(input.refuseStarts, (left) => Math.max(0, left - 1))) > 0
@@ -293,9 +316,6 @@ function makeTestAdapter(input: {
                     : { nativeThreadHasTurns: turnInput.nativeThreadHasTurns }),
                 },
               ]);
-              const providerTurnId = ProviderTurnId.make(
-                `provider-turn:${input.driver}:${turnInput.threadId}:${turnInput.runOrdinal}`,
-              );
               if (
                 turnInput.runOrdinal === (input.holdRunOrdinal ?? 1) &&
                 input.holdFirstTurn !== undefined
@@ -555,6 +575,9 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
     const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
     const child = ThreadId.make("side-chat-auto-child");
     const failStartOnce = yield* Ref.make(false);
+    const releaseRunningStartFailure = yield* Deferred.make<void>();
+    const heldTurn = yield* Deferred.make<void>();
+    const releaseHeldTurn = yield* Deferred.make<void>();
     const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
       makeTestAdapter({
         instanceId: CODEX_MODEL_SELECTION.instanceId,
@@ -564,21 +587,32 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
         responseByRunOrdinal: {},
         responseByThreadId: {
           [threadId]: { 2: "New main chat result" },
-          [child]: { 1: "Branch result", 3: "A later branch result" },
+          [child]: {
+            1: "Branch result",
+            3: "A later branch result",
+            4: "Historical branch excerpt",
+            5: "Fresh branch excerpt",
+          },
         },
         capturedTurns,
         failStartOnce,
+        releaseRunningStartFailure,
+        holdRunOrdinal: 11,
+        holdFirstTurn: heldTurn,
+        releaseFirstTurn: releaseHeldTurn,
       }),
     ]);
     yield* Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
-      const dispatch = Effect.fn("SideChatContextTest.dispatch")(function* (
+      const submit = (
         target: ThreadId,
         prompt: string,
         refreshSideChatContext = false,
-      ) {
-        yield* orchestrator.dispatch({
+        freshContext = false,
+        mode: "start_immediately" | "queue_after_active" = "start_immediately",
+      ) =>
+        orchestrator.dispatch({
           type: "message.dispatch",
           commandId: CommandId.make(prompt),
           threadId: target,
@@ -588,9 +622,17 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
           origin: { kind: "user" },
           createdBy: "user",
           creationSource: "web",
-          dispatchMode: { type: "start_immediately" },
+          dispatchMode: { type: mode },
           refreshSideChatContext,
+          freshContext,
         });
+      const dispatch = Effect.fn("SideChatContextTest.dispatch")(function* (
+        target: ThreadId,
+        prompt: string,
+        refreshSideChatContext = false,
+        freshContext = false,
+      ) {
+        yield* submit(target, prompt, refreshSideChatContext, freshContext);
         const settled = yield* waitForIdle(target);
         yield* worker.drain();
         return settled.runs.at(-1)?.status;
@@ -639,10 +681,92 @@ it.live("delivers new side-chat excerpts once to the main chat and keeps explici
       const explicit = yield* send(child, "Refresh the side chat", true);
       assert.include(explicit, '"text":"New main chat result"');
       yield* Ref.set(failStartOnce, true);
-      assert.equal(yield* dispatch(threadId, "Prompt the provider refused"), "failed");
+      const eventSink = yield* EventSink.EventSinkV2;
+      const afterSequence = yield* eventSink.latestSequence();
+      const refusing = yield* dispatch(threadId, "Prompt the provider refused").pipe(
+        Effect.forkChild,
+      );
+      const [starting] = yield* eventSink.stream({ afterSequence }).pipe(
+        Stream.map(({ event }) =>
+          event.type === "provider-turn.updated" &&
+          event.threadId === threadId &&
+          event.payload.status === "running"
+            ? event.payload
+            : undefined,
+        ),
+        Stream.filter((turn) => turn !== undefined),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      assert.isDefined(starting);
+      yield* Deferred.succeed(releaseRunningStartFailure, undefined);
+      assert.equal(yield* Fiber.join(refusing), "failed");
+      const afterRefusal = yield* orchestrator.getThreadProjection(threadId);
+      assert.isTrue(afterRefusal.providerTurns.some((turn) => turn.id === starting.id));
       const later = yield* send(threadId, "Use the later result");
       assert.include(later, '"text":"A later branch result"');
       assert.notInclude(later, '"text":"Branch result"');
+
+      const beforeRewind = yield* orchestrator.getThreadProjection(threadId);
+      const checkpoint = beforeRewind.checkpoints.find((entry) => entry.appRunOrdinal === 3)!;
+      const beforeRollback = yield* eventSink.latestSequence();
+      yield* orchestrator.dispatch({
+        type: "checkpoint.rollback",
+        commandId: CommandId.make("side-chat-auto-rewind"),
+        threadId,
+        checkpointId: checkpoint.id,
+        scopeId: checkpoint.scopeId,
+        restoreFiles: false,
+      });
+      const [rollback] = yield* eventSink.stream({ afterSequence: beforeRollback }).pipe(
+        Stream.filter(
+          ({ event }) =>
+            event.threadId === threadId &&
+            ((event.type === "run.updated" && event.payload.status === "rolled_back") ||
+              (event.type === "thread.metadata-updated" && event.payload.rollbackFailure != null)),
+        ),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      assert.equal(
+        rollback?.event.type,
+        "run.updated",
+        rollback?.event.type === "thread.metadata-updated"
+          ? rollback.event.payload.rollbackFailure?.message
+          : undefined,
+      );
+      yield* worker.drain();
+      const replay = yield* send(threadId, "Use the later result after rewind");
+      assert.include(replay, '"text":"A later branch result"');
+
+      yield* send(child, "Before fresh context");
+      assert.equal(yield* dispatch(threadId, "Start fresh", false, true), "completed");
+      yield* send(child, "After fresh context");
+      const fresh = yield* send(threadId, "Continue the fresh conversation");
+      assert.include(fresh, '"text":"Fresh branch excerpt"');
+      assert.notInclude(fresh, '"text":"Historical branch excerpt"');
+
+      yield* send(child, "A result to refresh explicitly");
+      const rootRefresh = yield* send(threadId, "Refresh main chat", true);
+      assert.include(rootRefresh, '"text":"A result to refresh explicitly"');
+      assert.equal(yield* send(threadId, "Continue after refresh"), "Continue after refresh");
+
+      yield* submit(threadId, "Hold the main chat");
+      yield* Deferred.await(heldTurn);
+      yield* send(child, "Branch result while the main chat waits");
+      yield* submit(threadId, "Queue fresh context", false, true, "queue_after_active");
+      yield* submit(threadId, "Queue a refresh", true, false, "queue_after_active");
+      const queued = (yield* orchestrator.getThreadProjection(threadId)).messages.find(
+        (message) => message.id === MessageId.make("Queue a refresh"),
+      );
+      assert.include(
+        queued?.context?.sideChatRefresh ?? "",
+        '"text":"Branch result while the main chat waits"',
+      );
+      yield* Deferred.succeed(releaseHeldTurn, undefined);
+      const settled = yield* waitForIdle(threadId);
+      assert.equal(settled.runs.at(-1)?.status, "completed");
+      assert.equal((yield* Ref.get(capturedTurns)).at(-1)?.text, "Queue a refresh");
     }).pipe(
       Effect.provide(
         ProviderReplayHarness.layerWithRegistry(

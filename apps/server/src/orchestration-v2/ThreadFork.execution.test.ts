@@ -1237,6 +1237,7 @@ it.effect(
         "Later sibling update",
       );
 
+      yield* TestClock.adjust("1 millis");
       const rootMessageId = MessageId.make("refresh-root");
       yield* orchestrator.dispatch({
         ...command,

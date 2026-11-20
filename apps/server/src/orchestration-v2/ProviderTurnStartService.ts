@@ -1643,7 +1643,31 @@ export const layer: Layer.Layer<
         return;
       }
       const retryHandoff = resumedRetryHandoff ?? (yield* prepareRetryHandoff(handoffContext));
-      const explicitRefresh = providerMessage.context?.sideChatRefresh;
+      const refreshBefore = providerMessage.context?.sideChatRefreshBefore;
+      let explicitRefresh = providerMessage.context?.sideChatRefresh;
+      if (explicitRefresh !== undefined && refreshBefore !== undefined) {
+        const resetsSinceCapture = projection.runs.flatMap((prior) =>
+          prior.ordinal < run.ordinal &&
+          prior.status !== "rolled_back" &&
+          prior.freshContext === true &&
+          prior.startedAt !== null &&
+          DateTime.formatIso(prior.startedAt) >= refreshBefore
+            ? [prior.userMessageId]
+            : [],
+        );
+        // A queued snapshot can cross a fresh-context turn before it reaches the provider.
+        if (resetsSinceCapture.length > 0) {
+          const resetPrompts = yield* projectionStore.getMessagesById(
+            input.threadId,
+            resetsSinceCapture,
+          );
+          if (
+            resetsSinceCapture.some((id) => resetPrompts.get(id)?.scheduledTaskId === undefined)
+          ) {
+            explicitRefresh = undefined;
+          }
+        }
+      }
       let automaticRefresh: string | undefined;
       if (
         explicitRefresh === undefined &&
@@ -1674,22 +1698,36 @@ export const layer: Layer.Layer<
             !prompt.text.trimStart().startsWith("/"),
         )
       ) {
-        // Only attempts that reached the provider can advance the excerpt cutoff.
-        const delivered = new Set(projection.providerTurns.map((turn) => turn.runAttemptId));
+        // Claude can publish a running turn before offering the prompt. Repeat excerpts if delivery is uncertain.
+        const delivered = new Set(
+          projection.providerTurns
+            .filter((turn) => turn.status === "completed")
+            .map((turn) => turn.runAttemptId),
+        );
+        const surviving = new Set(
+          projection.runs.filter((prior) => prior.status === "completed").map((prior) => prior.id),
+        );
         const after = projection.attempts.reduce<string | undefined>((latest, prior) => {
           if (
-            prior.runId === run.id ||
-            prior.includesSideChatContext !== true ||
-            prior.startedAt === null ||
-            !delivered.has(prior.id)
+            !surviving.has(prior.runId) ||
+            !delivered.has(prior.id) ||
+            (prior.sideChatContextBefore === undefined && prior.includesSideChatContext !== true)
           ) {
             return latest;
           }
-          const cutoff = DateTime.formatIso(prior.startedAt);
-          return latest === undefined || cutoff > latest ? cutoff : latest;
+          const cutoff =
+            prior.sideChatContextBefore ??
+            (prior.startedAt === null ? undefined : DateTime.formatIso(prior.startedAt));
+          return cutoff !== undefined && (latest === undefined || cutoff > latest)
+            ? cutoff
+            : latest;
         }, undefined);
         automaticRefresh = yield* projectionStore.getSideChatRefresh(input.threadId, {
+          kind: "automatic",
           after,
+          freshRunIds: projection.runs
+            .filter((prior) => prior.freshContext === true)
+            .map((prior) => prior.id),
           // Leave the current millisecond open so concurrent finalizations remain eligible.
           before: DateTime.formatIso(now),
         });
@@ -1719,9 +1757,19 @@ export const layer: Layer.Layer<
         status: "running",
         startedAt: run.startedAt ?? now,
       };
+      const sideChatContextBefore =
+        automaticRefresh !== undefined
+          ? DateTime.formatIso(now)
+          : explicitRefresh !== undefined &&
+              refreshBefore !== undefined &&
+              refreshBefore <= DateTime.formatIso(providerMessage.createdAt) &&
+              !isCompactionCommandMessage(providerMessage) &&
+              !goalCommand
+            ? refreshBefore
+            : undefined;
       const runningAttempt: OrchestrationV2RunAttempt = {
         ...attempt,
-        ...(automaticRefresh === undefined ? {} : { includesSideChatContext: true }),
+        ...(sideChatContextBefore === undefined ? {} : { sideChatContextBefore }),
         ...(runningProviderThread.nativeThreadRef?.nativeId == null
           ? {}
           : { nativeThreadId: runningProviderThread.nativeThreadRef.nativeId }),

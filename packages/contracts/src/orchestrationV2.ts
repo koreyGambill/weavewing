@@ -917,8 +917,10 @@ export const OrchestrationV2RunAttempt = Schema.Struct({
   providerThreadId: ProviderThreadId,
   providerTurnId: Schema.NullOr(ProviderTurnId),
   reason: Schema.Literals(["initial", "steering_restart", "retry", "provider_recovery"]),
-  /** The prompt includes automatic side-chat excerpts finalized before startedAt. */
+  /** Older attempts used startedAt as the upper bound for automatic side-chat excerpts. */
   includesSideChatContext: Schema.optional(Schema.Literal(true)),
+  /** Exclusive upper bound of the side-chat context selected for this prompt. */
+  sideChatContextBefore: Schema.optional(IsoDateTime),
   status: Schema.Literals([
     "pending",
     "running",

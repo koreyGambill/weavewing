@@ -7568,8 +7568,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }
         : undefined,
     );
-    if (command.context?.sideChatRefresh !== undefined) {
-      const { sideChatRefresh: _incomingSnapshot, ...context } = command.context;
+    if (
+      command.context?.sideChatRefresh !== undefined ||
+      command.context?.sideChatRefreshBefore !== undefined
+    ) {
+      const {
+        sideChatRefresh: _incomingSnapshot,
+        sideChatRefreshBefore: _incomingCutoff,
+        ...context
+      } = command.context;
       command = { ...command, context };
     }
     if (command.refreshSideChatContext === true) {
@@ -7591,13 +7598,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             "Newest context can only accompany a regular user prompt in the current conversation.",
         });
       }
+      const before =
+        projection.thread.lineage.sideChat === true
+          ? undefined
+          : DateTime.formatIso(yield* DateTime.now);
       const snapshot = yield* projectionStore
-        .getSideChatRefresh(command.threadId)
+        .getSideChatRefresh(
+          command.threadId,
+          before === undefined
+            ? undefined
+            : {
+                kind: "explicit",
+                before,
+                freshRunIds: projection.runs
+                  .filter((prior) => prior.freshContext === true)
+                  .map((prior) => prior.id),
+              },
+        )
         .pipe(mapDispatchError(command));
       if (snapshot !== undefined) {
         command = {
           ...command,
-          context: { version: 1, records: [], ...command.context, sideChatRefresh: snapshot },
+          context: {
+            version: 1,
+            records: [],
+            ...command.context,
+            sideChatRefresh: snapshot,
+            ...(before === undefined ? {} : { sideChatRefreshBefore: before }),
+          },
         };
       }
     }
@@ -12795,6 +12823,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     const sideChatRefresh = queuedMessage.context?.sideChatRefresh;
+    const sideChatRefreshBefore = queuedMessage.context?.sideChatRefreshBefore;
     if (sideChatRefresh !== undefined && command.text.trimStart().startsWith("/")) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -12804,8 +12833,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     let context = command.context;
     if (context !== undefined) {
-      const { sideChatRefresh: _incomingSnapshot, ...editedContext } = context;
-      context = { ...editedContext, ...(sideChatRefresh === undefined ? {} : { sideChatRefresh }) };
+      const {
+        sideChatRefresh: _incomingSnapshot,
+        sideChatRefreshBefore: _incomingCutoff,
+        ...editedContext
+      } = context;
+      context = {
+        ...editedContext,
+        ...(sideChatRefresh === undefined ? {} : { sideChatRefresh }),
+        ...(sideChatRefreshBefore === undefined ? {} : { sideChatRefreshBefore }),
+      };
     }
     yield* ensureGoalCommandSupported(
       command,

@@ -592,7 +592,13 @@ export interface ProjectionStoreV2Shape {
   >;
   readonly getSideChatRefresh: (
     threadId: ThreadId,
-    window?: { readonly after: string | undefined; readonly before: string },
+    window?: {
+      readonly before: string;
+      readonly freshRunIds: ReadonlyArray<RunId>;
+    } & (
+      | { readonly kind: "automatic"; readonly after: string | undefined }
+      | { readonly kind: "explicit" }
+    ),
   ) => Effect.Effect<string | undefined, ProjectionStoreV2Error>;
   readonly getThreadRecords: <K extends ProjectionRecordField>(
     threadId: ThreadId,
@@ -6808,7 +6814,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       "ProjectionStore.getSideChatRefresh",
     )(
       function* (threadId, window) {
-        const finalizedAt = sql`MAX(COALESCE(run.completed_at, message.updated_at), message.updated_at)`;
+        // A completed run publishes the excerpt window, which can seek past older branch runs.
+        const after = window?.kind === "automatic" ? window.after : undefined;
         // A normal fork starts its own side-chat tree, even if it has the same lineage root.
         const rows = yield* sql<{ excerpt: string }>`
           WITH RECURSIVE
@@ -6842,7 +6849,31 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               WHERE json_extract(child.payload_json, '$.lineage.sideChat') = 1
                 AND json_extract(child.payload_json, '$.lineage.parentThreadId') = parent.thread_id
                 AND child.deleted_at IS NULL
-            )
+            )${
+              window === undefined
+                ? sql``
+                : sql`,
+            recent_window(first_completion) AS MATERIALIZED (
+              SELECT MAX(${after ?? ""}, COALESCE(${
+                window.freshRunIds.length === 0
+                  ? sql`NULL`
+                  : sql`(
+                SELECT json_extract(fresh.payload_json, '$.startedAt')
+                FROM orchestration_v2_projection_runs fresh
+                  INDEXED BY sqlite_autoindex_orchestration_v2_projection_runs_1
+                JOIN orchestration_v2_projection_messages prompt
+                  ON prompt.message_id = json_extract(fresh.payload_json, '$.userMessageId')
+                WHERE fresh.thread_id = ${threadId}
+                  AND fresh.run_id IN ${sql.in(window.freshRunIds)}
+                  AND fresh.status <> 'rolled_back'
+                  AND json_extract(fresh.payload_json, '$.startedAt') IS NOT NULL
+                  AND json_extract(prompt.payload_json, '$.scheduledTaskId') IS NULL
+                ORDER BY fresh.ordinal DESC
+                LIMIT 1
+              )`
+              }, ''))
+            )`
+            }
           SELECT json_object(
             'threadId', tree.thread_id,
             'title', tree.title,
@@ -6850,9 +6881,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             'text', substr(trim(json_extract(message.payload_json, '$.text')), 1, 800)
           ) AS excerpt
           FROM tree
-          JOIN orchestration_v2_projection_messages message ON message.thread_id = tree.thread_id
-          JOIN orchestration_v2_projection_runs run ON run.run_id = message.run_id
-            AND run.thread_id = tree.thread_id
+          ${
+            window === undefined
+              ? sql`JOIN orchestration_v2_projection_runs run ON run.thread_id = tree.thread_id`
+              : sql`
+              CROSS JOIN recent_window
+              CROSS JOIN orchestration_v2_projection_runs run
+                INDEXED BY orchestration_v2_projection_runs_last_executed_idx
+                ON run.thread_id = tree.thread_id
+                  AND run.status <> 'queued'
+                  AND NOT (run.status = 'cancelled' AND json_extract(run.payload_json, '$.startedAt') IS NULL)
+                  AND (run.completed_at IS NULL) = 0
+                  AND run.completed_at >= recent_window.first_completion
+                  AND run.completed_at < ${window.before}
+            `
+          }
+          CROSS JOIN orchestration_v2_projection_messages message
+            INDEXED BY orchestration_v2_projection_messages_run_idx
+            ON message.run_id = run.run_id AND message.thread_id = tree.thread_id
           LEFT JOIN orchestration_v2_projection_nodes node ON node.node_id = message.node_id
             AND node.thread_id = tree.thread_id AND node.run_id = run.run_id
           LEFT JOIN ancestors ancestor ON ancestor.thread_id = tree.thread_id
@@ -6876,14 +6922,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               )
             )
             AND trim(json_extract(message.payload_json, '$.text')) <> ''
-            ${
-              window === undefined
-                ? sql``
-                : sql`AND ${finalizedAt} >= ${window.after ?? ""} AND ${finalizedAt} < ${window.before}`
-            }
-          ORDER BY ${window === undefined ? sql`` : sql`${finalizedAt} DESC,`}
+          ORDER BY ${window === undefined ? sql`` : sql`run.completed_at DESC,`}
             message.created_at DESC, message.message_id DESC
-          LIMIT ${window === undefined ? 8 : 4}
+          LIMIT ${window?.kind === "automatic" ? 4 : 8}
         `;
         // A JSON line keeps embedded newlines and delimiters inside their source excerpt.
         const excerpts: string[] = [];
