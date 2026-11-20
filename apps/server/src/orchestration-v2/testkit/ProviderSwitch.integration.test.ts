@@ -4042,9 +4042,22 @@ describe("orchestration v2 provider switching", () => {
       }),
   );
 
-  it.live(
-    "splits native conversation history through a selected reply before either branch sends",
-    () =>
+  it.live.each([
+    {
+      name: "Codex",
+      driver: CODEX_DRIVER,
+      capabilities: CodexProviderCapabilitiesV2,
+      modelSelection: CODEX_MODEL_SELECTION,
+    },
+    {
+      name: "Claude",
+      driver: CLAUDE_DRIVER,
+      capabilities: ClaudeProviderCapabilitiesV2,
+      modelSelection: CLAUDE_MODEL_SELECTION,
+    },
+  ])(
+    "splits $name native conversation history through a selected reply before either branch sends",
+    ({ driver, capabilities, modelSelection }) =>
       Effect.gen(function* () {
         const cwd = yield* checkpointWorkspace("reply-rewind");
         const fileSystem = yield* FileSystem.FileSystem;
@@ -4056,10 +4069,10 @@ describe("orchestration v2 provider switching", () => {
         const failPrefixFork = yield* Ref.make(true);
         const registry = ProviderAdapterRegistry.layerFromAdapters([
           makeTestAdapter({
-            instanceId: CODEX_MODEL_SELECTION.instanceId,
-            driver: CODEX_DRIVER,
-            capabilities: CodexProviderCapabilitiesV2,
-            modelSelection: CODEX_MODEL_SELECTION,
+            instanceId: modelSelection.instanceId,
+            driver: driver,
+            capabilities: capabilities,
+            modelSelection: modelSelection,
             responseByRunOrdinal: {},
             capturedTurns,
             forkThread: (input) =>
@@ -4069,14 +4082,14 @@ describe("orchestration v2 provider switching", () => {
                   input,
                 ]);
                 if (input.providerTurnId && (yield* Ref.get(failPrefixFork))) {
-                  return yield* unimplemented(CODEX_DRIVER, "native prefix fork failed");
+                  return yield* unimplemented(driver, "native prefix fork failed");
                 }
                 const nativeId = `native-split:${index.length}`;
                 return {
                   ...input.sourceProviderThread,
                   appThreadId: input.targetThreadId,
                   id: ProviderThreadId.make(nativeId),
-                  nativeThreadRef: { driver: CODEX_DRIVER, nativeId, strength: "strong" },
+                  nativeThreadRef: { driver: driver, nativeId, strength: "strong" },
                   nativeConversationHeadRef: null,
                   firstRunOrdinal: null,
                   lastRunOrdinal: null,
@@ -4105,7 +4118,7 @@ describe("orchestration v2 provider switching", () => {
                 messageId: MessageId.make(`reply-rewind:message:${text}`),
                 text,
                 attachments: [],
-                modelSelection: CODEX_MODEL_SELECTION,
+                modelSelection: modelSelection,
                 deliveryIntent: "auto",
                 dispatchMode: { type: "start_immediately" },
               });
@@ -4133,7 +4146,7 @@ describe("orchestration v2 provider switching", () => {
             threadId: root,
             projectId,
             title: "Reply rewind",
-            modelSelection: CODEX_MODEL_SELECTION,
+            modelSelection: modelSelection,
             runtimeMode: "full-access",
             interactionMode: "default",
             branch: null,
@@ -4184,7 +4197,7 @@ describe("orchestration v2 provider switching", () => {
             id: ProviderTurnId.make("reply-rewind:later-native-turn"),
             ordinal: before.providerTurns.at(-1)!.ordinal + 1,
             nativeTurnRef: {
-              driver: CODEX_DRIVER,
+              driver: driver,
               nativeId: "later-native-turn",
               strength: "strong" as const,
             },
@@ -4202,8 +4215,8 @@ describe("orchestration v2 provider switching", () => {
                     type: "provider-turn.updated",
                     threadId: root,
                     runId: boundaryRun.id,
-                    driver: CODEX_DRIVER,
-                    providerInstanceId: CODEX_MODEL_SELECTION.instanceId,
+                    driver: driver,
+                    providerInstanceId: modelSelection.instanceId,
                     occurredAt: now,
                     payload: { ...laterNativeTurn, runAttemptId },
                   },
@@ -4233,6 +4246,12 @@ describe("orchestration v2 provider switching", () => {
             "Keep this edit through the split.",
           );
           assert.notEqual(main.thread.activeProviderThreadId, activeBefore);
+          // A Claude fork already ends at the reply; pinning the source turn id would resume at a missing message.
+          assert.deepEqual(
+            main.providerThreads.find((thread) => thread.id === main.thread.activeProviderThreadId)
+              ?.nativeConversationHeadRef,
+            driver === CODEX_DRIVER ? originalBoundary.nativeTurnRef : null,
+          );
           assert.deepEqual(yield* messages(root), ["keep this prefix", replies[0]!.text]);
           for (const id of [archive, priorFork]) {
             assert.deepEqual(yield* messages(id), [

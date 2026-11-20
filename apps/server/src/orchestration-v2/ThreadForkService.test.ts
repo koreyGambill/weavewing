@@ -9,6 +9,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
@@ -380,4 +381,57 @@ it.effect("marks only requested forks as side chats and inherits parent permissi
     ).pipe(Effect.flip);
     assert.equal(fromDelegated.cause, "A subagent cannot start a side chat.");
   }),
+);
+
+it.each([
+  {
+    name: "a strong Codex turn",
+    driver: "codex",
+    nativeId: "codex-turn",
+    strength: "strong",
+    forks: true,
+  },
+  {
+    name: "a weak Codex turn",
+    driver: "codex",
+    nativeId: "codex-turn",
+    strength: "weak",
+    forks: false,
+  },
+  {
+    name: "a Claude resume cursor",
+    driver: "claudeAgent",
+    nativeId: "msg-uuid",
+    strength: "weak",
+    forks: true,
+  },
+  {
+    name: "a Claude placeholder turn",
+    driver: "claudeAgent",
+    nativeId: "turn:1",
+    strength: "weak",
+    forks: false,
+  },
+  {
+    name: "another provider",
+    driver: "opencode",
+    nativeId: "turn-1",
+    strength: "strong",
+    forks: false,
+  },
+] as const)(
+  "forks a busy source through $name: $forks",
+  ({ driver, nativeId, strength, forks }) => {
+    const providerThreadId = ProviderThreadId.make("provider-thread:busy-source");
+    const thread = {
+      id: providerThreadId,
+      driver: ProviderDriverKind.make(driver),
+    } as unknown as Parameters<typeof ThreadForkService.canForkFromBusySource>[0];
+    const turn = {
+      providerThreadId,
+      status: "completed",
+      nativeTurnRef: { driver: ProviderDriverKind.make(driver), nativeId, strength },
+    } as unknown as Parameters<typeof ThreadForkService.canForkFromBusySource>[1];
+    assert.strictEqual(ThreadForkService.canForkFromBusySource(thread, turn), forks);
+  },
 );

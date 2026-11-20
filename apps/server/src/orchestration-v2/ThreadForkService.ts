@@ -50,17 +50,20 @@ export function forkableSourceRunStatusError(
   return `Fork source run ${run.id} is ${run.status}; in-progress and rolled-back runs cannot be forked.`;
 }
 
-/** Codex can atomically fork through a completed turn while a later turn is active. */
+/** Codex and Claude can fork through a completed turn while a later turn is active. */
 export function canForkFromBusySource(
   thread: OrchestrationV2ProviderThread | undefined,
   turn: OrchestrationV2ProviderTurn | undefined,
 ): boolean {
-  return (
-    thread?.driver === "codex" &&
-    turn?.providerThreadId === thread.id &&
-    turn.status === "completed" &&
-    turn.nativeTurnRef?.strength === "strong"
-  );
+  if (thread === undefined || turn?.providerThreadId !== thread.id || turn.status !== "completed") {
+    return false;
+  }
+  const ref = turn.nativeTurnRef;
+  if (thread.driver === "codex") return ref?.strength === "strong";
+  // Claude marks completed turns weak but records its resume cursor; "turn:" ids are placeholders.
+  if (thread.driver === "claudeAgent")
+    return ref?.nativeId != null && !ref.nativeId.startsWith("turn:");
+  return false;
 }
 
 /** A pending fork transfer; the target thread's next turn resolves it natively or portably. */

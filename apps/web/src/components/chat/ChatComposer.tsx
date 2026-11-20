@@ -358,6 +358,8 @@ export interface ChatComposerHandle {
 
 export interface ChatComposerProps {
   cornerControls?: React.ReactNode;
+  /** Shown beside the attach button, for actions that only apply in some threads. */
+  footerLeadingControls?: React.ReactNode;
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
@@ -3771,9 +3773,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "hidden sm:flex",
                 )}
               >
-                {composerAttachButton && !dictationTakesFooter ? (
-                  <div className="me-2 shrink-0 @max-[16rem]/composer-surface:me-1">
+                {(composerAttachButton || props.footerLeadingControls) && !dictationTakesFooter ? (
+                  <div className="me-2 flex shrink-0 items-center gap-1 @max-[16rem]/composer-surface:me-1">
                     {composerAttachButton}
+                    {props.footerLeadingControls}
                   </div>
                 ) : null}
                 <div

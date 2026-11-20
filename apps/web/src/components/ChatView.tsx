@@ -2,7 +2,6 @@ import { WorkspaceTitlebar } from "./WorkspaceTitlebar";
 import * as DateTime from "effect/DateTime";
 import { ContextArchiveRow } from "./chat/ContextArchiveRow";
 import SideChatPane from "./chat/SideChatPane";
-import { RewindContextButton } from "./chat/RewindContextButton";
 import { Button } from "./ui/button";
 import { ForkConversationButton } from "./chat/ForkConversationButton";
 import { SideChatContextButton } from "./chat/SideChatContextButton";
@@ -2865,20 +2864,6 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.lineage.sideChat !== true &&
     !isSubagentThread &&
     serverConfig?.environment.capabilities.sideChats === true;
-  const rewindRun =
-    isServerThread &&
-    activeThreadRef !== null &&
-    activeThread?.lineage.sideChat !== true &&
-    !isSubagentThread &&
-    canOperateThread &&
-    serverConfig?.environment.capabilities.conversationContextRewind === true
-      ? serverProjection?.runs.findLast(
-          (run) =>
-            run.threadId === threadId &&
-            run.ordinal > (activeThreadShell?.contextRewind?.runOrdinal ?? 0) &&
-            isStableForkRun(run),
-        )
-      : undefined;
   const canBranchAssistantText =
     isServerThread &&
     canOperateThread &&
@@ -3943,21 +3928,19 @@ export default function ChatView(props: ChatViewProps) {
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
+                              footerLeadingControls={
+                                isServerThread &&
+                                sideChatRefreshAvailable &&
+                                !inlineSideChat &&
+                                (activeThread.lineage.sideChat ||
+                                  serverConfig?.environment.capabilities.sideChatAutoContext !==
+                                    true) ? (
+                                  <SideChatContextButton threadKey={routeThreadKey} />
+                                ) : undefined
+                              }
                               cornerControls={
                                 isServerThread ? (
                                   <div className="flex flex-col items-center gap-1 @max-[16rem]/composer-surface:flex-row">
-                                    {rewindRun && activeThreadRef ? (
-                                      <RewindContextButton
-                                        key={activeThreadKey}
-                                        thread={activeThreadRef}
-                                        runId={rewindRun.id}
-                                        disabled={
-                                          isWorking ||
-                                          activeEnvironmentUnavailable ||
-                                          activeRuntime?.activeRunId != null
-                                        }
-                                      />
-                                    ) : null}
                                     {!embedded &&
                                     activeThread.lineage.contextArchive &&
                                     sideChatParentRef &&
@@ -3971,13 +3954,6 @@ export default function ChatView(props: ChatViewProps) {
                                       >
                                         Bring back
                                       </Button>
-                                    ) : null}
-                                    {sideChatRefreshAvailable &&
-                                    !inlineSideChat &&
-                                    (activeThread.lineage.sideChat ||
-                                      serverConfig?.environment.capabilities.sideChatAutoContext !==
-                                        true) ? (
-                                      <SideChatContextButton threadKey={routeThreadKey} />
                                     ) : null}
                                     {activeThread.lineage.sideChat !== true &&
                                       (() => {

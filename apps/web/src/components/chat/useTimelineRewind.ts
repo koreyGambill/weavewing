@@ -142,7 +142,7 @@ function getRewindToReplyDisabledReason({
     const provider = providerThreads.find(
       (provider) => provider.id === thread.activeProviderThreadId,
     );
-    if (provider?.driver !== "codex") return "Rewind to here requires native Codex history.";
+    if (provider === undefined) return "Rewind to here needs the provider's saved conversation.";
     if (provider.goal?.status === "active") return "Pause the active goal before rewinding.";
     if (provider.pendingBackgroundTasks?.length)
       return "Finish provider background work before rewinding.";
@@ -160,10 +160,9 @@ function getRewindToReplyDisabledReason({
       boundary?.status !== "completed" ||
       reply.providerTurnId !== boundary.id ||
       boundary.providerThreadId !== provider.id ||
-      boundary.nativeTurnRef?.strength !== "strong" ||
-      boundary.nativeTurnRef.nativeId === null
+      boundary.nativeTurnRef?.nativeId == null
     ) {
-      return "This reply and the later conversation need to share the active Codex session and have a native turn boundary.";
+      return "This reply and the later conversation need to share the active provider session and have a native turn boundary.";
     }
     const capabilities = providerSessions.find(
       (session) => session.id === provider.providerSessionId,
@@ -172,7 +171,7 @@ function getRewindToReplyDisabledReason({
       capabilities &&
       (!capabilities.threads.canForkThread || !capabilities.threads.canForkFromTurn)
     ) {
-      return "This Codex installation does not support native forks at a turn boundary.";
+      return "This provider cannot fork its conversation at a reply.";
     }
     return null;
   };

@@ -6641,7 +6641,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return yield* invalidRewind("There is no later conversation to move.");
       }
       if (
-        splitSource?.driver !== "codex" ||
+        splitSource === undefined ||
         splitSource.id !== thread.activeProviderThreadId ||
         splitSource.providerInstanceId !== thread.modelSelection.instanceId ||
         splitSource.nativeThreadRef?.strength !== "strong" ||
@@ -6651,13 +6651,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (splitSource.pendingBackgroundTasks?.length ?? 0) > 0 ||
         splitBoundary?.status !== "completed" ||
         reply.providerTurnId !== splitBoundary.id ||
-        splitBoundary.nativeTurnRef?.strength !== "strong" ||
-        splitBoundary.nativeTurnRef.nativeId === null ||
+        // Claude records completed turns as weak refs to its resume cursor; the adapter's fork validates it.
+        splitBoundary.nativeTurnRef?.nativeId == null ||
         splitBoundary.providerThreadId !== splitSource.id ||
         suffix.some((run) => isHandoffSourceRun(run) && run.providerThreadId !== splitSource?.id)
       ) {
         return yield* invalidRewind(
-          "This reply and the later conversation need to share the active Codex session and have a native turn boundary.",
+          "This reply and the later conversation need to share the active provider session and have a native turn boundary.",
         );
       }
       contextArchive = {
@@ -6761,9 +6761,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .pipe(mapDispatchError(command));
       const capabilities = yield* selection.getCapabilities().pipe(mapDispatchError(command));
       if (!capabilities.threads.canForkThread || !capabilities.threads.canForkFromTurn) {
-        return yield* invalidRewind(
-          "This Codex installation does not support native forks at a turn boundary.",
-        );
+        return yield* invalidRewind("This provider cannot fork its conversation at a reply.");
       }
       const resolvedRuntimePolicy = yield* runtimePolicy
         .resolve({ thread, modelSelection })
@@ -6800,13 +6798,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         })
         .pipe(
           Effect.tapError((cause) =>
-            Effect.logWarning("Codex could not verify the rewind boundary", {
+            Effect.logWarning("The provider could not verify the rewind boundary", {
               threadId: thread.id,
               cause,
             }),
           ),
           Effect.mapError(() =>
-            invalidRewind("Codex could not create a native continuation ending at this reply."),
+            invalidRewind("The provider could not continue the conversation from this reply."),
           ),
         );
       const continuationRef = continuation.nativeThreadRef;
@@ -6815,7 +6813,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         continuationRef.nativeId === null ||
         continuationRef.nativeId === splitSource.nativeThreadRef?.nativeId
       ) {
-        return yield* invalidRewind("Codex did not create an independent native continuation.");
+        return yield* invalidRewind("The provider did not create an independent continuation.");
       }
       const archiveProvider = yield* session
         .forkThread({
@@ -6830,7 +6828,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         archiveRef.nativeId === splitSource.nativeThreadRef?.nativeId ||
         archiveRef.nativeId === continuationRef.nativeId
       ) {
-        return yield* invalidRewind("Codex did not create two independent native conversations.");
+        return yield* invalidRewind("The provider did not create two independent conversations.");
       }
 
       const firstNewRunOrdinal =
@@ -6854,7 +6852,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         occurredAt: now,
         payload: {
           ...continuation,
-          nativeConversationHeadRef: splitBoundary.nativeTurnRef,
+          // Codex forks keep turn ids, so the boundary turn is the head. Claude forks get new
+          // message ids and already end at the boundary, so they resume from their own end.
+          nativeConversationHeadRef:
+            continuation.driver === "codex"
+              ? splitBoundary.nativeTurnRef
+              : continuation.nativeConversationHeadRef,
           firstRunOrdinal: splitSource.firstRunOrdinal,
           lastRunOrdinal: splitRun.ordinal,
           updatedAt: now,

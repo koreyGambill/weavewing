@@ -468,8 +468,9 @@ answer its questions.
 
 ## Rewind conversation context
 
-When a thread is idle, choose **Rewind conversation context** beside the composer
-on web and desktop, or from **Git controls** in the mobile thread header.
+On mobile, choose **Rewind conversation context** from **Git controls** in the
+thread header while the thread is idle. On web and desktop, send `/clear` for a
+fresh session instead, or use **Rewind to here** below.
 Messages through the latest finished turn move into **Earlier conversation**.
 Your next message starts with fresh context. The thread keeps its files and
 draft. Earlier checkpoints remain in the thread’s history. Checkpoint restore
@@ -481,7 +482,7 @@ mobile, open **Earlier conversation** from the side chat list above the composer
 **Bring back** adds a removable reference to your original thread’s draft, even
 before you send a message in the archive.
 
-On web and desktop, **Rewind to here** under a completed Codex reply keeps the
+On web and desktop, **Rewind to here** under a completed Codex or Claude reply keeps the
 conversation through that reply and moves later turns into **Earlier
 conversation**. The thread keeps its files and draft. Finish queued work first,
 then choose a reply with a native turn boundary in the active conversation.
