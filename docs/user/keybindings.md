@@ -34,6 +34,10 @@ Other Control-letter keys retain their shell behavior, except Search, the comman
 palette, and the close commands below. **Alt+H/J/K/L** always resizes the focused tile by a step, including in a
 terminal; terminal applications lose those four Alt shortcuts.
 
+When several tiles share an edge in the direction you move, focus goes to the
+most recently active tile along that edge. When closing a terminal tab asks
+for confirmation, press Enter to close or Escape to keep it open.
+
 Number shortcuts target the drop-down terminal's tiles when it has focus.
 Focusing a hidden tile restores the layout. A number with no matching tile does nothing.
 Ctrl+Tab and Ctrl+Shift+Tab cycle tile tabs directly. The existing close,

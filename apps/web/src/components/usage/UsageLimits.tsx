@@ -38,6 +38,7 @@ import {
   AlertDialogPopup,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
@@ -214,7 +215,14 @@ export function LimitWindows({
         return (
           <Fragment key={window.id}>
             <span className="flex min-w-0 items-center gap-2 text-xs">
-              <span className="truncate text-muted-foreground">{window.label}</span>
+              <span
+                className={cn(
+                  "min-w-0 text-muted-foreground",
+                  compact ? "wrap-anywhere" : "truncate",
+                )}
+              >
+                {window.label}
+              </span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
                 {remainingPercent(window)}% left
               </span>

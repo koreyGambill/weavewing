@@ -23,6 +23,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import { markDraftTerminalUsed } from "../composerDraftStore";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
@@ -923,6 +924,7 @@ function TerminalSessionViewport({
             ? { threadId, terminalId, data, [kind]: true }
             : { threadId, terminalId, data },
         });
+      let markedTerminalUse = false;
       const sendTerminalInput = (
         data: string,
         fallbackError: string,
@@ -934,6 +936,10 @@ function TerminalSessionViewport({
         const generation = writableSessionGeneration(session, hasTerminalWriteAccess());
         const lifecycleVersion = session.lifecycleVersion;
         if (generation === null) return;
+        if (kind !== "reply" && !markedTerminalUse) {
+          markedTerminalUse = true;
+          markDraftTerminalUsed({ environmentId, threadId });
+        }
         const writeInput = terminalInputWriter(
           JSON.stringify([environmentId, threadId, terminalId]),
           () => appAtomRegistry.mount(terminalSessionAtom),

@@ -19,10 +19,16 @@ describe("dialog initial focus", () => {
   it.each([
     { label: "generic", options: undefined, focused: "Cancel", confirmed: false },
     {
-      label: "destructive opt-in",
-      options: { variant: "destructive", initialFocus: "confirm" },
+      label: "destructive",
+      options: { variant: "destructive" },
       focused: "Cancel",
       confirmed: false,
+    },
+    {
+      label: "destructive opt-in",
+      options: { variant: "destructive", initialFocus: "confirm" },
+      focused: "Confirm",
+      confirmed: true,
     },
     { label: "opt-in", options: { initialFocus: "confirm" }, focused: "Confirm", confirmed: true },
   ] as const)(
@@ -38,6 +44,13 @@ describe("dialog initial focus", () => {
       await expect.element(page.getByRole("button", { name: focused, exact: true })).toHaveFocus();
       await userEvent.keyboard("{Enter}");
       await expect(confirmation).resolves.toBe(confirmed);
+      await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+      await act(() => {
+        confirmation = requestConfirmDialog("Continue?", options);
+      });
+      await expect.element(page.getByRole("button", { name: focused, exact: true })).toHaveFocus();
+      await userEvent.keyboard("{Escape}");
+      await expect(confirmation).resolves.toBe(false);
     },
   );
 

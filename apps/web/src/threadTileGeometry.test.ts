@@ -88,6 +88,22 @@ describe("tile geometry", () => {
     expect(directionalTile(transposed, "right-top", "up")).toBe("middle-top");
   });
 
+  it("uses activation history at a shared edge and stays aligned in a grid", () => {
+    const top = { id: "top", rect: { x: 0.5, y: 0, width: 0.5, height: 0.6 } };
+    const bottom = { id: "bottom", rect: { x: 0.5, y: 0.6, width: 0.5, height: 0.4 } };
+    const tall = { id: "tall", rect: { x: 0, y: 0, width: 0.5, height: 1 } };
+    const stack = [top, bottom, tall];
+    expect(directionalTile(stack, "bottom", "left")).toBe("tall");
+    expect(directionalTile(stack, "tall", "right")).toBe("top");
+    expect(directionalTile(stack, "tall", "right", ["tall", "bottom", "top"])).toBe("bottom");
+
+    const upperLeft = { id: "upper-left", rect: { ...top.rect, x: 0 } };
+    const lowerLeft = { id: "lower-left", rect: { ...bottom.rect, x: 0 } };
+    expect(
+      directionalTile([top, bottom, upperLeft, lowerLeft], "upper-left", "right", ["bottom"]),
+    ).toBe("top");
+  });
+
   it("does not treat a wide pane below as a horizontal neighbor", () => {
     const groups = [
       { id: "current", rect: { x: 0, y: 0, width: 0.3, height: 0.8 } },

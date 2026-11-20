@@ -60,10 +60,16 @@ export function useSavedTileLayouts(environmentId: EnvironmentId, projectId: Pro
         ? override.defaultTileLayoutId
         : undefined,
     effectiveDefault: resolveDefaultTileLayout(settings, projectId),
-    /** A layout with the same name is replaced in place. */
-    save: (name: string, root: SavedTileNode) => {
-      const existing = layouts.find((layout) => layout.name === name);
-      const layout: SavedTileLayout = { id: existing?.id ?? randomUUID(), name, root };
+    save: (name: string, root: SavedTileNode, replaceId: string | null = null) => {
+      const existing = layouts.find((layout) =>
+        replaceId === null ? layout.name === name : layout.id === replaceId,
+      );
+      if (replaceId !== null && !existing) return;
+      const layout: SavedTileLayout = {
+        id: existing?.id ?? randomUUID(),
+        name: existing?.name ?? name,
+        root,
+      };
       updateSettings({
         tileLayouts: existing
           ? layouts.map((entry) => (entry.id === existing.id ? layout : entry))

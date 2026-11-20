@@ -18,6 +18,7 @@ import {
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
+import { prepareDraftWorkspaceCleanup } from "../lib/draftWorkspaceCleanup";
 import { newDraftId, newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import {
@@ -265,98 +266,52 @@ export function createNewThreadHandler(router: AnyRouter) {
         ? getDraftThread(currentRouteTarget.threadRef)
         : getDraftSession(currentRouteTarget.draftId)
       : null;
-    if (emptyStoredDraftThread) {
-      return (async () => {
-        const isDraftAlreadyOpen =
-          currentRouteTarget?.kind === "draft" &&
-          currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
-        const hasExplicitWorkspaceOption =
-          hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasStartFromOriginOption;
-        let workspaceContext: NewThreadWorkspaceOptions | null = null;
-        if (hasExplicitWorkspaceOption) {
-          workspaceContext = pickExplicitWorkspaceOptions(options);
-        } else if (!isDraftAlreadyOpen) {
-          const defaultEnvMode = await resolveDefaultEnvMode();
-          if (abandonedSinceRequest()) {
-            return null;
-          }
-          // Concurrent calls may change the draft; stale resets, remaps, or navigation could clobber it.
-          const routeTargetNow = getCurrentRouteTarget();
-          const openedMeanwhile =
-            routeTargetNow?.kind === "draft" &&
-            routeTargetNow.draftId === emptyStoredDraftThread.draftId;
-          const promotedMeanwhile =
-            storedDraftThreadRef !== null && readThreadShell(storedDraftThreadRef) !== null;
-          const remappedMeanwhile =
-            getDraftSessionByLogicalProjectKey(logicalProjectKey)?.draftId !==
-            emptyStoredDraftThread.draftId;
-          const investedMeanwhile = composerDraftHasUserContent(
-            getComposerDraft(emptyStoredDraftThread.draftId),
-          );
-          if (openedMeanwhile || promotedMeanwhile || remappedMeanwhile || investedMeanwhile) {
-            return null;
-          }
-          workspaceContext = {
-            branch: null,
-            worktreePath: null,
-            envMode: defaultEnvMode,
-            startFromOrigin: resolveNewDraftStartFromOrigin({
-              envMode: defaultEnvMode,
-              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-            }),
-          };
-        }
-        if (workspaceContext) {
-          setDraftThreadContext(emptyStoredDraftThread.draftId, {
-            ...workspaceContext,
-            ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
-            ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+    if (
+      emptyStoredDraftThread &&
+      currentRouteTarget?.kind === "draft" &&
+      currentRouteTarget.draftId === emptyStoredDraftThread.draftId
+    ) {
+      const hasExplicitWorkspaceOption =
+        hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasStartFromOriginOption;
+      const workspaceContext = hasExplicitWorkspaceOption
+        ? pickExplicitWorkspaceOptions(options)
+        : {};
+      if (hasExplicitWorkspaceOption) {
+        setDraftThreadContext(emptyStoredDraftThread.draftId, {
+          ...workspaceContext,
+          ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+        });
+      }
+      const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
+      const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
+      if (!storedDraftHasExplicitModelPick) {
+        applyStickyState(emptyStoredDraftThread.draftId);
+        const modelSelectionOverride = resolveModelSelectionOverride(
+          emptyStoredDraftThread.draftId,
+        );
+        if (modelSelectionOverride) {
+          setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
+            replaceOptions: true,
           });
         }
-        const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
-        const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
-        if (!storedDraftHasExplicitModelPick) {
-          applyStickyState(emptyStoredDraftThread.draftId);
-          const modelSelectionOverride = resolveModelSelectionOverride(
-            emptyStoredDraftThread.draftId,
-          );
-          if (modelSelectionOverride) {
-            setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
-              replaceOptions: true,
-            });
-          }
-        }
-        // Remapping physical projects clears workspace context; preserve the branch and worktree.
-        setLogicalProjectDraftThreadId(
-          logicalProjectKey,
-          projectRef,
-          emptyStoredDraftThread.draftId,
-          {
-            threadId: emptyStoredDraftThread.threadId,
-            ...workspaceContext,
-            ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
-            ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
-          },
-        );
-        const opened = {
-          draftId: emptyStoredDraftThread.draftId,
+      }
+      // Remapping physical projects clears workspace context; preserve the branch and worktree.
+      setLogicalProjectDraftThreadId(
+        logicalProjectKey,
+        projectRef,
+        emptyStoredDraftThread.draftId,
+        {
           threadId: emptyStoredDraftThread.threadId,
-        };
-        seedPrompt(emptyStoredDraftThread.draftId);
-        const routeTargetAfterWrites = getCurrentRouteTarget();
-        if (
-          routeTargetAfterWrites?.kind === "draft" &&
-          routeTargetAfterWrites.draftId === emptyStoredDraftThread.draftId
-        ) {
-          return opened;
-        }
-        await router.navigate({
-          to: "/draft/$draftId",
-          params: { draftId: emptyStoredDraftThread.draftId },
-          replace: options?.replace ?? false,
-        });
-        return opened;
-      })();
+          ...workspaceContext,
+          ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+        },
+      );
+      const opened = {
+        draftId: emptyStoredDraftThread.draftId,
+        threadId: emptyStoredDraftThread.threadId,
+      };
+      seedPrompt(emptyStoredDraftThread.draftId);
+      return Promise.resolve(opened);
     }
 
     if (
@@ -418,6 +373,13 @@ export function createNewThreadHandler(router: AnyRouter) {
         });
         return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
       }
+      const cleanup =
+        emptyStoredDraftThread &&
+        storedDraftThreadRef &&
+        racedDraft?.draftId === emptyStoredDraftThread.draftId &&
+        readThreadShell(storedDraftThreadRef) === null
+          ? prepareDraftWorkspaceCleanup(storedDraftThreadRef)
+          : undefined;
       setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
         threadId,
         createdAt,
@@ -433,6 +395,9 @@ export function createNewThreadHandler(router: AnyRouter) {
         runtimeMode: defaultRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
       });
+      if (emptyStoredDraftThread && getDraftSession(emptyStoredDraftThread.draftId) === null) {
+        cleanup?.();
+      }
       applyStickyState(draftId);
       const modelSelectionOverride = resolveModelSelectionOverride(draftId);
       if (modelSelectionOverride) {

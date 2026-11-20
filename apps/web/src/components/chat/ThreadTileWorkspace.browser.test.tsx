@@ -32,21 +32,32 @@ vi.mock("../SurfaceTabContent", () => ({
     tabTitles.get(surface.id) ?? surface.kind,
 }));
 vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
-const savedLayouts = vi.hoisted(() => ({ effectiveDefault: null as SavedTileLayout | null }));
+const savedLayouts = vi.hoisted(() => ({
+  effectiveDefault: null as SavedTileLayout | null,
+  layouts: [] as readonly SavedTileLayout[],
+  save: vi.fn(),
+}));
 vi.mock("./useSavedTileLayouts", () => ({
   useSavedTileLayouts: () => ({
-    layouts: [],
+    layouts: savedLayouts.layouts,
     globalDefaultId: null,
     projectId: null,
     projectDefaultId: undefined,
     effectiveDefault: savedLayouts.effectiveDefault,
-    save: () => {},
+    save: savedLayouts.save,
     setGlobalDefault: () => {},
     setProjectDefault: () => {},
   }),
 }));
 
-async function setup(resizeScenario = false, newThread = false, leader = false) {
+async function setup(
+  resizeScenario = false,
+  newThread = false,
+  leader = false,
+  layouts: readonly SavedTileLayout[] = [],
+) {
+  savedLayouts.layouts = layouts;
+  savedLayouts.save.mockClear();
   const keybindings = leader
     ? DEFAULT_RESOLVED_KEYBINDINGS
     : compileResolvedKeybindingsConfig(defaultKeybindingsForMode(false));
@@ -882,7 +893,8 @@ it("leaves Escape in a maximized terminal even when the shortcut context is stal
 });
 
 it("opens layout actions from the title bar and saves the current workspace", async () => {
-  await using fixture = await setup();
+  const target = DEFAULT_TILE_LAYOUTS[0]!;
+  await using fixture = await setup(false, false, false, [target]);
   const { screen } = fixture;
   const controls = document.querySelector('[aria-label="Title bar controls"]')!;
   expect(controls.querySelector('button[aria-label="Layouts"]')).not.toBeNull();
@@ -901,6 +913,26 @@ it("opens layout actions from the title bar and saves the current workspace", as
     .element(screen.getByRole("dialog", { name: "Save layout", exact: true }))
     .toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+  const replaceLayout = async () => {
+    await userEvent.click(screen.getByRole("button", { name: "Layouts", exact: true }));
+    await userEvent.hover(screen.getByRole("menuitem", { name: "Replace layout", exact: true }));
+    await userEvent.click(screen.getByRole("menuitem", { name: target.name, exact: true }));
+  };
+  await replaceLayout();
+  const confirmation = screen.getByRole("dialog", { name: "Replace layout", exact: true });
+  await expect
+    .element(confirmation.getByText(`Replace “${target.name}”`, { exact: false }))
+    .toBeVisible();
+  await userEvent.click(confirmation.getByRole("button", { name: "Cancel", exact: true }));
+  expect(savedLayouts.save).not.toHaveBeenCalled();
+  await replaceLayout();
+  await userEvent.click(confirmation.getByRole("button", { name: "Replace", exact: true }));
+  expect(savedLayouts.save).toHaveBeenCalledExactlyOnceWith(
+    target.name,
+    expect.objectContaining({ kind: expect.any(String) }),
+    target.id,
+  );
+
   await userEvent.click(screen.getByRole("button", { name: "Tile actions", exact: true }).first());
   await expect
     .element(screen.getByRole("menuitem", { name: "Layouts", exact: true }))

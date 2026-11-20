@@ -74,7 +74,7 @@ describe("terminal close confirmation", () => {
     ).resolves.toBe(false);
     expect(confirmMock).toHaveBeenCalledWith(
       'Close terminal "Running"?\nThis stops the running process and clears its history.',
-      { variant: "destructive" },
+      { variant: "destructive", initialFocus: "confirm" },
     );
   });
 
@@ -84,7 +84,7 @@ describe("terminal close confirmation", () => {
     await confirmTerminalClose(threadRef, [{ terminalId: "terminal-2", label: "Unknown" }]);
     expect(confirmMock).toHaveBeenCalledWith(
       'Close terminal "Unknown"?\nThis stops the running process and clears its history.',
-      { variant: "destructive" },
+      { variant: "destructive", initialFocus: "confirm" },
     );
   });
 
@@ -104,7 +104,7 @@ describe("terminal close confirmation", () => {
     ).resolves.toBe(true);
     expect(confirmMock).toHaveBeenCalledWith(
       'Close 2 terminals?\nThis stops their running processes and clears their histories: "First", "Third".',
-      { variant: "destructive" },
+      { variant: "destructive", initialFocus: "confirm" },
     );
   });
 

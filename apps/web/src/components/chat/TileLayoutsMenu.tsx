@@ -65,6 +65,7 @@ export function TileLayoutsMenu(props: {
   api: ReturnType<typeof useSavedTileLayouts>;
   hasProject: boolean;
   onSaveAs: () => void;
+  onReplace: (id: string) => void;
   onApply: (layout: SavedTileLayout) => void;
 }) {
   const navigate = useNavigate();
@@ -87,6 +88,16 @@ export function TileLayoutsMenu(props: {
       </Tooltip>
       <MenuPopup align="end">
         <MenuItem onClick={props.onSaveAs}>Save layout as…</MenuItem>
+        <MenuSub>
+          <MenuSubTrigger disabled={!api.layouts.length}>Replace layout</MenuSubTrigger>
+          <MenuSubPopup>
+            {api.layouts.map((layout) => (
+              <MenuItem key={layout.id} onClick={() => props.onReplace(layout.id)}>
+                <span className="block max-w-64 truncate">{layout.name}</span>
+              </MenuItem>
+            ))}
+          </MenuSubPopup>
+        </MenuSub>
         <MenuSub>
           <MenuSubTrigger disabled={!api.layouts.length}>Apply layout</MenuSubTrigger>
           <MenuSubPopup>
@@ -148,17 +159,20 @@ export function SaveTileLayoutDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   layouts: readonly SavedTileLayout[];
+  replaceId: string | null;
   dropped: boolean;
   tiles: number;
   onSave: (name: string) => void;
 }) {
   const id = useId();
   const [name, setName] = useState("");
-  const trimmed = name.trim();
-  const replaces = props.layouts.some((layout) => layout.name === trimmed);
-  const full = !replaces && props.layouts.length >= MAX_TILE_LAYOUTS;
+  const replacing = props.replaceId !== null;
+  const target = props.layouts.find((layout) => layout.id === props.replaceId);
+  const trimmed = replacing ? (target?.name ?? "") : name.trim();
+  const replacesByName = !replacing && props.layouts.some((layout) => layout.name === trimmed);
+  const full = !replacing && !replacesByName && props.layouts.length >= MAX_TILE_LAYOUTS;
   const tooManyTiles = props.tiles > MAX_SAVED_TILE_GROUPS;
-  const blocked = !trimmed || full || tooManyTiles;
+  const blocked = !trimmed || full || tooManyTiles || props.tiles === 0;
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="sm:max-w-md">
@@ -172,29 +186,42 @@ export function SaveTileLayoutDialog(props: {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Save layout</DialogTitle>
+            <DialogTitle>{replacing ? "Replace layout" : "Save layout"}</DialogTitle>
             <DialogDescription>
-              Saves tiles, areas and split sizes. New threads open fresh terminals and pages.
+              {replacing
+                ? target
+                  ? `Replace “${target.name}” with the current tiles, areas and split sizes.`
+                  : "This saved layout is no longer available."
+                : "Saves tiles, areas and split sizes. New threads open fresh terminals and pages."}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <div className="flex flex-col gap-2">
-              <Label htmlFor={`${id}-name`}>Name</Label>
-              <Input
-                id={`${id}-name`}
-                value={name}
-                maxLength={64}
-                autoFocus
-                onChange={(event) => setName(event.target.value)}
-              />
+              {replacing ? null : (
+                <>
+                  <Label htmlFor={`${id}-name`}>Name</Label>
+                  <Input
+                    id={`${id}-name`}
+                    value={name}
+                    maxLength={64}
+                    autoFocus
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </>
+              )}
               {props.dropped && (
                 <p className="text-xs text-muted-foreground">
                   Floating tiles and pull request, file, device and side chat tabs are not saved.
                 </p>
               )}
-              {replaces && (
+              {replacesByName && (
                 <p className="text-xs text-muted-foreground">
                   A layout with this name exists and will be replaced.
+                </p>
+              )}
+              {props.tiles === 0 && (
+                <p className="text-xs text-destructive-foreground">
+                  Keep at least one docked area to save this layout.
                 </p>
               )}
               {tooManyTiles && (
@@ -215,7 +242,7 @@ export function SaveTileLayoutDialog(props: {
               Cancel
             </Button>
             <Button type="submit" disabled={blocked}>
-              Save
+              {replacing || replacesByName ? "Replace" : "Save"}
             </Button>
           </DialogFooter>
         </form>
