@@ -398,6 +398,7 @@ it.effect(
           timeoutSeconds: 10,
           target: "",
           hasCredentials: false,
+          shared: true,
           snoozedUntil,
         },
         latest: { source: "Production", state, summary: "Health check", items: [] },

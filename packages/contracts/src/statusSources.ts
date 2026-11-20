@@ -1,4 +1,7 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+
+import { EnvironmentId } from "./baseSchemas.ts";
 
 const Name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 const Url = Schema.String.check(Schema.isMaxLength(4096));
@@ -51,6 +54,8 @@ export const StatusSourceConfig = Schema.Struct({
   snoozedUntil: Schema.NullOr(Timestamp),
   target: Schema.String.check(Schema.isMaxLength(8192)),
   hasCredentials: Schema.Boolean,
+  /** Linked environments mirror a shared source and alert on it too. */
+  shared: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type StatusSourceConfig = typeof StatusSourceConfig.Type;
 
@@ -61,6 +66,8 @@ export const StatusSource = Schema.Struct({
     Schema.Struct({ from: StatusState, to: StatusState, at: Timestamp }),
   ),
   favicon: Schema.optional(Schema.String.check(Schema.isMaxLength(131072))),
+  /** Set on a read-only copy of a source shared by a linked environment. */
+  origin: Schema.optional(Schema.Struct({ environmentId: EnvironmentId, label: Name })),
 });
 export type StatusSource = typeof StatusSource.Type;
 export const StatusSourceList = Schema.Array(StatusSource);
@@ -74,11 +81,16 @@ export const StatusSourceUpsertInput = Schema.Struct({
   timeoutSeconds: Schema.optional(StatusSourceTimeoutSeconds),
   target: Schema.optional(StatusSourceConfig.fields.target),
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  shared: Schema.optional(Schema.Boolean),
 });
 export type StatusSourceUpsertInput = typeof StatusSourceUpsertInput.Type;
 
 export const StatusSourceDeleteInput = Schema.Struct({ id: Name });
 export type StatusSourceDeleteInput = typeof StatusSourceDeleteInput.Type;
+export const StatusSourceReorderInput = Schema.Struct({
+  ids: Schema.Array(Name).check(Schema.isMaxLength(64)),
+});
+export type StatusSourceReorderInput = typeof StatusSourceReorderInput.Type;
 export const StatusSourceSnoozeInput = Schema.Struct({ id: Name, until: Schema.NullOr(Timestamp) });
 export type StatusSourceSnoozeInput = typeof StatusSourceSnoozeInput.Type;
 export const StatusSourceRotateWebhookSecretInput = StatusSourceDeleteInput;

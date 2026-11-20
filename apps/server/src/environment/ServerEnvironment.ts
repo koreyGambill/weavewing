@@ -222,6 +222,8 @@ export const make = Effect.gen(function* () {
     capabilities: {
       conversationContextRewind: true,
       statusSources: true,
+      statusSourceSharing: true,
+      statusSourceOrder: true,
       automations: true,
       automationRunHistory: true,
       automationTriggerProjects: true,

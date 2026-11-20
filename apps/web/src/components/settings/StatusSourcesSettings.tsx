@@ -1,14 +1,35 @@
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useAtomValue } from "@effect/atom-react";
+import { pendingRouteOrder } from "@t3tools/client-runtime/connection";
 import type { EnvironmentId, StatusSource, StatusSourceKind } from "@t3tools/contracts";
-import { PlusIcon } from "lucide-react";
+import { GripVerticalIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
+import { cn } from "~/lib/utils";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useEnvironmentHttpBaseUrl } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import {
   statusSources,
   statusSourcesDelete,
+  statusSourcesReorder,
   statusSourcesRotateWebhookSecret,
   statusSourcesSnooze,
   statusSourcesUpsert,
@@ -33,6 +54,7 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -73,6 +95,8 @@ export function StatusSourcesSettings() {
       key={environment.environmentId}
       environmentId={environment.environmentId}
       label={environment.label}
+      sharing={environment.serverConfig.environment.capabilities.statusSourceSharing === true}
+      ordering={environment.serverConfig.environment.capabilities.statusSourceOrder === true}
     />
   );
 }
@@ -80,12 +104,43 @@ export function StatusSourcesSettings() {
 function EnvironmentStatusSources({
   environmentId,
   label,
+  sharing,
+  ordering,
 }: {
   environmentId: EnvironmentId;
   label: string;
+  sharing: boolean;
+  ordering: boolean;
 }) {
   const query = useEnvironmentQuery(statusSources({ environmentId, input: {} }));
+  const saved = query.data?.filter((source) => !source.origin);
+  const savedIds = saved?.map((source) => source.config.id) ?? [];
+  const [pendingOrder, setPendingOrder] = useState<ReadonlyArray<string> | null>(null);
+  const shownOrder = pendingRouteOrder(pendingOrder, savedIds);
+  // Dropped during render so a stale order never outlives the save it was for.
+  if (pendingOrder !== null && shownOrder === null) setPendingOrder(null);
+  const order: Array<string> = shownOrder === null ? savedIds : [...shownOrder];
+  const byId = new Map(saved?.map((source) => [source.config.id, source]));
+  const own = saved && order.flatMap((id) => byId.get(id) ?? []);
   const canEdit = useAtomValue(statusSourcesUpsert.permissionAtom(environmentId));
+  const canReorder = ordering && canEdit && order.length > 1;
+  const reorder = useAtomCommand(statusSourcesReorder, { reportFailure: true });
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = (event: DragEndEvent) => {
+    if (event.over === null || event.active.id === event.over.id) return;
+    const next = arrayMove(
+      order,
+      order.indexOf(String(event.active.id)),
+      order.indexOf(String(event.over.id)),
+    );
+    setPendingOrder(next);
+    void reorder({ environmentId, input: { ids: next } }).then((result) => {
+      if (result._tag === "Failure") setPendingOrder(null);
+    });
+  };
   const [editing, setEditing] = useState<StatusSource | "new" | null>(null);
   return (
     <SettingsPageContainer>
@@ -103,6 +158,7 @@ function EnvironmentStatusSources({
           External tools checked from {label}. See current state and the last transition in the
           Status tool in the right tools sidebar. History stays in each tool. Snoozing mutes
           notifications while checks continue.
+          {sharing && ` Shared sources also alert on every machine that links to ${label}.`}
         </p>
         {!canEdit && (
           <p className="px-4 pb-3 text-xs text-muted-foreground">
@@ -119,25 +175,37 @@ function EnvironmentStatusSources({
             Loading sources…
           </p>
         )}
-        {query.data?.length === 0 && (
+        {own?.length === 0 && (
           <SettingsRow
             title="No status sources"
             description="Add a Wing status endpoint, health URL, local command, or signed webhook."
           />
         )}
-        {query.data?.map((source) => (
-          <StatusSourceRow
-            key={source.config.id}
-            source={source}
-            environmentId={environmentId}
-            canEdit={canEdit}
-            onEdit={() => setEditing(source)}
-          />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={order} strategy={verticalListSortingStrategy}>
+            {own?.map((source, index) => (
+              <StatusSourceRow
+                key={source.config.id}
+                source={source}
+                position={index + 1}
+                environmentId={environmentId}
+                canEdit={canEdit}
+                canReorder={canReorder}
+                onEdit={() => setEditing(source)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </SettingsSection>
       {editing !== null && (
         <StatusSourceEditor
           environmentId={environmentId}
+          sharing={sharing}
           source={editing === "new" ? undefined : editing}
           onClose={() => setEditing(null)}
         />
@@ -148,15 +216,28 @@ function EnvironmentStatusSources({
 
 function StatusSourceRow({
   source,
+  position,
   environmentId,
   canEdit,
+  canReorder,
   onEdit,
 }: {
   source: StatusSource;
+  position: number;
   environmentId: EnvironmentId;
   canEdit: boolean;
+  canReorder: boolean;
   onEdit: () => void;
 }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: source.config.id, disabled: !canReorder });
   const remove = useAtomCommand(statusSourcesDelete, { reportFailure: true });
   const snooze = useAtomCommand(statusSourcesSnooze, { reportFailure: true });
   const [removing, setRemoving] = useState(false);
@@ -164,10 +245,26 @@ function StatusSourceRow({
   const now = useNowMinute();
   const snoozed = source.config.snoozedUntil !== null && source.config.snoozedUntil > now;
   return (
-    <>
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn(isDragging && "relative z-10 rounded-lg bg-background shadow-md")}
+    >
       <SettingsRow
         title={
           <span className="flex items-center gap-2">
+            {canReorder && (
+              <button
+                type="button"
+                ref={setActivatorNodeRef}
+                {...attributes}
+                {...listeners}
+                aria-label={`Reorder ${source.config.name}, position ${position}`}
+                className="-ms-1.5 flex size-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/70 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing"
+              >
+                <GripVerticalIcon className="size-3.5" />
+              </button>
+            )}
             <StatusSourceIcon source={source} />
             {source.config.name}
             <StatusStateIcon state={source.latest.state} />
@@ -257,7 +354,7 @@ function StatusSourceRow({
           </DialogPopup>
         </Dialog>
       )}
-    </>
+    </div>
   );
 }
 
@@ -279,10 +376,12 @@ function parseHeaders(value: string): Record<string, string> | null {
 
 function StatusSourceEditor({
   environmentId,
+  sharing,
   source,
   onClose,
 }: {
   environmentId: EnvironmentId;
+  sharing: boolean;
   source: StatusSource | undefined;
   onClose: () => void;
 }) {
@@ -297,6 +396,7 @@ function StatusSourceEditor({
   const [headers, setHeaders] = useState("");
   const [interval, setInterval] = useState(source?.config.intervalSeconds ?? 60);
   const [timeout, setTimeout] = useState(source?.config.timeoutSeconds ?? 10);
+  const [shared, setShared] = useState(source?.config.shared ?? true);
   const [pending, setPending] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [savedId, setSavedId] = useState(source?.config.id);
@@ -334,6 +434,8 @@ function StatusSourceEditor({
         icon,
         intervalSeconds: interval,
         timeoutSeconds: timeout,
+        // Left out when unchanged, so an older open dialog cannot undo another device's choice.
+        ...(shared !== (source?.config.shared ?? true) ? { shared } : {}),
         ...(target.trim() ? { target: target.trim() } : {}),
         ...(parsedHeaders === undefined || parsedHeaders === null
           ? {}
@@ -557,6 +659,22 @@ function StatusSourceEditor({
                     )}
                   </>
                 )}
+              </div>
+            )}
+            {sharing && (
+              <div className="flex items-start justify-between gap-3">
+                <div className="grid gap-1">
+                  <Label htmlFor="status-source-shared">Share with linked machines</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Machines that link to this one show this source and alert when it fails.
+                  </p>
+                </div>
+                <Switch
+                  id="status-source-shared"
+                  checked={shared}
+                  onCheckedChange={setShared}
+                  disabled={!canEdit}
+                />
               </div>
             )}
             {error && (

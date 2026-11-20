@@ -1,9 +1,11 @@
 import {
+  type EnvironmentId,
   StatusPayload,
   StatusSourceConfig,
   StatusSourcesError,
   type StatusSource,
   type StatusSourceUpsertInput,
+  type StatusSourceReorderInput,
   type StatusSourceSnoozeInput,
   type StatusState,
 } from "@t3tools/contracts";
@@ -48,6 +50,8 @@ export class StatusSources extends Context.Service<
       input: StatusSourceUpsertInput,
     ) => Effect.Effect<StatusSource, StatusSourcesError>;
     readonly remove: (input: { readonly id: string }) => Effect.Effect<void, StatusSourcesError>;
+    /** Puts the listed sources first, in that order; unlisted ones keep their order after them. */
+    readonly reorder: (input: StatusSourceReorderInput) => Effect.Effect<void, StatusSourcesError>;
     readonly snooze: (
       input: StatusSourceSnoozeInput,
     ) => Effect.Effect<StatusSource, StatusSourcesError>;
@@ -59,6 +63,16 @@ export class StatusSources extends Context.Service<
       readonly headers: Readonly<Record<string, string>>;
       readonly body: Uint8Array;
     }) => Effect.Effect<boolean, StatusSourcesError>;
+    /**
+     * Replaces the read-only copies of the sources `environmentId` shares. An
+     * empty list forgets them. Inbox alerts stay with the environment that runs
+     * the check, so a copy seen through several links raises one.
+     */
+    readonly mirror: (input: {
+      readonly environmentId: EnvironmentId;
+      readonly label: string;
+      readonly sources: ReadonlyArray<StatusSource>;
+    }) => Effect.Effect<void>;
     /** One item per state change after a source's first observation. */
     readonly transitions: Stream.Stream<StatusSourceTransition>;
   }
@@ -75,6 +89,8 @@ const decodePayload = Schema.decodeUnknownEffect(Schema.fromJsonString(StatusPay
 const encodeConfigs = Schema.encodeEffect(Schema.fromJsonString(persistedSchema));
 const encodeCredentials = Schema.encodeEffect(Schema.fromJsonString(Credentials));
 const samePayload = Schema.toEquivalence(StatusPayload);
+const sameConfig = Schema.toEquivalence(StatusSourceConfig);
+const sameCredentials = Schema.toEquivalence(Credentials);
 const secretName = (id: string) => `status-source-${id}`;
 const signingName = (id: string) => `status-source-signing-${id}`;
 const utf8 = new TextEncoder();
@@ -124,11 +140,12 @@ const make = Effect.gen(function* () {
       { config, latest: unknown(config.name), lastTransition: null },
     ]),
   );
+  const mirrored = new Map<EnvironmentId, ReadonlyArray<StatusSource>>();
   const workers = new Map<string, Fiber.Fiber<void>>();
   const pollConfigs = new Map<string, StatusSourceConfig>();
   const initialized = new Set<string>();
   const list = Effect.fn("StatusSources.list")(() =>
-    Effect.sync(() => Array.from(entries.values())),
+    Effect.sync(() => [...entries.values(), ...[...mirrored.values()].flat()]),
   );
   const emit = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const persist = Effect.fn("StatusSources.persist")(function* (
@@ -307,16 +324,19 @@ const make = Effect.gen(function* () {
             target: cleanTarget,
             hasCredentials:
               input.kind === "command" || target !== cleanTarget || Object.keys(headers).length > 0,
+            shared: input.shared ?? old?.config.shared ?? true,
           }).pipe(
             Effect.mapError(
               (cause) => new StatusSourcesError({ operation: "validate-config", cause }),
             ),
           );
-          const source: StatusSource = {
-            config,
-            latest: unknown(config.name),
-            lastTransition: null,
-          };
+          const sameCheck =
+            old !== undefined &&
+            sameCredentials(previous, { target, headers }) &&
+            sameConfig({ ...old.config, shared: config.shared }, config);
+          const source: StatusSource = sameCheck
+            ? { ...old, config }
+            : { config, latest: unknown(config.name), lastTransition: null };
           const oldSecret = yield* secrets
             .get(secretName(id))
             .pipe(
@@ -341,12 +361,13 @@ const make = Effect.gen(function* () {
                   (cause) => new StatusSourcesError({ operation: "write-secret", cause }),
                 ),
               );
-            yield* persist([
-              ...Array.from(entries.values())
-                .filter((entry) => entry.config.id !== id)
-                .map((entry) => entry.config),
-              config,
-            ]);
+            yield* persist(
+              old
+                ? Array.from(entries.values()).map((entry) =>
+                    entry.config.id === id ? config : entry.config,
+                  )
+                : [...Array.from(entries.values()).map((entry) => entry.config), config],
+            );
           }).pipe(
             Effect.tapError(() =>
               (Option.isSome(oldSecret)
@@ -355,16 +376,21 @@ const make = Effect.gen(function* () {
               ).pipe(Effect.ignore),
             ),
           );
-          pollConfigs.delete(id);
           entries.set(id, source);
-          initialized.delete(id);
+          if (!sameCheck) {
+            pollConfigs.delete(id);
+            initialized.delete(id);
+          }
           yield* emit;
-          return source;
+          return { source, sameCheck };
         }),
       );
-      yield* stop(result.config.id);
-      yield* launch(result.config);
-      return result;
+      // Only sharing changed: the running check and its baseline stay as they are.
+      if (!result.sameCheck) {
+        yield* stop(result.source.config.id);
+        yield* launch(result.source.config);
+      }
+      return result.source;
     },
     Effect.uninterruptible,
     mutations.withPermits(1),
@@ -387,6 +413,23 @@ const make = Effect.gen(function* () {
       yield* stop(id);
       yield* Effect.all([secrets.remove(secretName(id)), secrets.remove(signingName(id))]).pipe(
         Effect.mapError((cause) => new StatusSourcesError({ operation: "remove-secret", cause })),
+      );
+    },
+    Effect.uninterruptible,
+    mutations.withPermits(1),
+  );
+  const reorder = Effect.fn("StatusSources.reorder")(
+    function* ({ ids }: StatusSourceReorderInput) {
+      yield* mutex.withPermits(1)(
+        Effect.gen(function* () {
+          const current = [...entries.values()];
+          const ordered = [...new Set([...ids.flatMap((id) => entries.get(id) ?? []), ...current])];
+          if (ordered.every((source, index) => source === current[index])) return;
+          yield* persist(ordered.map((source) => source.config));
+          entries.clear();
+          for (const source of ordered) entries.set(source.config.id, source);
+          yield* emit;
+        }),
       );
     },
     Effect.uninterruptible,
@@ -472,14 +515,59 @@ const make = Effect.gen(function* () {
     if (!Number.isFinite(timestamp) || Math.abs(now - timestamp) > 300_000) return false;
     return yield* accept(source.config, value.value, true);
   });
+  const mirror = Effect.fn("StatusSources.mirror")(function* (input: {
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+    readonly sources: ReadonlyArray<StatusSource>;
+  }) {
+    yield* mutex.withPermits(1)(
+      Effect.gen(function* () {
+        const prefix = `${input.environmentId}:`;
+        const label = input.label.trim().slice(0, 200) || input.environmentId.slice(0, 200);
+        const origin = { environmentId: input.environmentId, label };
+        const before = mirrored.get(input.environmentId) ?? [];
+        const copies = input.sources.map((source): StatusSource => ({
+          config: {
+            ...source.config,
+            id: `${prefix}${source.config.id}`.slice(0, 200),
+            name: `${label} · ${source.config.name}`.slice(0, 200),
+          },
+          latest: source.latest,
+          lastTransition: source.lastTransition,
+          origin,
+        }));
+        const changed =
+          before.length !== copies.length ||
+          copies.some((copy, index) => {
+            const previous = before[index]!;
+            return (
+              previous.config.id !== copy.config.id ||
+              previous.config.name !== copy.config.name ||
+              previous.config.icon !== copy.config.icon ||
+              previous.config.snoozedUntil !== copy.config.snoozedUntil ||
+              previous.lastTransition?.at !== copy.lastTransition?.at ||
+              !samePayload(
+                withoutObservationTimes(previous.latest),
+                withoutObservationTimes(copy.latest),
+              )
+            );
+          });
+        if (copies.length > 0) mirrored.set(input.environmentId, copies);
+        else mirrored.delete(input.environmentId);
+        if (changed) yield* emit;
+      }),
+    );
+  });
   for (const source of entries.values()) yield* launch(source.config);
   return StatusSources.of({
     list,
     upsert,
     remove,
+    reorder,
     snooze,
     rotateWebhookSecret,
     webhook,
+    mirror,
     transitions: Stream.fromPubSub(transitions),
     subscribe: () =>
       Stream.unwrap(

@@ -489,6 +489,7 @@ import {
   StatusSourceList,
   StatusSourceUpsertInput,
   StatusSourceDeleteInput,
+  StatusSourceReorderInput,
   StatusSourceSnoozeInput,
   StatusSourceRotateWebhookSecretInput,
   StatusSourceRotateWebhookSecretResult,
@@ -751,6 +752,7 @@ export const WS_METHODS = {
   statusSourcesSubscribe: "statusSources.subscribe",
   statusSourcesUpsert: "statusSources.upsert",
   statusSourcesDelete: "statusSources.delete",
+  statusSourcesReorder: "statusSources.reorder",
   statusSourcesSnooze: "statusSources.snooze",
   statusSourcesRotateWebhookSecret: "statusSources.rotateWebhookSecret",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -2598,6 +2600,11 @@ const WsStatusSourcesDeleteRpc = Rpc.make(WS_METHODS.statusSourcesDelete, {
   success: Schema.Void,
   error: Schema.Union([StatusSourcesError, EnvironmentAuthorizationError]),
 });
+const WsStatusSourcesReorderRpc = Rpc.make(WS_METHODS.statusSourcesReorder, {
+  payload: StatusSourceReorderInput,
+  success: Schema.Void,
+  error: Schema.Union([StatusSourcesError, EnvironmentAuthorizationError]),
+});
 const WsStatusSourcesSnoozeRpc = Rpc.make(WS_METHODS.statusSourcesSnooze, {
   payload: StatusSourceSnoozeInput,
   success: StatusSource,
@@ -2791,6 +2798,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsStatusSourcesDeleteRpc,
   WsStatusSourcesSnoozeRpc,
   WsStatusSourcesRotateWebhookSecretRpc,
+  WsStatusSourcesReorderRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

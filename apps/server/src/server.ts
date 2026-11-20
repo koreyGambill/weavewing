@@ -92,6 +92,7 @@ import * as ThreadReplies from "./orchestration-v2/ThreadReplies.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 import * as PeerMcpClient from "./peer/PeerMcpClient.ts";
+import * as PeerStatusSources from "./peer/PeerStatusSources.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -924,6 +925,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.effectDiscard(
     ThreadReplies.ThreadReplies.pipe(Effect.flatMap((replies) => replies.start())),
   ),
+  // Mirrors status sources that linked environments share, so their failures alert here too.
+  PeerStatusSources.layer,
 ).pipe(
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(

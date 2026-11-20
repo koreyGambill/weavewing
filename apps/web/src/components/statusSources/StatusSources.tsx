@@ -43,6 +43,7 @@ import {
   sourceExpansionState,
   type SourceExpansion,
   statusItemCounts,
+  withoutRepeatedMirrors,
 } from "./statusSources.logic";
 
 const sourcesAtom = environmentAtomList("web-status-sources", (environmentId) =>
@@ -71,9 +72,13 @@ export function useStatusSourceGroups() {
   const queries = useAtomValue(
     sourcesAtom(environmentIdsKey(connected.map((entry) => entry.environmentId))),
   );
+  const visible = withoutRepeatedMirrors(
+    queries.map((query) => AsyncResult.getOrElse(query, () => null)),
+    new Set(connected.map((entry) => entry.environmentId)),
+  );
   return connected.map((environment, index) => ({
     environment,
-    sources: AsyncResult.getOrElse(queries[index]!, () => null),
+    sources: visible[index] ?? null,
     failed: AsyncResult.isFailure(queries[index]!),
   }));
 }
@@ -331,36 +336,38 @@ function SourceStatus({
             />
           </StatusHint>
         )}
-        <Menu>
-          <MenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`${source.config.name} actions`}
-                disabled={!permission || busy}
-              />
-            }
-          >
-            <MoreHorizontalIcon />
-          </MenuTrigger>
-          <MenuPopup>
-            {snoozed ? (
-              <MenuItem onClick={() => void handleSnooze(null)}>Unsnooze notifications</MenuItem>
-            ) : (
-              [15, 60, 1440].map((minutes) => (
-                <MenuItem
-                  key={minutes}
-                  onClick={() =>
-                    void handleSnooze(new Date(Date.now() + minutes * 60_000).toISOString())
-                  }
-                >
-                  Snooze {minutes === 1440 ? "1 day" : minutes === 60 ? "1 hour" : "15 minutes"}
-                </MenuItem>
-              ))
-            )}
-          </MenuPopup>
-        </Menu>
+        {!source.origin && (
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`${source.config.name} actions`}
+                  disabled={!permission || busy}
+                />
+              }
+            >
+              <MoreHorizontalIcon />
+            </MenuTrigger>
+            <MenuPopup>
+              {snoozed ? (
+                <MenuItem onClick={() => void handleSnooze(null)}>Unsnooze notifications</MenuItem>
+              ) : (
+                [15, 60, 1440].map((minutes) => (
+                  <MenuItem
+                    key={minutes}
+                    onClick={() =>
+                      void handleSnooze(new Date(Date.now() + minutes * 60_000).toISOString())
+                    }
+                  >
+                    Snooze {minutes === 1440 ? "1 day" : minutes === 60 ? "1 hour" : "15 minutes"}
+                  </MenuItem>
+                ))
+              )}
+            </MenuPopup>
+          </Menu>
+        )}
       </div>
       {expanded && (
         <div className="pl-5">

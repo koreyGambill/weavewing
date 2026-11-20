@@ -3,14 +3,21 @@ import * as NodeCrypto from "node:crypto";
 import * as PlatformNodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, expect } from "@effect/vitest";
-import type { StatusPayload, StatusSource } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  StatusSourceList,
+  type StatusPayload,
+  type StatusSource,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -25,6 +32,8 @@ const payload = (state: StatusPayload["state"]): StatusPayload => ({
   summary: `Fixture ${state}`,
   items: [],
 });
+
+const encodeList = Schema.encodeEffect(StatusSourceList);
 
 const setup = Effect.gen(function* () {
   const calls =
@@ -245,4 +254,139 @@ it.effect(
       expect(new TextDecoder().decode(Option.getOrThrow(stored))).toContain("old.test");
       expect((yield* service.list())[0]?.config.name).toBe("Original");
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect(
+  "shares new sources by default, keeps the choice on edit, and reads old configs as shared",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.makeDirectory(config.stateDir, { recursive: true });
+      yield* fs.writeFileString(
+        `${config.stateDir}/status-sources.json`,
+        JSON.stringify([
+          {
+            id: "legacy",
+            name: "Legacy",
+            kind: "webhook",
+            icon: "activity",
+            intervalSeconds: 60,
+            timeoutSeconds: 10,
+            snoozedUntil: null,
+            target: "",
+            hasCredentials: false,
+          },
+        ]),
+      );
+      const { service } = yield* setup;
+      expect((yield* service.list())[0]?.config.shared).toBe(true);
+      const created = yield* service.upsert({ name: "Hook", kind: "webhook", icon: "activity" });
+      expect(created.config.shared).toBe(true);
+      const unshared = yield* service.upsert({
+        id: created.config.id,
+        name: "Hook",
+        kind: "webhook",
+        icon: "activity",
+        shared: false,
+      });
+      expect(unshared.config.shared).toBe(false);
+      const renamed = yield* service.upsert({
+        id: created.config.id,
+        name: "Renamed",
+        kind: "webhook",
+        icon: "activity",
+      });
+      expect(renamed.config.shared).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("mirrors a linked environment's sources read-only, without inbox alerts here", () =>
+  Effect.gen(function* () {
+    const { service, updates } = yield* setup;
+    const sql = yield* SqlClient.SqlClient;
+    const environmentId = EnvironmentId.make("environment:peer");
+    const label = "L".repeat(250);
+    const shared: StatusSource = {
+      config: {
+        id: "disk",
+        name: "Disk",
+        kind: "command",
+        icon: "terminal",
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        snoozedUntil: null,
+        target: "",
+        hasCredentials: true,
+        shared: true,
+      },
+      latest: payload("fail"),
+      lastTransition: { from: "ok", to: "fail", at: "2026-01-01T00:00:00.000Z" },
+    };
+    yield* service.mirror({ environmentId, label, sources: [shared] });
+    const [mirrored] = yield* Queue.take(updates);
+    expect(mirrored).toMatchObject({
+      config: { id: "environment:peer:disk" },
+      lastTransition: shared.lastTransition,
+      origin: { environmentId, label: label.slice(0, 200) },
+    });
+    // A long peer label still encodes for subscribers.
+    yield* encodeList(yield* service.list());
+    expect(yield* sql`SELECT id FROM notifications`).toEqual([]);
+    const refused = yield* service
+      .snooze({ id: mirrored!.config.id, until: null })
+      .pipe(Effect.flip);
+    expect(refused.operation).toBe("source-not-found");
+    yield* service.mirror({ environmentId, label, sources: [] });
+    expect(yield* Queue.take(updates)).toEqual([]);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("keeps a running check's state when only sharing changes", () =>
+  Effect.gen(function* () {
+    const { service, calls, results, updates } = yield* setup;
+    const input = {
+      name: "Fixture",
+      kind: "wing-status" as const,
+      icon: "activity",
+      target: "http://127.0.0.1/status",
+    };
+    const source = yield* service.upsert(input);
+    yield* Queue.take(updates);
+    yield* Queue.take(calls);
+    yield* Queue.offer(results, payload("fail"));
+    yield* Queue.take(updates);
+    yield* service.upsert({ ...input, id: source.config.id, shared: false });
+    const [unshared] = yield* Queue.take(updates);
+    expect(unshared).toMatchObject({ config: { shared: false }, latest: { state: "fail" } });
+    expect(yield* Queue.size(calls)).toBe(0);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("keeps the chosen source order through edits, restarts, and mirrors", () =>
+  Effect.gen(function* () {
+    const { service, updates } = yield* setup;
+    const names = (sources: ReadonlyArray<StatusSource>) =>
+      sources.map((source) => source.config.name);
+    const add = (name: string) => service.upsert({ name, kind: "webhook", icon: "activity" });
+    const a = yield* add("A");
+    yield* add("B");
+    const c = yield* add("C");
+    yield* service.reorder({ ids: [c.config.id, a.config.id, "missing"] });
+    expect(names(yield* service.list())).toEqual(["C", "A", "B"]);
+    yield* service.upsert({ id: a.config.id, name: "A2", kind: "webhook", icon: "activity" });
+    const restarted = yield* setup;
+    expect(names(yield* restarted.service.list())).toEqual(["C", "A2", "B"]);
+
+    const environmentId = EnvironmentId.make("environment:peer");
+    const peer = [c, a].map((source) => ({ ...source, config: { ...source.config } }));
+    const mirrorNames = Queue.take(updates).pipe(
+      Effect.map((sources) => names(sources.filter((source) => source.origin)).join()),
+    );
+    yield* service.mirror({ environmentId, label: "Peer", sources: peer });
+    while ((yield* mirrorNames) !== "Peer · C,Peer · A");
+    // A reorder alone still reaches subscribers.
+    yield* service.mirror({ environmentId, label: "Peer", sources: peer.toReversed() });
+    while ((yield* mirrorNames) !== "Peer · A,Peer · C");
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

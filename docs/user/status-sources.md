@@ -9,6 +9,9 @@ from that environment's server, so `127.0.0.1` refers to the server's machine. C
 requires the **settings** permission; snoozing needs **operate**. Agents can read status but cannot change sources or run
 commands through them.
 
+Drag a source by its handle in **Settings > Status sources** to change the order the Status panel
+shows. Linked machines show shared sources in the same order.
+
 ## Add Stormwing
 
 Choose **Wing status**, name it **Stormwing**, and use
@@ -38,6 +41,22 @@ Send the Wing status JSON body with an `updatedAt` timestamp and the header
 `x-t3-signature: sha256=<hex HMAC-SHA256 of the exact body bytes using the signing secret>`.
 The sender must reach the selected server's endpoint.
 The timestamp must be within five minutes of the server's clock.
+
+## Share status with your other machines
+
+Sources are shared by default. Every machine with a linked-environment connection to this
+machine (Settings → Labs → **Linked environments**) shows its shared sources under its own
+status, named after this machine, and alerts on them like its own. A machine you are already
+connected to directly shows its sources once. Links go one way, so link each machine to each
+other machine you want alerts from. Turn off **Share with linked machines** in a source's
+settings to keep it on this machine.
+
+Shared copies update about once a minute, so a failure that recovers between updates may not
+reach other machines. Inbox alerts stay on the machine that runs the check; other machines show
+the toast or desktop notification. Snooze or edit a source on the machine that runs it; its
+snooze applies everywhere. A machine that stops answering keeps its last status, so a sleeping
+laptop does not clear or raise alerts. Removing, expiring or revoking the link removes its
+sources.
 
 ## Notifications and snoozing
 

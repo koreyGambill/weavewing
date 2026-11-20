@@ -98,6 +98,9 @@ export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type;
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   conversationContextRewind: Schema.optionalKey(Schema.Literal(true)),
   statusSources: Schema.optionalKey(Schema.Boolean),
+  /** Status sources take `shared` and mirror what linked environments share. */
+  statusSourceSharing: Schema.optionalKey(Schema.Boolean),
+  statusSourceOrder: Schema.optionalKey(Schema.Boolean),
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   attachmentUploads: Schema.optionalKey(Schema.Boolean),
