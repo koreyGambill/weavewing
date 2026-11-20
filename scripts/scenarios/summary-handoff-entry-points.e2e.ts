@@ -10,6 +10,7 @@ test("Completed replies expose a bounded summary handoff", WEB, async ({ t3, app
     messages: ["Show the completed reply."],
   });
   await t3.open(thread);
+  await screen.getByRole("region", "Conversation", { exact: true }).waitFor({ timeout: 120_000 });
   await app.screenshot("handoff-actions");
   await expect(screen.getByRole("button", "Hand off", { exact: true })).toBeVisible();
   const fromReply = screen.getByRole("button", "Hand off from here", { exact: true });
