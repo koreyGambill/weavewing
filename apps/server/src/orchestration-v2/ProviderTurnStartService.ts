@@ -1202,14 +1202,22 @@ export const layer: Layer.Layer<
             },
             strategy: "full_thread_summary",
             runs: projection.runs,
-            items: (yield* projectionStore.getTurnStartHistory(input.threadId)).filter((item) =>
-              item.runId === null
-                ? rewind === undefined
-                : !archivedRunIds?.has(item.runId) &&
-                  projection.runs.some(
-                    (source) => source.id === item.runId && source.ordinal < run.ordinal,
-                  ),
-            ),
+            items: [
+              ...(rewind === undefined && projection.thread.lineage.contextArchive !== undefined
+                ? yield* ContextHandoffService.readInheritedHandoffItems(
+                    projectionStore,
+                    projection.thread,
+                  )
+                : []),
+              ...(yield* projectionStore.getTurnStartHistory(input.threadId)).filter((item) =>
+                item.runId === null
+                  ? rewind === undefined
+                  : !archivedRunIds?.has(item.runId) &&
+                    projection.runs.some(
+                      (source) => source.id === item.runId && source.ordinal < run.ordinal,
+                    ),
+              ),
+            ],
             createdAt,
           });
           return { handoff, transferId, createdAt };

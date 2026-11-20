@@ -1,4 +1,4 @@
-import { vi } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -4104,6 +4104,32 @@ describe("orchestration v2 provider switching", () => {
             sourcePoint: { type: "rewind", runId },
             sideChat: true,
           });
+        const forkSideChat = (id: ThreadId) =>
+          orchestrator.dispatch({
+            type: "thread.fork",
+            commandId: CommandId.make(`rewind:side-chat:${id}`),
+            createdBy: "user",
+            creationSource: "web",
+            sourceThreadId: root,
+            targetThreadId: id,
+            sourcePoint: { type: "latest_stable" },
+            sideChat: true,
+          });
+        const detach = (id: ThreadId) =>
+          Effect.gen(function* () {
+            const projection = yield* read(id);
+            const providerThread = projection.providerThreads.find(
+              (thread) => thread.id === projection.thread.activeProviderThreadId,
+            );
+            assert.exists(providerThread?.providerSessionId);
+            yield* orchestrator.dispatch({
+              type: "provider-session.detach",
+              commandId: CommandId.make(`rewind:detach:${id}`),
+              threadId: id,
+              providerSessionId: providerThread!.providerSessionId!,
+            });
+            yield* worker.drain();
+          });
         const messages = (id: ThreadId) =>
           orchestrator
             .getTimelinePage(id, { view: "messages", limit: 20 })
@@ -4159,6 +4185,9 @@ describe("orchestration v2 provider switching", () => {
         });
         assert.isNull((yield* read(archive)).thread.deletedAt);
         yield* send(archive, "continue archived history");
+        yield* detach(archive);
+        yield* Ref.set(failResumeOnce, true);
+        yield* send(archive, "recover archive conversation");
         const oldProvider = before.providerThreads.find(
           (thread) => thread.id === before.thread.activeProviderThreadId,
         )!;
@@ -4175,25 +4204,55 @@ describe("orchestration v2 provider switching", () => {
         });
         yield* send(root, "plain prompt after rewind");
 
-        const current = yield* read();
-        const providerThread = current.providerThreads.find(
-          (thread) => thread.id === current.thread.activeProviderThreadId,
+        const portableSideChat = ThreadId.make("thread:rewind-portable-side-chat");
+        yield* forkSideChat(portableSideChat);
+        yield* send(portableSideChat, "portable side chat after rewind", CODEX_MODEL_SELECTION);
+        const nativeSideChat = ThreadId.make("thread:rewind-native-side-chat");
+        yield* forkSideChat(nativeSideChat);
+        yield* send(nativeSideChat, "native fallback side chat after rewind");
+        assert.isTrue(
+          (yield* read(nativeSideChat)).turnItems.some(
+            (item) => item.type === "system_notice" && item.title === "Native fork failed",
+          ),
         );
-        assert.exists(providerThread?.providerSessionId);
-        yield* orchestrator.dispatch({
-          type: "provider-session.detach",
-          commandId: CommandId.make("rewind:detach"),
-          threadId: root,
-          providerSessionId: providerThread!.providerSessionId!,
-        });
-        yield* worker.drain();
+
+        yield* detach(root);
         yield* Ref.set(failResumeOnce, true);
         yield* send(root, "recover native conversation");
         yield* send(root, "switch to Codex", CODEX_MODEL_SELECTION);
 
+        const latest = (yield* read()).runs.at(-1)!;
+        yield* rewind(latest.id, nextArchive);
+        assert.deepEqual(yield* messages(nextArchive), [
+          "plain prompt after rewind",
+          "recover native conversation",
+          "switch to Codex",
+        ]);
+        yield* send(nextArchive, "continue second archive");
+        yield* send(root, "plain prompt after second rewind");
+        const nextSideChat = ThreadId.make("thread:rewind-next-side-chat");
+        yield* forkSideChat(nextSideChat);
+        yield* send(nextSideChat, "portable side chat after second rewind", CODEX_MODEL_SELECTION);
+
         const turns = yield* Ref.get(capturedTurns);
         const turn = (prompt: string) => turns.find(({ text }) => text.endsWith(prompt))!;
         assert.include(turn("continue archived history").text, "archived Claude history");
+        const archiveRecovery = turn("recover archive conversation");
+        assert.notEqual(
+          archiveRecovery.nativeThreadId,
+          turn("continue archived history").nativeThreadId,
+        );
+        assert.include(archiveRecovery.text, "continue archived history");
+        expect.soft(archiveRecovery.text).toContain("archived Codex history");
+        expect.soft(archiveRecovery.text).toContain("archived Claude history");
+        for (const prompt of [
+          "portable side chat after rewind",
+          "native fallback side chat after rewind",
+        ]) {
+          assert.include(turn(prompt).text, "plain prompt after rewind");
+          expect.soft(turn(prompt).text).not.toContain("archived Claude history");
+          expect.soft(turn(prompt).text).not.toContain("archived Codex history");
+        }
         const plainPrompt = turn("plain prompt after rewind");
         assert.equal(plainPrompt.text, "plain prompt after rewind");
         assert.notEqual(plainPrompt.nativeThreadId, turn("archived Claude history").nativeThreadId);
@@ -4207,17 +4266,20 @@ describe("orchestration v2 provider switching", () => {
           assert.notInclude(turn(prompt).text, "archived Codex history");
           assert.notInclude(turn(prompt).text, "continue archived history");
         }
-        const latest = (yield* read()).runs.at(-1)!;
-        yield* rewind(latest.id, nextArchive);
-        assert.deepEqual(yield* messages(nextArchive), [
-          "plain prompt after rewind",
-          "recover native conversation",
-          "switch to Codex",
-        ]);
+        const secondArchive = turn("continue second archive").text;
+        assert.include(secondArchive, "plain prompt after rewind");
+        assert.notInclude(secondArchive, "archived Codex history");
+        assert.notInclude(secondArchive, "archived Claude history");
+        const secondSideChat = turn("portable side chat after second rewind").text;
+        assert.include(secondSideChat, "plain prompt after second rewind");
+        assert.notInclude(secondSideChat, "plain prompt after rewind");
+        assert.notInclude(secondSideChat, "archived Codex history");
+        assert.notInclude(secondSideChat, "archived Claude history");
         assert.deepEqual(yield* messages(archive), [
           "archived Codex history",
           "archived Claude history",
           "continue archived history",
+          "recover archive conversation",
         ]);
       }).pipe(
         Effect.provide(

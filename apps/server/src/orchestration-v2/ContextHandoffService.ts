@@ -149,17 +149,28 @@ export function visibleConversationItems(
 
 type ForkHistorySource = Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "attempts">;
 
-/** Visible rows of `source`'s own runs through `throughRun`, plus its v1 imported rows. */
+function forkHistoryStartOrdinal(
+  thread: OrchestrationV2AppThread,
+  throughRunOrdinal: number,
+): number {
+  // An explicit historical fork can still start inside the archived prefix.
+  const cut = thread.contextRewind?.runOrdinal;
+  return cut !== undefined && throughRunOrdinal > cut ? cut + 1 : 1;
+}
+
 const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHistoryItems")(
   function* (
     projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords">,
     source: ForkHistorySource,
-    throughRun: Pick<OrchestrationV2Run, "ordinal">,
+    throughRunOrdinal: number,
+    fromRunOrdinal: number,
   ) {
     const { turnItems } = yield* projectionStore.getThreadRecords(source.thread.id, ["turnItems"], {
       turnItemRunIds: [
-        ...source.runs.filter((run) => run.ordinal <= throughRun.ordinal).map((run) => run.id),
-        ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
+        ...source.runs
+          .filter((run) => run.ordinal >= fromRunOrdinal && run.ordinal <= throughRunOrdinal)
+          .map((run) => run.id),
+        ...(fromRunOrdinal === 1 && source.thread.historyOrigin === "v1_import" ? [null] : []),
       ],
     });
     return visibleConversationItems(source, turnItems);
@@ -173,16 +184,20 @@ export const readInheritedHandoffItems = Effect.fn(
   projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords" | "getThreadProjection">,
   thread: OrchestrationV2AppThread,
 ) {
-  if (thread.lineage.contextArchive !== undefined) {
-    const projection = yield* projectionStore.getThreadProjection(thread.id);
-    return projection.visibleTurnItems
-      .filter((row) => row.visibility === "inherited")
-      .map((row) => row.item);
-  }
   const segments: Array<ReadonlyArray<OrchestrationV2TurnItem>> = [];
   const seen = new Set([thread.id]);
   let current = thread;
-  while (current.forkedFrom !== null && current.lineage.sideChat !== true) {
+  while (true) {
+    if (current.lineage.contextArchive !== undefined) {
+      const projection = yield* projectionStore.getThreadProjection(current.id);
+      segments.unshift(
+        projection.visibleTurnItems
+          .filter((row) => row.visibility === "inherited")
+          .map((row) => row.item),
+      );
+      break;
+    }
+    if (current.forkedFrom === null || current.lineage.sideChat === true) break;
     let point = current.forkedFrom.type === "run" ? current.forkedFrom : undefined;
     if (point === undefined) {
       // Delegates retain their supervising node; their inherited conversation has its own transfer.
@@ -206,7 +221,11 @@ export const readInheritedHandoffItems = Effect.fn(
       .pipe(Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }));
     const forkRun = source?.runs.find((run) => run.id === runId);
     if (source === null || forkRun === undefined) break;
-    segments.unshift(yield* readOwnHistoryItems(projectionStore, source, forkRun));
+    const fromRunOrdinal = forkHistoryStartOrdinal(source.thread, forkRun.ordinal);
+    segments.unshift(
+      yield* readOwnHistoryItems(projectionStore, source, forkRun.ordinal, fromRunOrdinal),
+    );
+    if (fromRunOrdinal > 1) break;
     current = source.thread;
   }
   return segments.flat();
@@ -220,9 +239,12 @@ export const readForkHistoryItems = Effect.fn(
   source: ForkHistorySource,
   throughRun: Pick<OrchestrationV2Run, "ordinal">,
 ) {
+  const fromRunOrdinal = forkHistoryStartOrdinal(source.thread, throughRun.ordinal);
   return [
-    ...(yield* readInheritedHandoffItems(projectionStore, source.thread)),
-    ...(yield* readOwnHistoryItems(projectionStore, source, throughRun)),
+    ...(fromRunOrdinal === 1
+      ? yield* readInheritedHandoffItems(projectionStore, source.thread)
+      : []),
+    ...(yield* readOwnHistoryItems(projectionStore, source, throughRun.ordinal, fromRunOrdinal)),
   ];
 });
 
