@@ -49,8 +49,7 @@ export function resolveChatCanvasLayout({
   const leftOfDetails = detailsCard
     ? detailsCard.left - DETAILS_CARD_CLEARANCE - normalWidth
     : centeredLeft;
-  const normalLeft =
-    leftOfDetails >= padding ? Math.min(centeredLeft, leftOfDetails) : centeredLeft;
+  const normalLeft = Math.max(padding, Math.min(centeredLeft, leftOfDetails));
   let chat = {
     left: normalLeft,
     width: normalWidth,
