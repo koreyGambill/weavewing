@@ -590,9 +590,9 @@ function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS; className: 
 
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
-  // "folder" is a one-line row inside a boring sidebar project folder;
-  // "folder-multiline" adds a branch and PR line under it.
-  variant: "card" | "slim" | "folder" | "folder-multiline";
+  // "folder" is a one-line row inside a project folder; "folder-multiline" adds a branch and
+  // PR line under it. "dense" is the folder row outside a folder, for the Dense rows view.
+  variant: "card" | "slim" | "folder" | "folder-multiline" | "dense";
   navigationParent?: string | undefined;
   familyDepth?: number | undefined;
   variantAction: SidebarSweepAction;
@@ -1313,7 +1313,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
-    const inFolder = variant === "folder" || multiline;
+    const inFolder = variant === "folder" || multiline || variant === "dense";
     return (
       <li
         data-thread-item={threadKey}
@@ -1345,7 +1345,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     ? "flex flex-col justify-center px-2.5 py-1.5"
                     : "flex h-9 items-center gap-2.5 px-2.5",
                   // Lines titles up with the folder name, past its chevron and icon.
-                  inFolder && "ps-9",
+                  inFolder && variant !== "dense" && "ps-9",
                 )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
@@ -1366,7 +1366,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {draftIndicator}
               {title}
               {multiline ? titleLineIcons : automationMarker}
-              {multiline ? null : computerLocalityIcon}
               {pinIndicator}
               {multiline ? null : terminalStatusIcon}
               {isRegeneratingTitle ? (
@@ -1496,6 +1495,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </span>
               )}
               {props.sweepAction !== null ? dragDestination : null}
+              {/* Last on the line, so the locality marker never moves as the status changes. */}
+              {multiline ? null : computerLocalityIcon}
             </div>
             {multiline ? metaLine : null}
           </TooltipTrigger>
