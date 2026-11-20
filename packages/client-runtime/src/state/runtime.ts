@@ -138,6 +138,7 @@ export interface AtomCommandOptions {
   readonly label?: string;
   readonly reportFailure?: boolean;
   readonly reportDefect?: boolean;
+  readonly signal?: AbortSignal;
 }
 
 export interface AtomCommandReporter {
@@ -147,7 +148,11 @@ export interface AtomCommandReporter {
 
 export interface AtomCommand<W, A, E> {
   readonly label: string;
-  readonly run: (registry: AtomRegistry.AtomRegistry, input: W) => Promise<AtomCommandResult<A, E>>;
+  readonly run: (
+    registry: AtomRegistry.AtomRegistry,
+    input: W,
+    signal?: AbortSignal,
+  ) => Promise<AtomCommandResult<A, E>>;
 }
 
 export type AtomCommandConcurrency<W> =
@@ -342,7 +347,7 @@ export async function runAtomCommand<W, A, E>(
   options: AtomCommandOptions = {},
   reporter: AtomCommandReporter = console,
 ): Promise<AtomCommandResult<A, E>> {
-  const result = await settleAtomCommandResult(() => command.run(registry, input));
+  const result = await settleAtomCommandResult(() => command.run(registry, input, options.signal));
   reportAtomCommandResult(result, { ...options, label: options.label ?? command.label }, reporter);
   return result;
 }
@@ -393,7 +398,6 @@ export interface AtomQueryOptions extends AtomCommandOptions {
    * verification flows where a cached failure must not satisfy a retry.
    */
   readonly refresh?: boolean;
-  readonly signal?: AbortSignal;
 }
 
 export async function executeAtomQuery<A, E>(
@@ -438,13 +442,17 @@ export function createRuntimeCommand<R, ER, W, A, E>(
   const concurrency = options.concurrency ?? { mode: "parallel" as const };
   return {
     label: options.label,
-    run: (registry, input) =>
+    run: (registry, input, signal) =>
       settleAtomCommandResult(() =>
         scheduler.schedule(registry, concurrency, input, () => {
           const atom = runtime
             .atom(options.execute(input, registry))
             .pipe(Atom.withLabel(options.label));
-          return executeAtomQuery(registry, atom, { reportDefect: false, reportFailure: false });
+          return executeAtomQuery(registry, atom, {
+            reportDefect: false,
+            reportFailure: false,
+            ...(signal === undefined ? {} : { signal }),
+          });
         }),
       ),
   };

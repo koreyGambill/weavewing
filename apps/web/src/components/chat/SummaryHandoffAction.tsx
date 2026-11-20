@@ -9,7 +9,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { FileOutputIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { focusThreadDraft, resolveThreadOpenRoute } from "../../lib/sideChatPane";
 import { readThreadShell, useServerConfigs, useThreadShell } from "../../state/entities";
@@ -47,7 +47,8 @@ export function SummaryHandoffAction({
   );
   const prepare = useAtomCommand(threadEnvironment.prepareSummaryHandoff, { reportFailure: false });
   const navigate = useNavigate();
-  const request = useRef(0);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
   const [open, setOpen] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [portable, setPortable] = useState(false);
@@ -60,15 +61,21 @@ export function SummaryHandoffAction({
   if (!supported || !canPrepare) return null;
 
   const prepareHandoff = async (useSavedConversation: boolean) => {
-    const id = ++request.current;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setError(null);
     setHandoff(null);
     setPortable(useSavedConversation);
-    const result = await prepare({
-      environmentId,
-      input: { threadId, ...(useSavedConversation ? { strategy: "portable" } : {}) },
-    });
-    if (id !== request.current) return;
+    const result = await prepare(
+      {
+        environmentId,
+        input: { threadId, ...(useSavedConversation ? { strategy: "portable" } : {}) },
+      },
+      controller.signal,
+    );
+    if (controller.signal.aborted) return;
+    request.current = null;
     if (result._tag === "Success") {
       setHandoff(result.value);
       setText(result.value.kind === "native_unavailable" ? "" : result.value.text);
@@ -88,7 +95,8 @@ export function SummaryHandoffAction({
       setDestination(null);
       void prepareHandoff(false);
     } else {
-      request.current++;
+      request.current?.abort();
+      request.current = null;
     }
   };
 
@@ -191,7 +199,8 @@ export function SummaryHandoffAction({
                       Change
                     </Button>
                   </div>
-                ) : (
+                ) : null}
+                <div hidden={targetShell !== null}>
                   <ThreadPicker
                     environmentId={environmentId}
                     excludeThreadId={threadId}
@@ -200,14 +209,14 @@ export function SummaryHandoffAction({
                     }
                     onSelect={setDestination}
                   />
-                )}
+                </div>
               </>
             )}
           </div>
         </DialogPanel>
         <DialogFooter>
           <DialogAction
-            disabled={!text.trim() || targetShell === null}
+            disabled={!text.trim() || targetShell === null || targetShell.archivedAt !== null}
             onClick={() => void stage()}
           >
             Add to draft
