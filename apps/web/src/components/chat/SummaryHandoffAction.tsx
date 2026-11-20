@@ -101,6 +101,7 @@ export function SummaryHandoffAction({
     request.current = controller;
     setError(null);
     setHandoff(null);
+    setText("");
     setPortable(useSavedConversation);
     const result = await prepare(
       {
