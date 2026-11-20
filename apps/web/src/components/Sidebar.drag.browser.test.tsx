@@ -10,6 +10,7 @@ import { AppRoot } from "~/AppRoot";
 import "~/components/ChatView";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 import {
   ENVIRONMENT_ID,
   emitThreadShell,
@@ -145,6 +146,8 @@ it("keeps focus in the search box when a click picks a search result", async () 
 });
 
 it("shows the current Scratch folder and updates the project on the same thread route", async () => {
+  // AppRoot's registry outlives its mount.
+  await act(() => appAtomRegistry.reset());
   await page.viewport(1400, 900);
   const thread = { ...threadWithHistory("folder-move", 1), worktreePath: "/workspace/loose-notes" };
   const destination = { id: ProjectId.make("destination"), title: "Destination project" };
