@@ -222,6 +222,7 @@ export const make = Effect.gen(function* () {
     capabilities: {
       statusSources: true,
       automations: true,
+      automationRunHistory: true,
       automationTriggerProjects: true,
       repositoryIdentity: true,
       connectionProbe: true,

@@ -19,6 +19,8 @@ export function EnvironmentAutomationHistory({
   grouped: boolean;
 }) {
   const environment = useEnvironment(environmentId);
+  const canListAll =
+    environment?.serverConfig?.environment.capabilities.automationRunHistory === true;
   const history = useRef<HTMLElement>(null);
   const inventory = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
@@ -27,7 +29,7 @@ export function EnvironmentAutomationHistory({
   const tasks = inventory.data?.tasks ?? EMPTY_TASKS;
   const taskId = tasks.find((task) => task.id === selection)?.id;
   const items = [
-    { value: "", label: "All automations" },
+    ...(canListAll ? [{ value: "", label: "All automations" }] : []),
     ...tasks
       .map((task) => ({ value: task.id, label: task.title }))
       .sort((a, b) => a.label.localeCompare(b.label)),
@@ -35,11 +37,14 @@ export function EnvironmentAutomationHistory({
 
   const [cursors, setCursors] = useState<ScheduledTaskRunId[]>([]);
   const before = cursors.at(-1);
+  const canLoadRuns = canListAll || taskId !== undefined;
   const query = useEnvironmentQuery(
-    serverEnvironment.scheduledTaskRuns({
-      environmentId,
-      input: { ...(taskId === undefined ? {} : { id: taskId }), ...(before ? { before } : {}) },
-    }),
+    canLoadRuns
+      ? serverEnvironment.scheduledTaskRuns({
+          environmentId,
+          input: { ...(taskId === undefined ? {} : { id: taskId }), ...(before ? { before } : {}) },
+        })
+      : null,
   );
   const previousTasks = useRef(tasks);
   const { refresh } = query;
@@ -66,7 +71,7 @@ export function EnvironmentAutomationHistory({
         ) : null}
         <Select
           items={items}
-          value={taskId ?? ""}
+          value={taskId ?? (canListAll ? "" : null)}
           onValueChange={(value) => {
             setSelection(value);
             setCursors([]);
@@ -74,7 +79,7 @@ export function EnvironmentAutomationHistory({
           }}
         >
           <SelectTrigger size="compact" aria-label="Filter runs by automation">
-            <SelectValue />
+            <SelectValue placeholder="Select automation" />
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
             {items.map((item) => (
@@ -116,6 +121,16 @@ export function EnvironmentAutomationHistory({
       </div>
       {query.error !== null ? (
         <p className="text-destructive">Could not load run history: {query.error}</p>
+      ) : !canLoadRuns ? (
+        <p className="text-muted-foreground">
+          {inventory.data === null
+            ? inventory.error === null
+              ? "Loading automations…"
+              : "Run history needs an automation."
+            : tasks.length === 0
+              ? "No automations on this server."
+              : "Choose an automation to see its runs."}
+        </p>
       ) : query.data === null ? (
         <p className="text-muted-foreground">Loading runs…</p>
       ) : runs.length === 0 ? (

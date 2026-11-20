@@ -408,6 +408,14 @@ function EventTriggerFields({
   for (const id of triggerProjects ?? []) {
     if (!projectItems.has(id)) projectItems.set(id, `${id} (unavailable)`);
   }
+  const projectSelectionLabel =
+    triggerProjects === null
+      ? "All projects"
+      : triggerProjects.length === 0
+        ? "Select projects"
+        : triggerProjects.length === 1 && triggerProjects[0] !== undefined
+          ? projectItems.get(triggerProjects[0])
+          : `${triggerProjects.length} projects selected`;
   const statusEvent = draft.eventKind === "status_transition";
   const sources = useEnvironmentQuery(
     statusEvent ? statusSources({ environmentId, input: {} }) : null,
@@ -493,15 +501,10 @@ function EventTriggerFields({
             <Menu>
               <MenuTrigger
                 id="scheduled-task-event-project"
+                aria-label={`Trigger projects, ${projectSelectionLabel}`}
                 render={<Button variant="outline" size="sm" />}
               >
-                {triggerProjects === null
-                  ? "All projects"
-                  : triggerProjects.length === 0
-                    ? "Select projects"
-                    : triggerProjects.length === 1 && triggerProjects[0] !== undefined
-                      ? projectItems.get(triggerProjects[0])
-                      : `${triggerProjects.length} projects selected`}
+                {projectSelectionLabel}
                 <ChevronDownIcon />
               </MenuTrigger>
               <MenuPopup align="start">
