@@ -288,7 +288,14 @@ export interface LimitAccount {
   readonly limits: ServerProviderUsageLimits;
 }
 
-export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
+/** Group reports by subscription. Include unreadable subscriptions for status-only surfaces. */
+export function collectLimitAccounts(
+  presentations: LimitPresentations,
+  { includeUnavailable = false }: { readonly includeUnavailable?: boolean } = {},
+): readonly LimitAccount[] {
+  const include = (limits: ServerProviderUsageLimits) =>
+    limitsNotice(limits) === null ||
+    (includeUnavailable && limits.unavailable?.reason !== "unsupported");
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
@@ -332,7 +339,9 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           !previous.environments.some((seen) => seen.environmentId === candidate.environmentId),
       ),
     ];
-    const winner = fresher ? next : previous;
+    const previousReadable = limitsNotice(previous.limits) === null;
+    const nextReadable = limitsNotice(next.limits) === null;
+    const winner = (previousReadable === nextReadable ? fresher : nextReadable) ? next : previous;
     const creditSource = creditSources.get(key);
     // A hub e-mail names the account better than the driver's default instance name.
     const hubEmail = [previous, next].some(
@@ -372,7 +381,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   for (const [environmentId, presentation] of presentations) {
     const label = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
-      if (!provider.usageLimits || limitsNotice(provider.usageLimits) !== null) continue;
+      if (!provider.usageLimits || !include(provider.usageLimits)) continue;
       merge(resolveKey(nativeReport(provider)) ?? `${environmentId}:${provider.instanceId}`, {
         key: `${environmentId}:${provider.instanceId}`,
         driver: provider.driver,
@@ -394,7 +403,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         ? `${presentation.entry.target.label} · ${source.label}`
         : source.label;
       for (const account of source.accounts) {
-        if (limitsNotice(account.usageLimits) !== null) continue;
+        if (!include(account.usageLimits)) continue;
         const resolved = resolveKey(account);
         // A resolved account already has an identity; its public key must stay distinct from others'.
         const hub = resolved ? `${environmentId}:${source.id}` : hubIdentity(environmentId, source);

@@ -37,6 +37,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { ShortcutReferenceDialog } from "./ShortcutReferenceDialog";
+import { SidebarUsageLimits } from "./SidebarUsageLimits";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
@@ -243,23 +244,28 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
+  children,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  children?: ReactNode;
 }) {
   return (
-    <SidebarMenuItem className="shrink-0">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
-              {icon}
-            </SidebarMenuButton>
-          }
-        />
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
+    <SidebarMenuItem className={children ? "flex min-w-0 items-center gap-1" : "shrink-0"}>
+      <div className="shrink-0">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+                {icon}
+              </SidebarMenuButton>
+            }
+          />
+          <TooltipPopup side="top">{label}</TooltipPopup>
+        </Tooltip>
+      </div>
+      {children}
     </SidebarMenuItem>
   );
 }
@@ -303,7 +309,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   };
 
   return (
-    <SidebarMenu className="flex-row items-center">
+    <SidebarMenu className="flex-row flex-wrap items-center">
       <SidebarUtilityItem
         icon={<span>/</span>}
         label="Shortcut reference"
@@ -335,7 +341,9 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
-          />
+          >
+            <SidebarUsageLimits />
+          </SidebarUtilityItem>
         </>
       )}
       <SidebarThreadUndoNotice />

@@ -80,3 +80,9 @@ export function rankProvidersByMetric(
     totals.find((entry) => entry.provider === provider)?.[field] ?? 0;
   return providers.toSorted((left, right) => value(right) - value(left));
 }
+
+/** Identify an account without revealing its email address. */
+export function accountInitials(email: string): string {
+  const [local = "", domain = ""] = email.split("@");
+  return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase() || "?";
+}

@@ -741,6 +741,31 @@ describe("pools", () => {
       "env-a:codex",
       "env-a:hub:claude.json",
     ]);
+    expect(
+      collectLimitAccounts(withOther(unreadable), { includeUnavailable: true }).map((account) => [
+        account.key,
+        account.limits.unavailable?.reason,
+      ]),
+    ).toEqual([
+      ["env-a:codex", undefined],
+      ["env-a:team", "probeFailed"],
+      ["env-a:hub:claude.json", undefined],
+    ]);
+
+    const duplicateFailure = {
+      ...unreadable,
+      auth: native.auth,
+      usageLimits: {
+        windows: [],
+        unavailable: { reason: "probeFailed" as const },
+        checkedAt: "2026-12-01T00:00:00Z",
+      },
+    };
+    expect(
+      collectLimitAccounts(withOther(duplicateFailure), { includeUnavailable: true }).map(
+        (account) => account.limits,
+      ),
+    ).toEqual([native.usageLimits]);
   });
 
   it.each([
