@@ -26,7 +26,7 @@ import {
 } from "@t3tools/provider-core/server/handoffBudget";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { createOrchestrationV2TurnItemVisibility } from "@t3tools/shared/orchestrationV2Timeline";
-import type { ProjectionStoreV2Shape } from "./ProjectionStore.ts";
+import { inheritedForkStartOrdinal, type ProjectionStoreV2Shape } from "./ProjectionStore.ts";
 
 export class ContextHandoffPrepareError extends Schema.TaggedError<ContextHandoffPrepareError>()(
   "ContextHandoffPrepareError",
@@ -163,8 +163,7 @@ const forkHistoryStartOrdinal = Effect.fn("orchestrationV2.contextHandoff.forkHi
   ) {
     if (thread.contextRewind === undefined) return 1;
     const cut = yield* projectionStore.getForkSourceRewindOrdinal(thread.id, targetThreadId);
-    // A historical fork can select a run inside the prefix already archived at creation.
-    return cut !== undefined && throughRunOrdinal > cut ? cut + 1 : 1;
+    return inheritedForkStartOrdinal(throughRunOrdinal, cut);
   },
 );
 

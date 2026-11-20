@@ -4093,13 +4093,14 @@ describe("orchestration v2 provider switching", () => {
         const rewind = (
           runId: OrchestrationV2ThreadProjection["runs"][number]["id"],
           id: ThreadId,
+          sourceThreadId = root,
         ) =>
           orchestrator.dispatch({
             type: "thread.fork",
             commandId: CommandId.make(`rewind:${runId}:${id}`),
             createdBy: "user",
             creationSource: "web",
-            sourceThreadId: root,
+            sourceThreadId,
             targetThreadId: id,
             sourcePoint: { type: "rewind", runId },
             sideChat: true,
@@ -4229,6 +4230,7 @@ describe("orchestration v2 provider switching", () => {
 
         const latest = (yield* read()).runs.at(-1)!;
         yield* rewind(latest.id, nextArchive);
+        yield* send(root, "plain prompt after second rewind");
         yield* send(portableSideChat, "portable delayed side chat", CODEX_MODEL_SELECTION);
         yield* send(nativeSideChat, "native fallback delayed side chat");
         const descendant = ThreadId.make("thread:rewind-descendant");
@@ -4248,10 +4250,41 @@ describe("orchestration v2 provider switching", () => {
           "switch to Codex",
         ]);
         yield* send(nextArchive, "continue second archive");
-        yield* send(root, "plain prompt after second rewind");
         const nextSideChat = ThreadId.make("thread:rewind-next-side-chat");
         yield* fork(nextSideChat);
+        yield* send(root, "live parent turn in the same segment");
         yield* send(nextSideChat, "portable side chat after second rewind", CODEX_MODEL_SELECTION);
+
+        const branchArchive = ThreadId.make("thread:rewind-branch-archive");
+        yield* rewind((yield* read(branch)).runs.at(-1)!.id, branchArchive, branch);
+        const branchArchiveProjection = yield* read(branchArchive);
+        const branchArchiveShell = yield* orchestrator.getThreadShell(branchArchive);
+        const archiveHead = yield* orchestrator.getTimelinePage(branchArchive, {
+          view: "messages",
+          limit: 1,
+        });
+        const archiveTail = yield* orchestrator.getTimelinePage(branchArchive, {
+          view: "messages",
+          limit: 20,
+          afterPosition: archiveHead.items[0]!.position,
+        });
+        const branchArchiveMessages = [...archiveHead.items, ...archiveTail.items].flatMap(
+          ({ item }) => (item.type === "user_message" ? [item.text] : []),
+        );
+        const { projection: archiveWindow } = yield* orchestrator.getThreadSnapshotWindow(
+          branchArchive,
+          { rowLimit: 20, userTurnLimit: 2 },
+        );
+        expect
+          .soft(branchArchiveShell?.visibleItemCount)
+          .toBe(branchArchiveProjection.visibleTurnItems.length);
+        expect
+          .soft(archiveWindow.visibleTurnItems.map((row) => row.sourceItemId))
+          .toEqual(branchArchiveProjection.visibleTurnItems.map((row) => row.sourceItemId));
+        yield* send(branchArchive, "continue fork archive");
+        yield* detach(branchArchive);
+        yield* Ref.set(failResumeOnce, true);
+        yield* send(branchArchive, "recover fork archive");
 
         const turns = yield* Ref.get(capturedTurns);
         const turn = (prompt: string) => turns.find(({ text }) => text.endsWith(prompt))!;
@@ -4274,6 +4307,7 @@ describe("orchestration v2 provider switching", () => {
           expect.soft(turn(prompt).text).not.toContain("archived Codex history");
           expect.soft(turn(prompt).text).not.toContain("recover native conversation");
           expect.soft(turn(prompt).text).not.toContain("switch to Codex");
+          expect.soft(turn(prompt).text).not.toContain("plain prompt after second rewind");
         }
         assert.include(
           turn("portable side chat from normal fork").text,
@@ -4303,6 +4337,17 @@ describe("orchestration v2 provider switching", () => {
         assert.notInclude(secondArchive, "archived Claude history");
         const secondSideChat = turn("portable side chat after second rewind").text;
         assert.include(secondSideChat, "plain prompt after second rewind");
+        assert.include(secondSideChat, "live parent turn in the same segment");
+        for (const prompt of ["continue fork archive", "recover fork archive"]) {
+          expect.soft(turn(prompt).text).toContain("plain prompt after rewind");
+          expect.soft(turn(prompt).text).toContain("prompt on the normal fork");
+          expect.soft(turn(prompt).text).not.toContain("archived Codex history");
+          expect.soft(turn(prompt).text).not.toContain("archived Claude history");
+        }
+        assert.include(turn("recover fork archive").text, "continue fork archive");
+        expect
+          .soft(branchArchiveMessages)
+          .toEqual(["plain prompt after rewind", "prompt on the normal fork"]);
         assert.notInclude(secondSideChat, "plain prompt after rewind");
         assert.notInclude(secondSideChat, "archived Codex history");
         assert.notInclude(secondSideChat, "archived Claude history");

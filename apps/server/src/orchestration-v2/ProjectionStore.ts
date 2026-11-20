@@ -893,6 +893,7 @@ type ProjectionWindow = Omit<
   "anchorThreadId"
 > & {
   readonly suppressLocal?: boolean | undefined;
+  readonly fromRunOrdinal?: number | undefined;
   readonly forkCreatedAt?: DateTime.Utc | undefined;
   readonly historyAnchor?: { readonly threadId: ThreadId; readonly itemId: TurnItemId } | undefined;
 };
@@ -1189,6 +1190,7 @@ type ShellThreadRow = {
   readonly thread_id: string;
   readonly payload_json: string;
   readonly forked_from_run_source_thread_id: string | null;
+  readonly fork_source_rewind_ordinal: number | null;
   readonly latest_run_id: string | null;
   readonly latest_run_status: string | null;
   readonly latest_run_requested_at: string | null;
@@ -1639,6 +1641,15 @@ export function forkInheritedRunOrdinals(
   );
 }
 
+/** Lower bound of a normal fork's inherited range at creation. */
+export function inheritedForkStartOrdinal(
+  throughRunOrdinal: number,
+  cut: number | null | undefined,
+) {
+  // A historical fork can select a run inside the prefix already archived at creation.
+  return cut != null && throughRunOrdinal > cut ? cut + 1 : 1;
+}
+
 function visibleTurnItemsThroughRun(input: {
   readonly sourceProjection: OrchestrationV2ThreadProjection;
   readonly sourceRunId: NonNullable<OrchestrationV2TurnItem["runId"]>;
@@ -1695,6 +1706,7 @@ function buildVisibleTurnItems(input: {
   readonly projection: OrchestrationV2ThreadProjection;
   readonly sourceProjection: OrchestrationV2ThreadProjection | null;
   readonly inheritedRowCount?: number;
+  readonly fromRunOrdinal: number;
 }): Array<OrchestrationV2ProjectedTurnItem> {
   const forkedFrom = inheritedRunFork(input.projection.thread);
   if (
@@ -1711,7 +1723,7 @@ function buildVisibleTurnItems(input: {
           sourceProjection: input.sourceProjection,
           sourceRunId: forkedFrom.runId,
           forkCreatedAt: input.projection.thread.createdAt,
-          fromRunOrdinal: input.projection.thread.lineage.contextArchive?.fromRunOrdinal ?? 1,
+          fromRunOrdinal: input.fromRunOrdinal,
         });
   const markerItem = makeForkMarkerTurnItem({
     targetProjection: input.projection,
@@ -2074,6 +2086,7 @@ function isActivityRunForShell(
 }
 
 type ShellThreadState = {
+  readonly forkSourceRewindOrdinal: number | null;
   readonly thread: OrchestrationV2ThreadProjection["thread"];
   readonly latestRunId: RunId | null;
   readonly latestRunStatus: OrchestrationV2ShellThreadStatus;
@@ -2195,9 +2208,14 @@ function visibleItemCountForShell(input: {
     return state.itemCount;
   }
 
-  const archiveStart = state.thread.lineage.contextArchive?.fromRunOrdinal ?? 1;
+  const fromRunOrdinal =
+    state.thread.lineage.contextArchive?.fromRunOrdinal ??
+    inheritedForkStartOrdinal(
+      sourceState.runsById.get(forkedFrom.runId)?.ordinal ?? 0,
+      state.forkSourceRewindOrdinal,
+    );
   const inheritedPrefixCount =
-    archiveStart <= 1 && inheritedRunFork(sourceState.thread) !== null
+    fromRunOrdinal <= 1 && inheritedRunFork(sourceState.thread) !== null
       ? visibleItemCountForShell({
           threadId: sourceState.thread.id,
           statesByThreadId: input.statesByThreadId,
@@ -2211,7 +2229,7 @@ function visibleItemCountForShell(input: {
       state: sourceState,
       runId: forkedFrom.runId,
       forkCreatedAt: state.thread.createdAt,
-      fromRunOrdinal: archiveStart,
+      fromRunOrdinal,
     }) +
     1 +
     state.itemCount
@@ -3448,6 +3466,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       ${window.requiredRunId ?? null} IS NULL
                       OR (
                         item.run_id IS NULL
+                        AND ${window.fromRunOrdinal ?? 1} = 1
                         AND EXISTS (
                           SELECT 1
                           FROM orchestration_v2_projection_threads AS source_thread
@@ -3456,7 +3475,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                         )
                       )
                       OR (
-                        run.ordinal <= (
+                        run.ordinal >= ${window.fromRunOrdinal ?? 1}
+                        AND run.ordinal <= (
                           SELECT required_run.ordinal
                           FROM orchestration_v2_projection_runs AS required_run
                           WHERE required_run.thread_id = item.thread_id
@@ -4671,6 +4691,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           return withLocalVisibleTurnItems(projection);
         }
 
+        const fromRunOrdinal =
+          projection.thread.lineage.contextArchive?.fromRunOrdinal ??
+          (yield* readForkSourceStartOrdinal(forkedFrom, threadId));
         const sourceWindow =
           window === undefined
             ? undefined
@@ -4694,7 +4717,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     ) AS ordinal
                     FROM orchestration_v2_projection_runs AS run
                     WHERE run.thread_id = ${forkedFrom.threadId}
-                      AND run.ordinal <= (SELECT ordinal FROM fork_run)
+                      AND run.ordinal BETWEEN ${fromRunOrdinal} AND (SELECT ordinal FROM fork_run)
                       AND EXISTS (
                         SELECT 1
                         FROM orchestration_v2_projection_turn_items AS item
@@ -4711,6 +4734,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                         FROM orchestration_v2_projection_turn_items
                         WHERE thread_id = ${forkedFrom.threadId}
                           AND run_id IS NULL
+                          AND ${fromRunOrdinal} = 1
                           AND json_extract(payload_json, '$.historyOrigin') = 'v1_import'
                         ORDER BY ordinal DESC, turn_item_id DESC
                         LIMIT 1
@@ -4749,6 +4773,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   userTurnLimit: window.userTurnLimit,
                   deferWork: window.deferWork,
                   requiredRunId: forkedFrom.runId,
+                  fromRunOrdinal,
                   forkCreatedAt: projection.thread.createdAt,
                   suppressLocal: anchor === undefined || anchorIsInDescendant,
                   ...(anchor === undefined || anchorIsInDescendant
@@ -4795,6 +4820,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 projection,
                 sourceProjection: null,
                 inheritedRowCount,
+                fromRunOrdinal,
               }),
             };
           }
@@ -4810,6 +4836,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           visibleTurnItems: buildVisibleTurnItems({
             projection,
             sourceProjection,
+            fromRunOrdinal,
           }),
         };
       },
@@ -6836,12 +6863,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
     );
 
-    const getForkSourceRewindOrdinal: ProjectionStoreV2Shape["getForkSourceRewindOrdinal"] = (
-      sourceThreadId,
-      targetThreadId,
-    ) =>
-      // Creation events survive compaction and order a rewind and fork even in the same millisecond.
-      sql<{ readonly ordinal: number | null }>`
+    // Creation events survive compaction and order a rewind and fork even in the same millisecond.
+    const forkSourceRewindOrdinal = (
+      sourceThreadId: ThreadId | Statement.Fragment,
+      targetThreadId: ThreadId | Statement.Fragment,
+    ) => sql`(
         SELECT MAX(json_extract(archive.payload_json, '$.lineage.contextArchive.throughRunOrdinal')) AS ordinal
         FROM orchestration_v2_projection_context_transfers AS transfer
         JOIN orchestration_events AS archive INDEXED BY idx_orchestration_events_agent_stream_sequence
@@ -6861,10 +6887,32 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ORDER BY fork.sequence
             LIMIT 1
           )
+    )`;
+
+    const getForkSourceRewindOrdinal: ProjectionStoreV2Shape["getForkSourceRewindOrdinal"] = (
+      sourceThreadId,
+      targetThreadId,
+    ) =>
+      sql<{ readonly ordinal: number | null }>`
+        SELECT ${forkSourceRewindOrdinal(sourceThreadId, targetThreadId)} AS ordinal
       `.pipe(
         Effect.map((rows) => rows[0]?.ordinal ?? undefined),
         Effect.mapError(controlReadError(sourceThreadId)),
       );
+
+    const readForkSourceStartOrdinal = Effect.fn("ProjectionStore.readForkSourceStartOrdinal")(
+      function* (fork: { readonly threadId: ThreadId; readonly runId: RunId }, targetId: ThreadId) {
+        const rows = yield* sql<{ readonly ordinal: number; readonly rewind: number | null }>`
+          SELECT run.ordinal, ${forkSourceRewindOrdinal(fork.threadId, targetId)} AS rewind
+          FROM orchestration_v2_projection_runs AS run
+          JOIN orchestration_v2_projection_threads AS source ON source.thread_id = run.thread_id
+          WHERE run.run_id = ${fork.runId} AND source.thread_id = ${fork.threadId}
+            AND json_extract(source.payload_json, '$.contextRewind') IS NOT NULL
+        `;
+        const run = rows[0];
+        return run === undefined ? 1 : inheritedForkStartOrdinal(run.ordinal, run.rewind);
+      },
+    );
 
     const getSideChatRefresh: ProjectionStoreV2Shape["getSideChatRefresh"] = Effect.fn(
       "ProjectionStore.getSideChatRefresh",
@@ -7169,7 +7217,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         let inherited: Array<TimelineIndexRow> = [];
         if (sourceRun !== undefined) {
           const ordinals = forkInheritedRunOrdinals(source.records.runs, records.thread.createdAt);
-          const fromRunOrdinal = records.thread.lineage.contextArchive?.fromRunOrdinal ?? 1;
+          const fromRunOrdinal =
+            records.thread.lineage.contextArchive?.fromRunOrdinal ??
+            inheritedForkStartOrdinal(
+              sourceRun.ordinal,
+              source.records.thread.contextRewind === undefined
+                ? undefined
+                : yield* getForkSourceRewindOrdinal(fork.threadId, threadId),
+            );
           const isInheritedVisible = createInheritedTurnItemVisibility({
             runs: source.records.runs,
             attempts: source.records.attempts,
@@ -8390,6 +8445,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
                 ELSE NULL
               END AS forked_from_run_source_thread_id,
+              CASE WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
+                AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1 THEN (
+                  SELECT ${forkSourceRewindOrdinal(sql`source.thread_id`, sql`t.thread_id`)}
+                  FROM orchestration_v2_projection_threads AS source
+                  WHERE source.thread_id = json_extract(t.payload_json, '$.forkedFrom.threadId')
+                    AND json_extract(source.payload_json, '$.contextRewind') IS NOT NULL
+                )
+              END AS fork_source_rewind_ordinal,
               presented.run_id AS latest_run_id,
               presented.status AS latest_run_status,
               presented.requested_at AS latest_run_requested_at,
@@ -9231,6 +9294,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
           ),
+          forkSourceRewindOrdinal: row.fork_source_rewind_ordinal,
           itemCount: shellItemCountsByThreadId.get(thread.id)?.itemCount ?? 0,
           runlessItemCount: shellItemCountsByThreadId.get(thread.id)?.runlessItemCount ?? 0,
           updatedAt: thread.updatedAt,
