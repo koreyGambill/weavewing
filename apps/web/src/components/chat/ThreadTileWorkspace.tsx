@@ -1258,7 +1258,7 @@ export function ThreadTileWorkspace(props: {
                   } as CSSProperties
                 }
                 className={cn(
-                  "workspace-tile-frame absolute overflow-hidden bg-background outline-none",
+                  "workspace-tile-frame @container/tile absolute flex flex-col overflow-hidden bg-background outline-none",
                   group.floating && "shadow-2xl",
                 )}
                 data-focused={focusedGroupId === id}
@@ -1275,7 +1275,7 @@ export function ThreadTileWorkspace(props: {
                     const foldedTabs = group.tabs.filter((tabId) => !fit.shown.has(tabId));
                     return (
                       <div
-                        className="workspace-tile-titlebar flex min-w-0 cursor-grab items-center justify-end gap-0.5 px-1 active:cursor-grabbing"
+                        className="workspace-tile-titlebar flex min-w-0 shrink-0 cursor-grab items-center justify-end gap-0.5 px-1 active:cursor-grabbing"
                         role="toolbar"
                         aria-label={`Move tile: ${title(group.activeTabId)}`}
                         draggable={!maximized && !group.floating}
@@ -1782,7 +1782,7 @@ export function ThreadTileWorkspace(props: {
                 </FittedTileBar>
                 {isNewTab(group.activeTabId) && (
                   <div
-                    className="flex h-full flex-col items-center justify-center gap-4 p-6 outline-none"
+                    className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-3 outline-none @max-[20rem]/tile:px-2"
                     data-tile-chooser={id}
                     aria-keyshortcuts={areaChoices
                       .map((choice) => choice.key.toUpperCase())
@@ -1795,69 +1795,74 @@ export function ThreadTileWorkspace(props: {
                       floatGesture(event, group);
                     }}
                   >
-                    <p className="text-sm font-medium">
-                      {savedLayout.pendingAreas?.[group.activeTabId]
-                        ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]
-                        : "Choose an area"}
-                    </p>
-                    {savedLayout.pendingAreas?.[group.activeTabId] && (
-                      <p className="-mt-2 text-xs text-muted-foreground">
-                        {savedLayout.pendingAreas[group.activeTabId] === "diff"
-                          ? "No changes to diff yet. This tile will update when changes are available."
-                          : `${TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} will open automatically when this thread is ready.`}
+                    <div className="my-auto flex shrink-0 flex-col items-center gap-3">
+                      <p className="text-sm font-medium">
+                        {savedLayout.pendingAreas?.[group.activeTabId]
+                          ? TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]
+                          : "Choose an area"}
                       </p>
-                    )}
-                    <div
-                      className="flex max-w-md flex-wrap justify-center gap-2"
-                      role="group"
-                      aria-label="Areas"
-                    >
-                      {areaChoices.map((choice, index) => {
-                        const openNote =
-                          choice.openElsewhere && chatGroup?.id === id
-                            ? "Main chat is open in this tile"
-                            : choice.openElsewhere;
-                        const button = (
-                          <Button
-                            key={choice.label}
-                            variant={
-                              chooserActive && index === chooserSelection ? "default" : "outline"
-                            }
-                            size="sm"
-                            aria-keyshortcuts={choice.key.toUpperCase()}
-                            aria-disabled={choice.openElsewhere ? true : undefined}
-                            aria-description={openNote ?? undefined}
-                            onClick={() => choice.run(id)}
-                          >
-                            {choice.label}
-                            <Kbd
-                              aria-hidden
+                      {savedLayout.pendingAreas?.[group.activeTabId] && (
+                        <p className="-mt-2 text-xs text-muted-foreground">
+                          {savedLayout.pendingAreas[group.activeTabId] === "diff"
+                            ? "No changes to diff yet. This tile will update when changes are available."
+                            : `${TILE_LAYOUT_AREA_LABELS[savedLayout.pendingAreas[group.activeTabId]!]} will open automatically when this thread is ready.`}
+                        </p>
+                      )}
+                      <div
+                        className="flex w-full max-w-md flex-wrap justify-center gap-2 @max-[20rem]/tile:grid @max-[20rem]/tile:grid-cols-1 @max-[20rem]/tile:gap-1"
+                        role="group"
+                        aria-label="Areas"
+                      >
+                        {areaChoices.map((choice, index) => {
+                          const openNote =
+                            choice.openElsewhere && chatGroup?.id === id
+                              ? "Main chat is open in this tile"
+                              : choice.openElsewhere;
+                          const button = (
+                            <Button
+                              key={choice.label}
                               variant={
-                                chooserActive && index === chooserSelection ? "primary" : "default"
+                                chooserActive && index === chooserSelection ? "default" : "outline"
                               }
+                              size="sm"
+                              className="@max-[20rem]/tile:justify-between"
+                              aria-keyshortcuts={choice.key.toUpperCase()}
+                              aria-disabled={choice.openElsewhere ? true : undefined}
+                              aria-description={openNote ?? undefined}
+                              onClick={() => choice.run(id)}
                             >
-                              {choice.key.toUpperCase()}
-                            </Kbd>
-                          </Button>
-                        );
-                        return choice.openElsewhere ? (
-                          <Tooltip key={choice.label}>
-                            <TooltipTrigger render={button} />
-                            <TooltipPopup>{openNote}</TooltipPopup>
-                          </Tooltip>
-                        ) : (
-                          button
-                        );
-                      })}
+                              {choice.label}
+                              <Kbd
+                                aria-hidden
+                                variant={
+                                  chooserActive && index === chooserSelection
+                                    ? "primary"
+                                    : "default"
+                                }
+                              >
+                                {choice.key.toUpperCase()}
+                              </Kbd>
+                            </Button>
+                          );
+                          return choice.openElsewhere ? (
+                            <Tooltip key={choice.label}>
+                              <TooltipTrigger render={button} />
+                              <TooltipPopup>{openNote}</TooltipPopup>
+                            </Tooltip>
+                          ) : (
+                            button
+                          );
+                        })}
+                      </div>
+                      <p className="text-center text-xs text-muted-foreground @max-[20rem]/tile:hidden">
+                        Press a letter, or use the arrows and Enter.
+                        {lastBlankTab
+                          ? ""
+                          : group.tabs.length > 1
+                            ? " Esc closes this tab."
+                            : " Esc closes this tile."}
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Press a letter, or use the arrows and Enter.
-                      {lastBlankTab
-                        ? ""
-                        : group.tabs.length > 1
-                          ? " Esc closes this tab."
-                          : " Esc closes this tile."}
-                    </p>
                   </div>
                 )}
               </section>

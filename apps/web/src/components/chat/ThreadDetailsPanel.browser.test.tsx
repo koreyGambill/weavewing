@@ -348,7 +348,7 @@ it("offers Ready for a branch-discovered draft in Thread Details with external P
   using fixture = setup({ workspaceRoot: "/work/project", folder: "/work/project", git: true });
   await using _screen = await render(<Panel fixture={fixture} />);
   const card = page.getByRole("region", { name: "Thread details" });
-  await card.getByRole("link", { name: /#7/ }).click();
+  await page.getByRole("link", { name: /#7/ }).click();
   expect(state.openLink).toHaveBeenCalledWith(
     "https://github.com/owner/repo/pull/7",
     expect.anything(),

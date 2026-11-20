@@ -107,6 +107,7 @@ interface BranchToolbarProps {
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
   /** The project and folder segment, shown after the machine in the composer strip. */
+  leading?: ReactNode;
   where?: ReactNode;
   whereProjectTitle?: string | null;
   /** Shown at the end of the composer strip, such as the new thread's permissions. */
@@ -656,6 +657,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
+  leading,
   where,
   whereProjectTitle,
   trailing,
@@ -831,6 +833,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       data-compact={labelsOverflow ? "" : undefined}
       className={cn("gap-1 text-xs font-normal text-foreground/70 dark:text-muted-foreground")}
     >
+      {leading ? <div className="flex shrink-0">{leading}</div> : null}
       {showGitControls ? (
         <div className="contents @xl/composer-surface:hidden">
           <RunContextSelector
@@ -918,25 +921,31 @@ export const BranchToolbar = memo(function BranchToolbar({
           onCreateOpenChange={setCreateEnvironmentOpen}
         />
       ) : null}
-      {showGitControls ? (
-        <BranchToolbarBranchSelector
-          forceNewWorktree={forceNewWorktree}
-          ref={branchSelectorRef}
-          className="min-w-0 flex-initial justify-end @xl/composer-surface:ml-auto"
-          environmentId={environmentId}
-          threadId={threadId}
-          {...(draftId ? { draftId } : {})}
-          envLocked={envLocked}
-          effectiveEnvModeOverride={effectiveEnvMode}
-          {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
-          {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
-          startFromOrigin={startFromOrigin}
-          onStartFromOriginChange={onStartFromOriginChange}
-          {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
-          {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
-        />
+      {showGitControls || trailing ? (
+        <div className="ms-auto flex min-w-0 items-center gap-1">
+          {showGitControls ? (
+            <BranchToolbarBranchSelector
+              forceNewWorktree={forceNewWorktree}
+              ref={branchSelectorRef}
+              className="min-w-0 flex-initial justify-end"
+              environmentId={environmentId}
+              threadId={threadId}
+              {...(draftId ? { draftId } : {})}
+              envLocked={envLocked}
+              effectiveEnvModeOverride={effectiveEnvMode}
+              {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
+              {...(onActiveThreadBranchOverrideChange
+                ? { onActiveThreadBranchOverrideChange }
+                : {})}
+              startFromOrigin={startFromOrigin}
+              onStartFromOriginChange={onStartFromOriginChange}
+              {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+              {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+            />
+          ) : null}
+          {trailing}
+        </div>
       ) : null}
-      {trailing}
     </ComposerSurface.ContextStrip>
   );
 });

@@ -3,7 +3,7 @@ import { createStore } from "zustand";
 import type { ThreadPanelPresentation } from "../../rightPanelLayout";
 import type { DetailsCardMeasurement } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
-import { canFitThreadDetailsCard, resolveThreadDetailsCardLayout } from "./threadDetailsCardLayout";
+import { resolveThreadDetailsCardLayout } from "./threadDetailsCardLayout";
 
 interface CanvasEdges {
   readonly left: number;
@@ -13,7 +13,6 @@ interface CanvasEdges {
 
 export interface ChatCanvasMeasurements {
   readonly width: number;
-  readonly narrowestWidth?: number;
   readonly height: number;
   readonly padding: number;
   readonly maxChatWidth: number;
@@ -22,7 +21,6 @@ export interface ChatCanvasMeasurements {
   readonly timelineGutter: number;
   /** The find bar's box in canvas coordinates while it is shown. */
   readonly findBar: CanvasEdges | null;
-  readonly detailsBar?: CanvasEdges | null;
 }
 
 interface ChatCanvasStoreState {
@@ -49,15 +47,13 @@ const sameEdges = (a: CanvasEdges | null, b: CanvasEdges | null) =>
 
 const sameMeasurements = (a: ChatCanvasMeasurements, b: ChatCanvasMeasurements) =>
   a.width === b.width &&
-  a.narrowestWidth === b.narrowestWidth &&
   a.height === b.height &&
   a.padding === b.padding &&
   a.maxChatWidth === b.maxChatWidth &&
   a.minChatWidth === b.minChatWidth &&
   a.composerHeight === b.composerHeight &&
   a.timelineGutter === b.timelineGutter &&
-  sameEdges(a.findBar, b.findBar) &&
-  sameEdges(a.detailsBar ?? null, b.detailsBar ?? null);
+  sameEdges(a.findBar, b.findBar);
 
 /**
  * One store per chat view: the canvas measures into it, and the chat view's
@@ -101,27 +97,14 @@ export function resolveChatCanvasModel({
   const { findBar } = measurements;
   const detailsCardTopInset = findBar?.bottom ?? 0;
   const lane = { padding: measurements.padding, minChatWidth: measurements.minChatWidth };
-  // Sampling both ends of a panel animation keeps the details from switching mid-transition.
-  const fitWidth = Math.min(container.width, measurements.narrowestWidth ?? container.width);
-  const detailsBar = fitWidth > 0 && !canFitThreadDetailsCard(fitWidth, measurements);
-  const barObstacle = detailsBar && detailsCardInlineOpen ? measurements.detailsBar : null;
-  const topObstacle =
-    findBar && barObstacle
-      ? {
-          left: Math.min(findBar.left, barObstacle.left),
-          right: Math.max(findBar.right, barObstacle.right),
-          bottom: Math.max(findBar.bottom, barObstacle.bottom),
-        }
-      : (barObstacle ?? findBar);
-  // The preview avoids where an open inline card would sit, whether or not a
-  // preview overlap has pushed the card itself into popover mode.
-  const preferredDetailsCard = detailsBar
-    ? null
-    : resolveThreadDetailsCardLayout({
-        container,
-        frame: null,
-        topInset: detailsCardTopInset,
-      });
+  const detailsCardBottomInset =
+    measurements.composerHeight < container.height ? measurements.composerHeight : 0;
+  const preferredDetailsCard = resolveThreadDetailsCardLayout({
+    container,
+    frame: null,
+    topInset: detailsCardTopInset,
+    bottomInset: detailsCardBottomInset,
+  });
   // The canvas outlives thread switches, so a measurement only counts for the
   // thread whose card is shown now.
   const detailsCardMeasured =
@@ -152,7 +135,7 @@ export function resolveChatCanvasModel({
     minChatWidth: measurements.minChatWidth,
     composerHeight: measurements.composerHeight,
     detailsCard,
-    findBar: topObstacle,
+    findBar,
   });
   const detailsCardPlacement =
     preferredDetailsCard &&
@@ -161,9 +144,9 @@ export function resolveChatCanvasModel({
       frame: layout.frame,
       overlapsDetailsCard: layout.overlapsDetailsCard,
       topInset: detailsCardTopInset,
+      bottomInset: detailsCardBottomInset,
     });
-  const detailsCardMode: ThreadPanelPresentation =
-    detailsCardPlacement || detailsBar ? "inline" : "popover";
+  const detailsCardMode: ThreadPanelPresentation = detailsCardPlacement ? "inline" : "popover";
   return {
     container,
     lane,
@@ -172,6 +155,5 @@ export function resolveChatCanvasModel({
     preferredDetailsCard,
     detailsCardPlacement,
     detailsCardMode,
-    detailsBar,
   };
 }

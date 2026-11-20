@@ -56,7 +56,7 @@ import {
   SquareIcon,
   UnplugIcon,
 } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -142,10 +142,13 @@ type RemoteSubagent = OrchestrationV2Subagent & {
 };
 
 /** A task delegated to a linked environment has no thread here, so it gets its own row kind. */
-type LineageRow = ThreadRelationshipWalkRow | { readonly remote: RemoteSubagent };
+type LineageRow =
+  | ThreadRelationshipWalkRow
+  | { readonly remote: RemoteSubagent }
+  | { readonly native: OrchestrationV2Subagent };
 
 const lineageRowStatus = (row: LineageRow) =>
-  "remote" in row ? row.remote.status : row.edge.status;
+  "remote" in row ? row.remote.status : "native" in row ? row.native.status : row.edge.status;
 
 const isFinishedAgentStatus = (status: string | null | undefined) =>
   ["completed", "failed", "error", "cancelled", "interrupted", "idle"].includes(status ?? "");
@@ -333,6 +336,47 @@ function RemoteSubagentRow(props: {
   );
 }
 
+function NativeSubagentRow({ agent }: { readonly agent: OrchestrationV2Subagent }) {
+  const [expanded, setExpanded] = useState(false);
+  const title = relationshipThreadTitle({ title: agent.title ?? "Subagent", isSubagent: true });
+  const notes = agent.result || agent.progress || agent.prompt;
+  return (
+    <li>
+      <ThreadDetailsControl
+        size="sm"
+        variant="ghost"
+        part="row"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <ThreadRelationshipIcon
+          driver={agent.driver}
+          anyInstanceBadge={false}
+          fallbackIcon={BotIcon}
+          status={agent.status}
+        />
+        <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+        <span
+          className={cn(
+            "shrink-0 text-xs",
+            agent.status === "failed" ? "text-error-foreground" : "text-muted-foreground",
+          )}
+        >
+          {threadRelationshipStatusLabel(agent.status)}
+        </span>
+        <ChevronDownIcon
+          className={cn(THREAD_DETAILS_PANEL_CHEVRON_CLASS, !expanded && "-rotate-90")}
+        />
+      </ThreadDetailsControl>
+      {expanded ? (
+        <p className="px-3 py-2 text-xs whitespace-pre-wrap wrap-anywhere text-muted-foreground">
+          {notes || "No agent details yet."}
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
 /**
  * The thread on a linked environment whose agent delegated this one. It opens
  * there when this client is connected to that environment.
@@ -436,6 +480,7 @@ export function ThreadRelationshipsPanel(props: {
   readonly showLineage: boolean;
   readonly showSideChats: boolean;
 }) {
+  const headingId = useId();
   const ref = scopeThreadRef(props.environmentId, props.threadId);
   const projection = useQuietThreadProjection(ref)?.projection ?? null;
   const providersByEnvironment = useEnvironmentProviders();
@@ -596,6 +641,12 @@ export function ThreadRelationshipsPanel(props: {
       .map((remote) => ({ remote })),
     ({ remote }) => (isFinishedAgentStatus(remote.status) ? "remotePrevious" : "remoteActive"),
   );
+  const { nativeActive = [], nativePrevious = [] } = groupBy(
+    (projection?.subagents ?? [])
+      .filter((agent) => agent.childThreadId === null && agent.remoteChild === undefined)
+      .map((native) => ({ native })),
+    ({ native }) => (isFinishedAgentStatus(native.status) ? "nativePrevious" : "nativeActive"),
+  );
   const groups: ReadonlyArray<{
     id: string;
     label: string | null;
@@ -603,11 +654,16 @@ export function ThreadRelationshipsPanel(props: {
     expanded: boolean;
   }> = [
     { id: "related", label: null, rows: related, expanded: true },
-    { id: "active", label: null, rows: [...active, ...remoteActive], expanded: true },
+    {
+      id: "active",
+      label: null,
+      rows: [...active, ...remoteActive, ...nativeActive],
+      expanded: true,
+    },
     {
       id: "previous",
       label: "Previous agents",
-      rows: [...previous, ...remotePrevious],
+      rows: [...previous, ...remotePrevious, ...nativePrevious],
       expanded: false,
     },
   ];
@@ -630,6 +686,8 @@ export function ThreadRelationshipsPanel(props: {
       runningCount > 0 ||
       remoteActive.length > 0 ||
       remotePrevious.length > 0 ||
+      nativeActive.length > 0 ||
+      nativePrevious.length > 0 ||
       contextFork !== undefined ||
       delegatedFrom !== undefined ||
       // Disconnect lives in this heading, so a thread with only side chats still shows it.
@@ -986,7 +1044,7 @@ export function ThreadRelationshipsPanel(props: {
     <>
       {lineageVisible ? (
         <ThreadDetailsSection
-          headingId="thread-details-lineage-heading"
+          headingId={`${headingId}-lineage`}
           title={runningCount > 0 ? `Lineage · ${runningCount} running` : "Lineage"}
           // A lone "Previous agents" row names itself; the heading returns for status or actions.
           showHeading={
@@ -995,6 +1053,7 @@ export function ThreadRelationshipsPanel(props: {
             related.length > 0 ||
             active.length > 0 ||
             remoteActive.length > 0 ||
+            nativeActive.length > 0 ||
             delegatedFrom !== undefined
           }
           data-thread-relationships-panel
@@ -1069,6 +1128,8 @@ export function ThreadRelationshipsPanel(props: {
                         ?.find((entry) => entry.instanceId === row.remote.providerInstanceId)}
                       anyInstanceBadge={hasInstanceBadge(providerEntries)}
                     />
+                  ) : "native" in row ? (
+                    <NativeSubagentRow key={row.native.id} agent={row.native} />
                   ) : (
                     renderRelationshipRow(row)
                   ),
@@ -1080,7 +1141,7 @@ export function ThreadRelationshipsPanel(props: {
       ) : null}
       {sideChatsVisible ? (
         <ThreadDetailsSection
-          headingId="thread-details-side-chats-heading"
+          headingId={`${headingId}-side-chats`}
           title={runningSideChats > 0 ? `Side chats · ${runningSideChats} running` : "Side chats"}
           data-thread-side-chats-panel
         >

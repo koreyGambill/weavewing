@@ -3,16 +3,17 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { projectPickerPathLabel } from "@t3tools/client-runtime/project-picker";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect } from "react";
+import { MapPinIcon } from "lucide-react";
 
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import type { DraftId } from "~/composerDraftStore";
 import { useThreadRouteTarget } from "~/hooks/useThreadRouteTarget";
 import { shortcutLabelForCommand } from "~/keybindings";
-import { cn } from "~/lib/utils";
 import { registerCommands } from "~/shortcuts/dispatcher";
 import { useProject } from "~/state/entities";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { InlineButton } from "../ui/button";
+import { ComposerContextLabel } from "../ComposerContextLabel";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl } from "./ComposerControl";
@@ -88,15 +89,15 @@ export function ComposerWhereLine({
   if (project === null || folder === null) return null;
   const folderLabel = projectPickerPathLabel(folder, homes.get(environmentId));
   const content = (
-    <span
-      className={cn(
-        "inline-flex min-w-0 items-center gap-1.5",
-        atDefaultPlace ? "text-muted-foreground" : "text-foreground",
-      )}
-    >
-      {isScratch ? null : <span className="shrink-0 font-medium">{project.title}</span>}
-      <span className="min-w-0 truncate font-mono">{folderLabel}</span>
-    </span>
+    <>
+      <MapPinIcon className="shrink-0" />
+      <ComposerContextLabel>
+        <span className={atDefaultPlace ? "text-muted-foreground" : "text-foreground"}>
+          {isScratch ? null : <span className="font-medium">{project.title} </span>}
+          <span className="font-mono">{folderLabel}</span>
+        </span>
+      </ComposerContextLabel>
+    </>
   );
   const ariaLabel = isScratch ? `Folder ${folderLabel}` : `${project.title}, ${folderLabel}`;
 

@@ -30,27 +30,28 @@ const preview: ChatCanvasPreview = {
 };
 
 describe("chat canvas model", () => {
-  it("shows the details card inline only where the canvas fits it beside the chat", () => {
-    const resolve = (width: number, narrowestWidth = width, maxChatWidth = 768) =>
+  it("floats details over narrow chat without changing the chat width", () => {
+    const resolve = (width: number, detailsCardInlineOpen: boolean) =>
       resolveChatCanvasModel({
-        measurements: { ...measurements(width), narrowestWidth, maxChatWidth },
-        detailsCardMeasurement: { threadRef, width: 280, fullContentHeight: 300 },
+        measurements: measurements(width),
+        detailsCardMeasurement: {
+          threadRef,
+          width: width === 260 ? 208 : 280,
+          fullContentHeight: 300,
+        },
         threadRef,
         preview: null,
-        detailsCardInlineOpen: true,
+        detailsCardInlineOpen,
       });
-    expect(resolve(1140).detailsCardPlacement).not.toBeNull();
-    expect(resolve(1139)).toMatchObject({
-      detailsBar: true,
-      detailsCardMode: "inline",
-      detailsCardPlacement: null,
-      layout: { chat: { width: 768, insetEnd: 0 } },
-    });
-    expect(resolve(1400, 1139).detailsBar).toBe(true);
-    expect(resolve(900).layout.chat.width).toBe(768);
-    expect(resolve(800).layout.chat.width).toBe(704);
-    expect(resolve(1400, 1400, 1152).detailsBar).toBe(true);
-    expect(resolve(1800, 1800, 1800).detailsBar).toBe(true);
+    for (const width of [1_300, 1_050, 900, 500, 260]) {
+      const open = resolve(width, true);
+      expect(open.detailsCardMode).toBe("inline");
+      expect(open.detailsCardPlacement).toMatchObject({
+        right: 12,
+        width: width === 260 ? 208 : 280,
+      });
+      expect(open.layout.chat.width).toBe(resolve(width, false).layout.chat.width);
+    }
   });
 
   it("moves the card into a popover when a preview below it leaves too little height", () => {
@@ -67,12 +68,11 @@ describe("chat canvas model", () => {
     expect(model.detailsCardMode).toBe("popover");
   });
 
-  it("keeps a dragged preview below the compact bar and find controls", () => {
+  it("keeps a dragged preview below find controls", () => {
     const model = resolveChatCanvasModel({
       measurements: {
         ...measurements(900),
         findBar: { left: 608, right: 888, bottom: 48 },
-        detailsBar: { left: 12, right: 888, bottom: 94 },
       },
       detailsCardMeasurement: null,
       threadRef,
@@ -80,7 +80,7 @@ describe("chat canvas model", () => {
       detailsCardInlineOpen: true,
     });
     expect(model.detailsCardTopInset).toBe(48);
-    expect(model.layout.frame?.y).toBeGreaterThan(94);
+    expect(model.layout.frame?.y).toBeGreaterThan(48);
   });
 
   it("ignores a details card measured for another thread", () => {
@@ -105,8 +105,8 @@ describe("chat canvas model", () => {
     store.getState().measureDetailsCard({ threadRef, width: 280, fullContentHeight: 300 });
     expect(measured.measurements).toBe(before.measurements);
     expect(store.getState()).toBe(measured);
-    store.getState().setMeasurements({ ...measurements(1400), narrowestWidth: 900 });
-    expect(store.getState().measurements.narrowestWidth).toBe(900);
+    store.getState().setMeasurements(measurements(900));
+    expect(store.getState().measurements.width).toBe(900);
     expect(store.getState()).not.toBe(measured);
   });
 });

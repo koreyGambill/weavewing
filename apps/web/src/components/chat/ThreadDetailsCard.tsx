@@ -1,16 +1,12 @@
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import {
-  useId,
   useLayoutEffect,
-  useRef,
   useState,
   type MouseEventHandler,
   type ReactNode,
   type RefObject,
 } from "react";
-import { ChevronDownIcon } from "lucide-react";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { Popover, PopoverPopup, PopoverCreateHandle } from "../ui/popover";
@@ -43,21 +39,8 @@ export function ThreadDetailsCard({
   const canvas = useChatCanvas();
   const preferredPlacement = canvas?.preferredDetailsCard ?? null;
   const placement = canvas?.detailsCardPlacement ?? null;
-  const bar = canvas?.detailsBar === true;
-  const mode = placement || bar ? "inline" : "popover";
-  const panelRef = useRef<HTMLElement>(null);
-  const disclosureRef = useRef<HTMLButtonElement>(null);
-  const contentId = useId();
+  const mode = placement ? "inline" : "popover";
   const threadKey = `${threadRef.environmentId}:${threadRef.threadId}`;
-  const [expandedThreadKey, setExpandedThreadKey] = useState<string | null>(null);
-  const [focusedThreadKey, setFocusedThreadKey] = useState<string | null>(null);
-  const expanded = expandedThreadKey === threadKey || focusedThreadKey === threadKey;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- hands focus to the side card when the disclosure disappears
-  useLayoutEffect(() => {
-    if (!bar && disclosureRef.current === document.activeElement) {
-      panelRef.current?.focus({ preventScroll: true });
-    }
-  }, [bar]);
   const topInset = canvas?.detailsCardTopInset ?? 0;
   const inlineOpen = useRightPanelStore((state) =>
     selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "inline"),
@@ -73,13 +56,8 @@ export function ThreadDetailsCard({
   const contentHeights =
     measurements.key === measurementKey ? measurements.heights : { full: 0, compact: 0 };
   const canvasHeight = canvas?.container.height ?? 0;
-  const height =
-    placement?.height ??
-    Math.max(
-      0,
-      bar ? Math.min(canvasHeight * 0.55, canvasHeight - topInset - 52) : canvasHeight - 52,
-    );
-  const density = bar ? "full" : resolveThreadDetailsCardDensity(height, contentHeights);
+  const height = placement?.height ?? Math.max(0, canvasHeight - 52);
+  const density = resolveThreadDetailsCardDensity(height, contentHeights);
   const measureDetailsCard = canvas?.measureDetailsCard;
   const cardWidth = preferredPlacement?.width;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- transfers an open fallback to the inline card as the canvas gains room
@@ -96,7 +74,7 @@ export function ThreadDetailsCard({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the card's DOM height via ResizeObserver and reports it to the canvas
   useLayoutEffect(() => {
     const element = contentElement;
-    if (!element || bar || density === "essential") return;
+    if (!element || density === "essential") return;
     const measure = () => {
       const frame = element.closest<HTMLElement>("[data-thread-details-card]");
       const next = element.offsetHeight + (frame ? frame.offsetHeight - frame.clientHeight : 0);
@@ -127,7 +105,6 @@ export function ThreadDetailsCard({
     return observeResize(element, measure);
   }, [
     contentElement,
-    bar,
     density,
     measurementKey,
     cardWidth,
@@ -142,22 +119,12 @@ export function ThreadDetailsCard({
         mode === "popover" &&
           "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]",
       )}
-      style={placement || bar ? { maxHeight: height } : undefined}
-      onContextMenu={bar ? undefined : onContextMenu}
+      style={placement ? { maxHeight: height } : undefined}
+      onContextMenu={onContextMenu}
       data-thread-details-card
     >
       <ScrollArea scrollFade className="min-h-0">
-        <div
-          ref={setContentElement}
-          onFocus={(event) => {
-            if (event.currentTarget.contains(event.target)) setFocusedThreadKey(threadKey);
-          }}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget)) setFocusedThreadKey(null);
-          }}
-        >
-          {children(density)}
-        </div>
+        <div ref={setContentElement}>{children(density)}</div>
       </ScrollArea>
     </div>
   );
@@ -184,64 +151,24 @@ export function ThreadDetailsCard({
         }
       }}
     >
-      {mode === "inline" && inlineOpen ? (
+      {placement && inlineOpen ? (
         <aside
           {...detailsArea}
-          ref={panelRef}
           data-workspace-focus-key={`details:${threadKey}`}
-          // Skip the return transition to avoid overlapping the rising preview.
           className={cn(
-            bar ? "relative z-[50] mx-3 shrink-0 pt-3 pb-2" : "absolute z-20",
-            placement &&
-              topInset > 0 &&
-              "transition-[top] duration-150 ease-out motion-reduce:transition-none",
+            "absolute z-20",
+            topInset > 0 && "transition-[top] duration-150 ease-out motion-reduce:transition-none",
           )}
-          style={
-            placement
-              ? {
-                  right: placement.right,
-                  top: placement.y,
-                  width: placement.width,
-                  maxHeight: height,
-                }
-              : { marginTop: topInset }
-          }
+          style={{
+            right: placement.right,
+            top: placement.y,
+            width: placement.width,
+            maxHeight: height,
+          }}
           data-density={density}
-          data-thread-details-panel={bar ? "bar" : "inline"}
+          data-thread-details-panel="inline"
         >
-          <div
-            ref={bar ? canvas?.registerDetailsBar : undefined}
-            hidden={!bar}
-            className="dropdown-glass rounded-xl px-1 py-0.5"
-            onContextMenu={onContextMenu}
-          >
-            <Button
-              ref={disclosureRef}
-              variant="ghost"
-              size="compact"
-              aria-expanded={expanded}
-              aria-controls={contentId}
-              onClick={() => {
-                disclosureRef.current?.focus();
-                setExpandedThreadKey(expanded ? null : threadKey);
-              }}
-            >
-              Details
-              <ChevronDownIcon className={expanded ? "rotate-180" : undefined} />
-            </Button>
-          </div>
-          <div
-            id={contentId}
-            hidden={bar && !expanded}
-            className={
-              bar
-                ? "absolute top-full left-0 w-[min(100%,var(--thread-details-panel-width))]"
-                : "max-h-[inherit]"
-            }
-            onContextMenu={bar ? onContextMenu : undefined}
-          >
-            {!bar || expanded ? card : null}
-          </div>
+          {card}
         </aside>
       ) : null}
       {/* Rendered in both modes: base-ui keeps a popup that unmounts mid-open

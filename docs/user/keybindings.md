@@ -43,21 +43,22 @@ mobile clients use their own navigation and do not render this keybindings page.
 
 ## Search and command palette
 
-Press `mod+k` to search. Threads searches thread titles, project names and finished
+Press Ctrl+K to search. Cmd+K also works on macOS. Threads searches thread titles, project names and finished
 user and assistant messages. Select a message result to open its thread at the
 match. Projects matches names and paths, and starts a new thread in the selected
 project. Files searches the active workspace and opens the selected file.
 
 Use Tab or Shift+Tab to switch between Threads, Projects and Files without losing
 the query. Ctrl+1, Ctrl+2 and Ctrl+3 select a tab directly. Search starts on the
-current machine. Use the machine control to include all connected machines.
+current machine when it is connected. Use the machine control to include all
+connected machines. When there is no current connection, search includes all
+connected machines automatically.
 
 Press `mod+p` for commands and actions, including new threads, themes and adding
 projects. Files is available in Search instead of on `mod+p`.
 
-These shortcuts take priority while a terminal or vim is focused. On Linux and
-Windows, Ctrl+K and Ctrl+P no longer reach the shell for kill-line or previous
-history, or vim for its own commands. You can change the bindings in Settings.
+These shortcuts take priority while a terminal or vim is focused. You can
+change the bindings in Settings to send them to your terminal instead.
 Optional leader alternatives are Ctrl+A then `/` for Search and Ctrl+A then `:`
 for the command palette when leader bindings are enabled.
 

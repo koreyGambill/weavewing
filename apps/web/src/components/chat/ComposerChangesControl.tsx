@@ -29,7 +29,7 @@ export function ComposerChangesControl({
     workspaceMutationId,
     gitStatus: data,
   });
-  if (!totals || (totals.insertions === 0 && totals.deletions === 0)) return null;
+  if (!totals) return null;
   const { insertions, deletions } = totals;
   return (
     <Tooltip>
@@ -37,6 +37,7 @@ export function ComposerChangesControl({
         render={
           <ComposerControl
             size="xs"
+            className="shrink-0"
             aria-label={`Changes: ${insertions} additions, ${deletions} deletions`}
             onClick={onOpen}
           />

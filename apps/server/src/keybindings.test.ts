@@ -1379,6 +1379,7 @@ it.effect("moves shipped search shortcuts and preserves customized chords and co
         ["search.toggle", "commandPalette.toggle", "filePicker.toggle"].includes(rule.command),
       ),
       [
+        { key: "ctrl+k", command: "search.toggle", when: "isMac" },
         { key: "leader /", command: "search.toggle" },
         { key: "leader :", command: "commandPalette.toggle" },
         { key: "mod+k", command: "search.toggle" },

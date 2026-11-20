@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   DEFAULT_TERMINAL_ID,
+  DROPDOWN_TERMINAL_THREAD_ID,
   ProjectId,
   ThreadId,
   TerminalCwdNotFoundError,
@@ -3185,22 +3186,28 @@ it.layer(
     }),
   );
 
-  it.effect("starts bash as a login shell on macOS only", () =>
+  it.effect("starts the drop-down with the destination shell profile", () =>
     Effect.gen(function* () {
-      for (const [platform, shell, args] of [
+      for (const [platform, shell, args, threadId = "thread-1"] of [
         ["darwin", "/bin/bash", ["-l"]],
         ["darwin", "/opt/homebrew/bin/bash", ["-l"]],
         ["linux", "/bin/bash", undefined],
         ["win32", "C:\\Program Files\\Git\\bin\\bash.exe", undefined],
         ["darwin", "/bin/zsh", ["-o", "nopromptsp"]],
         ["linux", "/bin/zsh", ["-o", "nopromptsp"]],
-        ["win32", "pwsh.exe", POWERSHELL_ARGS],
+        ["darwin", "/bin/zsh", ["-l", "-o", "nopromptsp"], DROPDOWN_TERMINAL_THREAD_ID],
+        ["linux", "/bin/zsh", ["-l", "-o", "nopromptsp"], DROPDOWN_TERMINAL_THREAD_ID],
+        ["linux", "/bin/bash", ["-l"], DROPDOWN_TERMINAL_THREAD_ID],
+        ["linux", "/usr/bin/fish", ["-l"], DROPDOWN_TERMINAL_THREAD_ID],
+        ["win32", "pwsh.exe", POWERSHELL_ARGS, DROPDOWN_TERMINAL_THREAD_ID],
       ] as const) {
         const { manager, ptyAdapter } = yield* createManager(5, {
           shellResolver: () => shell,
         }).pipe(Effect.provide(layerWithHostPlatform(platform)));
-        yield* manager.open(openInput());
-        expect.soft(ptyAdapter.spawnInputs[0]?.args, `${platform} ${shell}`).toEqual(args);
+        yield* manager.open(openInput({ threadId }));
+        expect
+          .soft(ptyAdapter.spawnInputs[0]?.args, `${platform} ${shell} ${threadId}`)
+          .toEqual(args);
       }
     }),
   );

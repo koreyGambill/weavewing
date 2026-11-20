@@ -228,6 +228,11 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
     rule: { key: "mod+k", command: "search.toggle" },
   },
   {
+    id: "weavewing.mac-ctrl-k.v1",
+    alongside: { key: "mod+k", command: "search.toggle" },
+    rule: { key: "ctrl+k", command: "search.toggle", when: "isMac" },
+  },
+  {
     id: "weavewing.terminal-keys.v1",
     alongside: { key: "ctrl+alt+w", command: "workspace.tile.closeTab" },
     rule: { key: "mod+w", command: "workspace.tile.closeTab" },

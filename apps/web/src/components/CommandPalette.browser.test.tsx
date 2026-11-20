@@ -17,6 +17,7 @@ const entities = vi.hoisted(() => ({
   projects: [] as ReadonlyArray<Project>,
   threads: [] as ReadonlyArray<Thread>,
   delegatedUnderParent: new Set<string>() as ReadonlySet<string>,
+  primary: undefined as EnvironmentId | null | undefined,
 }));
 vi.mock("../state/entities", async (original) => ({
   ...(await original<typeof import("../state/entities")>()),
@@ -30,7 +31,9 @@ vi.mock("../hooks/useScratchProject", { spy: true });
 vi.mock("../state/environments", async (original) => ({
   ...(await original<typeof import("../state/environments")>()),
   usePrimaryEnvironmentId: () =>
-    entities.threads[0]?.environmentId ?? entities.projects[0]?.environmentId ?? "local",
+    entities.primary === undefined
+      ? (entities.threads[0]?.environmentId ?? entities.projects[0]?.environmentId ?? "local")
+      : entities.primary,
   useEnvironments: () => ({
     environments: [
       ...new Set([
@@ -56,6 +59,7 @@ function setup(state: Partial<typeof entities> = {}) {
   useCommandPaletteStore.setState(useCommandPaletteStore.getInitialState(), true);
   entities.projects = state.projects ?? [];
   entities.threads = state.threads ?? [];
+  entities.primary = state.primary;
   entities.delegatedUnderParent = state.delegatedUnderParent ?? new Set();
 }
 
@@ -223,24 +227,38 @@ describe("CommandPalette open intents", () => {
     await expect.element(page.getByRole("option", { name: /Delta/ })).toBeVisible();
   });
 
-  it("separates commands from thread search and focuses its query", async () => {
+  it("finds threads and projects without a primary environment", async () => {
+    const environmentId = EnvironmentId.make("remote");
     setup({
-      threads: [
-        makeThreadFixture({ environmentId: EnvironmentId.make("local"), title: "Acme context" }),
+      primary: null,
+      projects: [
+        {
+          id: ProjectId.make("acme"),
+          environmentId,
+          title: "Acme",
+          workspaceRoot: "/work/acme",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          repositoryIdentity: null,
+          defaultModelSelection: null,
+          scripts: [],
+        },
       ],
+      threads: [makeThreadFixture({ environmentId, title: "Acme context" })],
     });
     await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
 
-    openCommandPalette();
-    await page.getByPlaceholder("Search commands...").fill("acme");
-    await expect
-      .element(page.getByRole("option", { name: /Acme context/ }))
-      .not.toBeInTheDocument();
     openCommandPalette({ query: "acme" });
 
     const input = page.getByPlaceholder("Search thread messages and titles…");
-    await expect.element(input).toHaveFocus();
-    await expect.element(input).toHaveValue("acme");
-    await expect.element(page.getByRole("option", { name: /Acme context/ })).toBeVisible();
+    await expect.element(input, { timeout: 2500 }).toHaveFocus();
+    await expect.element(input, { timeout: 2500 }).toHaveValue("acme");
+    await expect
+      .element(page.getByRole("option", { name: /Acme context/ }), { timeout: 2500 })
+      .toBeVisible();
+    await userEvent.keyboard("{Control>}2{/Control}");
+    await expect
+      .element(page.getByRole("option", { name: /Acme/ }), { timeout: 2500 })
+      .toBeVisible();
   });
 });

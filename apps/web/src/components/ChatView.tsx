@@ -3353,6 +3353,10 @@ export default function ChatView(props: ChatViewProps) {
       </header>
     </WorkspaceTitlebar>
   );
+  const composerLineage =
+    !embedded && isServerThread ? (
+      <ChatFooterLineage lineageHandle={threadLineageHandle} agents={serverProjection?.subagents} />
+    ) : null;
   const conversationColumn = (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden"
@@ -3709,7 +3713,7 @@ export default function ChatView(props: ChatViewProps) {
                             <ChatComposer
                               cornerControls={
                                 isServerThread ? (
-                                  <div className="flex flex-col items-center gap-1">
+                                  <div className="flex flex-col items-center gap-1 @max-[16rem]/composer-surface:flex-row">
                                     {sideChatRefreshAvailable ? (
                                       <SideChatContextButton threadKey={routeThreadKey} />
                                     ) : null}
@@ -3939,6 +3943,7 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
+                                leading={composerLineage}
                                 whereProjectTitle={
                                   activeProjectIsScratch ? null : (activeProject?.title ?? null)
                                 }
@@ -3994,7 +3999,7 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     ) : null}
                   </div>
-                  {embedded || !isServerThread ? (
+                  {showComposerContextStrip || !composerLineage ? (
                     <div
                       aria-hidden
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
@@ -4003,18 +4008,9 @@ export default function ChatView(props: ChatViewProps) {
                 </div>
               </div>
             </div>
-            {!embedded && isServerThread ? (
-              <div
-                data-chat-footer
-                className="pointer-events-auto flex w-fit pl-(--workspace-gutter-start) pb-safe"
-              >
-                <ChatFooterLineage
-                  lineageHandle={threadLineageHandle}
-                  runningAgents={
-                    serverProjection?.subagents.filter((agent) => agent.status === "running")
-                      .length ?? 0
-                  }
-                />
+            {composerLineage && !showComposerContextStrip ? (
+              <div className="pointer-events-auto flex w-fit pl-(--workspace-gutter-start) pb-safe">
+                {composerLineage}
               </div>
             ) : null}
           </div>

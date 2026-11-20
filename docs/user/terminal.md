@@ -29,6 +29,9 @@ selected as you switch threads. Return to a machine to resume its terminals.
 If it disconnects, the drop-down waits for it to reconnect or for you to pick
 another machine.
 
+On macOS and Linux, fresh drop-down shells load the destination machine’s login
+profile. Open a new terminal tab to pick up profile changes.
+
 New tabs and tiles start in the source terminal's recorded launch directory,
 or the machine's default folder when there is no recorded directory. Changes
 made with `cd` inside the shell don't change that starting directory.

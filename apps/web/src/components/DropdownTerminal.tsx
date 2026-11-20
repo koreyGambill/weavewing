@@ -364,6 +364,7 @@ function DropdownTerminalPanel() {
           <HeaderControl
             label={expanded ? "Restore drop-down height" : "Fill the window"}
             keys={shortcutLabelForCommand(keybindings, "terminal.dropdownExpand")}
+            pressed={expanded}
             onClick={() => useDropdownTerminalStore.getState().toggleExpanded()}
           >
             {expanded ? <Minimize2 /> : <Maximize2 />}

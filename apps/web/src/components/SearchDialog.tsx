@@ -9,6 +9,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects } from "../state/entities";
 import { useEnvironments } from "../state/environments";
+import { hostEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import {
@@ -33,14 +34,23 @@ export function SearchDialog(props: {
   const [shown, setShown] = useState(PAGE_SIZE);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { activeThread, handleNewThread } = useHandleNewThread();
-  const preferredEnvironmentId = activeThread?.environmentId ?? primaryEnvironmentId;
+  const hostEnvironmentId = useAtomValue(hostEnvironmentIdAtom);
+  const { activeThread, routeThreadRef, handleNewThread } = useHandleNewThread();
   const { environments } = useEnvironments();
   const connected = environments.filter(
     (environment) => environment.connection.phase === "connected",
   );
+  const preferredEnvironmentId =
+    [routeThreadRef?.environmentId, primaryEnvironmentId, hostEnvironmentId]
+      .map((id) => connected.find((environment) => environment.environmentId === id)?.environmentId)
+      .find((id) => id !== undefined) ?? null;
   const environmentIds = connected
-    .filter((environment) => allMachines || environment.environmentId === preferredEnvironmentId)
+    .filter(
+      (environment) =>
+        allMachines ||
+        preferredEnvironmentId === null ||
+        environment.environmentId === preferredEnvironmentId,
+    )
     .map((environment) => environment.environmentId);
   const environmentSet = new Set(environmentIds);
   const projects = useProjects();
@@ -160,7 +170,7 @@ export function SearchDialog(props: {
           onItemHighlighted={(value) => setHighlighted(typeof value === "string" ? value : null)}
           footerActionLabel={tab === "threads" ? "Open thread" : "New thread"}
           footerTrailing={
-            connected.length > 1 ? (
+            connected.length > 1 && preferredEnvironmentId !== null ? (
               <Button
                 size="xs"
                 variant="ghost"

@@ -48,7 +48,7 @@ import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { mergePathEntries } from "@t3tools/shared/shell";
+import { mergePathEntries, readUserLoginShell } from "@t3tools/shared/shell";
 
 import { acpRegistryManagedBinaryDirectories } from "@t3tools/provider-acp-registry/server";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
@@ -581,13 +581,6 @@ function enqueueProcessEvent(
   return true;
 }
 
-function defaultShellResolver(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
-  if (platform === "win32") {
-    return "pwsh.exe";
-  }
-  return env.SHELL ?? "bash";
-}
-
 const normalizeShellCommand = Effect.fn("terminal.normalizeShellCommand")(function* (
   value: string | undefined,
   platform: NodeJS.Platform,
@@ -645,6 +638,7 @@ const POWERSHELL_UTF8_SETUP =
 function shellCandidateFromCommand(
   command: string | null,
   platform: NodeJS.Platform,
+  login: boolean,
 ): ShellCandidate | null {
   if (!command || command.length === 0) return null;
   const shellName = basenameForPlatform(command, platform).toLowerCase();
@@ -652,10 +646,13 @@ function shellCandidateFromCommand(
     return { shell: command, args: ["-NoLogo", "-NoExit", "-Command", POWERSHELL_UTF8_SETUP] };
   }
   if (platform !== "win32" && shellName === "zsh") {
-    return { shell: command, args: ["-o", "nopromptsp"] };
+    return { shell: command, args: login ? ["-l", "-o", "nopromptsp"] : ["-o", "nopromptsp"] };
   }
-  // Login shells load ~/.bash_profile, matching macOS terminal startup.
-  if (platform === "darwin" && shellName === "bash") {
+  // Match macOS bash startup and load Unix drop-down shells like a remote login.
+  if (
+    (platform === "darwin" && shellName === "bash") ||
+    (platform !== "win32" && login && ["bash", "fish", "sh", "dash", "ksh"].includes(shellName))
+  ) {
     return { shell: command, args: ["-l"] };
   }
   return { shell: command };
@@ -698,36 +695,42 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
 }
 
 const resolveShellCandidates = Effect.fn("terminal.resolveShellCandidates")(function* (
-  shellResolver: () => string,
+  shellResolver: (() => string) | undefined,
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
+  login: boolean,
 ) {
-  const requested = shellCandidateFromCommand(
-    yield* normalizeShellCommand(shellResolver(), platform),
-    platform,
+  const userShell = login && platform !== "win32" ? readUserLoginShell() : undefined;
+  const candidate = (command: string | null) => shellCandidateFromCommand(command, platform, login);
+  const requested = candidate(
+    yield* normalizeShellCommand(
+      shellResolver?.() ?? (platform === "win32" ? "pwsh.exe" : (env.SHELL ?? userShell ?? "bash")),
+      platform,
+    ),
   );
 
   if (platform === "win32") {
     return uniqueShellCandidates([
       requested,
-      shellCandidateFromCommand("pwsh.exe", platform),
-      shellCandidateFromCommand(windowsPowerShellPath(env), platform),
-      shellCandidateFromCommand("powershell.exe", platform),
-      shellCandidateFromCommand(env.ComSpec ?? null, platform),
-      shellCandidateFromCommand(windowsCmdPath(env), platform),
-      shellCandidateFromCommand("cmd.exe", platform),
+      candidate("pwsh.exe"),
+      candidate(windowsPowerShellPath(env)),
+      candidate("powershell.exe"),
+      candidate(env.ComSpec ?? null),
+      candidate(windowsCmdPath(env)),
+      candidate("cmd.exe"),
     ]);
   }
 
   return uniqueShellCandidates([
     requested,
-    shellCandidateFromCommand(yield* normalizeShellCommand(env.SHELL, platform), platform),
-    shellCandidateFromCommand("/bin/zsh", platform),
-    shellCandidateFromCommand("/bin/bash", platform),
-    shellCandidateFromCommand("/bin/sh", platform),
-    shellCandidateFromCommand("zsh", platform),
-    shellCandidateFromCommand("bash", platform),
-    shellCandidateFromCommand("sh", platform),
+    candidate(yield* normalizeShellCommand(env.SHELL, platform)),
+    candidate(yield* normalizeShellCommand(userShell, platform)),
+    candidate("/bin/zsh"),
+    candidate("/bin/bash"),
+    candidate("/bin/sh"),
+    candidate("zsh"),
+    candidate("bash"),
+    candidate("sh"),
   ]);
 });
 
@@ -1832,7 +1835,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const agentScope = yield* AgentScope;
   // Inherit the full environment minus createTerminalSpawnEnv's blocklist; allowlists silently drop user tooling variables.
   const baseEnv = options.env ?? process.env;
-  const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const resolveLaunchInputEnvironment = Effect.fn("terminal.resolveLaunchInputEnvironment")(
     function* <Input extends TerminalOpenInput | TerminalAttachInput>(
@@ -2859,9 +2861,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         Effect.andThen(
           Effect.gen(function* () {
             const shellCandidates = yield* resolveShellCandidates(
-              shellResolver,
+              options.shellResolver,
               platform,
               baseEnv,
+              session.threadId === DROPDOWN_TERMINAL_THREAD_ID,
             ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,

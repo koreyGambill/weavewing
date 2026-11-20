@@ -2,6 +2,10 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   EnvironmentId,
+  NodeId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type OrchestrationV2Subagent,
   ORCHESTRATION_V2_WS_METHODS,
   RunId,
   ThreadId,
@@ -781,38 +785,25 @@ it("preserves chat width, details visibility and focus as the tile resizes", asy
   await expect.element(answer).toBeVisible();
   const tile = document.querySelector<HTMLElement>("[data-chat-canvas]")!;
   const composer = document.querySelector<HTMLElement>("[data-chat-composer-stack]")!;
-  const resize = async (width: number, mode: "inline" | "bar") => {
+  const resize = async (width: number, composerWidth: number) => {
     tile.style.width = `${width}px`;
     tile.style.flex = "none";
     await vi.waitFor(() => {
       expect(tile.clientWidth).toBe(width);
-      expect(tile.querySelector(`[data-thread-details-panel="${mode}"]`)).not.toBeNull();
-      expect(composer.clientWidth).toBe(736);
+      expect(tile.querySelector("[data-thread-details-panel=inline]")).not.toBeNull();
+      expect(composer.clientWidth).toBe(composerWidth);
     });
   };
-  await resize(1300, "inline");
-  await resize(1108, "inline");
-  await resize(1107, "bar");
-  await resize(1050, "bar");
-  const disclosure = page
-    .getByRole("region", { name: "Thread details" })
-    .getByRole("button", { name: "Details", exact: true });
-  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
-  await disclosure.click();
-  await expect.element(disclosure).toHaveAttribute("aria-expanded", "true");
+  await resize(1300, 736);
   const control = tile.querySelector<HTMLButtonElement>(
     "[data-thread-details-card] button:not(:disabled)",
   )!;
   control.focus();
+  await resize(1050, 736);
   expect(document.activeElement).toBe(control);
-  await resize(1300, "inline");
+  await resize(500, 476);
   expect(document.activeElement).toBe(control);
-  await resize(1050, "bar");
-  expect(document.activeElement).toBe(control);
-  await disclosure.click();
-  await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
-  await resize(1300, "inline");
-  expect(document.activeElement).toBe(tile.querySelector('[data-thread-details-panel="inline"]'));
+  await resize(1300, 736);
   await page.getByRole("button", { name: "Toggle thread details panel" }).first().click();
   tile.style.width = "1050px";
   await vi.waitFor(() => {
@@ -821,7 +812,7 @@ it("preserves chat width, details visibility and focus as the tile resizes", asy
   });
 });
 
-it("opens footer lineage and changes with the card closed", async () => {
+it("shows lineage counts in the chat bar and agents in Thread Details", async () => {
   await import("~/index.css");
   await using viewport = new AsyncDisposableStack();
   const initial = { width: window.innerWidth, height: window.innerHeight };
@@ -832,9 +823,7 @@ it("opens footer lineage and changes with the card closed", async () => {
   const child = {
     ...threadWithHistory("workspace-side-chat", 1),
     sideChatOf: thread.id,
-    olderSettled: true as const,
   };
-  const threadRef = scopeThreadRef(ENVIRONMENT_ID, thread.id);
   using _environment = installFakeEnvironment([thread, child]);
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
@@ -852,38 +841,52 @@ it("opens footer lineage and changes with the card closed", async () => {
   const card = page.getByRole("region", { name: "Thread details" });
   await expect.element(card).not.toBeInTheDocument();
 
-  const footer = page.locator("[data-chat-footer]");
-  await footer.getByRole("button", { name: "Lineage", exact: true }).click();
+  const now = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+  for (const status of ["running", "failed", "completed"] as const) {
+    const agent = {
+      id: NodeId.make(`fixture-${status}`),
+      threadId: thread.id,
+      runId: null,
+      parentNodeId: NodeId.make("fixture-parent"),
+      origin: "provider_native",
+      createdBy: "agent",
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerThreadId: null,
+      childThreadId: null,
+      nativeTaskRef: null,
+      prompt: "Check the composer.",
+      title: `Fixture ${status} agent`,
+      model: null,
+      status,
+      result: null,
+      startedAt: now,
+      completedAt: status === "running" ? null : now,
+      updatedAt: now,
+    } satisfies OrchestrationV2Subagent;
+    await act(() => emitThreadEvent(thread.id, { type: "subagent.updated", payload: agent }));
+  }
+  const lineageControl = page.getByRole("button", { name: "Lineage, 1 working, 1 failed, 1 past" });
+  await expect.element(lineageControl).toHaveAttribute("data-chat-lineage");
+  await lineageControl.click();
   const lineage = page.getByRole("dialog", { name: "Thread lineage" });
-  await expect.element(lineage.getByText(child.title), { timeout: 2500 }).toBeVisible();
+  const agent = lineage.getByRole("button", { name: /Fixture running agent/ });
+  await agent.click();
+  await expect.element(lineage.getByText("Check the composer.")).toBeVisible();
   await userEvent.keyboard("{Escape}");
 
   await expect.element(lineage, { timeout: 2500 }).not.toBeInTheDocument();
   await page.viewport(690, 860);
-  await footer.getByRole("button", { name: "Lineage", exact: true }).click();
-  await expect.element(lineage.getByText(child.title)).toBeVisible();
+  await lineageControl.click();
+  await expect
+    .element(lineage.getByRole("button", { name: /Fixture running agent/ }))
+    .toBeVisible();
   await userEvent.keyboard("{Escape}");
 
-  const actionMenu = page.getByRole("button", { name: `Thread actions for ${thread.title}` });
-  await actionMenu.click();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Todos", exact: true }), { timeout: 3000 })
-    .toBeVisible();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Automations", exact: true }))
-    .toBeVisible();
-  await page.getByRole("menuitem", { name: "Changes", exact: true }).click();
-  await vi.waitFor(() =>
-    expect(
-      useRightPanelStore.getState().byThreadKey[`${ENVIRONMENT_ID}:${thread.id}`]?.surfaces,
-    ).toContainEqual(expect.objectContaining({ kind: "diff" })),
-  );
-  useRightPanelStore.getState().close(threadRef);
-  await page.viewport(1300, 860);
-  await page.getByRole("button", { name: "Details", exact: true }).click();
-  const hosted = page.getByRole("navigation", { name: "Threads" });
-  await expect.element(hosted.getByText("Add project script")).toBeVisible();
-  await expect.element(card).not.toBeInTheDocument();
+  await page.getByRole("button", { name: "Toggle thread details panel" }).first().click();
+  await expect.element(card).toBeVisible();
+  await expect.element(card.getByRole("button", { name: /Fixture running agent/ })).toBeVisible();
+  await expect.element(card.getByRole("button", { name: /Change folder/ })).not.toBeInTheDocument();
 });
 
 it("uses the remembered base and whitespace-filtered Diff counts beside the branch", async () => {

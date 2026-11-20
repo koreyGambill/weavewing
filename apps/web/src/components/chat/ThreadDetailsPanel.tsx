@@ -1,10 +1,6 @@
 import { ThreadListSummary } from "../reviews/ThreadListView";
 import { Popover, PopoverPopup } from "../ui/popover";
 import { ThreadDetailsLocation } from "./ThreadDetailsDestination";
-import { openChangeThreadFolder } from "./changeThreadFolderDialogState";
-import { useAtomValue } from "@effect/atom-react";
-import { changeThreadFolder } from "../../state/xwingEnvironments";
-import { FolderIcon } from "lucide-react";
 import type {
   EditorId,
   EnvironmentId,
@@ -103,7 +99,6 @@ interface ThreadDetailsPanelProps extends Pick<
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
-  const canChangeFolder = useAtomValue(changeThreadFolder.permissionAtom(props.environmentId));
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const threadKey = `${props.environmentId}:${props.threadId}`;
   const [lineageThreadKey, setLineageThreadKey] = useState<string | null>(null);
@@ -252,21 +247,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             </ThreadDetailsSection>
           ) : null}
 
-          {!props.draftId ? (
-            <ThreadDetailsSection
-              headingId="thread-details-folder-card-heading"
-              title="Folder"
-              showHeading={false}
-            >
-              <ThreadDetailsControl
-                disabled={!canChangeFolder}
-                onClick={() => openChangeThreadFolder(activeThreadRef)}
-              >
-                <FolderIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-                Change folder…
-              </ThreadDetailsControl>
-            </ThreadDetailsSection>
-          ) : null}
           {density === "full" && !props.draftId && visible.servers ? (
             <ThreadServersPanel environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
@@ -275,10 +255,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <ThreadAutomationsPanel environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
 
-          {!lineageOpen &&
-          density === "full" &&
-          !props.draftId &&
-          (visible.lineage || visible.sideChats) ? (
+          {!props.draftId && (visible.lineage || visible.sideChats) ? (
             <ThreadRelationshipsPanel
               environmentId={props.environmentId}
               threadId={props.threadId}

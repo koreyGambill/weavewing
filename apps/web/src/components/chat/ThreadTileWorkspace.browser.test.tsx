@@ -967,8 +967,12 @@ it("runs leader commands from terminal focus and keeps keyboard resize active un
     bubbles: true,
     cancelable: true,
   });
+  target.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Control", ctrlKey: true, bubbles: true }),
+  );
   target.dispatchEvent(first);
   target.dispatchEvent(second);
+  target.dispatchEvent(new KeyboardEvent("keyup", { key: "Control", bubbles: true }));
   expect(first.defaultPrevented).toBe(true);
   expect(second.defaultPrevented).toBe(false);
 

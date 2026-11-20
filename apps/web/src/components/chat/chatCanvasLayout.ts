@@ -19,10 +19,10 @@ export interface ChatCanvasPreview {
 }
 
 const GAP = 12;
-export const DETAILS_CARD_CLEARANCE = 32;
+const DETAILS_CARD_CLEARANCE = 32;
 
 /** The chat lane width with only the configured maximum and canvas gutters. */
-export const resolveChatWidth = (width: number, padding: number, maxChatWidth: number) =>
+const resolveChatWidth = (width: number, padding: number, maxChatWidth: number) =>
   Math.max(0, Math.min(maxChatWidth, width - padding * 2));
 
 export function resolveChatCanvasLayout({
@@ -44,13 +44,13 @@ export function resolveChatCanvasLayout({
   detailsCard?: PreviewMiniPlayerObstacles["detailsCard"];
   findBar?: PreviewMiniPlayerObstacles["detailsCard"];
 }) {
-  const centeredWidth = resolveChatWidth(container.width, padding, maxChatWidth);
-  const laneRight = detailsCard
-    ? detailsCard.left - DETAILS_CARD_CLEARANCE
-    : container.width - padding;
-  const normalWidth = Math.max(0, Math.min(centeredWidth, laneRight - padding));
-  const canvasCenterLeft = (container.width - normalWidth) / 2;
-  const normalLeft = Math.max(padding, Math.min(canvasCenterLeft, laneRight - normalWidth));
+  const normalWidth = resolveChatWidth(container.width, padding, maxChatWidth);
+  const centeredLeft = (container.width - normalWidth) / 2;
+  const leftOfDetails = detailsCard
+    ? detailsCard.left - DETAILS_CARD_CLEARANCE - normalWidth
+    : centeredLeft;
+  const normalLeft =
+    leftOfDetails >= padding ? Math.min(centeredLeft, leftOfDetails) : centeredLeft;
   let chat = {
     left: normalLeft,
     width: normalWidth,

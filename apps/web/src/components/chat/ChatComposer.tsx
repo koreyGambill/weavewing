@@ -3484,7 +3484,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             )}
           >
             {props.cornerControls && !isComposerCollapsedMobile ? (
-              <div className="absolute top-2 right-2 z-20" data-composer-corner-controls>
+              <div
+                className="absolute top-2 right-2 z-20 @max-[16rem]/composer-surface:static @max-[16rem]/composer-surface:flex @max-[16rem]/composer-surface:justify-end @max-[16rem]/composer-surface:px-2 @max-[16rem]/composer-surface:pt-1"
+                data-composer-corner-controls
+              >
                 {props.cornerControls}
               </div>
             ) : null}
@@ -3575,7 +3578,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 "relative px-4 pb-2",
                 "pt-3.5 sm:pt-4",
                 isComposerCollapsedMobile && "hidden",
-                props.cornerControls && "pr-12",
+                props.cornerControls &&
+                  "pr-12 @max-[16rem]/composer-surface:pr-4 @max-[16rem]/composer-surface:pt-1",
               )}
             >
               {isStashMenuOpen && !composerMenuOpen && (
@@ -3757,7 +3761,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <div
                 data-chat-composer-footer="true"
                 className={cn(
-                  "flex min-w-0 flex-nowrap items-center overflow-visible px-2 pb-2",
+                  "flex min-w-0 flex-nowrap items-center overflow-visible px-2 pb-2 @max-[16rem]/composer-surface:px-1.5",
                   pendingUserInputs.length > 0 && "pt-2",
                   showMobilePendingAnswerActions &&
                     speechInput.state.phase === "idle" &&
@@ -3765,7 +3769,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 )}
               >
                 {composerAttachButton && !dictationTakesFooter ? (
-                  <div className="me-2">{composerAttachButton}</div>
+                  <div className="me-2 shrink-0 @max-[16rem]/composer-surface:me-1">
+                    {composerAttachButton}
+                  </div>
                 ) : null}
                 <div
                   data-chat-composer-actions="right"
@@ -3773,7 +3779,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
+                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2 @max-[16rem]/composer-surface:gap-1"
                 >
                   <div
                     ref={attachExpandedComposerControls}

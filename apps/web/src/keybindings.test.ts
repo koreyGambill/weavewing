@@ -968,7 +968,7 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
             ? shiftKey
               ? "workspace.tile.closeAllTabs"
               : "workspace.tile.closeTab"
-            : !shiftKey && platform !== "MacIntel" && key === "k"
+            : !shiftKey && key === "k"
               ? "search.toggle"
               : !shiftKey && platform !== "MacIntel" && key === "p"
                 ? "commandPalette.toggle"

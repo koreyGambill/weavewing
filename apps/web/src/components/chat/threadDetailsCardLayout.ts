@@ -1,5 +1,4 @@
 import type { PreviewMiniPlayerFrame } from "../preview/previewMiniPlayerLayout";
-import { DETAILS_CARD_CLEARANCE, resolveChatWidth } from "./chatCanvasLayout";
 
 export const THREAD_DETAILS_CARD_GAP = 12;
 // Keep in sync with --thread-details-panel-width.
@@ -14,36 +13,31 @@ export function resolveThreadDetailsCardDensity(
   return "essential";
 }
 
-/** Whether the side card leaves room for the same chat width as an empty canvas. */
-export function canFitThreadDetailsCard(
-  width: number,
-  { padding, maxChatWidth }: { padding: number; maxChatWidth: number },
-) {
-  const available = width - THREAD_DETAILS_CARD_WIDTH - THREAD_DETAILS_CARD_GAP;
-  return (
-    available - DETAILS_CARD_CLEARANCE - padding >= resolveChatWidth(width, padding, maxChatWidth)
-  );
-}
-
 export function resolveThreadDetailsCardLayout({
   container,
   frame,
   overlapsDetailsCard = false,
   topInset = 0,
+  bottomInset = 0,
 }: {
   container: { width: number; height: number };
   frame: PreviewMiniPlayerFrame | null;
   overlapsDetailsCard?: boolean;
   topInset?: number;
+  bottomInset?: number;
 }) {
   const gap = THREAD_DETAILS_CARD_GAP;
-  const width = THREAD_DETAILS_CARD_WIDTH;
+  const preferredWidth = Math.max(208, Math.floor(container.width * 0.75));
+  const width = Math.min(THREAD_DETAILS_CARD_WIDTH, preferredWidth, container.width - gap * 2);
+  if (width <= 0) return null;
   const x = container.width - width - gap;
   const y = gap + topInset;
+  const availableHeight = container.height - y - gap;
+  const maxHeight = availableHeight - Math.min(bottomInset, Math.max(0, availableHeight - 160));
   const height =
     overlapsDetailsCard && frame && frame.x + frame.width > x - gap && frame.x < x + width + gap
-      ? Math.min(container.height - y - gap, frame.y - y - gap)
-      : container.height - y - gap;
+      ? Math.min(maxHeight, frame.y - y - gap)
+      : maxHeight;
   if (height < 160) return null;
   return {
     x,

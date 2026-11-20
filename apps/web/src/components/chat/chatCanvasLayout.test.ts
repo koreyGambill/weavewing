@@ -337,22 +337,10 @@ describe("workspace card beside chat", () => {
   it("keeps chat centered while the card fits beside it", () => {
     expect(withCard(1500).chat).toEqual({ left: 382, width: 736, insetStart: 0, insetEnd: 0 });
   });
-  it("narrows chat only after it reaches the left padding", () => {
+  it("lets the card cover the chat when side-by-side would narrow it", () => {
     expect(withCard(1108).chat).toMatchObject({ left: 48, width: 736 });
-    expect(withCard(1028).chat).toEqual({ left: 48, width: 656, insetStart: 0, insetEnd: 276 });
-    expect(withCard(1012).chat).toMatchObject({ left: 48, width: 640 });
-  });
-  it("reserves the marker gutter across widths where the details card fits", () => {
-    for (let width = 1012; width <= 1440; width++) {
-      const container = { width, height: 900 };
-      const card = resolveThreadDetailsCardLayout({
-        container,
-        frame: null,
-      })!;
-      const chat = withCard(width).chat;
-      expect(chat.left).toBeGreaterThanOrEqual(48);
-      expect(chat.width).toBeGreaterThanOrEqual(640);
-      expect(card.x - chat.left - chat.width).toBeGreaterThanOrEqual(32);
-    }
+    expect(withCard(1028).chat).toEqual({ left: 146, width: 736, insetStart: 0, insetEnd: 0 });
+    expect(withCard(900).chat).toMatchObject({ left: 82, width: 736 });
+    expect(withCard(800).chat).toMatchObject({ left: 48, width: 704 });
   });
 });
