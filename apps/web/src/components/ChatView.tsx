@@ -1,4 +1,8 @@
 import { WorkspaceTitlebar } from "./WorkspaceTitlebar";
+import * as DateTime from "effect/DateTime";
+import { ContextArchiveRow } from "./chat/ContextArchiveRow";
+import { RewindContextButton } from "./chat/RewindContextButton";
+import { Button } from "./ui/button";
 import { ForkConversationButton } from "./chat/ForkConversationButton";
 import { SideChatContextButton } from "./chat/SideChatContextButton";
 import type { RightPanelSurface } from "../rightPanelStore";
@@ -220,6 +224,8 @@ import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
 import {
+  bringSideChatToDraft,
+  focusThreadDraft,
   isInSideChatPane,
   resolveThreadOpenRoute,
   type SideChatParentPanel,
@@ -1638,6 +1644,17 @@ export default function ChatView(props: ChatViewProps) {
   const displayedThreadRef = parseScopedThreadKey(displayedTimelineKey);
   const canReadTurns = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   const sideChatShells = useSideChatShells(isServerThread ? displayedThreadRef : null);
+  const contextArchives = sideChatShells.flatMap((shell) =>
+    shell.lineage.contextArchive
+      ? [
+          {
+            ...shell.lineage.contextArchive,
+            threadId: shell.id,
+            createdAt: DateTime.formatIso(shell.createdAt),
+          },
+        ]
+      : [],
+  );
   const sideChatRefreshAvailable =
     isServerThread &&
     canOperateThread &&
@@ -2797,6 +2814,20 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.lineage.sideChat !== true &&
     !isSubagentThread &&
     serverConfig?.environment.capabilities.sideChats === true;
+  const rewindRun =
+    isServerThread &&
+    activeThreadRef !== null &&
+    activeThread?.lineage.sideChat !== true &&
+    !isSubagentThread &&
+    canOperateThread &&
+    serverConfig?.environment.capabilities.conversationContextRewind === true
+      ? serverProjection?.runs.findLast(
+          (run) =>
+            run.threadId === threadId &&
+            run.ordinal > (activeThreadShell?.contextRewind?.runOrdinal ?? 0) &&
+            isStableForkRun(run),
+        )
+      : undefined;
   const canBranchAssistantText =
     isServerThread &&
     canOperateThread &&
@@ -3220,6 +3251,15 @@ export default function ChatView(props: ChatViewProps) {
     runShellCommand: runSideChatShellCommandStable,
   };
 
+  const bringArchiveBack = async (parent: ScopedThreadRef, archive: ScopedThreadRef) => {
+    if (!readEnvironmentScope(parent.environmentId, AuthOrchestrationOperateScope)) return;
+    bringSideChatToDraft(parent, archive, "Earlier conversation");
+    if (parent.threadId !== routeThreadRef.threadId) {
+      await navigate({ to: "/$environmentId/$threadId", params: parent });
+    }
+    focusThreadDraft(parent);
+  };
+
   const inlineSideChats = new Map<MessageId, Array<(typeof sideChatShells)[number]>>();
   for (const child of sideChatShells) {
     const anchor = child.lineage.sideChatAnchor;
@@ -3528,6 +3568,30 @@ export default function ChatView(props: ChatViewProps) {
                 canOperateThread={canOperateThread}
                 threadDetailRef={routeThreadDetailRef}
                 entriesInput={timelineEntriesInput}
+                contextArchives={contextArchives.length > 0 ? contextArchives : undefined}
+                archiveImportedHistory={serverProjection?.thread.historyOrigin === "v1_import"}
+                renderContextArchive={
+                  displayedThreadRef === null || contextArchives.length === 0
+                    ? undefined
+                    : (row, onToggle) => (
+                        <ContextArchiveRow
+                          parent={displayedThreadRef}
+                          host={(parentPanel ?? sideChatParentPanel).hostRef}
+                          threadId={row.threadId}
+                          expanded={row.expanded}
+                          onToggle={onToggle}
+                          onBringBack={
+                            canOperateThread
+                              ? () =>
+                                  void bringArchiveBack(
+                                    displayedThreadRef,
+                                    scopeThreadRef(displayedThreadRef.environmentId, row.threadId),
+                                  )
+                              : undefined
+                          }
+                        />
+                      )
+                }
                 draftEntries={isServerThread ? null : draftTimelineEntries}
                 activeThreadKey={activeThreadKey}
                 syncing={threadSyncPhase !== null}
@@ -3729,6 +3793,32 @@ export default function ChatView(props: ChatViewProps) {
                               cornerControls={
                                 isServerThread ? (
                                   <div className="flex flex-col items-center gap-1 @max-[16rem]/composer-surface:flex-row">
+                                    {rewindRun && activeThreadRef ? (
+                                      <RewindContextButton
+                                        key={activeThreadKey}
+                                        thread={activeThreadRef}
+                                        runId={rewindRun.id}
+                                        disabled={
+                                          isWorking ||
+                                          activeEnvironmentUnavailable ||
+                                          activeRuntime?.activeRunId != null
+                                        }
+                                      />
+                                    ) : null}
+                                    {!embedded &&
+                                    activeThread.lineage.contextArchive &&
+                                    sideChatParentRef &&
+                                    canOperateThread ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="xs"
+                                        onClick={() =>
+                                          void bringArchiveBack(sideChatParentRef, routeThreadRef)
+                                        }
+                                      >
+                                        Bring back
+                                      </Button>
+                                    ) : null}
                                     {sideChatRefreshAvailable &&
                                     !inlineSideChat &&
                                     (activeThread.lineage.sideChat ||

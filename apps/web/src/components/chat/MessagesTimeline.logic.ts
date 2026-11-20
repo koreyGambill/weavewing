@@ -507,6 +507,7 @@ export type MessagesTimelineRow = MessagesTimelineRowContent & {
 };
 
 type MessagesTimelineRowContent =
+  | Extract<TimelineEntry, { kind: "context-archive" }>
   | {
       kind: "worktree-setup";
       id: string;
@@ -1948,6 +1949,11 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "context-archive") {
+      nextRows.push(timelineEntry);
+      continue;
+    }
+
     if (input.isWorking && index === activeTurnHeaderIndex) {
       appendWorkingRow();
     }
@@ -2788,6 +2794,13 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
+    case "context-archive":
+      return (
+        b.kind === "context-archive" &&
+        a.expanded === b.expanded &&
+        a.hasLoadedEntries === b.hasLoadedEntries &&
+        a.createdAt === b.createdAt
+      );
     case "working":
       return (
         a.createdAt === (b as typeof a).createdAt && a.compacting === (b as typeof a).compacting

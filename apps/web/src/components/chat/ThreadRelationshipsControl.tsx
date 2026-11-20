@@ -629,7 +629,9 @@ export function ThreadRelationshipsPanel(props: {
   const canMerge =
     mergeTargetThreadId !== null &&
     (isSideChat
-      ? canOperate && projection?.runs.some((run) => run.userMessageId !== null) === true
+      ? canOperate &&
+        (projection?.thread.lineage.contextArchive != null ||
+          projection?.runs.some((run) => run.userMessageId !== null) === true)
       : latestMergeBackRun !== null);
   const unlistedThreadIds = relationshipRows
     .filter(

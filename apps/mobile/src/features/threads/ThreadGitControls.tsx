@@ -87,6 +87,8 @@ export type ThreadGitMenuProps = {
   readonly onOpenFilesInspector?: () => void;
   readonly onOpenGitInspector?: () => void;
   readonly onBringBack?: () => void;
+  readonly onRewindContext?: () => void;
+  readonly rewindContextDisabled?: boolean;
   readonly onMergeBack?: () => void;
   readonly onPull: () => Promise<void>;
   readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>;
@@ -339,6 +341,17 @@ export function useThreadGitMenuDefinition(props: ThreadGitMenuProps): AppBarMen
             : "Turn diffs and worktree changes",
         onPress: model.openReview,
       },
+      ...(props.onRewindContext
+        ? [
+            {
+              id: "rewind-context",
+              title: "Rewind conversation context",
+              icon: "clock",
+              disabled: props.rewindContextDisabled,
+              onPress: props.onRewindContext,
+            },
+          ]
+        : []),
       ...(props.onBringBack
         ? [
             {

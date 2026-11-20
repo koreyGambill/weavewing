@@ -29,6 +29,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   isProviderNativeSubagentThread,
+  isStableForkRun,
   MessageId,
   ThreadId,
   type ProjectScript,
@@ -379,6 +380,9 @@ function ThreadRouteContent(
     selectedThread?.environmentId ?? null,
     AuthTerminalOperateScope,
   );
+  const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(
+    selectedThread?.environmentId ?? null,
+  );
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
@@ -457,11 +461,62 @@ function ThreadRouteContent(
   const openPullRequest = useOpenPullRequest();
   const isSideChat = selectedThread?.lineage.sideChat === true;
   const sideChatParentId = isSideChat ? selectedThread.lineage.parentThreadId : null;
+  const rewindContext = useAtomCommand(threadEnvironment.rewindContext, { reportFailure: false });
+  const [rewindingContext, setRewindingContext] = useState(false);
+  const rewindRun =
+    selectedThread &&
+    !isSideChat &&
+    selectedThread.lineage.relationshipToParent !== "subagent" &&
+    selectedThread.source.delegatedFrom == null &&
+    canOperateThread &&
+    routeEnvironmentRuntime?.serverConfig?.environment.capabilities.conversationContextRewind ===
+      true
+      ? selectedThreadDetail?.runs.findLast(
+          (run) =>
+            run.threadId === selectedThread.id &&
+            run.ordinal > (selectedThreadDetail.thread.contextRewind?.runOrdinal ?? 0) &&
+            isStableForkRun(run),
+        )
+      : undefined;
+  const confirmRewind = () => {
+    if (!selectedThread || !rewindRun || rewindingContext) return;
+    Dialog.confirm({
+      title: "Rewind conversation context?",
+      message:
+        "Earlier messages will move into Earlier conversation, where you can reopen them or bring them back. Your files, draft, and checkpoints stay in this thread.",
+      confirmText: "Rewind context",
+      onConfirm: () => {
+        if (!readEnvironmentScope(selectedThread.environmentId, AuthOrchestrationOperateScope))
+          return;
+        setRewindingContext(true);
+        void rewindContext({
+          environmentId: selectedThread.environmentId,
+          input: {
+            sourceThreadId: selectedThread.id,
+            targetThreadId: ThreadId.make(uuidv4()),
+            runId: rewindRun.id,
+            creationSource: "mobile",
+          },
+        })
+          .then((result) => {
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              Dialog.alert(
+                "Could not rewind conversation context",
+                error instanceof Error ? error.message : undefined,
+              );
+            }
+          })
+          .finally(() => setRewindingContext(false));
+      },
+    });
+  };
+  const contextArchive = selectedThread?.lineage.contextArchive;
   const handleBringBack = async () => {
     if (
       !selectedThread ||
       sideChatParentId === null ||
-      selectedThread.latestUserMessageAt === null ||
+      (selectedThread.latestUserMessageAt === null && contextArchive == null) ||
       !readEnvironmentScope(selectedThread.environmentId, AuthOrchestrationOperateScope)
     ) {
       return;
@@ -542,7 +597,6 @@ function ThreadRouteContent(
   useEffect(() => {
     if (previewTarget) revealPreview();
   }, [previewTarget]);
-  const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeConnectionError = routeEnvironmentRuntime?.connectionError ?? null;
@@ -835,8 +889,13 @@ function ThreadRouteContent(
     threadId: threadId ?? "",
     onOpenFilesInspector: selectedThreadCwd !== null ? handleOpenFilesInspector : undefined,
     onOpenGitInspector: handleOpenGitInspector,
+    onRewindContext: rewindRun !== undefined ? confirmRewind : undefined,
+    rewindContextDisabled:
+      rewindingContext || composer.activeThreadBusy || composer.runlessWorkActive,
     onBringBack:
-      sideChatParentId !== null && selectedThread?.latestUserMessageAt != null && canOperateThread
+      sideChatParentId !== null &&
+      (selectedThread?.latestUserMessageAt != null || contextArchive != null) &&
+      canOperateThread
         ? () => void handleBringBack()
         : undefined,
     onMergeBack:
@@ -1056,6 +1115,8 @@ function ThreadRouteContent(
           feedbackSubmissions={composer.feedbackSubmissions}
           onDismissFeedback={composer.dismissFeedback}
           selectedThreadFeed={composer.selectedThreadFeed}
+          threadRuns={selectedThreadDetail?.runs}
+          archiveImportedHistory={selectedThreadDetail?.thread.historyOrigin === "v1_import"}
           pendingHandoff={composer.pendingHandoff}
           activityRun={composer.selectedThreadActivityRun}
           activeWorkStartedAt={

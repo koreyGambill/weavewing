@@ -117,6 +117,14 @@ export type TimelineAttempt = Pick<
 export type TimelineEntry = (
   | {
       readonly id: string;
+      readonly kind: "context-archive";
+      readonly createdAt: string;
+      readonly threadId: ThreadId;
+      readonly expanded: boolean;
+      readonly hasLoadedEntries: boolean;
+    }
+  | {
+      readonly id: string;
       readonly kind: "message";
       readonly createdAt: string;
       readonly message: ChatMessage;

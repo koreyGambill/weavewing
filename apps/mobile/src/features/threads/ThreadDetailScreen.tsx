@@ -13,7 +13,11 @@ import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
-import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
+import {
+  useChildThreadInputs,
+  useSideChats,
+  useThreadReportedModelSelection,
+} from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
@@ -44,6 +48,7 @@ import {
 import type {
   EnvironmentId,
   MessageId,
+  OrchestrationV2Run,
   RuntimeRequestId,
   ScopedThreadRef,
   ServerConfig as T3ServerConfig,
@@ -242,6 +247,10 @@ export interface ThreadDetailScreenProps {
   readonly feedbackSubmissions: ReadonlyArray<CodexFeedbackSubmission>;
   readonly onDismissFeedback: (id: MessageId) => void;
   readonly selectedThreadFeed: ReadonlyArray<ThreadFeedEntry>;
+  readonly threadRuns?:
+    | ReadonlyArray<Pick<OrchestrationV2Run, "id" | "ordinal" | "threadId">>
+    | undefined;
+  readonly archiveImportedHistory?: boolean;
   readonly pendingHandoff?: HandoffEndpoints | null;
   readonly activityRun: ThreadFeedLatestRun | null;
   readonly activeWorkStartedAt: string | null;
@@ -908,6 +917,56 @@ function ThreadDetailBody(
   const jumpMessageLoaded =
     jumpMessageId !== null &&
     selectedThreadFeed.some((entry) => entry.type === "message" && entry.id === jumpMessageId);
+  const rewind = props.selectedThread.source.contextRewind;
+  const sideChats = useSideChats({
+    environmentId: props.environmentId,
+    threadId: props.selectedThread.id,
+  });
+  const archiveRanges = sideChats.flatMap((chat) =>
+    chat.lineage.contextArchive ? [chat.lineage.contextArchive] : [],
+  );
+  const archivedRuns = new Set(
+    props.threadRuns
+      ?.filter(
+        (run) =>
+          run.threadId === props.selectedThread.id &&
+          archiveRanges.some(
+            (range) =>
+              run.ordinal >= range.fromRunOrdinal && run.ordinal <= range.throughRunOrdinal,
+          ),
+      )
+      .map((run) => run.id),
+  );
+  const hasFirstArchive = archiveRanges.some((range) => range.fromRunOrdinal === 1);
+  const isArchived = (entry: ThreadFeedEntry) => {
+    const runId = entry.type === "message" ? entry.message.runId : entry.runId;
+    return (
+      (runId !== null && archivedRuns.has(runId)) ||
+      (hasFirstArchive &&
+        rewind !== undefined &&
+        entry.createdAt < rewind.createdAt &&
+        ((runId === null && props.archiveImportedHistory === true) ||
+          (entry.type === "message" && entry.message.visibility === "inherited") ||
+          (entry.type === "activity-group" &&
+            entry.activities.every(
+              (activity) => activity.projectedItem.visibility === "inherited",
+            ))))
+    );
+  };
+  const [revealedArchiveFor, setRevealedArchiveFor] = useState<string | null>(null);
+  const archiveKey = rewind === undefined ? null : `${selectedThreadKey}:${rewind.runId}`;
+  if (
+    archiveKey !== null &&
+    revealedArchiveFor !== archiveKey &&
+    jumpMessageLoaded &&
+    selectedThreadFeed.some((entry) => entry.id === jumpMessageId && isArchived(entry))
+  ) {
+    setRevealedArchiveFor(archiveKey);
+  }
+  const displayedThreadFeed =
+    archiveKey === null || archiveKey === revealedArchiveFor
+      ? selectedThreadFeed
+      : selectedThreadFeed.filter((entry) => entry.id === jumpMessageId || !isArchived(entry));
   const historyForJump = props.historyControls;
   // History down to the message in one request; another page if it is not
   // there yet.
@@ -1474,7 +1533,7 @@ function ThreadDetailBody(
                   threadId={props.selectedThread.id}
                   detailRef={props.selectedThreadDetailRef}
                   workspaceRoot={props.threadCwd}
-                  feed={props.selectedThreadFeed}
+                  feed={displayedThreadFeed}
                   pendingHandoff={props.pendingHandoff}
                   worktreeSetup={props.worktreeSetup}
                   setupWorkingStartedAt={props.setupWorkingStartedAt}

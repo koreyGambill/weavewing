@@ -144,7 +144,7 @@ export default function SideChatPane(props: {
     projection && parentProjection ? deriveBringBacks(parentProjection, projection) : null;
   const unavailableReason = !canOperate
     ? "This connection cannot change threads."
-    : shell?.source.latestUserMessageAt == null
+    : shell?.source.latestUserMessageAt == null && shell?.source.lineage.contextArchive == null
       ? "Available after the first message."
       : null;
 
@@ -245,7 +245,7 @@ export default function SideChatPane(props: {
             <TooltipPopup side="bottom">Open as side chat tab</TooltipPopup>
           </Tooltip>
         ) : null}
-        {inline || shell?.source.lineage.sideChatAnchor ? (
+        {inline || shell?.source.lineage.sideChatAnchor || shell?.source.lineage.contextArchive ? (
           <Tooltip>
             <TooltipTrigger
               render={

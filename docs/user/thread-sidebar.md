@@ -453,6 +453,20 @@ side chats.
 On mobile, a thread lists its side chats above the composer. Tap one to open it and
 answer its questions.
 
+## Rewind conversation context
+
+When a thread is idle, choose **Rewind conversation context** beside the composer
+on web and desktop, or from **Git controls** in the mobile thread header.
+Messages through the latest finished turn move into **Earlier conversation**.
+Your next message starts with fresh context. The thread keeps its files, draft,
+and checkpoints.
+
+On web and desktop, expand **Earlier conversation** to read the archived
+messages inline. Open it as a side chat tab or full chat to continue it. On
+mobile, open **Earlier conversation** from the side chat list above the composer.
+**Bring back** adds a removable reference to your original thread’s draft, even
+before you send a message in the archive.
+
 ## Snooze until later
 
 To change the choices in the snooze menu, open **Settings → Threads → Snooze options**.

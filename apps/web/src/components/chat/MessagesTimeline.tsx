@@ -8,6 +8,7 @@ import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock } from "./WorkLog";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
+import { groupContextArchiveEntries, type ContextArchiveRange } from "./contextArchiveEntries";
 import { deriveTimelineMinimapItems, mergeUnloadedUserTurns } from "./timelineMinimapItems";
 import {
   type AssistantCitation,
@@ -28,6 +29,7 @@ import { observeResize } from "~/lib/observeResize";
 import { useStableCallback } from "~/hooks/useStableCallback";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
+const EMPTY_CONTEXT_ARCHIVE_IDS = new Set<ThreadId>();
 const EMPTY_PENDING_APPROVALS: ReadonlyArray<PendingApproval> = [];
 const EMPTY_RESPONDING_REQUEST_IDS: TimelineRowSharedState["respondingRequestIds"] = [];
 
@@ -261,6 +263,14 @@ interface MessagesTimelineProps {
 
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  archiveImportedHistory?: boolean;
+  contextArchives?: ReadonlyArray<ContextArchiveRange> | undefined;
+  renderContextArchive?:
+    | ((
+        row: Extract<TimelineEntry, { kind: "context-archive" }>,
+        onToggle: () => void,
+      ) => ReactNode)
+    | undefined;
   latestRun: TimelineLatestRun | null;
   /** The run the screen reader announcer follows; see announcedRun. */
   announcedRun?: { readonly runId: RunId; readonly status: TimelineLatestRun["status"] } | null;
@@ -387,7 +397,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
   awaitingUser = null,
   awaitingRequestId = null,
   listRef,
-  timelineEntries,
+  timelineEntries: ungroupedEntries,
+  contextArchives,
+  archiveImportedHistory = false,
+  renderContextArchive,
   findOpen = false,
   findExpanded = false,
   findQuery = "",
@@ -504,6 +517,63 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const normalizedFindQuery = findQuery.trim();
   const findActive = findExpanded;
+  const runs = useStableHandoffRuns(runsProp);
+  const archiveRevealKey = `${citationRequest?.key ?? ""}:${findNavigationId}:${listIdentityKey}`;
+  const [archiveDisclosures, setArchiveDisclosures] = useState({
+    threadKey: listIdentityKey,
+    expanded: EMPTY_CONTEXT_ARCHIVE_IDS,
+    closed: EMPTY_CONTEXT_ARCHIVE_IDS,
+    revealKey: archiveRevealKey,
+  });
+  const expandedArchives =
+    archiveDisclosures.threadKey === listIdentityKey
+      ? archiveDisclosures.expanded
+      : EMPTY_CONTEXT_ARCHIVE_IDS;
+  const timelineEntries = groupContextArchiveEntries({
+    entries: ungroupedEntries,
+    archives: contextArchives,
+    archiveImportedHistory,
+    runs,
+    expanded: expandedArchives,
+    closed:
+      archiveDisclosures.revealKey === archiveRevealKey
+        ? archiveDisclosures.closed
+        : EMPTY_CONTEXT_ARCHIVE_IDS,
+    revealEntryIds: [
+      citationRequest?.citation.messageId,
+      findActive ? activeFindMatch?.entryId : undefined,
+      rememberedPosition?.atEnd === false ? rememberedPosition.rowId : undefined,
+    ],
+  });
+  const toggleArchive = (archive: Extract<TimelineEntry, { kind: "context-archive" }>) => {
+    const { threadId } = archive;
+    const expanded = new Set(expandedArchives);
+    const closed = new Set(
+      archiveDisclosures.revealKey === archiveRevealKey
+        ? archiveDisclosures.closed
+        : EMPTY_CONTEXT_ARCHIVE_IDS,
+    );
+    if (archive.expanded) {
+      expanded.delete(threadId);
+      closed.add(threadId);
+    } else {
+      expanded.add(threadId);
+      closed.delete(threadId);
+      if (
+        !archive.hasLoadedEntries &&
+        historyControls?.hasMoreHistory &&
+        !historyControls.loading
+      ) {
+        historyControls.onLoadEarlier();
+      }
+    }
+    setArchiveDisclosures({
+      threadKey: listIdentityKey,
+      expanded,
+      closed,
+      revealKey: archiveRevealKey,
+    });
+  };
 
   const disclosureRevealRef = useRef<{
     key: string;
@@ -792,8 +862,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
     (approval) =>
       isVisiblePendingApproval(approval) && !matchedApprovalRequestIds.has(approval.requestId),
   );
-  // Run status/timestamps change per stream event; keep them out of shared row context.
-  const runs = useStableHandoffRuns(runsProp);
   const minimapItems = mergeUnloadedUserTurns(deriveTimelineMinimapItems(rows), userTurns);
   const markedMinimapItems =
     branchOriginMessageIds?.size || followUpMessageIds?.size
@@ -1399,7 +1467,13 @@ const ConversationTimeline = memo(function ConversationTimeline({
           data-timeline-root="true"
         >
           <AudioPreviewUnmountContext value={onAudioUnmount}>
-            <TimelineRowContent row={item} />
+            {item.kind === "context-archive" ? (
+              <div data-timeline-row-id={item.id}>
+                {renderContextArchive?.(item, () => toggleArchive(item))}
+              </div>
+            ) : (
+              <TimelineRowContent row={item} />
+            )}
           </AudioPreviewUnmountContext>
         </div>
       </div>
