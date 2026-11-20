@@ -340,6 +340,22 @@ describe("GhosttyTerminalSurface visibility", () => {
     expect(surface.getSelection()).toBe("");
   });
 
+  it("jumps back to the prompt when the user types while scrolled into history", async () => {
+    vi.stubGlobal("navigator", { platform: "Linux x86_64" });
+    const harness = createHarness();
+    const surface = await harness.create({ beforeKey: () => true });
+    surface.write(Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\r\n"));
+    key(surface, "PageUp", "PageUp", { shiftKey: true });
+    expect(surface.isAtBottom()).toBe(false);
+
+    key(surface, "Shift", "ShiftLeft", { shiftKey: true });
+    expect(surface.isAtBottom()).toBe(false);
+
+    key(surface, "a", "KeyA");
+    expect(harness.onData).toHaveBeenLastCalledWith("a");
+    expect(surface.isAtBottom()).toBe(true);
+  });
+
   it("suppresses local shortcut releases in Kitty sessions, including read-only observers", async () => {
     vi.stubGlobal("navigator", { platform: "Linux x86_64" });
     const harness = createHarness();

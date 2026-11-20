@@ -1031,6 +1031,7 @@ function TerminalSessionViewport({
         if (navigationData !== null) {
           event.preventDefault();
           event.stopPropagation();
+          terminalRef.current?.revealPrompt();
           void sendTerminalInput(navigationData, "Failed to move cursor");
           return false;
         }
@@ -1039,6 +1040,7 @@ function TerminalSessionViewport({
         if (deleteData !== null) {
           event.preventDefault();
           event.stopPropagation();
+          terminalRef.current?.revealPrompt();
           void sendTerminalInput(deleteData, "Failed to delete terminal input");
           return false;
         }
@@ -1046,6 +1048,7 @@ function TerminalSessionViewport({
         if (!isTerminalClearShortcut(event)) return true;
         event.preventDefault();
         event.stopPropagation();
+        terminalRef.current?.revealPrompt();
         void sendTerminalInput("\u000c", "Failed to clear terminal");
         return false;
       }
