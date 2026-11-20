@@ -529,21 +529,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
     archiveDisclosures.threadKey === listIdentityKey
       ? archiveDisclosures.expanded
       : EMPTY_CONTEXT_ARCHIVE_IDS;
+  const closedArchives =
+    archiveDisclosures.revealKey === archiveRevealKey
+      ? archiveDisclosures.closed
+      : EMPTY_CONTEXT_ARCHIVE_IDS;
+  const citedMessageId = citationRequest?.citation.messageId;
+  const foundEntryId = findActive ? activeFindMatch?.entryId : undefined;
+  const rememberedRowId =
+    rememberedPosition?.atEnd === false ? rememberedPosition.rowId : undefined;
   const timelineEntries = groupContextArchiveEntries({
     entries: ungroupedEntries,
     archives: contextArchives,
     archiveImportedHistory,
     runs,
     expanded: expandedArchives,
-    closed:
-      archiveDisclosures.revealKey === archiveRevealKey
-        ? archiveDisclosures.closed
-        : EMPTY_CONTEXT_ARCHIVE_IDS,
-    revealEntryIds: [
-      citationRequest?.citation.messageId,
-      findActive ? activeFindMatch?.entryId : undefined,
-      rememberedPosition?.atEnd === false ? rememberedPosition.rowId : undefined,
-    ],
+    closed: closedArchives,
+    revealEntryIds: [citedMessageId, foundEntryId, rememberedRowId],
   });
   const toggleArchive = (archive: Extract<TimelineEntry, { kind: "context-archive" }>) => {
     const { threadId } = archive;

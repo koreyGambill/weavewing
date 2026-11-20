@@ -2970,6 +2970,23 @@ export function sameRowsInput(
     const next = right[key];
     if (Object.is(previous, next)) continue;
     if (previous instanceof Set && next instanceof Set && shallow(previous, next)) continue;
+    // Grouping archives recreates the disclosure rows even when the visible entries are unchanged.
+    if (
+      key === "timelineEntries" &&
+      left.timelineEntries[0]?.kind === "context-archive" &&
+      right.timelineEntries[0]?.kind === "context-archive" &&
+      left.timelineEntries.length === right.timelineEntries.length &&
+      left.timelineEntries.every((entry, index) => {
+        const candidate = right.timelineEntries[index];
+        return (
+          entry === candidate ||
+          (entry.kind === "context-archive" &&
+            candidate?.kind === "context-archive" &&
+            shallow(entry, candidate))
+        );
+      })
+    )
+      continue;
     return false;
   }
   return Object.keys(left).length === Object.keys(right).length;
