@@ -285,6 +285,7 @@ import {
 } from "./preparingComposerImages";
 import { ComposerControlsBar } from "./ComposerControlsBar";
 import { ComposerContextRing } from "./ComposerContextRing";
+import type { ThreadApiCost } from "./threadCost.logic";
 import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
 import { composerCommandKeyHandler } from "./composerCommandKey";
 import { usePromptSuggestion } from "./usePromptSuggestion";
@@ -421,6 +422,7 @@ export interface ChatComposerProps {
   compactThreadUnavailable: boolean;
   compactDisabled: boolean;
   contextWindow: ContextWindowSnapshot | null;
+  threadCost: ThreadApiCost | null;
 
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -537,6 +539,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     compactThreadUnavailable,
     compactDisabled,
     contextWindow,
+    threadCost,
     resolvedTheme,
     settings,
     keybindings,
@@ -3795,6 +3798,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   {activeThreadId && !dictationTakesFooter ? (
                     <ComposerContextRing
                       usage={contextWindow}
+                      cost={threadCost}
                       compactDisabled={compactDisabled}
                       onCompact={compactThreadContextStable}
                     />

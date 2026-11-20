@@ -1,4 +1,5 @@
 import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import { formatUsd } from "@t3tools/shared/usageFormat";
 
 import { formatContextWindowTokens } from "../../lib/contextWindow";
 import { cn } from "../../lib/utils";
@@ -7,6 +8,8 @@ import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popov
 import { ComposerControl } from "./ComposerControl";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { contextBreakdown } from "./contextBreakdown.logic";
+import type { ThreadApiCost } from "./threadCost.logic";
+import { ThreadCostDetails } from "./ThreadDetailsUsage";
 
 const RING_RADIUS = 6;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -14,10 +17,12 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 /** How full the context window is, with the breakdown and Compact one click away. Static: no animation. */
 export function ComposerContextRing({
   usage,
+  cost,
   compactDisabled,
   onCompact,
 }: {
   readonly usage: ContextWindowSnapshot | null;
+  readonly cost: ThreadApiCost | null;
   readonly compactDisabled: boolean;
   readonly onCompact: () => void;
 }) {
@@ -119,6 +124,19 @@ export function ComposerContextRing({
               ))}
             </dl>
           </>
+        ) : null}
+        {cost ? (
+          <div className="mt-3 border-t pt-2 text-xs">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="font-medium">API cost</span>
+              <span className="text-muted-foreground tabular-nums">
+                {cost.costUsd === null ? "Unavailable" : formatUsd(cost.costUsd)}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-col gap-0.5">
+              <ThreadCostDetails cost={cost} headline={false} />
+            </div>
+          </div>
         ) : null}
         <div className="mt-3 flex items-center gap-2 border-t pt-2">
           <PopoverClose

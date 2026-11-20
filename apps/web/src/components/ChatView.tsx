@@ -334,6 +334,7 @@ import { PanelLayoutControls, type PanelLayoutControlsProps } from "./chat/Panel
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
+import { useThreadApiCost } from "./chat/useThreadApiCost";
 import { ChatFooterLineage } from "./chat/ChatFooterLineage";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
@@ -1544,6 +1545,13 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadLiveTokenUsage,
     activeProviderThread,
   );
+  const activeThreadApiCost = useThreadApiCost({
+    environmentId: activeThread?.environmentId ?? environmentId,
+    threadId: isServerThread ? (activeThread?.id ?? null) : null,
+    providerInstanceId: activeProviderInstanceId,
+    providers: providerStatuses,
+    settledAt: isWorking ? undefined : (activeContextWindow?.updatedAt ?? null),
+  });
   const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
   const activeWorkStartedAt =
     deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
@@ -3514,6 +3522,7 @@ export default function ChatView(props: ChatViewProps) {
                   providers: providerStatuses,
                   sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
                   contextWindow: activeContextWindow,
+                  cost: activeThreadApiCost,
                 }}
               />
 
@@ -3950,6 +3959,7 @@ export default function ChatView(props: ChatViewProps) {
                               compactThreadUnavailable={compactThreadUnavailable}
                               compactDisabled={compactDisabled}
                               contextWindow={activeContextWindow}
+                              threadCost={activeThreadApiCost}
                               resolvedTheme={resolvedTheme}
                               settings={settings}
                               keybindings={keybindings}

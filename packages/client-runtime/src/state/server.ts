@@ -1567,6 +1567,12 @@ export function createServerEnvironmentAtoms<R, E>(
         );
       },
     }),
+    // Readers pass the latest settled turn as a revision, so it refetches when a turn ends.
+    threadCost: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:thread-cost",
+      tag: WS_METHODS.serverGetThreadCost,
+      staleTimeMs: 60_000,
+    }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,

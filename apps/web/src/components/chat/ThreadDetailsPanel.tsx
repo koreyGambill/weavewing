@@ -31,6 +31,7 @@ import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
 import {
   ThreadDetailsContext,
+  ThreadDetailsCost,
   ThreadDetailsUsage,
   type ThreadDetailsUsageInput,
 } from "./ThreadDetailsUsage";
@@ -269,6 +270,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
           {visible.context && props.usage.contextWindow ? (
             <ThreadDetailsContext usage={props.usage.contextWindow} />
           ) : null}
+
+          {visible.cost && props.usage.cost ? <ThreadDetailsCost cost={props.usage.cost} /> : null}
 
           <div className="p-2 group-has-[>section>:last-child:not(:empty)]/details-items:hidden">
             <ThreadDetailsControl

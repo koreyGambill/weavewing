@@ -61,7 +61,7 @@ A separate work account is fine. Setup for two: [Codex](./providers-codex.md#use
 
 ## Can I use an API key or OpenRouter instead of a subscription?
 
-Yes. Add another provider instance in Settings and give it its own keys and endpoint. Claude has a full OpenRouter recipe. Your subscription setup stays untouched. [OpenRouter](./providers-claude.md#openrouter) · [Provider instances](./install.md#providers)
+Yes. Add another provider instance in Settings and give it its own keys and endpoint. Claude has a full OpenRouter recipe. Your subscription setup stays untouched. On a Claude or Codex API key, Thread Details and the context ring show the thread's estimated cost at list price; set a price under [Model prices](./usage.md#set-custom-model-prices) when a model has none. [OpenRouter](./providers-claude.md#openrouter) · [Provider instances](./install.md#providers)
 
 ## Does T3 Code support local models?
 

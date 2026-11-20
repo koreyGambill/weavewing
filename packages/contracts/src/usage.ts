@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { ForwardCompatibleArray, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  ForwardCompatibleArray,
+  NonNegativeInt,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 
 /** Bump for incompatible UsageSummary changes; skipped unknown array variants need no bump. */
 export const USAGE_CONTRACT_VERSION = 6 as const;
@@ -162,6 +168,28 @@ export const UsageSummary = Schema.Struct({
   modelFilter: Schema.optional(UsageModelFilter),
 });
 export type UsageSummary = typeof UsageSummary.Type;
+
+export const ThreadCostInput = Schema.Struct({ threadId: ThreadId });
+export type ThreadCostInput = typeof ThreadCostInput.Type;
+
+/** One provider instance's share of a thread, at list price from the per-turn token ledger. */
+export const ThreadCostEntry = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  tokens: NonNegativeInt,
+  /** Null when no turn's model has a known rate. */
+  costUsd: Schema.NullOr(Schema.Number),
+  /** Tokens from turns whose model has no known rate, left out of `costUsd`. */
+  unpricedTokens: NonNegativeInt,
+  /** Native subagents and compaction. The ledger gives them no cache split or model, so their price is an estimate. */
+  otherTokens: NonNegativeInt,
+  otherCostUsdEstimate: Schema.NullOr(Schema.Number),
+});
+export type ThreadCostEntry = typeof ThreadCostEntry.Type;
+
+export const ThreadCost = Schema.Struct({
+  instances: ForwardCompatibleArray(ThreadCostEntry),
+});
+export type ThreadCost = typeof ThreadCost.Type;
 
 export class UsageReadError extends Schema.TaggedError<UsageReadError>()("UsageReadError", {
   reason: Schema.Literals(["scanFailed", "invalidWindow"]),

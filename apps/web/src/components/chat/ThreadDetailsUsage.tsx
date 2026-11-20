@@ -12,6 +12,7 @@ import {
   paceOf,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
 import type { ReactNode } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -23,6 +24,7 @@ import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import type { ThreadApiCost } from "./threadCost.logic";
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: "Ahead of pace",
@@ -35,6 +37,7 @@ export interface ThreadDetailsUsageInput {
   readonly providers: readonly ServerProvider[];
   readonly sources: UsageLimitSourceSnapshots;
   readonly contextWindow: ContextWindowSnapshot | null;
+  readonly cost: ThreadApiCost | null;
 }
 
 type UsageTone = "error" | "warning" | null;
@@ -44,7 +47,7 @@ export function ThreadDetailsUsage({
   providerInstanceId,
   providers,
   sources,
-}: Omit<ThreadDetailsUsageInput, "contextWindow">) {
+}: Omit<ThreadDetailsUsageInput, "contextWindow" | "cost">) {
   const nowMinute = useNowMinute();
   const now = Date.parse(`${nowMinute}:00Z`);
   const report =
@@ -135,6 +138,68 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
         />
       </div>
     </ThreadDetailsSection>
+  );
+}
+
+/** What the thread has spent on API-key providers, at list price. */
+export function ThreadDetailsCost({ cost }: { readonly cost: ThreadApiCost }) {
+  const value = cost.costUsd === null ? "Unavailable" : formatUsd(cost.costUsd);
+  return (
+    <ThreadDetailsSection headingId="thread-details-cost-heading" title="Cost" showHeading={false}>
+      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+        <UsageRow
+          label="API cost"
+          fill={null}
+          tone={null}
+          value={value}
+          tooltip={<ThreadCostDetails cost={cost} />}
+        />
+      </div>
+    </ThreadDetailsSection>
+  );
+}
+
+/** The estimate and availability caveats shared by Thread Details and the context popover. */
+export function ThreadCostDetails({
+  cost,
+  headline = true,
+}: {
+  readonly cost: ThreadApiCost;
+  /** False where the amount is already shown beside it. */
+  readonly headline?: boolean;
+}) {
+  return (
+    <>
+      {headline ? (
+        <span className="text-foreground">
+          {cost.costUsd === null
+            ? "API cost: no saved list price covers this model"
+            : `API cost: about ${formatUsd(cost.costUsd)}`}
+        </span>
+      ) : cost.costUsd === null ? (
+        <span className="text-muted-foreground">No saved list price covers this model.</span>
+      ) : null}
+      {cost.costUsd === null ? (
+        <span className="text-muted-foreground">Set one under Usage, in Model prices.</span>
+      ) : null}
+      <span className="text-muted-foreground">
+        Estimated at list price from {formatTokens(cost.tokens + cost.otherTokens)} reported tokens.
+        Your bill may differ.
+      </span>
+      {cost.otherTokens > 0 ? (
+        <span className="text-muted-foreground">
+          Subagents and compaction ({formatTokens(cost.otherTokens)} tokens) are estimated.
+        </span>
+      ) : null}
+      {cost.unpricedTokens > 0 && cost.costUsd !== null ? (
+        <span className="text-muted-foreground">
+          {formatTokens(cost.unpricedTokens)} tokens have no list price and are left out.
+        </span>
+      ) : null}
+      {cost.excludesOtherInstances ? (
+        <span className="text-muted-foreground">Turns on subscription providers are left out.</span>
+      ) : null}
+    </>
   );
 }
 
