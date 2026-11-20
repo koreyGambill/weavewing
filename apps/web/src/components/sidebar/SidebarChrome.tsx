@@ -252,7 +252,7 @@ function SidebarUtilityItem({
   children?: ReactNode;
 }) {
   return (
-    <SidebarMenuItem className={children ? "flex min-w-0 items-center gap-1" : "shrink-0"}>
+    <SidebarMenuItem className={children ? "flex min-w-0 items-center" : "shrink-0"}>
       <div className="shrink-0">
         <Tooltip>
           <TooltipTrigger

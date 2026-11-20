@@ -68,7 +68,7 @@ export function SidebarUsageLimits() {
   if (accounts.length === 0) return null;
 
   return (
-    <div className="flex min-w-6 flex-wrap items-center">
+    <div className="ms-1 flex min-w-6 flex-wrap items-center">
       {accounts.map((account) => (
         <SubscriptionIndicator key={account.key} account={account} />
       ))}
