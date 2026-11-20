@@ -2,27 +2,25 @@ import {
   CommandId,
   OrchestrationV2PrepareSummaryHandoffError,
   type OrchestrationV2RpcSchemas,
-  MessageId,
-  ThreadId,
+  type MessageId,
+  type ThreadId,
+  latestProviderTurnForAttempt,
 } from "@t3tools/contracts";
 import * as NodeOS from "node:os";
-import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { settingsForThread } from "@t3tools/shared/serverSettings";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import {
-  HANDOFF_SUMMARY_INPUT_LIMIT,
-  NATIVE_HANDOFF_SUMMARY_PROMPT,
-} from "@t3tools/provider-core/server/textGenerationPrompts";
-import { subagentResultForRun } from "@t3tools/provider-core/server/subagentProjection";
+import { HANDOFF_SUMMARY_INPUT_LIMIT } from "@t3tools/provider-core/server/textGenerationPrompts";
+import * as ProjectStore from "./ProjectStore.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { incomingCardSummarySource, messageSummarySourceHash } from "./incomingCardSummary.ts";
 
@@ -50,7 +48,7 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const sql = yield* SqlClient.SqlClient;
-  const random = yield* SecureRandom.SecureRandom;
+  const projects = yield* ProjectStore.ProjectStoreV2;
 
   // Reserved before the call and never released, so a restart or replay cannot pay twice.
   const reserveAttempt = Effect.fn("MessageSummaryService.reserveAttempt")(function* (input: {
@@ -185,8 +183,9 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
   const prepareNativeHandoff = Effect.fn("MessageSummaryService.prepareNativeHandoff")(function* (
     sourceThreadId: ThreadId,
   ) {
-    const { thread, runs } = yield* threads
-      .getThreadRecords(sourceThreadId, ["runs"])
+    const generate = textGeneration.generateNativeHandoffSummary;
+    const { thread, runs, providerThreads, providerTurns } = yield* threads
+      .getThreadRecords(sourceThreadId, ["runs", "providerThreads", "providerTurns"])
       .pipe(Effect.mapError((cause) => new OrchestrationV2PrepareSummaryHandoffError({ cause })));
     const boundary = runs.findLast(
       (run) => run.status === "completed" && run.ordinal > (thread.contextRewind?.runOrdinal ?? 0),
@@ -196,114 +195,55 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
         "Native preparation needs a completed turn in the source conversation.",
       );
     }
-    const modelSelection = thread.modelSelection;
-    if (boundary.providerInstanceId !== modelSelection.instanceId) {
-      return nativeUnavailable(
-        "The source model uses a different provider from the latest completed turn.",
-      );
-    }
-
-    const threadId = ThreadId.make(`handoff:${yield* random.uuidV4().pipe(Effect.orDie)}`);
-    const commandId = (action: string) => CommandId.make(`${threadId}:${action}`);
-    const fork = Effect.acquireUseRelease(
-      threads
-        .dispatch({
-          type: "thread.fork",
-          commandId: commandId("fork"),
-          sourceThreadId,
-          targetThreadId: threadId,
-          sourcePoint: { type: "run", runId: boundary.id },
-          title: "Preparing handoff summary",
-          forkHistoryPolicy: "require_native",
-          createdBy: "system",
-          creationSource: "server",
-        })
-        .pipe(Effect.mapError((cause) => ({ stage: "fork" as const, cause }))),
-      () =>
-        Effect.gen(function* () {
-          yield* threads.dispatch({
-            type: "thread.runtime-mode.set",
-            commandId: commandId("mode"),
-            threadId,
-            runtimeMode: "approval-required",
-          });
-          yield* threads.dispatch({
-            type: "thread.interaction-mode.set",
-            commandId: commandId("interaction"),
-            threadId,
-            interactionMode: "default",
-          });
-          const { projectId } = thread;
-          const { run } = yield* threads.sendToThread({
-            projectId,
-            commandId: commandId("send"),
-            threadId,
-            messageId: MessageId.make(`${threadId}:prompt`),
-            origin: { kind: "user" },
-            text: NATIVE_HANDOFF_SUMMARY_PROMPT,
-            attachments: [],
-            modelSelection,
-            mode: "auto",
-            createdBy: "system",
-            creationSource: "server",
-          });
-          const waited = yield* threads.waitForThread({
-            projectId,
-            threadId,
-            runId: run.id,
-            timeoutMs: 90_000,
-          });
-          if (waited.timedOut) {
-            return nativeUnavailable("The native summary did not finish in time.");
-          }
-          const completed = waited.resultRun ?? waited.run;
-          if (completed?.status !== "completed") {
-            return nativeUnavailable("The provider did not finish the native summary turn.");
-          }
-          const records = yield* threads.getThreadRecords(
-            threadId,
-            ["messages", "turnItems", "providerTurns", "contextTransfers"],
-            {
-              messageRunIds: [completed.id],
-              turnItemRunId: completed.id,
-              turnItemTypes: ["assistant_message"],
-            },
-          );
-          if (
-            !records.contextTransfers.some(
-              (transfer) =>
-                transfer.type === "fork" &&
-                transfer.targetRunId === completed.id &&
-                transfer.resolution?.strategy === "native_fork",
-            )
-          ) {
-            return nativeUnavailable("The provider did not confirm a native history fork.");
-          }
-          const text = subagentResultForRun(records, completed, {
-            requireReport: false,
-          }).text.trim();
-          return text
-            ? ({ kind: "native_summary", text, truncated: false } as const)
-            : nativeUnavailable("The native summary turn returned no text.");
-        }).pipe(Effect.mapError((cause) => ({ stage: "run" as const, cause }))),
-      () =>
-        threads
-          .dispatch({ type: "thread.delete", commandId: commandId("close"), threadId })
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("Could not close the summary handoff fork", { threadId, cause }),
-            ),
-          ),
+    const providerThread = providerThreads.find(
+      (candidate) => candidate.id === boundary.providerThreadId,
     );
-    return yield* fork.pipe(
-      Effect.catch(({ stage, cause }) =>
-        Effect.logDebug("Native summary preparation was unavailable", { stage, cause }).pipe(
+    const providerTurn = latestProviderTurnForAttempt(
+      providerTurns.filter((candidate) => candidate.providerThreadId === providerThread?.id),
+      boundary.activeAttemptId,
+    );
+    const sessionRef = providerThread?.nativeThreadRef;
+    const turnRef = providerTurn?.nativeTurnRef;
+    if (
+      !generate ||
+      !sessionRef?.nativeId ||
+      sessionRef.strength !== "strong" ||
+      providerThread?.providerInstanceId !== boundary.modelSelection.instanceId ||
+      !turnRef?.nativeId ||
+      turnRef.driver !== sessionRef.driver ||
+      providerTurn?.status !== "completed"
+    ) {
+      return nativeUnavailable("The source turn has no usable native conversation boundary.");
+    }
+    const cwd =
+      thread.worktreePath ??
+      (yield* projects.get(thread.projectId).pipe(
+        Effect.map(Option.map((project) => project.workspaceRoot)),
+        Effect.map(Option.getOrUndefined),
+        Effect.orElseSucceed(() => undefined),
+      ));
+    if (cwd === undefined) {
+      return nativeUnavailable("The source conversation workspace is unavailable.");
+    }
+    return yield* generate({
+      cwd,
+      sourceDriver: sessionRef.driver,
+      nativeSessionId: sessionRef.nativeId,
+      nativeTurnId: turnRef.nativeId,
+      modelSelection: boundary.modelSelection,
+    }).pipe(
+      Effect.map(({ summary }) => {
+        const text = summary.trim();
+        return text
+          ? ({ kind: "native_summary", text, truncated: false } as const)
+          : nativeUnavailable("The native summary returned no text.");
+      }),
+      Effect.catch((error) =>
+        Effect.logDebug("Native summary preparation was unavailable", {
+          detail: error.detail,
+        }).pipe(
           Effect.as(
-            nativeUnavailable(
-              stage === "fork"
-                ? "The source provider cannot fork native history at the latest completed turn."
-                : "The provider could not prepare a summary in the native fork.",
-            ),
+            nativeUnavailable("The source provider could not prepare a tool-free native summary."),
           ),
         ),
       ),

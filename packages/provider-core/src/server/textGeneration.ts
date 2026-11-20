@@ -3,6 +3,7 @@ import type {
   ChatAttachment,
   ModelSelection,
   ProjectId,
+  ProviderDriverKind,
   PullRequestReviewGuide,
   TextGenerationError,
   MonitoringReviewOutput,
@@ -127,6 +128,14 @@ export interface MessageSummaryGenerationInput {
 }
 
 export interface ProviderTextGeneration {
+  /** Summarize a bounded native conversation in an isolated, non-persistent provider request. */
+  readonly generateNativeHandoffSummary?: (input: {
+    readonly cwd: string;
+    readonly sourceDriver: ProviderDriverKind;
+    readonly nativeSessionId: string;
+    readonly nativeTurnId: string;
+    readonly modelSelection: ModelSelection;
+  }) => Effect.Effect<{ readonly summary: string }, TextGenerationError>;
   readonly generateMessageSummary?: (
     input: MessageSummaryGenerationInput,
   ) => Effect.Effect<{ readonly summary: string }, TextGenerationError>;

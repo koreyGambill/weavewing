@@ -1,14 +1,11 @@
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as FileSystem from "effect/FileSystem";
 import { decodeProviderReplayNdjson } from "@t3tools/provider-testing/replayTranscript";
-import { NATIVE_HANDOFF_SUMMARY_PROMPT } from "@t3tools/provider-core/server/textGenerationPrompts";
 import { assert, it, vi } from "@effect/vitest";
 import {
   CommandId,
   EnvironmentId,
   MessageId,
-  type ModelSelection,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -26,14 +23,12 @@ import {
   makeClaudeRestartReplayHarness,
   ClaudeOrchestratorReplayHarness,
 } from "./Adapters/ClaudeAdapterV2.testkit.ts";
-import {
-  THREAD_FORK_NATIVE_SOURCE_PROMPT,
-  THREAD_FORK_NATIVE_TARGET_PROMPT,
-} from "./testkit/fixtures/shared.ts";
+import { THREAD_FORK_NATIVE_SOURCE_PROMPT } from "./testkit/fixtures/shared.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as MessageSummary from "./MessageSummaryService.ts";
+import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
@@ -89,7 +84,7 @@ function makeHarness(options: {
       Layer.provide(
         Layer.mergeAll(
           layerSettings,
-          NodeCrypto.layer,
+          ProjectStore.layer.pipe(Layer.provide(layerDatabase)),
           Layer.mock(TextGeneration.TextGeneration)({ generateMessageSummary }),
         ),
       ),
@@ -281,64 +276,24 @@ it.effect.each([true, false])(
   },
 );
 
-it.effect("prepares and cleans up a native handoff without adding a turn to the source", () =>
+it.effect("uses the source turn model and boundary without creating a handoff thread", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs.readFileString(
       `${import.meta.dirname}/testkit/fixtures/thread_fork_native/claude_transcript.ndjson`,
     );
-    const adapted = raw
-      .split("\n")
-      .map((line) => {
-        if (line.includes('"label":"query.open:fork"')) {
-          return line.replace(
-            '"permissionMode":"bypassPermissions","allowDangerouslySkipPermissions":true,',
-            '"permissionMode":"default",',
-          );
-        }
-        return line.includes('"label":"prompt.offer:2"')
-          ? line.replace(
-              JSON.stringify(THREAD_FORK_NATIVE_TARGET_PROMPT),
-              JSON.stringify(NATIVE_HANDOFF_SUMMARY_PROMPT),
-            )
-          : line;
-      })
-      .join("\n");
-    const transcript = yield* decodeProviderReplayNdjson(adapted).pipe(
-      Effect.flatMap(ClaudeOrchestratorReplayHarness.decodeTranscript),
-    );
+    const transcript = yield* decodeProviderReplayNdjson(
+      raw.slice(0, raw.indexOf('{"type":"expect_outbound","label":"session.fork"')),
+    ).pipe(Effect.flatMap(ClaudeOrchestratorReplayHarness.decodeTranscript));
     const { harness, assertComplete } = makeClaudeRestartReplayHarness(transcript);
     const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "t3-summary-native-" });
     const database = SqlitePersistence.layerMemory;
-    const selections: ModelSelection[] = [];
-    const registry = Layer.effect(
-      ProviderAdapterRegistry.ProviderAdapterRegistryV2,
-      Effect.gen(function* () {
-        const replayRegistry = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
-        return {
-          ...replayRegistry,
-          get: (instanceId) =>
-            replayRegistry.get(instanceId).pipe(
-              Effect.map((adapter) => ({
-                ...adapter,
-                openSession: (input) =>
-                  adapter.openSession(input).pipe(
-                    Effect.map((session) => ({
-                      ...session,
-                      startTurn: (turn) => {
-                        selections.push(turn.modelSelection);
-                        return session.startTurn(turn);
-                      },
-                    })),
-                  ),
-              })),
-            ),
-        };
-      }),
-    ).pipe(Layer.provide(harness.makeProviderAdapterRegistryLayer(transcript)));
+    const generate = vi.fn<
+      NonNullable<TextGeneration.TextGeneration["Service"]["generateNativeHandoffSummary"]>
+    >(() => Effect.succeed({ summary: "fork native ok" }));
     const replay = ProviderReplayHarness.layerWithRegistry(
       { name: "handoff-native", runtimePolicyOverride: { cwd: workspace } },
-      registry,
+      harness.makeProviderAdapterRegistryLayer(transcript),
       { databaseLayer: database },
     );
     const settings = ServerSettings.layerTest({});
@@ -353,8 +308,9 @@ it.effect("prepares and cleans up a native handoff without adding a turn to the 
           threadsLayer,
           settings,
           database,
-          NodeCrypto.layer,
+          ProjectStore.layer.pipe(Layer.provide(database)),
           Layer.mock(TextGeneration.TextGeneration)({
+            generateNativeHandoffSummary: generate,
             generateMessageSummary: () =>
               Effect.die("Native preparation must not generate from a portable excerpt."),
           }),
@@ -380,7 +336,7 @@ it.effect("prepares and cleans up a native handoff without adding a turn to the 
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: null,
-        worktreePath: null,
+        worktreePath: workspace,
         createdBy: "user",
         creationSource: "web",
       });
@@ -399,12 +355,38 @@ it.effect("prepares and cleans up a native handoff without adding a turn to the 
       });
       const before = yield* threads.waitForThread({ projectId, threadId, timeoutMs: 90_000 });
       assert.equal(before.run?.status, "completed");
+      yield* threads.dispatch({
+        type: "thread.model-selection.set",
+        commandId: CommandId.make("native-summary-pick-next-model"),
+        threadId,
+        modelSelection: { ...selection, options: [{ id: "effort", value: "low" }] },
+      });
       const handoff = yield* summaries.prepareHandoff({ threadId });
       assert.deepStrictEqual(handoff, {
         kind: "native_summary",
         text: "fork native ok",
         truncated: false,
       });
+      assert.deepStrictEqual(generate.mock.calls, [
+        [
+          {
+            cwd: workspace,
+            sourceDriver: ProviderDriverKind.make("claudeAgent"),
+            modelSelection: selection,
+            nativeSessionId: "8d0dafab-45d3-45eb-abef-41b9e55d5ff9",
+            nativeTurnId: "68baa075-b7d4-4689-866b-96bd51e570c3",
+          },
+        ],
+      ]);
+      generate.mockReturnValueOnce(
+        Effect.fail(
+          new TextGenerationError({
+            operation: "generateNativeHandoffSummary",
+            detail: "Provider unavailable",
+          }),
+        ),
+      );
+      assert.equal((yield* summaries.prepareHandoff({ threadId })).kind, "native_unavailable");
       const source = yield* threads.getThreadRecords(threadId, ["runs", "messages"]);
       assert.lengthOf(source.runs, 1);
       assert.lengthOf(
@@ -412,7 +394,10 @@ it.effect("prepares and cleans up a native handoff without adding a turn to the 
         1,
       );
       const shells = yield* yield* threads.readShellSnapshot();
-      assert.isFalse(shells.threads.some((shell) => shell.title === "Preparing handoff summary"));
+      assert.deepEqual(
+        shells.threads.map((shell) => shell.id),
+        [threadId],
+      );
       yield* assertComplete;
     }).pipe(Effect.provide(summaryLayer));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

@@ -1,3 +1,4 @@
+import { resolveSettings } from "@anthropic-ai/claude-agent-sdk";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -9,6 +10,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { type ClaudeSettings, TextGenerationError } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
+import { NATIVE_HANDOFF_SUMMARY_PROMPT } from "@t3tools/provider-core/server/textGenerationPrompts";
+import { compileClaudeModelSelection } from "../claudeModelOptions.ts";
 
 import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
 import {
@@ -16,6 +20,7 @@ import {
   toJsonSchemaObject,
 } from "@t3tools/provider-core/server/textGenerationUtils";
 import {
+  applyClaudePromptEffortPrefix,
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
@@ -33,10 +38,35 @@ import {
 import {
   hasClaudeManagedMcpConfig,
   makeClaudeEnvironment,
+  resolveClaudeHomePath,
 } from "../provider/Drivers/ClaudeHome.ts";
+import { customClaudeApiEndpointHost } from "../provider/Drivers/ClaudeSkills.ts";
 import { readClaudeLaunchArgSettings } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 
 const CLAUDE_TIMEOUT_MS = 180_000;
+const CLAUDE_NATIVE_SUMMARY_TIMEOUT_MS = 90_000;
+const CLAUDE_SESSION_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const decodeNativeSummary = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      subtype: Schema.Literal("success"),
+      is_error: Schema.Literal(false),
+      num_turns: Schema.Literal(1),
+      result: Schema.String,
+      session_id: Schema.String.check(Schema.isPattern(CLAUDE_SESSION_ID)),
+    }),
+  ),
+);
+const decodeClaudeAuthStatus = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      loggedIn: Schema.Literal(true),
+      authMethod: Schema.String,
+      apiProvider: Schema.Literal("firstParty"),
+      subscriptionType: Schema.optionalKey(Schema.String),
+    }),
+  ),
+);
 /** `--tools` takes bare names; patterns go in the allow list. */
 const CLAUDE_INVESTIGATION_TOOLS = "Read,Grep,Glob,Bash";
 /** In dontAsk mode every call outside this list, Bash included, is refused. */
@@ -130,8 +160,53 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       ),
     );
 
+  const spawnClaude = Effect.fn("ClaudeTextGeneration.spawnClaude")(function* (input: {
+    readonly operation: string;
+    readonly args: ReadonlyArray<string>;
+    readonly env: NodeJS.ProcessEnv;
+    readonly cwd: string;
+    readonly prompt: string;
+  }) {
+    const spawn = yield* resolveSpawnCommand(claudeSettings.binaryPath || "claude", input.args, {
+      env: input.env,
+    });
+    const child = yield* commandSpawner
+      .spawn(
+        ChildProcess.make(spawn.command, spawn.args, {
+          env: input.env,
+          cwd: input.cwd,
+          shell: spawn.shell,
+          stdin: { stream: Stream.encodeText(Stream.make(input.prompt)) },
+          forceKillAfter: "1 second",
+        }),
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          normalizeCliError("claude", input.operation, cause, "Failed to spawn Claude CLI process"),
+        ),
+      );
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        readStreamAsString(input.operation, child.stdout),
+        readStreamAsString(input.operation, child.stderr),
+        child.exitCode.pipe(
+          Effect.mapError((cause) =>
+            normalizeCliError(
+              "claude",
+              input.operation,
+              cause,
+              "Failed to read Claude CLI exit code",
+            ),
+          ),
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return { stdout, stderr, exitCode };
+  });
+
   const encodeJsonForOperation = (
-    operation: TextGenerationOperations.Operation,
+    operation: string,
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -145,6 +220,119 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           }),
       ),
     );
+
+  const generateNativeHandoffSummary: NonNullable<
+    ProviderTextGeneration["generateNativeHandoffSummary"]
+  > = Effect.fn("ClaudeTextGeneration.generateNativeHandoffSummary")(
+    function* (input) {
+      const operation = "generateNativeHandoffSummary";
+      const unavailable = (detail: string) => new TextGenerationError({ operation, detail });
+      if (
+        !CLAUDE_SESSION_ID.test(input.nativeSessionId) ||
+        !CLAUDE_SESSION_ID.test(input.nativeTurnId)
+      ) {
+        return yield* unavailable("The Claude session has no exact native message boundary.");
+      }
+      const policy = yield* Effect.tryPromise({
+        try: () => resolveSettings({ cwd: input.cwd, settingSources: [] }),
+        catch: () => unavailable("Claude's managed settings could not be inspected."),
+      });
+      const configDirectory = yield* resolveClaudeHomePath(claudeSettings, claudeEnvironment).pipe(
+        Effect.provideService(Path.Path, path),
+      );
+      const managed = yield* Effect.all([
+        hasClaudeManagedMcpConfig(),
+        fileSystem
+          .exists(path.join(configDirectory, "remote-settings.json"))
+          .pipe(
+            Effect.mapError(() => unavailable("Claude's managed settings could not be inspected.")),
+          ),
+      ]).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+      // Safe mode leaves administrator-managed hooks active.
+      if (managed.some(Boolean) || policy.sources.some(({ source }) => source === "managed")) {
+        return yield* unavailable("Claude's managed settings prevent verifying tool isolation.");
+      }
+      const auth = yield* spawnClaude({
+        operation,
+        cwd: input.cwd,
+        env: claudeEnvironment,
+        prompt: "",
+        args: ["--safe-mode", "auth", "status", "--json"],
+      }).pipe(Effect.scoped);
+      const account = yield* decodeClaudeAuthStatus(auth.stdout).pipe(
+        Effect.mapError(() => unavailable("Claude's account type could not be verified.")),
+      );
+      const personal =
+        account.authMethod === "claude.ai" &&
+        (account.subscriptionType === "pro" || account.subscriptionType === "max");
+      const customApiKey =
+        account.authMethod === "api_key" &&
+        customClaudeApiEndpointHost(claudeEnvironment.ANTHROPIC_BASE_URL) !== undefined;
+      if (auth.exitCode !== 0 || (!personal && !customApiKey)) {
+        return yield* unavailable("Claude's account can receive managed policy at startup.");
+      }
+      const catalog = yield* routeModelCatalog(yield* scopedModelCatalog, input.cwd);
+      const model = compileClaudeModelSelection(input.modelSelection, catalog);
+      const settings = yield* encodeJsonForOperation(
+        operation,
+        { ...model.settings, disableAllHooks: true },
+        "Failed to encode Claude CLI settings.",
+      );
+      const { stdout, exitCode } = yield* spawnClaude({
+        operation,
+        cwd: input.cwd,
+        env: claudeEnvironment,
+        prompt: applyClaudePromptEffortPrefix(NATIVE_HANDOFF_SUMMARY_PROMPT, model.promptEffort),
+        args: [
+          "-p",
+          "--output-format",
+          "json",
+          "--resume",
+          input.nativeSessionId,
+          "--resume-session-at",
+          input.nativeTurnId,
+          "--fork-session",
+          NO_SESSION_PERSISTENCE,
+          "--safe-mode",
+          "--disable-slash-commands",
+          "--tools",
+          "",
+          "--strict-mcp-config",
+          "--disallowedTools",
+          "mcp__*",
+          "--settings",
+          settings,
+          "--permission-mode",
+          "dontAsk",
+          "--max-turns",
+          "1",
+          "--model",
+          model.apiModelId,
+          ...(model.effort ? ["--effort", model.effort] : []),
+        ],
+      }).pipe(Effect.scoped);
+      if (exitCode !== 0) {
+        return yield* unavailable("Claude did not complete the isolated session fork.");
+      }
+      const output = yield* decodeNativeSummary(stdout).pipe(
+        Effect.mapError(() => unavailable("Claude returned no successful one-turn summary.")),
+      );
+      if (output.session_id === input.nativeSessionId) {
+        return yield* unavailable("Claude did not return a distinct forked session.");
+      }
+      return { summary: output.result };
+    },
+    Effect.timeoutOrElse({
+      duration: CLAUDE_NATIVE_SUMMARY_TIMEOUT_MS,
+      orElse: () =>
+        Effect.fail(
+          new TextGenerationError({
+            operation: "generateNativeHandoffSummary",
+            detail: "The native summary request timed out.",
+          }),
+        ),
+    }),
+  );
 
   const runClaudeJson = Effect.fn("runClaudeJson")(function* <S extends Schema.Top>({
     operation,
@@ -242,9 +430,11 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       noSessionPersistence: boolean,
     ) {
       const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
-      const spawnCommand = yield* resolveSpawnCommand(
-        claudeSettings.binaryPath || "claude",
-        [
+      return yield* spawnClaude({
+        operation,
+        cwd: workingDirectory,
+        prompt,
+        args: [
           "-p",
           "--output-format",
           "json",
@@ -275,52 +465,13 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           "--permission-mode",
           "dontAsk",
         ],
-        {
-          env: {
-            ...claudeEnvironment,
-            ...(maxOutputTokens === undefined
-              ? {}
-              : { CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxOutputTokens) }),
-          },
-        },
-      );
-      const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: {
           ...claudeEnvironment,
           ...(maxOutputTokens === undefined
             ? {}
             : { CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxOutputTokens) }),
         },
-        cwd: workingDirectory,
-        shell: spawnCommand.shell,
-        stdin: {
-          stream: Stream.encodeText(Stream.make(prompt)),
-        },
-        forceKillAfter: "1 second",
       });
-
-      const child = yield* commandSpawner
-        .spawn(command)
-        .pipe(
-          Effect.mapError((cause) =>
-            normalizeCliError("claude", operation, cause, "Failed to spawn Claude CLI process"),
-          ),
-        );
-
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [
-          readStreamAsString(operation, child.stdout),
-          readStreamAsString(operation, child.stderr),
-          child.exitCode.pipe(
-            Effect.mapError((cause) =>
-              normalizeCliError("claude", operation, cause, "Failed to read Claude CLI exit code"),
-            ),
-          ),
-        ],
-        { concurrency: "unbounded" },
-      );
-
-      return { stdout, stderr, exitCode };
     });
 
     const rawStdout = yield* runClaudeCommand(true).pipe(
@@ -405,9 +556,12 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
   });
 
-  return TextGenerationOperations.fromRunner(
-    "ClaudeTextGeneration",
-    <S extends Schema.Top>(request: TextGenerationOperations.Request<S>) =>
-      Effect.scoped(runClaudeJson(request)),
-  );
+  return {
+    ...TextGenerationOperations.fromRunner(
+      "ClaudeTextGeneration",
+      <S extends Schema.Top>(request: TextGenerationOperations.Request<S>) =>
+        Effect.scoped(runClaudeJson(request)),
+    ),
+    generateNativeHandoffSummary,
+  };
 });

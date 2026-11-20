@@ -113,6 +113,49 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
+it("shows the archived suffix inline and the full history when opened on its own", async () => {
+  const source = threadWithHistory("rewind-main", 2);
+  const archive = {
+    ...threadWithHistory("rewind-archive", 1),
+    sideChatOf: source.id,
+    contextArchive: { fromRunOrdinal: 1, throughRunOrdinal: 2, splitAfterRunOrdinal: 1 },
+    inheritedItems: source.items,
+  };
+  using _environment = installFakeEnvironment([
+    { ...source, items: source.items.slice(0, 2) },
+    archive,
+  ]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${source.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+
+  const prefix = "Answer 0 for rewind-main.";
+  const suffix = "Answer 1 for rewind-main.";
+  await expect.element(page.getByText(prefix, { exact: false })).toBeVisible();
+  await userEvent.click(page.getByRole("button", { name: "Earlier conversation", exact: true }));
+  const paneSelector = `[data-side-chat-pane="${archive.id}"]`;
+  await vi.waitFor(() => expect(document.querySelector(paneSelector)).not.toBeNull());
+  const pane = page.elementLocator(document.querySelector(paneSelector)!);
+  await expect.element(pane.getByText(suffix, { exact: false })).toBeVisible();
+  await expect
+    .element(pane.getByText("Answer 0 for rewind-archive.", { exact: false }))
+    .toBeVisible();
+  await expect.element(pane.getByText(prefix, { exact: false })).not.toBeInTheDocument();
+  await userEvent.click(pane.getByRole("button", { name: "Open full chat" }));
+  await vi.waitFor(() => expect(document.querySelector(paneSelector)).toBeNull());
+  await expect.element(page.getByText(prefix, { exact: false })).toBeVisible();
+  await expect.element(page.getByText(suffix, { exact: false })).toBeVisible();
+});
+
 it("a machine chip stashed in one thread restores with its machine in another", async () => {
   const other = threadWithHistory("thread-stash-restore", 1);
   const asking = threadWithQuestion("thread-stash-question", "Which file should change?");

@@ -1330,6 +1330,9 @@ export const layer: Layer.Layer<
                 targetThreadId: projection.thread.id,
                 modelSelection: run.modelSelection,
                 runtimePolicy: resolvedRuntimePolicy,
+                ...(requireNative && session.driver === "codex"
+                  ? { verifyTurnBoundary: true }
+                  : {}),
                 ...(sourceProviderTurn === undefined
                   ? {}
                   : { providerTurnId: sourceProviderTurn.id }),

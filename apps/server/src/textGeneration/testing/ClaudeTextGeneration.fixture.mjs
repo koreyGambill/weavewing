@@ -3,6 +3,18 @@ import * as NodeFS from "node:fs";
 const argv = process.argv.slice(2);
 const args = argv.join(" ");
 
+if (argv.includes("auth") && argv.includes("status")) {
+  process.stdout.write(
+    JSON.stringify({
+      loggedIn: true,
+      authMethod: "claude.ai",
+      apiProvider: "firstParty",
+      subscriptionType: process.env.T3_FAKE_CLAUDE_SUBSCRIPTION_TYPE ?? "max",
+    }),
+  );
+  process.exit(0);
+}
+
 function fail(message, code) {
   process.stderr.write(message + "\n");
   process.exit(code);

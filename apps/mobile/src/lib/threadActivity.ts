@@ -46,12 +46,14 @@ import {
 import type {
   ChatAttachment,
   MessageId,
+  OrchestrationV2AppThread,
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
   OrchestrationV2ExecutionNode,
   OrchestrationMessageContext,
   OrchestrationV2ProjectedTurnItem,
   OrchestrationV2RunAttempt,
+  OrchestrationV2Run,
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItem,
   OrchestrationV2UserMessageInputIntent,
@@ -209,6 +211,47 @@ export type ThreadFeedEntry = ThreadFeedEntryContent & {
   readonly continuesWorkLog?: boolean;
   readonly checkpointSummary?: ThreadCheckpointSummary;
 };
+
+/** Identifies feed rows tucked under the legacy rewind's Earlier conversation control. */
+export function isLegacyArchivedFeedEntry(input: {
+  readonly threadId: ThreadId;
+  readonly runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "ordinal" | "threadId">> | undefined;
+  readonly ranges: ReadonlyArray<
+    NonNullable<OrchestrationV2AppThread["lineage"]["contextArchive"]>
+  >;
+  readonly rewindCreatedAt: string | undefined;
+  readonly archiveImportedHistory: boolean | undefined;
+}): (entry: ThreadFeedEntry) => boolean {
+  const ranges = input.ranges.filter((range) => range.splitAfterRunOrdinal === undefined);
+  const archivedRunIds = new Set(
+    input.runs
+      ?.filter(
+        (run) =>
+          run.threadId === input.threadId &&
+          ranges.some(
+            (range) =>
+              run.ordinal >= range.fromRunOrdinal && run.ordinal <= range.throughRunOrdinal,
+          ),
+      )
+      .map((run) => run.id),
+  );
+  const hasFirstArchive = ranges.some((range) => range.fromRunOrdinal === 1);
+  return (entry) => {
+    const runId = entry.type === "message" ? entry.message.runId : entry.runId;
+    return (
+      (runId !== null && archivedRunIds.has(runId)) ||
+      (hasFirstArchive &&
+        input.rewindCreatedAt !== undefined &&
+        entry.createdAt < input.rewindCreatedAt &&
+        ((runId === null && input.archiveImportedHistory === true) ||
+          (entry.type === "message" && entry.message.visibility === "inherited") ||
+          (entry.type === "activity-group" &&
+            entry.activities.every(
+              (activity) => activity.projectedItem.visibility === "inherited",
+            ))))
+    );
+  };
+}
 
 type ThreadFeedEntryContent =
   | Extract<RawThreadFeedEntry, { type: "message" | "html-render" | "sent-message" | "mcp-app" }>

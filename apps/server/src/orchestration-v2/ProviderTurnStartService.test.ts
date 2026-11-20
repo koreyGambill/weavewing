@@ -2366,14 +2366,17 @@ effectIt.effect(
           forkHistoryPolicy: "require_native",
         })),
       });
-      harness.forkThread.mockReturnValue(
-        Effect.fail(
-          new ProviderAdapter.ProviderAdapterForkThreadError({
-            driver: ProviderDriverKind.make("codex"),
-            providerThreadId: projection.providerThreads[0]!.id,
-            cause: "Native session missing",
-          }),
-        ),
+      const fork = harness.forkThread.getMockImplementation()!;
+      harness.forkThread.mockImplementation((input) =>
+        input.verifyTurnBoundary
+          ? Effect.fail(
+              new ProviderAdapter.ProviderAdapterForkThreadError({
+                driver: ProviderDriverKind.make("codex"),
+                providerThreadId: projection.providerThreads[0]!.id,
+                cause: "Codex did not end the fork at the requested turn.",
+              }),
+            )
+          : fork(input),
       );
       yield* harness.start;
       expect(harness.projection().runs.at(-1)?.status).toBe("failed");

@@ -86,6 +86,7 @@ function getRewindToReplyDisabledReason({
   const {
     thread,
     runs,
+    attempts,
     providerThreads,
     providerTurns,
     providerSessions,
@@ -124,7 +125,9 @@ function getRewindToReplyDisabledReason({
     if (
       run?.status !== "completed" ||
       reply?.type !== "assistant_message" ||
-      reply.messageId !== messageId
+      reply.messageId !== messageId ||
+      reply.streaming ||
+      reply.status !== "completed"
     ) {
       return "Choose the final reply of a completed turn.";
     }
@@ -143,7 +146,10 @@ function getRewindToReplyDisabledReason({
     if (provider.goal?.status === "active") return "Pause the active goal before rewinding.";
     if (provider.pendingBackgroundTasks?.length)
       return "Finish provider background work before rewinding.";
-    const boundary = latestProviderTurnForAttempt(providerTurns, run.activeAttemptId);
+    const attempt = attempts.find((attempt) => attempt.id === run.activeAttemptId);
+    const boundary =
+      latestProviderTurnForAttempt(providerTurns, run.activeAttemptId) ??
+      providerTurns.find((turn) => turn.id === attempt?.providerTurnId);
     if (
       run.providerThreadId !== provider.id ||
       laterRuns.some((later) => later.providerThreadId !== provider.id) ||
@@ -152,6 +158,7 @@ function getRewindToReplyDisabledReason({
       provider.nativeThreadRef.nativeId === null ||
       provider.providerSessionId === null ||
       boundary?.status !== "completed" ||
+      reply.providerTurnId !== boundary.id ||
       boundary.providerThreadId !== provider.id ||
       boundary.nativeTurnRef?.strength !== "strong" ||
       boundary.nativeTurnRef.nativeId === null

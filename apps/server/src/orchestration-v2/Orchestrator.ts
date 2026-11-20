@@ -6650,6 +6650,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         splitSource.goal?.status === "active" ||
         (splitSource.pendingBackgroundTasks?.length ?? 0) > 0 ||
         splitBoundary?.status !== "completed" ||
+        reply.providerTurnId !== splitBoundary.id ||
         splitBoundary.nativeTurnRef?.strength !== "strong" ||
         splitBoundary.nativeTurnRef.nativeId === null ||
         splitBoundary.providerThreadId !== splitSource.id ||
@@ -6789,12 +6790,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         modelSelection,
         runtimePolicy: resolvedRuntimePolicy,
       };
-      const archiveProvider = yield* session
-        .forkThread({
-          ...forkInput,
-          targetThreadId: targetThread.id,
-        })
-        .pipe(mapDispatchError(command));
       const continuation = yield* session
         .forkThread({
           ...forkInput,
@@ -6814,18 +6809,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             invalidRewind("Codex could not create a native continuation ending at this reply."),
           ),
         );
-      const archiveRef = archiveProvider.nativeThreadRef;
       const continuationRef = continuation.nativeThreadRef;
+      if (
+        continuationRef?.strength !== "strong" ||
+        continuationRef.nativeId === null ||
+        continuationRef.nativeId === splitSource.nativeThreadRef?.nativeId
+      ) {
+        return yield* invalidRewind("Codex did not create an independent native continuation.");
+      }
+      const archiveProvider = yield* session
+        .forkThread({
+          ...forkInput,
+          targetThreadId: targetThread.id,
+        })
+        .pipe(mapDispatchError(command));
+      const archiveRef = archiveProvider.nativeThreadRef;
       if (
         archiveRef?.strength !== "strong" ||
         archiveRef.nativeId === null ||
-        continuationRef?.strength !== "strong" ||
-        continuationRef.nativeId === null ||
-        new Set([
-          splitSource.nativeThreadRef?.nativeId,
-          archiveRef.nativeId,
-          continuationRef.nativeId,
-        ]).size !== 3
+        archiveRef.nativeId === splitSource.nativeThreadRef?.nativeId ||
+        archiveRef.nativeId === continuationRef.nativeId
       ) {
         return yield* invalidRewind("Codex did not create two independent native conversations.");
       }

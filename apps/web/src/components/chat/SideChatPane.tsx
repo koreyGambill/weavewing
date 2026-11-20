@@ -134,6 +134,19 @@ export default function SideChatPane(props: {
   const snapshotLoaded = useEnvironmentShellHasSnapshot(environmentId);
   const projection = useQuietThreadProjection(shell === null ? null : threadRef)?.projection;
   const parentProjection = useQuietThreadProjection(parentRef)?.projection;
+  const archive = shell?.source.lineage.contextArchive;
+  const splitAfterRunOrdinal = archive?.splitAfterRunOrdinal;
+  const inlineArchiveRunIds =
+    inline && archive !== undefined && splitAfterRunOrdinal !== undefined
+      ? new Set(
+          parentProjection?.runs
+            .filter(
+              (run) =>
+                run.ordinal > splitAfterRunOrdinal && run.ordinal <= archive.throughRunOrdinal,
+            )
+            .map((run) => run.id),
+        )
+      : undefined;
   const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const environment = useEnvironment(environmentId);
   const refreshAvailable =
@@ -352,6 +365,7 @@ export default function SideChatPane(props: {
               embedded={props.parentPanel}
               inlineSideChatDepth={props.inlineDepth ?? 0}
               inlineSideChatExpansion={props.inlineExpansion}
+              inlineArchiveRunIds={inlineArchiveRunIds}
             />
           </ComposerHandleContext>
         </BackgroundThreadContext>

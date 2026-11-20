@@ -448,6 +448,7 @@ type ChatViewProps =
       embedded?: SideChatParentPanel;
       inlineSideChatDepth?: number;
       inlineSideChatExpansion?: InlineSideChatExpansion | undefined;
+      inlineArchiveRunIds?: ReadonlySet<RunId> | undefined;
       routeKind: "server";
       draftId?: never;
     }
@@ -460,6 +461,7 @@ type ChatViewProps =
       embedded?: never;
       inlineSideChatDepth?: never;
       inlineSideChatExpansion?: never;
+      inlineArchiveRunIds?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -479,6 +481,7 @@ export default function ChatView(props: ChatViewProps) {
     embedded: parentPanel,
     inlineSideChatDepth = 0,
     inlineSideChatExpansion,
+    inlineArchiveRunIds,
   } = props;
   const embedded = parentPanel !== undefined;
   const inlineSideChat = inlineSideChatDepth > 0;
@@ -3682,6 +3685,7 @@ export default function ChatView(props: ChatViewProps) {
                 canOperateThread={canOperateThread}
                 threadDetailRef={routeThreadDetailRef}
                 entriesInput={timelineEntriesInput}
+                inlineArchiveRunIds={inlineArchiveRunIds}
                 contextArchives={contextArchives.length > 0 ? contextArchives : undefined}
                 archiveImportedHistory={serverProjection?.thread.historyOrigin === "v1_import"}
                 renderContextArchive={

@@ -4175,7 +4175,47 @@ describe("orchestration v2 provider switching", () => {
             yield* rewind("reply-rewind:wrong-reply", replies[1]!.messageId).pipe(Effect.isFailure),
           );
           assert.lengthOf(yield* Ref.get(forkRequests), 0);
+          const eventSink = yield* EventSink.EventSinkV2;
+          const originalBoundary = before.providerTurns.find(
+            (turn) => turn.id === replies[0]!.providerTurnId,
+          )!;
+          const laterNativeTurn = {
+            ...originalBoundary,
+            id: ProviderTurnId.make("reply-rewind:later-native-turn"),
+            ordinal: before.providerTurns.at(-1)!.ordinal + 1,
+            nativeTurnRef: {
+              driver: CODEX_DRIVER,
+              nativeId: "later-native-turn",
+              strength: "strong" as const,
+            },
+          };
+          const updateLaterNativeTurn = (
+            runAttemptId: typeof boundaryRun.activeAttemptId,
+            event: string,
+          ) =>
+            Effect.gen(function* () {
+              const now = yield* DateTime.now;
+              yield* eventSink.write({
+                events: [
+                  {
+                    id: EventId.make(`reply-rewind:${event}`),
+                    type: "provider-turn.updated",
+                    threadId: root,
+                    runId: boundaryRun.id,
+                    driver: CODEX_DRIVER,
+                    providerInstanceId: CODEX_MODEL_SELECTION.instanceId,
+                    occurredAt: now,
+                    payload: { ...laterNativeTurn, runAttemptId },
+                  },
+                ],
+              });
+            });
+          yield* updateLaterNativeTurn(boundaryRun.activeAttemptId, "later-turn-without-reply");
+          assert.isTrue(yield* rewind("reply-rewind:wrong-provider-turn").pipe(Effect.isFailure));
+          assert.lengthOf(yield* Ref.get(forkRequests), 0);
+          yield* updateLaterNativeTurn(null, "unlink-later-turn");
           assert.isTrue(yield* rewind("reply-rewind:failed").pipe(Effect.isFailure));
+          assert.lengthOf(yield* Ref.get(forkRequests), 1);
           assert.equal(
             (yield* orchestrator.getThreadProjection(root)).thread.activeProviderThreadId,
             activeBefore,
@@ -4203,9 +4243,10 @@ describe("orchestration v2 provider switching", () => {
             ]);
           }
           assert.equal(branch.thread.lineage.contextArchive?.splitAfterRunOrdinal, 1);
-          const [, , fullFork, prefixFork] = yield* Ref.get(forkRequests);
+          const [, prefixFork, fullFork] = yield* Ref.get(forkRequests);
           assert.isUndefined(fullFork?.providerTurnId);
           assert.equal(prefixFork?.providerTurnId, replies[0]!.providerTurnId);
+          assert.isTrue(prefixFork?.verifyTurnBoundary);
           assert.equal(prefixFork?.sourceProviderThread.id, activeBefore);
 
           yield* send(root, "continue main");

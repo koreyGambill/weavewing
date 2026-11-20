@@ -1,17 +1,18 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ClaudeSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { expect } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
-import { processProbeSource } from "../testUtils/processProbe.ts";
+import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
 import {
   SYNTHETIC_CLAUDE_CAPABLE_MODEL,
   SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
@@ -48,7 +49,11 @@ function makeFakeClaudeBinary(dir: string, lifecyclePort?: number) {
       source:
         lifecyclePort === undefined
           ? source
-          : `process.on("SIGTERM", () => {}); ${processProbeSource(lifecyclePort)}`,
+          : `if (process.argv.includes("auth")) {
+              process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
+              process.exit(0);
+            }
+            process.on("SIGTERM", () => {}); ${processProbeSource(lifecyclePort)}`,
     });
     return binDir;
   });
@@ -59,6 +64,7 @@ function withFakeClaudeEnv<A, E, R>(
     output: string;
     rejectsNoSessionPersistence?: boolean;
     lifecyclePort?: number;
+    subscriptionType?: string;
     exitCode?: number;
     stderr?: string;
     argsMustContain?: string;
@@ -79,6 +85,7 @@ function withFakeClaudeEnv<A, E, R>(
     const hostEnv = yield* HostProcess.Environment;
     const fakeClaudeEnv: Record<string, string | undefined> = {
       T3_FAKE_CLAUDE_OUTPUT: input.output,
+      T3_FAKE_CLAUDE_SUBSCRIPTION_TYPE: input.subscriptionType,
       T3_FAKE_CLAUDE_REJECTS_NO_SESSION_PERSISTENCE: input.rejectsNoSessionPersistence
         ? "1"
         : undefined,
@@ -112,6 +119,78 @@ function withFakeClaudeEnv<A, E, R>(
 }
 
 it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
+  const nativeInput = {
+    cwd: process.cwd(),
+    sourceDriver: ProviderDriverKind.make("claudeAgent"),
+    nativeSessionId: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+    nativeTurnId: "bbbbbbbb-bbbb-4bbb-abbb-bbbbbbbbbbbb",
+    modelSelection: createModelSelection(
+      ProviderInstanceId.make("claudeAgent"),
+      SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+      [{ id: "effort", value: "high" }],
+    ),
+  };
+
+  it.effect("summarizes a bounded Claude fork without allowing a persistent retry", () =>
+    Effect.gen(function* () {
+      const output = JSON.stringify({
+        subtype: "success",
+        is_error: false,
+        num_turns: 1,
+        result: "The migration is ready.",
+        session_id: "cccccccc-cccc-4ccc-accc-cccccccccccc",
+      });
+      yield* withFakeClaudeEnv(
+        {
+          output,
+          argsMustContain: `--resume ${nativeInput.nativeSessionId} --resume-session-at ${nativeInput.nativeTurnId} --fork-session --no-session-persistence --safe-mode`,
+          argsMustNotContain: "--json-schema",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            expect(yield* textGeneration.generateNativeHandoffSummary!(nativeInput)).toEqual({
+              summary: "The migration is ready.",
+            });
+          }),
+      );
+      yield* withFakeClaudeEnv({ output, rejectsNoSessionPersistence: true }, (textGeneration) =>
+        Effect.gen(function* () {
+          expect(
+            yield* textGeneration.generateNativeHandoffSummary!(nativeInput).pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure" });
+        }),
+      );
+    }),
+  );
+
+  it.effect("declines native summary when Claude can load organization policy", () =>
+    withFakeClaudeEnv({ output: "", subscriptionType: "enterprise" }, (textGeneration) =>
+      Effect.gen(function* () {
+        const error = yield* textGeneration.generateNativeHandoffSummary!(nativeInput).pipe(
+          Effect.flip,
+        );
+        expect(error.detail).toContain("managed policy");
+      }),
+    ),
+  );
+
+  it.effect("kills the native Claude summary process when its request is interrupted", () =>
+    Effect.gen(function* () {
+      const probe = yield* makeProcessProbe;
+      yield* withFakeClaudeEnv({ output: "", lifecyclePort: probe.port }, (textGeneration) =>
+        Effect.gen(function* () {
+          const request = yield* textGeneration.generateNativeHandoffSummary!(nativeInput).pipe(
+            Effect.forkScoped,
+          );
+          yield* probe.started;
+          const cancellation = yield* Fiber.interrupt(request).pipe(Effect.forkScoped);
+          yield* probe.exited;
+          yield* Fiber.join(cancellation);
+        }),
+      );
+    }),
+  );
+
   it.effect("caps a context review outside the checkout and disables MCP tools", () =>
     withFakeClaudeEnv(
       {

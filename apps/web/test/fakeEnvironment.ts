@@ -222,6 +222,8 @@ export interface FakeThread {
   readonly worktreePath?: string;
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
+  readonly contextArchive?: OrchestrationV2ThreadShell["lineage"]["contextArchive"];
+  readonly inheritedItems?: ReadonlyArray<OrchestrationV2TurnItem>;
   /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
   readonly olderSettled?: true;
   readonly id: ThreadId;
@@ -323,6 +325,7 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
       parentThreadId: thread.sideChatOf ?? null,
       relationshipToParent: null,
       ...(thread.sideChatOf ? { sideChat: true } : {}),
+      ...(thread.contextArchive ? { contextArchive: thread.contextArchive } : {}),
     },
     forkedFrom: null,
     createdBy: "user",
@@ -349,15 +352,16 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
 
 function projectionOf(thread: FakeThread): OrchestrationV2ThreadProjection {
   const shell = shellOf(thread);
-  const visibleTurnItems: OrchestrationV2ProjectedTurnItem[] = thread.items.map(
-    (item, position) => ({
-      position,
-      visibility: "local",
-      sourceThreadId: thread.id,
-      sourceItemId: item.id,
-      item,
-    }),
-  );
+  const visibleTurnItems: OrchestrationV2ProjectedTurnItem[] = [
+    ...(thread.inheritedItems ?? []),
+    ...thread.items,
+  ].map((item, position) => ({
+    position,
+    visibility: item.threadId === thread.id ? "local" : "inherited",
+    sourceThreadId: item.threadId,
+    sourceItemId: item.id,
+    item,
+  }));
   return {
     thread: {
       id: shell.id,

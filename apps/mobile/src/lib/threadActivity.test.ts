@@ -25,6 +25,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildThreadFeed,
+  isLegacyArchivedFeedEntry,
   workEntryRowLabel,
   threadFeedCompactionLabels,
   createThreadFeedCache,
@@ -38,6 +39,32 @@ import {
 const threadId = ThreadId.make("thread-1");
 const sourceThreadId = ThreadId.make("thread-source");
 const runId = RunId.make("run-1");
+
+it("keeps the selected-reply prefix visible after a legacy rewind", () => {
+  const at = "2026-06-20T00:00:01.000Z";
+  const prefix = { ...userMessage(at), runId: RunId.make("kept-prefix") };
+  const legacy = {
+    ...userMessage(at),
+    id: TurnItemId.make("legacy-item"),
+    messageId: MessageId.make("legacy-message"),
+    runId,
+  };
+  const feed = buildThreadFeed([projected(legacy, 0), projected(prefix, 1)]);
+  const isArchived = isLegacyArchivedFeedEntry({
+    threadId,
+    runs: [
+      { id: runId, ordinal: 1, threadId },
+      { id: prefix.runId, ordinal: 2, threadId },
+    ],
+    ranges: [
+      { fromRunOrdinal: 1, throughRunOrdinal: 1 },
+      { fromRunOrdinal: 2, throughRunOrdinal: 3, splitAfterRunOrdinal: 2 },
+    ],
+    rewindCreatedAt: "2026-06-20T00:00:02.000Z",
+    archiveImportedHistory: false,
+  });
+  expect(feed.map(isArchived)).toEqual([true, false]);
+});
 
 it.each(["info", "warning", "error", undefined] as const)(
   "renders %s system notice severity",

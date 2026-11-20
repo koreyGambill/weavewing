@@ -175,11 +175,12 @@ import { orchestrationEnvironment } from "../../state/orchestration";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
 import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
 import type { RunStopPresentation } from "@t3tools/client-runtime/state/thread-execution";
-import type {
-  PendingApproval,
-  PendingUserInput,
-  ThreadFeedEntry,
-  ThreadFeedLatestRun,
+import {
+  isLegacyArchivedFeedEntry,
+  type PendingApproval,
+  type PendingUserInput,
+  type ThreadFeedEntry,
+  type ThreadFeedLatestRun,
 } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
@@ -925,34 +926,13 @@ function ThreadDetailBody(
   const archiveRanges = sideChats.flatMap((chat) =>
     chat.lineage.contextArchive ? [chat.lineage.contextArchive] : [],
   );
-  const archivedRuns = new Set(
-    props.threadRuns
-      ?.filter(
-        (run) =>
-          run.threadId === props.selectedThread.id &&
-          archiveRanges.some(
-            (range) =>
-              run.ordinal >= range.fromRunOrdinal && run.ordinal <= range.throughRunOrdinal,
-          ),
-      )
-      .map((run) => run.id),
-  );
-  const hasFirstArchive = archiveRanges.some((range) => range.fromRunOrdinal === 1);
-  const isArchived = (entry: ThreadFeedEntry) => {
-    const runId = entry.type === "message" ? entry.message.runId : entry.runId;
-    return (
-      (runId !== null && archivedRuns.has(runId)) ||
-      (hasFirstArchive &&
-        rewind !== undefined &&
-        entry.createdAt < rewind.createdAt &&
-        ((runId === null && props.archiveImportedHistory === true) ||
-          (entry.type === "message" && entry.message.visibility === "inherited") ||
-          (entry.type === "activity-group" &&
-            entry.activities.every(
-              (activity) => activity.projectedItem.visibility === "inherited",
-            ))))
-    );
-  };
+  const isArchived = isLegacyArchivedFeedEntry({
+    threadId: props.selectedThread.id,
+    runs: props.threadRuns,
+    ranges: archiveRanges,
+    rewindCreatedAt: rewind?.createdAt,
+    archiveImportedHistory: props.archiveImportedHistory,
+  });
   const [revealedArchiveFor, setRevealedArchiveFor] = useState<string | null>(null);
   const archiveKey = rewind === undefined ? null : `${selectedThreadKey}:${rewind.runId}`;
   if (

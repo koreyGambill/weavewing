@@ -96,6 +96,20 @@ export const make = Effect.gen(function* () {
     );
   });
   return TextGeneration.of({
+    generateNativeHandoffSummary: Effect.fn("TextGeneration.generateNativeHandoffSummary")(
+      function* (input) {
+        const operation = "generateNativeHandoffSummary";
+        const instance = yield* registry.getInstance(input.modelSelection.instanceId);
+        const generate = instance?.textGeneration.generateNativeHandoffSummary;
+        if (!instance?.enabled || instance.driverKind !== input.sourceDriver || !generate) {
+          return yield* new TextGenerationError({
+            operation,
+            detail: "This provider does not support tool-free native summary preparation.",
+          });
+        }
+        return yield* installationGate.execute(input.modelSelection.instanceId, generate(input));
+      },
+    ),
     generateMessageSummary: Effect.fn("TextGeneration.generateMessageSummary")(function (input) {
       return generate("generateMessageSummary", input.modelSelection, (service, modelSelection) =>
         service.generateMessageSummary

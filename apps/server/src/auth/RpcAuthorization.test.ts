@@ -225,6 +225,42 @@ describe("RPC scope middleware", () => {
   );
 });
 
+const summaryHandoffMethod = ORCHESTRATION_V2_WS_METHODS.prepareSummaryHandoff;
+const summaryHandoffGroup = WsRpcGroup.omit(
+  ...[...WsRpcGroup.requests.keys()].filter(
+    (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof summaryHandoffMethod> =>
+      tag !== summaryHandoffMethod,
+  ),
+);
+
+it.effect.each([
+  { scopes: [AuthOrchestrationOperateScope], missing: AuthOrchestrationReadScope },
+  { scopes: [AuthOrchestrationReadScope], missing: AuthOrchestrationOperateScope },
+  { scopes: [AuthOrchestrationReadScope, AuthOrchestrationOperateScope], missing: null },
+])("requires read and operate for summary preparation (missing $missing)", ({ scopes, missing }) =>
+  Effect.gen(function* () {
+    const client = yield* RpcTest.makeClient(summaryHandoffGroup).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          summaryHandoffGroup.toLayerHandler(summaryHandoffMethod, () =>
+            Effect.succeed({ kind: "excerpt" as const, text: "Conversation", truncated: false }),
+          ),
+          RpcAuthorization.layer(scopes),
+        ),
+      ),
+    );
+    const input = { threadId: ThreadId.make("summary-source"), strategy: "portable" as const };
+    if (missing === null) {
+      expect(yield* client[summaryHandoffMethod](input)).toMatchObject({ text: "Conversation" });
+    } else {
+      expect(yield* client[summaryHandoffMethod](input).pipe(Effect.flip)).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: missing,
+      });
+    }
+  }),
+);
+
 it.effect(
   "rejects status source mutations before executing a configured command or changing secrets",
   () =>

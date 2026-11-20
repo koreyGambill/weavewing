@@ -412,7 +412,9 @@ const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.laye
   ),
 );
 const layerMessageSummaryProvided = MessageSummaryService.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerTextGenerationProvided)),
+  Layer.provide(
+    Layer.mergeAll(layerThreadManagementProvided, ProjectStore.layer, layerTextGenerationProvided),
+  ),
 );
 const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
   Layer.provide(
