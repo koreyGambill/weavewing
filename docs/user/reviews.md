@@ -89,6 +89,10 @@ Notes remain private until you select text and
 add it to the composer, then send it. You can include the T3 thread ID in the file. The note includes a
 terminal resume command when the provider has a resumable session.
 
+Paste or drop PNG, JPEG, GIF, or WebP images (up to 10 MB each) into a note. T3 saves
+them in a folder beside the note file and links them relatively, so the note still shows
+them in other Markdown viewers. Images stay on disk when you delete their link.
+
 Workspace is available in web and desktop builds with workspace support. An
 older connected environment needs a build with support before it can serve the
 panel.

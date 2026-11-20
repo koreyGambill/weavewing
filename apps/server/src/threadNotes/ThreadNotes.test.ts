@@ -303,12 +303,15 @@ it.effect("stores pasted images beside the note and refuses scriptable formats",
     const h = yield* harness();
     const dataUrl = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`;
     const first = yield* h.service.saveImage({ threadId, dataUrl });
+    const note = yield* h.service.get({ threadId });
+    expect(first.notePath).toBe(note.path);
+    const stored = h.path.join(h.path.dirname(note.path), first.path);
+    const firstInode = (yield* h.fs.stat(stored)).ino;
     const again = yield* h.service.saveImage({ threadId, dataUrl });
     expect(again.path).toBe(first.path);
+    expect((yield* h.fs.stat(stored)).ino).toEqual(firstInode);
     expect(first.path).toMatch(/^thread-[0-9a-f]{20}-images\/[0-9a-f]{20}\.png$/);
-    const note = yield* h.service.get({ threadId });
-    const stored = yield* h.fs.readFile(h.path.join(h.path.dirname(note.path), first.path));
-    expect(Buffer.from(stored).toString()).toBe("png-bytes");
+    expect(Buffer.from(yield* h.fs.readFile(stored)).toString()).toBe("png-bytes");
     const svg = yield* Effect.result(
       h.service.saveImage({ threadId, dataUrl: "data:image/svg+xml;base64,PHN2Zy8+" }),
     );

@@ -41,8 +41,11 @@ export const ThreadNotesSaveImageInput = Schema.Struct({
   dataUrl: Schema.String.check(Schema.isMaxLength(THREAD_NOTES_IMAGE_DATA_URL_MAX_CHARS)),
 });
 export type ThreadNotesSaveImageInput = typeof ThreadNotesSaveImageInput.Type;
-/** The image's path relative to the note file, ready for a Markdown image link. */
-export const ThreadNotesSavedImage = Schema.Struct({ path: Schema.String });
+/** `path` is relative to `notePath`'s directory, ready for a Markdown image link. */
+export const ThreadNotesSavedImage = Schema.Struct({
+  notePath: Schema.String,
+  path: Schema.String,
+});
 export type ThreadNotesSavedImage = typeof ThreadNotesSavedImage.Type;
 export class ThreadNotesError extends Schema.TaggedError<ThreadNotesError>()("ThreadNotesError", {
   code: Schema.Literals(["storage", "conflict", "invalid", "thread", "send"]),

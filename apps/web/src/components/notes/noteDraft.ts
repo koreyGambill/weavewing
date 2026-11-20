@@ -1,7 +1,12 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  THREAD_NOTES_IMAGE_MAX_BYTES,
+  type EnvironmentId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import type { ThreadNote } from "@t3tools/contracts";
 import { create } from "zustand";
-import { persistThreadNote } from "../../state/threadNotes";
+import { readFileAsDataUrl } from "../../lib/imageCompression";
+import { persistThreadNote, saveThreadNoteImage } from "../../state/threadNotes";
 
 interface Draft {
   note: ThreadNote;
@@ -101,19 +106,42 @@ export async function retryNote(environmentId: EnvironmentId, threadId: ThreadId
   return flushNote(environmentId, threadId);
 }
 
-/** Inserts on its own line at `at`, clamped to the current text, so edits made while waiting survive. */
+/**
+ * Inserts on its own line where the cursor was when `prefix` preceded it, or at the end when the
+ * text before the cursor changed meanwhile. Returns false when the draft now belongs to another file.
+ */
 export function insertNoteText(
   environmentId: EnvironmentId,
   threadId: ThreadId,
-  at: number,
+  anchor: { readonly notePath: string; readonly prefix: string },
   insertion: string,
-) {
+): boolean {
   const current = useDrafts.getState().entries[keyFor(environmentId, threadId)];
-  if (!current) return;
-  const index = Math.min(at, current.text.length);
+  if (!current || current.note.path !== anchor.notePath) return false;
+  const index = current.text.startsWith(anchor.prefix) ? anchor.prefix.length : current.text.length;
   const before = current.text.slice(0, index);
   const after = current.text.slice(index);
   const lead = before === "" || before.endsWith("\n") ? "" : "\n";
   const trail = after.startsWith("\n") ? "" : "\n";
   editNote(environmentId, threadId, { text: `${before}${lead}${insertion}${trail}${after}` });
+  return true;
+}
+
+/** Saves one image for the note at `notePath` and returns its Markdown image link. */
+export async function saveImageLink(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  notePath: string,
+  file: File,
+): Promise<string> {
+  if (file.size > THREAD_NOTES_IMAGE_MAX_BYTES)
+    throw new Error("Images in notes must be 10 MB or smaller.");
+  const saved = await saveThreadNoteImage(environmentId, {
+    threadId,
+    dataUrl: await readFileAsDataUrl(file),
+  });
+  if (saved.notePath !== notePath)
+    throw new Error("The notes directory changed while the image was saving.");
+  const alt = file.name.replace(/\.[^.]+$/, "").replace(/[[\]\\]/g, "") || "image";
+  return `![${alt}](${saved.path})`;
 }

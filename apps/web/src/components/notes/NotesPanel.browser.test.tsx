@@ -132,7 +132,8 @@ it("previews private drafts, saves before sharing a selected range, and retains 
   expect(state.send).not.toHaveBeenCalled();
 });
 
-it("stores a pasted image beside the note and links it on its own line", async () => {
+it("links saved images where the cursor was, or at the end after earlier text changed", async () => {
+  state.saveImage.mockReset();
   const environmentId = EnvironmentId.make("notes-image");
   const threadId = ThreadId.make("notes-image");
   const note: ThreadNote = {
@@ -148,7 +149,23 @@ it("stores a pasted image beside the note and links it on its own line", async (
   state.settings.mockReturnValue(
     Atom.make(AsyncResult.success({ directory: "/notes" })).pipe(Atom.keepAlive),
   );
-  state.saveImage.mockResolvedValue({ path: "thread-abc-images/0123.png" });
+  state.save.mockImplementation(
+    async (_environmentId: EnvironmentId, input: ThreadNotesSaveInput) => ({
+      ...note,
+      text: input.text,
+    }),
+  );
+  let releaseUpload = () => {};
+  const uploadGate = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  state.saveImage
+    .mockResolvedValueOnce({ notePath: note.path, path: "thread-abc-images/0123.png" })
+    .mockRejectedValueOnce(new Error("Notes can hold PNG, JPEG, GIF, or WebP images."))
+    .mockImplementationOnce(async () => {
+      await uploadGate;
+      return { notePath: note.path, path: "thread-abc-images/4567.png" };
+    });
   await using _view = await render(
     <RegistryContext.Provider value={appAtomRegistry}>
       <NotesPanel environmentId={environmentId} threadId={threadId} />
@@ -158,17 +175,30 @@ it("stores a pasted image beside the note and links it on its own line", async (
   await expect.element(field).toHaveValue(note.text);
   const element = field.element();
   if (!(element instanceof HTMLTextAreaElement)) throw new Error("Expected textarea");
-  const clipboardData = new DataTransfer();
-  clipboardData.items.add(new File(["png"], "Screen Shot.png", { type: "image/png" }));
-  await act(() => {
-    element.setSelectionRange(7, 7);
-    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true }));
-  });
+  const paste = (at: number, ...files: File[]) =>
+    act(() => {
+      const clipboardData = new DataTransfer();
+      for (const file of files) clipboardData.items.add(file);
+      element.setSelectionRange(at, at);
+      element.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true }));
+    });
+  await paste(
+    7,
+    new File(["png"], "Screen Shot.png", { type: "image/png" }),
+    new File(["<svg/>"], "vector.png", { type: "image/png" }),
+  );
   await expect
     .element(field)
     .toHaveValue("before \n![Screen Shot](thread-abc-images/0123.png)\nafter");
+  await expect
+    .element(page.getByText("vector.png: Notes can hold PNG, JPEG, GIF, or WebP images."))
+    .toBeVisible();
   expect(state.saveImage).toHaveBeenCalledWith(environmentId, {
     threadId,
     dataUrl: expect.stringMatching(/^data:image\/png;base64,/),
   });
+  await paste(7, new File(["png"], "late.png", { type: "image/png" }));
+  await field.fill("typed first");
+  releaseUpload();
+  await expect.element(field).toHaveValue("typed first\n![late](thread-abc-images/4567.png)\n");
 });

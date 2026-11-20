@@ -10,7 +10,6 @@ import { CircleHelpIcon, EyeIcon, PencilIcon, SendIcon, SettingsIcon } from "luc
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import {
-  saveThreadNoteImage,
   threadNoteGet,
   threadNotesSettings,
   updateThreadNotesSettings,
@@ -23,7 +22,6 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ChatMarkdown from "../ChatMarkdown";
 import { randomUUID } from "../../lib/utils";
-import { readFileAsDataUrl } from "../../lib/imageCompression";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import {
   editNote,
@@ -31,9 +29,16 @@ import {
   insertNoteText,
   receiveNote,
   retryNote,
+  saveImageLink,
   useNoteDraft,
 } from "./noteDraft";
 
+// Keeps the separator for a root (/ or C:\) so relative links still resolve there.
+function noteDirectory(notePath: string) {
+  const separator = Math.max(notePath.lastIndexOf("/"), notePath.lastIndexOf("\\"));
+  const directory = notePath.slice(0, separator);
+  return directory === "" || directory.endsWith(":") ? notePath.slice(0, separator + 1) : directory;
+}
 const imageFiles = (files: FileList) => [...files].filter((file) => file.type.startsWith("image/"));
 
 export function NotesPanel({
@@ -65,22 +70,24 @@ export function NotesPanel({
   useEffect(() => {
     if (query.data) receiveNote(environmentId, query.data);
   }, [environmentId, query.data]);
-  async function insertImages(files: ReadonlyArray<File>, at: number) {
+  async function insertImages(files: ReadonlyArray<File>, cursor: number) {
+    if (!draft) return;
     setError(null);
-    try {
-      const links: string[] = [];
-      for (const file of files) {
-        const saved = await saveThreadNoteImage(environmentId, {
-          threadId,
-          dataUrl: await readFileAsDataUrl(file),
-        });
-        const alt = file.name.replace(/\.[^.]+$/, "").replace(/[[\]]/g, "") || "image";
-        links.push(`![${alt}](${saved.path})`);
+    const anchor = { notePath: draft.note.path, prefix: draft.text.slice(0, cursor) };
+    const links: string[] = [];
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
+        links.push(await saveImageLink(environmentId, threadId, anchor.notePath, file));
+      } catch (cause) {
+        failures.push(
+          `${file.name}: ${cause instanceof Error ? cause.message : "Could not save the image."}`,
+        );
       }
-      insertNoteText(environmentId, threadId, at, links.join("\n"));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the image.");
     }
+    if (links.length > 0 && !insertNoteText(environmentId, threadId, anchor, links.join("\n")))
+      failures.push("The notes directory changed while the image was saving.");
+    if (failures.length > 0) setError(failures.join(" "));
   }
   async function shareSelection() {
     const selectedText = draft?.text.slice(selection.start, selection.end);
@@ -316,7 +323,7 @@ export function NotesPanel({
                     cwd={undefined}
                     environmentId={environmentId}
                     threadRef={{ environmentId, threadId }}
-                    imageBaseDir={draft.note.path.replace(/[\\/][^\\/]*$/, "")}
+                    imageBaseDir={noteDirectory(draft.note.path)}
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">No notes yet.</p>

@@ -331,15 +331,18 @@ const make = Effect.gen(function* () {
     yield* fs
       .makeDirectory(path.join(directory, folder), { recursive: true })
       .pipe(Effect.mapError(storage));
-    // Renamed into place so a content-hash name never holds a partial write.
     const target = path.join(directory, folder, fileName);
-    const temporary = `${target}.${NodeCrypto.randomUUID()}.tmp`;
-    yield* fs.writeFile(temporary, bytes).pipe(
-      Effect.andThen(fs.rename(temporary, target)),
-      Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore)),
-      Effect.mapError(storage),
-    );
-    return { path: `${folder}/${fileName}` } satisfies ThreadNotesSavedImage;
+    // The name is the content hash, and replacing the file would break asset URLs pinned to its inode.
+    if (!(yield* fs.exists(target).pipe(Effect.mapError(storage)))) {
+      // Renamed into place so a content-hash name never holds a partial write.
+      const temporary = `${target}.${NodeCrypto.randomUUID()}.tmp`;
+      yield* fs.writeFile(temporary, bytes).pipe(
+        Effect.andThen(fs.rename(temporary, target)),
+        Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore)),
+        Effect.mapError(storage),
+      );
+    }
+    return { notePath: note.path, path: `${folder}/${fileName}` } satisfies ThreadNotesSavedImage;
   });
   return ThreadNotes.of({ get, save, settings, updateSettings, saveImage, sendSelection });
 });
