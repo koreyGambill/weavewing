@@ -432,6 +432,7 @@ type ChatViewProps =
       forceExpandedMobileComposer?: boolean;
       /** A side chat in its parent's right panel; the parent keeps the keyboard and workspace UI. */
       embedded?: SideChatParentPanel;
+      inlineSideChatDepth?: number;
       routeKind: "server";
       draftId?: never;
     }
@@ -442,6 +443,7 @@ type ChatViewProps =
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
       embedded?: never;
+      inlineSideChatDepth?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -459,8 +461,10 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
     embedded: parentPanel,
+    inlineSideChatDepth = 0,
   } = props;
   const embedded = parentPanel !== undefined;
+  const inlineSideChat = inlineSideChatDepth > 0;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -2719,7 +2723,7 @@ export default function ChatView(props: ChatViewProps) {
   const timelineSkills = activeProviderStatus
     ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
     : EMPTY_PROVIDER_SKILLS;
-  const threadFindEnabled = isServerThread && serverConfig?.threadFind === true;
+  const threadFindEnabled = !inlineSideChat && isServerThread && serverConfig?.threadFind === true;
   const isThreadFindActive = useThreadFindOpen(activeThreadRef, threadFindEnabled);
   const openThreadFindStable = useStableCallback((threadRef: ScopedThreadRef) => {
     if (threadFindEnabled && scopedThreadKey(threadRef) === activeThreadKey) {
@@ -3211,6 +3215,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   // Above the early return, where React Compiler can cache it for the side chat pane.
   const sideChatParentPanel = {
+    hostRef: routeThreadRef,
     openToolDiff: onOpenToolDiffStable,
     runShellCommand: runSideChatShellCommandStable,
   };
@@ -3232,9 +3237,11 @@ export default function ChatView(props: ChatViewProps) {
           <InlineSideChat
             key={child.id}
             child={child}
+            depth={inlineSideChatDepth + 1}
             parentRef={displayedThreadRef}
             parentPanel={parentPanel ?? sideChatParentPanel}
             expanded={inlineOpenChildren.has(child.id)}
+            onFocusParentComposer={scheduleComposerFocusStable}
             onToggle={() => setInlineChildOpen(child.id, !inlineOpenChildren.has(child.id))}
           />
         ))}
@@ -3377,8 +3384,11 @@ export default function ChatView(props: ChatViewProps) {
           threadRef={embedded || detailsInSidebar ? null : activeThreadRef}
           preview={canvasPreview}
           detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
-          composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
+          composerOverlayElement={
+            isDraftHeroState || inlineSideChat ? null : composerOverlayElement
+          }
           data-chat-workspace-drop-target="true"
+          data-inline-side-chat-canvas={inlineSideChat || undefined}
           onDragEnter={workspaceFileDropHandlers.onDragEnter}
           onDragOver={workspaceFileDropHandlers.onDragOver}
           onDragLeave={workspaceFileDropHandlers.onDragLeave}
@@ -3510,6 +3520,7 @@ export default function ChatView(props: ChatViewProps) {
             ) : null}
             <WorkspaceMutationIdContext value={workspaceMutationId}>
               <ThreadTimeline
+                inFlow={inlineSideChat}
                 pendingApprovals={pendingApprovals}
                 heldApprovalRequestIds={heldApprovalRequestIds}
                 respondingRequestIds={respondingRequestIds}
@@ -3621,7 +3632,7 @@ export default function ChatView(props: ChatViewProps) {
               />
             </WorkspaceMutationIdContext>
 
-            {showScrollToBottom && !isThreadFindActive && (
+            {!inlineSideChat && showScrollToBottom && !isThreadFindActive && (
               <ScrollToEndButton
                 bottom={scrollToEndClearance + 4}
                 summary={scrollToEndSummary}
@@ -3633,21 +3644,25 @@ export default function ChatView(props: ChatViewProps) {
           <div
             {...workspaceAreaProps("composer", 2, showProviderSubagentBar ? "Subagent" : undefined)}
             ref={(overlay: HTMLDivElement | null) => {
+              if (inlineSideChat) return;
               setComposerOverlayElement(overlay);
               attachFollowComposerOverlay(overlay);
             }}
             inert={isRevertingCheckpoint}
             data-chat-composer-overlay="true"
             className={
-              isDraftHeroState
-                ? "pointer-events-none absolute inset-0 z-20 flex items-center [@media(max-height:34rem)]:items-end"
-                : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+              inlineSideChat
+                ? "relative py-1"
+                : isDraftHeroState
+                  ? "pointer-events-none absolute inset-0 z-20 flex items-center [@media(max-height:34rem)]:items-end"
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
             }
           >
             <div ref={draftHeroTransitionGroupRef} className="chat-composer-lane w-full">
               <div
                 ref={threadPanelPopoverAnchorRef}
                 data-chat-composer-stack="true"
+                data-chat-composer-thread={routeThreadKey}
                 className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
               >
                 {isDraftHeroState ? (
@@ -3714,7 +3729,11 @@ export default function ChatView(props: ChatViewProps) {
                               cornerControls={
                                 isServerThread ? (
                                   <div className="flex flex-col items-center gap-1 @max-[16rem]/composer-surface:flex-row">
-                                    {sideChatRefreshAvailable ? (
+                                    {sideChatRefreshAvailable &&
+                                    !inlineSideChat &&
+                                    (activeThread.lineage.sideChat ||
+                                      serverConfig?.environment.capabilities.sideChatAutoContext !==
+                                        true) ? (
                                       <SideChatContextButton threadKey={routeThreadKey} />
                                     ) : null}
                                     {activeThread.lineage.sideChat !== true &&
@@ -3999,7 +4018,7 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     ) : null}
                   </div>
-                  {showComposerContextStrip || !composerLineage ? (
+                  {!inlineSideChat && (showComposerContextStrip || !composerLineage) ? (
                     <div
                       aria-hidden
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"

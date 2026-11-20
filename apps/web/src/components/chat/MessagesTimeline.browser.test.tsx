@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { injectHtmlRenderBootstrap } from "@t3tools/shared/htmlRender";
 import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
 import { flushSync } from "react-dom";
@@ -1348,16 +1349,15 @@ describe("MessagesTimeline citations", () => {
         onCiteAssistantText: () => true,
         onBranchAssistantText: parentBranch,
         renderInlineSideChats: () => (
-          <div className="h-36">
-            <MessagesTimeline
-              {...baseProps()}
-              routeThreadKey={`environment-local:${source.sourceThreadId}`}
-              timelineEntries={innerEntries}
-              onCiteAssistantText={() => true}
-              onBranchAssistantText={childBranch}
-              stableSideChatRunIds={stableSideChatRunIds}
-            />
-          </div>
+          <MessagesTimeline
+            {...baseProps()}
+            inFlow
+            routeThreadKey={`environment-local:${source.sourceThreadId}`}
+            timelineEntries={innerEntries}
+            onCiteAssistantText={() => true}
+            onBranchAssistantText={childBranch}
+            stableSideChatRunIds={stableSideChatRunIds}
+          />
         ),
       },
     );
@@ -1378,6 +1378,54 @@ describe("MessagesTimeline citations", () => {
     });
     expect(parentBranch).not.toHaveBeenCalled();
     expect(window.getSelection()?.toString().trim()).toBe(text);
+  });
+
+  it("reveals a citation three inline transcripts deep using the root scroller", async () => {
+    const branch = (depth: number): ReactNode => (
+      <MessagesTimeline
+        {...baseProps()}
+        inFlow
+        routeThreadKey={`environment-local:drill-${depth}`}
+        citationRequest={
+          depth === 3
+            ? {
+                key: "nested-citation",
+                citation: {
+                  ...CITATION_REQUEST.citation,
+                  environmentId: EnvironmentId.make("environment-local"),
+                  threadId: ThreadId.make("drill-3"),
+                  messageId: MessageId.make("drill-3"),
+                  text: "Drill 3",
+                  start: 0,
+                  end: 7,
+                },
+              }
+            : null
+        }
+        citationHistory={{ _tag: "found" }}
+        timelineEntries={[message(`Drill ${depth}`, { role: "assistant" }, `drill-${depth}`)]}
+        renderInlineSideChats={depth < 3 ? () => branch(depth + 1) : undefined}
+      />
+    );
+    await using screen = await renderTimeline(
+      [message("Parent reply", { role: "assistant" }, "parent-reply")],
+      { renderInlineSideChats: () => branch(1) },
+    );
+    await expect.element(screen.getByText("Drill 3", { exact: true })).toBeVisible();
+    const deepest = screen.getByText("Drill 3", { exact: true }).element();
+    expect(document.querySelectorAll(".messages-timeline-scroll")).toHaveLength(1);
+    expect(deepest.closest(".messages-timeline-scroll")).not.toBeNull();
+    let count = 0;
+    for (let node = deepest.parentElement; node; node = node.parentElement) {
+      if (node.hasAttribute("data-inline-side-chat-transcript")) count += 1;
+    }
+    expect(count).toBe(3);
+    await vi.waitFor(() =>
+      expect(deepest.closest("[data-assistant-citation-source]")).toHaveAttribute(
+        "data-citation-highlighted",
+        "true",
+      ),
+    );
   });
 
   it("lands a citation present at mount under StrictMode", async () => {

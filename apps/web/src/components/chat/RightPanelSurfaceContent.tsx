@@ -198,7 +198,7 @@ export function RightPanelSurfaceContent(props: {
       return (
         <SideChatPane
           key={surface.id}
-          parentRef={threadRef}
+          hostRef={threadRef}
           threadId={surface.threadId}
           parentPanel={props.sideChatParentPanel}
           onClose={() => onCloseSurface(surface)}

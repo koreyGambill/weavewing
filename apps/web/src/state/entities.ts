@@ -427,6 +427,29 @@ function shellParentThreadId(
 }
 
 /** Retains unchanged reachable shells so unrelated streams do not re-render the panel. */
+/** Finds the side chats reachable by following immediate side-chat parent links. */
+export function sideChatDescendantDepths(
+  threadId: ThreadId,
+  threads: Iterable<OrchestrationV2ThreadShell>,
+): ReadonlyMap<ThreadId, number> {
+  const children = new Map<ThreadId, ThreadId[]>();
+  for (const thread of threads) {
+    const parent = thread.lineage.parentThreadId;
+    if (!thread.lineage.sideChat || parent === null) continue;
+    const siblings = children.get(parent);
+    if (siblings) siblings.push(thread.id);
+    else children.set(parent, [thread.id]);
+  }
+  const depths = new Map([[threadId, 0]]);
+  for (const [parent, depth] of depths) {
+    for (const child of children.get(parent) ?? []) {
+      if (!depths.has(child)) depths.set(child, depth + 1);
+    }
+  }
+  depths.delete(threadId);
+  return depths;
+}
+
 export function selectThreadRelationshipShells(
   threadId: ThreadId,
   projection:
@@ -458,9 +481,11 @@ export function selectThreadRelationshipShells(
   const current = threads.find((thread) => thread.id === threadId);
   const currentParentId = current === undefined ? null : shellParentThreadId(current);
   if (currentParentId !== null) named.add(currentParentId);
+  const sideChats = sideChatDescendantDepths(threadId, threads);
   return threads.filter(
     (thread) =>
       named.has(thread.id) ||
+      sideChats.has(thread.id) ||
       shellParentThreadId(thread) === threadId ||
       (currentParentId !== null && shellParentThreadId(thread) === currentParentId),
   );

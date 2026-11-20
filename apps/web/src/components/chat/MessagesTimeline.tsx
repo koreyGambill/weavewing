@@ -36,6 +36,7 @@ const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
+  Fragment,
   memo,
   use,
   useContext,
@@ -226,6 +227,8 @@ interface MessagesTimelineProps {
   respondingRequestIds?: TimelineRowSharedState["respondingRequestIds"];
   canOperateThread?: boolean;
   onRespondToApproval?: TimelineRowSharedState["onRespondToApproval"];
+  /** Inline branches take their height from their rows and scroll with the parent timeline. */
+  inFlow?: boolean;
   citationRequest?: AssistantCitationRequest | null;
   citationHistory?: CitedHistory;
   onBranchAssistantText?: ((anchor: SideChatAnchor) => Promise<boolean>) | undefined;
@@ -358,6 +361,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   respondingRequestIds = EMPTY_RESPONDING_REQUEST_IDS,
   canOperateThread = false,
   onRespondToApproval,
+  inFlow = false,
   citationRequest = null,
   citationHistory = CITED_HISTORY_LOADING,
   onCiteAssistantText,
@@ -873,6 +877,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         })
       : null,
     viewport: timelineViewportElement,
+    inFlow,
     onManualNavigation: navigateTimeline,
   });
   const [findListReady, setFindListReady] = useState(false);
@@ -1097,7 +1102,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // force a layout on every chunk.
   const measuredLaneWidthRef = useRef<number | null>(null);
   const observeLaneWidth = (lane: HTMLDivElement | null) => {
-    if (!lane) return;
+    if (!lane || inFlow) return;
     return observeResize(lane, (entries) => {
       const width = entries.at(-1)?.contentRect.width;
       if (width === undefined || width === measuredLaneWidthRef.current) return;
@@ -1109,6 +1114,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const attachTimelineViewportElement = (viewportElement: HTMLDivElement | null) => {
     setTimelineViewportElement(viewportElement);
     if (!viewportElement) return;
+    if (inFlow) return () => setTimelineViewportElement(null);
     const stopObserving = observeResize(viewportElement, () => {
       measureTimelineGutter(viewportElement);
       scheduleMinimapRefresh();
@@ -1229,34 +1235,33 @@ const ConversationTimeline = memo(function ConversationTimeline({
       workspaceRoot={workspaceRoot}
     />
   );
-  const listHeaderLeadingContent =
-    parentThreadLink === null ? (
-      topFadeEnabled ? (
-        TIMELINE_LIST_FADE_HEADER
-      ) : (
-        TIMELINE_LIST_HEADER
-      )
+  const listHeaderLeadingContent = inFlow ? null : parentThreadLink === null ? (
+    topFadeEnabled ? (
+      TIMELINE_LIST_FADE_HEADER
     ) : (
-      <div className="messages-timeline-row-frame">
-        <div className="chat-content-lane pt-1 sm:pt-2">
-          <TimelineSystemDivider
-            label={parentThreadLink.sideChat ? "Context from" : "Subagent of"}
-            detail={
-              parentThreadLink.environmentLabel === undefined
-                ? parentThreadLink.title
-                : `${parentThreadLink.title} on ${parentThreadLink.environmentLabel}`
-            }
-            icon={parentThreadLink.sideChat ? MessagesSquareIcon : BotIcon}
-            {...(parentThreadLink.open === undefined
-              ? {}
-              : {
-                  actionLabel: parentThreadLink.actionLabel ?? "Open parent thread",
-                  onAction: parentThreadLink.open,
-                })}
-          />
-        </div>
+      TIMELINE_LIST_HEADER
+    )
+  ) : (
+    <div className="messages-timeline-row-frame">
+      <div className="chat-content-lane pt-1 sm:pt-2">
+        <TimelineSystemDivider
+          label={parentThreadLink.sideChat ? "Context from" : "Subagent of"}
+          detail={
+            parentThreadLink.environmentLabel === undefined
+              ? parentThreadLink.title
+              : `${parentThreadLink.title} on ${parentThreadLink.environmentLabel}`
+          }
+          icon={parentThreadLink.sideChat ? MessagesSquareIcon : BotIcon}
+          {...(parentThreadLink.open === undefined
+            ? {}
+            : {
+                actionLabel: parentThreadLink.actionLabel ?? "Open parent thread",
+                onAction: parentThreadLink.open,
+              })}
+        />
       </div>
-    );
+    </div>
+  );
   const listHeader = (
     <>
       {parentThreadLink === null ? listHeaderLeadingContent : null}
@@ -1404,7 +1409,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const timelineListFooter = (
     <TimelineListFooter
       composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}
-      onGrow={onFooterGrow}
+      onGrow={inFlow ? undefined : onFooterGrow}
     >
       {footer}
       {unmatchedPendingApprovals.length > 0 ? (
@@ -1429,6 +1434,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   };
 
   if (showsEmptyState) {
+    if (inFlow) return activityAnnouncer;
     if (hideEmptyPlaceholder) {
       return (
         <>
@@ -1457,87 +1463,100 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <TimelineRowActivityCtx value={activityState}>
           <TooltipScrollDismissArea
             ref={attachTimelineViewportElement}
-            className="relative h-full min-h-0"
+            className={inFlow ? "relative min-w-0" : "relative h-full min-h-0"}
             data-assistant-citation-viewport="true"
           >
             {onCiteAssistantText && citationThreadRef ? (
               <AssistantSelectionToolbar
                 viewport={timelineViewportElement}
+                inFlow={inFlow}
                 threadRef={citationThreadRef}
                 onCite={onCiteAssistantText}
                 onBranch={onBranchAssistantText}
               />
             ) : null}
-            <LegendList<MessagesTimelineRow>
-              ref={setTimelineList}
-              data={rows}
-              extraData={listExtraData}
-              keyExtractor={keyExtractor}
-              getItemType={getItemType}
-              renderItem={renderItem}
-              estimatedItemSize={90}
-              initialScrollAtEnd={
-                !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
-              }
-              // Legend needs a data refresh to mount new pins without a scroll event.
-              dataVersion={`${readyCitationRequest?.key ?? listIdentityKey}:${alwaysRenderKeys.join(",")}`}
-              {...(alwaysRender ? { alwaysRender } : {})}
-              onLoad={handleListLoad}
-              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-              maintainScrollAtEnd={
-                citationPositioning ||
-                (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-                anchoredEndSpace ||
-                !liveFollowEnabled ||
-                fullscreenAppRowId !== null
-                  ? false
-                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                    : TIMELINE_MAINTAIN_SCROLL_AT_END
-              }
-              maintainVisibleContentPosition={
-                findActive ||
-                citationPositioning ||
-                (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                  ? false
-                  : maintainVisibleContentPosition
-              }
-              maintainScrollAtEndThreshold={1}
-              onScroll={handleScroll}
-              onItemSizeChanged={scheduleMinimapRefresh}
-              onMetricsChange={scheduleMinimapRefresh}
-              // Keyboard scrolling only moves the focused element; F6 and clicks land here.
-              tabIndex={-1}
-              data-workspace-focus-default
-              className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-                topFadeEnabled && "topbar-scroll-fade",
-              )}
-              ListHeaderComponent={listHeader}
-              ListFooterComponent={timelineListFooter}
-            />
-            <TimelineMinimap
-              items={markedMinimapItems}
-              hasPersistentGutter={minimapHasPersistentGutter}
-              hitStripWidth={minimapHitStripWidth}
-              currentIndex={minimapCurrentIndex}
-              atEnd={minimapAtEnd}
-              stripMap={minimapStripMap}
-              onWheel={forwardMinimapWheel}
-              onSelect={(item) => {
-                if (item.rowIndex < 0) {
-                  onRevealMessage?.(MessageId.make(item.id));
-                  return;
-                }
-                navigateTimeline();
-                void listRef.current?.scrollToIndex({
-                  index: item.rowIndex,
-                  animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-                  viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
-                });
-              }}
-            />
+            {inFlow ? (
+              <div data-inline-side-chat-transcript>
+                {listHeader}
+                {rows.map((item) => (
+                  <Fragment key={item.id}>{renderItem({ item })}</Fragment>
+                ))}
+                {timelineListFooter}
+              </div>
+            ) : (
+              <>
+                <LegendList<MessagesTimelineRow>
+                  ref={setTimelineList}
+                  data={rows}
+                  extraData={listExtraData}
+                  keyExtractor={keyExtractor}
+                  getItemType={getItemType}
+                  renderItem={renderItem}
+                  estimatedItemSize={90}
+                  initialScrollAtEnd={
+                    !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+                  }
+                  // Legend needs a data refresh to mount new pins without a scroll event.
+                  dataVersion={`${readyCitationRequest?.key ?? listIdentityKey}:${alwaysRenderKeys.join(",")}`}
+                  {...(alwaysRender ? { alwaysRender } : {})}
+                  onLoad={handleListLoad}
+                  {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+                  contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+                  maintainScrollAtEnd={
+                    citationPositioning ||
+                    (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                    anchoredEndSpace ||
+                    !liveFollowEnabled ||
+                    fullscreenAppRowId !== null
+                      ? false
+                      : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                        ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                        : TIMELINE_MAINTAIN_SCROLL_AT_END
+                  }
+                  maintainVisibleContentPosition={
+                    findActive ||
+                    citationPositioning ||
+                    (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                      ? false
+                      : maintainVisibleContentPosition
+                  }
+                  maintainScrollAtEndThreshold={1}
+                  onScroll={handleScroll}
+                  onItemSizeChanged={scheduleMinimapRefresh}
+                  onMetricsChange={scheduleMinimapRefresh}
+                  // Keyboard scrolling only moves the focused element; F6 and clicks land here.
+                  tabIndex={-1}
+                  data-workspace-focus-default
+                  className={cn(
+                    "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                    topFadeEnabled && "topbar-scroll-fade",
+                  )}
+                  ListHeaderComponent={listHeader}
+                  ListFooterComponent={timelineListFooter}
+                />
+                <TimelineMinimap
+                  items={markedMinimapItems}
+                  hasPersistentGutter={minimapHasPersistentGutter}
+                  hitStripWidth={minimapHitStripWidth}
+                  currentIndex={minimapCurrentIndex}
+                  atEnd={minimapAtEnd}
+                  stripMap={minimapStripMap}
+                  onWheel={forwardMinimapWheel}
+                  onSelect={(item) => {
+                    if (item.rowIndex < 0) {
+                      onRevealMessage?.(MessageId.make(item.id));
+                      return;
+                    }
+                    navigateTimeline();
+                    void listRef.current?.scrollToIndex({
+                      index: item.rowIndex,
+                      animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+                      viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
+                    });
+                  }}
+                />
+              </>
+            )}
           </TooltipScrollDismissArea>
         </TimelineRowActivityCtx>
       </MarkdownFindContext>

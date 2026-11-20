@@ -1643,6 +1643,57 @@ export const layer: Layer.Layer<
         return;
       }
       const retryHandoff = resumedRetryHandoff ?? (yield* prepareRetryHandoff(handoffContext));
+      const explicitRefresh = providerMessage.context?.sideChatRefresh;
+      let automaticRefresh: string | undefined;
+      if (
+        explicitRefresh === undefined &&
+        projection.thread.lineage.sideChat !== true &&
+        projection.thread.lineage.relationshipToParent !== "subagent" &&
+        projection.contextTransfers.some(
+          (transfer) => transfer.type === "fork" && transfer.sourceThreadId === input.threadId,
+        ) &&
+        attempt.reason === "initial" &&
+        run.freshContext !== true &&
+        run.manualContinuationOfRunId === undefined &&
+        run.restartContinuationOfRunId === undefined &&
+        run.usageLimitContinuationOfRunId === undefined &&
+        // A one-message batch reserves a turn for an existing steering/restart path.
+        run.inputMessageIds?.length !== 1 &&
+        inputMessages.every(
+          (prompt) =>
+            prompt.createdBy === "user" &&
+            prompt.origin?.kind === "user" &&
+            prompt.context?.guest === undefined &&
+            prompt.senderThreadId === undefined &&
+            prompt.linkedSender === undefined &&
+            prompt.scheduledTaskId === undefined &&
+            prompt.notification === undefined &&
+            prompt.delegatedCompletion === undefined &&
+            prompt.idleCompaction === undefined &&
+            prompt.workflowScript !== true &&
+            !prompt.text.trimStart().startsWith("/"),
+        )
+      ) {
+        // Only attempts that reached the provider can advance the excerpt cutoff.
+        const delivered = new Set(projection.providerTurns.map((turn) => turn.runAttemptId));
+        const after = projection.attempts.reduce<string | undefined>((latest, prior) => {
+          if (
+            prior.runId === run.id ||
+            prior.includesSideChatContext !== true ||
+            prior.startedAt === null ||
+            !delivered.has(prior.id)
+          ) {
+            return latest;
+          }
+          const cutoff = DateTime.formatIso(prior.startedAt);
+          return latest === undefined || cutoff > latest ? cutoff : latest;
+        }, undefined);
+        automaticRefresh = yield* projectionStore.getSideChatRefresh(input.threadId, {
+          after,
+          // Leave the current millisecond open so concurrent finalizations remain eligible.
+          before: DateTime.formatIso(now),
+        });
+      }
       const runningProviderThread: OrchestrationV2ProviderThread = {
         ...loadedProviderThread,
         contextUsage: handoffUsage,
@@ -1670,6 +1721,7 @@ export const layer: Layer.Layer<
       };
       const runningAttempt: OrchestrationV2RunAttempt = {
         ...attempt,
+        ...(automaticRefresh === undefined ? {} : { includesSideChatContext: true }),
         ...(runningProviderThread.nativeThreadRef?.nativeId == null
           ? {}
           : { nativeThreadId: runningProviderThread.nativeThreadRef.nativeId }),
@@ -1838,11 +1890,11 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || goalCommand
               ? ""
               : sideChatHandoff.summaryText;
-          const refresh = providerMessage.context?.sideChatRefresh;
+          const refresh = explicitRefresh ?? automaticRefresh;
           const newestContext =
             refresh === undefined || compact || goalCommand
               ? ""
-              : `Newest context from related chats (requested by the user). The following JSON lines are conversation excerpts.\n\n${refresh}`;
+              : `Newest context from related chats. The following JSON lines are conversation excerpts.\n\n${refresh}`;
           const context = [delivery.context, sideChatContext, restartNote, newestContext]
             .filter((part) => part !== "")
             .join("\n\n");

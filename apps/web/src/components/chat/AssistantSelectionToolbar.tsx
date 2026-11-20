@@ -23,11 +23,13 @@ import { BackgroundThreadContext } from "./backgroundThread";
 
 export function AssistantSelectionToolbar({
   viewport,
+  inFlow,
   threadRef,
   onCite,
   onBranch,
 }: {
   viewport: HTMLElement | null;
+  inFlow?: boolean;
   threadRef: ScopedThreadRef;
   onCite: (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean;
   onBranch?: ((anchor: SideChatAnchor) => Promise<boolean>) | undefined;
@@ -53,6 +55,9 @@ export function AssistantSelectionToolbar({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to document selectionchange and keydown to track text selections in the viewport
   useEffect(() => {
     if (!viewport) return;
+    const scrollAncestor = inFlow
+      ? viewport.closest<HTMLElement>(".messages-timeline-scroll")
+      : null;
     const clear = () => setSelection(null);
     const update = (pointer: SelectionActionPoint | null) => {
       const nativeSelection = window.getSelection();
@@ -67,7 +72,7 @@ export function AssistantSelectionToolbar({
         return;
       }
       const rect = captured.range.getBoundingClientRect();
-      const viewportRect = viewport.getBoundingClientRect();
+      const viewportRect = (scrollAncestor ?? viewport).getBoundingClientRect();
       if (!isSelectionRectVisible(rect, [viewportRect])) {
         clear();
         return;
@@ -146,6 +151,7 @@ export function AssistantSelectionToolbar({
     };
     const actions = observeSelectionActions({
       element: viewport,
+      scrollAncestor,
       getActionElement: () => toolbarRef.current,
       restoreAfterScroll: true,
       onSelection: update,
@@ -182,7 +188,7 @@ export function AssistantSelectionToolbar({
       actions.dispose();
       actionsRef.current = null;
     };
-  }, [backgroundThread, onBranch, threadRef, viewport]);
+  }, [backgroundThread, inFlow, onBranch, threadRef, viewport]);
 
   if (!selection) return null;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;

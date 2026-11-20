@@ -498,6 +498,111 @@ class ClaudeMcpRegistrationTimeoutError extends Schema.TaggedError<ClaudeMcpRegi
   {},
 ) {}
 
+it.live("delivers new side-chat excerpts once to the main chat and keeps explicit refresh", () =>
+  Effect.gen(function* () {
+    const cwd = yield* checkpointWorkspace("side-chat-auto-context");
+    const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+    const child = ThreadId.make("side-chat-auto-child");
+    const failStartOnce = yield* Ref.make(false);
+    const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+      makeTestAdapter({
+        instanceId: CODEX_MODEL_SELECTION.instanceId,
+        driver: CODEX_DRIVER,
+        capabilities: CodexProviderCapabilitiesV2,
+        modelSelection: CODEX_MODEL_SELECTION,
+        responseByRunOrdinal: {},
+        responseByThreadId: {
+          [threadId]: { 2: "New main chat result" },
+          [child]: { 1: "Branch result", 3: "A later branch result" },
+        },
+        capturedTurns,
+        failStartOnce,
+      }),
+    ]);
+    yield* Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const dispatch = Effect.fn("SideChatContextTest.dispatch")(function* (
+        target: ThreadId,
+        prompt: string,
+        refreshSideChatContext = false,
+      ) {
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(prompt),
+          threadId: target,
+          messageId: MessageId.make(prompt),
+          text: prompt,
+          attachments: [],
+          origin: { kind: "user" },
+          createdBy: "user",
+          creationSource: "web",
+          dispatchMode: { type: "start_immediately" },
+          refreshSideChatContext,
+        });
+        const settled = yield* waitForIdle(target);
+        yield* worker.drain();
+        return settled.runs.at(-1)?.status;
+      });
+      const send = Effect.fn("SideChatContextTest.send")(function* (
+        target: ThreadId,
+        prompt: string,
+        refreshSideChatContext = false,
+      ) {
+        assert.equal(yield* dispatch(target, prompt, refreshSideChatContext), "completed");
+        const turn = (yield* Ref.get(capturedTurns)).at(-1);
+        assert.equal(turn?.threadId, target);
+        return turn!.text;
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("side-chat-auto-create"),
+        threadId,
+        projectId,
+        title: "Main chat",
+        modelSelection: CODEX_MODEL_SELECTION,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("side-chat-auto-fork"),
+        sourceThreadId: threadId,
+        targetThreadId: child,
+        sourcePoint: { type: "latest_stable" },
+        sideChat: true,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      assert.equal(yield* send(threadId, "Before branch activity"), "Before branch activity");
+      yield* send(child, "Investigate the branch");
+      const first = yield* send(threadId, "Use the branch result");
+      assert.include(first, '"text":"Branch result"');
+      assert.match(first, /User message:\nUse the branch result$/);
+      assert.equal(yield* send(threadId, "Keep going"), "Keep going");
+      assert.equal(yield* send(child, "Ordinary side chat prompt"), "Ordinary side chat prompt");
+      const explicit = yield* send(child, "Refresh the side chat", true);
+      assert.include(explicit, '"text":"New main chat result"');
+      yield* Ref.set(failStartOnce, true);
+      assert.equal(yield* dispatch(threadId, "Prompt the provider refused"), "failed");
+      const later = yield* send(threadId, "Use the later result");
+      assert.include(later, '"text":"A later branch result"');
+      assert.notInclude(later, '"text":"Branch result"');
+    }).pipe(
+      Effect.provide(
+        ProviderReplayHarness.layerWithRegistry(
+          { name: "side-chat-auto-context", cwd },
+          layerRegistry,
+        ),
+      ),
+    );
+  }),
+);
+
 describe("orchestration v2 provider switching", () => {
   it.live.each([
     "compact-native",

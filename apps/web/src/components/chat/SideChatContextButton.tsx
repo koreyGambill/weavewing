@@ -4,7 +4,10 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toggleSideChatRefresh, useSideChatRefreshArmed } from "./sideChatContextRefresh";
 
-export function SideChatContextButton(props: { readonly threadKey: string }) {
+export function SideChatContextButton(props: {
+  readonly threadKey: string;
+  readonly showLabel?: boolean;
+}) {
   const armed = useSideChatRefreshArmed(props.threadKey);
   return (
     <Tooltip>
@@ -12,13 +15,14 @@ export function SideChatContextButton(props: { readonly threadKey: string }) {
         render={
           <Button
             type="button"
-            size="icon-xs"
+            size={props.showLabel ? "xs" : "icon-xs"}
             variant={armed ? "secondary" : "ghost"}
             aria-label="Get newest context"
             aria-pressed={armed}
             onClick={() => toggleSideChatRefresh(props.threadKey)}
           >
             <RefreshCwIcon />
+            {props.showLabel ? "Get newest context" : null}
           </Button>
         }
       />

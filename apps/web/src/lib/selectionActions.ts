@@ -45,12 +45,14 @@ export function isSelectionRectVisible(rect: SelectionRect, clips: readonly Sele
  */
 export function observeSelectionActions({
   element,
+  scrollAncestor,
   getActionElement,
   restoreAfterScroll = false,
   onSelection,
   onDismiss,
 }: {
   element: HTMLElement;
+  scrollAncestor?: HTMLElement | null;
   getActionElement?: () => HTMLElement | null;
   restoreAfterScroll?: boolean;
   onSelection: (pointer: SelectionActionPoint | null) => void;
@@ -170,6 +172,7 @@ export function observeSelectionActions({
   document.addEventListener("focusin", onFocusIn);
   element.addEventListener("contextmenu", onContextMenu, true);
   element.addEventListener("scroll", onScroll, true);
+  scrollAncestor?.addEventListener("scroll", onScroll);
   view.addEventListener("blur", dismiss);
   view.addEventListener("resize", dismiss);
 
@@ -197,6 +200,7 @@ export function observeSelectionActions({
       document.removeEventListener("focusin", onFocusIn);
       element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("scroll", onScroll, true);
+      scrollAncestor?.removeEventListener("scroll", onScroll);
       view.removeEventListener("blur", dismiss);
       view.removeEventListener("resize", dismiss);
     },

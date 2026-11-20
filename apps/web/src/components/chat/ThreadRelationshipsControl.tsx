@@ -29,6 +29,7 @@ import {
   resolveLatestMergeBackRun,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import {
+  AuthOrchestrationOperateScope,
   isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   NodeId,
@@ -61,6 +62,7 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
+  sideChatDescendantDepths,
   useProjects,
   useQuietThreadProjection,
   useQuietThreadShell,
@@ -78,11 +80,17 @@ import {
 import { threadEnvironment } from "../../state/threads";
 import { orchestrationEnvironment, threadTitlesRead } from "../../state/orchestration";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentQuery } from "../../state/query";
 import { AgentElapsed } from "./AgentElapsed";
 import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadRelationshipIcon";
 import { ThreadLineageWorkflowRow } from "./ThreadLineageWorkflowRow";
-import { resolveThreadOpenRoute } from "../../lib/sideChatPane";
+import { useRightPanelStore } from "../../rightPanelStore";
+import {
+  bringSideChatToDraft,
+  focusThreadDraft,
+  resolveThreadOpenRoute,
+} from "../../lib/sideChatPane";
 
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -512,6 +520,7 @@ export function ThreadRelationshipsPanel(props: {
   const parentProjection = useQuietThreadProjection(parentRef)?.projection;
   const navigate = useNavigate();
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
+  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
   const stopWorkflowCommand = useAtomCommand(orchestrationEnvironment.stopWorkflow);
@@ -576,10 +585,31 @@ export function ThreadRelationshipsPanel(props: {
     (row.edge.kind !== "subagent" || isParentThreadRelationship(row.edge, props.threadId));
   const currentProject = projects.find((project) => project.id === currentThread?.projectId);
   const latestMergeBackRun = projection === null ? null : resolveLatestMergeBackRun(projection);
-  const mergeTargetThreadId = resolveMergeBackTargetThreadId(projection);
+  const sideChat = currentThread?.lineage.sideChat === true ? currentThread : null;
+  const mergeTargetThreadId = sideChat
+    ? sideChat.lineage.parentThreadId
+    : resolveMergeBackTargetThreadId(projection);
+  const immediateRows = immediateThreadRelationships(graph, props.threadId);
+  const immediateIds = new Set(immediateRows.map((row) => row.threadId));
+  const descendants = sideChatDescendantDepths(
+    props.threadId,
+    [...graph.nodes.values()].flatMap((node) => (node.thread ? [node.thread] : [])),
+  );
+  const nestedRows = graph.edges.flatMap((edge) => {
+    const depth = descendants.get(edge.targetThreadId);
+    const thread = graph.nodes.get(edge.targetThreadId)?.thread;
+    if (
+      depth === undefined ||
+      immediateIds.has(edge.targetThreadId) ||
+      edge.kind !== "fork" ||
+      thread?.lineage.parentThreadId !== edge.sourceThreadId
+    )
+      return [];
+    return [{ threadId: edge.targetThreadId, fromThreadId: edge.sourceThreadId, depth, edge }];
+  });
   const relationshipRows = orderWebThreadLineageRows({
     graph,
-    rows: immediateThreadRelationships(graph, props.threadId),
+    rows: [...immediateRows, ...nestedRows],
     currentThreadId: props.threadId,
     mergeTargetThreadId,
   })
@@ -595,7 +625,12 @@ export function ThreadRelationshipsPanel(props: {
         ? row
         : { ...row, edge: { ...row.edge, status: workflowGroup.workflow.status } };
     });
-  const canMerge = mergeTargetThreadId !== null && latestMergeBackRun !== null;
+  const isSideChat = sideChat !== null;
+  const canMerge =
+    mergeTargetThreadId !== null &&
+    (isSideChat
+      ? canOperate && projection?.runs.some((run) => run.userMessageId !== null) === true
+      : latestMergeBackRun !== null);
   const unlistedThreadIds = relationshipRows
     .filter(
       ({ threadId, edge }) =>
@@ -713,7 +748,16 @@ export function ThreadRelationshipsPanel(props: {
   };
 
   const merge = async () => {
-    if (!latestMergeBackRun || mergeTargetThreadId === null || busyAction !== null) return;
+    if (mergeTargetThreadId === null || busyAction !== null) return;
+    if (sideChat) {
+      if (!canMerge) return;
+      const parent = scopeThreadRef(props.environmentId, mergeTargetThreadId);
+      bringSideChatToDraft(parent, ref, sideChat.title);
+      await navigate({ to: "/$environmentId/$threadId", params: parent });
+      focusThreadDraft(parent);
+      return;
+    }
+    if (!latestMergeBackRun) return;
     if (mergeErrorToastId.current !== null) {
       toastManager.close(mergeErrorToastId.current);
       mergeErrorToastId.current = null;
@@ -812,7 +856,9 @@ export function ThreadRelationshipsPanel(props: {
           : GitForkIcon;
     const relationship =
       node?.thread?.lineage.sideChat === true && !isParent
-        ? "Side chat"
+        ? node.thread.lineage.parentThreadId === props.threadId
+          ? "Side chat"
+          : `Side chat of ${graph.nodes.get(edge.sourceThreadId)?.thread?.title ?? "parent thread"}`
         : relationshipLabel(edge, props.threadId);
     const projectedAgent = isSubagent && !isParent ? subagentsByThreadId.get(threadId) : undefined;
     const workflowGroup =
@@ -925,7 +971,13 @@ export function ThreadRelationshipsPanel(props: {
               size="sm"
               variant="ghost"
               part={workflowGroup ? "primary" : "row"}
-              onClick={() => openThread(threadId)}
+              onClick={() => {
+                if (!isParent && descendants.has(threadId)) {
+                  useRightPanelStore.getState().openSideChat(ref, threadId);
+                } else {
+                  openThread(threadId);
+                }
+              }}
             />
           }
         >
@@ -982,9 +1034,11 @@ export function ThreadRelationshipsPanel(props: {
                     variant="ghost"
                     part="secondary"
                     aria-label={
-                      parentTitle
-                        ? `Merge back to ${parentTitle}`
-                        : "Merge back to source conversation"
+                      isSideChat
+                        ? `Bring back to ${parentTitle ?? "parent thread"}`
+                        : parentTitle
+                          ? `Merge back to ${parentTitle}`
+                          : "Merge back to source conversation"
                     }
                     aria-disabled={!canMerge || busyAction !== null || undefined}
                     onClick={() => void merge()}
@@ -998,9 +1052,11 @@ export function ThreadRelationshipsPanel(props: {
                 }
               />
               <TooltipPopup side="left">
-                {latestMergeBackRun === null
-                  ? "Complete a run in this fork before merging it back"
-                  : `Send this conversation's new turns to ${parentTitle || "its source"}, after its current work`}
+                {isSideChat
+                  ? `Add a removable reference to the draft in ${parentTitle ?? "the parent thread"}`
+                  : latestMergeBackRun === null
+                    ? "Complete a run in this fork before merging it back"
+                    : `Send this conversation's new turns to ${parentTitle || "its source"}, after its current work`}
               </TooltipPopup>
             </Tooltip>
             <span className="shrink-0 border border-transparent ps-1 pe-2.5 text-2xs font-medium text-muted-foreground">

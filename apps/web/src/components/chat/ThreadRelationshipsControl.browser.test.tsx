@@ -29,7 +29,8 @@ vi.mock(import("@effect/atom-react"), async (original) => ({
   useAtomValue: (() => false) as never,
 }));
 
-vi.mock(import("../../state/entities"), () => ({
+vi.mock(import("../../state/entities"), async (original) => ({
+  ...(await original()),
   useQuietThreadShell: (() => null) as never,
   useQuietThreadProjection: ((ref: unknown) =>
     ref === null ? null : { projection: state.projection }) as never,
@@ -57,6 +58,8 @@ vi.mock(import("../../state/use-atom-command"), () => ({
       : AsyncResult.failure(Cause.fail(new Error("Connection lost")))) as never,
 }));
 
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import { render } from "../../../test/render";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
 import { ScrollArea } from "../ui/scroll-area";
@@ -265,6 +268,34 @@ it("shows a side chat's full title in its tooltip", async () => {
   await vi.waitFor(() =>
     expect(document.querySelector('[data-slot="tooltip-popup"]')?.textContent).toContain(longTitle),
   );
+});
+
+it("opens a nested drill in the viewing thread's side-chat tab", async () => {
+  setup();
+  const sideId = ThreadId.make("side");
+  const drillId = ThreadId.make("drill");
+  state.relatedShells = [
+    { id: sideId, title: "Side", lineage: { sideChat: true, parentThreadId: threadId } },
+    { id: drillId, title: "Nested drill", lineage: { sideChat: true, parentThreadId: sideId } },
+  ];
+  await using screen = await render(
+    <ThreadRelationshipsPanel
+      environmentId={environmentId}
+      threadId={threadId}
+      showLineage={false}
+      showSideChats
+    />,
+  );
+  const viewingRef = scopeThreadRef(environmentId, threadId);
+  try {
+    await screen.getByRole("button", { name: /Nested drill/ }).click();
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, viewingRef)
+        .activeSurfaceId,
+    ).toBe(`side-chat:${drillId}`);
+  } finally {
+    useRightPanelStore.getState().closeSurface(viewingRef, `side-chat:${drillId}`);
+  }
 });
 
 it("shows a remote subagent's full title in its tooltip even when its environment is unavailable", async () => {

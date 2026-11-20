@@ -34,11 +34,13 @@ export function useAssistantCitationTarget({
   request,
   phase,
   viewport,
+  inFlow,
   onManualNavigation,
 }: {
   request: AssistantCitationRequest | null;
   phase: CitationPhase | null;
   viewport: HTMLElement | null;
+  inFlow?: boolean;
   onManualNavigation: () => void;
 }) {
   const [settlement, setSettlement] = useState<CitationSettlement | null>(null);
@@ -137,7 +139,10 @@ export function useAssistantCitationTarget({
 
   const settled = current !== null && settlement?.target === current.target ? settlement : null;
   const target =
-    current !== null && phase?._tag === "ready" && listLoaded && settled?.dismissed !== true
+    current !== null &&
+    phase?._tag === "ready" &&
+    (listLoaded || inFlow) &&
+    settled?.dismissed !== true
       ? current.target
       : null;
   const positioning = current !== null && phase?._tag !== "failed" && settled === null;

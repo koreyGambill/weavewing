@@ -105,6 +105,7 @@ import {
   environmentContextRecord,
   terminalContextReference,
 } from "./lib/composerContextRecords";
+import { bringSideChatToDraft } from "./lib/sideChatPane";
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
 import {
   copiedComposerAttachmentFile,
@@ -772,8 +773,8 @@ describe("composerDraftStore thread contexts", () => {
   it("attaches once per thread, appends one chip, and survives persistence", () => {
     const store = useComposerDraftStore.getState();
     store.setPrompt(threadRef, "Compare with");
-    store.addThreadContexts(threadRef, [attached]);
-    store.addThreadContexts(threadRef, [attached, { ...attached, title: "renamed" }]);
+    bringSideChatToDraft(threadRef, attached, "Fix [login] flow");
+    bringSideChatToDraft(threadRef, attached, "renamed");
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft?.threadContexts).toEqual([attached]);

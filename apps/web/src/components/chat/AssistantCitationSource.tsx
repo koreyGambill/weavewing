@@ -121,11 +121,11 @@ function observeAssistantCitationSource({
   root: HTMLElement;
   itemKey: string;
   request: AssistantCitationTarget;
-  list: LegendListRef;
+  list: LegendListRef | null;
 }) {
   const activation = request.activationRef.current;
   if (activation.dismissed) return;
-  const scrollNode = list.getScrollableNode();
+  const scrollNode = list?.getScrollableNode() ?? root.closest(".messages-timeline-scroll");
   if (!(scrollNode instanceof HTMLElement)) return;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let highlighted: Highlight | null = null;
@@ -173,9 +173,11 @@ function observeAssistantCitationSource({
       finishHighlight();
       return;
     }
-    const state = list.getState();
-    const index = state.indexByKey(itemKey);
-    if (index === undefined || !(state.sizeAtIndex(index) > 0)) return;
+    const state = list?.getState();
+    if (state) {
+      const index = state.indexByKey(itemKey);
+      if (index === undefined || !(state.sizeAtIndex(index) > 0)) return;
+    }
     const range = isMessageReveal(request.citation)
       ? wholeMessageRange(root)
       : resolveAssistantCitationRange(root, request.citation);
@@ -185,38 +187,44 @@ function observeAssistantCitationSource({
       return;
     }
     if (!activation.scrolled) {
-      if (scrolling) return;
-      const scrollRect = scrollNode.getBoundingClientRect();
-      const offset = Math.max(
-        0,
-        Math.min(
-          scrollNode.scrollHeight - scrollNode.clientHeight,
-          state.scroll + rect.top - scrollRect.top - Math.min(120, scrollNode.clientHeight / 3),
-        ),
-      );
-      if (Math.abs(offset - state.scroll) > 1) {
-        scrolling = true;
-        void list.scrollToOffset({ offset, animated: !reducedMotion }).then(
-          () => {
-            scrolling = false;
-            if (!stopped && !activation.dismissed) schedule();
-          },
-          () => {
-            scrolling = false;
-            if (stopped || activation.dismissed) return;
-            activation.dismissed = true;
-            clear();
-            request.onComplete();
-            toastManager.add({
-              type: "warning",
-              title: "Could not open the cited response",
-              description: "Click the citation to try again.",
-            });
-          },
+      if (!list || !state) {
+        const viewport = scrollNode.getBoundingClientRect();
+        scrollNode.scrollTop +=
+          rect.top - viewport.top - Math.min(120, scrollNode.clientHeight / 3);
+      } else {
+        if (scrolling) return;
+        const scrollRect = scrollNode.getBoundingClientRect();
+        const offset = Math.max(
+          0,
+          Math.min(
+            scrollNode.scrollHeight - scrollNode.clientHeight,
+            state.scroll + rect.top - scrollRect.top - Math.min(120, scrollNode.clientHeight / 3),
+          ),
         );
-        return;
+        if (Math.abs(offset - state.scroll) > 1) {
+          scrolling = true;
+          void list.scrollToOffset({ offset, animated: !reducedMotion }).then(
+            () => {
+              scrolling = false;
+              if (!stopped && !activation.dismissed) schedule();
+            },
+            () => {
+              scrolling = false;
+              if (stopped || activation.dismissed) return;
+              activation.dismissed = true;
+              clear();
+              request.onComplete();
+              toastManager.add({
+                type: "warning",
+                title: "Could not open the cited response",
+                description: "Click the citation to try again.",
+              });
+            },
+          );
+          return;
+        }
+        if (rect.bottom <= scrollRect.top || rect.top >= scrollRect.bottom) return;
       }
-      if (rect.bottom <= scrollRect.top || rect.top >= scrollRect.bottom) return;
       activation.scrolled = true;
       request.onComplete();
       if (!range) {
@@ -312,14 +320,16 @@ function observeAssistantCitationSource({
   });
   observer.observe(scrollNode, { childList: true, characterData: true, subtree: true });
   const stopObservingResize = observeResize([root, scrollNode], schedule);
-  const state = list.getState();
-  const unsubscribe = [
-    state.listenToPosition(itemKey, schedule),
-    state.listen("totalSize", schedule),
-    state.listen("headerSize", schedule),
-  ];
+  const state = list?.getState();
+  const unsubscribe = state
+    ? [
+        state.listenToPosition(itemKey, schedule),
+        state.listen("totalSize", schedule),
+        state.listen("headerSize", schedule),
+      ]
+    : [];
   const cancelScroll = () => {
-    if (scrolling) {
+    if (list && scrolling) {
       scrolling = false;
       void list.scrollToOffset({
         // Legend may defer reading the offset until after the user scrolls.
@@ -372,7 +382,7 @@ export function AssistantCitationSource({
   useEffect(() => {
     const root = rootRef.current;
     const list = listRef.current;
-    if (!root || !list || !request || request.citation.messageId !== messageId) return;
+    if (!root || !request || request.citation.messageId !== messageId) return;
     return observeAssistantCitationSource({ root, itemKey, request, list });
   }, [itemKey, listRef, messageId, request]);
 

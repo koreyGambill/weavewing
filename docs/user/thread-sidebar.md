@@ -425,7 +425,9 @@ sidebar. Open **Lineage** in the thread header to find its side chats and subage
 
 Select text in an assistant reply and choose **Drill in** to start a side chat under
 that reply. Expand the annotation to ask a question, and select text in its reply
-to drill further. **Open full chat** gives the branch more room. **Jump to source**
+to drill further. **Open as side chat tab** puts the branch in a tab on the chat
+you’re viewing. You can also reopen nested branches under **Side chats** in
+**Lineage**. **Open full chat** gives the branch its own page. **Jump to source**
 takes you back to the passage, or to the fork turn for a side chat opened without a
 selection.
 
@@ -438,8 +440,9 @@ model, and reasoning level shown in the thread's composer, including for its fir
 reply. Change them for an individual side chat in its composer. Later changes to the
 parent do not change existing side chats.
 
-To use what you learned, choose **Bring back**. The thread gets the side chat with
-your next message there. Bring back is available while the thread is idle.
+To use what you learned, choose **Bring back**. This adds a removable reference to
+the parent chat’s draft and keeps any text you already typed. The parent receives
+the reference when you send the draft.
 
 Closing a side chat you never sent a message in deletes it. To delete one you used,
 choose **Delete** at the top of the side chat. Deleting a thread also deletes its
