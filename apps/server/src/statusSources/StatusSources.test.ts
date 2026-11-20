@@ -362,3 +362,31 @@ it.effect("keeps a running check's state when only sharing changes", () =>
     expect(yield* Queue.size(calls)).toBe(0);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
+
+it.effect("keeps the chosen source order through edits, restarts, and mirrors", () =>
+  Effect.gen(function* () {
+    const { service, updates } = yield* setup;
+    const names = (sources: ReadonlyArray<StatusSource>) =>
+      sources.map((source) => source.config.name);
+    const add = (name: string) => service.upsert({ name, kind: "webhook", icon: "activity" });
+    const a = yield* add("A");
+    yield* add("B");
+    const c = yield* add("C");
+    yield* service.reorder({ ids: [c.config.id, a.config.id, "missing"] });
+    expect(names(yield* service.list())).toEqual(["C", "A", "B"]);
+    yield* service.upsert({ id: a.config.id, name: "A2", kind: "webhook", icon: "activity" });
+    const restarted = yield* setup;
+    expect(names(yield* restarted.service.list())).toEqual(["C", "A2", "B"]);
+
+    const environmentId = EnvironmentId.make("environment:peer");
+    const peer = [c, a].map((source) => ({ ...source, config: { ...source.config } }));
+    const mirrorNames = Queue.take(updates).pipe(
+      Effect.map((sources) => names(sources.filter((source) => source.origin)).join()),
+    );
+    yield* service.mirror({ environmentId, label: "Peer", sources: peer });
+    while ((yield* mirrorNames) !== "Peer · C,Peer · A");
+    // A reorder alone still reaches subscribers.
+    yield* service.mirror({ environmentId, label: "Peer", sources: peer.toReversed() });
+    while ((yield* mirrorNames) !== "Peer · A,Peer · C");
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);

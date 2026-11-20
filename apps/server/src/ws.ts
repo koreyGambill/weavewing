@@ -2403,6 +2403,7 @@ export const layerWsRpc = (
         [WS_METHODS.statusSourcesSubscribe]: () => statusSources.subscribe(),
         [WS_METHODS.statusSourcesUpsert]: (input) => statusSources.upsert(input),
         [WS_METHODS.statusSourcesDelete]: (input) => statusSources.remove(input),
+        [WS_METHODS.statusSourcesReorder]: (input) => statusSources.reorder(input),
         [WS_METHODS.statusSourcesSnooze]: (input) => statusSources.snooze(input),
         [WS_METHODS.statusSourcesRotateWebhookSecret]: (input) =>
           statusSources.rotateWebhookSecret(input),

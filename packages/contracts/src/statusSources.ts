@@ -87,6 +87,10 @@ export type StatusSourceUpsertInput = typeof StatusSourceUpsertInput.Type;
 
 export const StatusSourceDeleteInput = Schema.Struct({ id: Name });
 export type StatusSourceDeleteInput = typeof StatusSourceDeleteInput.Type;
+export const StatusSourceReorderInput = Schema.Struct({
+  ids: Schema.Array(Name).check(Schema.isMaxLength(64)),
+});
+export type StatusSourceReorderInput = typeof StatusSourceReorderInput.Type;
 export const StatusSourceSnoozeInput = Schema.Struct({ id: Name, until: Schema.NullOr(Timestamp) });
 export type StatusSourceSnoozeInput = typeof StatusSourceSnoozeInput.Type;
 export const StatusSourceRotateWebhookSecretInput = StatusSourceDeleteInput;

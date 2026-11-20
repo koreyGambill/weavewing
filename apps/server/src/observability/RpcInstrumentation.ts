@@ -287,6 +287,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.statusSourcesSubscribe]: "statusSources",
   [WS_METHODS.statusSourcesUpsert]: "statusSources",
   [WS_METHODS.statusSourcesDelete]: "statusSources",
+  [WS_METHODS.statusSourcesReorder]: "statusSources",
   [WS_METHODS.statusSourcesSnooze]: "statusSources",
   [WS_METHODS.statusSourcesRotateWebhookSecret]: "statusSources",
   [WS_METHODS.notificationsSubscribe]: "notifications",

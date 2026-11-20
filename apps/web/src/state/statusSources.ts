@@ -22,6 +22,11 @@ export const statusSourcesDelete = createEnvironmentRpcCommand(connectionAtomRun
   tag: WS_METHODS.statusSourcesDelete,
 });
 
+export const statusSourcesReorder = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "status-sources:reorder",
+  tag: WS_METHODS.statusSourcesReorder,
+});
+
 export const statusSourcesSnooze = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "status-sources:snooze",
   tag: WS_METHODS.statusSourcesSnooze,

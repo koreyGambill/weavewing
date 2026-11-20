@@ -9,6 +9,9 @@ from that environment's server, so `127.0.0.1` refers to the server's machine. C
 requires the **settings** permission; snoozing needs **operate**. Agents can read status but cannot change sources or run
 commands through them.
 
+Drag a source by its handle in **Settings > Status sources** to change the order the Status panel
+shows. Linked machines show shared sources in the same order.
+
 ## Add Stormwing
 
 Choose **Wing status**, name it **Stormwing**, and use
