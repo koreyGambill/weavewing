@@ -273,6 +273,18 @@ export function ThreadTileWorkspace(props: {
   const savedLayout = useRightPanelStore((state) =>
     selectThreadTileLayout(state.byThreadKey, props.threadRef),
   );
+  const workspaceKey = `${props.threadRef.environmentId}:${props.threadRef.threadId}`;
+  const focusHistory = useRef<{ key: string; ids: readonly string[] } | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- remembers focus changes from any input so navigation can resolve a shared divider
+  useLayoutEffect(() => {
+    const previous = focusHistory.current?.key === workspaceKey ? focusHistory.current.ids : [];
+    const { focusedGroupId } = savedLayout;
+    const groups = new Set(getTileGroups(savedLayout).map(({ id }) => id));
+    focusHistory.current = {
+      key: workspaceKey,
+      ids: [focusedGroupId, ...previous.filter((id) => id !== focusedGroupId && groups.has(id))],
+    };
+  }, [savedLayout, workspaceKey]);
   const rootRef = useRef<HTMLDivElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the canvas so split minimums also hold after window resizing; measured before paint so saved ratios never flash at the minimum
@@ -735,17 +747,18 @@ export function ThreadTileWorkspace(props: {
       const group = currentGroup();
       if (!group) return;
       const current = currentLayout();
+      const recent = focusHistory.current?.ids;
+      const findTarget = (restored = false) =>
+        directionalTile(visibleGeometry(restored), group.id, direction, recent);
       // A pair moves within itself first; any other move from a maximized view restores the
       // layout and goes where the tiles sit there.
-      const shown = current.besideGroupId
-        ? directionalTile(visibleGeometry(), group.id, direction)
-        : null;
+      const shown = current.besideGroupId ? findTarget() : null;
       if (shown || !current.maximizedGroupId) {
-        const next = shown ?? directionalTile(visibleGeometry(), group.id, direction);
+        const next = shown ?? findTarget();
         if (next) focus(next);
         return;
       }
-      const next = directionalTile(visibleGeometry(true), group.id, direction);
+      const next = findTarget(true);
       if (!next) return;
       apply({ type: "maximize", groupId: null });
       focus(next);

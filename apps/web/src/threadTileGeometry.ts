@@ -91,10 +91,12 @@ export function tileGeometry(root: TileNode) {
   return { groups, splits };
 }
 
+/** Among equally near neighbors that share an edge, prefer the most recently focused. */
 export function directionalTile(
   groups: readonly { id: string; rect: TileRect }[],
   currentId: string,
   direction: "left" | "right" | "up" | "down",
+  recentIds: readonly string[] = [],
 ) {
   const current = groups.find((group) => group.id === currentId);
   if (!current) return null;
@@ -104,7 +106,9 @@ export function directionalTile(
   const currentSize = horizontal ? current.rect.width : current.rect.height;
   const currentCrossStart = horizontal ? current.rect.y : current.rect.x;
   const currentCrossSize = horizontal ? current.rect.height : current.rect.width;
-  let best: { id: string; overlap: boolean; gap: number; cross: number } | null = null;
+  const rankById = new Map(recentIds.map((id, rank) => [id, rank]));
+  let best: { id: string; overlap: boolean; gap: number; rank: number; cross: number } | null =
+    null;
   for (const group of groups) {
     if (group.id === currentId) continue;
     const start = horizontal ? group.rect.x : group.rect.y;
@@ -118,15 +122,18 @@ export function directionalTile(
         Math.max(currentCrossStart, crossStart) >
       1e-9;
     const cross = Math.abs(crossStart + crossSize / 2 - currentCrossStart - currentCrossSize / 2);
-    const candidate = { id: group.id, overlap, gap: Math.max(0, gap), cross };
+    const rank = overlap ? (rankById.get(group.id) ?? Infinity) : Infinity;
+    const candidate = { id: group.id, overlap, gap: Math.max(0, gap), rank, cross };
     if (
       !best ||
       (candidate.overlap && !best.overlap) ||
       (candidate.overlap === best.overlap &&
         (candidate.gap < best.gap ||
           (candidate.gap === best.gap &&
-            (candidate.cross < best.cross ||
-              (candidate.cross === best.cross && candidate.id < best.id)))))
+            (candidate.rank < best.rank ||
+              (candidate.rank === best.rank &&
+                (candidate.cross < best.cross ||
+                  (candidate.cross === best.cross && candidate.id < best.id)))))))
     )
       best = candidate;
   }
