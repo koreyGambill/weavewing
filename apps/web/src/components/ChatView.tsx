@@ -397,7 +397,11 @@ import {
 } from "./chat/useSystemComposerBanners";
 import { useDraftHeroLayoutTransition } from "./chat/useDraftHeroLayoutTransition";
 import { useLocalDispatchState } from "./chat/useLocalDispatchState";
-import { draftFanoutSelectionsAtom, draftSendState } from "./chat/chatViewSend";
+import {
+  draftFanoutSelectionsAtom,
+  draftSendState,
+  pendingTurnSubmissionAtom,
+} from "./chat/chatViewSend";
 import {
   isCompactCommandMessage,
   type LocalThreadErrorEntry,
@@ -1859,25 +1863,36 @@ export default function ChatView(props: ChatViewProps) {
 
   const { focusComposer: focusComposerStable, scheduleComposerFocus: scheduleComposerFocusStable } =
     useComposerFocus(composerRef);
-  const canInterruptRunningThread =
-    canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
-  const onInterrupt = async () => {
-    if (
-      !activeThread ||
-      !readEnvironmentScope(activeThread.environmentId, AuthOrchestrationOperateScope)
-    )
-      return;
+  const hasInterruptibleRun = deriveCanInterruptRunningThread(
+    activeThread !== undefined,
+    activeRuntime,
+  );
+  const pendingTurn = useAtomValue(pendingTurnSubmissionAtom(routeThreadKey));
+  const canStopSubmission = pendingTurn !== null && (isSendBusy || !pendingTurn.accepted);
+  const canInterruptRunningThread = canOperateThread && (hasInterruptibleRun || canStopSubmission);
+  const interruptSubmittedTurn = async (targetThreadId: ThreadId) => {
+    if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
     const result = await interruptThreadTurn({
       environmentId,
-      input: { threadId: activeThread.id },
+      input: { threadId: targetThreadId },
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       setThreadError(
-        activeThread.id,
+        targetThreadId,
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
     }
+  };
+  const onInterrupt = () => {
+    if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+    if (hasInterruptibleRun && activeThread) return interruptSubmittedTurn(activeThread.id);
+    const pending = canStopSubmission
+      ? appAtomRegistry.get(pendingTurnSubmissionAtom(routeThreadKey))
+      : null;
+    if (pending === null) return;
+    if (pending.accepted) return interruptSubmittedTurn(pending.submission.threadId);
+    pending.submission.requestStop();
   };
   const onInterruptStable = useStableCallback(onInterrupt);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window listener for the desktop snapshot event that focuses the composer
@@ -2891,6 +2906,7 @@ export default function ChatView(props: ChatViewProps) {
     setThreadError,
   });
   const { onSend } = useComposerSend({
+    interruptSubmittedTurn,
     environmentId,
     routeThreadKey,
     currentRouteThreadKeyRef,

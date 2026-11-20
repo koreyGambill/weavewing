@@ -53,6 +53,22 @@ import { recallComposerMessage } from "./composerPromptHistory";
 export const draftFanoutSelectionsAtom = Atom.family((_routeKey: string) =>
   Atom.make<ReadonlyArray<ModelSelection> | null>(null).pipe(Atom.keepAlive),
 );
+export class PendingTurnSubmission {
+  stopRequested = false;
+
+  constructor(readonly threadId: ThreadId) {}
+
+  requestStop() {
+    this.stopRequested = true;
+  }
+}
+
+export const pendingTurnSubmissionAtom = Atom.family((_routeKey: string) =>
+  Atom.make<{
+    readonly submission: PendingTurnSubmission;
+    readonly accepted: boolean;
+  } | null>(null).pipe(Atom.keepAlive),
+);
 const draftSendStateByRouteKey = new Map<
   string,
   {

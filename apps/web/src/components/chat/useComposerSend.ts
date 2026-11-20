@@ -129,6 +129,8 @@ import {
 } from "@t3tools/shared/composerContextReferences";
 import {
   draftSendState,
+  pendingTurnSubmissionAtom,
+  PendingTurnSubmission,
   type MultipleModelTarget,
   resolveMultipleModelTargets,
   prepareTurnAttachments,
@@ -242,6 +244,7 @@ interface ComposerSendInput {
     SetStateAction<Record<string, ReadonlyArray<CodexFeedbackSubmission>>>
   >;
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
+  readonly interruptSubmittedTurn: (threadId: ThreadId) => Promise<void>;
   readonly anchorNewTurn: TimelineFollow["anchorNewTurn"];
   readonly acknowledgeActiveThreadWoke: () => void;
   /** Resolves true once the side chat started and got the prompt. */
@@ -1209,6 +1212,15 @@ export function useComposerSend(input: ComposerSendInput) {
         return;
       }
     }
+    const pendingTurn =
+      !shouldQueueBehindActiveRun && multipleModelSelections === null
+        ? new PendingTurnSubmission(threadIdForSend)
+        : null;
+    const pendingAtom = pendingTurnSubmissionAtom(routeThreadKey);
+    appAtomRegistry.set(
+      pendingAtom,
+      pendingTurn === null ? null : { submission: pendingTurn, accepted: false },
+    );
     if (sendQueuesBehindSetup) {
       setSetupQueueSendThreadKey(activeThreadKey);
     } else {
@@ -1349,7 +1361,8 @@ export function useComposerSend(input: ComposerSendInput) {
 
     let backgroundDraftOpened = false;
     let turnStartSucceeded = false;
-    if (failure === null && turnAttachmentsResult._tag === "Success") {
+    const stoppedBeforeDispatch = pendingTurn?.stopRequested === true;
+    if (!stoppedBeforeDispatch && failure === null && turnAttachmentsResult._tag === "Success") {
       const bootstrap =
         isLocalDraftThread || baseBranchForWorktree
           ? {
@@ -1453,6 +1466,11 @@ export function useComposerSend(input: ComposerSendInput) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (pendingTurn !== null) {
+          // Wait for the receipt so Stop cannot overtake the send on the server.
+          if (pendingTurn.stopRequested) await input.interruptSubmittedTurn(threadIdForSend);
+          appAtomRegistry.set(pendingAtom, { submission: pendingTurn, accepted: true });
+        }
         if (checkoutPullRequestUrl) {
           linkCheckoutPullRequest(
             scopeThreadRef(environmentId, threadIdForSend),
@@ -1501,12 +1519,12 @@ export function useComposerSend(input: ComposerSendInput) {
       }
     }
 
-    if (failure !== null) {
+    if (failure !== null || stoppedBeforeDispatch) {
       if (isLocalDraftThread && draftId && draftThread) {
         restoreFailedDraftThread(
           draftId,
           draftThread,
-          wasBootstrapThreadDeleted(squashAtomCommandFailure(failure))
+          failure !== null && wasBootstrapThreadDeleted(squashAtomCommandFailure(failure))
             ? newThreadId()
             : threadIdForSend,
         );
@@ -1531,9 +1549,11 @@ export function useComposerSend(input: ComposerSendInput) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: isAtomCommandInterrupted(failure)
-              ? "Message may not have been sent"
-              : "Message not sent",
+            title: stoppedBeforeDispatch
+              ? "Message cancelled"
+              : failure !== null && isAtomCommandInterrupted(failure)
+                ? "Message may not have been sent"
+                : "Message not sent",
             description: hasText
               ? "Your new draft was kept. Copy the failed message to send it again."
               : "Your new draft was kept.",
@@ -1571,7 +1591,7 @@ export function useComposerSend(input: ComposerSendInput) {
           });
         }
       }
-      if (!isAtomCommandInterrupted(failure)) {
+      if (!stoppedBeforeDispatch && failure !== null && !isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         setThreadError(
           threadIdForSend,
@@ -1603,6 +1623,7 @@ export function useComposerSend(input: ComposerSendInput) {
     sendInFlightRef.current = false;
     setSetupQueueSendThreadKey((current) => (current === activeThreadKey ? null : current));
     if (!turnStartSucceeded) {
+      appAtomRegistry.set(pendingAtom, null);
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
       );

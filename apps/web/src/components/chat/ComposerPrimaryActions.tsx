@@ -189,11 +189,7 @@ export function CollapsedComposerStopAction({
   onInterrupt: () => void;
 }) {
   const [stopPhase, setStopPhase] = useStopPhase({ runId, canInterrupt, canOperateThread });
-  if (
-    !(canInterrupt || stopPhase === "pending" || stopPhase === "timedOut") ||
-    hasSendableContent ||
-    isEditingQueuedMessage
-  ) {
+  if (!(canInterrupt || stopPhase === "pending" || stopPhase === "timedOut")) {
     return children;
   }
   return (
@@ -202,6 +198,7 @@ export function CollapsedComposerStopAction({
       data-chat-composer-collapsed-controls="true"
       className="flex shrink-0"
     >
+      {hasSendableContent || isEditingQueuedMessage ? children : null}
       <StopGenerationButton
         stopPhase={stopPhase}
         canOperateThread={canOperateThread}
@@ -274,7 +271,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const withStopButton = (action: ReactNode) => (
     <>
       {action}
-      {stopPhase === "pending" || stopPhase === "timedOut"
+      {canInterrupt || stopPhase === "pending" || stopPhase === "timedOut"
         ? renderStopGenerationButton(false)
         : null}
     </>

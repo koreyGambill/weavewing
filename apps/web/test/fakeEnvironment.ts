@@ -414,7 +414,7 @@ let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
 let holdCommand: (command: OrchestrationV2Command) => boolean = () => false;
 let pendingDispatches: Array<{
   readonly command: OrchestrationV2Command;
-  readonly reply: Deferred.Deferred<never, OrchestrationV2DispatchCommandError>;
+  readonly reply: Deferred.Deferred<{ sequence: number }, OrchestrationV2DispatchCommandError>;
 }> = [];
 let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
 let sequence = 1;
@@ -442,7 +442,10 @@ const handlers: Record<string, (input: never) => unknown> = {
       dispatched.push(command);
       if (acceptCommands && !holdCommand(command))
         return Effect.succeed({ sequence: sequence + 1 });
-      const reply = Deferred.makeUnsafe<never, OrchestrationV2DispatchCommandError>();
+      const reply = Deferred.makeUnsafe<
+        { sequence: number },
+        OrchestrationV2DispatchCommandError
+      >();
       pendingDispatches.push({ command, reply });
       return Deferred.await(reply);
     }),
@@ -565,6 +568,7 @@ export function installFakeEnvironment(
   fixtures: ReadonlyArray<FakeThread>,
   options?: {
     readonly acceptCommands?: boolean;
+    readonly threadStop?: boolean;
     readonly vcsStatus?: typeof vcsStatusSnapshot;
     readonly keybindings?: ResolvedKeybindingsConfig;
     readonly extraProjects?: ReadonlyArray<Pick<OrchestrationProjectShell, "id" | "title">>;
@@ -579,6 +583,15 @@ export function installFakeEnvironment(
     ...makeServerConfig(options?.providers ?? [CODEX_PROVIDER]),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
   };
+  if (options?.threadStop) {
+    baseServerConfig = {
+      ...baseServerConfig,
+      environment: {
+        ...baseServerConfig.environment,
+        capabilities: { ...baseServerConfig.environment.capabilities, threadStop: true },
+      },
+    };
+  }
   dispatched = [];
   acceptCommands = options?.acceptCommands === true;
   projects = [
@@ -623,6 +636,12 @@ export function installFakeEnvironment(
 }
 
 /** Answers the oldest unanswered command with the server's rejection. */
+export async function acknowledgePendingCommand(): Promise<void> {
+  const pending = pendingDispatches.shift();
+  if (!pending) throw new Error("No pending command");
+  await Effect.runPromise(Deferred.succeed(pending.reply, { sequence: sequence + 1 }));
+}
+
 export async function rejectPendingCommand(message: string): Promise<void> {
   const pending = pendingDispatches.shift();
   if (!pending) throw new Error("No pending command");
