@@ -1,3 +1,10 @@
+import { useDeadlinePassed } from "../../hooks/useDeadline";
+import { ProviderModelPicker } from "./ProviderModelPicker";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { useEnvironmentProviders } from "../../state/environments";
+import { providerInstanceEntriesFor } from "../../providerInstances";
+import { getTextGenerationModelOptionsByInstance } from "../../modelSelection";
+import { useQuietThreadProjection } from "../../state/entities";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -7,6 +14,8 @@ import {
   type OrchestrationV2RpcSchemas,
   type ScopedThreadRef,
   type ThreadId,
+  type RunId,
+  type ModelSelection,
 } from "@t3tools/contracts";
 import { FileOutputIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -36,11 +45,35 @@ type Handoff = typeof OrchestrationV2RpcSchemas.prepareSummaryHandoff.output.Typ
 export function SummaryHandoffAction({
   source,
   compact = false,
+  throughRunId,
 }: {
   readonly source: ScopedThreadRef;
   readonly compact?: boolean;
+  readonly throughRunId?: RunId;
 }) {
   const { environmentId, threadId } = source;
+  const [open, setOpen] = useState(false);
+  const projection = useQuietThreadProjection(open ? source : null)?.projection;
+  const settings = useEnvironmentSettings(environmentId);
+  const providers = useEnvironmentProviders().get(environmentId) ?? [];
+  const [modelOverride, setModelOverride] = useState<ModelSelection | null>(null);
+  const selection = modelOverride ?? projection?.thread.modelSelection;
+  const boundary = projection?.runs.findLast(
+    (run) => run.status === "completed" && (throughRunId === undefined || run.id === throughRunId),
+  );
+  const turn = projection?.providerTurns.findLast(
+    (turn) => turn.runAttemptId === boundary?.activeAttemptId,
+  );
+  const usage = turn?.tokenUsage;
+  const expiresAt =
+    usage?.promptCacheExpiresAt !== undefined
+      ? Date.parse(usage.promptCacheExpiresAt)
+      : usage?.promptCacheTtlMs !== undefined && turn
+        ? Date.parse(usage.updatedAt) + usage.promptCacheTtlMs
+        : null;
+  const cacheCold = useDeadlinePassed(
+    expiresAt !== null && Number.isFinite(expiresAt) ? expiresAt : null,
+  );
   const supported = useServerConfigs().get(environmentId)?.environment.capabilities.summaryHandoff;
   const canPrepare = useAtomValue(
     threadEnvironment.prepareSummaryHandoff.permissionAtom(environmentId),
@@ -50,7 +83,6 @@ export function SummaryHandoffAction({
   const request = useRef<AbortController | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancel the in-flight summary RPC when the action unmounts
   useEffect(() => () => request.current?.abort(), []);
-  const [open, setOpen] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [portable, setPortable] = useState(false);
   const [text, setText] = useState("");
@@ -61,7 +93,7 @@ export function SummaryHandoffAction({
 
   if (!supported || !canPrepare) return null;
 
-  const prepareHandoff = async (useSavedConversation: boolean) => {
+  const prepareHandoff = async (useSavedConversation: boolean, override = modelOverride) => {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -71,7 +103,12 @@ export function SummaryHandoffAction({
     const result = await prepare(
       {
         environmentId,
-        input: { threadId, ...(useSavedConversation ? { strategy: "portable" } : {}) },
+        input: {
+          threadId,
+          ...(throughRunId ? { throughRunId } : {}),
+          ...(useSavedConversation ? { strategy: "portable" } : {}),
+          ...(override ? { modelSelection: override } : {}),
+        },
       },
       controller.signal,
     );
@@ -94,7 +131,8 @@ export function SummaryHandoffAction({
       setHandoff(null);
       setText("");
       setDestination(null);
-      void prepareHandoff(false);
+      setModelOverride(null);
+      void prepareHandoff(false, null);
     } else {
       request.current?.abort();
       request.current = null;
@@ -130,13 +168,13 @@ export function SummaryHandoffAction({
           <Button
             variant="ghost"
             size={compact ? "icon-xs" : "xs"}
-            aria-label="Hand off summary"
-            title={compact ? "Hand off summary" : undefined}
+            aria-label={throughRunId ? "Hand off from here" : "Hand off"}
+            title={compact ? (throughRunId ? "Hand off from here" : "Hand off") : undefined}
           />
         }
       >
         <FileOutputIcon />
-        {compact ? null : "Hand off summary"}
+        {compact ? null : throughRunId ? "Hand off from here" : "Hand off"}
       </DialogTrigger>
       <DialogPopup>
         <DialogHeader>
@@ -147,6 +185,44 @@ export function SummaryHandoffAction({
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-3">
+            {selection ? (
+              <ProviderModelPicker
+                environmentId={environmentId}
+                activeInstanceId={selection.instanceId}
+                model={selection.model}
+                lockedProvider={null}
+                instanceEntries={providerInstanceEntriesFor(
+                  providers,
+                  settings,
+                  projection?.thread.projectId ?? null,
+                )}
+                modelOptionsByInstance={getTextGenerationModelOptionsByInstance(
+                  settings,
+                  providers,
+                  selection.instanceId,
+                  selection.model,
+                )}
+                triggerAriaLabel="Summary model"
+                onInstanceModelChange={(instanceId, model) => {
+                  const own = projection?.thread.modelSelection;
+                  const override =
+                    own?.instanceId === instanceId && own.model === model
+                      ? null
+                      : { instanceId, model };
+                  setModelOverride(override);
+                  void prepareHandoff(override !== null, override);
+                }}
+              />
+            ) : null}
+            {modelOverride !== null ? (
+              <p className="text-xs text-muted-foreground">
+                A different model summarizes saved messages.
+              </p>
+            ) : cacheCold ? (
+              <p role="status" className="text-xs text-muted-foreground">
+                The prompt cache has expired. The first summary request will not be cached.
+              </p>
+            ) : null}
             {error ? (
               <p role="alert" className="text-sm text-destructive">
                 {error}

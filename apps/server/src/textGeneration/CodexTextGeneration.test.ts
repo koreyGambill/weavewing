@@ -882,3 +882,47 @@ it.effect(
       expect(calls).toEqual([]);
     }),
 );
+
+it.live("summarizes a native Codex fork through the selected turn", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const dir = yield* fs.makeTempDirectoryScoped({ prefix: "native-codex-summary-" });
+    const binary = writeFakeCli({
+      directory: dir,
+      name: "codex",
+      source: `
+import { createInterface } from "node:readline";
+const args = process.argv.slice(2);
+if (args.includes("mcp")) { console.log("[]"); process.exit(0); }
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+for await (const line of createInterface({ input: process.stdin })) {
+  const msg = JSON.parse(line);
+  if (msg.id === undefined) continue;
+  let result = {};
+  if (msg.method === "initialize") result = { codexHome: process.cwd(), userAgent: "fixture", platformFamily: "unix", platformOs: "linux" };
+  if (msg.method === "thread/fork") {
+    if (msg.params.threadId !== "source" || msg.params.lastTurnId !== "boundary" || msg.params.model !== "thread-model") process.exit(2);
+    result = { approvalPolicy: "never", approvalsReviewer: "user", cwd: process.cwd(), model: "thread-model", modelProvider: "openai", sandbox: { type: "readOnly", networkAccess: false }, thread: { cliVersion: "test", createdAt: 0, updatedAt: 0, cwd: process.cwd(), ephemeral: true, modelProvider: "openai", preview: "", projectId: null, sessionId: "fork", source: "cli", status: { type: "idle" }, id: "fork", turns: [{ id: "boundary", items: [], status: "completed", error: null }] } };
+  }
+  if (msg.method === "thread/turns/list") result = { data: [{ id: "boundary", items: [], status: "completed", error: null }], nextCursor: null };
+  if (msg.method === "turn/start") {
+    if (msg.params.threadId !== "fork") process.exit(3);
+    send({ id: msg.id, result: { turn: { id: "summary", items: [], status: "inProgress", error: null } } });
+    send({ method: "turn/completed", params: { threadId: "fork", turn: { id: "summary", status: "completed", error: null, items: [{ type: "agentMessage", id: "answer", text: "Bounded summary", phase: "final_answer" }] } } });
+    continue;
+  }
+  send({ id: msg.id, result });
+}`,
+    });
+    const service = yield* makeCodexTextGeneration(decodeCodexSettings({ binaryPath: binary }));
+    expect(service.generateNativeHandoffSummary).toBeDefined();
+    const result = yield* service.generateNativeHandoffSummary!({
+      cwd: dir,
+      sourceDriver: ProviderDriverKind.make("codex"),
+      nativeSessionId: "source",
+      nativeTurnId: "boundary",
+      modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "thread-model"),
+    });
+    expect(result.summary).toBe("Bounded summary");
+  }).pipe(Effect.scoped, Effect.provide(layerCodexTextGenerationTest)),
+);

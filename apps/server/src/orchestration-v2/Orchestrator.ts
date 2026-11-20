@@ -6679,7 +6679,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const sourceProviderThread =
       sourceRun === null ? undefined : providerThreadForRun(sourceProjection, sourceRun);
     if (command.forkHistoryPolicy === "require_native") {
-      if (sourceRun === null || contextArchive !== undefined) {
+      if (sourceRun === null) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -6702,7 +6702,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           sameProvider: true,
           hasStrongNativeSource:
             sourceProviderThread?.nativeThreadRef?.strength === "strong" &&
-            sourceProviderTurn !== undefined,
+            sourceProviderTurn !== undefined &&
+            (contextArchive === undefined ||
+              !sourceProjection.runs.some(
+                (run) =>
+                  isHandoffSourceRun(run) &&
+                  run.ordinal >= contextArchive.fromRunOrdinal &&
+                  run.ordinal <= contextArchive.throughRunOrdinal &&
+                  run.providerThreadId !== sourceProviderThread.id,
+              )),
           sourceRunStatus: sourceRun.status,
           fromSpecificTurn: true,
           sourceBusy:
@@ -9250,9 +9258,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : yield* projectionStore
             .getProviderThreadSession(command.threadId, activeProviderThread.id)
             .pipe(mapDispatchError(command)));
+    // A provider session may serve several projects; its launch cwd belongs to the process.
+    const activeConversationCwd =
+      projection.checkpointScopes.findLast(
+        (scope) => scope.kind === "root_run" && scope.providerThreadId === activeProviderThread?.id,
+      )?.cwd ?? activeProviderSession?.cwd;
     const workspaceChanged =
-      activeProviderSession !== undefined &&
-      activeProviderSession.cwd !==
+      activeConversationCwd !== undefined &&
+      activeConversationCwd !==
         (projection.thread.worktreePath ??
           (yield* runtimePolicy
             .resolve({ thread: projection.thread, modelSelection })
@@ -9733,13 +9746,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const sideChatFork =
       pendingForkTransfer !== undefined && projection.thread.lineage.sideChat === true;
     const contextArchive = projection.thread.lineage.contextArchive;
+    const archiveSpansProviderThreads =
+      contextArchive !== undefined &&
+      sourceProjection !== null &&
+      sourceProjection.runs.some(
+        (run) =>
+          isHandoffSourceRun(run) &&
+          run.ordinal >= contextArchive.fromRunOrdinal &&
+          run.ordinal <= contextArchive.throughRunOrdinal &&
+          run.providerThreadId !== sourceProviderThread?.id,
+      );
     // Opened during the parent's first turn: the digest is the whole context.
     const sideChatWithoutSource =
       sideChatFork && pendingForkTransfer.sourcePoint.runId === undefined;
     if (pendingForkTransfer !== undefined) {
       if (
         pendingForkTransfer.forkHistoryPolicy === "require_native" &&
-        (contextArchive !== undefined || sourceRun === null || sourceProviderThread === undefined)
+        (archiveSpansProviderThreads || sourceRun === null || sourceProviderThread === undefined)
       ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -9825,7 +9848,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             (candidate) => sourceRun === null || candidate.ordinal > sourceRun.ordinal,
           );
     const forkExecution =
-      pendingForkTransfer === undefined || sourceRun === null || contextArchive !== undefined
+      pendingForkTransfer === undefined || sourceRun === null || archiveSpansProviderThreads
         ? null
         : yield* mapDispatchError(command)(
             commandPolicy.decideForkExecution({
@@ -9852,7 +9875,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           );
     const canResolveForkNatively = forkExecution === "native_fork";
     const requiresPortableFork =
-      forkExecution === "portable_context" || contextArchive !== undefined;
+      forkExecution === "portable_context" || archiveSpansProviderThreads;
 
     if (canResolveForkNatively) {
       yield* mapDispatchError(command)(

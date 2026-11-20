@@ -22,19 +22,20 @@ the fork again. The fork’s details show which kind of history it received.
 
 ## Hand off a summary
 
-Choose **Hand off summary** in the source thread’s **Conversation history** section.
-Review the prepared text, choose a destination on the same environment, and add
-it to the draft. The handoff is appended to any existing draft text. Send it from
-the destination when you’re ready.
+Choose **Hand off** in the chat header or **Conversation history**. To summarize only
+through a particular reply, choose **Hand off from here** under that completed reply.
+Review the text, choose a destination on the same environment, and add it to the draft.
+The handoff is appended to any existing draft text. Send it when you’re ready.
 
-On supported Claude Code profiles, Weavewing prepares the summary in a temporary
-native fork of the latest completed turn using that turn’s model and reasoning
-settings. Summary preparation runs with tools disabled.
+Codex and supported Claude Code profiles prepare the summary in a temporary native
+fork, using the thread’s selected model and reasoning settings. The source conversation
+is unchanged. If the prompt cache has expired, the dialog warns that the first request
+will not be cached. Native history can still have a cold cache.
 
-For Codex or a Claude Code profile where tools can’t be disabled, choose **Use
-saved conversation** to prepare a summary from a bounded portion of saved
-messages. When summary generation is unavailable, edit the excerpt or write the
-handoff yourself.
+Choose another summary model to summarize saved messages instead. If native preparation
+is unavailable, choose **Use saved conversation**. This path uses a bounded portion of
+saved messages and leaves out provider-only history and attachments. When summary
+generation is unavailable, edit the excerpt or write the handoff yourself.
 
 ## What a portable handoff carries
 

@@ -267,7 +267,12 @@ it.effect.each([true, false])(
       const unavailable = yield* summaries.prepareHandoff({ threadId });
       assert.equal(unavailable.kind, "native_unavailable");
       assert.lengthOf(harness.generateMessageSummary.mock.calls, 0);
-      const handoff = yield* summaries.prepareHandoff({ threadId, strategy: "portable" });
+      const chosen = { instanceId: ProviderInstanceId.make("codex"), model: "cheaper-model" };
+      const handoff = yield* summaries.prepareHandoff({ threadId, modelSelection: chosen });
+      assert.deepStrictEqual(
+        harness.generateMessageSummary.mock.calls[0]![0].modelSelection,
+        chosen,
+      );
       assert.equal(handoff.kind, available ? "summary" : "excerpt");
       if (handoff.kind === "native_unavailable") return assert.fail(handoff.reason);
       assert.include(handoff.text, "migration plan");
@@ -276,7 +281,7 @@ it.effect.each([true, false])(
   },
 );
 
-it.effect("uses the source turn model and boundary without creating a handoff thread", () =>
+it.effect("uses the thread model and native boundary without creating a thread", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs.readFileString(
@@ -367,12 +372,17 @@ it.effect("uses the source turn model and boundary without creating a handoff th
         text: "fork native ok",
         truncated: false,
       });
-      assert.deepStrictEqual(generate.mock.calls, [
+      const bounded = yield* summaries.prepareHandoff({
+        threadId,
+        throughRunId: before.run!.runId,
+      });
+      assert.equal(bounded.kind, "native_summary");
+      assert.deepStrictEqual(generate.mock.calls.slice(0, 1), [
         [
           {
             cwd: workspace,
             sourceDriver: ProviderDriverKind.make("claudeAgent"),
-            modelSelection: selection,
+            modelSelection: { ...selection, options: [{ id: "effort", value: "low" }] },
             nativeSessionId: "8d0dafab-45d3-45eb-abef-41b9e55d5ff9",
             nativeTurnId: "68baa075-b7d4-4689-866b-96bd51e570c3",
           },

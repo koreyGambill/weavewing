@@ -4321,6 +4321,21 @@ describe("orchestration v2 provider switching", () => {
           modelSelection: CLAUDE_MODEL_SELECTION,
           responseByRunOrdinal: {},
           capturedTurns,
+          forkThread: (input) =>
+            input.targetThreadId.startsWith("thread:archive-native-child:")
+              ? Effect.succeed({
+                  ...input.sourceProviderThread,
+                  appThreadId: input.targetThreadId,
+                  id: ProviderThreadId.make(`native:${input.targetThreadId}`),
+                  nativeThreadRef: {
+                    ...input.sourceProviderThread.nativeThreadRef!,
+                    nativeId: `native:${input.targetThreadId}`,
+                    strength: "strong" as const,
+                  },
+                  nativeConversationHeadRef: null,
+                  forkedFrom: { providerThreadId: input.sourceProviderThread.id },
+                })
+              : unimplemented(input.sourceProviderThread.driver, "native fork unavailable"),
           failResumeOnce,
           nativeThreadGeneration: yield* Ref.make(0),
         }),
@@ -4331,6 +4346,21 @@ describe("orchestration v2 provider switching", () => {
           modelSelection: CODEX_MODEL_SELECTION,
           responseByRunOrdinal: {},
           capturedTurns,
+          forkThread: (input) =>
+            input.targetThreadId.startsWith("thread:archive-native-child:")
+              ? Effect.succeed({
+                  ...input.sourceProviderThread,
+                  appThreadId: input.targetThreadId,
+                  id: ProviderThreadId.make(`native:${input.targetThreadId}`),
+                  nativeThreadRef: {
+                    ...input.sourceProviderThread.nativeThreadRef!,
+                    nativeId: `native:${input.targetThreadId}`,
+                    strength: "strong" as const,
+                  },
+                  nativeConversationHeadRef: null,
+                  forkedFrom: { providerThreadId: input.sourceProviderThread.id },
+                })
+              : unimplemented(input.sourceProviderThread.driver, "native fork unavailable"),
           nativeThreadGeneration: yield* Ref.make(0),
         }),
       ]);
@@ -4433,6 +4463,59 @@ describe("orchestration v2 provider switching", () => {
           branch: null,
           worktreePath: cwd,
         });
+        for (const selection of [CODEX_MODEL_SELECTION, CLAUDE_MODEL_SELECTION]) {
+          const nativeSource = ThreadId.make(`thread:archive-native:${selection.instanceId}`);
+          const nativeArchive = ThreadId.make(
+            `thread:archive-native-child:${selection.instanceId}`,
+          );
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make(`archive-native-create:${selection.instanceId}`),
+            threadId: nativeSource,
+            projectId,
+            title: "Native archive",
+            modelSelection: selection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+            createdBy: "user",
+            creationSource: "web",
+          });
+          yield* send(nativeSource, `native archive source ${selection.instanceId}`, selection);
+          const ordinaryBefore = yield* read(nativeSource);
+          const sharedSession = ordinaryBefore.providerSessions[0]!;
+          yield* (yield* EventSink.EventSinkV2).write({
+            events: [
+              {
+                id: EventId.make(`foreign-session-cwd:${selection.instanceId}`),
+                type: "provider-session.updated",
+                threadId: nativeSource,
+                occurredAt: yield* DateTime.now,
+                payload: { ...sharedSession, cwd: `${cwd}/another-project` },
+              },
+            ],
+          });
+          yield* send(nativeSource, `ordinary continuation ${selection.instanceId}`, selection);
+          const ordinaryAfter = yield* read(nativeSource);
+          assert.equal(
+            ordinaryAfter.thread.activeProviderThreadId,
+            ordinaryBefore.thread.activeProviderThreadId,
+          );
+          assert.isFalse(ordinaryAfter.turnItems.some((item) => item.type === "handoff"));
+          yield* rewind((yield* read(nativeSource)).runs.at(-1)!.id, nativeArchive, nativeSource);
+          yield* send(
+            nativeArchive,
+            `native archive continuation ${selection.instanceId}`,
+            selection,
+          );
+          const archived = yield* read(nativeArchive);
+          assert.equal(archived.contextTransfers[0]?.resolution?.strategy, "native_fork");
+          const captured = (yield* Ref.get(capturedTurns)).find(({ text }) =>
+            text.endsWith(`native archive continuation ${selection.instanceId}`),
+          );
+          assert.equal(captured?.text, `native archive continuation ${selection.instanceId}`);
+        }
         yield* send(root, "archived Codex history", CODEX_MODEL_SELECTION);
         yield* send(root, "archived Claude history");
         const before = yield* read();

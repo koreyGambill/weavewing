@@ -1,3 +1,9 @@
+import * as Layer from "effect/Layer";
+import * as Context from "effect/Context";
+import * as CodexClient from "effect-codex-app-server/client";
+import * as Deferred from "effect/Deferred";
+import { NATIVE_HANDOFF_SUMMARY_PROMPT } from "@t3tools/provider-core/server/textGenerationPrompts";
+import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -436,5 +442,133 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }).pipe(Effect.ensuring(cleanup));
   });
 
-  return TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson);
+  const generateNativeHandoffSummary: NonNullable<
+    ProviderTextGeneration["generateNativeHandoffSummary"]
+  > = Effect.fn("CodexTextGeneration.generateNativeHandoffSummary")(
+    function* (input) {
+      const operation = "generateNativeHandoffSummary";
+      const resolved = resolveRuntime ? yield* resolveRuntime : undefined;
+      const config = resolved?.config ?? codexConfig;
+      const environment = resolved?.environment ?? resolvedEnvironment;
+      const env = {
+        ...environment,
+        ...(config.homePath
+          ? { CODEX_HOME: expandHomePath(config.homePath, yield* HostProcess.HomeDirectory) }
+          : {}),
+      };
+      const launchArgs = resolveCodexLaunchArgs(config.launchArgs, env);
+      const enabledServers = yield* listEnabledMcpServers({
+        binary: config.binaryPath || "codex",
+        cwd: input.cwd,
+        env,
+        launchArgs: codexMcpListLaunchArgs(launchArgs),
+      });
+      const spawn = yield* resolveSpawnCommand(
+        config.binaryPath || "codex",
+        [
+          ...codexExecLaunchArgs(launchArgs),
+          ...CODEX_NO_PLUGIN_ARGS,
+          ...codexMcpServerOffFlags(enabledServers),
+          ...(codexMcpServersOff(enabledServers)
+            ? ["--config", codexMcpServersOff(enabledServers)!]
+            : []),
+          "--config",
+          "features.hooks=false",
+          "--config",
+          "features.codex_hooks=false",
+          "--config",
+          "features.shell_tool=false",
+          "--config",
+          "features.apply_patch_freeform=false",
+          "--config",
+          'web_search="disabled"',
+          "app-server",
+        ],
+        { env },
+      );
+      const child = yield* commandSpawner.spawn(
+        ChildProcess.make(spawn.command, spawn.args, {
+          cwd: input.cwd,
+          env,
+          shell: spawn.shell,
+          forceKillAfter: "1 second",
+        }),
+      );
+      const clientContext = yield* Layer.build(CodexClient.layerChildProcess(child));
+      const client = Context.get(clientContext, CodexClient.CodexAppServerClient);
+      yield* client.request("initialize", {
+        clientInfo: { name: "t3-summary", version: "1" },
+        capabilities: { experimentalApi: true },
+      });
+      yield* client.notify("initialized", undefined);
+      const fork = yield* client.request("thread/fork", {
+        threadId: input.nativeSessionId,
+        lastTurnId: input.nativeTurnId,
+        model: input.modelSelection.model,
+        cwd: input.cwd,
+        ephemeral: true,
+        excludeTurns: true,
+        approvalPolicy: "never",
+        sandbox: "read-only",
+      });
+      if (fork.thread.id === input.nativeSessionId) {
+        return yield* new TextGenerationError({
+          operation,
+          detail: "Codex did not preserve the requested fork boundary.",
+        });
+      }
+      const done = yield* Deferred.make<string, TextGenerationError>();
+      yield* client.handleServerNotification("turn/completed", ({ threadId, turn }) => {
+        if (threadId !== fork.thread.id) return Effect.void;
+        const summary = turn.items
+          .flatMap((item) => (item.type === "agentMessage" ? [item.text] : []))
+          .join("\n")
+          .trim();
+        return (
+          turn.status === "completed" && summary
+            ? Deferred.succeed(done, summary)
+            : Deferred.fail(
+                done,
+                new TextGenerationError({
+                  operation,
+                  detail: "Codex did not complete the native summary.",
+                }),
+              )
+        ).pipe(Effect.asVoid);
+      });
+      yield* client.request("turn/start", {
+        threadId: fork.thread.id,
+        model: input.modelSelection.model,
+        input: [{ type: "text", text: NATIVE_HANDOFF_SUMMARY_PROMPT, text_elements: [] }],
+        ...(getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
+          ? { effort: getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort") }
+          : {}),
+      });
+      const summary = yield* Deferred.await(done);
+      return { summary };
+    },
+    Effect.scoped,
+    Effect.mapError(
+      (cause) =>
+        new TextGenerationError({
+          operation: "generateNativeHandoffSummary",
+          detail: "Codex could not summarize the native fork.",
+          cause,
+        }),
+    ),
+    Effect.timeoutOrElse({
+      duration: CODEX_TIMEOUT_MS,
+      orElse: () =>
+        Effect.fail(
+          new TextGenerationError({
+            operation: "generateNativeHandoffSummary",
+            detail: "Codex native summary timed out.",
+          }),
+        ),
+    }),
+  );
+  return {
+    ...TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson),
+    generateNativeHandoffSummary,
+  };
 });

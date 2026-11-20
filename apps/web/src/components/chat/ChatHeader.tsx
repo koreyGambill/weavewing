@@ -1,3 +1,4 @@
+import { SummaryHandoffAction } from "./SummaryHandoffAction";
 import { Button } from "../ui/button";
 import { ThreadGlyph } from "../ThreadGlyph";
 import { nextThreadGlyphSeed, resolveThreadGlyph } from "@t3tools/client-runtime/thread-glyphs";
@@ -474,6 +475,7 @@ export const ChatHeader = memo(function ChatHeader({
       ) : null}
       {isServerThread ? (
         <>
+          <SummaryHandoffAction source={activeThreadRef} compact />
           <GuestShareIndicator threadRef={activeThreadRef} />
         </>
       ) : null}

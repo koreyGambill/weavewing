@@ -4854,6 +4854,8 @@ export const OrchestrationV2RpcSchemas = {
     input: Schema.Struct({
       threadId: ThreadId,
       strategy: Schema.optionalKey(Schema.Literal("portable")),
+      throughRunId: Schema.optionalKey(RunId),
+      modelSelection: Schema.optionalKey(ModelSelection),
     }),
     output: Schema.Union([
       Schema.Struct({

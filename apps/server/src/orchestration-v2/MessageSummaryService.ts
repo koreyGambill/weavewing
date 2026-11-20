@@ -108,23 +108,65 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
   );
 
   const preparePortableHandoff = Effect.fn("MessageSummaryService.preparePortableHandoff")(
-    function* (threadId: ThreadId) {
-      const { thread } = yield* threads
-        .getThreadRecords(threadId, [])
+    function* (input: typeof OrchestrationV2RpcSchemas.prepareSummaryHandoff.input.Type) {
+      const { threadId } = input;
+      const { thread, runs } = yield* threads
+        .getThreadRecords(threadId, ["runs"])
         .pipe(Effect.mapError((cause) => new OrchestrationV2PrepareSummaryHandoffError({ cause })));
       if (thread.deletedAt !== null) {
         return yield* new OrchestrationV2PrepareSummaryHandoffError({
           cause: "Thread was deleted.",
         });
       }
+      const boundary =
+        input.throughRunId === undefined
+          ? undefined
+          : runs.find((run) => run.id === input.throughRunId && run.status === "completed");
+      if (input.throughRunId !== undefined && boundary === undefined) {
+        return yield* new OrchestrationV2PrepareSummaryHandoffError({
+          cause: "Choose a completed reply.",
+        });
+      }
+      let beforePosition = Number.POSITIVE_INFINITY;
+      if (boundary) {
+        const { turnItems } = yield* threads
+          .getThreadRecords(threadId, ["turnItems"], { turnItemRunIds: [boundary.id] })
+          .pipe(
+            Effect.mapError((cause) => new OrchestrationV2PrepareSummaryHandoffError({ cause })),
+          );
+        const reply = turnItems.findLast(
+          (item) =>
+            item.type === "assistant_message" &&
+            item.status === "completed" &&
+            item.phase !== "commentary" &&
+            item.phase !== "partial_answer",
+        );
+        if (!reply)
+          return yield* new OrchestrationV2PrepareSummaryHandoffError({
+            cause: "The completed reply is unavailable.",
+          });
+        const located = yield* threads
+          .getTimelinePage(threadId, { view: "messages", itemId: reply.id, limit: 1 })
+          .pipe(
+            Effect.mapError((cause) => new OrchestrationV2PrepareSummaryHandoffError({ cause })),
+          );
+        const position = located.items.find((row) => row.sourceItemId === reply.id)?.position;
+        if (position === undefined)
+          return yield* new OrchestrationV2PrepareSummaryHandoffError({
+            cause: "The completed reply is unavailable.",
+          });
+        beforePosition = position + 1;
+      }
       const page = yield* threads
-        .getTimelinePage(threadId, {
-          view: "messages",
-          beforePosition: Number.POSITIVE_INFINITY,
-          limit: 100,
-        })
+        .getTimelinePage(threadId, { view: "messages", beforePosition, limit: 100 })
         .pipe(Effect.mapError((cause) => new OrchestrationV2PrepareSummaryHandoffError({ cause })));
       const history = page.items.flatMap(({ item }) => {
+        if (
+          boundary &&
+          item.runId !== null &&
+          !runs.some((run) => run.id === item.runId && run.ordinal <= boundary.ordinal)
+        )
+          return [];
         if (item.type === "user_message" && !item.workflowScript && item.text.trim()) {
           return [{ label: "User", text: item.text.trim() }];
         }
@@ -166,10 +208,7 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
                 source: "Conversation handoff",
                 message: transcript,
                 purpose: "handoff",
-                modelSelection: settingsForThread(
-                  resolveProjectSettings(settings, thread.projectId).settings,
-                  thread.modelSelection,
-                ).textGenerationModelSelection,
+                modelSelection: input.modelSelection ?? thread.modelSelection,
               })
               .pipe(Effect.orElseSucceed(() => null))
           : null;
@@ -181,14 +220,17 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
 
   const nativeUnavailable = (reason: string) => ({ kind: "native_unavailable", reason }) as const;
   const prepareNativeHandoff = Effect.fn("MessageSummaryService.prepareNativeHandoff")(function* (
-    sourceThreadId: ThreadId,
+    input: typeof OrchestrationV2RpcSchemas.prepareSummaryHandoff.input.Type,
   ) {
     const generate = textGeneration.generateNativeHandoffSummary;
     const { thread, runs, providerThreads, providerTurns } = yield* threads
-      .getThreadRecords(sourceThreadId, ["runs", "providerThreads", "providerTurns"])
+      .getThreadRecords(input.threadId, ["runs", "providerThreads", "providerTurns"])
       .pipe(Effect.mapError((cause) => new OrchestrationV2PrepareSummaryHandoffError({ cause })));
     const boundary = runs.findLast(
-      (run) => run.status === "completed" && run.ordinal > (thread.contextRewind?.runOrdinal ?? 0),
+      (run) =>
+        run.status === "completed" &&
+        run.ordinal > (thread.contextRewind?.runOrdinal ?? 0) &&
+        (input.throughRunId === undefined || run.id === input.throughRunId),
     );
     if (!boundary || thread.deletedAt !== null) {
       return nativeUnavailable(
@@ -230,7 +272,7 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
       sourceDriver: sessionRef.driver,
       nativeSessionId: sessionRef.nativeId,
       nativeTurnId: turnRef.nativeId,
-      modelSelection: boundary.modelSelection,
+      modelSelection: thread.modelSelection,
     }).pipe(
       Effect.map(({ summary }) => {
         const text = summary.trim();
@@ -251,9 +293,9 @@ const make = Effect.fn("MessageSummaryService.make")(function* (dailyLimit: numb
   });
 
   const prepareHandoff: MessageSummaryService["Service"]["prepareHandoff"] = (input) =>
-    input.strategy === "portable"
-      ? preparePortableHandoff(input.threadId)
-      : prepareNativeHandoff(input.threadId);
+    input.strategy === "portable" || input.modelSelection !== undefined
+      ? preparePortableHandoff(input)
+      : prepareNativeHandoff(input);
   return MessageSummaryService.of({ execute, prepareHandoff });
 });
 

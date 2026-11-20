@@ -1,3 +1,5 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { SummaryHandoffAction } from "./SummaryHandoffAction";
 import {
   isReactionOnlyAssistantText,
   parseAssistantReactions,
@@ -264,6 +266,19 @@ function AssistantMessageMeta({
       />
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
+      ) : null}
+      {ctx.threadRef &&
+      projectedItem?.item.type === "assistant_message" &&
+      projectedItem.item.status === "completed" &&
+      projectedItem.item.phase !== "commentary" &&
+      projectedItem.item.phase !== "partial_answer" &&
+      projectedItem.item.runId !== null &&
+      !message.streaming ? (
+        <SummaryHandoffAction
+          source={scopeThreadRef(ctx.threadRef.environmentId, projectedItem.sourceThreadId)}
+          throughRunId={projectedItem.item.runId}
+          compact
+        />
       ) : null}
       {ctx.rewindToReply &&
       projectedItem?.sourceThreadId === ctx.threadRef?.threadId &&

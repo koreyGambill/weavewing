@@ -471,7 +471,9 @@ answer its questions.
 On mobile, choose **Rewind conversation context** from **Git controls** in the
 thread header while the thread is idle. On web and desktop, send `/clear` for a
 fresh session instead, or use **Rewind to here** below.
-Messages through the latest finished turn move into **Earlier conversation**.
+Messages through the latest finished turn move into **Earlier conversation**. Codex and Claude archives reuse a native copy of that conversation when the archived
+range shares one provider session. A range spanning provider sessions uses saved
+conversation context instead.
 Your next message starts with fresh context. The thread keeps its files and
 draft. Earlier checkpoints remain in the thread’s history. Checkpoint restore
 works only within the current provider session.
