@@ -116,7 +116,7 @@ export function InlineSideChat({
               parentPanel={parentPanel}
               onFocusParentComposer={() => {
                 showInline();
-                focusThreadDraft(childRef);
+                focusThreadDraft(childRef, "center");
               }}
             />
           ))}

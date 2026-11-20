@@ -74,10 +74,11 @@ export function showThreadConversation(ref: ScopedThreadRef) {
 }
 
 /** Reveals and focuses a specific thread's composer after a tab switch or navigation. */
-export function focusThreadDraft(ref: ScopedThreadRef) {
+export function focusThreadDraft(ref: ScopedThreadRef, reveal?: "center") {
   showThreadConversation(ref);
   requestWorkspaceFocus({
     area: "document",
+    ...(reveal ? { reveal } : {}),
     selector: `[data-chat-composer-thread="${CSS.escape(scopedThreadKey(ref))}"] [contenteditable="true"]`,
   });
 }

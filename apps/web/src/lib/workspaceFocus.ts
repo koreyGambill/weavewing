@@ -23,6 +23,7 @@ export interface WorkspaceFocusTarget {
   area: string;
   selector?: string;
   restore?: boolean;
+  reveal?: "center";
 }
 
 function workspaceArea(element: Element): HTMLElement | null {
@@ -91,11 +92,13 @@ function isInScrollView(target: HTMLElement) {
  * Brings a restored control into view, innermost scrolling list first.
  * scrollIntoView would also scroll overflow-hidden layout containers out of place.
  */
-function revealInScrollers(target: HTMLElement) {
+function revealInScrollers(target: HTMLElement, align?: "center") {
   for (const scroller of scrollingAncestors(target)) {
     const box = scroller.getBoundingClientRect();
     const rect = target.getBoundingClientRect();
-    if (rect.top < box.top) scroller.scrollTop -= box.top - rect.top;
+    if (align === "center")
+      scroller.scrollTop += (rect.top + rect.bottom - box.top - box.bottom) / 2;
+    else if (rect.top < box.top) scroller.scrollTop -= box.top - rect.top;
     else if (rect.bottom > box.bottom) scroller.scrollTop += rect.bottom - box.bottom;
   }
 }
@@ -212,10 +215,11 @@ export function createWorkspaceFocusController(doc: Document) {
     }
     return false;
   };
-  const focus = (name: string, restore = true, selector?: string) => {
+  const focus = (name: string, restore = true, selector?: string, reveal?: "center") => {
     if (name === "document" && selector) {
       const target = doc.querySelector<HTMLElement>(selector);
       if (!target || !isWorkspaceElementVisible(target)) return false;
+      if (reveal) revealInScrollers(target, reveal);
       target.focus({ preventScroll: true });
       return doc.activeElement === target;
     }
@@ -342,7 +346,8 @@ export function createWorkspaceFocusController(doc: Document) {
   const schedule = () => {
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
-      if (pending && focus(pending.area, pending.restore, pending.selector)) cancelRequest();
+      if (pending && focus(pending.area, pending.restore, pending.selector, pending.reveal))
+        cancelRequest();
     });
   };
   const request = (target: WorkspaceFocusTarget) => {

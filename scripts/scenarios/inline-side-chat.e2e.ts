@@ -125,6 +125,16 @@ test(
     await screen.getByRole("button", /^Bring back to Explain that/).tap();
     await expect(rails.first()).toHaveAttribute("aria-expanded", "true");
     await expect(screen.getByRole("link", "Thread, Go one level deeper.")).toBeVisible();
+    const recipient = screen.getByRole("textbox", /^Message Explain that/);
+    await expect(recipient).toBeFocused();
+    const recipientVisible = await browser.evaluate(() => {
+      const editor = document.activeElement;
+      if (!editor?.matches('[contenteditable="true"]')) return false;
+      const { x, y, width, height } = editor.getBoundingClientRect();
+      return editor.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    });
+    if (!recipientVisible) throw new Error("The focused recipient is covered or off screen.");
+    await app.screenshot("bring-back-focused-recipient");
     await expect(fullChat).toHaveCount(3);
     await screen.getByRole("button", "Open as side chat tab").last().tap();
     await expect(screen.getByRole("button", "Close side chat")).toBeVisible();
