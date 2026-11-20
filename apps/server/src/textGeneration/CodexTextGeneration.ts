@@ -536,13 +536,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
               )
         ).pipe(Effect.asVoid);
       });
+      const effort = getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort");
       yield* client.request("turn/start", {
         threadId: fork.thread.id,
         model: input.modelSelection.model,
         input: [{ type: "text", text: NATIVE_HANDOFF_SUMMARY_PROMPT, text_elements: [] }],
-        ...(getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
-          ? { effort: getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort") }
-          : {}),
+        ...(effort ? { effort } : {}),
       });
       const summary = yield* Deferred.await(done);
       return { summary };

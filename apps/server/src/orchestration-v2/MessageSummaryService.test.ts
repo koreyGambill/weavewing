@@ -374,7 +374,7 @@ it.effect("uses the thread model and native boundary without creating a thread",
       });
       const bounded = yield* summaries.prepareHandoff({
         threadId,
-        throughRunId: before.run!.runId,
+        throughRunId: before.run!.id,
       });
       assert.equal(bounded.kind, "native_summary");
       assert.deepStrictEqual(generate.mock.calls.slice(0, 1), [
