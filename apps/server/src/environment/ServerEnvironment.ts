@@ -221,6 +221,7 @@ export const make = Effect.gen(function* () {
     ...(databaseMigration === undefined ? {} : { databaseMigration }),
     capabilities: {
       statusSources: true,
+      statusSourceSharing: true,
       automations: true,
       automationRunHistory: true,
       automationTriggerProjects: true,

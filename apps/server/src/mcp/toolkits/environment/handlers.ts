@@ -4,6 +4,7 @@ import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as StatusSources from "../../../statusSources/StatusSources.ts";
+import { callerLinkOrigin } from "../../linkOrigin.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller, unavailable } from "../../threadAccess.ts";
@@ -46,11 +47,20 @@ const access = Effect.gen(function* () {
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   t3_status_sources: McpToolAccess.reads(() =>
     Effect.gen(function* () {
-      yield* readCaller();
+      const caller = yield* readCaller();
+      const linked = callerLinkOrigin(caller) !== undefined;
       const sources = yield* StatusSources.StatusSources;
       return yield* sources.list().pipe(
         Effect.map((entries) =>
-          entries.map(({ config, latest, lastTransition }) => ({ config, latest, lastTransition })),
+          entries
+            // A link sees only this machine's own shared sources, so mirrors never echo back.
+            .filter((entry) => !linked || (entry.config.shared && entry.origin === undefined))
+            .map(({ config, latest, lastTransition, origin }) => ({
+              config,
+              latest,
+              lastTransition,
+              ...(origin ? { origin } : {}),
+            })),
         ),
         Effect.mapError(unavailable),
       );

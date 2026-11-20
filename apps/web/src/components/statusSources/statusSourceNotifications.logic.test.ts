@@ -19,6 +19,7 @@ function source(
       timeoutSeconds: 10,
       target: "http://localhost/health",
       hasCredentials: false,
+      shared: true,
       snoozedUntil,
     },
     latest: { source: "health", state: to, summary: to, items: [] },

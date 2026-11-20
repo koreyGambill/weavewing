@@ -33,6 +33,7 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -73,6 +74,7 @@ export function StatusSourcesSettings() {
       key={environment.environmentId}
       environmentId={environment.environmentId}
       label={environment.label}
+      sharing={environment.serverConfig.environment.capabilities.statusSourceSharing === true}
     />
   );
 }
@@ -80,11 +82,14 @@ export function StatusSourcesSettings() {
 function EnvironmentStatusSources({
   environmentId,
   label,
+  sharing,
 }: {
   environmentId: EnvironmentId;
   label: string;
+  sharing: boolean;
 }) {
   const query = useEnvironmentQuery(statusSources({ environmentId, input: {} }));
+  const own = query.data?.filter((source) => !source.origin);
   const canEdit = useAtomValue(statusSourcesUpsert.permissionAtom(environmentId));
   const [editing, setEditing] = useState<StatusSource | "new" | null>(null);
   return (
@@ -103,6 +108,7 @@ function EnvironmentStatusSources({
           External tools checked from {label}. See current state and the last transition in the
           Status tool in the right tools sidebar. History stays in each tool. Snoozing mutes
           notifications while checks continue.
+          {sharing && ` Shared sources also alert on every machine that links to ${label}.`}
         </p>
         {!canEdit && (
           <p className="px-4 pb-3 text-xs text-muted-foreground">
@@ -119,13 +125,13 @@ function EnvironmentStatusSources({
             Loading sources…
           </p>
         )}
-        {query.data?.length === 0 && (
+        {own?.length === 0 && (
           <SettingsRow
             title="No status sources"
             description="Add a Wing status endpoint, health URL, local command, or signed webhook."
           />
         )}
-        {query.data?.map((source) => (
+        {own?.map((source) => (
           <StatusSourceRow
             key={source.config.id}
             source={source}
@@ -138,6 +144,7 @@ function EnvironmentStatusSources({
       {editing !== null && (
         <StatusSourceEditor
           environmentId={environmentId}
+          sharing={sharing}
           source={editing === "new" ? undefined : editing}
           onClose={() => setEditing(null)}
         />
@@ -279,10 +286,12 @@ function parseHeaders(value: string): Record<string, string> | null {
 
 function StatusSourceEditor({
   environmentId,
+  sharing,
   source,
   onClose,
 }: {
   environmentId: EnvironmentId;
+  sharing: boolean;
   source: StatusSource | undefined;
   onClose: () => void;
 }) {
@@ -297,6 +306,7 @@ function StatusSourceEditor({
   const [headers, setHeaders] = useState("");
   const [interval, setInterval] = useState(source?.config.intervalSeconds ?? 60);
   const [timeout, setTimeout] = useState(source?.config.timeoutSeconds ?? 10);
+  const [shared, setShared] = useState(source?.config.shared ?? true);
   const [pending, setPending] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [savedId, setSavedId] = useState(source?.config.id);
@@ -334,6 +344,8 @@ function StatusSourceEditor({
         icon,
         intervalSeconds: interval,
         timeoutSeconds: timeout,
+        // Left out when unchanged, so an older open dialog cannot undo another device's choice.
+        ...(shared !== (source?.config.shared ?? true) ? { shared } : {}),
         ...(target.trim() ? { target: target.trim() } : {}),
         ...(parsedHeaders === undefined || parsedHeaders === null
           ? {}
@@ -557,6 +569,22 @@ function StatusSourceEditor({
                     )}
                   </>
                 )}
+              </div>
+            )}
+            {sharing && (
+              <div className="flex items-start justify-between gap-3">
+                <div className="grid gap-1">
+                  <Label htmlFor="status-source-shared">Share with linked machines</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Machines that link to this one show this source and alert when it fails.
+                  </p>
+                </div>
+                <Switch
+                  id="status-source-shared"
+                  checked={shared}
+                  onCheckedChange={setShared}
+                  disabled={!canEdit}
+                />
               </div>
             )}
             {error && (

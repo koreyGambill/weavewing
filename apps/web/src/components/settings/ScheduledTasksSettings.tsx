@@ -421,7 +421,9 @@ function EventTriggerFields({
     statusEvent ? statusSources({ environmentId, input: {} }) : null,
   );
   const sourceItems: Record<string, string> = { any: "Any source" };
-  for (const source of sources.data ?? []) sourceItems[source.config.id] = source.config.name;
+  // Automations follow only this environment's own checks.
+  for (const source of sources.data ?? [])
+    if (!source.origin) sourceItems[source.config.id] = source.config.name;
   // A source removed since the task was saved still shows, so the form does not silently change it.
   if (draft.eventStatusSource && sourceItems[draft.eventStatusSource] === undefined) {
     sourceItems[draft.eventStatusSource] = `${draft.eventStatusSource} (removed)`;

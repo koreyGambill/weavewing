@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { StatusItem, StatusState } from "@t3tools/contracts";
+import type { StatusItem, StatusSource, StatusState } from "@t3tools/contracts";
 
 import {
   groupStatusItems,
   sourceDefaultExpanded,
   sourceExpanded,
   statusItemCounts,
+  withoutRepeatedMirrors,
 } from "./statusSources.logic";
 
 const items: StatusItem[] = [
@@ -84,5 +85,30 @@ describe("status source presentation", () => {
     expect(
       sourceDefaultExpanded({ state, items: checks.map((state) => ({ name: state, state })) }),
     ).toBe(expanded);
+  });
+});
+
+describe("withoutRepeatedMirrors", () => {
+  const source = (id: string, origin?: string) =>
+    ({
+      config: { id },
+      ...(origin ? { origin: { environmentId: origin, label: origin } } : {}),
+    }) as unknown as StatusSource;
+  const ids = (group: ReadonlyArray<StatusSource> | null) => group?.map((entry) => entry.config.id);
+
+  it("keeps one copy of each check across the environments shown", () => {
+    const a = [source("own"), source("c:disk", "c"), source("d:disk", "d")];
+    const b = [source("c:disk", "c"), source("d:disk", "d")];
+    const d = [source("disk")];
+    expect(withoutRepeatedMirrors([a, b, null], new Set(["a", "b"])).map(ids)).toEqual([
+      ["own", "c:disk", "d:disk"],
+      [],
+      undefined,
+    ]);
+    expect(withoutRepeatedMirrors([a, b, d], new Set(["a", "b", "d"])).map(ids)).toEqual([
+      ["own", "c:disk"],
+      [],
+      ["disk"],
+    ]);
   });
 });

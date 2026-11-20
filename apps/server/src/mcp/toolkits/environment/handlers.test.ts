@@ -5,6 +5,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2ThreadShell,
+  type StatusSource,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -95,5 +96,70 @@ it.effect("refuses a preferences update when the caller's turn ends while it wai
         ),
       ),
     );
+  }),
+);
+
+it.effect("shows a linked environment only this machine's own shared status sources", () =>
+  Effect.gen(function* () {
+    const source = (id: string, shared: boolean, mirrored = false): StatusSource => ({
+      config: {
+        id,
+        name: id,
+        kind: "webhook",
+        icon: "activity",
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        snoozedUntil: null,
+        target: "",
+        hasCredentials: false,
+        shared,
+      },
+      latest: { source: id, state: "ok", summary: "", items: [] },
+      lastTransition: null,
+      ...(mirrored ? { origin: { environmentId, label: "Elsewhere" } } : {}),
+    });
+    const sources = [
+      source("shared", true),
+      source("private", false),
+      source("mirror", true, true),
+    ];
+    const read = (linked: boolean) =>
+      Effect.gen(function* () {
+        const toolkit = yield* EnvironmentToolkit;
+        const result = yield* toolkit
+          .handle("t3_status_sources", {})
+          .pipe(Stream.unwrap, Stream.runCollect);
+        const sources = result.at(-1)!.result as ReadonlyArray<StatusSource>;
+        return sources.map((entry) => entry.config.id);
+      }).pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(EnvironmentHandlers.layer).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                Layer.mock(StatusSources.StatusSources)({ list: () => Effect.succeed(sources) }),
+                ThreadCommandExecutor.layer,
+                Layer.succeed(McpInvocationContext.McpInvocationContext, {
+                  environmentId,
+                  requestNamespace: "client:status",
+                  thread: undefined,
+                  client: {
+                    sessionId: "session:status",
+                    label: "Peer",
+                    access: "read-only",
+                    linked,
+                  },
+                  capabilities: new Set(["orchestration" as const]),
+                  issuedAt: 0,
+                }),
+                Layer.mock(ThreadManagement.ThreadManagementService)({}),
+                Layer.mock(Environment.ServerEnvironment)({}),
+                Layer.mock(Settings.ServerSettingsService)({}),
+              ),
+            ),
+          ),
+        ),
+      );
+    expect(yield* read(false)).toEqual(["shared", "private", "mirror"]);
+    expect(yield* read(true)).toEqual(["shared"]);
   }),
 );

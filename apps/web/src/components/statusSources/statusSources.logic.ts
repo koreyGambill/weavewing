@@ -1,4 +1,4 @@
-import type { StatusItem, StatusPayload, StatusState } from "@t3tools/contracts";
+import type { StatusItem, StatusPayload, StatusSource, StatusState } from "@t3tools/contracts";
 
 const stateOrder: Record<StatusState, number> = { fail: 0, warn: 1, ok: 2, unknown: 3 };
 
@@ -52,4 +52,25 @@ export function sourceExpanded(
     stateOrder[sourceExpansionState(payload)] < stateOrder[saved.state] ||
     (saved.at !== undefined && lastTransitionAt !== undefined && lastTransitionAt > saved.at)
   );
+}
+
+/**
+ * Keeps one copy of each check across the environments a client shows: the
+ * environment's own source when it is shown, otherwise the first mirror of it.
+ */
+export function withoutRepeatedMirrors(
+  groups: ReadonlyArray<ReadonlyArray<StatusSource> | null>,
+  shown: ReadonlySet<string>,
+): ReadonlyArray<ReadonlyArray<StatusSource> | null> {
+  const seen = new Set<string>();
+  return groups.map((sources) => {
+    if (!sources) return sources;
+    const kept = sources.filter((source) => {
+      if (!source.origin) return true;
+      if (shown.has(source.origin.environmentId) || seen.has(source.config.id)) return false;
+      seen.add(source.config.id);
+      return true;
+    });
+    return kept.length === sources.length ? sources : kept;
+  });
 }
