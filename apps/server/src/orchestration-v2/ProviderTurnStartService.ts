@@ -72,6 +72,7 @@ import {
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
+import { canForkFromBusySource } from "./ThreadForkService.ts";
 import {
   isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
@@ -1264,13 +1265,12 @@ export const layer: Layer.Layer<
               cause: `Native fork transfer ${nativeForkTransfer.id} has no source provider execution.`,
             });
           }
-          // Providers refuse to fork a busy thread, so a source that started a turn after
-          // dispatch planned this fork gets the portable context dispatch gives a busy source.
+          // The source may have started a later turn between planning and executing the fork.
           const sourceBusy = sourceProjection.runs.some(
             (candidate) => candidate.ordinal > sourceRun.ordinal && isActiveRun(candidate),
           );
           let nativeForkFailure: string | undefined;
-          if (!sourceBusy) {
+          if (!sourceBusy || canForkFromBusySource(sourceProviderThread, sourceProviderTurn)) {
             // Rolled-back turns are no longer in the source conversation, so they cannot bound a fork.
             const rolledBackAttemptIds = new Set(
               sourceProjection.attempts
@@ -1298,7 +1298,7 @@ export const layer: Layer.Layer<
               }),
             );
             if (forked._tag === "Success") return forked.success;
-            if (input.willRetry === true) return yield* forked.failure;
+            if (input.willRetry === true && !sourceBusy) return yield* forked.failure;
             if (!(yield* isCurrentAttemptInStatus("starting"))) return undefined;
             // Retries are spent (e.g. the source's native session is gone): start fresh with portable history.
             yield* Effect.logWarning("Starting a native fork in a fresh native session", {

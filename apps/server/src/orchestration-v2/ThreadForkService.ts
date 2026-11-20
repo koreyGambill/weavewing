@@ -6,6 +6,7 @@ import {
   OrchestrationV2ContextTransfer,
   OrchestrationV2CreationSource,
   OrchestrationV2ProviderThread,
+  type OrchestrationV2ProviderTurn,
   OrchestrationV2ProviderTurnTokenUsage,
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
@@ -47,6 +48,19 @@ export function forkableSourceRunStatusError(
   run: Pick<OrchestrationV2Run, "id" | "status">,
 ): string {
   return `Fork source run ${run.id} is ${run.status}; in-progress and rolled-back runs cannot be forked.`;
+}
+
+/** Codex can atomically fork through a completed turn while a later turn is active. */
+export function canForkFromBusySource(
+  thread: OrchestrationV2ProviderThread | undefined,
+  turn: OrchestrationV2ProviderTurn | undefined,
+): boolean {
+  return (
+    thread?.driver === "codex" &&
+    turn?.providerThreadId === thread.id &&
+    turn.status === "completed" &&
+    turn.nativeTurnRef?.strength === "strong"
+  );
 }
 
 /** A pending fork transfer; the target thread's next turn resolves it natively or portably. */

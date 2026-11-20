@@ -496,7 +496,7 @@ function makeLocalCommandHarness(input: {
     readonly repeatedResume?: boolean;
     readonly acceptedResume?: boolean;
     readonly restartedResume?: boolean;
-    readonly nativeForkFrom?: "idle" | "busy";
+    readonly nativeForkFrom?: "idle" | "busy" | "busy-without-boundary";
     readonly switchedProvider?: boolean;
     readonly threadRuntimeMode?: OrchestrationV2ThreadProjection["thread"]["runtimeMode"];
   };
@@ -707,11 +707,14 @@ function makeLocalCommandHarness(input: {
       providerThreadId: parentProviderThread.id,
       nodeId: rootNodeId,
       runAttemptId: RunAttemptId.make(`side-chat-parent-attempt-${ordinal}`),
-      nativeTurnRef: {
-        driver: providerThread.driver,
-        nativeId: `side-chat-parent-native-turn-${ordinal}`,
-        strength: "strong" as const,
-      },
+      nativeTurnRef:
+        input.sideChat?.nativeForkFrom === "busy-without-boundary"
+          ? null
+          : {
+              driver: providerThread.driver,
+              nativeId: `side-chat-parent-native-turn-${ordinal}`,
+              strength: "strong" as const,
+            },
       ordinal,
       status: "completed" as const,
       startedAt: now,
@@ -747,7 +750,7 @@ function makeLocalCommandHarness(input: {
         status: "rolled_back" as const,
         completedAt: now,
       },
-      ...(input.sideChat?.nativeForkFrom === "busy"
+      ...(input.sideChat?.nativeForkFrom?.startsWith("busy")
         ? [
             {
               ...run,
@@ -2314,8 +2317,9 @@ effectIt.effect("includes a persisted newest-context snapshot in the provider in
 
 effectIt.effect.each([
   { nativeForkFrom: "idle", forks: true, transferStatus: "consumed", handoffIds: [] },
+  { nativeForkFrom: "busy", forks: true, transferStatus: "consumed", handoffIds: [] },
   {
-    nativeForkFrom: "busy",
+    nativeForkFrom: "busy-without-boundary",
     forks: false,
     transferStatus: "resolved_portable",
     handoffIds: ["side-chat-fork-context"],

@@ -672,6 +672,7 @@ const writeParentRun = (input: {
   readonly transcript?: { readonly streaming?: boolean };
   /** A checkpointed run on a native provider thread, which `latest_stable` forks start from. */
   readonly stable?: boolean;
+  readonly nativeBoundary?: boolean;
 }) =>
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
@@ -682,6 +683,7 @@ const writeParentRun = (input: {
     const providerThreadId = input.stable
       ? ProviderThreadId.make(`${input.runId}:provider-thread`)
       : null;
+    const attemptId = input.nativeBoundary ? RunAttemptId.make(`${input.runId}:attempt`) : null;
     yield* eventSink.write({
       events: [
         ...(providerThreadId === null
@@ -730,7 +732,7 @@ const writeParentRun = (input: {
             providerThreadId,
             userMessageId: messageId,
             rootNodeId: nodeId,
-            activeAttemptId: null,
+            activeAttemptId: attemptId,
             status: input.status,
             queuePosition: null,
             requestedAt: now,
@@ -750,6 +752,31 @@ const writeParentRun = (input: {
               : {}),
           },
         },
+        ...(attemptId === null || providerThreadId === null
+          ? []
+          : [
+              {
+                id: EventId.make(`${input.runId}:provider-turn`),
+                type: "provider-turn.updated" as const,
+                threadId: input.threadId,
+                occurredAt: now,
+                payload: {
+                  id: ProviderTurnId.make(`${input.runId}:provider-turn`),
+                  providerThreadId,
+                  nodeId: NodeId.make(`${input.runId}:root`),
+                  runAttemptId: attemptId,
+                  nativeTurnRef: {
+                    driver,
+                    nativeId: `${input.runId}:turn`,
+                    strength: "strong" as const,
+                  },
+                  ordinal: input.ordinal,
+                  status: "completed" as const,
+                  startedAt: now,
+                  completedAt: now,
+                },
+              },
+            ]),
         ...(input.transcript === undefined
           ? []
           : [
@@ -1001,6 +1028,53 @@ it.effect("a side chat of a busy parent points history recovery at the parent", 
     assert.notInclude(coverage, `threadId:"${sideChatId}"`);
     assert.isFalse(started.turnItems.some((item) => item.type === "handoff"));
   }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
+it.effect.each([false, true])(
+  "keeps a bounded native Codex fork while the parent is busy (side chat %s)",
+  (sideChat) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const parentId = ThreadId.make("native-busy-parent");
+      const childId = ThreadId.make("native-busy-child");
+      const stableRunId = RunId.make("native-busy-stable");
+      yield* createParent(parentId);
+      yield* writeParentRun({
+        threadId: parentId,
+        runId: stableRunId,
+        ordinal: 1,
+        status: "completed",
+        text: "Keep this history",
+        stable: true,
+        nativeBoundary: true,
+      });
+      yield* writeParentRun({
+        threadId: parentId,
+        runId: RunId.make("native-busy-current"),
+        ordinal: 2,
+        status: "running",
+        text: "Parent is still working",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("native-busy-fork"),
+        sourceThreadId: parentId,
+        targetThreadId: childId,
+        sourcePoint: sideChat ? { type: "latest_stable" } : { type: "run", runId: stableRunId },
+        sideChat,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* askSideChat(childId, "native-busy-first-message");
+      const started = yield* orchestrator.getThreadProjection(childId);
+      assert.equal(
+        started.providerThreads[0]?.forkedFrom?.providerTurnId,
+        ProviderTurnId.make(`${stableRunId}:provider-turn`),
+      );
+      assert.isFalse(
+        started.contextHandoffs.some((item) => item.strategy === "full_thread_summary"),
+      );
+    }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 
 it.effect("a side chat of an idle parent still starts with the framing note", () =>

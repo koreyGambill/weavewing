@@ -221,7 +221,7 @@ export interface CommandPolicyV2Shape {
       readonly hasStrongNativeSource: boolean;
       readonly sourceRunStatus: OrchestrationV2Run["status"];
       readonly fromSpecificTurn: boolean;
-      /** Later source runs are still active; providers cannot fork a thread mid-turn. */
+      /** Later source runs prevent this provider from forking at the requested boundary. */
       readonly sourceBusy: boolean;
     },
   ) => Effect.Effect<ForkExecutionPolicyV2, CommandPolicyV2Error>;

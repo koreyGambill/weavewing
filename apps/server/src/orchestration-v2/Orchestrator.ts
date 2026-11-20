@@ -209,6 +209,7 @@ import {
   forkContextTransfer,
   isForkableSourceRunStatus,
   ThreadForkServiceV2,
+  canForkFromBusySource,
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -9539,7 +9540,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               hasStrongNativeSource: sourceProviderThread?.nativeThreadRef?.strength === "strong",
               sourceRunStatus: sourceRun.status,
               fromSpecificTurn: sourceRun !== null,
-              sourceBusy: sourceRunsAfterFork.some(isActiveRun),
+              sourceBusy:
+                sourceRunsAfterFork.some(isActiveRun) &&
+                !canForkFromBusySource(
+                  sourceProviderThread,
+                  sourceProjection?.providerTurns.find((turn) => turn.id === sourceProviderTurnId),
+                ),
             }),
           );
     const canResolveForkNatively = forkExecution === "native_fork";
