@@ -1513,7 +1513,77 @@ it.layer(
       yield* TestClock.adjust("1 second");
 
       expect(yield* Deferred.await(label)).toBe("Google Chrome");
+      expect(yield* manager.list("thread-1")).toEqual([
+        {
+          terminalId: DEFAULT_TERMINAL_ID,
+          cwd: process.cwd(),
+          status: "running",
+          hasRunningSubprocess: true,
+          childCommand: "Google Chrome",
+        },
+      ]);
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("reads the newest plain-text lines within the UTF-8 byte limit", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(2_000);
+      const input = openInput();
+      yield* manager.open(input);
+      const published = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.subscribe((event) =>
+        event.type === "output" && event.data.endsWith("last\r\n")
+          ? Deferred.succeed(published, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+      ptyAdapter.processes[0]!.emitData(
+        "old\r\n".repeat(1_200) +
+          "\x1b[34m" +
+          "😀".repeat(9_000) +
+          "\x1b[0m\r\n" +
+          "\x1b]8;;https://acme.test\x07link\x1b]8;;\x1b\\\r\n" +
+          "\x1b]0;title\u009ctitle-suffix\x07\u009d0;another title\u009c" +
+          "\x1bPignore\x1b\\\x1b(B\u009b31m\x00last\r\n",
+      );
+      yield* Deferred.await(published);
+
+      expect(yield* manager.read({ ...input, lines: 2 })).toEqual({
+        text: "link\nlast\n",
+        truncated: true,
+      });
+      const { text, truncated } = yield* manager.read(input);
+      expect(truncated).toBe(true);
+      expect(text).toMatch(/^😀+\nlink\nlast\n$/u);
+      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(32 * 1024);
+      expect(Buffer.byteLength(text) + Buffer.byteLength("😀")).toBeGreaterThan(32 * 1024);
+    }),
+  );
+
+  it.effect("defaults to 200 lines and clamps an oversized read to 1,000 lines", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(2_000);
+      const input = openInput();
+      yield* manager.open(input);
+      const published = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.subscribe((event) =>
+        event.type === "output"
+          ? Deferred.succeed(published, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+      const lines = Array.from({ length: 1_101 }, (_, index) => `${index}\n`);
+      ptyAdapter.processes[0]!.emitData(lines.join(""));
+      yield* Deferred.await(published);
+      expect(yield* manager.read(input)).toEqual({
+        text: lines.slice(-200).join(""),
+        truncated: true,
+      });
+      expect(yield* manager.read({ ...input, lines: 2_000 })).toEqual({
+        text: lines.slice(-1_000).join(""),
+        truncated: true,
+      });
+    }),
   );
 
   // Answers process-table queries after `queryDuration`, honoring the caller's

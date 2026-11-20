@@ -52,6 +52,8 @@ import { MCP_TOOL_EXPOSURE_HEADER } from "@t3tools/provider-core/server/mcpSessi
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
+import * as TerminalHandlers from "./toolkits/terminal/handlers.ts";
+import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
 import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import * as EnvironmentHandlers from "./toolkits/environment/handlers.ts";
 import { ThemeToolkit } from "./toolkits/theme/tools.ts";
@@ -1279,6 +1281,11 @@ const layerPreviewControlsRegistration = toolkitRegistration(
   PreviewControlsHandlers.layer,
 );
 
+export const layerTerminalRegistration = toolkitRegistration(
+  TerminalToolkit,
+  TerminalHandlers.layer,
+);
+
 const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentToolkit,
   EnvironmentHandlers.layer,
@@ -1357,6 +1364,7 @@ export const layerTools = Layer.mergeAll(
   layerEnvironmentToolkit,
   layerThemeToolkit,
   layerPreviewControlsRegistration,
+  layerTerminalRegistration,
   layerWorktreeToolkitRegistration,
   layerXwingToolkit,
   layerPullRequestsToolkit,

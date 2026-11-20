@@ -103,6 +103,9 @@ export {
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
 const DEFAULT_HISTORY_BYTE_LIMIT = 8 * 1024 * 1024;
+const DEFAULT_TERMINAL_READ_LINES = 200;
+export const MAX_TERMINAL_READ_LINES = 1_000;
+const MAX_TERMINAL_READ_BYTES = 32 * 1024;
 // eCryptfs permits 143-byte names.
 const MAX_HISTORY_FILENAME_BYTES = 143;
 const MAX_HISTORY_CHUNK_LENGTH = 16 * 1024;
@@ -203,6 +206,23 @@ export class TerminalManager extends Context.Service<
 
     readonly getShell: (input: TerminalObserveInput) => Effect.Effect<string, TerminalError>;
 
+    /** Summarize the terminals currently retained for the thread. */
+    readonly list: (threadId: string) => Effect.Effect<
+      ReadonlyArray<
+        Pick<TerminalSummary, "terminalId" | "cwd" | "status" | "hasRunningSubprocess"> & {
+          readonly childCommand: string | null;
+        }
+      >
+    >;
+
+    /** Read a bounded plain-text tail without attaching a viewer or starting a process. */
+    readonly read: (
+      input: TerminalObserveInput & { readonly lines?: number | undefined },
+    ) => Effect.Effect<
+      { readonly text: string; readonly truncated: boolean },
+      TerminalSessionLookupError
+    >;
+
     /**
      * Attached viewers share one PTY sized to the smallest of them, so a narrow client
      * still sees the whole TUI. Streams and resizes with the same `viewerId` (one client
@@ -246,6 +266,14 @@ export class TerminalManager extends Context.Service<
       input: TerminalWriteInput,
       viewerId?: string,
     ) => Effect.Effect<void, TerminalError>;
+
+    /** Write input to a running terminal, refusing if it has exited or moved away. */
+    readonly writeRunning: (
+      input: Pick<TerminalWriteInput, "threadId" | "terminalId" | "data">,
+    ) => Effect.Effect<
+      void,
+      TerminalSessionLookupError | TerminalNotRunningError | TerminalWriteError
+    >;
 
     readonly resize: (
       input: TerminalResizeInput,
@@ -1375,10 +1403,15 @@ function findStringEnd(
   input: string,
   start: number,
   isOsc: boolean,
+  allowC1Terminator = false,
 ): { end: number; c1?: { effect: C1Effect; index: number } } | null {
   for (let index = start; index < input.length; index += 1) {
     const codePoint = input.charCodeAt(index);
-    if ((isOsc && codePoint === 0x07) || isControlSequenceCancel(codePoint)) {
+    if (
+      (isOsc && codePoint === 0x07) ||
+      (allowC1Terminator && codePoint === 0x9c) ||
+      isControlSequenceCancel(codePoint)
+    ) {
       return { end: index + 1 };
     }
     // Like xterm.js, an ESC that does not start ST ends the string and begins the next sequence.
@@ -1423,15 +1456,22 @@ function findEscapeSequenceEndIndex(input: string, start: number): number | null
 // libghostty prints UTF-8 C1 code points (U+0080-U+009F) as text, so only ESC starts a sequence.
 const HISTORY_SEQUENCE_START = /\u001b/;
 const NEXT_HISTORY_SEQUENCE_START = new RegExp(HISTORY_SEQUENCE_START.source, "g");
+const PLAIN_HISTORY_C1_START = /[\u0090\u0098\u009b\u009d-\u009f]/u;
+const NEXT_PLAIN_HISTORY_SEQUENCE_START = new RegExp(
+  `${HISTORY_SEQUENCE_START.source}|${PLAIN_HISTORY_C1_START.source}`,
+  "gu",
+);
 
 function sanitizeTerminalHistoryChunk(
   pendingControlSequence: string,
   data: string,
+  plainText = false,
 ): { visibleText: string; pendingControlSequence: string } {
-  if (pendingControlSequence.length === 0 && !HISTORY_SEQUENCE_START.test(data)) {
+  if (!plainText && pendingControlSequence.length === 0 && !HISTORY_SEQUENCE_START.test(data)) {
     return { visibleText: data, pendingControlSequence: "" };
   }
 
+  const sequenceStart = plainText ? NEXT_PLAIN_HISTORY_SEQUENCE_START : NEXT_HISTORY_SEQUENCE_START;
   const input = `${pendingControlSequence}${data}`;
   // Only the pending prefix's final ESC can begin a terminator split across chunks.
   const pendingScanStart = Math.max(0, pendingControlSequence.length - 1);
@@ -1446,6 +1486,12 @@ function sanitizeTerminalHistoryChunk(
 
   while (index < input.length) {
     const codePoint = input.charCodeAt(index);
+    const startsWithC1 =
+      plainText && c1Introducer.length === 0 && PLAIN_HISTORY_C1_START.test(input[index]!);
+    if (startsWithC1) {
+      c1Introducer = `\u001b${String.fromCharCode(codePoint - 0x40)}`;
+      index += 1;
+    }
 
     if (c1Introducer.length > 0 || codePoint === 0x1b) {
       // Empty for a sequence the input introduces itself, which starts with ESC at `index`.
@@ -1467,7 +1513,7 @@ function sanitizeTerminalHistoryChunk(
           const cursorCodePoint = input.charCodeAt(cursor);
           const cancelled = isControlSequenceCancel(cursorCodePoint);
           if (cancelled || isCsiFinalByte(cursorCodePoint)) {
-            if (cancelled || !shouldStripCsiSequence(body, input[cursor] ?? "")) {
+            if (!plainText && (cancelled || !shouldStripCsiSequence(body, input[cursor] ?? ""))) {
               append(prefix + input.slice(index, cursor + 1));
             } else {
               append(executedControls);
@@ -1482,10 +1528,10 @@ function sanitizeTerminalHistoryChunk(
             if (c1) {
               // The CSI ends here undispatched, so it is kept only when the terminal is back in
               // ground with nothing to answer.
-              if (c1.next.length === 0 && !c1.query) {
+              if (!plainText && c1.next.length === 0 && !c1.query) {
                 append(prefix + input.slice(index, end));
               } else {
-                append(executedControls + c1.safe);
+                append(executedControls + (plainText ? "" : c1.safe));
               }
               c1Introducer = c1.next;
               index = end;
@@ -1517,17 +1563,24 @@ function sanitizeTerminalHistoryChunk(
         nextCodePoint === 0x5d ||
         nextCodePoint === 0x50 ||
         nextCodePoint === 0x5e ||
-        nextCodePoint === 0x5f
+        nextCodePoint === 0x5f ||
+        (plainText && nextCodePoint === 0x58)
       ) {
         const stringEnd = findStringEnd(
           input,
           Math.max(contentStart, pendingScanStart),
           nextCodePoint === 0x5d,
+          startsWithC1,
         );
         if (stringEnd === null) {
           return { visibleText, pendingControlSequence: prefix + input.slice(index) };
         }
         const { end, c1 } = stringEnd;
+        if (plainText) {
+          c1Introducer = c1?.effect.next ?? "";
+          index = end;
+          continue;
+        }
         const content = stripStringTerminator(
           prefix.slice(2) + input.slice(contentStart, c1?.index ?? end),
         );
@@ -1553,7 +1606,7 @@ function sanitizeTerminalHistoryChunk(
         return { visibleText, pendingControlSequence: input.slice(index) };
       }
       // ESC Z (DECID) is the legacy primary device attributes query.
-      if (nextCodePoint !== 0x5a) {
+      if (!plainText && nextCodePoint !== 0x5a) {
         append(input.slice(index, escapeSequenceEndIndex));
       }
       index = escapeSequenceEndIndex;
@@ -1561,13 +1614,19 @@ function sanitizeTerminalHistoryChunk(
     }
 
     // One slice per printable run: every chunk of coloured output reaches this loop.
-    NEXT_HISTORY_SEQUENCE_START.lastIndex = index + 1;
-    const nextSequenceStart = NEXT_HISTORY_SEQUENCE_START.exec(input)?.index ?? input.length;
+    sequenceStart.lastIndex = index + 1;
+    const nextSequenceStart = sequenceStart.exec(input)?.index ?? input.length;
     append(input.slice(index, nextSequenceStart));
     index = nextSequenceStart;
   }
 
   return { visibleText, pendingControlSequence: c1Introducer };
+}
+
+function plainTerminalHistory(history: string): string {
+  return sanitizeTerminalHistoryChunk("", history, true)
+    .visibleText.replace(/\r\n?/gu, "\n")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu, "");
 }
 
 function legacySafeThreadId(threadId: string): string {
@@ -2565,9 +2624,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     threadId: string,
     terminalId: string,
   ): Effect.fn.Return<TerminalSessionState, TerminalSessionLookupError> {
-    return yield* Effect.flatMap(getSession(threadId, terminalId), (session) =>
-      Effect.fromOption(session, () => new TerminalSessionLookupError({ threadId, terminalId })),
-    );
+    const session = yield* getSession(threadId, terminalId);
+    if (
+      Option.isNone(session) ||
+      session.value.threadId !== threadId ||
+      session.value.terminalId !== terminalId
+    ) {
+      return yield* new TerminalSessionLookupError({ threadId, terminalId });
+    }
+    return session.value;
   });
 
   const sessionsForThread = Effect.fn("terminal.sessionsForThread")(function* (threadId: string) {
@@ -3808,34 +3873,70 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
   };
 
-  const write: TerminalManager["Service"]["write"] = Effect.fn("terminal.write")(
-    function* (input, viewerId) {
-      const terminalId = input.terminalId;
-      const session = yield* requireSession(input.threadId, terminalId);
-      const process = session.process;
-      if (!process || session.status !== "running") {
-        if (session.status === "exited") return;
-        return yield* new TerminalNotRunningError({
+  const list: TerminalManager["Service"]["list"] = Effect.fn("terminal.list")(function* (threadId) {
+    return yield* Effect.map(readManagerState, (state) =>
+      [...state.sessions.values()]
+        .filter((session) => session.threadId === threadId)
+        .map((session) => ({
+          terminalId: session.terminalId,
+          cwd: session.cwd,
+          status: session.status,
+          hasRunningSubprocess: session.hasRunningSubprocess,
+          childCommand:
+            session.childCommandLabel && session.hasRunningSubprocess
+              ? terminalWireLabel(session)
+              : null,
+        })),
+    );
+  });
+
+  const read: TerminalManager["Service"]["read"] = Effect.fn("terminal.read")((input) =>
+    withThreadLock(
+      input.threadId,
+      Effect.gen(function* () {
+        const session = yield* requireSession(input.threadId, input.terminalId);
+        const plain = plainTerminalHistory(session.history.value());
+        const lines = Math.min(input.lines ?? DEFAULT_TERMINAL_READ_LINES, MAX_TERMINAL_READ_LINES);
+        const text = new BoundedTerminalHistory(lines, plain, MAX_TERMINAL_READ_BYTES).value();
+        return { text, truncated: text.length < plain.length };
+      }),
+    ),
+  );
+
+  const write = Effect.fn("terminal.write")(function* (
+    input: TerminalWriteInput,
+    viewerId?: string,
+    requireRunning = false,
+  ) {
+    const terminalId = input.terminalId;
+    const session = yield* requireSession(input.threadId, terminalId);
+    const process = session.process;
+    if (!process || session.status !== "running") {
+      if (!requireRunning && session.status === "exited") return;
+      return yield* new TerminalNotRunningError({
+        threadId: input.threadId,
+        terminalId,
+      });
+    }
+    if (input.reply && !acceptsQueryReply(toSessionKey(input.threadId, terminalId), viewerId)) {
+      return;
+    }
+    session.inputCount += 1;
+    yield* Effect.try({
+      try: () => process.write(PtyAdapter.ptyInput(input.data, input.binary)),
+      catch: (cause) =>
+        new TerminalWriteError({
           threadId: input.threadId,
           terminalId,
-        });
-      }
-      if (input.reply && !acceptsQueryReply(toSessionKey(input.threadId, terminalId), viewerId)) {
-        return;
-      }
-      session.inputCount += 1;
-      yield* Effect.try({
-        try: () => process.write(PtyAdapter.ptyInput(input.data, input.binary)),
-        catch: (cause) =>
-          new TerminalWriteError({
-            threadId: input.threadId,
-            terminalId,
-            terminalPid: process.pid,
-            cause,
-          }),
-      });
-    },
-  );
+          terminalPid: process.pid,
+          cause,
+        }),
+    });
+  });
+
+  const writeRunning: TerminalManager["Service"]["writeRunning"] = Effect.fn(
+    "terminal.writeRunning",
+  )((input) => withThreadLock(input.threadId, write(input, undefined, true)));
 
   const resizeLocked = Effect.fn("terminal.resize")(function* (
     input: TerminalResizeInput,
@@ -4123,11 +4224,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   return TerminalManager.of({
     open,
     getShell,
+    list,
+    read,
     attachStream,
     attachOutputStream,
     observeStream,
     resyncStream,
     write,
+    writeRunning,
     resize,
     clear,
     close,

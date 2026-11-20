@@ -166,11 +166,19 @@ const refuseLinkedFromLimitedAutomation = Effect.gen(function* () {
 export const readsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   declare((params: P) => requireThreadCaller.pipe(Effect.flatMap(() => handle(params))), undefined);
 
-export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+export const actsAsCaller = <P, A, E, R>(
+  handle: (params: P) => Effect.Effect<A, E, R>,
+  options?: { readonly fullAccessRequired: string },
+) =>
   declare(
     (params: P) =>
       requireThreadCaller.pipe(
         Effect.andThen(writingCaller),
+        Effect.tap((caller) =>
+          options === undefined
+            ? Effect.void
+            : assertFullAccess(caller, options.fullAccessRequired),
+        ),
         Effect.flatMap(() => handle(params)),
       ),
     undefined,

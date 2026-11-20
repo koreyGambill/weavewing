@@ -1423,10 +1423,12 @@ describe("extractMcpToolCallIdentity", () => {
         }),
       );
 
-    expect(identityFor("mcp__editor_t3_code_f6129534__html_render")).toEqual({
-      server: "t3-code",
-      tool: "html_render",
-    });
+    for (const tool of ["html_render", "terminal_list", "terminal_read", "terminal_send"]) {
+      expect(identityFor(`mcp__editor_t3_code_f6129534__${tool}`)).toEqual({
+        server: "t3-code",
+        tool,
+      });
+    }
     expect(identityFor("mcp__editor_github_1234abcd__html_render")).toEqual({
       server: "editor_github_1234abcd",
       tool: "html_render",

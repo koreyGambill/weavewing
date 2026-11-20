@@ -93,6 +93,7 @@ import {
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
+import { TerminalToolkit } from "../../mcp/toolkits/terminal/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { ReviewToolkit } from "../../mcp/toolkits/reviews/tools.ts";
 import { MessageToolkit } from "../../mcp/toolkits/message/tools.ts";
@@ -815,6 +816,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(XwingToolkit.tools),
       ...Object.values(ThemeToolkit.tools),
       ...Object.values(PreviewControlsToolkit.tools),
+      ...Object.values(TerminalToolkit.tools),
       ...Object.values(HtmlToolkit.tools),
       ...Object.values(ReviewToolkit.tools),
       ...Object.values(MessageToolkit.tools),

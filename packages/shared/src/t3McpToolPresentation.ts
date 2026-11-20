@@ -69,6 +69,7 @@ export type T3McpToolSummaryAction =
   | "read-pr-guide"
   | "browser"
   | "device"
+  | "terminal"
   | "html-preview"
   | "html-render"
   | "send-to-user";
@@ -349,6 +350,9 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   ),
   t3_preview_list: tool(["List", "Listing", "Listed", "preview tabs"], "browser", "browser"),
   t3_preview_close: tool(["Close", "Closing", "Closed", "a preview tab"], "browser", "browser"),
+  terminal_list: tool(["List", "Listing", "Listed", "thread terminals"], "terminal"),
+  terminal_read: tool(["Read", "Reading", "Read", "terminal output"], "terminal"),
+  terminal_send: tool(["Send", "Sending", "Sent", "terminal input"], "terminal"),
   t3_environment_read: tool(
     ["Read", "Reading", "Read", "environment preferences"],
     "environment-read",

@@ -67,6 +67,7 @@ import { MessageToolkit } from "../../apps/server/src/mcp/toolkits/message/tools
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
 import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
+import { TerminalToolkit } from "../../apps/server/src/mcp/toolkits/terminal/tools.ts";
 import { ProjectToolkit } from "../../apps/server/src/mcp/toolkits/project/tools.ts";
 import {
   CHILD_PULL_REQUEST_REPORT_NEXT,
@@ -496,6 +497,7 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   EnvironmentToolkit,
   ThemeToolkit,
   PreviewControlsToolkit,
+  TerminalToolkit,
   WorktreeToolkit,
   PullRequestsToolkit,
   PreviewToolkit,
