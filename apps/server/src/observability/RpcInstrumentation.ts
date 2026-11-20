@@ -186,6 +186,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.threadNotesSettings]: "workspace",
   [WS_METHODS.threadNotesUpdateSettings]: "workspace",
   [WS_METHODS.threadNotesSendSelection]: "workspace",
+  [WS_METHODS.threadNotesSaveImage]: "workspace",
   [WS_METHODS.threadWorkspaceGet]: "workspace",
   [WS_METHODS.threadListRead]: "workspace",
   [WS_METHODS.threadArtifactRead]: "workspace",

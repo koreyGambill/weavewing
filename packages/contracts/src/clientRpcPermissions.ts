@@ -27,6 +27,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
 
   [WS_METHODS.threadNotesSave]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadNotesSendSelection]: AuthOrchestrationOperateScope,
+  [WS_METHODS.threadNotesSaveImage]: AuthOrchestrationOperateScope,
   [WS_METHODS.threadNotesUpdateSettings]: AuthEnvironmentMaintainScope,
   [WS_METHODS.reviewsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.reviewsSave]: AuthOrchestrationOperateScope,

@@ -10,6 +10,7 @@ import { CircleHelpIcon, EyeIcon, PencilIcon, SendIcon, SettingsIcon } from "luc
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import {
+  saveThreadNoteImage,
   threadNoteGet,
   threadNotesSettings,
   updateThreadNotesSettings,
@@ -22,8 +23,18 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ChatMarkdown from "../ChatMarkdown";
 import { randomUUID } from "../../lib/utils";
+import { readFileAsDataUrl } from "../../lib/imageCompression";
 import { useComposerDraftStore } from "../../composerDraftStore";
-import { editNote, flushNote, receiveNote, retryNote, useNoteDraft } from "./noteDraft";
+import {
+  editNote,
+  flushNote,
+  insertNoteText,
+  receiveNote,
+  retryNote,
+  useNoteDraft,
+} from "./noteDraft";
+
+const imageFiles = (files: FileList) => [...files].filter((file) => file.type.startsWith("image/"));
 
 export function NotesPanel({
   environmentId,
@@ -54,6 +65,23 @@ export function NotesPanel({
   useEffect(() => {
     if (query.data) receiveNote(environmentId, query.data);
   }, [environmentId, query.data]);
+  async function insertImages(files: ReadonlyArray<File>, at: number) {
+    setError(null);
+    try {
+      const links: string[] = [];
+      for (const file of files) {
+        const saved = await saveThreadNoteImage(environmentId, {
+          threadId,
+          dataUrl: await readFileAsDataUrl(file),
+        });
+        const alt = file.name.replace(/\.[^.]+$/, "").replace(/[[\]]/g, "") || "image";
+        links.push(`![${alt}](${saved.path})`);
+      }
+      insertNoteText(environmentId, threadId, at, links.join("\n"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the image.");
+    }
+  }
   async function shareSelection() {
     const selectedText = draft?.text.slice(selection.start, selection.end);
     setSending(true);
@@ -283,7 +311,13 @@ export function NotesPanel({
             {viewing ? (
               <div aria-label="Notes preview" className="min-h-0 flex-1 overflow-auto">
                 {draft.text ? (
-                  <ChatMarkdown text={draft.text} cwd={undefined} environmentId={environmentId} />
+                  <ChatMarkdown
+                    text={draft.text}
+                    cwd={undefined}
+                    environmentId={environmentId}
+                    threadRef={{ environmentId, threadId }}
+                    imageBaseDir={draft.note.path.replace(/[\\/][^\\/]*$/, "")}
+                  />
                 ) : (
                   <p className="text-sm text-muted-foreground">No notes yet.</p>
                 )}
@@ -308,6 +342,21 @@ export function NotesPanel({
                 }
                 onBlur={() => {
                   void flushNote(environmentId, threadId).catch(() => {});
+                }}
+                onPaste={(event) => {
+                  const files = imageFiles(event.clipboardData.files);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  void insertImages(files, event.currentTarget.selectionEnd);
+                }}
+                onDragOver={(event) => {
+                  if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  const files = imageFiles(event.dataTransfer.files);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  void insertImages(files, event.currentTarget.selectionEnd);
                 }}
               />
             )}

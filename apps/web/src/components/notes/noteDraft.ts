@@ -100,3 +100,20 @@ export async function retryNote(environmentId: EnvironmentId, threadId: ThreadId
   if (draft) set(key, { ...draft, error: null });
   return flushNote(environmentId, threadId);
 }
+
+/** Inserts on its own line at `at`, clamped to the current text, so edits made while waiting survive. */
+export function insertNoteText(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  at: number,
+  insertion: string,
+) {
+  const current = useDrafts.getState().entries[keyFor(environmentId, threadId)];
+  if (!current) return;
+  const index = Math.min(at, current.text.length);
+  const before = current.text.slice(0, index);
+  const after = current.text.slice(index);
+  const lead = before === "" || before.endsWith("\n") ? "" : "\n";
+  const trail = after.startsWith("\n") ? "" : "\n";
+  editNote(environmentId, threadId, { text: `${before}${lead}${insertion}${trail}${after}` });
+}

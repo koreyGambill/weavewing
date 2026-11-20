@@ -297,3 +297,21 @@ it.effect(
         expect(record.text.length).toBe(COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS);
     }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it.effect("stores pasted images beside the note and refuses scriptable formats", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const dataUrl = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`;
+    const first = yield* h.service.saveImage({ threadId, dataUrl });
+    const again = yield* h.service.saveImage({ threadId, dataUrl });
+    expect(again.path).toBe(first.path);
+    expect(first.path).toMatch(/^thread-[0-9a-f]{20}-images\/[0-9a-f]{20}\.png$/);
+    const note = yield* h.service.get({ threadId });
+    const stored = yield* h.fs.readFile(h.path.join(h.path.dirname(note.path), first.path));
+    expect(Buffer.from(stored).toString()).toBe("png-bytes");
+    const svg = yield* Effect.result(
+      h.service.saveImage({ threadId, dataUrl: "data:image/svg+xml;base64,PHN2Zy8+" }),
+    );
+    expect(Result.isFailure(svg) && svg.failure.code).toBe("invalid");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

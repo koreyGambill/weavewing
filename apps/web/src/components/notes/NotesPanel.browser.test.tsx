@@ -11,12 +11,19 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 import { act, render } from "../../../test/render";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-const state = vi.hoisted(() => ({ get: vi.fn(), settings: vi.fn(), save: vi.fn(), send: vi.fn() }));
+const state = vi.hoisted(() => ({
+  get: vi.fn(),
+  settings: vi.fn(),
+  save: vi.fn(),
+  send: vi.fn(),
+  saveImage: vi.fn(),
+}));
 vi.mock("../../state/threadNotes", () => ({
   threadNoteGet: state.get,
   threadNotesSettings: state.settings,
   persistThreadNote: state.save,
   sendThreadNoteSelection: state.send,
+  saveThreadNoteImage: state.saveImage,
   updateThreadNotesSettings: "settings",
 }));
 vi.mock(import("../../state/session"), async (importOriginal) => ({
@@ -123,4 +130,45 @@ it("previews private drafts, saves before sharing a selected range, and retains 
     .toHaveValue("Unsent text survives navigation");
   expect(reopened.container).toBeInTheDocument();
   expect(state.send).not.toHaveBeenCalled();
+});
+
+it("stores a pasted image beside the note and links it on its own line", async () => {
+  const environmentId = EnvironmentId.make("notes-image");
+  const threadId = ThreadId.make("notes-image");
+  const note: ThreadNote = {
+    threadId,
+    path: "/notes/thread-abc.md",
+    text: "before after",
+    revision: "first",
+    includeThreadId: false,
+    resumeCommand: null,
+    resumeExplanation: "Unavailable.",
+  };
+  state.get.mockReturnValue(Atom.make(AsyncResult.success(note)).pipe(Atom.keepAlive));
+  state.settings.mockReturnValue(
+    Atom.make(AsyncResult.success({ directory: "/notes" })).pipe(Atom.keepAlive),
+  );
+  state.saveImage.mockResolvedValue({ path: "thread-abc-images/0123.png" });
+  await using _view = await render(
+    <RegistryContext.Provider value={appAtomRegistry}>
+      <NotesPanel environmentId={environmentId} threadId={threadId} />
+    </RegistryContext.Provider>,
+  );
+  const field = page.getByRole("textbox", { name: "Personal thread notes" });
+  await expect.element(field).toHaveValue(note.text);
+  const element = field.element();
+  if (!(element instanceof HTMLTextAreaElement)) throw new Error("Expected textarea");
+  const clipboardData = new DataTransfer();
+  clipboardData.items.add(new File(["png"], "Screen Shot.png", { type: "image/png" }));
+  await act(() => {
+    element.setSelectionRange(7, 7);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true }));
+  });
+  await expect
+    .element(field)
+    .toHaveValue("before \n![Screen Shot](thread-abc-images/0123.png)\nafter");
+  expect(state.saveImage).toHaveBeenCalledWith(environmentId, {
+    threadId,
+    dataUrl: expect.stringMatching(/^data:image\/png;base64,/),
+  });
 });

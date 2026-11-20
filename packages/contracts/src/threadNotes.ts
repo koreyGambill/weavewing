@@ -1,6 +1,11 @@
 import * as Schema from "effect/Schema";
 import { ThreadId } from "./baseSchemas.ts";
 
+export const THREAD_NOTES_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+// Base64 grows bytes by 4/3; the slack covers the data URL header.
+const THREAD_NOTES_IMAGE_DATA_URL_MAX_CHARS =
+  Math.ceil((THREAD_NOTES_IMAGE_MAX_BYTES * 4) / 3) + 256;
+
 export const ThreadNotesSettings = Schema.Struct({ directory: Schema.String });
 export type ThreadNotesSettings = typeof ThreadNotesSettings.Type;
 export const ThreadNote = Schema.Struct({
@@ -31,6 +36,14 @@ export const ThreadNotesSendSelectionInput = Schema.Struct({
   endIndex: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 });
 export type ThreadNotesSendSelectionInput = typeof ThreadNotesSendSelectionInput.Type;
+export const ThreadNotesSaveImageInput = Schema.Struct({
+  threadId: ThreadId,
+  dataUrl: Schema.String.check(Schema.isMaxLength(THREAD_NOTES_IMAGE_DATA_URL_MAX_CHARS)),
+});
+export type ThreadNotesSaveImageInput = typeof ThreadNotesSaveImageInput.Type;
+/** The image's path relative to the note file, ready for a Markdown image link. */
+export const ThreadNotesSavedImage = Schema.Struct({ path: Schema.String });
+export type ThreadNotesSavedImage = typeof ThreadNotesSavedImage.Type;
 export class ThreadNotesError extends Schema.TaggedError<ThreadNotesError>()("ThreadNotesError", {
   code: Schema.Literals(["storage", "conflict", "invalid", "thread", "send"]),
   message: Schema.String,

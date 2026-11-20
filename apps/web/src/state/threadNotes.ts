@@ -1,5 +1,5 @@
 import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
-import type { ThreadNotesSaveInput } from "@t3tools/contracts";
+import type { ThreadNotesSaveImageInput, ThreadNotesSaveInput } from "@t3tools/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -32,6 +32,18 @@ export const updateThreadNotesSettings = createEnvironmentRpcCommand(connectionA
 });
 export async function persistThreadNote(environmentId: EnvironmentId, input: ThreadNotesSaveInput) {
   const result = await runAtomCommand(appAtomRegistry, save, { environmentId, input });
+  if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+  return result.value;
+}
+const saveImage = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "threadNotes:saveImage",
+  tag: WS_METHODS.threadNotesSaveImage,
+});
+export async function saveThreadNoteImage(
+  environmentId: EnvironmentId,
+  input: ThreadNotesSaveImageInput,
+) {
+  const result = await runAtomCommand(appAtomRegistry, saveImage, { environmentId, input });
   if (result._tag === "Failure") throw squashAtomCommandFailure(result);
   return result.value;
 }

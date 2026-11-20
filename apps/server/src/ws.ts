@@ -3195,6 +3195,7 @@ export const layerWsRpc = (
         [WS_METHODS.threadNotesSettings]: () => threadNotes.settings(),
         [WS_METHODS.threadNotesUpdateSettings]: (input) => threadNotes.updateSettings(input),
         [WS_METHODS.threadNotesSendSelection]: (input) => threadNotes.sendSelection(input),
+        [WS_METHODS.threadNotesSaveImage]: (input) => threadNotes.saveImage(input),
         [WS_METHODS.threadWorkspaceGet]: (input) => threadWorkspace.get(input),
         [WS_METHODS.threadListRead]: (input) => threadWorkspace.listRead(input),
         [WS_METHODS.threadArtifactRead]: (input) => threadWorkspace.artifactRead(input),

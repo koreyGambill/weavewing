@@ -7,9 +7,12 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import {
+  THREAD_NOTES_IMAGE_MAX_BYTES,
   ThreadNotesError,
   type ThreadNote,
   type ThreadNotesGetInput,
+  type ThreadNotesSaveImageInput,
+  type ThreadNotesSavedImage,
   type ThreadNotesSaveInput,
   type ThreadNotesSendSelectionInput,
   type ThreadNotesSettings,
@@ -21,12 +24,14 @@ import {
 } from "@t3tools/shared/composerContextReferences";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as ServerConfig from "../config.ts";
+import { parseBase64DataUrl } from "../imageMime.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
@@ -39,6 +44,9 @@ export class ThreadNotes extends Context.Service<
     readonly updateSettings: (
       input: ThreadNotesSettings,
     ) => Effect.Effect<ThreadNotesSettings, ThreadNotesError>;
+    readonly saveImage: (
+      input: ThreadNotesSaveImageInput,
+    ) => Effect.Effect<ThreadNotesSavedImage, ThreadNotesError>;
     readonly sendSelection: (
       input: ThreadNotesSendSelectionInput,
     ) => Effect.Effect<ThreadNote, ThreadNotesError>;
@@ -47,6 +55,13 @@ export class ThreadNotes extends Context.Service<
 
 const digest = (text: string) => NodeCrypto.createHash("sha256").update(text).digest("hex");
 const shellQuote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
+// Raster formats only: an SVG can carry script, and the preview serves these files to the browser.
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 const settingsCodec = Schema.fromJsonString(Schema.Struct({ directory: Schema.String }));
 const encodeSettings = Schema.encodeEffect(settingsCodec);
 const decodeSettings = Schema.decodeEffect(settingsCodec);
@@ -284,6 +299,48 @@ const make = Effect.gen(function* () {
       );
     return note;
   });
-  return ThreadNotes.of({ get, save, settings, updateSettings, sendSelection });
+  const saveImage = Effect.fn("ThreadNotes.saveImage")(function* (
+    input: ThreadNotesSaveImageInput,
+  ) {
+    const invalid = (message: string) => new ThreadNotesError({ code: "invalid", message });
+    const parsed = parseBase64DataUrl(input.dataUrl);
+    const extension = parsed && IMAGE_EXTENSIONS[parsed.mimeType];
+    if (!parsed || !extension)
+      return yield* invalid("Notes can hold PNG, JPEG, GIF, or WebP images.");
+    const bytes = yield* Effect.fromResult(Base64.decode(parsed.base64)).pipe(
+      Effect.mapError(() => invalid("The image data is not valid.")),
+    );
+    if (bytes.byteLength > THREAD_NOTES_IMAGE_MAX_BYTES)
+      return yield* invalid("Images in notes must be 10 MB or smaller.");
+    const note = yield* get(input);
+    const directory = path.dirname(note.path);
+    const folder = `${path.basename(note.path, ".md")}-images`;
+    const fileName = `${NodeCrypto.createHash("sha256").update(bytes).digest("hex").slice(0, 20)}.${extension}`;
+    const folderInfo = yield* fs.lstat(path.join(directory, folder)).pipe(
+      Effect.catchIf(
+        (cause) => cause.reason._tag === "NotFound",
+        () => Effect.succeed(null),
+      ),
+      Effect.mapError(storage),
+    );
+    if (folderInfo !== null && folderInfo.type !== "Directory")
+      return yield* new ThreadNotesError({
+        code: "storage",
+        message: `${folder} must be a regular directory beside the note.`,
+      });
+    yield* fs
+      .makeDirectory(path.join(directory, folder), { recursive: true })
+      .pipe(Effect.mapError(storage));
+    // Renamed into place so a content-hash name never holds a partial write.
+    const target = path.join(directory, folder, fileName);
+    const temporary = `${target}.${NodeCrypto.randomUUID()}.tmp`;
+    yield* fs.writeFile(temporary, bytes).pipe(
+      Effect.andThen(fs.rename(temporary, target)),
+      Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore)),
+      Effect.mapError(storage),
+    );
+    return { path: `${folder}/${fileName}` } satisfies ThreadNotesSavedImage;
+  });
+  return ThreadNotes.of({ get, save, settings, updateSettings, saveImage, sendSelection });
 });
 export const layer = Layer.effect(ThreadNotes, make);

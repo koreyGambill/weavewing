@@ -54,6 +54,8 @@ import {
   ThreadNotesSettingsInput,
   ThreadNotesUpdateSettingsInput,
   ThreadNotesSendSelectionInput,
+  ThreadNotesSaveImageInput,
+  ThreadNotesSavedImage,
   ThreadNotesError,
 } from "./threadNotes.ts";
 import {
@@ -593,6 +595,7 @@ export const WS_METHODS = {
   threadNotesSettings: "threadNotes.settings",
   threadNotesUpdateSettings: "threadNotes.updateSettings",
   threadNotesSendSelection: "threadNotes.sendSelection",
+  threadNotesSaveImage: "threadNotes.saveImage",
   threadWorkspaceGet: "threadWorkspace.get",
   threadListRead: "threadWorkspace.listRead",
   threadArtifactRead: "threadWorkspace.artifactRead",
@@ -1756,6 +1759,12 @@ const WsThreadNotesSendSelectionRpc = Rpc.make(WS_METHODS.threadNotesSendSelecti
   error: Schema.Union([ThreadNotesError, EnvironmentAuthorizationError]),
 });
 
+const WsThreadNotesSaveImageRpc = Rpc.make(WS_METHODS.threadNotesSaveImage, {
+  payload: ThreadNotesSaveImageInput,
+  success: ThreadNotesSavedImage,
+  error: Schema.Union([ThreadNotesError, EnvironmentAuthorizationError]),
+});
+
 const WsThreadListReadRpc = Rpc.make(WS_METHODS.threadListRead, {
   payload: ThreadListReadInput,
   success: Schema.Array(ThreadListEntry),
@@ -2889,6 +2898,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadNotesSettingsRpc,
   WsThreadNotesUpdateSettingsRpc,
   WsThreadNotesSendSelectionRpc,
+  WsThreadNotesSaveImageRpc,
   WsThreadWorkspaceGetRpc,
   WsThreadListReadRpc,
   WsThreadArtifactReadRpc,
