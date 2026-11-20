@@ -27,11 +27,14 @@ Review the prepared text, choose a destination on the same environment, and add
 it to the draft. The handoff is appended to any existing draft text. Send it from
 the destination when you’re ready.
 
-Weavewing prepares the summary in a temporary native fork of the latest completed
-turn using the source model and reasoning settings. If native preparation is
-unavailable, choose **Use saved conversation** to prepare a summary from a
-bounded portion of saved messages. When that model is unavailable, edit the
-excerpt or write the handoff yourself.
+On supported Claude Code profiles, Weavewing prepares the summary in a temporary
+native fork of the latest completed turn using that turn’s model and reasoning
+settings. Summary preparation runs with tools disabled.
+
+For Codex or a Claude Code profile where tools can’t be disabled, choose **Use
+saved conversation** to prepare a summary from a bounded portion of saved
+messages. When summary generation is unavailable, edit the excerpt or write the
+handoff yourself.
 
 ## What a portable handoff carries
 
