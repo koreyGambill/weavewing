@@ -1023,6 +1023,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       // A form opened before the first run saves no thread; the binding stays.
       const { task } = yield* service.upsert({
         ...input,
+        requireExisting: true,
         threadId: null,
         threadMode: "fresh_session",
       });
@@ -1601,6 +1602,31 @@ it.effect("checks a task's destination thread only when the destination changes"
         yield* Ref.update(shells, (all) =>
           new Map(all).set(destination, threadShell(otherProject)),
         );
+        const reset = { ...input, threadId: null, detachFromThread: true };
+        if ("idleCheckin" in schedule) {
+          const refused = yield* service.upsert(reset).pipe(Effect.flip);
+          assert.include(refused.message, "Idle check-ins require an existing main thread");
+        } else {
+          for (const threadMode of ["continue", "fresh_session"] as const) {
+            const { task } = yield* service.upsert({ ...reset, threadMode });
+            assert.isNull(task.threadId);
+            assert.equal(task.threadMode, threadMode);
+            assert.equal(task.projectId, project);
+            assert.isNull(
+              (yield* service.upsert({
+                ...input,
+                threadId: null,
+                threadMode,
+                title: "Edited again",
+              })).task.threadId,
+            );
+            yield* Ref.update(shells, (all) => new Map(all).set(destination, threadShell(project)));
+            yield* service.upsert(input);
+            yield* Ref.update(shells, (all) =>
+              new Map(all).set(destination, threadShell(otherProject)),
+            );
+          }
+        }
         const edit = { ...input, projectId: otherProject };
         const moved = (yield* service.upsert(edit)).task;
         assert.equal(moved.threadId, destination);

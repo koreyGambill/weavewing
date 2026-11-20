@@ -828,6 +828,7 @@ function TaskForm({
       schedule,
       enabled: draft.enabled,
       threadId: draft.threadId,
+      ...(draft.task !== null && draft.detachFromThread ? { detachFromThread: true } : {}),
       ...(offersThreadModes ? { threadMode: draft.threadMode } : {}),
       workspaceStrategy:
         draftWorkspace(draft, worktreeProvider) === "root"

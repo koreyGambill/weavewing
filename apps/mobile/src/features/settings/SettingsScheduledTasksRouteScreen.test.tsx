@@ -4,6 +4,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskId,
+  ThreadId,
   type ScheduledTask,
 } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
@@ -13,7 +14,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 const { Children, mocks } = vi.hoisted(() => ({
   Children: ({ children }: { children?: ReactNode }) => children,
-  mocks: { upsert: vi.fn(), alert: vi.fn(), tasks: [] as ScheduledTask[] },
+  mocks: {
+    upsert: vi.fn(),
+    alert: vi.fn(),
+    tasks: [] as ScheduledTask[],
+    thread: null as {
+      id: ThreadId;
+      title: string;
+      projectId: ProjectId;
+      modelSelection: ScheduledTask["modelSelection"];
+    } | null,
+  },
 }));
 vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
@@ -93,14 +104,34 @@ vi.mock("../../components/ui/ThemedSwitch", () => ({
     onValueChange: (value: boolean) => void;
   }) => <button onClick={() => onValueChange(!value)}>Toggle enabled</button>,
 }));
+vi.mock("../../native/NativeScrollViewMarker", () => ({ NativeScrollView: Children }));
+vi.mock("@legendapp/list/react-native", () => ({ LegendList: () => null }));
+vi.mock("expo-haptics", () => ({}));
+vi.mock("../../components/ui/SelectionRow", () => ({ SelectionRow: () => null }));
+vi.mock("../../components/ui/useBarInset", () => ({ useSearchToolbarInset: () => 0 }));
+vi.mock("../threads/NewTaskContextPickerScreens", () => ({
+  BranchPickerScreen: ({ project }: { project: { workspaceRoot: string } | null }) => (
+    <output>{project?.workspaceRoot}</output>
+  ),
+}));
+vi.mock("../threads/ThreadSettingsSheet", () => ({}));
+vi.mock("../../state/queries", () => ({
+  useDebouncedValue: (query: string) => query,
+  usePaginatedBranches: ({ cwd }: { cwd: string | null }) => ({
+    refs: [],
+    error: null,
+    data: { cwd },
+  }),
+}));
 vi.mock("../../state/entities", () => ({
   useProjects: () => [
-    { environmentId: "environment", id: "project", title: "Project" },
+    { environmentId: "environment", id: "project", title: "Project", workspaceRoot: "/stored" },
+    { environmentId: "environment", id: "moved", title: "Moved project", workspaceRoot: "/live" },
     { environmentId: "target", id: "target-project", title: "Target project" },
   ],
   useServerConfigs: () => new Map(),
   useEnvironmentServerConfig: () => null,
-  useThreadShell: () => null,
+  useThreadShell: () => mocks.thread,
 }));
 vi.mock("./settings-environment-filter", () => ({
   useSettingsEnvironmentFilter: () => ({
@@ -134,6 +165,7 @@ vi.mock("../../state/query", () => ({
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => mocks.upsert }));
 
 import { appAtomRegistry } from "../../state/atom-registry";
+import { ScheduledTaskBranchPickerRouteScreen } from "./ScheduledTaskPickerScreens";
 import { editDraft } from "./scheduledTaskDraft";
 import {
   scheduledTaskEditorSessionAtom,
@@ -148,6 +180,7 @@ beforeEach(() => {
   container = document.createElement("div");
   root = createRoot(container);
   mocks.alert.mockReset();
+  mocks.thread = null;
   mocks.upsert.mockReset();
   mocks.upsert.mockResolvedValue({ _tag: "Success" });
   const task: ScheduledTask = {
@@ -201,6 +234,52 @@ function button(label: string) {
   if (!element) throw new Error(`Missing button: ${label}`);
   return element;
 }
+function bindMovedThread() {
+  const editor = appAtomRegistry.get(scheduledTaskEditorSessionAtom)?.current;
+  if (!editor?.draft.task) throw new Error("Missing task editor");
+  const task = {
+    ...editor.draft.task,
+    threadId: ThreadId.make("bound"),
+    threadMode: "fresh_session" as const,
+  };
+  mocks.thread = {
+    id: task.threadId,
+    title: "Bound thread",
+    projectId: ProjectId.make("moved"),
+    modelSelection: task.modelSelection,
+  };
+  mocks.tasks = [task];
+  startScheduledTaskEditor({ ...editor, draft: editDraft(task) });
+}
+
+it("uses the moved thread's live checkout when listing base branches", () => {
+  act(() => {
+    bindMovedThread();
+    root.render(
+      <RegistryContext.Provider value={appAtomRegistry}>
+        <ScheduledTaskBranchPickerRouteScreen />
+      </RegistryContext.Provider>,
+    );
+  });
+  expect(container.querySelector("output")?.textContent).toBe("/live");
+});
+
+it("sends a destination reset when switching back to the stored project", async () => {
+  act(bindMovedThread);
+  await act(async () => {
+    button("Select Project").click();
+    button("Save changes").click();
+  });
+  expect(mocks.upsert).toHaveBeenCalledExactlyOnceWith({
+    environmentId: "environment",
+    input: expect.objectContaining({
+      projectId: "project",
+      threadId: null,
+      detachFromThread: true,
+    }),
+  });
+});
+
 describe("scheduled task batched edits", () => {
   it("submits the selected interval when saved before React commits", async () => {
     await act(async () => {

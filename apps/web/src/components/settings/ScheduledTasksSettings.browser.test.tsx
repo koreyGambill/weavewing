@@ -331,6 +331,28 @@ describe("ScheduledTasksSettings", () => {
     );
   });
 
+  it("sends an explicit detach when the project picker returns to the stored project", async () => {
+    setup();
+    state.boundProjectId = movedProjectId;
+    state.providerAvailable = true;
+    await using screen = await render(<ScheduledTasksSettings taskId={task.id} />);
+    const project = screen.getByRole("combobox", { name: "Project" });
+    await expect.element(project).toHaveTextContent("Moved project");
+    await userEvent.click(project);
+    await userEvent.click(page.getByRole("option", { name: "Project", exact: true }));
+    await userEvent.click(screen.getByRole("button", { name: "Save task" }));
+    await vi.waitFor(() =>
+      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+        environmentId,
+        input: expect.objectContaining({
+          projectId,
+          threadId: null,
+          detachFromThread: true,
+        }),
+      }),
+    );
+  });
+
   it("offers no model choice for a task bound to a thread, whose runs use the thread's model", async () => {
     setup();
     await using _screen = await render(<ScheduledTasksSettings taskId={task.id} />);

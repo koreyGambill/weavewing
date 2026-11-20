@@ -226,6 +226,7 @@ export type ScheduledTaskDraft = {
   readonly prompt: string;
   readonly projectId: ProjectId | null;
   readonly threadId: ThreadId | null;
+  readonly detachFromThread?: boolean;
   readonly modelSelection: ModelSelection | null;
   readonly modelSelectionIsExplicit: boolean;
   readonly schedule: ScheduleDraft;
@@ -283,6 +284,7 @@ export function moveDraftToThread(
   return {
     ...draft,
     threadId: thread.id,
+    detachFromThread: false,
     projectId: thread.projectId,
     threadMode: draft.threadMode === "new_thread" ? "continue" : draft.threadMode,
   };
@@ -294,6 +296,7 @@ export function unbindDraftFromThread(draft: ScheduledTaskDraft): ScheduledTaskD
   return {
     ...draft,
     threadId: null,
+    detachFromThread: true,
     ...(draft.workspace === "root"
       ? { workspace: "worktree" as const, startFromOrigin: true }
       : {}),

@@ -898,6 +898,7 @@ export const layer = Layer.effect(
         readonly secret: string | null;
         readonly secretChanged: boolean;
       },
+      detachFromThread: boolean,
     ) =>
       sql<{ task_id: string }>`
         INSERT INTO scheduled_tasks (
@@ -962,10 +963,9 @@ export const layer = Layer.effect(
           enabled = excluded.enabled,
           schedule_json = excluded.schedule_json,
           project_id = excluded.project_id,
-          -- A first run may bind the thread while this save is in flight; only a
-          -- switch to new threads unbinds.
+          -- A first run may bind the thread while an ordinary save is in flight.
           thread_id = CASE
-            WHEN excluded.thread_mode = 'new_thread' THEN NULL
+            WHEN excluded.thread_mode = 'new_thread' OR ${detachFromThread ? 1 : 0} = 1 THEN NULL
             WHEN excluded.project_id != scheduled_tasks.project_id THEN excluded.thread_id
             ELSE COALESCE(excluded.thread_id, scheduled_tasks.thread_id)
           END,
@@ -2260,7 +2260,10 @@ export const layer = Layer.effect(
           ),
         );
       const threadMode = review !== null ? "new_thread" : resolveThreadMode(input, existingTask);
-      const keptThreadId = input.threadId ?? existingTask?.threadId ?? null;
+      const detachFromThread = input.detachFromThread === true && input.threadId == null;
+      const keptThreadId = detachFromThread
+        ? null
+        : (input.threadId ?? existingTask?.threadId ?? null);
       let threadId = threadMode === "new_thread" ? null : keptThreadId;
       if (
         threadId !== null &&
@@ -2480,6 +2483,7 @@ export const layer = Layer.effect(
         input.requireExisting === true,
         scheduleUnchanged ? existingTask.schedule : null,
         webhook,
+        detachFromThread,
       );
       // Events queued under the old trigger or filters are not this trigger's.
       if (!scheduleUnchanged && existingTask?.schedule.type === "event") {
