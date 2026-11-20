@@ -2189,15 +2189,18 @@ export const layer = Layer.effect(
         }),
       );
 
+    const readDestinationThread = (threadId: ThreadId, taskId: ScheduledTaskId) =>
+      threadManagement
+        .getThreadShell(threadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            taskError("Could not read the destination thread.", { taskId, cause }),
+          ),
+        );
+
     const requireDestinationThread = Effect.fn("ScheduledTaskService.requireDestinationThread")(
       function* (threadId: ThreadId, projectId: ProjectId, taskId: ScheduledTaskId) {
-        const thread = yield* threadManagement
-          .getThreadShell(threadId)
-          .pipe(
-            Effect.mapError((cause) =>
-              taskError("Could not read the destination thread.", { taskId, cause }),
-            ),
-          );
+        const thread = yield* readDestinationThread(threadId, taskId);
         if (thread === null || thread.deletedAt !== null) {
           return yield* taskError("That thread no longer exists.", { taskId });
         }
@@ -2258,12 +2261,17 @@ export const layer = Layer.effect(
         );
       const threadMode = review !== null ? "new_thread" : resolveThreadMode(input, existingTask);
       const keptThreadId = input.threadId ?? existingTask?.threadId ?? null;
-      // A bound thread belongs to its project, so moving the task leaves it for a new one.
-      const movedOffThread =
-        existingTask !== null &&
-        existingTask.projectId !== input.projectId &&
-        keptThreadId === existingTask.threadId;
-      const threadId = threadMode === "new_thread" || movedOffThread ? null : keptThreadId;
+      let threadId = threadMode === "new_thread" ? null : keptThreadId;
+      if (
+        threadId !== null &&
+        threadId === existingTask?.threadId &&
+        existingTask.projectId !== input.projectId
+      ) {
+        const destination = yield* readDestinationThread(threadId, id);
+        if (destination?.projectId !== input.projectId || destination.deletedAt !== null) {
+          threadId = null;
+        }
+      }
       if (
         input.schedule.type === "interval" &&
         input.schedule.idleCheckin &&
@@ -2320,7 +2328,8 @@ export const layer = Layer.effect(
       if (workspaceStrategy.type === "worktree") {
         const previous = existingTask?.workspaceStrategy;
         if (
-          existingTask?.projectId === input.projectId &&
+          (existingTask?.projectId === input.projectId ||
+            (threadId !== null && threadId === existingTask?.threadId)) &&
           previous?.type === "worktree" &&
           previous.baseRef === workspaceStrategy.baseRef &&
           previous.branch === workspaceStrategy.branch &&

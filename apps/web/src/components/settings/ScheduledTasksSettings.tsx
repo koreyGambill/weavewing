@@ -1849,7 +1849,7 @@ function ScheduledTaskEditorForm({
     label: "scheduled task upsert",
   });
   const webhookDenial = managedCapabilityDenial(useManagedPolicy(environmentId), "webhookTasks");
-  const [draft, setDraft] = useState<DraftState>(() =>
+  const [storedDraft, setStoredDraft] = useState<DraftState>(() =>
     task
       ? taskToDraft(task)
       : {
@@ -1857,13 +1857,28 @@ function ScheduledTaskEditorForm({
           projectId: defaultScheduledTaskProjectId(scopedProjects, scope),
         },
   );
-  // Pinned first. The chosen project stays listed after it is archived.
-  const projects = scopedProjects
+  const boundThread = useScheduledTaskThread(
+    environmentId,
+    storedDraft.threadId ? (storedDraft.threadId as ThreadId) : null,
+  );
+  const withLiveProject = (current: DraftState) =>
+    boundThread !== null && boundThread.id === current.threadId
+      ? { ...current, projectId: boundThread.projectId }
+      : current;
+  const draft = withLiveProject(storedDraft);
+  const setDraft: Dispatch<SetStateAction<DraftState>> = (update) =>
+    setStoredDraft((current) =>
+      typeof update === "function" ? update(withLiveProject(current)) : update,
+    );
+  // Keep the selected project available even when the editor opened in the task's old project scope.
+  const projects = allProjects
     .filter(
       (project) =>
-        project.archivedAt == null ||
-        project.id === draft.projectId ||
-        project.id === task?.projectId,
+        project.environmentId === environmentId &&
+        (project.id === draft.projectId ||
+          project.id === task?.projectId ||
+          (project.archivedAt == null &&
+            matchesScheduledTaskScope(scope, environmentId, project.id))),
     )
     .sort((left, right) => Number(right.pinnedAt != null) - Number(left.pinnedAt != null));
   const submissionPending = useRef(false);
@@ -1904,10 +1919,6 @@ function ScheduledTaskEditorForm({
     activeSelection?.instanceId ?? firstInstance?.instanceId ?? ("" as ProviderInstanceId);
   const activeModel = activeSelection?.model ?? "";
   const haikuKey = reviewModelKey(instanceEntries);
-  const boundThread = useScheduledTaskThread(
-    environmentId,
-    draft.threadId ? (draft.threadId as ThreadId) : null,
-  );
   // Bound runs use the thread's current model, so the locked picker shows that one.
   const shownSelection = draft.threadId
     ? (boundThread?.modelSelection ?? null)

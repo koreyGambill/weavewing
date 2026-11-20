@@ -23,7 +23,7 @@ import { ThreadSettingsPickerScreen } from "../threads/ThreadSettingsSheet";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
   NEW_THREAD_DESTINATION_LABEL,
-  useScheduledTaskDestinationLabel,
+  useScheduledTaskThread,
   useScheduledTaskEditor,
 } from "./scheduled-task-editor";
 import { moveDraftToThread, unbindDraftFromThread } from "./scheduledTaskDraft";
@@ -189,9 +189,10 @@ export function ScheduledTaskThreadPickerRouteScreen() {
   const insets = useSafeAreaInsets();
   const { editor, setEditor } = useScheduledTaskEditor();
   const environmentId = editor?.environmentId ?? null;
-  const projectId = editor?.draft.projectId ?? null;
   const threadId = editor?.draft.threadId ?? null;
-  const currentLabel = useScheduledTaskDestinationLabel(environmentId, threadId);
+  const boundThread = useScheduledTaskThread(environmentId, threadId);
+  const projectId = boundThread?.projectId ?? editor?.draft.projectId ?? null;
+  const currentLabel = boundThread?.title.trim() || `Thread ${threadId}`;
   const shells = useVisibleThreadShells();
   const [query, setQuery] = useState("");
   const search = {
@@ -278,7 +279,14 @@ export function ScheduledTaskThreadPickerRouteScreen() {
                         ...current,
                         draft: item.thread
                           ? moveDraftToThread(current.draft, item.thread)
-                          : { ...unbindDraftFromThread(current.draft), threadMode: "new_thread" },
+                          : {
+                              ...unbindDraftFromThread(current.draft),
+                              projectId:
+                                boundThread?.id === current.draft.threadId
+                                  ? boundThread.projectId
+                                  : current.draft.projectId,
+                              threadMode: "new_thread",
+                            },
                       }
                     : current,
                 );

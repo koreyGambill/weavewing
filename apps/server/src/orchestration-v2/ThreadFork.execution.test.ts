@@ -1119,6 +1119,47 @@ it.effect(
       yield* write(sibling, 2, "Streaming draft", true);
       yield* write(regularFork, 1, "Normal fork text");
       yield* write(other, 1, "Unrelated project chat");
+      const destination = ProjectId.make("refresh-moved-project");
+      const eventSink = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      const createdAt = DateTime.formatIso(now);
+      const projectCommandId = CommandId.make("refresh-create-project");
+      yield* eventSink.commitProjectCommand({
+        projectId: destination,
+        commandId: projectCommandId,
+        commandType: "project.create",
+        acceptedAt: now,
+        event: {
+          eventId: EventId.make("refresh-moved-project"),
+          aggregateKind: "project",
+          aggregateId: destination,
+          occurredAt: createdAt,
+          commandId: projectCommandId,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "project.created",
+          payload: {
+            projectId: destination,
+            title: "Destination",
+            workspaceRoot: "/destination",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          },
+        },
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.workspace.select",
+        commandId: CommandId.make("refresh-move-parent"),
+        threadId: parent,
+        expected: { worktreePath: null, xwingEnvironmentId: null },
+        projectId: destination,
+        worktreePath: "/destination",
+        branch: null,
+        developmentEnvironment: null,
+      });
       yield* askSideChat(child, "refresh-unarmed");
 
       const command = {

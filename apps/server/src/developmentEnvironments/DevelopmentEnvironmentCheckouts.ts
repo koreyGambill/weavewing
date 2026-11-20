@@ -55,17 +55,18 @@ export class DevelopmentEnvironmentCheckouts extends Context.Service<
 
 const decodeXwingEnvironmentId = Schema.decodeUnknownOption(XwingEnvironmentId);
 
-const makeXwing = Effect.gen(function* () {
-  const xwing = yield* XwingEnvironments.XwingEnvironments;
+export const makeGitCheckoutLookup = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  // Symlinked roots must still match the repository Xwing recorded.
+  // Symlinked roots must still match the registered checkout.
   const canonical = (target: string) =>
     fileSystem.realPath(target).pipe(Effect.orElseSucceed(() => path.resolve(target)));
   // Worktrees and subfolders of one repository share its common directory; null outside Git.
-  const repositoryOf = (cwd: string) =>
-    git
+  const repositoryOf = Effect.fn("DevelopmentEnvironmentCheckouts.repositoryOf")(function (
+    cwd: string,
+  ) {
+    return git
       .execute({
         operation: "DevelopmentEnvironmentCheckouts.repositoryOf",
         cwd,
@@ -75,14 +76,24 @@ const makeXwing = Effect.gen(function* () {
       })
       .pipe(
         Effect.flatMap((result) => {
-          const [commonDir, topLevel] = result.stdout.replace(/\r?\n$/u, "").split(/\r?\n/u);
-          return result.exitCode !== 0 || commonDir === undefined || topLevel === undefined
+          const [commonDir, topLevel, ...rest] = result.stdout
+            .replace(/\r?\n$/u, "")
+            .split(/\r?\n/u);
+          return result.exitCode !== 0 || !commonDir || !topLevel || rest.length > 0
             ? Effect.succeed(null)
             : Effect.all({ commonDir: canonical(commonDir), topLevel: canonical(topLevel) });
         }),
         Effect.orElseSucceed(() => null),
       );
+  });
+  return { canonical, repositoryOf };
+});
 
+const makeXwing = Effect.gen(function* () {
+  const xwing = yield* XwingEnvironments.XwingEnvironments;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const { canonical, repositoryOf } = yield* makeGitCheckoutLookup;
   const isDirectory = (target: string) =>
     fileSystem.stat(target).pipe(
       Effect.map((info) => info.type === "Directory"),

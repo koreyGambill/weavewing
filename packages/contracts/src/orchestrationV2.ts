@@ -3877,10 +3877,12 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     expected: Schema.Struct({
+      projectId: Schema.optional(ProjectId),
       worktreePath: Schema.NullOr(TrimmedNonEmptyString),
       xwingEnvironmentId: Schema.NullOr(TrimmedNonEmptyString),
     }),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+    projectId: Schema.optional(ProjectId),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     developmentEnvironment: Schema.NullOr(OrchestrationV2DevelopmentEnvironmentCheckout),
   }),
