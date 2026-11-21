@@ -659,17 +659,19 @@ const make = Effect.gen(function* () {
         tailProbed = true;
         const tailPosition = Math.floor((read.thread.itemCount - 1) / 100) * 100 - 1;
         if (tailPosition > read.nextPosition) {
-          const tail = yield* forwarding.readThread(scope, remote.environmentId, {
-            threadId: remote.threadId,
-            view: "messages",
-            limit: 100,
-            maxCharsPerItem: 20_000,
-            afterPosition: tailPosition,
-          });
-          const tailReply = tail.items.findLast(
+          const tail = yield* forwarding
+            .readThread(scope, remote.environmentId, {
+              threadId: remote.threadId,
+              view: "messages",
+              limit: 100,
+              maxCharsPerItem: 20_000,
+              afterPosition: tailPosition,
+            })
+            .pipe(Effect.orElseSucceed(() => undefined));
+          const tailReply = tail?.items.findLast(
             (item) => item.type === "assistant_message" && (runId === null || item.runId === runId),
           );
-          if (!tail.hasMore && tailReply !== undefined) {
+          if (tail && !tail.hasMore && tailReply !== undefined) {
             reply = tailReply;
             break;
           }

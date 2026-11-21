@@ -979,7 +979,10 @@ const taskResult = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>, ta
       ),
     );
 
-const captureThreadReads = (nativeFetch: typeof globalThis.fetch) => {
+const captureThreadReads = (
+  nativeFetch: typeof globalThis.fetch,
+  rejectRead?: (read: OrchestratorMcpThreadReadInput) => boolean,
+) => {
   const reads: Array<OrchestratorMcpThreadReadInput> = [];
   const fetch: typeof globalThis.fetch = (input, init) => {
     const body = init?.body instanceof Uint8Array ? new TextDecoder().decode(init.body) : null;
@@ -994,6 +997,9 @@ const captureThreadReads = (nativeFetch: typeof globalThis.fetch) => {
         rpc.params.arguments !== undefined
       ) {
         reads.push(rpc.params.arguments);
+        if (rejectRead?.(rpc.params.arguments)) {
+          return Promise.reject(new Error("Remote read failed"));
+        }
       }
     }
     return nativeFetch(input, init);
@@ -1832,6 +1838,7 @@ it.effect.each([
   "long",
   "later-run",
   "sparse",
+  "probe-error",
   "growing",
   "shrinking",
   "cancel",
@@ -1840,7 +1847,12 @@ it.effect.each([
   "interrupted",
 ] as const)("reads a successful task with an aligned tail probe (%s)", (scenario) =>
   Effect.gen(function* () {
-    const { reads, fetch } = captureThreadReads(yield* FetchHttpClient.Fetch);
+    let rejectedProbe = false;
+    const { reads, fetch } = captureThreadReads(yield* FetchHttpClient.Fetch, (read) => {
+      if (scenario !== "probe-error" || rejectedProbe || read.afterPosition !== 299) return false;
+      rejectedProbe = true;
+      return true;
+    });
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const thread = yield* makeBoxThread;
@@ -1939,7 +1951,12 @@ it.effect.each([
         } else {
           expect(pages.at(1)?.afterPosition).toBe(tailPosition);
           const rest = pages.slice(2);
-          if (scenario === "later-run" || scenario === "shrinking" || scenario === "growing") {
+          if (
+            scenario === "later-run" ||
+            scenario === "shrinking" ||
+            scenario === "growing" ||
+            scenario === "probe-error"
+          ) {
             // An inconclusive tail falls back to scanning from where the first page ended.
             expect(rest.length).toBeGreaterThan(0);
             const resumed = rest.map((read) => read.afterPosition ?? -1);
