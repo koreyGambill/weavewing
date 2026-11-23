@@ -44,7 +44,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Instruction files and skills steer every agent here, which then runs commands.
   // Callers also need filesystem:write; see clientRpcRequiredScopes.
   [WS_METHODS.agentContextSave]: AuthTerminalOperateScope,
-  [WS_METHODS.agentContextCommit]: AuthSourceControlWriteScope,
   // Creating and repairing make worktrees and branches and run the repository's installs.
   [WS_METHODS.developmentEnvironmentsCreate]: AuthSourceControlWriteScope,
   [WS_METHODS.developmentEnvironmentsAttach]: AuthSourceControlWriteScope,

@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  commitPaths,
-  excludedPaths,
+  commitThreadTarget,
   joinSegments,
-  leftUncommitted,
   splitGenerated,
   watcherErrors,
 } from "./agentContext.logic";
@@ -47,37 +45,22 @@ describe("watcherErrors", () => {
   });
 });
 
-describe("commit selection", () => {
-  const dirty = [
-    { path: "renamed.md", origPath: "notes.md", untracked: false, secret: false },
-    { path: "scratch.txt", untracked: true, secret: false },
-    { path: ".env", untracked: true, secret: true },
+describe("commitThreadTarget", () => {
+  const projects = [
+    { id: "app", workspaceRoot: "/code/app" },
+    { id: "dotfiles", workspaceRoot: "/home/me/dotfiles/" },
   ];
-  const repo = { root: "/repo", head: null, branch: "main", dirty, dirtyCount: 5 };
 
-  it("commits both sides of a rename and leaves secret-looking files unchecked", () => {
-    const excluded = excludedPaths(dirty, new Map());
-    expect([...excluded]).toEqual([".env"]);
-    // A secret-looking file that appears on refresh starts unchecked; a person's choice wins.
-    const refreshed = [...dirty, { path: "id_rsa", untracked: true, secret: true }];
-    const choices = new Map([
-      [".env", true],
-      ["scratch.txt", false],
-    ]);
-    expect([...excludedPaths(refreshed, choices)]).toEqual(["scratch.txt", "id_rsa"]);
-    expect(
-      commitPaths(
-        "/repo",
-        dirty.filter((file) => !excluded.has(file.path)),
-      ),
-    ).toEqual(["/repo/renamed.md", "/repo/notes.md", "/repo/scratch.txt"]);
-  });
-
-  it("names what stays uncommitted, including files past the listing cap", () => {
-    expect(leftUncommitted(repo, new Set(["renamed.md", ".env"]))).toEqual([
-      "notes.md → renamed.md",
-      ".env",
-      "2 more not listed",
-    ]);
+  it("starts the thread in the checkout, project or new project that holds the repository", () => {
+    const checkout = { projectId: "app", worktreePath: "/worktrees/app-1" };
+    expect(commitThreadTarget("/worktrees/app-1", projects, checkout)).toEqual({
+      projectId: "app",
+      worktreePath: "/worktrees/app-1",
+    });
+    expect(commitThreadTarget("/home/me/dotfiles", projects, checkout)).toEqual({
+      projectId: "dotfiles",
+      worktreePath: null,
+    });
+    expect(commitThreadTarget("/code/notes", projects, undefined)).toBeNull();
   });
 });

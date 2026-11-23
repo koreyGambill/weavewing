@@ -1,8 +1,5 @@
 import {
-  AGENT_CONTEXT_MAX_DIRTY,
   AgentContextError,
-  type AgentContextCommitInput,
-  type AgentContextCommitResult,
   type AgentContextGetInput,
   type AgentContextInstruction,
   type AgentContextOverview,
@@ -21,7 +18,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
@@ -41,18 +37,11 @@ import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import { isCredentialPath } from "../threadInsights/InstructionFileAllowlist.ts";
 import { SkillSources } from "./SkillSources.ts";
-import { IndexLockedError, indexLocked, restoreIndex, snapshotIndex } from "./gitIndexSnapshot.ts";
-import {
-  generatedRanges,
-  readOnlyReason,
-  repoRelativePaths,
-  saveSource,
-  sha256,
-} from "./sourceFiles.ts";
+import { generatedRanges, readOnlyReason, saveSource, sha256 } from "./sourceFiles.ts";
 
 /**
  * Every source that shapes a provider's context in one project: instruction files and skills,
- * where they really live, and the guarded edits and commits Settings › Agent context makes.
+ * where they really live, and the guarded edits Settings › Agent context makes.
  */
 export class AgentContext extends Context.Service<
   AgentContext,
@@ -66,14 +55,10 @@ export class AgentContext extends Context.Service<
     readonly save: (
       input: AgentContextSaveInput,
     ) => Effect.Effect<AgentContextSaveResult, AgentContextError>;
-    readonly commit: (
-      input: AgentContextCommitInput,
-    ) => Effect.Effect<AgentContextCommitResult, AgentContextError>;
   }
 >()("t3/agentContext/AgentContext") {}
 
 const LINKED_OUTSIDE = "Linked outside this project.";
-const isIndexLocked = Schema.is(IndexLockedError);
 
 const failed = (message: string) => (cause: unknown) =>
   new AgentContextError({ message, reason: "failed", cause });
@@ -87,16 +72,6 @@ const make = Effect.gen(function* () {
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
   // Two saves of one file in this process would otherwise both pass the hash check.
   const saves = yield* Semaphore.make(1);
-  // One commit per repository at a time: staging, committing and restoring share its index.
-  const commitLocks = new Map<string, Semaphore.Semaphore>();
-  const commitLock = (root: string) => {
-    let lock = commitLocks.get(root);
-    if (lock === undefined) {
-      lock = Semaphore.makeUnsafe(1);
-      commitLocks.set(root, lock);
-    }
-    return lock;
-  };
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -244,13 +219,6 @@ const make = Effect.gen(function* () {
     for (const skill of skills.skills) {
       if (yield* safeToRead(skill.realPath)) readable.add(skill.realPath);
     }
-    // Sources whose repository a commit may name: the project's own, and the user's config.
-    const anchors = new Set([
-      ...instructions.filter((file) => file.status === "expected").map((file) => file.realPath),
-      ...skills.skills
-        .filter((skill) => userOwned(skill) || inProject(skill.realPath))
-        .map((skill) => skill.realPath),
-    ]);
     return {
       driver,
       cwd,
@@ -261,12 +229,11 @@ const make = Effect.gen(function* () {
       readOnly,
       editable,
       readable,
-      anchors,
     };
   });
 
   type Discovery = Effect.Success<ReturnType<typeof discover>>;
-  // Reads reuse the latest discovery briefly; overview, save and commit always rediscover.
+  // Reads reuse the latest discovery briefly; overview and save always rediscover.
   const recent = new Map<string, { readonly at: number; readonly found: Discovery }>();
   const discoveryKey = (input: AgentContextGetInput) =>
     `${input.providerInstanceId}\0${input.projectId}\0${input.worktreePath ?? ""}`;
@@ -283,7 +250,7 @@ const make = Effect.gen(function* () {
       : yield* discoverFresh(input);
   });
 
-  /** HEAD, branch and every changed or untracked file of a work tree. */
+  /** A work tree's branch, its changed files, and untracked files that look like secrets. */
   const repoState = Effect.fnUntraced(function* (root: string) {
     const run = (operation: string, args: ReadonlyArray<string>) =>
       git
@@ -294,7 +261,6 @@ const make = Effect.gen(function* () {
           allowNonZeroExit: true,
         })
         .pipe(Effect.orElseSucceed(() => ({ exitCode: 1, stdout: "" })));
-    const head = yield* run("head", ["rev-parse", "--verify", "--quiet", "HEAD"]);
     const branch = yield* run("branch", ["symbolic-ref", "--short", "--quiet", "HEAD"]);
     // Without optional locks, status never rewrites the index it reports on.
     const status = yield* run("status", [
@@ -304,40 +270,27 @@ const make = Effect.gen(function* () {
       "-z",
       "--untracked-files=all",
     ]);
-    const dirty: Array<AgentContextRepo["dirty"][number]> = [];
+    const modified = new Set<string>();
+    const secrets: string[] = [];
     const tokens = status.stdout.split("\0");
     for (let index = 0; index < tokens.length; index++) {
       const entry = tokens[index]!;
       if (entry.length < 4) continue;
-      const untracked = entry.startsWith("??");
       const filePath = entry.slice(3);
-      // A rename or copy is followed by its earlier path, which the commit must take too.
-      const origPath = entry[0] === "R" || entry[0] === "C" ? tokens[++index] : undefined;
-      dirty.push({
-        path: filePath,
-        ...(origPath ? { origPath } : {}),
-        untracked,
-        secret: untracked && looksLikeSecretName(path.basename(filePath)),
-      });
+      modified.add(path.join(root, filePath));
+      // A rename or copy is followed by its earlier path.
+      if (entry[0] === "R" || entry[0] === "C") index++;
+      if (entry.startsWith("??") && looksLikeSecretName(path.basename(filePath)))
+        secrets.push(filePath);
     }
-    const modified = new Set(
-      dirty.flatMap((entry) =>
-        [entry.path, entry.origPath ?? []].flat().map((file) => path.join(root, file)),
-      ),
-    );
-    const untracked = new Set(
-      dirty.filter((entry) => entry.untracked).map((entry) => path.join(root, entry.path)),
-    );
     return {
       repo: {
         root,
-        head: head.exitCode === 0 ? head.stdout.trim() || null : null,
         branch: branch.exitCode === 0 ? branch.stdout.trim() || null : null,
-        dirty: dirty.slice(0, AGENT_CONTEXT_MAX_DIRTY),
-        dirtyCount: dirty.length,
+        dirtyCount: modified.size,
+        secrets,
       } satisfies AgentContextRepo,
       modified,
-      untracked,
     };
   });
 
@@ -446,101 +399,6 @@ const make = Effect.gen(function* () {
     save: Effect.fn("AgentContext.save")(function* (input) {
       const found = yield* discoverFresh(input);
       return yield* saves.withPermits(1)(saveSource(input, found.editable));
-    }),
-    commit: Effect.fn("AgentContext.commit")(function* (input) {
-      const found = yield* discoverFresh(input);
-      const refused = (message: string) => new AgentContextError({ message, reason: "refused" });
-      // Any changed file of a repository holding a discovered source, so one commit can take
-      // everything. A skill linked out of the project does not vouch for its target's repository.
-      const cache = new Map<string, string | null>();
-      let holdsSource = false;
-      for (const file of found.anchors) {
-        if ((yield* repoRootOf(file, found.home, cache)) === input.repoRoot) {
-          holdsSource = true;
-          break;
-        }
-      }
-      if (!holdsSource)
-        return yield* refused(`${input.repoRoot} holds no agent context source here.`);
-      const relative = yield* repoRelativePaths(input.repoRoot, input.realPaths);
-      return yield* commitLock(input.repoRoot).withPermits(1)(
-        Effect.gen(function* () {
-          const state = yield* repoState(input.repoRoot);
-          if (state.repo.head !== input.expectedHead)
-            return yield* new AgentContextError({
-              message: "The repository's HEAD moved since this page loaded. Refresh, then commit.",
-              reason: "conflict",
-            });
-          const unchanged = input.realPaths.find((file) => !state.modified.has(file));
-          if (unchanged !== undefined)
-            return yield* refused(`${unchanged} has no changes to commit.`);
-          const pathspecs = relative.map((file) => `:(top,literal)${file}`);
-          const added = relative.flatMap((file, index) =>
-            state.untracked.has(input.realPaths[index]!) ? [`:(top,literal)${file}`] : [],
-          );
-          const commitGit = (operation: string, args: ReadonlyArray<string>) =>
-            git
-              .execute({
-                operation: `AgentContext.commit.${operation}`,
-                cwd: input.repoRoot,
-                args,
-                timeoutMs: 120_000,
-              })
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new AgentContextError({
-                      message: cause.detail || "Git could not commit these files.",
-                      reason: "failed",
-                      cause,
-                    }),
-                ),
-              );
-          const indexPath = path.resolve(
-            input.repoRoot,
-            (yield* commitGit("index-path", ["rev-parse", "--git-path", "index"])).stdout.trim(),
-          );
-          const lockedMessage = `Git's index is locked (${indexPath}.lock). Another Git process may be running; when it finishes, or once you remove a stale lock yourself, commit again.`;
-          if (yield* Effect.promise(() => indexLocked(indexPath)))
-            return yield* new AgentContextError({ message: lockedMessage, reason: "conflict" });
-          const snapshot = yield* Effect.tryPromise({
-            try: () => snapshotIndex(indexPath),
-            catch: failed("Could not read Git's index before committing."),
-          });
-          // `--only` commits these paths alone and leaves anything else already staged in place.
-          // Untracked files must be in the index first; a failed commit restores the index as it
-          // was, whatever the add or a hook changed.
-          const staged = Effect.gen(function* () {
-            if (added.length > 0) yield* commitGit("add", ["add", "--", ...added]);
-            yield* commitGit("commit", [
-              "commit",
-              "--only",
-              "-m",
-              input.message,
-              "--",
-              ...pathspecs,
-            ]);
-          });
-          // A failed restore replaces the commit's error with one that names both.
-          yield* staged.pipe(
-            Effect.tapError((error) =>
-              Effect.tryPromise({
-                try: () => restoreIndex(indexPath, snapshot),
-                catch: (cause) =>
-                  new AgentContextError({
-                    message: `${error.message} The index was not restored: ${
-                      isIndexLocked(cause) ? lockedMessage : String(cause)
-                    }`,
-                    reason: "failed",
-                    cause,
-                  }),
-              }),
-            ),
-          );
-          const head = yield* commitGit("head", ["rev-parse", "HEAD"]);
-          return { commitSha: head.stdout.trim() };
-        }),
-      );
     }),
   });
 });

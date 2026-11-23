@@ -38,11 +38,6 @@ const generatedBlocks = (text: string) => {
 export const sha256 = (text: string) =>
   NodeCrypto.createHash("sha256").update(text, "utf8").digest("hex");
 
-const within = (root: string, file: string) => {
-  const relative = NodePath.relative(root, file);
-  return relative === "" || (!relative.startsWith("..") && !NodePath.isAbsolute(relative));
-};
-
 /**
  * Why a discovered source stays read-only here, or null when Save may replace it. The file
  * itself must be a single-link regular Markdown file; links resolve before this check.
@@ -120,11 +115,3 @@ export const saveSource = Effect.fn("AgentContext.saveSource")(function* (
   });
   return { sha256: sha256(request.contents) };
 });
-
-/** Paths inside `repoRoot`, relative to it, or a refusal naming the first that is not. */
-export const repoRelativePaths = (repoRoot: string, realPaths: ReadonlyArray<string>) => {
-  const outside = realPaths.find((file) => !within(repoRoot, file) || file === repoRoot);
-  return outside === undefined
-    ? Effect.succeed(realPaths.map((file) => NodePath.relative(repoRoot, file)))
-    : Effect.fail(refused(`${outside} is not inside ${repoRoot}.`));
-};

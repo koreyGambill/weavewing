@@ -1,8 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { inferProjectTitleFromPath } from "@t3tools/client-runtime/state/projects";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AgentContextError,
   AuthFilesystemReadScope,
+  AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
   type AgentContextGetInput,
   type AgentContextInstruction,
@@ -18,24 +21,27 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { ChevronRightIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
-import { cn } from "~/lib/utils";
+import { cn, newMessageId, newProjectId, newThreadId } from "~/lib/utils";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
-import {
-  agentContextCommit,
-  agentContextGet,
-  agentContextRead,
-  agentContextSave,
-} from "../../state/agentContext";
+import { resolveAppModelSelectionForInstance } from "../../modelSelection";
+import { agentContextGet, agentContextRead, agentContextSave } from "../../state/agentContext";
 import { useProjects } from "../../state/entities";
 import { useEnvironmentProviders } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
+import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentScope } from "../../state/session";
 import { threadDefaultContextGet, threadDefaultContextItem } from "../../state/threadInsights";
+import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { buildThreadRouteParams } from "../../threadRoutes";
+import { DEFAULT_INTERACTION_MODE } from "../../types";
 import { formatBytes, formatTokens, homeOf, shortenPath } from "../insights/defaultContext.logic";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -48,17 +54,14 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import {
   agentContextTotals,
-  commitPaths,
-  dirtyLabel,
-  excludedPaths,
-  leftUncommitted,
+  commitPrompt,
+  commitThreadTarget,
   groupSkills,
   joinSegments,
   pendingCommits,
@@ -263,7 +266,7 @@ function EnvironmentAgentContext({
         <p className="px-4 pb-3 text-xs text-muted-foreground">
           Every file and skill that shapes what a new session receives
           {overview?.cwd ? ` in ${overview.cwd}` : ""}. Saving writes the real file a link points
-          to; commit each repository separately.
+          to.
         </p>
         {query.error && (
           <p role="alert" className="px-4 py-3 text-sm text-destructive-foreground">
@@ -323,9 +326,6 @@ function AgentContextSections({
     editable: boolean;
     opener: HTMLElement;
   } | null>(null);
-  const [committing, setCommitting] = useState<{ root: string; opener: HTMLElement } | null>(null);
-  // Files a commit left out, stated beside their repository until the next commit there.
-  const [leftOut, setLeftOut] = useState<ReadonlyMap<string, ReadonlyArray<string>>>(new Map());
   const totals = agentContextTotals(overview);
   const home = homeOf([
     ...overview.instructions.map((file) => file.realPath),
@@ -426,28 +426,13 @@ function AgentContextSections({
           </p>
         ) : (
           commits.map((repo) => (
-            <div key={repo.root} className="flex items-center gap-3 px-4 py-3 text-sm">
-              <span className="min-w-0 flex-1">
-                <span className="font-medium">{shortenPath(repo.root, home)}</span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {repo.dirtyCount} changed {repo.dirtyCount === 1 ? "file" : "files"}
-                  {repo.branch ? ` on ${repo.branch}` : " on a detached HEAD"}
-                </span>
-                {(leftOut.get(repo.root)?.length ?? 0) > 0 && (
-                  <span className="block text-xs text-warning-foreground">
-                    Left uncommitted: {leftOut.get(repo.root)!.join(", ")}
-                  </span>
-                )}
-              </span>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={(event) => setCommitting({ root: repo.root, opener: event.currentTarget })}
-              >
-                Commit…
-              </Button>
-            </div>
+            <UncommittedRepoRow
+              key={repo.root}
+              environmentId={environmentId}
+              target={target}
+              repo={repo}
+              home={home}
+            />
           ))
         )}
       </SettingsSection>
@@ -500,20 +485,6 @@ function AgentContextSections({
           opener={editing.opener}
           onClose={() => setEditing(null)}
           onSaved={onSaved}
-        />
-      )}
-      {committing !== null && (
-        <CommitDialog
-          environmentId={environmentId}
-          target={target}
-          repo={commits.find((entry) => entry.root === committing.root)}
-          opener={committing.opener}
-          home={home}
-          onClose={() => setCommitting(null)}
-          onCommitted={(root, left) => {
-            setLeftOut((current) => new Map(current).set(root, left));
-            onSaved();
-          }}
         />
       )}
     </>
@@ -917,7 +888,7 @@ function EditorBody({
 
 const isAgentContextError = Schema.is(AgentContextError);
 
-/** The server's message for a failed command, and whether the file or HEAD moved. */
+/** The server's message for a failed command, and whether the file moved. */
 function commandError(result: {
   readonly cause: Parameters<typeof squashAtomCommandFailure>[0]["cause"];
 }) {
@@ -927,146 +898,145 @@ function commandError(result: {
     : { message: error instanceof Error ? error.message : "The request failed.", conflict: false };
 }
 
-function CommitDialog({
+/** A repository with changes, and a way to have an agent commit them in a new thread. */
+function UncommittedRepoRow({
   environmentId,
   target,
   repo,
   home,
-  opener,
-  onClose,
-  onCommitted,
 }: {
   readonly environmentId: EnvironmentId;
   readonly target: DiscoveryTarget;
-  readonly repo: AgentContextRepo | undefined;
+  readonly repo: AgentContextRepo;
   readonly home: string | null;
-  readonly opener: HTMLElement;
-  readonly onClose: () => void;
-  /** `left` names the changed files the commit did not include. */
-  readonly onCommitted: (root: string, left: ReadonlyArray<string>) => void;
 }) {
-  const commit = useAtomCommand(agentContextCommit, { reportFailure: false });
-  const canCommit = useAtomValue(agentContextCommit.permissionAtom(environmentId));
-  const [message, setMessage] = useState("");
-  // Choices persist by path; a file with none follows the default as the list refreshes.
-  const [choices, setChoices] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const navigate = useNavigate();
+  const projects = useProjects().filter(
+    (project) => project.environmentId === environmentId && !project.archivedAt,
+  );
+  const providers = useEnvironmentProviders().get(environmentId) ?? [];
+  const settings = useEnvironmentSettings(environmentId);
+  const canStart = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const createProject = useOrchestrationCommand(projectEnvironment.create, {
+    reportFailure: false,
+  });
+  const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const files = repo?.dirty ?? [];
-  const excluded = excludedPaths(files, choices);
-  const chosen = files.filter((file) => !excluded.has(file.path));
+
+  const askToCommit = async () => {
+    const model = resolveAppModelSelectionForInstance(
+      target.providerInstanceId,
+      settings,
+      providers,
+      null,
+    );
+    if (model === null) {
+      setFailure("This provider has no model to start a thread with.");
+      return;
+    }
+    setBusy(true);
+    setFailure(null);
+    const checkout =
+      target.worktreePath === undefined
+        ? undefined
+        : { projectId: target.projectId, worktreePath: target.worktreePath };
+    let found = commitThreadTarget(repo.root, projects, checkout);
+    if (found === null) {
+      // No project holds this repository yet, so it becomes one, as adding its folder would.
+      const projectId = newProjectId();
+      const created = await createProject({
+        environmentId,
+        input: {
+          projectId,
+          title: inferProjectTitleFromPath(repo.root),
+          workspaceRoot: repo.root,
+          defaultModelSelection: null,
+        },
+      });
+      if (created._tag === "Failure") {
+        setBusy(false);
+        setFailure(commandError(created).message);
+        return;
+      }
+      found = { projectId, worktreePath: null };
+    }
+    const projectId = ProjectId.make(found.projectId);
+    const modelSelection = { instanceId: target.providerInstanceId, model };
+    const runtimeMode = resolveProjectSettings(settings, projectId).settings.defaultRuntimeMode;
+    const threadId = newThreadId();
+    const createdAt = new Date().toISOString();
+    const title = `Commit ${inferProjectTitleFromPath(repo.root)}`;
+    const started = await startTurn({
+      environmentId,
+      input: {
+        threadId,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          origin: { kind: "user" },
+          text: commitPrompt(repo.root),
+          attachments: [],
+        },
+        modelSelection,
+        runtimeMode,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        bootstrap: {
+          createThread: {
+            projectId,
+            title,
+            modelSelection,
+            runtimeMode,
+            interactionMode: DEFAULT_INTERACTION_MODE,
+            branch: null,
+            worktreePath: found.worktreePath,
+            createdAt,
+          },
+        },
+        createdAt,
+      },
+    });
+    setBusy(false);
+    if (started._tag === "Failure") {
+      setFailure(commandError(started).message);
+      return;
+    }
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+    });
+  };
+
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogPopup className="max-w-lg" finalFocus={() => opener}>
-        <DialogHeader>
-          <DialogTitle>Commit {repo ? shortenPath(repo.root, home) : "changes"}</DialogTitle>
-          <DialogDescription>
-            Commits the checked files by path. Anything already staged that you leave unchecked
-            stays staged. Undo with git revert.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          <div className="grid gap-3">
-            <div className="grid max-h-72 overflow-y-auto rounded-md border">
-              {files.map((file) => (
-                <label
-                  key={file.path}
-                  className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 not-last:border-b"
-                >
-                  <Checkbox
-                    checked={!excluded.has(file.path)}
-                    onCheckedChange={(checked) =>
-                      setChoices((current) => new Map(current).set(file.path, checked))
-                    }
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-xs">{dirtyLabel(file)}</span>
-                    {file.secret ? (
-                      <span className="block text-xs text-warning-foreground">
-                        looks like a secret: move it, delete it, or add it to .gitignore
-                      </span>
-                    ) : file.untracked ? (
-                      <span className="block text-xs text-muted-foreground">
-                        untracked: commit it, or move or delete it
-                      </span>
-                    ) : null}
-                  </span>
-                </label>
-              ))}
-            </div>
-            {repo !== undefined && repo.dirtyCount > files.length && (
-              <p className="text-xs text-warning-foreground">
-                {repo.dirtyCount - files.length} more changed files not shown; commit them from a
-                terminal.
-              </p>
-            )}
-            <div className="grid gap-1.5">
-              <Label htmlFor="agent-context-commit-message">Commit message</Label>
-              <Textarea
-                id="agent-context-commit-message"
-                value={message}
-                placeholder="docs: tighten agent instructions"
-                onChange={(event) => setMessage(event.target.value)}
-              />
-            </div>
-            {!canCommit && (
-              <p className="text-xs text-muted-foreground">
-                Committing needs source control permission on this environment.
-              </p>
-            )}
-          </div>
-        </DialogPanel>
-        <DialogFooter>
-          <p
-            role="alert"
-            className="mr-auto line-clamp-2 min-w-0 flex-1 text-xs text-destructive-foreground"
-          >
+    <div className="flex items-center gap-3 px-4 py-3 text-sm">
+      <span className="min-w-0 flex-1">
+        <span className="font-medium">{shortenPath(repo.root, home)}</span>
+        <span className="text-muted-foreground">
+          {" "}
+          · {repo.dirtyCount} changed {repo.dirtyCount === 1 ? "file" : "files"}
+          {repo.branch ? ` on ${repo.branch}` : " on a detached HEAD"}
+        </span>
+        {repo.secrets.length > 0 && (
+          <span className="block text-xs text-warning-foreground">
+            Looks like {repo.secrets.length === 1 ? "a secret" : "secrets"}:{" "}
+            {repo.secrets.join(", ")}
+          </span>
+        )}
+        {failure !== null && (
+          <span role="alert" className="block text-xs text-destructive-foreground">
             {failure}
-          </p>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            disabled={
-              !canCommit ||
-              busy ||
-              repo === undefined ||
-              chosen.length === 0 ||
-              message.trim() === ""
-            }
-            onClick={async () => {
-              if (repo === undefined) return;
-              setBusy(true);
-              setFailure(null);
-              const result = await commit({
-                environmentId,
-                input: {
-                  ...target,
-                  repoRoot: repo.root,
-                  realPaths: commitPaths(repo.root, chosen),
-                  message: message.trim(),
-                  expectedHead: repo.head,
-                },
-              });
-              setBusy(false);
-              if (result._tag === "Success") {
-                onCommitted(repo.root, leftUncommitted(repo, excluded));
-                onClose();
-                return;
-              }
-              setFailure(commandError(result).message);
-            }}
-          >
-            Commit
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+          </span>
+        )}
+      </span>
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={!canStart || busy}
+        onClick={() => void askToCommit()}
+      >
+        Ask an agent to commit
+      </Button>
+    </div>
   );
 }
 

@@ -3,18 +3,12 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import {
-  AGENT_CONTEXT_MAX_DIRTY,
-  AgentContextCommitInput,
-  ProjectId,
-  ProviderInstanceId,
-} from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 import { ProjectService } from "../project/ProjectService.ts";
@@ -94,10 +88,7 @@ const serviceLayer = (home: string, repo: string, worktree: string, lookups: { c
     Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 
-/**
- * A repository whose CLAUDE.md is a link to the real instructions file, beside a file the user
- * staged themselves, which a commit from the page must leave staged.
- */
+/** A repository whose CLAUDE.md is a link to the real instructions file, with changes of its own. */
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -215,24 +206,9 @@ it.effect("lists sources with their real paths, repository and generated text", 
         editable: true,
         listed: true,
       });
-      // Commit offers every changed file of the repository, untracked ones marked.
+      // Each repository counts every changed file and names untracked ones that look like secrets.
       expect(overview.repos).toEqual([
-        {
-          root: repo,
-          head: git(repo, "rev-parse", "HEAD"),
-          branch: "main",
-          dirty: [
-            { path: "other.md", untracked: false, secret: false },
-            { path: ".claude/skills/drafts/SKILL.md", untracked: true, secret: false },
-            { path: ".claude/skills/hard/SKILL.md", untracked: true, secret: false },
-            { path: ".claude/skills/key/SKILL.md", untracked: true, secret: false },
-            { path: ".claude/skills/leak/SKILL.md", untracked: true, secret: false },
-            { path: ".claude/skills/outside/SKILL.md", untracked: true, secret: false },
-            // Commit starts a secret-looking untracked file unchecked.
-            { path: ".env", untracked: true, secret: true },
-          ],
-          dirtyCount: 7,
-        },
+        { root: repo, branch: "main", dirtyCount: 7, secrets: [".env"] },
       ]);
       // Rows carry no file bodies; text loads through read.
       expect(JSON.stringify(overview)).not.toContain("standard-comments");
@@ -285,54 +261,6 @@ it.effect("saves only discovered sources, through their real path, and reports c
   ),
 );
 
-it.effect("commits only the named sources after checking HEAD, leaving other staged work", () =>
-  withService((service, { repo, real }) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      yield* fs.writeFileString(
-        real,
-        "# Rules\n<!-- overwing standards index -->\n<!-- /overwing standards index -->\n",
-      );
-      const head = git(repo, "rev-parse", "HEAD");
-      const commit = {
-        ...input,
-        repoRoot: repo,
-        realPaths: [real],
-        message: "docs: tighten rules",
-      };
-
-      const moved = yield* Effect.exit(service.commit({ ...commit, expectedHead: "0".repeat(40) }));
-      expect(JSON.stringify(moved)).toContain('"conflict"');
-      for (const realPaths of [[`${repo}/CLAUDE.md`], [`${repo}-other/notes.md`]]) {
-        const refusedCommit = yield* Effect.exit(
-          service.commit({ ...commit, realPaths, expectedHead: head }),
-        );
-        expect(JSON.stringify(refusedCommit), realPaths[0]).toContain('"refused"');
-      }
-
-      const result = yield* service.commit({ ...commit, expectedHead: head });
-      expect(result.commitSha).toBe(git(repo, "rev-parse", "HEAD"));
-      expect(git(repo, "show", "--name-only", "--format=%s", "HEAD").split("\n")).toEqual([
-        "docs: tighten rules",
-        "",
-        "docs/instructions.md",
-      ]);
-      expect(git(repo, "rev-parse", "HEAD~1")).toBe(head);
-      expect(git(repo, "status", "--porcelain", "--untracked-files=no")).toBe("M  other.md");
-
-      // The rest of the repository, including files that are not sources and untracked ones.
-      const rest = (yield* service.get(input)).repos[0]!;
-      yield* service.commit({
-        ...commit,
-        realPaths: rest.dirty.map((entry) => `${repo}/${entry.path}`),
-        message: "chore: commit everything",
-        expectedHead: rest.head,
-      });
-      expect(git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
-    }),
-  ),
-);
-
 it.effect("reads skill text only from Markdown outside credential and server state", () =>
   withService((service, { root, home, repo }) =>
     Effect.gen(function* () {
@@ -346,18 +274,6 @@ it.effect("reads skill text only from Markdown outside credential and server sta
         service.read({ ...input, realPath: `${repo}/.claude/skills/hard/SKILL.md` }),
       );
       expect(JSON.stringify(hardLinked)).toContain('"refused"');
-      // A skill linked into another repository does not make that repository committable.
-      git(`${root}/elsewhere`, "init", "-q", "-b", "main");
-      const foreignRepo = yield* Effect.exit(
-        service.commit({
-          ...input,
-          repoRoot: `${root}/elsewhere`,
-          realPaths: [`${root}/elsewhere/notes.md`],
-          message: "chore: planted",
-          expectedHead: null,
-        }),
-      );
-      expect(JSON.stringify(foreignRepo)).toContain("holds no agent context source");
       // A project skill linked out of the repository must not make that file writable.
       const outside = overview.skills.find((skill) => skill.name === "outside");
       expect(outside).toMatchObject({
@@ -406,73 +322,6 @@ it.effect("lets one of two concurrent saves from the same version through", () =
   ),
 );
 
-it.effect("leaves the index as it was when a hook rejects the commit", () =>
-  withService((service, { root, repo, real, draft }) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      yield* fs.makeDirectory(`${root}/reject-hooks`, { recursive: true });
-      // A formatter-style hook rewrites a file the commit added, then rejects the commit.
-      yield* fs.writeFileString(
-        `${root}/reject-hooks/pre-commit`,
-        `#!/bin/sh\nprintf 'formatted\\n' >> '${draft}'\nexit 1\n`,
-      );
-      yield* fs.chmod(`${root}/reject-hooks/pre-commit`, 0o755);
-      git(repo, "config", "core.hooksPath", `${root}/reject-hooks`);
-      yield* fs.writeFileString(
-        real,
-        "# Rules\n<!-- overwing standards index -->\n<!-- /overwing standards index -->\n",
-      );
-      const index = `${repo}/.git/index`;
-      const before = yield* fs.readFile(index);
-      const exit = yield* Effect.exit(
-        service.commit({
-          ...input,
-          repoRoot: repo,
-          realPaths: [real, draft],
-          message: "docs: rejected",
-          expectedHead: git(repo, "rev-parse", "HEAD"),
-        }),
-      );
-      expect(exit._tag).toBe("Failure");
-      expect(Buffer.from(yield* fs.readFile(index)).equals(Buffer.from(before))).toBe(true);
-      expect(git(repo, "status", "--porcelain", "--", draft)).toBe(
-        "?? .claude/skills/drafts/SKILL.md",
-      );
-
-      // Git killed mid-commit leaves its lock: the failure says so and leaves the lock alone.
-      yield* fs.writeFileString(`${root}/reject-hooks/pre-commit`, "#!/bin/sh\nkill -9 $PPID\n");
-      const killed = yield* Effect.exit(
-        service.commit({
-          ...input,
-          repoRoot: repo,
-          realPaths: [draft],
-          message: "docs: killed",
-          expectedHead: git(repo, "rev-parse", "HEAD"),
-        }),
-      );
-      expect(JSON.stringify(killed)).toContain("The index was not restored");
-      expect(JSON.stringify(killed)).toContain("index.lock");
-      expect(yield* fs.exists(`${index}.lock`)).toBe(true);
-      yield* fs.remove(`${index}.lock`);
-
-      // A lock another Git process holds is reported, and left for that process.
-      git(repo, "config", "core.hooksPath", `${root}/no-hooks`);
-      yield* fs.writeFileString(`${index}.lock`, "");
-      const locked = yield* Effect.exit(
-        service.commit({
-          ...input,
-          repoRoot: repo,
-          realPaths: [draft],
-          message: "docs: locked",
-          expectedHead: git(repo, "rev-parse", "HEAD"),
-        }),
-      );
-      expect(JSON.stringify(locked)).toContain("index.lock");
-      expect(yield* fs.exists(`${index}.lock`)).toBe(true);
-    }),
-  ),
-);
-
 it.effect("reads a checkout the thread uses and reuses discovery for text reads", () =>
   withService((service, { worktree, real, lookups }) =>
     Effect.gen(function* () {
@@ -491,132 +340,30 @@ it.effect("reads a checkout the thread uses and reuses discovery for text reads"
   ),
 );
 
-it.effect("commits both sides of a rename and one of two concurrent commits", () =>
-  withService((service, { repo, draft }) =>
+it.effect("decides linked skills by location, for every provider", () =>
+  withService((service, { home, dotfiles }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      yield* fs.writeFileString(`${repo}/notes.md`, "Long enough notes that Git sees a rename.\n");
-      git(repo, "add", "notes.md");
-      git(repo, "commit", "-q", "--only", "-m", "notes", "--", "notes.md");
-      git(repo, "mv", "notes.md", "renamed.md");
-      const renamed = (yield* service.get(input)).repos[0]!;
-      expect(renamed.dirty.find((entry) => entry.path === "renamed.md")).toEqual({
-        path: "renamed.md",
-        origPath: "notes.md",
-        untracked: false,
-        secret: false,
+      const codexInput = { providerInstanceId: codex, projectId };
+      const overview = yield* service.get(codexInput);
+      expect(overview.skills.find((skill) => skill.name === "linked")).toMatchObject({
+        editable: false,
+        readOnlyReason: "Linked outside this project.",
       });
-      yield* service.commit({
-        ...input,
-        repoRoot: repo,
-        realPaths: [`${repo}/renamed.md`, `${repo}/notes.md`],
-        message: "docs: rename",
-        expectedHead: renamed.head,
-      });
-      expect(git(repo, "show", "--name-status", "--format=", "HEAD")).toMatch(
-        /^R\d+\tnotes\.md\trenamed\.md$/,
-      );
-      expect(git(repo, "status", "--porcelain", "--untracked-files=no")).toBe("M  other.md");
-
-      const head = git(repo, "rev-parse", "HEAD");
-      const exits = yield* Effect.forEach(
-        ["first", "second"],
-        (name) =>
-          Effect.exit(
-            service.commit({
-              ...input,
-              repoRoot: repo,
-              realPaths: [draft],
-              message: `docs: ${name}`,
-              expectedHead: head,
-            }),
-          ),
-        { concurrency: "unbounded" },
-      );
-      expect(exits.filter((exit) => exit._tag === "Success")).toHaveLength(1);
-      expect(git(repo, "status", "--porcelain", "--", draft)).toBe("");
-      expect(git(repo, "rev-list", "--count", `${head}..HEAD`)).toBe("1");
-    }),
-  ),
-);
-
-it.effect("lists up to the cap of changed files and says how many there are", () =>
-  withService((service, { repo }) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      yield* fs.makeDirectory(`${repo}/many`);
-      for (let index = 0; index < AGENT_CONTEXT_MAX_DIRTY; index++)
-        yield* fs.writeFileString(`${repo}/many/${index}.txt`, "x");
-      const repoState = (yield* service.get(input)).repos[0]!;
-      expect(repoState.dirty).toHaveLength(AGENT_CONTEXT_MAX_DIRTY);
-      expect(repoState.dirtyCount).toBe(AGENT_CONTEXT_MAX_DIRTY + 7);
-      // Every listed row, with a rename's second path, fits one commit request.
-      const decode = Schema.decodeUnknownExit(AgentContextCommitInput);
-      const realPaths = Array.from(
-        { length: AGENT_CONTEXT_MAX_DIRTY * 2 },
-        (_, index) => `${repo}/many/${index}.txt`,
-      );
+      // The global AGENTS.md in dotfiles stays editable.
       expect(
-        decode({ ...input, repoRoot: repo, realPaths, message: "chore: many", expectedHead: null })
-          ._tag,
-      ).toBe("Success");
+        overview.instructions.find((file) => file.realPath === `${dotfiles}/AGENTS.md`),
+      ).toMatchObject({ editable: true, repoRoot: dotfiles });
+
+      // A global import inside a credential folder is listed but never readable.
+      const claudeOverview = yield* service.get(input);
+      const credential = `${home}/.config/gh/notes.md`;
+      expect(
+        claudeOverview.instructions.find((file) => file.realPath === credential)?.readable,
+      ).toBe(false);
+      const exit = yield* Effect.exit(service.read({ ...input, realPath: credential }));
+      expect(JSON.stringify(exit)).toContain('"refused"');
+      expect(yield* fs.exists(credential)).toBe(true);
     }),
   ),
-);
-
-it.effect(
-  "decides linked skills and committable repositories by location, for every provider",
-  () =>
-    withService((service, { root, home, dotfiles }) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const codexInput = { providerInstanceId: codex, projectId };
-        const overview = yield* service.get(codexInput);
-        expect(overview.skills.find((skill) => skill.name === "linked")).toMatchObject({
-          editable: false,
-          readOnlyReason: "Linked outside this project.",
-        });
-        // The linked skill's repository holds no source of this project, so it is not committable.
-        git(`${root}/elsewhere`, "init", "-q", "-b", "main");
-        const foreign = yield* Effect.exit(
-          service.commit({
-            ...codexInput,
-            repoRoot: `${root}/elsewhere`,
-            realPaths: [`${root}/elsewhere/notes.md`],
-            message: "chore: planted",
-            expectedHead: null,
-          }),
-        );
-        expect(JSON.stringify(foreign)).toContain("holds no agent context source");
-        // The global AGENTS.md in dotfiles stays editable, and its repository committable.
-        expect(
-          overview.instructions.find((file) => file.realPath === `${dotfiles}/AGENTS.md`),
-        ).toMatchObject({ editable: true, repoRoot: dotfiles });
-        for (const [key, value] of [
-          ["user.name", "Test"],
-          ["user.email", "test@example.com"],
-          ["commit.gpgsign", "false"],
-          ["core.hooksPath", `${root}/no-hooks`],
-        ])
-          git(dotfiles, "config", key!, value!);
-        yield* service.commit({
-          ...codexInput,
-          repoRoot: dotfiles,
-          realPaths: [`${dotfiles}/AGENTS.md`],
-          message: "docs: global rules",
-          expectedHead: null,
-        });
-        expect(git(dotfiles, "log", "--format=%s")).toBe("docs: global rules");
-
-        // A global import inside a credential folder is listed but never readable.
-        const claudeOverview = yield* service.get(input);
-        const credential = `${home}/.config/gh/notes.md`;
-        expect(
-          claudeOverview.instructions.find((file) => file.realPath === credential)?.readable,
-        ).toBe(false);
-        const exit = yield* Effect.exit(service.read({ ...input, realPath: credential }));
-        expect(JSON.stringify(exit)).toContain('"refused"');
-        expect(yield* fs.exists(credential)).toBe(true);
-      }),
-    ),
 );

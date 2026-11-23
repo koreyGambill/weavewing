@@ -3205,7 +3205,6 @@ export const layerWsRpc = (
         [WS_METHODS.agentContextGet]: (input) => agentContext.get(input),
         [WS_METHODS.agentContextRead]: (input) => agentContext.read(input),
         [WS_METHODS.agentContextSave]: (input) => agentContext.save(input),
-        [WS_METHODS.agentContextCommit]: (input) => agentContext.commit(input),
         [WS_METHODS.threadTimelineGet]: (input) => threadTimeline.get(input),
         [WS_METHODS.threadUserTurnsGet]: (input) => threadTimeline.userTurns(input),
         [WS_METHODS.threadNotesGet]: (input) => threadNotes.get(input),

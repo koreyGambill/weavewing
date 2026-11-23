@@ -25,8 +25,3 @@ export const agentContextSave = createEnvironmentRpcCommand(connectionAtomRuntim
   label: "agentContext:save",
   tag: WS_METHODS.agentContextSave,
 });
-
-export const agentContextCommit = createEnvironmentRpcCommand(connectionAtomRuntime, {
-  label: "agentContext:commit",
-  tag: WS_METHODS.agentContextCommit,
-});

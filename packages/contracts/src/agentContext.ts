@@ -115,28 +115,14 @@ export const AgentContextSkill = Schema.Struct({
 });
 export type AgentContextSkill = typeof AgentContextSkill.Type;
 
-/** The most changed files an overview lists per repository; Commit takes the rest from a terminal. */
-export const AGENT_CONTEXT_MAX_DIRTY = 2000;
-
 export const AgentContextRepo = Schema.Struct({
   root: Schema.String,
-  /** Null before the first commit. */
-  head: Schema.NullOr(Schema.String),
   /** Null on a detached HEAD. */
   branch: Schema.NullOr(Schema.String),
-  /** Every changed or untracked file in the work tree, relative to `root`; Commit offers them all. */
-  dirty: Schema.Array(
-    Schema.Struct({
-      path: Schema.String,
-      /** A rename's or copy's earlier path, which the commit takes with `path`. */
-      origPath: Schema.optional(Schema.String),
-      untracked: Schema.Boolean,
-      /** An untracked file whose name looks like a credential, which Commit leaves unchecked. */
-      secret: Schema.Boolean,
-    }),
-  ),
-  /** Every changed file, which exceeds `dirty.length` past `AGENT_CONTEXT_MAX_DIRTY`. */
+  /** Changed and untracked files in the work tree. */
   dirtyCount: NonNegativeInt,
+  /** Untracked files, relative to `root`, whose names look like credentials. */
+  secrets: Schema.Array(Schema.String),
 });
 export type AgentContextRepo = typeof AgentContextRepo.Type;
 
@@ -180,24 +166,6 @@ export type AgentContextSaveInput = typeof AgentContextSaveInput.Type;
 
 export const AgentContextSaveResult = Schema.Struct({ sha256: Schema.String });
 export type AgentContextSaveResult = typeof AgentContextSaveResult.Type;
-
-/** Commits changed files of a repository that holds a discovered source, by explicit path. */
-export const AgentContextCommitInput = Schema.Struct({
-  ...AgentContextGetInput.fields,
-  repoRoot: AbsolutePath,
-  // Each listed row can name two paths: a rename's new and earlier path.
-  realPaths: Schema.Array(AbsolutePath).check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(AGENT_CONTEXT_MAX_DIRTY * 2),
-  ),
-  message: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
-  /** The HEAD the page showed; null for a repository without commits. */
-  expectedHead: Schema.NullOr(Schema.String.check(Schema.isMaxLength(64))),
-});
-export type AgentContextCommitInput = typeof AgentContextCommitInput.Type;
-
-export const AgentContextCommitResult = Schema.Struct({ commitSha: Schema.String });
-export type AgentContextCommitResult = typeof AgentContextCommitResult.Type;
 
 export class AgentContextError extends Schema.TaggedError<AgentContextError>()(
   "AgentContextError",

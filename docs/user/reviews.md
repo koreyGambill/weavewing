@@ -135,11 +135,12 @@ changed since you opened it, the save stops and asks you to reload. Text between
 `npx skills` copies, and project skills that link outside the project, open
 read-only with **View**.
 
-**Uncommitted edits** lists each repository with changes. **Commit…** offers
-every changed file in it, untracked files included and marked, all checked.
-Files that look like secrets, such as `.env`, start unchecked: move them, delete
-them, or add them to `.gitignore`. Uncheck anything to leave it out; the page then
-names the files it left uncommitted. A failed commit leaves Git's index as it was.
+**Uncommitted edits** lists each repository with changes, its branch, and any
+untracked files that look like secrets, such as `.env`. **Ask an agent to
+commit** starts a new thread in that repository with the selected provider and
+its default model. The agent commits every change, moves, deletes or ignores
+files that should not be committed, and tells you which ones and why. It does
+not push. A repository that is not yet a project is added as one.
 
 **Load watchers** decide which tool calls Inspect's Loads view labels as
 knowledge loads. A shell command watcher matches its words in order, such as

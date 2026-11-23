@@ -1,7 +1,10 @@
 import {
+  findProjectByPath,
+  normalizeProjectPathForComparison,
+} from "@t3tools/client-runtime/state/projects";
+import {
   type AgentContextGeneratedRange,
   type AgentContextOverview,
-  type AgentContextRepo,
   type AgentContextSkill,
   type LoadWatcher,
   loadWatcherError,
@@ -49,44 +52,31 @@ export function agentContextTotals(overview: AgentContextOverview) {
   return { sessionTokens, listingTokens, duplicates: duplicateNames.size };
 }
 
-/** Repositories with anything to commit; their Commit action offers every changed file. */
+/** Repositories with uncommitted changes. */
 export const pendingCommits = (overview: AgentContextOverview) =>
-  overview.repos.filter((repo) => repo.dirty.length > 0);
-
-type DirtyFile = AgentContextRepo["dirty"][number];
-
-/** A rename shows where it came from. */
-export const dirtyLabel = (file: DirtyFile) =>
-  file.origPath === undefined ? file.path : `${file.origPath} → ${file.path}`;
+  overview.repos.filter((repo) => repo.dirtyCount > 0);
 
 /**
- * Files a commit leaves out: those a person unchecked, and secret-looking untracked files they
- * have not checked, including ones that appear when the list refreshes.
+ * Where a commit thread for `root` runs: the page's checkout when it is that repository, else
+ * the project rooted there. Null means no project holds it yet.
  */
-export const excludedPaths = (
-  files: ReadonlyArray<DirtyFile>,
-  choices: ReadonlyMap<string, boolean>,
-) =>
-  new Set(
-    files.filter((file) => !(choices.get(file.path) ?? !file.secret)).map((file) => file.path),
-  );
-
-/** The paths a commit names: a rename takes its earlier path too, or the deletion stays behind. */
-export const commitPaths = (root: string, files: ReadonlyArray<DirtyFile>) =>
-  files.flatMap((file) =>
-    [file.path, ...(file.origPath === undefined ? [] : [file.origPath])].map(
-      (entry) => `${root}/${entry}`,
-    ),
-  );
-
-/** What a commit leaves behind: the rows left unchecked, and any the listing could not show. */
-export function leftUncommitted(repo: AgentContextRepo, excluded: ReadonlySet<string>) {
-  const unlisted = repo.dirtyCount - repo.dirty.length;
-  return [
-    ...repo.dirty.filter((file) => excluded.has(file.path)).map(dirtyLabel),
-    ...(unlisted > 0 ? [`${unlisted} more not listed`] : []),
-  ];
+export function commitThreadTarget(
+  root: string,
+  projects: ReadonlyArray<{ readonly id: string; readonly workspaceRoot: string }>,
+  checkout: { readonly projectId: string; readonly worktreePath: string } | undefined,
+): { readonly projectId: string; readonly worktreePath: string | null } | null {
+  if (
+    checkout !== undefined &&
+    normalizeProjectPathForComparison(checkout.worktreePath) ===
+      normalizeProjectPathForComparison(root)
+  )
+    return { projectId: checkout.projectId, worktreePath: checkout.worktreePath };
+  const project = findProjectByPath(projects, root);
+  return project === undefined ? null : { projectId: project.id, worktreePath: null };
 }
+
+export const commitPrompt = (root: string) =>
+  `Commit every change in ${root}. If a file should not be committed (for example it looks like a secret, a build artifact or scratch), move it, delete it or add it to .gitignore instead, and tell me which files and why. Do not push.`;
 
 export interface TextSegment {
   /** The segment's first line in the loaded file, which keys it while its text changes. */

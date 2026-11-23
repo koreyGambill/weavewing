@@ -185,7 +185,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.agentContextGet]: "workspace",
   [WS_METHODS.agentContextRead]: "workspace",
   [WS_METHODS.agentContextSave]: "workspace",
-  [WS_METHODS.agentContextCommit]: "source-control",
   [WS_METHODS.threadTimelineGet]: "workspace",
   [WS_METHODS.threadUserTurnsGet]: "workspace",
   [WS_METHODS.threadNotesGet]: "workspace",

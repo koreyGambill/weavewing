@@ -47,8 +47,6 @@ import {
   DefaultContextItemText,
 } from "./threadInsights.ts";
 import {
-  AgentContextCommitInput,
-  AgentContextCommitResult,
   AgentContextError,
   AgentContextGetInput,
   AgentContextOverview,
@@ -612,7 +610,6 @@ export const WS_METHODS = {
   agentContextGet: "agentContext.get",
   agentContextRead: "agentContext.read",
   agentContextSave: "agentContext.save",
-  agentContextCommit: "agentContext.commit",
   threadNotesGet: "threadNotes.get",
   threadNotesSave: "threadNotes.save",
   threadNotesSettings: "threadNotes.settings",
@@ -1766,11 +1763,6 @@ const WsAgentContextReadRpc = Rpc.make(WS_METHODS.agentContextRead, {
 const WsAgentContextSaveRpc = Rpc.make(WS_METHODS.agentContextSave, {
   payload: AgentContextSaveInput,
   success: AgentContextSaveResult,
-  error: agentContextErrors,
-});
-const WsAgentContextCommitRpc = Rpc.make(WS_METHODS.agentContextCommit, {
-  payload: AgentContextCommitInput,
-  success: AgentContextCommitResult,
   error: agentContextErrors,
 });
 
@@ -2963,7 +2955,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentContextGetRpc,
   WsAgentContextReadRpc,
   WsAgentContextSaveRpc,
-  WsAgentContextCommitRpc,
   WsThreadContextGetRpc,
   WsThreadTimelineGetRpc,
   WsThreadUserTurnsGetRpc,
