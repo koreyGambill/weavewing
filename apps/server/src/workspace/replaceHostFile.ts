@@ -4,12 +4,27 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
+import * as Schema from "effect/Schema";
+
+/** The file is no longer the one the caller checked: another write replaced or changed it. */
+export class HostFileChangedError extends Schema.TaggedError<HostFileChangedError>()(
+  "HostFileChangedError",
+  { message: Schema.String },
+) {}
+
 /**
  * Replaces a host file via a temp file in its folder (in place when the folder is read-only).
  * The file must stay the single-link regular file at `realPath`, in the same folder, until the
  * write. Node lacks `renameat`, so a swap between the last check and the rename stays possible.
  */
-export async function replaceHostFile(realPath: string, contents: string): Promise<void> {
+export async function replaceHostFile(
+  realPath: string,
+  contents: string,
+  options?: {
+    /** SHA-256 of the file's UTF-8 text, checked on the handle the save replaces. */
+    readonly expectedSha256?: string;
+  },
+): Promise<void> {
   const handle = await NodeFSP.open(
     realPath,
     NodeFS.constants.O_RDONLY |
@@ -32,10 +47,20 @@ export async function replaceHostFile(realPath: string, contents: string): Promi
         current.dev !== opened.dev ||
         current.ino !== opened.ino
       ) {
-        throw new Error("The file changed or is not a single regular file.");
+        throw new HostFileChangedError({
+          message: "The file changed or is not a single regular file.",
+        });
       }
     };
     await unchanged();
+    if (options?.expectedSha256 !== undefined) {
+      const current = await handle.readFile();
+      const hash = NodeCrypto.createHash("sha256")
+        .update(current.toString("utf8"), "utf8")
+        .digest("hex");
+      if (hash !== options.expectedSha256)
+        throw new HostFileChangedError({ message: "The file changed since it was opened." });
+    }
     const mode = opened.mode & 0o7777;
     const folder = NodePath.dirname(realPath);
     const folderBefore = await NodeFSP.stat(folder);
@@ -72,7 +97,9 @@ export async function replaceHostFile(realPath: string, contents: string): Promi
           target.dev !== opened.dev ||
           target.ino !== opened.ino
         ) {
-          throw new Error("The file changed or is not a single regular file.");
+          throw new HostFileChangedError({
+            message: "The file changed or is not a single regular file.",
+          });
         }
         await inPlace.truncate(0);
         await inPlace.writeFile(contents);

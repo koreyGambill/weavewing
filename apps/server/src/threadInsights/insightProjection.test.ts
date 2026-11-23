@@ -2,13 +2,14 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   DEFAULT_LOAD_WATCHERS,
   LoadWatchers,
+  ServerSettings,
   ThreadId,
   TurnItemId,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
-import { compileLoadWatchers, projectLoadEvent } from "./insightProjection.ts";
+import { projectLoadEvent } from "./insightProjection.ts";
 
 const base = {
   id: TurnItemId.make("read"),
@@ -27,7 +28,8 @@ const base = {
   updatedAt: DateTime.makeUnsafe("2026-11-06T00:00:00Z"),
 } as const;
 
-const defaults = compileLoadWatchers(DEFAULT_LOAD_WATCHERS);
+const defaults = DEFAULT_LOAD_WATCHERS;
+const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const project = (item: OrchestrationV2TurnItem) => projectLoadEvent(item, defaults);
 
 describe("load event projection", () => {
@@ -137,41 +139,61 @@ describe("load event projection", () => {
     });
   });
 
-  it("labels loads by the configured watcher and matches tool names", () => {
-    const watchers = compileLoadWatchers([
-      { label: "notes", kind: "command", pattern: String.raw`^nb\s+show\b` },
-      { label: "vault", kind: "tool", pattern: "^mcp__vault__" },
-      { label: "broken", kind: "command", pattern: "(" },
-    ]);
+  it("labels loads by the configured watcher, matching command words and tool name globs", () => {
+    const watchers = [
+      { label: "notes", kind: "command", match: "nb show" },
+      { label: "vault", kind: "tool", match: "mcp__vault__*" },
+      { label: "any read", kind: "tool", match: "mcp__*__read*" },
+    ] as const;
     const command = { ...base, type: "command_execution", output: "text" } as const;
-    expect(projectLoadEvent({ ...command, input: "nb show standards" }, watchers)).toMatchObject({
-      kind: "knowledge",
-      label: "notes: nb show standards",
-      paths: [],
-    });
-    expect(projectLoadEvent({ ...command, input: "overwing search x" }, watchers)).toBeNull();
-    expect(
+    const tool = (toolName: string) =>
       projectLoadEvent(
         {
           ...base,
           type: "dynamic_tool",
-          toolName: "mcp__vault__lookup",
+          toolName,
           input: { path: "/vault/AGENTS.md" },
           output: "card",
         },
         watchers,
-      ),
-    ).toMatchObject({
+      );
+    for (const input of [
+      "nb show standards",
+      "/usr/local/bin/nb show x",
+      "cd /repo && nb show x",
+    ]) {
+      expect(projectLoadEvent({ ...command, input }, watchers), input).toMatchObject({
+        kind: "knowledge",
+        label: `notes: ${input}`,
+        paths: [],
+      });
+    }
+    for (const input of ["nb shows x", "nb x show", "overwing search x"])
+      expect(projectLoadEvent({ ...command, input }, watchers), input).toBeNull();
+    expect(tool("mcp__vault__lookup")).toMatchObject({
       kind: "knowledge",
       label: "vault: mcp__vault__lookup",
       evidence: "reported",
     });
+    expect(tool("mcp__files__read_file")).toMatchObject({
+      label: "any read: mcp__files__read_file",
+    });
+    expect(tool("mcp__vault")).toBeNull();
     expect(projectLoadEvent({ ...command, input: "nb show x" }, [])).toBeNull();
   });
 
-  it("refuses a watcher pattern that does not compile", () => {
+  it("refuses unusable watchers and falls back to defaults for an older stored format", () => {
     const decode = Schema.decodeUnknownExit(LoadWatchers);
-    expect(decode([{ label: "bad", kind: "command", pattern: "(" }])._tag).toBe("Failure");
+    for (const watcher of [
+      { label: "regex", kind: "command", pattern: "overwing\\s+search" },
+      { label: "glob", kind: "tool", match: "mcp__(a|b)+$" },
+      { label: "long", kind: "command", match: "a b c d e f g h i" },
+    ])
+      expect(decode([watcher])._tag, watcher.label).toBe("Failure");
     expect(decode(DEFAULT_LOAD_WATCHERS)._tag).toBe("Success");
+    const stored = decodeServerSettings({
+      loadWatchers: [{ label: "overwing", kind: "command", pattern: "overwing\\s+search" }],
+    });
+    expect(stored.loadWatchers).toEqual(DEFAULT_LOAD_WATCHERS);
   });
 });

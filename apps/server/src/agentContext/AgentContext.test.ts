@@ -14,6 +14,7 @@ import * as ServerConfig from "../config.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../provider/ProviderRegistry.ts";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -28,12 +29,21 @@ const input = { providerInstanceId: claude, projectId };
 const git = (cwd: string, ...args: string[]) =>
   NodeChildProcess.execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 
-const serviceLayer = (home: string, repo: string) =>
+const serviceLayer = (home: string, repo: string, worktree: string, lookups: { count: number }) =>
   agentContextLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectService)({
-          getById: () => Effect.succeedSome({ workspaceRoot: repo } as never),
+          getById: () =>
+            Effect.sync(() => {
+              lookups.count += 1;
+            }).pipe(Effect.andThen(Effect.succeedSome({ workspaceRoot: repo } as never))),
+        }),
+        Layer.mock(KnownWorkspaces.KnownWorkspaces)({
+          assertContains: (cwd) =>
+            cwd === worktree
+              ? Effect.void
+              : Effect.fail(new KnownWorkspaces.UnknownWorkspaceError({ cwd })),
         }),
         Layer.mock(ProviderInstanceRegistry)({
           getInstance: () => Effect.succeed({ driverKind: "claudeAgent" } as never),
@@ -73,9 +83,9 @@ const fixture = Effect.gen(function* () {
     real,
     [
       "# Rules",
-      "<!-- overwing standards: always -->",
+      "<!-- overwing standards index -->",
       "- standard-comments",
-      "<!-- /overwing standards -->",
+      "<!-- /overwing standards index -->",
       "",
     ].join("\n"),
   );
@@ -93,20 +103,43 @@ const fixture = Effect.gen(function* () {
   git(repo, "commit", "-q", "-m", "init");
   yield* fs.writeFileString(path.join(repo, "other.md"), "staged by the user\n");
   git(repo, "add", "other.md");
-  return { home, repo, real, link: path.join(repo, "CLAUDE.md") };
+  // Project skills a cloned repository could plant: links to a credential, a non-Markdown
+  // secret and a file outside the repository, beside an untracked skill of its own.
+  const skills = path.join(repo, ".claude", "skills");
+  const skill = "---\nname: x\n---\n";
+  for (const [name, target] of [
+    ["leak", path.join(home, ".ssh", "notes.md")],
+    ["key", path.join(home, "signing-key")],
+    ["outside", path.join(root, "elsewhere", "notes.md")],
+  ] as const) {
+    yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+    yield* fs.writeFileString(target, skill);
+    yield* fs.makeDirectory(path.join(skills, name), { recursive: true });
+    yield* fs.symlink(target, path.join(skills, name, "SKILL.md"));
+  }
+  yield* fs.makeDirectory(path.join(skills, "drafts"), { recursive: true });
+  const draft = path.join(skills, "drafts", "SKILL.md");
+  yield* fs.writeFileString(draft, skill);
+  const worktree = path.join(root, "worktree");
+  yield* fs.makeDirectory(worktree, { recursive: true });
+  yield* fs.writeFileString(path.join(worktree, "CLAUDE.md"), "# Worktree rules\n");
+  return { root, home, repo, real, draft, worktree, link: path.join(repo, "CLAUDE.md") };
 });
 
 /** Runs `body` against a fresh fixture with HOME pointed at the fixture's home folder. */
 const withService = <A, E, R>(
   body: (
     service: AgentContext["Service"],
-    files: Effect.Success<typeof fixture>,
+    files: Effect.Success<typeof fixture> & { readonly lookups: { count: number } },
   ) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
     const files = yield* fixture;
-    const service = yield* AgentContext.pipe(Effect.provide(serviceLayer(files.home, files.repo)));
-    return yield* body(service, files).pipe(
+    const lookups = { count: 0 };
+    const service = yield* AgentContext.pipe(
+      Effect.provide(serviceLayer(files.home, files.repo, files.worktree, lookups)),
+    );
+    return yield* body(service, { ...files, lookups }).pipe(
       Effect.provideService(HostProcess.HomeDirectory, files.home),
     );
   }).pipe(
@@ -128,11 +161,27 @@ it.effect("lists sources with their real paths, repository and generated text", 
         editable: true,
         generated: [{ startLine: 2, endLine: 4 }],
       });
-      expect(overview.skills).toMatchObject([
-        { name: "notes", origin: { kind: "user" }, repoRoot: null, editable: true, listed: true },
-      ]);
+      expect(overview.skills.find((skill) => skill.name === "notes")).toMatchObject({
+        origin: { kind: "user" },
+        repoRoot: null,
+        editable: true,
+        listed: true,
+      });
+      // Commit offers every changed file of the repository, untracked ones marked.
       expect(overview.repos).toEqual([
-        { root: repo, head: git(repo, "rev-parse", "HEAD"), branch: "main" },
+        {
+          root: repo,
+          head: git(repo, "rev-parse", "HEAD"),
+          branch: "main",
+          dirty: [
+            { path: "other.md", untracked: false },
+            { path: ".claude/skills/drafts/SKILL.md", untracked: true },
+            { path: ".claude/skills/key/SKILL.md", untracked: true },
+            { path: ".claude/skills/leak/SKILL.md", untracked: true },
+            { path: ".claude/skills/outside/SKILL.md", untracked: true },
+          ],
+          dirtyTruncated: false,
+        },
       ]);
       // Rows carry no file bodies; text loads through read.
       expect(JSON.stringify(overview)).not.toContain("standard-comments");
@@ -191,7 +240,7 @@ it.effect("commits only the named sources after checking HEAD, leaving other sta
       const fs = yield* FileSystem.FileSystem;
       yield* fs.writeFileString(
         real,
-        "# Rules\n<!-- overwing standards: always -->\n<!-- /overwing standards -->\n",
+        "# Rules\n<!-- overwing standards index -->\n<!-- /overwing standards index -->\n",
       );
       const head = git(repo, "rev-parse", "HEAD");
       const commit = {
@@ -203,10 +252,12 @@ it.effect("commits only the named sources after checking HEAD, leaving other sta
 
       const moved = yield* Effect.exit(service.commit({ ...commit, expectedHead: "0".repeat(40) }));
       expect(JSON.stringify(moved)).toContain('"conflict"');
-      const foreign = yield* Effect.exit(
-        service.commit({ ...commit, realPaths: [`${repo}/other.md`], expectedHead: head }),
-      );
-      expect(JSON.stringify(foreign)).toContain('"refused"');
+      for (const realPaths of [[`${repo}/CLAUDE.md`], [`${repo}-other/notes.md`]]) {
+        const refusedCommit = yield* Effect.exit(
+          service.commit({ ...commit, realPaths, expectedHead: head }),
+        );
+        expect(JSON.stringify(refusedCommit), realPaths[0]).toContain('"refused"');
+      }
 
       const result = yield* service.commit({ ...commit, expectedHead: head });
       expect(result.commitSha).toBe(git(repo, "rev-parse", "HEAD"));
@@ -216,7 +267,120 @@ it.effect("commits only the named sources after checking HEAD, leaving other sta
         "docs/instructions.md",
       ]);
       expect(git(repo, "rev-parse", "HEAD~1")).toBe(head);
-      expect(git(repo, "status", "--porcelain")).toBe("M  other.md");
+      expect(git(repo, "status", "--porcelain", "--untracked-files=no")).toBe("M  other.md");
+
+      // The rest of the repository, including files that are not sources and untracked ones.
+      const rest = (yield* service.get(input)).repos[0]!;
+      yield* service.commit({
+        ...commit,
+        realPaths: rest.dirty.map((entry) => `${repo}/${entry.path}`),
+        message: "chore: commit everything",
+        expectedHead: rest.head,
+      });
+      expect(git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+    }),
+  ),
+);
+
+it.effect("reads skill text only from Markdown outside credential and server state", () =>
+  withService((service, { root, home, repo }) =>
+    Effect.gen(function* () {
+      const overview = yield* service.get(input);
+      for (const realPath of [`${home}/.ssh/notes.md`, `${home}/signing-key`]) {
+        expect(overview.skills.find((skill) => skill.realPath === realPath)?.readable).toBe(false);
+        const exit = yield* Effect.exit(service.read({ ...input, realPath }));
+        expect(JSON.stringify(exit), realPath).toContain('"refused"');
+      }
+      // A project skill linked out of the repository must not make that file writable.
+      const outside = overview.skills.find((skill) => skill.name === "outside");
+      expect(outside).toMatchObject({
+        editable: false,
+        readOnlyReason: "Linked outside this project.",
+      });
+      const text = yield* service.read({ ...input, realPath: `${root}/elsewhere/notes.md` });
+      const exit = yield* Effect.exit(
+        service.save({
+          ...input,
+          realPath: `${root}/elsewhere/notes.md`,
+          contents: "changed",
+          expectedSha256: text.sha256,
+        }),
+      );
+      expect(JSON.stringify(exit)).toContain('"refused"');
+      expect(overview.skills.find((skill) => skill.name === "drafts")?.editable).toBe(true);
+      expect(repo).toBeTruthy();
+    }),
+  ),
+);
+
+it.effect("lets one of two concurrent saves from the same version through", () =>
+  withService((service, { real }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const original = yield* fs.readFileString(real);
+      const expectedSha256 = sha256(original);
+      const exits = yield* Effect.forEach(
+        ["first", "second"],
+        (name) =>
+          Effect.exit(
+            service.save({
+              ...input,
+              realPath: real,
+              contents: original.replace("# Rules", `# Rules ${name}`),
+              expectedSha256,
+            }),
+          ),
+        { concurrency: "unbounded" },
+      );
+      expect(exits.filter((exit) => exit._tag === "Success")).toHaveLength(1);
+      const failure = exits.find((exit) => exit._tag === "Failure");
+      expect(JSON.stringify(failure)).toContain('"conflict"');
+    }),
+  ),
+);
+
+it.effect("leaves the index as it was when a hook rejects the commit", () =>
+  withService((service, { root, repo, real, draft }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.makeDirectory(`${root}/reject-hooks`, { recursive: true });
+      yield* fs.writeFileString(`${root}/reject-hooks/pre-commit`, "#!/bin/sh\nexit 1\n");
+      yield* fs.chmod(`${root}/reject-hooks/pre-commit`, 0o755);
+      git(repo, "config", "core.hooksPath", `${root}/reject-hooks`);
+      yield* fs.writeFileString(
+        real,
+        "# Rules\n<!-- overwing standards index -->\n<!-- /overwing standards index -->\n",
+      );
+      const before = git(repo, "status", "--porcelain", "--untracked-files=all");
+      const exit = yield* Effect.exit(
+        service.commit({
+          ...input,
+          repoRoot: repo,
+          realPaths: [real, draft],
+          message: "docs: rejected",
+          expectedHead: git(repo, "rev-parse", "HEAD"),
+        }),
+      );
+      expect(exit._tag).toBe("Failure");
+      expect(git(repo, "status", "--porcelain", "--untracked-files=all")).toBe(before);
+    }),
+  ),
+);
+
+it.effect("reads a checkout the thread uses and reuses discovery for text reads", () =>
+  withService((service, { worktree, real, lookups }) =>
+    Effect.gen(function* () {
+      const overview = yield* service.get({ ...input, worktreePath: worktree });
+      expect(overview.cwd).toBe(worktree);
+      expect(overview.instructions.map((file) => file.path)).toContain(`${worktree}/CLAUDE.md`);
+      const unknown = yield* Effect.exit(service.get({ ...input, worktreePath: `${worktree}-x` }));
+      expect(JSON.stringify(unknown)).toContain('"refused"');
+
+      const before = lookups.count;
+      yield* service.get(input);
+      yield* service.read({ ...input, realPath: real });
+      yield* service.read({ ...input, realPath: real });
+      expect(lookups.count - before).toBe(1);
     }),
   ),
 );

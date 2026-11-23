@@ -447,6 +447,8 @@ const serviceLayer = (input: {
   readonly footprint?: InstructionFootprint;
   readonly codexHomePath?: string;
   readonly projectRoot?: string;
+  /** Counts full context resolutions, which every preview and uncached item read performs. */
+  readonly resolutions?: { count: number };
 }) =>
   defaultContextLayer.pipe(
     Layer.provide(
@@ -495,7 +497,11 @@ const serviceLayer = (input: {
         }),
         Layer.mock(McpProviderSessions)({ read: () => Effect.undefined }),
         Layer.mock(SkillSources)({
-          list: () => Effect.succeed({ support: "unsupported", skills: [] }),
+          list: () =>
+            Effect.sync(() => {
+              if (input.resolutions) input.resolutions.count += 1;
+              return { support: "unsupported" as const, skills: [] };
+            }),
         }),
         Layer.succeed(
           McpToolCatalog.McpToolCatalog,
@@ -534,8 +540,9 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
       parts: [{ key: "t3:x", label: "x", category: "t3", bytes: 40, estimatedTokens: 10 }],
       instructionSources: [{ path: path.join(home, "AGENTS.md"), bytes: 40 * 1024 }],
     };
+    const resolutions = { count: 0 };
     const context = yield* Layer.build(
-      serviceLayer({ home, footprint, codexHomePath: path.join(home, "work-codex") }),
+      serviceLayer({ home, footprint, codexHomePath: path.join(home, "work-codex"), resolutions }),
     ).pipe(
       Effect.provideService(HostProcess.HomeDirectory, home),
       Effect.provideService(HostProcess.Environment, {}),
@@ -558,6 +565,8 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
       service.itemText({ threadId, itemId: `file:${path.join(home, "work-codex", "AGENTS.md")}` }),
     );
     expect(file.text).toBe("work rules [more](more.md)");
+    // Expanding an item reuses the preview's resolution instead of resolving everything again.
+    expect(resolutions.count).toBe(1);
     const linked = byId.get(`file:${path.join(home, "work-codex", "more.md")}`);
     expect(linked).toMatchObject({
       parentId: `file:${path.join(home, "work-codex", "AGENTS.md")}`,

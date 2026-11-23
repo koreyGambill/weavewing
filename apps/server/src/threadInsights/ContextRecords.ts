@@ -21,7 +21,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Footprints from "./InstructionFootprints.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { compileLoadWatchers, projectLoadEvent } from "./insightProjection.ts";
+import { projectLoadEvent } from "./insightProjection.ts";
 
 const decodeItem = Schema.decodeEffect(Schema.fromJsonString(OrchestrationV2TurnItemJson));
 const encodeRecord = Schema.encodeEffect(Schema.fromJsonString(TurnContextRecord));
@@ -54,11 +54,9 @@ const make = Effect.gen(function* () {
           yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id=${input.threadId} AND deleted_at IS NULL`;
         if (!threads.length)
           return yield* new ThreadInsightsError({ message: "Thread context is unavailable." });
-        const watchers = compileLoadWatchers(
-          yield* settings.getSettings.pipe(
-            Effect.map((value) => value.loadWatchers),
-            Effect.orElseSucceed(() => DEFAULT_LOAD_WATCHERS),
-          ),
+        const watchers = yield* settings.getSettings.pipe(
+          Effect.map((value) => value.loadWatchers),
+          Effect.orElseSucceed(() => DEFAULT_LOAD_WATCHERS),
         );
         const limit = input.limit ?? 10;
         const rows = yield* sql<{

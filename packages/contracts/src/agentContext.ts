@@ -3,42 +3,47 @@ import * as Schema from "effect/Schema";
 import { NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
-/** Null when the pattern compiles, else the engine's message. */
-export function loadWatcherPatternError(pattern: string): string | null {
-  try {
-    RegExp(pattern);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
+const MAX_COMMAND_WORDS = 8;
+const TOOL_NAME_GLOB = /^[\w.:*-]+$/;
+
+/** Null for a usable watcher, else what to fix. */
+export function loadWatcherError(watcher: { readonly kind: string; readonly match: string }) {
+  const match = watcher.match.trim();
+  if (match === "") return "Add words to match.";
+  if (watcher.kind === "command")
+    return match.split(/\s+/).length > MAX_COMMAND_WORDS
+      ? `Use at most ${MAX_COMMAND_WORDS} words.`
+      : null;
+  return TOOL_NAME_GLOB.test(match)
+    ? null
+    : "Use letters, digits, _ . : - and * for any run of characters.";
 }
 
 /**
- * Marks a tool call as a knowledge load: `command` patterns match the shell command an agent
- * ran, `tool` patterns match the name of the MCP or provider tool it called.
+ * Marks a tool call as a knowledge load. A `command` watcher matches when its words appear as
+ * consecutive words of the shell command; a `tool` watcher matches the tool's name, with `*`
+ * standing for any run of characters. Both match in linear time, so no setting can stall the
+ * server.
  */
 export const LoadWatcher = Schema.Struct({
   label: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
   kind: Schema.Literals(["command", "tool"]),
-  pattern: TrimmedNonEmptyString.check(
-    Schema.isMaxLength(512),
-    Schema.makeFilter((pattern) => loadWatcherPatternError(pattern) ?? true),
-  ),
-});
+  match: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+}).check(Schema.makeFilter((watcher) => loadWatcherError(watcher) ?? true));
 export type LoadWatcher = typeof LoadWatcher.Type;
 export const LoadWatchers = Schema.Array(LoadWatcher).check(Schema.isMaxLength(32));
 
 export const DEFAULT_LOAD_WATCHERS: ReadonlyArray<LoadWatcher> = [
-  {
-    label: "overwing",
-    kind: "command",
-    pattern: String.raw`(?:^|[\s;&|/])overwing\s+(?:search|context|standards)(?:\s|$)`,
-  },
+  { label: "overwing", kind: "command", match: "overwing search" },
+  { label: "overwing", kind: "command", match: "overwing context" },
+  { label: "overwing", kind: "command", match: "overwing standards" },
 ];
 
 export const AgentContextGetInput = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   projectId: ProjectId,
+  /** A thread's checkout of the project; the server accepts only known workspaces. */
+  worktreePath: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
 });
 export type AgentContextGetInput = typeof AgentContextGetInput.Type;
 
@@ -62,6 +67,8 @@ const sourceFields = {
   repoRoot: Schema.NullOr(Schema.String),
   modified: Schema.Boolean,
   editable: Schema.Boolean,
+  /** Whether its text can be opened here; credential and server-state files never can. */
+  readable: Schema.Boolean,
   /** Why a listed source cannot be edited here. */
   readOnlyReason: Schema.optional(Schema.String),
   generated: Schema.Array(AgentContextGeneratedRange),
@@ -99,6 +106,8 @@ export const AgentContextSkill = Schema.Struct({
   listed: Schema.Boolean,
   /** Another source of the same name wins, so this copy never loads. */
   shadowed: Schema.Boolean,
+  /** Why the model never sees a skill that is not shadowed: only users invoke it, or it is off. */
+  unlisted: Schema.optional(Schema.Literals(["user-only", "off"])),
   listingBytes: NonNegativeInt,
   listingTokens: NonNegativeInt,
   /** Origin labels of the other sources offering a skill with this base name. */
@@ -112,6 +121,10 @@ export const AgentContextRepo = Schema.Struct({
   head: Schema.NullOr(Schema.String),
   /** Null on a detached HEAD. */
   branch: Schema.NullOr(Schema.String),
+  /** Every changed or untracked file in the work tree, relative to `root`; Commit offers them all. */
+  dirty: Schema.Array(Schema.Struct({ path: Schema.String, untracked: Schema.Boolean })),
+  /** More files changed than `dirty` lists. */
+  dirtyTruncated: Schema.Boolean,
 });
 export type AgentContextRepo = typeof AgentContextRepo.Type;
 
@@ -156,6 +169,7 @@ export type AgentContextSaveInput = typeof AgentContextSaveInput.Type;
 export const AgentContextSaveResult = Schema.Struct({ sha256: Schema.String });
 export type AgentContextSaveResult = typeof AgentContextSaveResult.Type;
 
+/** Commits changed files of a repository that holds a discovered source, by explicit path. */
 export const AgentContextCommitInput = Schema.Struct({
   ...AgentContextGetInput.fields,
   repoRoot: AbsolutePath,

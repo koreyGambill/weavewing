@@ -1497,8 +1497,9 @@ export const ServerSettings = Schema.Struct({
   outsideWorkspaceEditGrants: Schema.Array(OutsideWorkspaceEditGrant).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
-  /** Which tool calls the Context panel records as knowledge loads. */
+  /** Which tool calls the Context panel records as knowledge loads. A stored list that no longer decodes, such as the earlier regex format, falls back to the defaults. */
   loadWatchers: LoadWatchers.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome(DEFAULT_LOAD_WATCHERS)),
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_LOAD_WATCHERS)),
   ),
   /** Server-maintained history keeps old worktrees eligible for cleanup and review diffs. */

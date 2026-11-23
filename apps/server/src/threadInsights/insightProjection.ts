@@ -6,30 +6,35 @@ import type {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
-export interface CompiledLoadWatcher {
-  readonly label: string;
-  readonly kind: LoadWatcher["kind"];
-  readonly pattern: RegExp;
+const commandWords = (command: string) => command.split(/[\s;&|()]+/).filter(Boolean);
+
+/** The watcher's words as consecutive words of the command; the first may carry a path. */
+function commandMatches(words: ReadonlyArray<string>, match: string) {
+  const wanted = match.trim().split(/\s+/);
+  for (let start = 0; start + wanted.length <= words.length; start++) {
+    const first = words[start]!.slice(words[start]!.lastIndexOf("/") + 1);
+    if (first === wanted[0] && wanted.every((word, at) => at === 0 || words[start + at] === word))
+      return true;
+  }
+  return false;
 }
 
-/** Settings validate each pattern on save; one that still fails to compile watches nothing. */
-export function compileLoadWatchers(
-  watchers: ReadonlyArray<LoadWatcher>,
-): ReadonlyArray<CompiledLoadWatcher> {
-  return watchers.flatMap((watcher) => {
-    try {
-      return [{ label: watcher.label, kind: watcher.kind, pattern: new RegExp(watcher.pattern) }];
-    } catch {
-      return [];
-    }
-  });
+/** `*` matches any run of characters; each literal part is found once, left to right. */
+function toolMatches(name: string, glob: string) {
+  const parts = glob.split("*");
+  const first = parts[0]!;
+  const last = parts.at(-1)!;
+  if (parts.length === 1) return name === glob;
+  if (!name.startsWith(first) || !name.endsWith(last)) return false;
+  let at = first.length;
+  const end = name.length - last.length;
+  for (const part of parts.slice(1, -1)) {
+    const found = name.indexOf(part, at);
+    if (found === -1 || found + part.length > end) return false;
+    at = found + part.length;
+  }
+  return at <= end;
 }
-
-const watcherFor = (
-  watchers: ReadonlyArray<CompiledLoadWatcher>,
-  kind: LoadWatcher["kind"],
-  subject: string,
-) => watchers.find((watcher) => watcher.kind === kind && watcher.pattern.test(subject));
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const instructionPath =
@@ -138,7 +143,7 @@ function shellReads(command: string): { paths: string[]; search: boolean } {
 
 export function projectLoadEvent(
   item: OrchestrationV2TurnItem | OrchestrationV2TurnItemJson,
-  watchers: ReadonlyArray<CompiledLoadWatcher>,
+  watchers: ReadonlyArray<LoadWatcher>,
 ): ThreadLoadEvent | null {
   let paths: string[] = [];
   let toolName: string;
@@ -152,7 +157,9 @@ export function projectLoadEvent(
     paths = item.results?.map((entry) => entry.fileName) ?? [];
   } else if (item.type === "dynamic_tool") {
     toolName = item.toolName ?? "tool";
-    const watcher = watcherFor(watchers, "tool", toolName);
+    const watcher = watchers.find(
+      (entry) => entry.kind === "tool" && toolMatches(toolName, entry.match),
+    );
     if (watcher) {
       kind = "knowledge";
       label = `${watcher.label}: ${toolName}`;
@@ -196,7 +203,10 @@ export function projectLoadEvent(
     output = item.outputOmitted ? null : outputText(item.output);
   } else if (item.type === "command_execution") {
     const command = shellCommand(item.input);
-    const watcher = watcherFor(watchers, "command", command);
+    const words = commandWords(command);
+    const watcher = watchers.find(
+      (entry) => entry.kind === "command" && commandMatches(words, entry.match),
+    );
     const reads = shellReads(command);
     if (!watcher && !reads.paths.length) return null;
     evidence = "inferred";

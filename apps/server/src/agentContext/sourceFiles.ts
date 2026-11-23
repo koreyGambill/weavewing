@@ -5,13 +5,14 @@ import * as NodePath from "node:path";
 
 import { AgentContextError, type AgentContextGeneratedRange } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import { isCredentialPath } from "../threadInsights/InstructionFileAllowlist.ts";
 import { MAX_READ_BYTES, readBounded } from "../threadInsights/instructionFiles.ts";
-import { replaceHostFile } from "../workspace/replaceHostFile.ts";
+import { HostFileChangedError, replaceHostFile } from "../workspace/replaceHostFile.ts";
 
 const OPEN_MARKER = /^\s*<!--\s*overwing standards\b.*-->\s*$/;
-const CLOSE_MARKER = /^\s*<!--\s*\/overwing standards\s*-->\s*$/;
+const CLOSE_MARKER = /^\s*<!--\s*\/overwing standards\b.*-->\s*$/;
 
 /** Blocks `overwing standards export` writes, markers included, as one-based line ranges. */
 export function generatedRanges(text: string): ReadonlyArray<AgentContextGeneratedRange> {
@@ -71,6 +72,7 @@ export interface SaveRequest {
   readonly expectedSha256: string;
 }
 
+const isHostFileChanged = Schema.is(HostFileChangedError);
 const refused = (message: string) => new AgentContextError({ message, reason: "refused" });
 
 /**
@@ -94,21 +96,27 @@ export const saveSource = Effect.fn("AgentContext.saveSource")(function* (
       (cause) => new AgentContextError({ message: cause.message, reason: "failed", cause }),
     ),
   );
-  if (sha256(current) !== request.expectedSha256)
-    return yield* new AgentContextError({
-      message: "The file changed on disk since it was opened. Reload it, then reapply your edit.",
-      reason: "conflict",
-    });
+  const conflict = new AgentContextError({
+    message: "The file changed on disk since it was opened. Reload it, then reapply your edit.",
+    reason: "conflict",
+  });
+  if (sha256(current) !== request.expectedSha256) return yield* conflict;
   const before = generatedBlocks(current);
   const after = generatedBlocks(request.contents);
   if (before.length !== after.length || before.some((block, index) => block !== after[index]))
     return yield* refused(
       "Generated standards blocks are read-only. Edit the cards, then run overwing standards export.",
     );
+  // The hash is checked again on the file the save replaces, so a write in between conflicts.
   yield* Effect.tryPromise({
-    try: () => replaceHostFile(request.realPath, request.contents),
+    try: () =>
+      replaceHostFile(request.realPath, request.contents, {
+        expectedSha256: request.expectedSha256,
+      }),
     catch: (cause) =>
-      new AgentContextError({ message: "Could not save the file.", reason: "failed", cause }),
+      isHostFileChanged(cause)
+        ? conflict
+        : new AgentContextError({ message: "Could not save the file.", reason: "failed", cause }),
   });
   return { sha256: sha256(request.contents) };
 });

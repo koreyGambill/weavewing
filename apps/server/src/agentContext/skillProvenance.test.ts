@@ -109,7 +109,12 @@ it.effect("names each skill's origin, resolves links, prices listings and pairs 
       listed: false,
       listingBytes: 0,
     });
-    expect(row("deploy")).toMatchObject({ listed: false, listingBytes: 0, duplicates: [] });
+    expect(row("deploy")).toMatchObject({
+      listed: false,
+      unlisted: "user-only",
+      listingBytes: 0,
+      duplicates: [],
+    });
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -134,6 +139,13 @@ it.effect("labels Codex's own skills and lists their file path in the listing", 
       ],
       { driver: "codex", home, configDir: codexHome, cwd: null },
     );
+    const plugin = path.join(codexHome, "plugins", "cache", "curated", "pages", "0.1.26");
+    yield* skillFile(fs, path.join(plugin, "skills", "write-page"));
+    const [pages] = yield* describeSkills(
+      [candidate("pages:write-page", path.join(plugin, "skills", "write-page", "SKILL.md"))],
+      { driver: "codex", home, configDir: codexHome, cwd: null },
+    );
+    expect(pages?.origin).toEqual({ kind: "plugin", label: "pages@0.1.26" });
     expect(capture).toMatchObject({
       path: path.join(codexHome, "skills", "capture", "SKILL.md"),
       realPath: path.join(shared, "SKILL.md"),

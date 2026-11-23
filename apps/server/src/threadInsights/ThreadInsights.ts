@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { compileLoadWatchers, projectLoadEvent } from "./insightProjection.ts";
+import { projectLoadEvent } from "./insightProjection.ts";
 
 export class ThreadInsights extends Context.Service<
   ThreadInsights,
@@ -86,11 +86,9 @@ const make = Effect.gen(function* () {
                   }),
               ),
             );
-    const watchers = compileLoadWatchers(
-      yield* settings.getSettings.pipe(
-        Effect.map((value) => value.loadWatchers),
-        Effect.orElseSucceed(() => DEFAULT_LOAD_WATCHERS),
-      ),
+    const watchers = yield* settings.getSettings.pipe(
+      Effect.map((value) => value.loadWatchers),
+      Effect.orElseSucceed(() => DEFAULT_LOAD_WATCHERS),
     );
     return {
       threadId,

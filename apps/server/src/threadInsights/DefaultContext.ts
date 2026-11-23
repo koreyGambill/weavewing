@@ -11,6 +11,7 @@ import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSe
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -407,12 +408,30 @@ const make = Effect.gen(function* () {
     };
   });
 
+  type Resolved = Effect.Success<ReturnType<typeof resolve>>;
+  // Expanding an item reuses the preview it came from for a short while; previews always resolve.
+  const recent = new Map<string, { readonly at: number; readonly resolved: Resolved }>();
+  const resolveKey = ({ itemId: _itemId, ...input }: DefaultContextItemInput) =>
+    JSON.stringify(input);
+  const remember = (input: DefaultContextGetInput, resolved: Resolved) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.map((at) => {
+        if (recent.size > 32) recent.clear();
+        recent.set(resolveKey({ ...input, itemId: "" }), { at, resolved });
+        return resolved;
+      }),
+    );
+
   return DefaultContext.of({
     preview: Effect.fn("DefaultContext.preview")(function* (input) {
-      return (yield* resolve(input)).preview;
+      return (yield* remember(input, yield* resolve(input))).preview;
     }),
     itemText: Effect.fn("DefaultContext.itemText")(function* (input) {
-      const { preview, loaders } = yield* resolve(input);
+      const cached = recent.get(resolveKey(input));
+      const { preview, loaders } =
+        cached !== undefined && (yield* Clock.currentTimeMillis) - cached.at < 30_000
+          ? cached.resolved
+          : yield* remember(input, yield* resolve(input));
       const load = loaders.get(input.itemId);
       if (load === undefined)
         return yield* new ThreadInsightsError({ message: "This item has no readable text." });

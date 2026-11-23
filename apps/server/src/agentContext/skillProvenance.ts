@@ -23,7 +23,7 @@ export interface SkillLocations {
 }
 
 /** A skill row before its repository is known. */
-export type SkillRow = Omit<AgentContextSkill, "repoRoot" | "modified" | "editable">;
+export type SkillRow = Omit<AgentContextSkill, "repoRoot" | "modified" | "editable" | "readable">;
 
 const SkillLock = Schema.fromJsonString(
   Schema.Struct({
@@ -81,6 +81,7 @@ export const describeSkills = Effect.fn("SkillProvenance.describeSkills")(functi
   };
   const npxRoot = path.join(locations.home, ".agents", "skills");
   const userRoot = path.join(locations.configDir, "skills");
+  const pluginCache = path.join(locations.configDir, "plugins", "cache");
   const codex = locations.driver === "codex";
 
   const originOf = (
@@ -95,6 +96,10 @@ export const describeSkills = Effect.fn("SkillProvenance.describeSkills")(functi
           ? `${candidate.plugin.name}@${candidate.plugin.version}`
           : candidate.plugin.name,
       };
+    // Codex reports plugin skills by path only: plugins/cache/<marketplace>/<name>/<version>/.
+    const cached = path.relative(pluginCache, realDir).split(path.sep);
+    if (within(pluginCache, realDir) && cached.length >= 3 && cached[1] && cached[2])
+      return { kind: "plugin", label: `${cached[1]}@${cached[2]}` };
     if (within(npxRoot, skillDir) || within(npxRoot, realDir)) {
       const source = lock.get(path.basename(realDir)) ?? lock.get(path.basename(skillDir));
       return { kind: "npx", label: "npx skills", ...(source ? { detail: source } : {}) };
@@ -159,6 +164,9 @@ export const describeSkills = Effect.fn("SkillProvenance.describeSkills")(functi
         origin: originOf(candidate, skillDir, realDir),
         listed,
         shadowed: candidate.shadowed,
+        ...(listed || candidate.shadowed
+          ? {}
+          : { unlisted: candidate.skill.enabled ? ("user-only" as const) : ("off" as const) }),
         listingBytes,
         listingTokens: Math.ceil(listingBytes / 4),
         generated: [],

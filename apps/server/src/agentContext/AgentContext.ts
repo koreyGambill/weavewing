@@ -13,12 +13,14 @@ import {
   type AgentContextSourceText,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Semaphore from "effect/Semaphore";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import { ProjectService } from "../project/ProjectService.ts";
@@ -31,6 +33,8 @@ import {
   resolveInstructionFiles,
 } from "../threadInsights/instructionFiles.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
+import { isCredentialPath } from "../threadInsights/InstructionFileAllowlist.ts";
 import { SkillSources } from "./SkillSources.ts";
 import {
   generatedRanges,
@@ -71,6 +75,9 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettingsService;
   const skillSources = yield* SkillSources;
   const git = yield* GitVcsDriver;
+  const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
+  // Two saves of one file in this process would otherwise both pass the hash check.
+  const saves = yield* Semaphore.make(1);
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const isServerInternal = yield* makeIsServerInternalPath;
@@ -116,7 +123,21 @@ const make = Effect.gen(function* () {
         message: "This project no longer exists.",
         reason: "refused",
       });
-    const cwd = project.value.workspaceRoot ?? null;
+    const projectRoot = project.value.workspaceRoot ?? null;
+    // A thread's checkout counts only as the project root or a workspace this server knows.
+    if (
+      input.worktreePath !== undefined &&
+      input.worktreePath !== projectRoot &&
+      !(yield* knownWorkspaces.assertContains(input.worktreePath).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      ))
+    )
+      return yield* new AgentContextError({
+        message: "This checkout is not a known workspace.",
+        reason: "refused",
+      });
+    const cwd = input.worktreePath ?? projectRoot;
     const instance = yield* instances.getInstance(input.providerInstanceId);
     if (instance === undefined)
       return yield* new AgentContextError({
@@ -159,6 +180,8 @@ const make = Effect.gen(function* () {
       if (file.status === "expected" && !readOnly.has(file.realPath))
         readOnly.set(file.realPath, yield* readOnlyReason(file.realPath, home, internal));
     }
+    const projectRepo =
+      cwd === null ? null : ((yield* repoRootOf(path.join(cwd, ".git"), home, new Map())) ?? cwd);
     for (const skill of skills.skills) {
       if (readOnly.has(skill.realPath)) continue;
       readOnly.set(
@@ -167,17 +190,28 @@ const make = Effect.gen(function* () {
           ? "Plugin copy: updating the plugin replaces it."
           : skill.origin.kind === "npx"
             ? "Installed by npx skills: change the source, then reinstall."
-            : yield* readOnlyReason(skill.realPath, home, internal),
+            : // A cloned project could link a skill to a file in another repository.
+              skill.origin.kind === "project" &&
+                (projectRepo === null || !within(projectRepo, skill.realPath))
+              ? "Linked outside this project."
+              : yield* readOnlyReason(skill.realPath, home, internal),
       );
     }
     const editable = new Set(
       [...readOnly].flatMap(([file, reason]) => (reason === null ? [file] : [])),
     );
-    // Readable: every discovered instruction file the resolver read, and every skill file.
-    const readable = new Set([
-      ...instructions.filter((file) => file.status === "expected").map((file) => file.realPath),
-      ...skills.skills.map((skill) => skill.realPath),
-    ]);
+    // A skill can link anywhere, so its text is read only from Markdown outside secrets.
+    const skillReadable = Effect.fnUntraced(function* (realPath: string) {
+      return (
+        /\.md$/i.test(realPath) && !isCredentialPath(realPath, home) && !(yield* internal(realPath))
+      );
+    });
+    const readable = new Set(
+      instructions.filter((file) => file.status === "expected").map((file) => file.realPath),
+    );
+    for (const skill of skills.skills) {
+      if (yield* skillReadable(skill.realPath)) readable.add(skill.realPath);
+    }
     return {
       driver,
       cwd,
@@ -191,7 +225,27 @@ const make = Effect.gen(function* () {
     };
   });
 
-  const repoState = Effect.fnUntraced(function* (root: string, files: ReadonlyArray<string>) {
+  type Discovery = Effect.Success<ReturnType<typeof discover>>;
+  // Reads reuse the latest discovery briefly; overview, save and commit always rediscover.
+  const recent = new Map<string, { readonly at: number; readonly found: Discovery }>();
+  const discoveryKey = (input: AgentContextGetInput) =>
+    `${input.providerInstanceId}\0${input.projectId}\0${input.worktreePath ?? ""}`;
+  const discoverFresh = Effect.fnUntraced(function* (input: AgentContextGetInput) {
+    const found = yield* discover(input);
+    if (recent.size > 32) recent.clear();
+    recent.set(discoveryKey(input), { at: yield* Clock.currentTimeMillis, found });
+    return found;
+  });
+  const discoverRecent = Effect.fnUntraced(function* (input: AgentContextGetInput) {
+    const cached = recent.get(discoveryKey(input));
+    return cached !== undefined && (yield* Clock.currentTimeMillis) - cached.at < 30_000
+      ? cached.found
+      : yield* discoverFresh(input);
+  });
+
+  const MAX_DIRTY = 500;
+  /** HEAD, branch and every changed or untracked file of a work tree. */
+  const repoState = Effect.fnUntraced(function* (root: string) {
     const run = (operation: string, args: ReadonlyArray<string>) =>
       git
         .execute({
@@ -208,27 +262,35 @@ const make = Effect.gen(function* () {
       "--porcelain=v1",
       "-z",
       "--untracked-files=all",
-      "--",
-      ...files.map((file) => path.relative(root, file)),
     ]);
-    const modified = new Set(
-      status.stdout
-        .split("\0")
-        .filter((entry) => entry.length > 3)
-        .map((entry) => path.join(root, entry.slice(3))),
+    const dirty: Array<{ path: string; untracked: boolean }> = [];
+    const tokens = status.stdout.split("\0");
+    for (let index = 0; index < tokens.length; index++) {
+      const entry = tokens[index]!;
+      if (entry.length < 4) continue;
+      dirty.push({ path: entry.slice(3), untracked: entry.startsWith("??") });
+      // A rename or copy is followed by its original path, which is not a change of its own.
+      if (entry[0] === "R" || entry[0] === "C") index++;
+    }
+    const modified = new Set(dirty.map((entry) => path.join(root, entry.path)));
+    const untracked = new Set(
+      dirty.filter((entry) => entry.untracked).map((entry) => path.join(root, entry.path)),
     );
     return {
       repo: {
         root,
         head: head.exitCode === 0 ? head.stdout.trim() || null : null,
         branch: branch.exitCode === 0 ? branch.stdout.trim() || null : null,
+        dirty: dirty.slice(0, MAX_DIRTY),
+        dirtyTruncated: dirty.length > MAX_DIRTY,
       } satisfies AgentContextRepo,
       modified,
+      untracked,
     };
   });
 
   const get = Effect.fn("AgentContext.get")(function* (input: AgentContextGetInput) {
-    const found = yield* discover(input);
+    const found = yield* discoverFresh(input);
     const realPaths = [
       ...new Set([
         ...found.instructions.map((file) => file.realPath),
@@ -246,8 +308,8 @@ const make = Effect.gen(function* () {
     const modified = new Set<string>();
     yield* Effect.forEach(
       [...byRepo],
-      ([root, files]) =>
-        repoState(root, files).pipe(
+      ([root]) =>
+        repoState(root).pipe(
           Effect.map((state) => {
             repos.push(state.repo);
             for (const file of state.modified) modified.add(file);
@@ -271,6 +333,7 @@ const make = Effect.gen(function* () {
         repoRoot: roots.get(file.realPath) ?? null,
         modified: modified.has(file.realPath),
         editable: reason === null,
+        readable: found.readable.has(file.realPath),
         ...(reason ? { readOnlyReason: reason } : {}),
       };
     };
@@ -308,7 +371,7 @@ const make = Effect.gen(function* () {
   return AgentContext.of({
     get,
     read: Effect.fn("AgentContext.read")(function* (input) {
-      const found = yield* discover(input);
+      const found = yield* discoverRecent(input);
       if (!found.readable.has(input.realPath))
         return yield* new AgentContextError({
           message: "This file is not a readable source for this provider and project.",
@@ -325,32 +388,39 @@ const make = Effect.gen(function* () {
       };
     }),
     save: Effect.fn("AgentContext.save")(function* (input) {
-      const found = yield* discover(input);
-      return yield* saveSource(input, found.editable);
+      const found = yield* discoverFresh(input);
+      return yield* saves.withPermits(1)(saveSource(input, found.editable));
     }),
     commit: Effect.fn("AgentContext.commit")(function* (input) {
-      const found = yield* discover(input);
+      const found = yield* discoverFresh(input);
       const refused = (message: string) => new AgentContextError({ message, reason: "refused" });
-      const notEditable = input.realPaths.find((file) => !found.editable.has(file));
-      if (notEditable !== undefined)
-        return yield* refused(`${notEditable} is not an editable source here.`);
+      // Any changed file of a repository holding a discovered source, so one commit can take
+      // everything; the repository itself must hold a source this page found.
       const cache = new Map<string, string | null>();
-      for (const file of input.realPaths) {
-        if ((yield* repoRootOf(file, found.home, cache)) !== input.repoRoot)
-          return yield* refused(`${file} is not in ${input.repoRoot}.`);
+      let holdsSource = false;
+      for (const file of found.readable) {
+        if ((yield* repoRootOf(file, found.home, cache)) === input.repoRoot) {
+          holdsSource = true;
+          break;
+        }
       }
+      if (!holdsSource)
+        return yield* refused(`${input.repoRoot} holds no agent context source here.`);
       const relative = yield* repoRelativePaths(input.repoRoot, input.realPaths);
-      const state = yield* repoState(input.repoRoot, input.realPaths);
+      const state = yield* repoState(input.repoRoot);
       if (state.repo.head !== input.expectedHead)
         return yield* new AgentContextError({
           message: "The repository's HEAD moved since this page loaded. Refresh, then commit.",
           reason: "conflict",
         });
-      if (state.modified.size === 0)
-        return yield* refused("These files have no changes to commit.");
-      const pathspecs = relative
-        .filter((_, index) => state.modified.has(input.realPaths[index]!))
-        .map((file) => `:(top,literal)${file}`);
+      const unchanged = input.realPaths.find((file) => !state.modified.has(file));
+      if (unchanged !== undefined) return yield* refused(`${unchanged} has no changes to commit.`);
+      const selected = relative.map((file, index) => ({
+        pathspec: `:(top,literal)${file}`,
+        untracked: state.untracked.has(input.realPaths[index]!),
+      }));
+      const pathspecs = selected.map((entry) => entry.pathspec);
+      const added = selected.filter((entry) => entry.untracked).map((entry) => entry.pathspec);
       const commitGit = (operation: string, args: ReadonlyArray<string>) =>
         git
           .execute({
@@ -369,10 +439,26 @@ const make = Effect.gen(function* () {
                 }),
             ),
           );
-      // `--only` commits these paths alone and leaves anything else already staged in place;
-      // the add covers a source Git does not track yet.
-      yield* commitGit("add", ["add", "--", ...pathspecs]);
-      yield* commitGit("commit", ["commit", "--only", "-m", input.message, "--", ...pathspecs]);
+      // `--only` commits these paths alone and leaves anything else already staged in place.
+      // Git needs untracked sources in the index first; a failed commit takes them out again,
+      // so the index ends as it began.
+      if (added.length > 0) yield* commitGit("add", ["add", "--", ...added]);
+      yield* commitGit("commit", [
+        "commit",
+        "--only",
+        "-m",
+        input.message,
+        "--",
+        ...pathspecs,
+      ]).pipe(
+        Effect.tapError(() =>
+          added.length === 0
+            ? Effect.void
+            : commitGit("unstage", ["rm", "--cached", "--quiet", "--", ...added]).pipe(
+                Effect.ignore,
+              ),
+        ),
+      );
       const head = yield* commitGit("head", ["rev-parse", "HEAD"]);
       return { commitSha: head.stdout.trim() };
     }),
