@@ -626,6 +626,8 @@ type SidebarThreadRowProps = {
   jumpLabel: string | null;
   /** The row's jump number, shown at all times when the user turns thread numbers on. */
   positionLabel: string | null;
+  /** Dense rows only; other variants place the project icon on their own. */
+  showProjectIcon?: boolean | undefined;
   onThisComputer: boolean | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
@@ -1390,6 +1392,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 attention={needsAttention}
                 className="size-5 shrink-0"
               />
+              {variant === "dense" && props.showProjectIcon && props.project ? (
+                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+              ) : null}
               {draftIndicator}
               {title}
               {!multiline && scratchFolder !== null ? (

@@ -295,6 +295,9 @@ import {
 import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
+  changedSidebarThreadGroupNames,
+  localSidebarThreadGroups,
+  withServerSidebarGroups,
   deleteSidebarThreadGroup,
   discardNewSidebarThreadGroup,
   EMPTY_SIDEBAR_THREAD_GROUPS,
@@ -411,6 +414,7 @@ const GROUP_BY_KEY = "t3code:sidebar:group-by";
 const GROUP_BY_COLLAPSED_KEY = "t3code:sidebar:group-by-collapsed";
 const DENSE_ROWS_KEY = "t3code:sidebar:dense-rows";
 const THREAD_NUMBERS_KEY = "t3code:sidebar:thread-numbers";
+const DENSE_PROJECT_ICONS_KEY = "t3code:sidebar:dense-project-icons";
 const THREAD_ORDER_KEY = "t3code:sidebar:thread-order";
 const isSidebarThreadOrder = Schema.is(SidebarThreadOrder);
 const isSidebarGroupBy = Schema.is(SidebarGroupBy);
@@ -552,7 +556,6 @@ function useSidebarThreads(input: {
     folderGroups,
     keepEmptyFolders: keepEmpty,
     automationFilter,
-    threadGroups,
     renamingGroupId,
     derivedGrouping,
     environmentScope,
@@ -654,6 +657,19 @@ function useSidebarThreads(input: {
           };
         });
   const activeDepths = groupSidebarThreadFamilies(activeThreads);
+  const threadGroups =
+    input.threadGroups === null
+      ? null
+      : withServerSidebarGroups(
+          input.threadGroups,
+          new Map(
+            activeThreads.flatMap((thread) =>
+              thread.sidebarGroup === undefined
+                ? []
+                : [[threadShellKey(thread), thread.sidebarGroup] as const],
+            ),
+          ),
+        );
   const threadGroupArrangement: SidebarThreadGroupArrangement | null =
     threadGroups === null || threadGroups.groups.length === 0
       ? null
@@ -784,6 +800,7 @@ function useSidebarThreads(input: {
     projectFolders,
     threadGroupArrangement,
     threadGroupSections,
+    threadGroupsView: threadGroups,
     derivedSections,
     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
       const keys = sidebarFolderExpansionKeys(group);
@@ -1135,6 +1152,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const regenerateThreadTitle = useOrchestrationCommand(threadEnvironment.regenerateTitle, {
     reportFailure: false,
   });
+  const setThreadSidebarGroup = useOrchestrationCommand(threadEnvironment.setSidebarGroup);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onError: (error) => {
       toastManager.add(
@@ -1178,6 +1196,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const boringSidebarEnabled = groupBy === "project";
   const [denseRows, setDenseRows] = useLocalStorage(DENSE_ROWS_KEY, false, Schema.Boolean);
+  const [denseProjectIcons, setDenseProjectIcons] = useLocalStorage(
+    DENSE_PROJECT_ICONS_KEY,
+    true,
+    Schema.Boolean,
+  );
   const [threadNumbers, setThreadNumbers] = useLocalStorage(
     THREAD_NUMBERS_KEY,
     false,
@@ -1573,13 +1596,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     SidebarThreadGroups,
   );
   const threadGroups = sidebarThreadGroupsForOrder(storedThreadGroups, threadOrder);
-  const setThreadGroups = (update: (current: SidebarThreadGroups) => SidebarThreadGroups) =>
-    setStoredThreadGroups((current) =>
-      sidebarThreadGroupsForOrder(
-        update(sidebarThreadGroupsForOrder(current, threadOrder)),
-        threadOrder,
-      ),
+  // Edits apply to what the user sees, server-recorded groups included; membership changes go
+  // back to each thread's server so other machines group it the same way.
+  const setThreadGroups = (update: (current: SidebarThreadGroups) => SidebarThreadGroups) => {
+    const view = threadGroupsView ?? threadGroups;
+    const next = update(view);
+    for (const [key, group] of changedSidebarThreadGroupNames(view, next)) {
+      const thread = threadByKey.get(key);
+      if (thread === undefined || !serverConfigs.has(thread.environmentId)) continue;
+      void setThreadSidebarGroup({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.id, group },
+      });
+    }
+    setStoredThreadGroups(
+      sidebarThreadGroupsForOrder(localSidebarThreadGroups(next, view), threadOrder),
     );
+  };
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   // A group made moments ago and the groups before it, until the user names it.
   const [newThreadGroup, setNewThreadGroup] = useState<{
@@ -1608,6 +1641,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectFolders,
     threadGroupArrangement,
     threadGroupSections,
+    threadGroupsView,
     derivedSections,
     toggleProjectFolder,
     renderedSettledThreads,
@@ -1718,7 +1752,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     // A click on "New group" while one is being named only commits that name.
     if (threadKey === undefined && renamingGroupId !== null) return;
     const id = randomUUID();
-    setNewThreadGroup({ id, previous: threadGroups });
+    setNewThreadGroup({ id, previous: threadGroupsView ?? threadGroups });
     setThreadGroups((current) =>
       addSidebarThreadGroup(current, {
         id,
@@ -1767,12 +1801,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               {
                 id: "move-up",
                 label: "Move group up",
-                disabled: !canMoveSidebarThreadGroup(threadGroups, groupId, -1),
+                disabled: !canMoveSidebarThreadGroup(threadGroupsView ?? threadGroups, groupId, -1),
               },
               {
                 id: "move-down",
                 label: "Move group down",
-                disabled: !canMoveSidebarThreadGroup(threadGroups, groupId, 1),
+                disabled: !canMoveSidebarThreadGroup(threadGroupsView ?? threadGroups, groupId, 1),
               },
               {
                 id: "new-group",
@@ -3275,17 +3309,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 groupBy !== "named" || sectionByThreadKeyRef.current.get(threadKey) !== "active"
                   ? null
                   : {
-                      options: threadGroups.groups,
-                      current: sidebarThreadGroupOf(threadGroups, threadKey),
+                      options: (threadGroupsView ?? threadGroups).groups,
+                      current: sidebarThreadGroupOf(threadGroupsView ?? threadGroups, threadKey),
                       ungroupedName: threadGroups.ungroupedName ?? DEFAULT_UNGROUPED_NAME,
                       canMoveUp:
                         threadGroupArrangement !== null &&
-                        stepSidebarThread(threadGroups, threadGroupArrangement, threadKey, -1) !==
-                          null,
+                        stepSidebarThread(
+                          threadGroupsView ?? threadGroups,
+                          threadGroupArrangement,
+                          threadKey,
+                          -1,
+                        ) !== null,
                       canMoveDown:
                         threadGroupArrangement !== null &&
-                        stepSidebarThread(threadGroups, threadGroupArrangement, threadKey, 1) !==
-                          null,
+                        stepSidebarThread(
+                          threadGroupsView ?? threadGroups,
+                          threadGroupArrangement,
+                          threadKey,
+                          1,
+                        ) !== null,
                     },
               supports: {
                 settlement: configLoaded,
@@ -3978,6 +4020,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           Dense rows
                         </MenuCheckboxItem>
                       )}
+                      {groupBy !== "project" && denseRows ? (
+                        <MenuCheckboxItem
+                          variant="switch"
+                          checked={denseProjectIcons}
+                          onCheckedChange={(checked) => setDenseProjectIcons(Boolean(checked))}
+                        >
+                          Project icons
+                        </MenuCheckboxItem>
+                      ) : null}
                       {groupBy === "named" ? (
                         <MenuCheckboxItem
                           variant="switch"
@@ -4309,6 +4360,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             positionLabel={
                               threadNumbers ? (positionLabelByKey.get(threadKey) ?? null) : null
                             }
+                            showProjectIcon={denseProjectIcons}
                             onThisComputer={computerLocalityById.get(thread.environmentId) ?? null}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null

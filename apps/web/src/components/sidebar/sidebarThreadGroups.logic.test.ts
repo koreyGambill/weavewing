@@ -2,9 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
+  changedSidebarThreadGroupNames,
   deleteSidebarThreadGroup,
   discardNewSidebarThreadGroup,
   isUnnamedSidebarThreadGroup,
+  localSidebarThreadGroups,
   EMPTY_SIDEBAR_THREAD_GROUPS,
   moveSidebarThreadGroup,
   placeSidebarThread,
@@ -16,6 +18,7 @@ import {
   resolveSidebarShelfHit,
   stepSidebarThread,
   toggleSidebarThreadGroup,
+  withServerSidebarGroups,
   type SidebarThreadGroups,
 } from "./sidebarThreadGroups.logic";
 
@@ -316,6 +319,58 @@ describe("group edits", () => {
     expect(hidden.ungroupedName).toBe(null);
     expect(arrangeSidebarThreadGroups(hidden, families("a", "b", "c"), options).ungroupedAt).toBe(
       0,
+    );
+  });
+});
+
+describe("server-recorded groups", () => {
+  const local = state([
+    ["A", ["a1", "moved"]],
+    ["B", ["b1"]],
+  ]);
+  const view = withServerSidebarGroups(
+    local,
+    new Map<string, string | null>([
+      ["moved", "B"],
+      ["b1", null],
+      ["r1", "Remote"],
+      ["r2", "Remote"],
+    ]),
+  );
+
+  it("places threads by their recorded group and shows unknown names after local groups", () => {
+    expect(view.groups.map((group) => [group.name, group.threadKeys])).toEqual([
+      ["A", ["a1"]],
+      ["B", ["moved"]],
+      ["Remote", ["r1", "r2"]],
+    ]);
+  });
+
+  it("keeps a remote-only group off this machine until the user edits or moves it", () => {
+    expect(localSidebarThreadGroups(view, view).groups.map((group) => group.name)).toEqual([
+      "A",
+      "B",
+    ]);
+    const remoteId = view.groups[2]!.id;
+    for (const edited of [
+      toggleSidebarThreadGroup(view, remoteId),
+      moveSidebarThreadGroup(view, remoteId, -1),
+    ]) {
+      expect(localSidebarThreadGroups(edited, view).groups.some((g) => g.id === remoteId)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("reports each thread whose group name an edit changes", () => {
+    const renamed = renameSidebarThreadGroup(view, "A", "Alpha");
+    expect(changedSidebarThreadGroupNames(view, renamed)).toEqual(new Map([["a1", "Alpha"]]));
+    const deleted = deleteSidebarThreadGroup(view, view.groups[2]!.id);
+    expect(changedSidebarThreadGroupNames(view, deleted)).toEqual(
+      new Map([
+        ["r1", null],
+        ["r2", null],
+      ]),
     );
   });
 });

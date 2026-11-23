@@ -39,7 +39,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
 it("drops a thread into a group at the indicator, and a grouped thread still drags onto Pinned", async () => {
   await page.viewport(1400, 900);
   const [grouped, loose] = [threadWithHistory("grouped", 1), threadWithHistory("loose", 1)];
-  using _environment = installFakeEnvironment([grouped, loose]);
+  using _environment = installFakeEnvironment([grouped, loose], { acceptCommands: true });
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -126,6 +126,14 @@ it("drops a thread into a group at the indicator, and a grouped thread still dra
       keyOf(grouped),
     ]);
   });
+  // Membership travels with the thread so other machines group it the same way.
+  expect(dispatchedCommands()).toContainEqual(
+    expect.objectContaining({
+      type: "thread.sidebar-group.set",
+      threadId: loose.id,
+      group: "Demo",
+    }),
+  );
 
   // The drop moved rows, so the guard's window starts again.
   _clock.mockReturnValue(2e12);

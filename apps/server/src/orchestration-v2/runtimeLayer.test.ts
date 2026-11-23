@@ -3722,8 +3722,25 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           step,
         );
       }
+      assert.isUndefined(shellOf(yield* orchestrator.getShellSnapshot()).sidebarGroup);
+      for (const [step, group] of [
+        ["group", "Research"],
+        ["ungroup", null],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: "thread.sidebar-group.set",
+          commandId: CommandId.make(`runtime-layer-lifecycle-sidebar-group-${step}`),
+          threadId,
+          group,
+        });
+        assert.strictEqual(
+          shellOf(yield* orchestrator.getShellSnapshot()).sidebarGroup,
+          group,
+          step,
+        );
+      }
       const taggedShell = shellOf(yield* orchestrator.getShellSnapshot());
-      // Tags are not activity, so the thread keeps its place in thread lists.
+      // Tags and sidebar groups are not activity, so the thread keeps its place in thread lists.
       assert.equal(
         DateTime.toEpochMillis(taggedShell.updatedAt),
         DateTime.toEpochMillis(untaggedShell.updatedAt),

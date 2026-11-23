@@ -250,6 +250,106 @@ export function stepSidebarThread(
   return placeSidebarThread(state, arrangement, key, { groupId: source.groupId, beforeKey });
 }
 
+const REMOTE_GROUP_ID_PREFIX = "remote:";
+
+/**
+ * Overlays the groups threads carry from their servers onto this machine's groups. A thread's
+ * recorded group wins over local membership, matched by name; a name no local group has shows
+ * as a group after the local ones. Threads with no recorded group keep their local place.
+ */
+export function withServerSidebarGroups(
+  state: SidebarThreadGroups,
+  serverGroupByKey: ReadonlyMap<string, string | null>,
+): SidebarThreadGroups {
+  if (serverGroupByKey.size === 0) return state;
+  const localByName = new Map<string, SidebarThreadGroup>();
+  for (const group of state.groups) {
+    if (!localByName.has(group.name)) localByName.set(group.name, group);
+  }
+  const keysById = new Map(
+    state.groups.map((group) => [
+      group.id,
+      group.threadKeys.filter((key) => {
+        const recorded = serverGroupByKey.get(key);
+        return recorded === undefined || (recorded !== null && localByName.get(recorded) === group);
+      }),
+    ]),
+  );
+  const usedIds = new Set(state.groups.map((group) => group.id));
+  const remote = new Map<string, SidebarThreadGroup & { threadKeys: string[] }>();
+  for (const [key, name] of serverGroupByKey) {
+    if (name === null) continue;
+    const local = localByName.get(name);
+    if (local !== undefined) {
+      const keys = keysById.get(local.id)!;
+      if (!keys.includes(key)) keys.push(key);
+      continue;
+    }
+    let group = remote.get(name);
+    if (group === undefined) {
+      let id = `${REMOTE_GROUP_ID_PREFIX}${name}`;
+      while (usedIds.has(id)) id += "~";
+      usedIds.add(id);
+      group = { id, name, collapsed: false, threadKeys: [] };
+      remote.set(name, group);
+    }
+    group.threadKeys.push(key);
+  }
+  return {
+    ...state,
+    groups: [
+      ...state.groups.map((group) => {
+        const keys = keysById.get(group.id)!;
+        const unchanged =
+          keys.length === group.threadKeys.length &&
+          keys.every((key, index) => key === group.threadKeys[index]);
+        return unchanged ? group : { ...group, threadKeys: keys };
+      }),
+      ...remote.values(),
+    ],
+  };
+}
+
+/**
+ * What this machine keeps after an edit made on `withServerSidebarGroups` output: a group seen
+ * only through a thread's server record stays unsaved until the user changes or moves it.
+ */
+export function localSidebarThreadGroups(
+  next: SidebarThreadGroups,
+  view: SidebarThreadGroups,
+): SidebarThreadGroups {
+  const viewIndex = new Map(view.groups.map((group, index) => [group.id, index]));
+  const groups = next.groups.filter((group, index) => {
+    if (!group.id.startsWith(REMOTE_GROUP_ID_PREFIX)) return true;
+    const before = viewIndex.get(group.id);
+    if (before === undefined || view.groups[before] !== group) return true;
+    return (view.groups[before - 1]?.id ?? null) !== (next.groups[index - 1]?.id ?? null);
+  });
+  return groups.length === next.groups.length ? next : { ...next, groups };
+}
+
+/** Threads whose group name differs between two states, with the name each now has. */
+export function changedSidebarThreadGroupNames(
+  before: SidebarThreadGroups,
+  after: SidebarThreadGroups,
+): Map<string, string | null> {
+  const nameByKey = (state: SidebarThreadGroups) => {
+    const names = new Map<string, string>();
+    for (const group of state.groups) {
+      for (const key of group.threadKeys) if (!names.has(key)) names.set(key, group.name);
+    }
+    return names;
+  };
+  const previous = nameByKey(before);
+  const next = nameByKey(after);
+  const changed = new Map<string, string | null>();
+  for (const key of new Set([...previous.keys(), ...next.keys()])) {
+    const name = next.get(key) ?? null;
+    if ((previous.get(key) ?? null) !== name) changed.set(key, name);
+  }
+  return changed;
+}
+
 /** The group a thread belongs to, or null for Ungrouped. */
 export function sidebarThreadGroupOf(state: SidebarThreadGroups, key: string): string | null {
   return state.groups.find((group) => group.threadKeys.includes(key))?.id ?? null;

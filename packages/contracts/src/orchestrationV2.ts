@@ -657,6 +657,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
+  /** The user's sidebar group, matched by name across machines. Absent means never set, so a client may fall back to its own local grouping; null means explicitly ungrouped. */
+  sidebarGroup: Schema.optional(Schema.NullOr(Schema.String)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2232,6 +2234,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.pin-reordered",
       "thread.active-reordered",
       "thread.tags-updated",
+      "thread.sidebar-group-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.metadata-updated",
@@ -2505,6 +2508,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
+  /** The user's sidebar group, matched by name across machines. Absent means never set, so a client may fall back to its own local grouping; null means explicitly ungrouped. */
+  sidebarGroup: Schema.optional(Schema.NullOr(Schema.String)),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   opens: Schema.optional(LenientThreadOpens),
   titleRegeneration: Schema.optional(
@@ -3219,6 +3224,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.pin-reordered",
       "thread.active-reordered",
       "thread.tags-updated",
+      "thread.sidebar-group-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
@@ -3495,6 +3501,12 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     tag: ThreadTag,
     tagged: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.sidebar-group.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    group: Schema.NullOr(ThreadTag),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pin.reorder"),
