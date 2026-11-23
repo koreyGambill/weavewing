@@ -1,3 +1,4 @@
+import { getClientSettings } from "~/hooks/useSettings";
 import { documentChipKindForFileName } from "~/pierre-icons";
 import { isSvgAttachment } from "@t3tools/shared/image";
 import { useRenderedAppearance } from "../../hooks/useTheme";
@@ -79,7 +80,14 @@ function UserMessageMentionChip(props: {
             data-markdown-copy={props.copyMarkdown}
             onClick={() => {
               if (ctx.threadRef)
-                useRightPanelStore.getState().openFile(ctx.threadRef, props.record.path);
+                useRightPanelStore
+                  .getState()
+                  .openFile(
+                    ctx.threadRef,
+                    props.record.path,
+                    undefined,
+                    getClientSettings().linkTileDestination,
+                  );
             }}
           >
             <WorkspaceEntryIcon

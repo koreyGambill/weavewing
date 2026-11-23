@@ -152,7 +152,13 @@ export type TileAction =
   | { type: "resize-focus-pair"; ratio: number }
   | { type: "activate"; groupId: string; tabId: string }
   | { type: "focus"; groupId: string }
-  | { type: "move"; tabId: string; targetGroupId: string; index?: number }
+  | {
+      type: "move";
+      tabId: string;
+      targetGroupId: string;
+      index?: number;
+      preserveChooser?: boolean;
+    }
   | {
       type: "split";
       tabId: string;
@@ -717,6 +723,7 @@ export function applyTileAction(layout: ThreadTileLayout, action: TileAction): T
     if (node.kind !== "group") return node;
     const replaced =
       action.type === "move" &&
+      !action.preserveChooser &&
       node.id === target.id &&
       isNewTab(node.activeTabId) &&
       node.activeTabId !== action.tabId

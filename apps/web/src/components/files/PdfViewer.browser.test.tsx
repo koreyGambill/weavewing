@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vite-plus/test";
-import { render } from "../../../test/render";
+import { fakeTimers, render } from "../../../test/render";
 import "~/index.css";
 
 // Vite serves the worker module through its transform with an inline source map (6.8 MB for
@@ -310,14 +310,22 @@ it("keeps the bitmap through a drag and repaints once at the final size", async 
     });
     observer.observe(canvas, { attributeFilter: ["width"] });
     try {
-      for (const width of [470, 440, 400]) {
-        container.style.width = `${width}px`;
-        await vi.waitFor(
-          () =>
-            expect(canvas.getBoundingClientRect().width).toBe(region.element().clientWidth - 32),
-          { interval: 5 },
-        );
-        expect(canvas.width).toBe(initialWidth);
+      {
+        using _timers = fakeTimers();
+        for (const width of [470, 440, 400]) {
+          const previousWidth = canvas.getBoundingClientRect().width;
+          await new Promise<void>((resolve) => {
+            const resized = new ResizeObserver(() => {
+              if (canvas.getBoundingClientRect().width === previousWidth) return;
+              resized.disconnect();
+              resolve();
+            });
+            resized.observe(canvas);
+            container.style.width = `${width}px`;
+          });
+          expect(canvas.width).toBe(initialWidth);
+        }
+        await vi.advanceTimersByTimeAsync(150);
       }
       const finalWidth = Math.ceil(
         (region.element().clientWidth - 32) * Math.min(2, window.devicePixelRatio),

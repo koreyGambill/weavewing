@@ -231,6 +231,27 @@ describe("revealServerTabs", () => {
     ).toEqual(["browser:tab_forced", "browser:tab_next"]);
   });
 
+  it("preserves the tile chooser when an agent presents a browser", () => {
+    setup();
+    const panels = useRightPanelStore.getState();
+    panels.applyTileAction(ref, {
+      type: "new-group",
+      targetGroupId: "conversation-group",
+      groupId: "second-tile",
+      splitId: "two-tiles",
+      axis: "horizontal",
+      side: "after",
+    });
+    const groups = () =>
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, ref));
+    const chooser = groups()[1]!.activeTabId;
+    revealServerTabs(ref, [tab("tab_forced", true)], {
+      autoShowFloatingPreview: false,
+      linkTileDestination: "tile-2",
+    });
+    expect(groups()[1]?.tabs).toEqual([chooser, "browser:tab_forced"]);
+  });
+
   it("focuses a tab already in the panel instead of floating it when forced", () => {
     setup();
     useRightPanelStore.getState().openBrowser(ref, "tab_a");

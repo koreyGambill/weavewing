@@ -420,6 +420,7 @@ function placeLinkedSurface(
   after: ThreadRightPanelState,
   surfaceId: string,
   destination: LinkTileDestination | undefined,
+  preserveChooser = false,
 ): ThreadRightPanelState {
   const layout = after.tileLayout;
   if (
@@ -446,6 +447,7 @@ function placeLinkedSurface(
             type: "move",
             tabId: surfaceId,
             targetGroupId: target.id,
+            preserveChooser,
           }),
         };
   }
@@ -1108,7 +1110,13 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               true,
               fillChooser,
             );
-            return placeLinkedSurface(current, next, surface.id, options?.destination);
+            return placeLinkedSurface(
+              current,
+              next,
+              surface.id,
+              options?.destination,
+              options?.automatic,
+            );
           });
         }),
       addPullRequest: (ref, target) =>

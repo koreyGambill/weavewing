@@ -109,7 +109,7 @@ function PdfPage(props: {
         background: "white",
       });
       text.current.replaceChildren();
-      text.current.style.setProperty("--total-scale-factor", String(viewport.scale));
+      text.current.style.setProperty("--pdf-painted-scale", String(viewport.scale));
       layer = new TextLayer({
         container: text.current,
         viewport,

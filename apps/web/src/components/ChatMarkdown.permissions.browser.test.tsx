@@ -196,7 +196,7 @@ it("removes host actions after revocation while keeping file preview and copying
   expect(offeredActions()).toEqual(["copy-relative", "copy-full"]);
   await vi.waitFor(() => expect(state.copy).toHaveBeenCalledWith("/work/docs/readme.md"));
   await act(async () => screen.anchor().click());
-  expect(state.openFile).toHaveBeenCalledWith(threadRef, "docs/readme.md", undefined);
+  expect(state.openFile).toHaveBeenCalledWith(threadRef, "docs/readme.md", undefined, "tile-2");
   expect(state.openEditor).not.toHaveBeenCalled();
 });
 

@@ -573,7 +573,7 @@ describe("ChatMarkdown workspace file opens", () => {
     await act(async () => other!.click());
     await act(async () => resolvePending(result));
 
-    expect(openFile).toHaveBeenCalledExactlyOnceWith(threadRef, "/elsewhere/b.md", 9);
+    expect(openFile).toHaveBeenCalledExactlyOnceWith(threadRef, "/elsewhere/b.md", 9, "tile-2");
     expect(workspaceSearch).toHaveBeenCalledOnce();
   });
 });

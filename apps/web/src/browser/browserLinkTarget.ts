@@ -30,7 +30,7 @@ export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTar
   return "app";
 }
 
-/** Before hydration, the default "system" would ignore a saved "app" link target. */
+/** A link opened during startup must still respect the saved target. */
 export async function resolveBrowserLinkTargetPreference(): Promise<BrowserLinkTarget> {
   await ensureClientSettingsHydrated();
   return getClientSettings().browserLinkTarget;
