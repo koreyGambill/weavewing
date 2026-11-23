@@ -140,6 +140,7 @@ const fixture = Effect.gen(function* () {
     yield* fs.makeDirectory(path.join(skills, name), { recursive: true });
     yield* fs.symlink(target, path.join(skills, name, "SKILL.md"));
   }
+  git(path.join(root, "elsewhere"), "init", "-q", "-b", "main");
   yield* fs.makeDirectory(path.join(skills, "drafts"), { recursive: true });
   const draft = path.join(skills, "drafts", "SKILL.md");
   yield* fs.writeFileString(draft, skill);
@@ -290,6 +291,8 @@ it.effect("reads skill text only from Markdown outside credential and server sta
         }),
       );
       expect(JSON.stringify(exit)).toContain('"refused"');
+      // Nor offer that repository for a commit.
+      expect(overview.repos.map((entry) => entry.root)).not.toContain(`${root}/elsewhere`);
       expect(overview.skills.find((skill) => skill.name === "drafts")?.editable).toBe(true);
       expect(repo).toBeTruthy();
     }),

@@ -62,17 +62,27 @@ export const pendingCommits = (overview: AgentContextOverview) =>
  */
 export function commitThreadTarget(
   root: string,
-  projects: ReadonlyArray<{ readonly id: string; readonly workspaceRoot: string }>,
+  projects: ReadonlyArray<{
+    readonly id: string;
+    readonly workspaceRoot: string;
+    readonly archivedAt?: string | null | undefined;
+  }>,
   checkout: { readonly projectId: string; readonly worktreePath: string } | undefined,
-): { readonly projectId: string; readonly worktreePath: string | null } | null {
+): {
+  readonly projectId: string;
+  readonly worktreePath: string | null;
+  readonly unarchive: boolean;
+} | null {
   if (
     checkout !== undefined &&
     normalizeProjectPathForComparison(checkout.worktreePath) ===
       normalizeProjectPathForComparison(root)
   )
-    return { projectId: checkout.projectId, worktreePath: checkout.worktreePath };
+    return { projectId: checkout.projectId, worktreePath: checkout.worktreePath, unarchive: false };
   const project = findProjectByPath(projects, root);
-  return project === undefined ? null : { projectId: project.id, worktreePath: null };
+  return project === undefined
+    ? null
+    : { projectId: project.id, worktreePath: null, unarchive: project.archivedAt != null };
 }
 
 export const commitPrompt = (root: string) =>

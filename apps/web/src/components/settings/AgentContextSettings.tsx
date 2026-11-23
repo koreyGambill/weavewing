@@ -911,13 +911,14 @@ function UncommittedRepoRow({
   readonly home: string | null;
 }) {
   const navigate = useNavigate();
-  const projects = useProjects().filter(
-    (project) => project.environmentId === environmentId && !project.archivedAt,
-  );
+  const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const providers = useEnvironmentProviders().get(environmentId) ?? [];
   const settings = useEnvironmentSettings(environmentId);
   const canStart = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const createProject = useOrchestrationCommand(projectEnvironment.create, {
+    reportFailure: false,
+  });
+  const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     reportFailure: false,
   });
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
@@ -942,6 +943,17 @@ function UncommittedRepoRow({
         ? undefined
         : { projectId: target.projectId, worktreePath: target.worktreePath };
     let found = commitThreadTarget(repo.root, projects, checkout);
+    if (found?.unarchive) {
+      const restored = await updateProject({
+        environmentId,
+        input: { projectId: ProjectId.make(found.projectId), archived: false },
+      });
+      if (restored._tag === "Failure") {
+        setBusy(false);
+        setFailure(commandError(restored).message);
+        return;
+      }
+    }
     if (found === null) {
       // No project holds this repository yet, so it becomes one, as adding its folder would.
       const projectId = newProjectId();
@@ -959,7 +971,7 @@ function UncommittedRepoRow({
         setFailure(commandError(created).message);
         return;
       }
-      found = { projectId, worktreePath: null };
+      found = { projectId, worktreePath: null, unarchive: false };
     }
     const projectId = ProjectId.make(found.projectId);
     const modelSelection = { instanceId: target.providerInstanceId, model };

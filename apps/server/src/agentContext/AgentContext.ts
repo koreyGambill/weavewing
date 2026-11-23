@@ -296,10 +296,15 @@ const make = Effect.gen(function* () {
 
   const get = Effect.fn("AgentContext.get")(function* (input: AgentContextGetInput) {
     const found = yield* discoverFresh(input);
+    // A link out of the project must not offer that repository for an agent's commit.
     const realPaths = [
       ...new Set([
-        ...found.instructions.map((file) => file.realPath),
-        ...found.skills.skills.map((skill) => skill.realPath),
+        ...found.instructions
+          .filter((file) => file.status === "expected")
+          .map((file) => file.realPath),
+        ...found.skills.skills
+          .filter((skill) => found.readOnly.get(skill.realPath) !== LINKED_OUTSIDE)
+          .map((skill) => skill.realPath),
       ]),
     ];
     const cache = new Map<string, string | null>();

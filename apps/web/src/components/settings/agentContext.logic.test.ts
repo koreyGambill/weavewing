@@ -49,6 +49,7 @@ describe("commitThreadTarget", () => {
   const projects = [
     { id: "app", workspaceRoot: "/code/app" },
     { id: "dotfiles", workspaceRoot: "/home/me/dotfiles/" },
+    { id: "vault", workspaceRoot: "/home/me/vault", archivedAt: "2026-11-01T00:00:00.000Z" },
   ];
 
   it("starts the thread in the checkout, project or new project that holds the repository", () => {
@@ -56,10 +57,18 @@ describe("commitThreadTarget", () => {
     expect(commitThreadTarget("/worktrees/app-1", projects, checkout)).toEqual({
       projectId: "app",
       worktreePath: "/worktrees/app-1",
+      unarchive: false,
     });
     expect(commitThreadTarget("/home/me/dotfiles", projects, checkout)).toEqual({
       projectId: "dotfiles",
       worktreePath: null,
+      unarchive: false,
+    });
+    // The server still holds an archived project's folder, so it comes back instead of a new one.
+    expect(commitThreadTarget("/home/me/vault", projects, undefined)).toEqual({
+      projectId: "vault",
+      worktreePath: null,
+      unarchive: true,
     });
     expect(commitThreadTarget("/code/notes", projects, undefined)).toBeNull();
   });
