@@ -27,7 +27,7 @@ Cases are JSON lines in `cases/`, one file per area. The case schema in `run.ts`
 
 - `kind`: `bad` reproduces a mistake, `guard` protects correct behavior, `control` is ordinary work.
 - `experience`: the real mistake, in a sentence. `source`: where it happened.
-- `setup`: the fake thread, its `world` (repo, branch, files, PRs, pages), `priorTurns`, and `mocks` for tool results. With `world.backgroundTasks`, `t3_background_wait` answers from T3's own handler and ThreadManagementService, so its result and errors are the checkout's; a prior wait with `"result": "default"` gets that result too.
+- `setup`: the fake thread, its `world` (repo, branch, files, PRs, pages), `priorTurns`, and `mocks` for tool results. `threadCwd` sets the thread's folder, such as a parent of the repository, in place of the template's. With `world.backgroundTasks`, `t3_background_wait` answers from T3's own handler and ThreadManagementService, so its result and errors are the checkout's; a prior wait with `"result": "default"` gets that result too.
 - `setup.priorTurns[].toolCalls[].resultFile`: load a repository-relative file as the tool result instead of copying its contents into the case. An empty `prompt` resumes a top-level thread after its last prior tool result without adding a user message. Side-chat and subagent setups require a nonempty prompt.
 - `expect`: the checks, such as `calls`, `sharedArg` (every call of a tool passes one value at an argument path), `callsMustNot`, `maxCalls`, `order`, `shellMust`, `textMust`, `finalTextMust` (the last text, once the turn ended), and `linked`. A call's `args` match partially: `~text` is a case-insensitive substring, a bare `~` any present value, `"<=N"` / `">=N"` bound a number, `null` matches a missing key, and keys may be dotted paths. Device cases also use `device` to check every child brief, forbid raw UI commands, bound failed device actions per user turn, and require artifact paths in completed final answers. Secrets cases use `secret` (see [Secrets cases](#secrets-cases)).
 
@@ -273,27 +273,28 @@ Fidelity limits:
 
 ## File links cases
 
-`cases/file-links.ndjson` checks the file references in an agent's final answer. Chat turns every file-shaped Markdown link and inline code span into a pill, resolves it against the thread's cwd, and opens that path. `expect.fileLinks` replays the final answer through the same shared resolver (`file-link-grading.ts`) and fails on any pill that lands on no `world.files` entry, except a bare basename that the client's on-click lookup finds exactly once. `minWorking` sets how many working pills the answer needs, so an answer that cites no files cannot pass. `absolute` also fails any relative pill, even one that resolves, because the thread's folder may be a parent of the repository or differ from the agent's current directory. Paths outside the thread cwd, `/home` and `/Users` are ignored.
+`cases/file-links.ndjson` checks the file references in an agent's final answer. Chat turns every file-shaped Markdown link and inline code span into a pill, resolves it against the thread's cwd, and opens that path. `expect.fileLinks` parses the final answer with chat's own Markdown pipeline and resolver from `packages/shared` (`file-link-grading.ts`), so links, bare absolute paths and inline code outside links count as chat renders them, and fails on any pill that lands on no `world.files` entry, except a bare basename that the client's on-click lookup finds exactly once. `minWorking` sets how many working pills the answer needs, so an answer that cites no files cannot pass. `absolute` also fails any relative pill, even one that resolves, because the thread's folder may be a parent of the repository or differ from the agent's current directory. `cites` lists files, and optionally a line, that some pill must open. Paths outside the thread cwd, `/home` and `/Users` are ignored.
 
-Three `bad` cases reproduce the most common broken pills from a 2026-11-10 audit of 14,000 pills on three machines: package-relative paths (`cloud/http.ts`), basenames that several packages share (`index.ts:5`), and relative paths into a checkout outside the thread cwd. Three more, from a 2026-11-23 user report, cite files after repository-relative tool output: `git diff --stat`, `grep -rn`, and `grep` run after `cd` into a subfolder. The control asks a general git question that needs no file references.
+Three `bad` cases reproduce the most common broken pills from a 2026-11-10 audit of 14,000 pills on three machines: package-relative paths (`cloud/http.ts`), basenames that several packages share (`index.ts:5`), and relative paths into a checkout outside the thread cwd. Four more, from a 2026-11-23 user report, cite files after repository-relative tool output: `git diff --stat`, `grep -rn`, `grep` run after `cd` into a subfolder, and `grep` run after `cd app` in a thread rooted at the repository's parent (`file-links-parent-thread-root`). The control asks a general git question that needs no file references.
 
 ### Results
 
-Passes per case, main's runtime text → this text ("Write every file path in your reply as an absolute path, in links and inline code alike..."), 6 samples per case through `--transport claude-cli` on 2026-11-23. One or two samples per run errored and are left out. "Absolute" is the share of pills across all eight cases whose path is absolute.
+Passes per case, main's runtime text → this text ("Write every file you cite as an absolute path, in links and inline code alike, even inside the repository..."), 6 samples per case through `--transport claude-cli` on 2026-11-23, graded with this grader. A sample that errored is left out. "Absolute" is the share of pills across the eight cases above the line whose path is absolute.
 
 | Case                          | Haiku 5.5 | Sonnet 5.5 |
 | ----------------------------- | --------- | ---------- |
-| file-links-package-relative   | 6/6 → 4/6 | 5/5 → 4/6  |
-| file-links-ambiguous-basename | 0/6 → 1/5 | 1/6 → 1/6  |
-| file-links-other-checkout     | 0/6 → 1/6 | 4/6 → 6/6  |
+| file-links-package-relative   | 4/6 → 6/6 | 5/6 → 6/6  |
+| file-links-ambiguous-basename | 1/6 → 2/6 | 0/6 → 1/6  |
+| file-links-other-checkout     | 2/6 → 2/6 | 6/6 → 6/6  |
 | file-links-no-files-control   | 6/6 → 6/6 | 6/6 → 6/6  |
-| scratch-file-markdown-link    | 4/5 → 6/6 | 6/6 → 6/6  |
-| file-links-diff-stat          | 5/6 → 6/6 | 4/6 → 6/6  |
-| file-links-grep-results       | 4/6 → 5/6 | 5/6 → 5/6  |
-| file-links-subfolder-cwd      | 6/6 → 4/5 | 4/6 → 5/6  |
-| Absolute                      | 61% → 74% | 82% → 90%  |
+| scratch-file-markdown-link    | 6/6 → 6/6 | 6/6 → 6/6  |
+| file-links-diff-stat          | 6/6 → 6/6 | 6/6 → 6/6  |
+| file-links-grep-results       | 4/6 → 4/6 | 5/6 → 5/6  |
+| file-links-subfolder-cwd      | 6/6 → 4/6 | 5/6 → 6/6  |
+| Absolute                      | 56% → 72% | 83% → 87%  |
+| file-links-parent-thread-root | 0/5 → 1/6 | 5/6 → 4/6  |
 
-The first reference to a file is nearly always an absolute link. Most remaining relative pills are later mentions in inline code, such as a bare `http.ts:5` after an absolute link, or quoted values such as the import `./ws`. Chat still turns those spans into pills. Asking for absolute bare filenames too made Haiku worse (62% absolute). A 6-sample run of the eight cases cost about $0.30 on Haiku and $1.60 on Sonnet, as the CLI reported.
+On the parent-folder case, Haiku's absolute share rose from 17% to 73% and Sonnet's stayed near 90%. "Write every file path in your reply as an absolute path" reached 88% on both models but asked agents to rewrite import specifiers and manifest values too; "Cite files in inline code the same way" stayed near main (59% and 84%). Most remaining relative pills are later mentions in inline code, such as a bare `index.ts:5`, or values quoted from a manifest, such as `src/index.ts`. Chat still turns those spans into pills. A 6-sample run of the nine cases cost about $0.35 on Haiku and $1.80 on Sonnet, as the CLI reported.
 
 ## Where T3's text lives
 
