@@ -208,18 +208,22 @@ const PriorToolCall = Schema.Struct({
 
 /**
  * One expected call. `args` match partially: `~text` is a case-insensitive substring,
- * `"<=N"` / `">=N"` bound a number, `null` matches a missing key, and keys may be dotted paths.
+ * `re:pattern` a case-insensitive regex, `"<=N"` / `">=N"` bound a number, `null` matches a
+ * missing key, and keys may be dotted paths. `succeeded` requires a call that did not fail.
  */
 const McpToolUseCall = Schema.Struct({
   tool: Schema.String,
   args: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  succeeded: Schema.optional(Schema.Boolean),
 });
 type McpToolUseCall = typeof McpToolUseCall.Type;
 
 /** Grading rules. Tool names are bare: `delegate_task`, `Bash`, `Agent`. */
 const McpToolUseExpect = Schema.Struct({
-  /** Each entry needs one matching call. */
-  calls: Schema.optional(Schema.Array(McpToolUseCall)),
+  /** Each entry needs one matching call. An entry that is a list needs a call matching any item. */
+  calls: Schema.optional(
+    Schema.Array(Schema.Union([McpToolUseCall, Schema.Array(McpToolUseCall)])),
+  ),
   /** Each entry matches a different call, and no call matches two entries; tool names are exact. */
   distinctCalls: Schema.optional(Schema.Array(McpToolUseCall)),
   /** Every call of `tool` passes the same present value at the dotted path `arg`. */
@@ -1901,6 +1905,9 @@ const matches = (expected: unknown, actual: unknown): boolean => {
     return typeof actual === "number" && (bound[1] === "<=" ? actual <= limit : actual >= limit);
   }
   if (expected === "~") return actual !== undefined && actual !== null;
+  if (typeof expected === "string" && expected.startsWith("re:")) {
+    return actual !== undefined && new RegExp(expected.slice(3), "i").test(valueText(actual));
+  }
   if (typeof expected === "string" && expected.startsWith("~")) {
     return valueText(actual).toLowerCase().includes(expected.slice(1).toLowerCase());
   }
@@ -2019,10 +2026,22 @@ export const gradeSample = (
   // `tool` may list alternatives, as in "link_pull_request|watch_pull_request"; counts add up.
   const count = (tool: string) =>
     calls.filter((call) => tool.split("|").includes(call.tool)).length;
-  const found = ({ tool, args = {} }: McpToolUseCall, among = calls) =>
-    among.some((call) => tool.split("|").includes(call.tool) && matches(args, call.input));
-  const label = ({ tool, args }: McpToolUseCall) => (args ? `${tool} ${valueText(args)}` : tool);
-  for (const call of expect.calls ?? []) add(`calls ${label(call)}`, found(call));
+  const found = ({ tool, args = {}, succeeded }: McpToolUseCall, among = calls) =>
+    among.some(
+      (call) =>
+        tool.split("|").includes(call.tool) &&
+        matches(args, call.input) &&
+        !(succeeded === true && call.failed === true),
+    );
+  const label = ({ tool, args, succeeded }: McpToolUseCall) =>
+    `${args ? `${tool} ${valueText(args)}` : tool}${succeeded === true ? " succeeded" : ""}`;
+  for (const entry of expect.calls ?? []) {
+    const options = Array.isArray(entry) ? entry : [entry];
+    add(
+      `calls ${options.map(label).join(" or ")}`,
+      options.some((call) => found(call)),
+    );
+  }
   if (expect.distinctCalls !== undefined) {
     const expected = expect.distinctCalls.map(({ tool, args }) => ({ tool, input: args ?? {} }));
     add(
@@ -2053,8 +2072,8 @@ export const gradeSample = (
   for (const call of expect.callsMustNot ?? [])
     add(`callsMustNot ${label(call)}`, !found(call, attempted));
   // A page check must not pass because the grader never saw the file a path call shows.
-  const pageTools = [...(expect.calls ?? []), ...(expect.callsMustNot ?? [])].flatMap((call) =>
-    call.args?.page === undefined ? [] : call.tool.split("|"),
+  const pageTools = [...(expect.calls ?? []).flat(), ...(expect.callsMustNot ?? [])].flatMap(
+    (call) => (call.args?.page === undefined ? [] : call.tool.split("|")),
   );
   for (const call of calls)
     if (

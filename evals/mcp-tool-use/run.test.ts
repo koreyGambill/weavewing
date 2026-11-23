@@ -250,6 +250,45 @@ it.each([
   assert.equal(failed({ shellMustNot, shellMust }, run).length > 0, fails);
 });
 
+it("matches regex values, successful calls and lists of alternative calls", () => {
+  const edit = (input: object, failed = false) => ({
+    step: 0,
+    tool: "Edit",
+    input,
+    ...(failed ? { failed: true } : {}),
+  });
+  const run = (...calls: ReturnType<typeof edit>[]): SampleRun => ({
+    calls,
+    text: "",
+    stopReason: "end_turn",
+  });
+  const changed = {
+    calls: [
+      [
+        { tool: "Edit", args: { file_path: "~orders.ts" }, succeeded: true },
+        { tool: "Bash", args: { command: "~getJson" }, succeeded: true },
+      ],
+    ],
+  };
+  assert.deepEqual(failed(changed, run(edit({ file_path: "/home/user/app/src/orders.ts" }))), []);
+  assert.lengthOf(
+    failed(changed, run(edit({ file_path: "/home/user/app/src/orders.ts" }, true))),
+    1,
+  );
+  assert.deepEqual(
+    failed(changed, {
+      ...run(),
+      calls: [
+        { step: 0, tool: "Bash", input: { command: "sed -i s/fetchJson/getJson/ src/orders.ts" } },
+      ],
+    }),
+    [],
+  );
+  const decided = { calls: [{ tool: "Edit", args: { note: "re:exponential[\\s\\S]*2 ?s" } }] };
+  assert.deepEqual(failed(decided, run(edit({ note: "Exponential backoff, capped at 2s" }))), []);
+  assert.lengthOf(failed(decided, run(edit({ note: "Exponential backoff" }))), 1);
+});
+
 it("accepts any tool listed as an alternative", () => {
   const expect = { calls: [{ tool: "link_pull_request|watch_pull_request" }] };
   const run = (tool: string): SampleRun => ({
