@@ -17,7 +17,7 @@ export const layer = McpToolAccess.toLayer(ToolSearchToolkit, {
         tools: yield* exposure.search(
           thread.providerSessionId,
           query,
-          (tool) => capabilities.has("questions") || !QUESTION_TOOL_NAMES.has(tool),
+          capabilities.has("questions") ? new Set() : QUESTION_TOOL_NAMES,
         ),
       };
     }),
