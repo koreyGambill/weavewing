@@ -581,12 +581,15 @@ export const layerWithOptions = (
                 >(["orchestration", "worktree", "pull-requests"]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
-                const subagent = yield* projectionStore.getThread(threadId).pipe(
+                const lineage = yield* projectionStore.getThread(threadId).pipe(
                   Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
-                  Effect.orElseSucceed(() => false),
+                  Effect.option,
                 );
-                // A delegated child reports to its parent instead of asking the user.
-                const questionTools = !subagent && (yield* agentQuestionsEnabled);
+                const subagent = Option.getOrElse(lineage, () => false);
+                // A delegated child reports to its parent instead of asking the user, so a
+                // thread whose lineage cannot be read gets no question tools either.
+                const questionTools =
+                  Option.isSome(lineage) && !lineage.value && (yield* agentQuestionsEnabled);
                 if (questionTools) capabilities.add("questions");
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {

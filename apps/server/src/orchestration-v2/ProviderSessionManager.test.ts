@@ -5738,12 +5738,14 @@ it.effect.each([
   { name: "a thread while the setting is on", enabled: true, child: false, granted: true },
   { name: "a thread while the setting is off", enabled: false, child: false, granted: false },
   { name: "a delegated child", enabled: true, child: true, granted: false },
-] as const)("ProviderSessionManagerV2 grants question tools to $name only when on", (input) =>
+  { name: "a thread whose lineage cannot be read", enabled: true, child: false, granted: false },
+] as const)("ProviderSessionManagerV2 decides question tools for $name", (input) =>
   Effect.gen(function* () {
     const config = yield* runBrowserAccessScenario({
       enableAgentBrowserAccess: true,
       projectOverride: true,
       agentQuestionsEnabled: input.enabled,
+      ...(input.name === "a thread whose lineage cannot be read" ? { createThread: false } : {}),
       ...(input.child
         ? { delegatedBy: ThreadId.make("thread-provider-session-manager-parent") }
         : {}),
