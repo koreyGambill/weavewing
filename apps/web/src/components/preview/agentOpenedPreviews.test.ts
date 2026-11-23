@@ -17,7 +17,8 @@ import {
   reconcilePreviewServerSessions,
   resetPreviewStateForTests,
 } from "../../previewStateStore";
-import { useRightPanelStore } from "../../rightPanelStore";
+import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
+import { getTileGroups } from "../../threadTileLayout";
 import {
   applyDeviceSnapshot,
   floatDeviceSurface,
@@ -205,12 +206,29 @@ describe("revealServerTabs", () => {
     return source?.kind === "browser" ? source.tabId : null;
   };
 
-  it("floats revealed tabs, and only forced ones when floating previews are off", () => {
+  it("opens an explicitly revealed tab in a new right-hand tile", () => {
     setup();
-    revealServerTabs(ref, [tab("tab_plain")], { autoShowFloatingPreview: false });
+    revealServerTabs(ref, [tab("tab_plain")], {
+      autoShowFloatingPreview: false,
+      linkTileDestination: "tile-2",
+    });
     expect(floatingTabId()).toBeNull();
-    revealServerTabs(ref, [tab("tab_forced", true)], { autoShowFloatingPreview: false });
-    expect(floatingTabId()).toBe("tab_forced");
+    revealServerTabs(ref, [tab("tab_forced", true)], {
+      autoShowFloatingPreview: false,
+      linkTileDestination: "tile-2",
+    });
+    expect(floatingTabId()).toBeNull();
+    const layout = selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, ref);
+    expect(layout.root).toMatchObject({ kind: "split", axis: "horizontal" });
+    expect(getTileGroups(layout)[1]?.activeTabId).toBe("browser:tab_forced");
+    revealServerTabs(ref, [tab("tab_next", true)], {
+      autoShowFloatingPreview: false,
+      linkTileDestination: "tile-2",
+    });
+    expect(
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, ref))[1]
+        ?.tabs,
+    ).toEqual(["browser:tab_forced", "browser:tab_next"]);
   });
 
   it("focuses a tab already in the panel instead of floating it when forced", () => {
@@ -219,12 +237,18 @@ describe("revealServerTabs", () => {
     const browserSurfaceId = useRightPanelStore.getState().byThreadKey[threadKey]?.activeSurfaceId;
     useRightPanelStore.getState().open(ref, "diff");
 
-    revealServerTabs(ref, [tab("tab_a", false)], { autoShowFloatingPreview: true });
+    revealServerTabs(ref, [tab("tab_a", false)], {
+      autoShowFloatingPreview: true,
+      linkTileDestination: "tile-2",
+    });
     expect(useRightPanelStore.getState().byThreadKey[threadKey]?.activeSurfaceId).not.toBe(
       browserSurfaceId,
     );
     const userActionRevision = useRightPanelStore.getState().getUserActionRevision(ref);
-    revealServerTabs(ref, [tab("tab_a", true)], { autoShowFloatingPreview: true });
+    revealServerTabs(ref, [tab("tab_a", true)], {
+      autoShowFloatingPreview: true,
+      linkTileDestination: "tile-2",
+    });
     expect(useRightPanelStore.getState().byThreadKey[threadKey]?.activeSurfaceId).toBe(
       browserSurfaceId,
     );

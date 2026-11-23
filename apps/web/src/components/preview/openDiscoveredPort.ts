@@ -1,3 +1,4 @@
+import { getClientSettings } from "~/hooks/useSettings";
 import type { DiscoveredLocalServer, ScopedThreadRef } from "@t3tools/contracts";
 import {
   mapAtomCommandResult,
@@ -27,6 +28,8 @@ export async function openDiscoveredPort<E>(input: {
   });
   return mapAtomCommandResult(result, (snapshot) => {
     recordVisitForThread(input.threadRef, input.port.url);
-    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
+    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId, {
+      destination: getClientSettings().linkTileDestination,
+    });
   });
 }

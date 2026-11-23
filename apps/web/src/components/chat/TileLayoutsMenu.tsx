@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { LayoutTemplate } from "lucide-react";
 import { useContext, useId, useState, type ReactNode } from "react";
 
+import { updateClientSettings, useClientSettings } from "../../hooks/useSettings";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { BackgroundThreadContext } from "./backgroundThread";
 import { Button } from "../ui/button";
@@ -71,6 +72,9 @@ export function TileLayoutsMenu(props: {
   const navigate = useNavigate();
   const background = useContext(BackgroundThreadContext);
   const hasRoom = useMediaQuery("(min-width: 480px)");
+  const linkTarget = useClientSettings((settings) =>
+    settings.browserLinkTarget === "system" ? "system" : settings.linkTileDestination,
+  );
   const { api } = props;
   const globalName = api.layouts.find((layout) => layout.id === api.globalDefaultId)?.name;
   if (background || !hasRoom) return null;
@@ -147,6 +151,29 @@ export function TileLayoutsMenu(props: {
           </MenuSubPopup>
         </MenuSub>
         <MenuSeparator />
+        <MenuSub>
+          <MenuSubTrigger>Open links and previews in</MenuSubTrigger>
+          <MenuSubPopup>
+            <MenuRadioGroup
+              value={linkTarget}
+              onValueChange={(value) => {
+                if (value === "system") {
+                  void updateClientSettings({ browserLinkTarget: "system" });
+                } else if (value === "focused" || value === "tile-1" || value === "tile-2") {
+                  void updateClientSettings({
+                    linkTileDestination: value,
+                    browserLinkTarget: "app",
+                  });
+                }
+              }}
+            >
+              <Radio value="focused">Focused tile</Radio>
+              <Radio value="system">System browser for web links</Radio>
+              <Radio value="tile-1">Tile 1</Radio>
+              <Radio value="tile-2">Tile 2</Radio>
+            </MenuRadioGroup>
+          </MenuSubPopup>
+        </MenuSub>
         <MenuItem onClick={() => void navigate(TILE_LAYOUTS_SETTINGS_TARGET)}>
           Manage layouts…
         </MenuItem>

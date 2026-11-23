@@ -1,3 +1,4 @@
+import { getClientSettings } from "~/hooks/useSettings";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
@@ -84,5 +85,7 @@ export async function openTerminalLinkInPreview<E>(
   }
   recordVisitForThread(input.threadRef, input.url);
   applyPreviewServerSnapshot(input.threadRef, result.value);
-  useRightPanelStore.getState().openBrowser(input.threadRef, result.value.tabId);
+  useRightPanelStore.getState().openBrowser(input.threadRef, result.value.tabId, {
+    destination: getClientSettings().linkTileDestination,
+  });
 }

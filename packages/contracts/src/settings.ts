@@ -389,7 +389,9 @@ export {
 } from "./preview.ts";
 export const BrowserLinkTarget = Schema.Literals(["system", "app"]);
 export type BrowserLinkTarget = typeof BrowserLinkTarget.Type;
-export const DEFAULT_BROWSER_LINK_TARGET: BrowserLinkTarget = "system";
+export const DEFAULT_BROWSER_LINK_TARGET: BrowserLinkTarget = "app";
+export const LinkTileDestination = Schema.Literals(["focused", "tile-1", "tile-2"]);
+export type LinkTileDestination = typeof LinkTileDestination.Type;
 /**
  * What the address bar searches with when the input is not an address.
  * "custom" uses `browserCustomSearchUrl`, a template with `%s` for the query.
@@ -518,6 +520,10 @@ export const ClientSettingsSchema = Schema.Struct({
 
   browserLinkTarget: BrowserLinkTarget.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_LINK_TARGET)),
+  ),
+
+  linkTileDestination: LinkTileDestination.pipe(
+    Schema.withDecodingDefault(Effect.succeed("tile-2")),
   ),
 
   browserSearchEngine: BrowserSearchEngine.pipe(
@@ -2201,6 +2207,7 @@ export const ClientSettingsPatch = Schema.Struct({
   browserRecordingShowKeyPresses: Schema.optionalKey(Schema.Boolean),
   browserRecordingShowMousePresses: Schema.optionalKey(Schema.Boolean),
   browserLinkTarget: Schema.optionalKey(BrowserLinkTarget),
+  linkTileDestination: Schema.optionalKey(LinkTileDestination),
   browserSearchEngine: Schema.optionalKey(BrowserSearchEngine),
   browserCustomSearchUrl: Schema.optionalKey(BrowserCustomSearchUrl),
   browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),

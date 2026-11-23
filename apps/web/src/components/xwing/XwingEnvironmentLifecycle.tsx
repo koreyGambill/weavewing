@@ -1,3 +1,4 @@
+import { getClientSettings } from "~/hooks/useSettings";
 import {
   AuthOrchestrationReadScope,
   AuthTerminalReadScope,
@@ -376,7 +377,9 @@ function RunRow({
   const open = async (url: string) => {
     const result = await openPreviewSession({ openPreview, threadRef, url });
     if (result._tag === "Success") {
-      useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
+      useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId, {
+        destination: getClientSettings().linkTileDestination,
+      });
     }
   };
   return (

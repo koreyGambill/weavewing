@@ -44,6 +44,26 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
+  it.each([
+    { destination: "focused", target: 0 },
+    { destination: "tile-1", target: 0 },
+    { destination: "tile-2", target: 1 },
+  ] as const)("opens browser and file links in $destination", ({ destination, target }) => {
+    const store = useRightPanelStore.getState();
+    const groups = () =>
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA));
+    store.open(refA, "notes");
+    const firstId = groups()[0]!.id;
+    store.applyTileAction(refA, { type: "focus", groupId: firstId });
+    store.openBrowser(refA, "linked-page", { destination });
+    expect(groups()[target]?.activeTabId).toBe("browser:linked-page");
+    store.applyTileAction(refA, { type: "focus", groupId: firstId });
+    store.openFile(refA, "linked.txt", undefined, destination);
+    expect(groups()[target]?.activeTabId).toBe("file:linked.txt");
+    expect(groups()[1]?.tabs).toContain("notes");
+    expect(groups()).toHaveLength(2);
+  });
+
   it("opens related threads beside the main chat and keeps them in the current browser session", async () => {
     const store = useRightPanelStore.getState();
     const agentRef = scopeThreadRef("env-2" as EnvironmentId, refB.threadId);

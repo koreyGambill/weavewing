@@ -6,6 +6,7 @@ import {
 import type {
   DeviceServiceState,
   EnvironmentId,
+  LinkTileDestination,
   PreviewSessionSnapshot,
   ScopedThreadRef,
   ThreadId,
@@ -23,32 +24,37 @@ import {
   previewThreadRefsAtom,
   type ThreadPreviewState,
 } from "../../previewStateStore";
-import { useRightPanelStore } from "../../rightPanelStore";
+import { rightPanelHostRef, useRightPanelStore } from "../../rightPanelStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { deviceEnvironment } from "../../state/device";
 import { readEnvironmentSupportsServerBrowser } from "../../state/entities";
 import { environmentSummaries } from "../../state/presentation";
 
-/**
- * Shows browsers an agent or another client revealed for a thread: floating
- * over chat, or focusing an existing panel tab when the reveal is forced.
- */
+/** Explicit agent reveals use the workspace destination without stealing keyboard focus. */
 export function revealServerTabs(
   threadRef: ScopedThreadRef,
   sessions: ReadonlyArray<PreviewSessionSnapshot>,
-  options: { readonly autoShowFloatingPreview: boolean },
+  options: {
+    readonly autoShowFloatingPreview: boolean;
+    readonly linkTileDestination: LinkTileDestination;
+  },
 ): void {
   if (!readEnvironmentSupportsServerBrowser(threadRef.environmentId)) return;
   for (const session of sessions) {
     const force = session.revealRequest?.force === true;
     if (!options.autoShowFloatingPreview && !force) continue;
-    const surface = useRightPanelStore
-      .getState()
-      .byThreadKey[scopedThreadKey(threadRef)]?.surfaces.find(
-        (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
-      );
+    const panels = useRightPanelStore.getState();
+    const threadKey = scopedThreadKey(threadRef);
+    const surface = panels.byThreadKey[threadKey]?.surfaces.find(
+      (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
+    );
     if (surface && force) {
-      useRightPanelStore.getState().revealSurface(threadRef, surface.id);
+      panels.revealSurface(threadRef, surface.id);
+    } else if (force && scopedThreadKey(rightPanelHostRef(threadRef)) === threadKey) {
+      panels.openBrowser(threadRef, session.tabId, {
+        destination: options.linkTileDestination,
+        automatic: true,
+      });
     } else if (!surface) {
       usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(session.tabId));
     }
@@ -106,8 +112,10 @@ function followThread(threadKey: string, threadRef: ScopedThreadRef): () => void
     // Reveals run first so a revealed tab floats before it gains a panel tab.
     const revealed = freshlyRevealedServerTabs(before, next);
     if (revealed.length > 0) {
+      const settings = getClientSettings();
       revealServerTabs(threadRef, revealed, {
-        autoShowFloatingPreview: getClientSettings().browserAutoShowFloatingPreview,
+        autoShowFloatingPreview: settings.browserAutoShowFloatingPreview,
+        linkTileDestination: settings.linkTileDestination,
       });
     }
     if (before.sessions !== next.sessions || before.listLoaded !== next.listLoaded) {

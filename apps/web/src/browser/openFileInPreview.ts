@@ -1,3 +1,4 @@
+import { getClientSettings } from "~/hooks/useSettings";
 import type {
   AssetCreateUrlResult,
   AssetResource,
@@ -105,7 +106,9 @@ export async function openUrlInPreview<E>(input: {
       return;
     }
     applyPreviewServerSnapshot(threadRef, snapshot);
-    useRightPanelStore.getState().openBrowser(threadRef, snapshot.tabId);
+    useRightPanelStore.getState().openBrowser(threadRef, snapshot.tabId, {
+      destination: getClientSettings().linkTileDestination,
+    });
   });
 }
 

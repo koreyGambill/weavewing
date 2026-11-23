@@ -7,6 +7,7 @@ import {
   EnvironmentId,
   RunId,
   ThreadId,
+  type LinkTileDestination,
   type SavedTileNode,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -192,8 +193,17 @@ interface RightPanelStoreState {
     surfaceId?: string,
   ) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
-  openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
-  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  openBrowser: (
+    ref: ScopedThreadRef,
+    tabId: string | null,
+    options?: { destination: LinkTileDestination; automatic?: boolean },
+  ) => void;
+  openFile: (
+    ref: ScopedThreadRef,
+    relativePath: string,
+    line?: number,
+    destination?: LinkTileDestination,
+  ) => void;
   /** Re-roots one Files tab; null returns it to the workspace root. */
   setFilesRoot: (ref: ScopedThreadRef, surfaceId: string, root: string | null) => void;
   /** Opens a new Files tab beside the active one; null starts it at the workspace root. */
@@ -206,7 +216,11 @@ interface RightPanelStoreState {
     folderTrail: string,
     keepSource?: boolean,
   ) => void;
-  openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
+  openAttachment: (
+    ref: ScopedThreadRef,
+    attachment: ChatFileAttachment,
+    destination?: LinkTileDestination,
+  ) => void;
   addPullRequest: (ref: ScopedThreadRef, target: Parameters<typeof pullRequestSurface>[0]) => void;
   openPullRequest: (
     ref: ScopedThreadRef,
@@ -400,6 +414,58 @@ const upsertSurface = (
   };
   return activate ? activated(next, surface.id, fillChooser) : next;
 };
+
+function placeLinkedSurface(
+  before: ThreadRightPanelState,
+  after: ThreadRightPanelState,
+  surfaceId: string,
+  destination: LinkTileDestination | undefined,
+): ThreadRightPanelState {
+  const layout = after.tileLayout;
+  if (
+    !layout ||
+    !destination ||
+    before.surfaces.some((surface) => surface.kind !== "preview" && surface.id === surfaceId)
+  ) {
+    return after;
+  }
+
+  const groups = getTileGroups(layout);
+  const target =
+    destination === "focused"
+      ? (groups.find(
+          (group) => group.id === (before.tileLayout?.focusedGroupId ?? groups[0]?.id),
+        ) ?? groups[0])
+      : groups[destination === "tile-1" ? 0 : 1];
+  if (target) {
+    return target.tabs.includes(surfaceId)
+      ? after
+      : {
+          ...after,
+          tileLayout: reduceTileAction(layout, {
+            type: "move",
+            tabId: surfaceId,
+            targetGroupId: target.id,
+          }),
+        };
+  }
+
+  const first = groups[0]!;
+  const splitId = randomUUID();
+  const split = reduceTileAction(layout, {
+    type: "split",
+    tabId: surfaceId,
+    targetGroupId: first.id,
+    groupId: randomUUID(),
+    splitId,
+    axis: "horizontal",
+    side: "after",
+  });
+  return {
+    ...after,
+    tileLayout: reduceTileAction(split, { type: "resize", splitId, ratio: 0.62 }),
+  };
+}
 
 const updateThreadStateMap = (
   byThreadKey: Record<string, ThreadRightPanelState>,
@@ -1026,16 +1092,25 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           })),
         ),
-      openBrowser: (ref, tabId) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => {
+      openBrowser: (ref, tabId, options) =>
+        set((state) => {
+          const update = options?.automatic ? automaticUpdate : userAction;
+          const host = rightPanelHostRef(ref);
+          return update(state, scopedThreadKey(host), (current) => {
             const surface = browserSurface(tabId);
             const withoutPlaceholder = tabId
               ? current.surfaces.filter((entry) => entry.id !== "browser:new")
               : current.surfaces;
-            return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
-          }),
-        ),
+            const fillChooser = !options;
+            const next = upsertSurface(
+              { ...current, surfaces: withoutPlaceholder },
+              surface,
+              true,
+              fillChooser,
+            );
+            return placeLinkedSurface(current, next, surface.id, options?.destination);
+          });
+        }),
       addPullRequest: (ref, target) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
@@ -1092,11 +1167,17 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           }));
         }),
-      openFile: (ref, requestedPath, line) =>
+      openFile: (ref, requestedPath, line, destination) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             if (requestedPath === ".") {
-              return upsertSurface(current, singletonSurface("files"));
+              const surface = singletonSurface("files");
+              return placeLinkedSurface(
+                current,
+                upsertSurface(current, surface, true, !destination),
+                surface.id,
+                destination,
+              );
             }
             // Workspace entry paths use '/', including on Windows.
             const relativePath = /^[A-Za-z]:\/+$/.test(requestedPath)
@@ -1115,7 +1196,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               normalizeRevealLine(line),
               (existing?.revealRequestId ?? 0) + 1,
             );
-            return activated(
+            const next = activated(
               {
                 ...current,
                 surfaces: existing
@@ -1125,7 +1206,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                   : [...withoutStandaloneExplorer, surface],
               },
               surface.id,
+              !destination,
             );
+            return placeLinkedSurface(current, next, surface.id, destination);
           }),
         ),
       navigateFolder: (ref, surfaceId, relativePath, folderTrail, keepSource = false) =>
@@ -1187,16 +1270,20 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             } as RightPanelSurface),
           ),
         ),
-      openAttachment: (ref, attachment) =>
+      openAttachment: (ref, attachment, destination) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const withoutStandaloneExplorer = current.surfaces.filter(
               (surface) => !isStandaloneExplorer(surface),
             );
-            return upsertSurface(
+            const surface = attachmentSurface(attachment);
+            const next = upsertSurface(
               { ...current, surfaces: withoutStandaloneExplorer },
-              attachmentSurface(attachment),
+              surface,
+              true,
+              !destination,
             );
+            return placeLinkedSurface(current, next, surface.id, destination);
           }),
         ),
       openTerminal: (ref, terminalId, launchContext) =>

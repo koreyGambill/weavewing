@@ -138,7 +138,7 @@ import { openInEditorMenuLabel } from "../editorLabels";
 import { resolveDiffThemeName } from "../lib/diffRendering";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { useRenderedAppearance } from "../hooks/useTheme";
-import { useClientSettings } from "../hooks/useSettings";
+import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
 import {
   isLocalEditorFileHref,
@@ -608,7 +608,10 @@ function useChatMarkdownState({
         environmentId === null ? undefined : readPreparedConnection(environmentId)?.httpBaseUrl,
       createAssetUrl,
       onOpenFile: threadRef
-        ? (path) => useRightPanelStore.getState().openFile(threadRef, path)
+        ? (path) =>
+            useRightPanelStore
+              .getState()
+              .openFile(threadRef, path, undefined, getClientSettings().linkTileDestination)
         : undefined,
     }).then(
       (preview) => {
@@ -870,7 +873,9 @@ function useChatMarkdownState({
     // Every open supersedes pending lookups, including synchronous opens.
     const isLatestLookup = claimWorkspaceBasenameLookup();
     const openAt = (path: string) =>
-      useRightPanelStore.getState().openFile(threadRef, path, fileLinkMeta.line);
+      useRightPanelStore
+        .getState()
+        .openFile(threadRef, path, fileLinkMeta.line, getClientSettings().linkTileDestination);
     if (
       fileLinkMeta.workspaceLookupPath === null ||
       !cwd ||
@@ -1549,7 +1554,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
                     threadId: threadRef.threadId,
                     path: filePath,
                   },
-                  onOpen: () => useRightPanelStore.getState().openFile(threadRef, filePath),
+                  onOpen: () =>
+                    useRightPanelStore
+                      .getState()
+                      .openFile(
+                        threadRef,
+                        filePath,
+                        undefined,
+                        getClientSettings().linkTileDestination,
+                      ),
                 }
               : imageSource._tag === "Direct"
                 ? { src: resolveProtocolRelativeMediaUrl(imageSource.uri) }

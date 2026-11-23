@@ -1,3 +1,4 @@
+import { getClientSettings } from "~/hooks/useSettings";
 import { WorkspaceTitlebar } from "./WorkspaceTitlebar";
 import * as DateTime from "effect/DateTime";
 import { ContextArchiveRow } from "./chat/ContextArchiveRow";
@@ -1609,7 +1610,9 @@ export default function ChatView(props: ChatViewProps) {
   const downloadFileAttachmentStable = useStableCallback(downloadFileAttachment);
   const openFileAttachment = (attachment: ChatFileAttachment) => {
     if (activeThreadRef) {
-      useRightPanelStore.getState().openAttachment(activeThreadRef, attachment);
+      useRightPanelStore
+        .getState()
+        .openAttachment(activeThreadRef, attachment, getClientSettings().linkTileDestination);
       return;
     }
   };
