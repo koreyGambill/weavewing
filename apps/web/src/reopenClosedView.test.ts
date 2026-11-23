@@ -45,15 +45,17 @@ beforeEach(() => {
 
 describe("reopenClosedView", () => {
   it.each([
-    { relativePath: "src/app.ts", line: 18, folderTrail: undefined },
-    { relativePath: "apps", line: null, folderTrail: "apps/web/src" },
-    { relativePath: "", line: null, folderTrail: "apps/web/src" },
+    { relativePath: "src/app.ts", line: 18, endLine: undefined, folderTrail: undefined },
+    { relativePath: "src/app.ts", line: 18, endLine: 24, folderTrail: undefined },
+    { relativePath: "apps", line: null, endLine: undefined, folderTrail: "apps/web/src" },
+    { relativePath: "", line: null, endLine: undefined, folderTrail: "apps/web/src" },
   ])(
     "restores the captured file or folder tab at '$relativePath'",
-    async ({ relativePath, line, folderTrail }) => {
+    async ({ relativePath, line, endLine, folderTrail }) => {
       const panels = useRightPanelStore.getState();
-      if (folderTrail === undefined) panels.openFile(threadRef, relativePath, line ?? undefined);
-      else {
+      if (folderTrail === undefined) {
+        panels.openFile(threadRef, relativePath, { line: line ?? undefined, endLine });
+      } else {
         panels.openFile(threadRef, folderTrail);
         panels.navigateFolder(threadRef, `file:${folderTrail}`, relativePath, folderTrail);
       }
@@ -65,6 +67,7 @@ describe("reopenClosedView", () => {
               id: `file:${relativePath}`,
               relativePath,
               revealLine: line,
+              ...(endLine === undefined ? {} : { revealEndLine: endLine }),
               revealRequestId: 1,
               ...(folderTrail === undefined ? {} : { folderTrail }),
             };

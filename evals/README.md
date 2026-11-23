@@ -13,6 +13,7 @@ Write or run an eval when a change affects what a model sees or does: agent inst
 | [test-signal](test-signal/)             | Whether a cheap model running the test-signal check flags low-signal tests.                                            |
 | [monitoring-review](monitoring-review/) | Whether a turn-end standards review files new incidents without refiling reported ones.                                |
 | [message-summaries](message-summaries/) | Whether incoming-card summaries are one plain line that names the subject and ignores instructions inside the message. |
+| [context-line-refs](context-line-refs/) | Whether agents act on the commented line when a file or diff comment reaches them as context.                          |
 
 ## Run an eval
 

@@ -23,6 +23,14 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     color: var(--code-foreground, var(--foreground)) !important;
   }
 
+  /* Rows inherit --file-link-reveal-strength from the container, which playFileLinkFlash
+     animates. It is registered in index.css; a registration in this shadow root is ignored. */
+  @media (prefers-reduced-motion: reduce) {
+    [${FILE_LINK_REVEAL_ATTRIBUTE}] {
+      --file-link-reveal-strength: 1;
+    }
+  }
+
   /* Tint through --diffs-line-bg, not background-color. The editor paints row
      tints on a layer below its text selection; a background on the row itself
      covers the selection and makes selected text on this line invisible. */
@@ -30,12 +38,12 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     --diffs-line-bg: light-dark(
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 82%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 18% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-override, var(--diffs-selection-base))
       ),
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 75%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 25% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-override, var(--diffs-selection-base))
       )
     ) !important;
@@ -45,16 +53,15 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     background-color: light-dark(
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 75%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 25% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-number-override, var(--diffs-selection-base))
       ),
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 60%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 40% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-number-override, var(--diffs-selection-base))
       )
     ) !important;
-    color: var(--diffs-selection-number-fg) !important;
   }
 `;
 

@@ -1,3 +1,7 @@
+import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
+import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
+import { isWindowsDrivePathHref } from "@t3tools/shared/markdownLinks";
+import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import type { Element, Nodes, Root } from "hast";
 import { toJsxRuntime, type Components } from "hast-util-to-jsx-runtime";
 import { urlAttributes } from "html-url-attributes";
@@ -7,10 +11,23 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { type PluggableList, unified } from "unified";
 import { VFile } from "vfile";
+import { defaultUrlTransform } from "react-markdown";
+
+import { isLocalEditorFileHref, rewriteMarkdownFileUriHref } from "../../markdown-links";
 
 import { remarkParseWithoutUnusedSyntax } from "./markdownSyntaxGates";
 
 export type MarkdownUrlTransform = (url: string, key: string, node: Element) => string;
+
+/** Chat's link policy: keeps app, file and editor links, and empties unsafe ones. */
+export function chatMarkdownUrlTransform(href: string): string {
+  if (parseAssistantCitationHref(href)) return href;
+  if (parseComposerContextHref(href)) return href;
+  if (parseThreadLinkHref(href)) return href;
+  if (isWindowsDrivePathHref(href)) return href;
+  if (isLocalEditorFileHref(href)) return href;
+  return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
+}
 
 interface MarkdownRendererOptions {
   readonly remarkPlugins: PluggableList;

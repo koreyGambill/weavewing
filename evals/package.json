@@ -12,6 +12,7 @@
     "test-signal": "node --env-file-if-exists=../.env test-signal/run.ts",
     "monitoring-review": "node monitoring-review/run.ts",
     "message-summaries": "node --env-file-if-exists=../.env message-summaries/run.ts",
+    "context-line-refs": "node context-line-refs/run.ts",
     "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run --config ../vite.config.ts --dir ."
   },

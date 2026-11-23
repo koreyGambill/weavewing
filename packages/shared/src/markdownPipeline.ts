@@ -870,6 +870,58 @@ export function chatMarkdownImageSources(markdown: string): Array<string> {
   return sources;
 }
 
+const assistantLinkSourceProcessor = unified().use(remarkParse).use(CHAT_MARKDOWN_REMARK_PLUGINS);
+const userLinkSourceProcessor = unified()
+  .use(remarkParse)
+  .use(CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS)
+  .use(CHAT_USER_MARKDOWN_REMARK_PLUGINS);
+
+interface LinkSourceNode {
+  readonly type: string;
+  readonly url?: string;
+  readonly value?: string;
+  readonly identifier?: string;
+  readonly children?: ReadonlyArray<LinkSourceNode>;
+}
+
+/**
+ * The link destinations and inline code spans chat markdown renders, from the renderer's own
+ * parse. Code blocks, HTML and unresolved references add none.
+ */
+export function chatMarkdownLinkSources(
+  markdown: string,
+  options: { readonly userMessage?: boolean } = {},
+): { hrefs: Array<string>; inlineCode: Array<string> } {
+  const processor = options.userMessage ? userLinkSourceProcessor : assistantLinkSourceProcessor;
+  const tree = processor.runSync(processor.parse(markdown)) as LinkSourceNode;
+  const definitions = new Map<string, string>();
+  const collectDefinitions = (node: LinkSourceNode) => {
+    if (node.type === "definition" && node.identifier && typeof node.url === "string") {
+      if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+    }
+    node.children?.forEach(collectDefinitions);
+  };
+  collectDefinitions(tree);
+  const hrefs: Array<string> = [];
+  const inlineCode: Array<string> = [];
+  const visit = (node: LinkSourceNode, insideLink: boolean) => {
+    const url =
+      node.type === "link"
+        ? node.url
+        : node.type === "linkReference" && node.identifier
+          ? definitions.get(node.identifier)
+          : undefined;
+    if (url) hrefs.push(url);
+    if (node.type === "inlineCode" && !insideLink && node.value?.trim()) {
+      inlineCode.push(node.value.trim());
+    }
+    const childInsideLink = insideLink || node.type === "link" || node.type === "linkReference";
+    node.children?.forEach((child) => visit(child, childInsideLink));
+  };
+  visit(tree, false);
+  return { hrefs, inlineCode };
+}
+
 const linkDestinationProcessor = unified().use(remarkParse).use(remarkKeepWindowsPaths);
 
 // An angle destination cannot hold an unescaped `<` or `>`, or end on a lone backslash.
