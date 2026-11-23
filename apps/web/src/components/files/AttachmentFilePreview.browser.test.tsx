@@ -915,6 +915,39 @@ describe("large text preview recovery", () => {
     await vi.waitFor(() => expectStartVisible(screen.container));
   });
 
+  it("places a revealed line in the last screenful once its wrapped rows load", async () => {
+    const view = (loaded: boolean) => (
+      <div style={{ display: "flex", height: 400, width: 600 }}>
+        <VirtualTablePreview
+          name="log.txt"
+          count={1000}
+          columns={1}
+          source
+          wrap
+          revealLine={999}
+          revealRequestId={1}
+          getRows={(page) =>
+            loaded || page < 30
+              ? Array.from({ length: 32 }, (_, i) => {
+                  const line = page * 32 + i + 1;
+                  return [`line-${line}` + (line === 989 ? " wrapped text".repeat(400) : "")];
+                })
+              : undefined
+          }
+        />
+      </div>
+    );
+    await using screen = await render(view(false));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([999]));
+    await screen.rerender(view(true));
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector("[data-file-link-reveal]")?.textContent).toContain(
+        "line-999",
+      ),
+    );
+    await vi.waitFor(() => expectStartVisible(screen.container));
+  });
+
   it("does not replay a handled reveal when its tile is hidden and shown", async () => {
     await using screen = await render(revealView(500, 1));
     await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([500]));

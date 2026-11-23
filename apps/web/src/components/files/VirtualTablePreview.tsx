@@ -374,21 +374,36 @@ function ScaledRows(
     scale,
     maxFirst,
   ]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Places a revealed row in the native tail once it mounts; those rows have real heights, so row-index scrolling cannot.
+  const atStart = position.top === 0;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Places a revealed row in the native tail; those rows have real heights, so row-index scrolling cannot.
   useLayoutEffect(() => {
     const node = ref.current;
-    const row =
-      tailReveal.current === null
-        ? null
-        : contentRef.current?.querySelector<HTMLElement>(
-            `[data-preview-row="${tailReveal.current}"]`,
-          );
-    if (!node || !row || !nativeTail) return;
+    const content = contentRef.current;
+    const target = tailReveal.current;
+    if (!node || !content || target === null || !nativeTail) return;
+    // Placeholder rows above the target change height when their text arrives, so wait for
+    // every row from the first mounted one through the target, and for the measured layout.
+    for (let index = first; index <= target; index += 1) {
+      if (!props.getRows(Math.floor(index / PREVIEW_PAGE_ROWS))?.[index % PREVIEW_PAGE_ROWS]) {
+        return;
+      }
+    }
+    const row = content.querySelector<HTMLElement>(`[data-preview-row="${target}"]`);
+    const firstRow = content.querySelector<HTMLElement>(`[data-preview-row="${first}"]`);
+    if (
+      !row ||
+      (!atStart &&
+        (layout.height !== content.clientHeight ||
+          layout.offset !==
+            (firstRow
+              ? firstRow.getBoundingClientRect().top - content.getBoundingClientRect().top
+              : 0)))
+    )
+      return;
     tailReveal.current = null;
     node.scrollTop += row.getBoundingClientRect().top - node.getBoundingClientRect().top;
     setTop(node.scrollTop);
   });
-  const atStart = position.top === 0;
   const rowHeight = () =>
     contentRef.current?.querySelector<HTMLElement>(`[data-preview-row="${first}"]`)?.offsetHeight ||
     29;
@@ -398,6 +413,7 @@ function ScaledRows(
     const delta =
       event.deltaY * (event.deltaMode === 1 ? 29 : event.deltaMode === 2 ? node.clientHeight : 1);
     if (!delta) return;
+    tailReveal.current = null;
     event.preventDefault();
     pendingEnd.current = false;
     node.scrollTop += delta * (nativeTail ? 1 : (scale * 29) / rowHeight());
@@ -462,7 +478,11 @@ function ScaledRows(
       ref={ref}
       tabIndex={0}
       className="min-h-0 flex-1 overflow-auto"
+      onPointerDown={() => {
+        tailReveal.current = null;
+      }}
       onKeyDown={(event) => {
+        tailReveal.current = null;
         const node = event.currentTarget;
         const delta =
           event.key === "ArrowDown"
