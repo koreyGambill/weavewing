@@ -887,3 +887,136 @@ it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
       }),
     ).pipe(Effect.provide(testLayer)),
 );
+
+it("lists only the repository files that can be opened", () => {
+  const record = (tag: string, mode: string, path: string) =>
+    `${tag} ${mode} 0123456789abcdef0123456789abcdef01234567 0\t${path}`;
+  const stdout = [
+    record("H", "100644", "README.md"),
+    record("H", "100644", "gone.md"),
+    record("R", "100644", "gone.md"),
+    record("S", "100644", "sparse.md"),
+    record("H", "160000", "vendor-module"),
+    record("H", "100644", ".repos/effect/index.ts"),
+    "? untracked.md",
+    "? nested/",
+    "",
+  ].join("\0");
+  expect(WorkspaceSearchIndex.parseRepositoryFileRecords(stdout, 10)).toEqual({
+    paths: ["README.md", "untracked.md"],
+    truncated: false,
+  });
+  expect(WorkspaceSearchIndex.parseRepositoryFileRecords(stdout, 1)).toEqual({
+    paths: ["README.md"],
+    truncated: true,
+  });
+});
+
+it.effect("skips child folders whose repository lives outside the shared scratch folder", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-escape-" });
+      const cwd = path.join(home, "code");
+      const outside = path.join(home, "outside");
+      const git = (dir: string, ...args: ReadonlyArray<string>) =>
+        vcsProcess.run({ operation: "test.git", command: "git", args, cwd: dir });
+      yield* fs.makeDirectory(path.join(cwd, "own"), { recursive: true });
+      yield* fs.makeDirectory(path.join(cwd, "borrowed"), { recursive: true });
+      yield* fs.makeDirectory(outside, { recursive: true });
+      yield* fs.writeFileString(path.join(cwd, "own", "README.md"), "");
+      yield* fs.writeFileString(path.join(outside, "README.md"), "");
+      yield* git(path.join(cwd, "own"), "init");
+      yield* git(outside, "init");
+      // Its `.git` file points at a repository whose worktree is elsewhere.
+      yield* git(outside, "config", "core.worktree", outside);
+      yield* fs.writeFileString(
+        path.join(cwd, "borrowed", ".git"),
+        `gitdir: ${path.join(outside, ".git")}\n`,
+      );
+      // A link to a repository outside the parent is no child of it.
+      yield* fs.symlink(outside, path.join(cwd, "linked"));
+      const index = yield* WorkspaceSearchIndex.make(cwd).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
+      expect(
+        (yield* index.search("readme", 20, "file")).entries.map((entry) => entry.path),
+      ).toEqual(["own/README.md"]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("leaves deleted files, gitlinks and nested repositories out of a child repository", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-openable-" });
+      const repo = path.join(home, "code", "repo");
+      const git = (...args: ReadonlyArray<string>) =>
+        vcsProcess.run({ operation: "test.git", command: "git", args, cwd: repo });
+      yield* fs.makeDirectory(path.join(repo, "nested"), { recursive: true });
+      for (const file of ["kept.md", "gone.md", "nested/inner.md"]) {
+        yield* fs.writeFileString(path.join(repo, file), "");
+      }
+      yield* git("init");
+      yield* vcsProcess.run({
+        operation: "test.git",
+        command: "git",
+        args: ["init"],
+        cwd: path.join(repo, "nested"),
+      });
+      yield* git("add", "kept.md", "gone.md");
+      yield* git(
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        "160000,0123456789abcdef0123456789abcdef01234567,module.md",
+      );
+      yield* git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "files");
+      yield* fs.remove(path.join(repo, "gone.md"));
+      const index = yield* WorkspaceSearchIndex.make(path.join(home, "code")).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
+      expect((yield* index.search(".md", 20, "file")).entries.map((entry) => entry.path)).toEqual([
+        "repo/kept.md",
+      ]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("rebuilds a shared scratch folder's repository list once for concurrent searches", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-single-flight-" });
+      const repo = path.join(home, "code", "repo");
+      yield* fs.makeDirectory(repo, { recursive: true });
+      yield* fs.writeFileString(path.join(repo, "README.md"), "");
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      yield* vcsProcess.run({ operation: "test.git", command: "git", args: ["init"], cwd: repo });
+      let listings = 0;
+      const counting = VcsProcess.VcsProcess.of({
+        ...vcsProcess,
+        run: (input) => {
+          if (input.operation === "WorkspaceSearchIndex.listRepositoryFiles") listings += 1;
+          return vcsProcess.run(input);
+        },
+      });
+      const index = yield* WorkspaceSearchIndex.make(path.join(home, "code")).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+        Effect.provideService(VcsProcess.VcsProcess, counting),
+      );
+      const results = yield* Effect.all(
+        Array.from({ length: 4 }, () => index.search("readme", 20, "file")),
+        { concurrency: "unbounded" },
+      );
+      expect(results.map((result) => result.entries.length)).toEqual([1, 1, 1, 1]);
+      expect(listings).toBe(1);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);

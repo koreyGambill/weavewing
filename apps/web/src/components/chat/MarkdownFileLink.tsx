@@ -6,7 +6,12 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuSource, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  ContextMenuSource,
+  EnvironmentId,
+  FilesystemEntryMetadata,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import { memo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { FolderIcon } from "lucide-react";
 
@@ -34,7 +39,9 @@ interface MarkdownFileLinkProps {
   /** The destination as the agent wrote it, shown until a read confirms a relative link's file. */
   authoredPath: string;
   /** Reads where a relative link points; absent for links that open as written. */
-  verifyPath?: (() => Promise<string | null>) | undefined;
+  verifyPath?:
+    | (() => Promise<{ readonly path: string; readonly entry: FilesystemEntryMetadata } | null>)
+    | undefined;
   iconPath: string;
   isAppBundle?: boolean;
   workspaceRelativePath: string | null;
@@ -83,12 +90,18 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   resolveCopyPaths,
 }: MarkdownFileLinkProps) {
   const checkKey = `${environmentId}\u0000${targetPath}\u0000${authoredPath}`;
-  const [check, setCheck] = useState<{ id: number; key: string; path: string | null } | null>(null);
+  const [check, setCheck] = useState<{
+    id: number;
+    key: string;
+    verified: { readonly path: string; readonly entry: FilesystemEntryMetadata } | null;
+  } | null>(null);
   // A different link drops the last result, so a late read can never land on it.
   if (check !== null && check.key !== checkKey) setCheck(null);
-  const verifiedPath = verifyPath && check?.key === checkKey ? check.path : null;
-  // Only a confirmed relative link reads metadata; an absolute link renders from what was written.
-  const confirmed = verifiedPath !== null;
+  const verified = verifyPath && check?.key === checkKey ? check.verified : null;
+  const verifiedPath = verified?.path ?? null;
+  // The icon and tooltip use the check's own read; an absolute link renders from what was written.
+  const verifiedEntry = verified?.entry;
+  const confirmed = verified !== null;
   const shownPath = fileLinkShownPath(authoredPath, verifiedPath);
   // Nothing reads an unconfirmed relative link's guessed path, the icon and tooltip included.
   const readPath = verifiedPath ?? iconPath;
@@ -97,9 +110,10 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     fileLinkCheckSequence += 1;
     const id = fileLinkCheckSequence;
     const key = checkKey;
-    const settle = (path: string | null) =>
-      setCheck((previous) => (previous?.id === id ? { id, key, path } : previous));
-    setCheck({ id, key, path: null });
+    const settle = (
+      result: { readonly path: string; readonly entry: FilesystemEntryMetadata } | null,
+    ) => setCheck((previous) => (previous?.id === id ? { id, key, verified: result } : previous));
+    setCheck({ id, key, verified: null });
     verifyPath().then(settle, () => settle(null));
   };
   const handleOpenInEditor = () => {
@@ -384,7 +398,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
                   ) : undefined
                 }
                 path={readPath}
-                environmentId={confirmed ? environmentId : null}
+                metadata={verifiedEntry}
                 label={label}
                 theme={theme}
               />
@@ -411,7 +425,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
                   ) : undefined
                 }
                 path={readPath}
-                environmentId={confirmed ? environmentId : null}
+                metadata={verifiedEntry}
                 label={label}
                 theme={theme}
               />
@@ -420,11 +434,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         }
       />
       <TooltipPopup side="top" variant="code">
-        <WorkspaceEntryTooltip
-          path={readPath}
-          label={shownPath}
-          environmentId={confirmed ? environmentId : null}
-        />
+        <WorkspaceEntryTooltip path={readPath} label={shownPath} metadata={verifiedEntry} />
       </TooltipPopup>
     </Tooltip>
   );

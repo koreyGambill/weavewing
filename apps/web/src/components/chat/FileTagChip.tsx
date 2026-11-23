@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, FilesystemEntryMetadata } from "@t3tools/contracts";
 import { ContextChipLabel } from "../ContextChip";
 import { WorkspaceEntryIcon } from "./WorkspaceEntryIcon";
 
@@ -10,6 +10,8 @@ export function FileTagChipContent(props: {
   theme: "light" | "dark";
   environmentId?: EnvironmentId | null | undefined;
   cwd?: string | undefined;
+  /** Already read by the caller; the icon then reads nothing itself. */
+  metadata?: FilesystemEntryMetadata | undefined;
 }) {
   return (
     <>
@@ -18,6 +20,7 @@ export function FileTagChipContent(props: {
           path={props.path}
           environmentId={props.environmentId}
           cwd={props.cwd}
+          metadata={props.metadata}
           theme={props.theme}
         />
       )}

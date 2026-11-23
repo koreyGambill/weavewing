@@ -1928,7 +1928,7 @@ export default function FilePreviewPanel({
                     . Check the link's path or locate the file in Files.
                   </p>
                 ) : null}
-                {!isHostFile && file.readError?.failure !== "path_not_file" ? (
+                {attachment === undefined && file.readError?.failure !== "path_not_file" ? (
                   <Button
                     variant="outline"
                     size="sm"
@@ -1936,7 +1936,10 @@ export default function FilePreviewPanel({
                     onClick={() =>
                       dispatchCommandPalette({
                         _tag: "OpenFilePicker",
-                        query: relativePath.replace(/^(?:\.[\\/])+/, ""),
+                        // A host path names a file outside the project, so only its name is searched.
+                        query: isHostFile
+                          ? fileBasename(relativePath)
+                          : relativePath.replace(/^(?:\.[\\/])+/, ""),
                         reveal: {
                           line: revealLine ?? undefined,
                           endLine: revealEndLine ?? undefined,

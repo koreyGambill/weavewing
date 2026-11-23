@@ -23,14 +23,15 @@ export function fileLinkShownPath(authored: string, verifiedPath: string | null)
  * The absolute path a relative link names when a fresh read finds a file there, else null.
  * Absolute links are never read: they open as written.
  */
-export async function verifyRelativeFileLink(input: {
+export async function verifyRelativeFileLink<Entry extends { readonly kind: string }>(input: {
   readonly linkPath: string;
   readonly root: string;
-  readonly kindOf: (path: string) => Promise<"file" | "directory" | "other" | null>;
-}): Promise<string | null> {
+  readonly readEntry: (path: string) => Promise<Entry | null>;
+}): Promise<{ readonly path: string; readonly entry: Entry } | null> {
   const { linkPath, root } = input;
   if (isAbsolutePath(linkPath) || /^~(?:[\\/]|$)/.test(linkPath)) return null;
   const literal = resolvePathLinkTarget(linkPath, root);
-  const kind = await input.kindOf(literal).catch(() => null);
-  return kind === "file" ? literal : null;
+  const entry = await input.readEntry(literal).catch(() => null);
+  // The entry read here is the chip's only metadata, so nothing reads the file a second time.
+  return entry?.kind === "file" ? { path: literal, entry } : null;
 }

@@ -22,23 +22,35 @@ describe("fileLinkShownPath", () => {
 });
 
 describe("verifyRelativeFileLink", () => {
+  const verifiedPath = (input: Parameters<typeof verifyRelativeFileLink>[0]) =>
+    verifyRelativeFileLink(input).then((verified) => verified?.path ?? null);
   const kinds = (byPath: Record<string, "file" | "directory">) => {
     const reads: Array<string> = [];
     return {
       reads,
-      kindOf: (path: string) => {
+      readEntry: (path: string) => {
         reads.push(path);
-        return Promise.resolve(byPath[path] ?? null);
+        const kind = byPath[path];
+        return Promise.resolve(kind === undefined ? null : { kind, byteLength: 12 });
       },
     };
   };
 
+  it("returns the entry it read, so the chip needs no second read", async () => {
+    const host = kinds({ "/code/src/a.ts": "file" });
+    expect(await verifyRelativeFileLink({ linkPath: "src/a.ts", root: "/code", ...host })).toEqual({
+      path: "/code/src/a.ts",
+      entry: { kind: "file", byteLength: 12 },
+    });
+    expect(host.reads).toEqual(["/code/src/a.ts"]);
+  });
+
   it("confirms only a file at the literal path under the thread root", async () => {
     const host = kinds({ "/code/src/a.ts": "file", "/code/src/dir.ts": "directory" });
-    expect(await verifyRelativeFileLink({ linkPath: "src/a.ts", root: "/code", ...host })).toBe(
+    expect(await verifiedPath({ linkPath: "src/a.ts", root: "/code", ...host })).toBe(
       "/code/src/a.ts",
     );
-    expect(await verifyRelativeFileLink({ linkPath: "./src/a.ts", root: "/code", ...host })).toBe(
+    expect(await verifiedPath({ linkPath: "./src/a.ts", root: "/code", ...host })).toBe(
       "/code/src/a.ts",
     );
     expect(
@@ -62,7 +74,7 @@ describe("verifyRelativeFileLink", () => {
     expect(
       await verifyRelativeFileLink({ linkPath: "/code/src/a.ts", root: "/code", ...host }),
     ).toBeNull();
-    expect(await verifyRelativeFileLink({ linkPath: "~/a.ts", root: "/code", ...host })).toBeNull();
+    expect(await verifiedPath({ linkPath: "~/a.ts", root: "/code", ...host })).toBeNull();
     expect(host.reads).toEqual([]);
   });
 
@@ -71,7 +83,7 @@ describe("verifyRelativeFileLink", () => {
       await verifyRelativeFileLink({
         linkPath: "src/a.ts",
         root: "/code",
-        kindOf: () => Promise.reject(new Error("offline")),
+        readEntry: () => Promise.reject(new Error("offline")),
       }),
     ).toBeNull();
   });

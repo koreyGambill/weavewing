@@ -17,6 +17,7 @@ import type {
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -636,10 +637,14 @@ const isSharedScratchDirectory = Effect.fn("WorkspaceSearchIndex.isSharedScratch
 const CHILD_REPOSITORY_FILES_TTL_MS = 30_000;
 // Each repository keeps the single-workspace cap; the parent stops at a few repositories' worth.
 const CHILD_REPOSITORY_MAX_ENTRIES = WORKSPACE_INDEX_MAX_ENTRIES * 4;
-const CHILD_REPOSITORY_CONCURRENCY = 8;
+// `ls-files -s` records run about 120 bytes; reading stops well past `limit` records, never short.
+const CHILD_REPOSITORY_RECORD_BYTES = 512;
+const CHILD_REPOSITORY_CHECK_CONCURRENCY = 8;
+// Repositories listed at once; each takes an equal share of what the budget has left.
+const CHILD_REPOSITORY_LIST_CONCURRENCY = 4;
 
-// An unreadable parent lists no repositories, leaving its top-level search as before.
-const listChildRepositories = (cwd: string) =>
+// Folders with a `.git` marker, by name; cheap enough to run on every search.
+const listRepositoryCandidates = (cwd: string) =>
   Effect.promise(async () => {
     const names: string[] = [];
     for await (const entry of await NodeFSP.opendir(cwd)) {
@@ -653,11 +658,90 @@ const listChildRepositories = (cwd: string) =>
     return names.toSorted();
   }).pipe(Effect.catchDefect(() => Effect.succeed<string[]>([])));
 
+/**
+ * The candidates that are repositories in their own right inside `cwd`: a folder resolving outside
+ * the parent, or a `.git` file whose worktree lives elsewhere, would list another tree's files.
+ */
+const confirmChildRepositories = Effect.fn("WorkspaceSearchIndex.confirmChildRepositories")(
+  function* (
+    vcsProcess: VcsProcess.VcsProcess["Service"],
+    cwd: string,
+    candidates: ReadonlyArray<string>,
+  ) {
+    const parent = yield* Effect.promise(() => NodeFSP.realpath(cwd).catch(() => null));
+    if (parent === null) return [];
+    const confirmed = yield* Effect.forEach(
+      candidates,
+      Effect.fnUntraced(function* (name) {
+        const child = NodePath.join(cwd, name);
+        const real = yield* Effect.promise(() => NodeFSP.realpath(child).catch(() => null));
+        if (real === null || !real.startsWith(`${parent}${NodePath.sep}`)) return [];
+        const topLevel = yield* vcsProcess
+          .run({
+            operation: "WorkspaceSearchIndex.childRepositoryTopLevel",
+            command: "git",
+            args: ["rev-parse", "--show-toplevel"],
+            cwd: child,
+            allowNonZeroExit: true,
+            timeoutMs: 5_000,
+          })
+          .pipe(Effect.orElseSucceed(() => undefined));
+        if (!topLevel || topLevel.exitCode !== 0) return [];
+        const top = yield* Effect.promise(() =>
+          NodeFSP.realpath(topLevel.stdout.trim()).catch(() => null),
+        );
+        return top === real ? [name] : [];
+      }),
+      { concurrency: CHILD_REPOSITORY_CHECK_CONCURRENCY },
+    );
+    return confirmed.flat();
+  },
+);
+
+/**
+ * Paths a repository's files can be opened at, up to `limit`: tracked and untracked files minus
+ * what it ignores, without deleted or skip-worktree files, gitlinks, untracked nested
+ * repositories, or anything under a dot folder (vendored or tool state, such as `.repos`).
+ */
+export function parseRepositoryFileRecords(
+  stdout: string,
+  limit: number,
+): { readonly paths: string[]; readonly truncated: boolean } {
+  const present = new Set<string>();
+  const absent = new Set<string>();
+  for (const record of stdout.split("\0")) {
+    if (record.length < 3) continue;
+    const tag = record[0];
+    const rest = record.slice(2);
+    if (tag === "?") {
+      if (!rest.endsWith("/")) present.add(rest);
+      continue;
+    }
+    const tab = rest.indexOf("\t");
+    if (tab === -1) continue;
+    const path = rest.slice(tab + 1);
+    if (tag === "R" || tag === "S" || tag === "K" || rest.startsWith("160000 ")) absent.add(path);
+    else present.add(path);
+  }
+  const paths: string[] = [];
+  let truncated = false;
+  for (const path of present) {
+    if (absent.has(path) || /(?:^|\/)\.[^/]*\//.test(path)) continue;
+    if (paths.length === limit) {
+      truncated = true;
+      break;
+    }
+    paths.push(path);
+  }
+  return { paths, truncated };
+}
+
 const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles")(function* (
   vcsProcess: VcsProcess.VcsProcess["Service"],
   cwd: string,
   repository: string,
   hostIsWindows: boolean,
+  limit: number,
 ) {
   const result = yield* vcsProcess
     .run({
@@ -667,27 +751,34 @@ const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles"
         "-c",
         "core.fsmonitor=false",
         "ls-files",
+        "-z",
+        "-t",
+        "-s",
         "--cached",
         "--others",
+        "--deleted",
         "--exclude-standard",
-        "-z",
+        // Dot folders can dwarf a repository's source (`.repos` holds vendored trees).
+        "--",
+        ":(exclude,glob).*/**",
+        ":(exclude,glob)**/.*/**",
       ],
       cwd: NodePath.join(cwd, repository),
       allowNonZeroExit: true,
       timeoutMs: 10_000,
-      maxOutputBytes: 16 * 1024 * 1024,
+      maxOutputBytes: Math.min(16 * 1024 * 1024, limit * CHILD_REPOSITORY_RECORD_BYTES),
+      outputMode: "truncate",
     })
     .pipe(Effect.orElseSucceed(() => undefined));
   if (!result || result.exitCode !== 0) return { paths: [] as string[], truncated: true };
-  // Dot folders hold vendored or tool state (a repository's `.repos` can outnumber its source).
-  const paths = result.stdout
-    .split("\0")
-    .filter((entry) => entry.length > 0 && !/(?:^|[\\/])\.[^\\/]*[\\/]/.test(entry));
+  // A cut-off read ends mid-record, so its last record is dropped.
+  const stdout = result.stdoutTruncated
+    ? result.stdout.slice(0, result.stdout.lastIndexOf("\0") + 1)
+    : result.stdout;
+  const parsed = parseRepositoryFileRecords(stdout, limit);
   return {
-    paths: paths
-      .slice(0, WORKSPACE_INDEX_MAX_ENTRIES)
-      .map((entry) => `${repository}/${toPosixPath(entry, hostIsWindows)}`),
-    truncated: result.stdoutTruncated || paths.length > WORKSPACE_INDEX_MAX_ENTRIES,
+    paths: parsed.paths.map((entry) => `${repository}/${toPosixPath(entry, hostIsWindows)}`),
+    truncated: result.stdoutTruncated || parsed.truncated,
   };
 });
 
@@ -696,6 +787,7 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
 ) {
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const hostIsWindows = yield* HostProcess.isWindows;
+  const scope = yield* Effect.scope;
   // A parent that is itself inside a repository keeps listing only its own top level.
   const insideRepository = yield* vcsProcess
     .run({
@@ -710,42 +802,62 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
       Effect.map((result) => result.exitCode === 0 && result.stdout.trim() === "true"),
       Effect.orElseSucceed(() => false),
     );
+  type ChildFiles = { readonly entries: ProjectEntry[]; readonly truncated: boolean };
+  const buildChildFiles = Effect.fn("WorkspaceSearchIndex.buildChildRepositoryFiles")(function* (
+    candidates: ReadonlyArray<string>,
+  ) {
+    const repositories = yield* confirmChildRepositories(vcsProcess, cwd, candidates);
+    const entries: ProjectEntry[] = [];
+    let truncated = false;
+    for (let start = 0; start < repositories.length; start += CHILD_REPOSITORY_LIST_CONCURRENCY) {
+      const wave = repositories.slice(start, start + CHILD_REPOSITORY_LIST_CONCURRENCY);
+      const share = Math.floor((CHILD_REPOSITORY_MAX_ENTRIES - entries.length) / wave.length);
+      // Once the parent's budget is spent, no further repository is read at all.
+      if (share === 0) {
+        truncated = true;
+        break;
+      }
+      const listed = yield* Effect.forEach(
+        wave,
+        (repository) =>
+          listRepositoryFiles(
+            vcsProcess,
+            cwd,
+            repository,
+            hostIsWindows,
+            Math.min(WORKSPACE_INDEX_MAX_ENTRIES, share),
+          ),
+        { concurrency: "unbounded" },
+      );
+      for (const repository of listed) {
+        truncated ||= repository.truncated;
+        for (const entryPath of repository.paths) entries.push({ path: entryPath, kind: "file" });
+      }
+    }
+    return { entries, truncated } satisfies ChildFiles;
+  });
   let childFiles:
     | {
         readonly repositories: string;
         readonly expiresAt: number;
-        readonly result: { readonly entries: ProjectEntry[]; readonly truncated: boolean };
+        readonly result: Fiber.Fiber<ChildFiles>;
       }
     | undefined;
   const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
     function* () {
       if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
-      const repositories = yield* listChildRepositories(cwd);
-      const key = repositories.join("\0");
+      const candidates = yield* listRepositoryCandidates(cwd);
+      const key = candidates.join("\0");
       const now = yield* Clock.currentTimeMillis;
-      if (childFiles && childFiles.repositories === key && childFiles.expiresAt > now) {
-        return childFiles.result;
+      if (!childFiles || childFiles.repositories !== key || childFiles.expiresAt <= now) {
+        // Searches that arrive during a rebuild join it; it belongs to the index, not to them.
+        childFiles = {
+          repositories: key,
+          expiresAt: now + CHILD_REPOSITORY_FILES_TTL_MS,
+          result: yield* buildChildFiles(candidates).pipe(Effect.forkIn(scope)),
+        };
       }
-      const listed = yield* Effect.forEach(
-        repositories,
-        (repository) => listRepositoryFiles(vcsProcess, cwd, repository, hostIsWindows),
-        { concurrency: CHILD_REPOSITORY_CONCURRENCY },
-      );
-      const paths = listed.flatMap((repository) => repository.paths);
-      const result = {
-        entries: paths
-          .slice(0, CHILD_REPOSITORY_MAX_ENTRIES)
-          .map((entryPath): ProjectEntry => ({ path: entryPath, kind: "file" })),
-        truncated:
-          paths.length > CHILD_REPOSITORY_MAX_ENTRIES ||
-          listed.some((repository) => repository.truncated),
-      };
-      childFiles = {
-        repositories: key,
-        expiresAt: now + CHILD_REPOSITORY_FILES_TTL_MS,
-        result,
-      };
-      return result;
+      return yield* Fiber.join(childFiles.result);
     },
   );
 

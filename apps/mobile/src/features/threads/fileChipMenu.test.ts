@@ -7,6 +7,7 @@ import {
   fileChipShareSource,
   resolveFileChipTarget,
 } from "./fileChipMenu";
+import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
 
 it("copies native paths from a relative file chip in a Windows workspace", () => {
   const target = resolveFileChipTarget("reports/Device Users.csv", "C:/repo");
@@ -103,3 +104,14 @@ describe("file chip downloads", () => {
     }
   });
 });
+
+it.each([["/repo"], ["C:\\repo"]])(
+  "opens and copies an image link with an encoded backslash at one path in %s",
+  (workspaceRoot) => {
+    const href = "./notes%5Cweek.png";
+    const opened = classifyMarkdownImageSource(href, workspaceRoot);
+    expect(opened._tag === "WorkspaceFile" ? opened.path : null).toBe(
+      resolveFileChipTarget(href, workspaceRoot)?.fullPath,
+    );
+  },
+);

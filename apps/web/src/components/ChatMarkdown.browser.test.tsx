@@ -570,6 +570,17 @@ describe("ChatMarkdown relative file links", () => {
     expect(chip(screen.container).getAttribute("href")).toBe("/school/notes/a.md#L4-L8");
   });
 
+  it("sizes the tooltip from the hover's own read", async () => {
+    setup();
+    filesystemMetadata.mockResolvedValueOnce(
+      AsyncResult.success({ entries: [{ kind: "file", byteLength: 2048 }] }),
+    );
+    await using screen = await renderText("[Notes](notes/a.md)", { cwd: "/school", threadRef });
+    await userEvent.hover(chip(screen.container));
+    await expect.element(page.getByText(/\/school\/notes\/a\.md · 2 KB/)).toBeVisible();
+    expect(filesystemMetadata).toHaveBeenCalledOnce();
+  });
+
   it("keeps the link as written when the path is a folder", async () => {
     setup();
     filesystemMetadata.mockResolvedValueOnce(metadata("directory"));

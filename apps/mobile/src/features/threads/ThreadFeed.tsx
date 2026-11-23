@@ -274,6 +274,7 @@ import { fileRoutePathSegments, isAbsolutePath } from "../files/filePath";
 import { waitForThreadShell } from "./threadForkNavigation";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
+import { decideFileLinkTap, isAbsoluteLinkDestination } from "./fileLinkTap";
 import { useFileChipShare } from "./useFileChipShare";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import {
@@ -3014,8 +3015,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       };
       const resource = "resource" in media.source ? media.source.resource : null;
       const mediaPath = resource && "path" in resource ? resource.path : null;
+      // An absolute link opens as written; only a relative one is checked for a same-named folder.
       if (
         typeof mediaPath === "string" &&
+        !isAbsoluteLinkDestination(href) &&
         readEnvironmentScope(props.environmentId, AuthFilesystemReadScope)
       ) {
         void executeAtomQuery(
@@ -3056,31 +3059,32 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           ...(presentation.line ? { line: String(presentation.line) } : {}),
         });
       };
-      if (
-        isAbsolutePath(presentation.path) ||
-        !target.fullPath ||
-        !readEnvironmentScope(props.environmentId, AuthFilesystemReadScope)
-      ) {
-        open();
-        return;
-      }
-      // A relative link opens only where it points; a fresh read says when nothing is there.
-      void executeAtomQuery(
-        appAtomRegistry,
-        filesystemEnvironment.getMetadata({
-          environmentId: props.environmentId,
-          input: { paths: [target.fullPath] },
-        }),
-        { signal: request.signal, reportFailure: false, reportDefect: false },
-      ).then((result) => {
+      const fullPath = target.fullPath;
+      void decideFileLinkTap({
+        href,
+        fullPath,
+        canRead: readEnvironmentScope(props.environmentId, AuthFilesystemReadScope),
+        readKind: async (path) => {
+          const result = await executeAtomQuery(
+            appAtomRegistry,
+            filesystemEnvironment.getMetadata({
+              environmentId: props.environmentId,
+              input: { paths: [path] },
+            }),
+            { signal: request.signal, refresh: true, reportFailure: false, reportDefect: false },
+          );
+          if (result._tag !== "Success") throw new Error("The file could not be read.");
+          return result.value.entries[0]?.kind ?? null;
+        },
+      }).then((outcome) => {
         if (request.signal.aborted) return;
-        if (result._tag !== "Success" || result.value.entries[0]?.kind === "file") {
+        if (outcome === "open") {
           open();
           return;
         }
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Dialog.alert("No file there", `${safeDecodeURIComponent(href)}\n\n${target.fullPath}`);
-      }, open);
+        Dialog.alert("No file there", `${safeDecodeURIComponent(href)}\n\n${fullPath ?? ""}`);
+      });
       return;
     }
 

@@ -10,6 +10,9 @@ describe("classifyMarkdownImageSource", () => {
       "C:\\Users\\dara\\project",
       "C:\\Users\\dara\\project\\images\\result.png",
     ],
+    // On POSIX `\` belongs to the file name; only a Windows workspace splits on it.
+    ["./notes%5Cweek.png", "/workspace/project", "/workspace/project/notes\\week.png"],
+    ["./notes%5Cweek.png", "C:\\repo", "C:\\repo\\notes\\week.png"],
     ["file:///workspace/project/image%20one.png", null, "/workspace/project/image one.png"],
     ["file://server/share/image.png", "\\\\server\\share", "\\\\server\\share\\image.png"],
   ])("maps %s to a workspace file", (source, workspaceRoot, path) => {

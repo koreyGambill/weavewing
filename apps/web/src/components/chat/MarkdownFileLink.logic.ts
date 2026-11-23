@@ -1,4 +1,5 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import { AssetWorkspaceAssetNotFoundError, type EnvironmentId } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { splitFilePathPosition } from "@t3tools/shared/fileLinks";
 
 import type { MarkdownFileLinkMeta } from "../../markdown-links";
@@ -51,4 +52,18 @@ export function shouldUseMarkdownFileBrowserPrimaryAction(input: {
   canOpenInPanel: boolean;
 }): boolean {
   return input.canOpenInBrowser && !input.canOpenInEditor && !input.canOpenInPanel;
+}
+
+const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
+
+/**
+ * Where a file link's media opens when the file is gone: the file view's missing state, which
+ * offers Find, rather than a toast. Null for any other failure, or media with no linked path.
+ */
+export function missingLinkedMediaPath(error: unknown, linkedPath: string | undefined) {
+  return linkedPath !== undefined &&
+    isAssetNotFoundError(error) &&
+    error.resource._tag === "media-file"
+    ? linkedPath
+    : null;
 }

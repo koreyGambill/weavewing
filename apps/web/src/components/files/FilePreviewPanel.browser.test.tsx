@@ -501,4 +501,22 @@ describe("missing linked files", () => {
       openIntent: { kind: "files", query: "shots/photo.png", reveal: { line: 4, endLine: 8 } },
     });
   });
+
+  it("offers Find by name for a missing image outside the workspace", async () => {
+    using _settings = setup();
+    state.readError = {
+      failure: "operation_failed",
+      operation: "read-file",
+      message: "ENOENT: no such file",
+    };
+    using _palette = {
+      [Symbol.dispose]: () => dispatchCommandPalette({ _tag: "SetOpen", open: false }),
+    };
+    await using screen = await render(filePreview("/elsewhere/shot.png"));
+    await userEvent.click(screen.getByRole("button", { name: "Find shot.png" }));
+    expect(useCommandPaletteStore.getState()).toMatchObject({
+      mode: "files",
+      openIntent: { kind: "files", query: "shot.png" },
+    });
+  });
 });

@@ -196,7 +196,10 @@ import {
 import { MarkdownExternalLinkContent } from "./chat/MarkdownExternalLink";
 import { RemoteMediaGate } from "./chat/RemoteMediaGate";
 import { MarkdownFileLink } from "./chat/MarkdownFileLink";
-import { canUseMarkdownFileShellActions } from "./chat/MarkdownFileLink.logic";
+import {
+  canUseMarkdownFileShellActions,
+  missingLinkedMediaPath,
+} from "./chat/MarkdownFileLink.logic";
 import { rehypeChipPunctuation } from "./chat/markdownChipPunctuation";
 import { handleMarkdownFragmentClick, rehypeHeadingIds } from "./chat/markdownFragments";
 import { rehypeTextDirection } from "./chat/markdownTextDirection";
@@ -576,6 +579,13 @@ function useChatMarkdownState({
       },
       (error: unknown) => {
         if (mediaRequestId.current !== requestId) return;
+        const missingPath = missingLinkedMediaPath(error, resolvedFilePath);
+        if (missingPath !== null && threadRef) {
+          useRightPanelStore
+            .getState()
+            .openFile(threadRef, missingPath, undefined, getClientSettings().linkTileDestination);
+          return;
+        }
         let description =
           error instanceof Error
             ? error.message
@@ -759,9 +769,9 @@ function useChatMarkdownState({
     return verifyRelativeFileLink({
       linkPath,
       root: cwd,
-      kindOf: async (path) => {
+      readEntry: async (path) => {
         const result = await getFilesystemMetadata({ environmentId, input: { paths: [path] } });
-        return result._tag === "Success" ? (result.value.entries[0]?.kind ?? null) : null;
+        return result._tag === "Success" ? (result.value.entries[0] ?? null) : null;
       },
     });
   };
