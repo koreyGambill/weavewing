@@ -317,6 +317,7 @@ export function WorkspaceBrowserPreview(props: {
       documentId={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}`}
       title={props.title}
       pdf={pdf}
+      threadRef={props.threadRef}
     />
   );
 }

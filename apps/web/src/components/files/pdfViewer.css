@@ -2,6 +2,8 @@
 [data-pdf-text-layer] {
   position: absolute;
   inset: 0;
+  z-index: 1;
+  pointer-events: none;
   overflow: clip;
   line-height: 1;
   text-align: initial;
@@ -30,6 +32,7 @@
   position: absolute;
   white-space: pre;
   cursor: text;
+  pointer-events: auto;
   transform-origin: 0 0;
   user-select: text;
 }

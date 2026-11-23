@@ -43,6 +43,7 @@ import { LocalServerRow, ServerAccessMenuItems, ServerAccessToggle } from "./Ser
 import { ConnectWizard } from "./ConnectWizard";
 import { openConnectWizard } from "./connectWizardStore";
 import { ReachGrid } from "./ReachGrid";
+import { EnvironmentMap } from "./EnvironmentMap";
 import { type ReachServer, useReachModel } from "./useReachModel";
 import { type SquareChangeState, useSquareChange } from "./useSquareChange";
 import { WslBackendSettings } from "./WslBackendSettings";
@@ -66,6 +67,7 @@ export function EnvironmentsPage() {
   return (
     <SettingsPageContainer>
       <ConnectWizard model={data.model} servers={data.servers} change={change} />
+      <EnvironmentMap model={data.model} />
       {data.servers.length > 1 ? <TrustedTogether model={data.model} /> : null}
       {data.thisComputer !== null ? (
         <SettingsSection

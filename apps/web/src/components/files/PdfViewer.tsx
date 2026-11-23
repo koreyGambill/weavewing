@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent,
 } from "react";
 import { TextLayer, type PDFDocumentProxy } from "pdfjs-dist";
 import { ChevronDownIcon, ChevronUpIcon, MinusIcon, PlusIcon, ScanIcon } from "lucide-react";
@@ -37,6 +38,21 @@ type PdfPosition = PdfViewState & { width: number; ratios: readonly number[] };
 // Thread switches unmount the preview; retain only the most recent documents.
 const positions = new Map<string, PdfPosition>();
 
+type PdfLink = { box: readonly [number, number, number, number] } & (
+  | { url: string }
+  | { page: number }
+);
+
+// Resolves a link annotation's destination, named or explicit, to a page index.
+async function pdfLinkPage(pdf: PDFDocumentProxy, dest: unknown): Promise<number | null> {
+  const explicit: unknown = typeof dest === "string" ? await pdf.getDestination(dest) : dest;
+  if (!Array.isArray(explicit)) return null;
+  const [ref] = explicit as unknown[];
+  if (Number.isInteger(ref)) return ref as number;
+  if (typeof ref !== "object" || ref === null) return null;
+  return pdf.getPageIndex(ref as Parameters<PDFDocumentProxy["getPageIndex"]>[0]);
+}
+
 export type PdfViewState = {
   page: number;
   offset: number;
@@ -51,9 +67,13 @@ function PdfPage(props: {
   query: string;
   onSize: (index: number, ratio: number) => void;
   onError: (error: string) => void;
+  onPageLink: (index: number) => void;
+  onOpenLink: ((url: string, event: MouseEvent) => void) | undefined;
 }) {
+  const [links, setLinks] = useState<readonly PdfLink[]>([]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const text = useRef<HTMLDivElement>(null);
+  const linkLayer = useRef<HTMLDivElement>(null);
   const { document: pdf, index, width, onSize, onError } = props;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Render the PDF page canvas and text layer, cancelling tasks and releasing pdf.js page resources on cleanup.
   useEffect(() => {
@@ -76,10 +96,12 @@ function PdfPage(props: {
         window.devicePixelRatio || 1,
         Math.sqrt((8 * 1024 * 1024) / (viewport.width * viewport.height)),
       );
-      canvas.current.width = Math.ceil(viewport.width * ratio);
-      canvas.current.height = Math.ceil(viewport.height * ratio);
+      // Resizing the visible bitmap clears it, so swap in a fully painted page.
+      const buffer = document.createElement("canvas");
+      buffer.width = Math.ceil(viewport.width * ratio);
+      buffer.height = Math.ceil(viewport.height * ratio);
       paint = page.render({
-        canvas: canvas.current,
+        canvas: buffer,
         viewport,
         transform: [ratio, 0, 0, ratio, 0, 0],
         background: "white",
@@ -91,7 +113,39 @@ function PdfPage(props: {
         viewport,
         textContentSource: page.streamTextContent(),
       });
-      await Promise.all([paint.promise, layer.render()]);
+      const linked = page.getAnnotations({ intent: "display" }).then(async (annotations) => {
+        const found: PdfLink[] = [];
+        for (const annotation of annotations) {
+          if (annotation.subtype !== "Link") continue;
+          const [x1, y1] = viewport.convertToViewportPoint(annotation.rect[0], annotation.rect[1]);
+          const [x2, y2] = viewport.convertToViewportPoint(annotation.rect[2], annotation.rect[3]);
+          const box = [
+            Math.min(x1, x2) / viewport.width,
+            Math.min(y1, y2) / viewport.height,
+            Math.abs(x2 - x1) / viewport.width,
+            Math.abs(y2 - y1) / viewport.height,
+          ] as const;
+          if (typeof annotation.url === "string" && /^https?:\/\//i.test(annotation.url)) {
+            found.push({ box, url: annotation.url });
+            continue;
+          }
+          const target = await pdfLinkPage(pdf, annotation.dest).catch(() => null);
+          if (target !== null && target >= 0 && target < pdf.numPages)
+            found.push({ box, page: target });
+        }
+        if (!cancelled) setLinks(found);
+      });
+      // A page whose annotations cannot be read still renders, without links.
+      const linkedOrNone = linked.catch(() => undefined);
+      const shown = paint.promise.then(() => {
+        const visible = canvas.current;
+        if (cancelled || !visible) return;
+        visible.width = buffer.width;
+        visible.height = buffer.height;
+        visible.getContext("2d", { alpha: false })?.drawImage(buffer, 0, 0);
+        buffer.width = 0;
+      });
+      await Promise.all([shown, layer.render(), linkedOrNone]);
     })().catch((cause: unknown) => {
       if (!cancelled)
         onError(cause instanceof Error ? cause.message : "This PDF page could not render.");
@@ -116,15 +170,82 @@ function PdfPage(props: {
       );
       elements.forEach((element, index) => element.classList.toggle("pdf-find-match", hits[index]));
     };
+    const followLink = (event: globalThis.MouseEvent) => {
+      if (!window.getSelection()?.isCollapsed) return;
+      const anchor = document
+        .elementsFromPoint(event.clientX, event.clientY)
+        .find(
+          (element) =>
+            element instanceof HTMLAnchorElement && element.parentElement === linkLayer.current,
+        );
+      anchor?.dispatchEvent(
+        new window.MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        }),
+      );
+    };
+    node.addEventListener("click", followLink);
     mark();
     const observer = new MutationObserver(mark);
     observer.observe(node, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    return () => {
+      node.removeEventListener("click", followLink);
+      observer.disconnect();
+    };
   }, [props.query]);
   return (
     <>
       <canvas ref={canvas} aria-label={`Page ${index + 1}`} className="block h-full w-full" />
       <div ref={text} data-pdf-text-layer />
+      {links.length ? (
+        <div ref={linkLayer} className="pointer-events-none absolute inset-0">
+          {links.map((link) => {
+            const [left, top, width, height] = link.box;
+            const key = `${link.box.join()}:${"url" in link ? link.url : link.page}`;
+            const style = {
+              left: `${left * 100}%`,
+              top: `${top * 100}%`,
+              width: `${width * 100}%`,
+              height: `${height * 100}%`,
+            };
+            return "url" in link ? (
+              <a
+                key={key}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={link.url}
+                draggable={false}
+                className="pointer-events-auto absolute"
+                style={style}
+                onClick={(event) => {
+                  if (!props.onOpenLink) return;
+                  event.preventDefault();
+                  props.onOpenLink(link.url, event);
+                }}
+              />
+            ) : (
+              <a
+                key={key}
+                href={`#page=${link.page + 1}`}
+                aria-label={`Page ${link.page + 1}`}
+                draggable={false}
+                className="pointer-events-auto absolute"
+                style={style}
+                onClick={(event) => {
+                  event.preventDefault();
+                  props.onPageLink(link.page);
+                }}
+              />
+            );
+          })}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -135,6 +256,7 @@ export default function PdfViewer(props: {
   positionKey?: string;
   initialView?: PdfViewState;
   onViewChange?: (view: PdfViewState) => void;
+  onOpenLink?: (url: string, event: MouseEvent) => void;
 }) {
   const [savedPosition] = useState(() =>
     props.positionKey === undefined ? undefined : positions.get(props.positionKey),
@@ -488,6 +610,8 @@ export default function PdfViewer(props: {
                   query={query}
                   onSize={onSize}
                   onError={setError}
+                  onPageLink={showPage}
+                  onOpenLink={props.onOpenLink}
                 />
               </div>
             ))}
