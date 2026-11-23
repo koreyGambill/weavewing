@@ -19,7 +19,7 @@ import {
 } from "~/reviewCommentContext";
 
 import { nextFileCommentId } from "../files/fileCommentAnnotations";
-import { useAnnounceAddedToMessage } from "./addedToMessageToast";
+import { announceAddedToMessage } from "./addedToMessageToast";
 import {
   ADD_TO_MESSAGE_LABEL,
   ADD_TO_MESSAGE_PLACEHOLDER,
@@ -132,7 +132,6 @@ export function AnnotatableCodeView({
   onFileCollapsedChange,
 }: AnnotatableCodeViewProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
-  const announceAddedToMessage = useAnnounceAddedToMessage();
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
   const reviewComments = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.reviewComments ?? EMPTY_REVIEW_COMMENTS,

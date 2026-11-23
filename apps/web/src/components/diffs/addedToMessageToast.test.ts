@@ -8,7 +8,6 @@ import { announceAddedToMessage } from "./addedToMessageToast";
 
 const mocks = vi.hoisted(() => ({
   counts: new Map<string, number>(),
-  sessions: new Map<string, { environmentId: string; threadId: string }>(),
   listeners: new Set<() => void>(),
   add: vi.fn(),
   update: vi.fn(),
@@ -18,16 +17,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("~/components/ui/toast", () => ({
   toastManager: { add: mocks.add, update: mocks.update, close: mocks.close },
 }));
-vi.mock("~/lib/sideChatPane", () => ({ focusThreadDraft: vi.fn() }));
 vi.mock("~/composerDraftStore", () => ({
-  queuedRunEditThreadRef: (draftId: string) =>
-    draftId.startsWith("queued-edit:") ? { environmentId: "env-1", threadId: "thread-2" } : null,
   useComposerDraftStore: {
     getState: () => ({
       getComposerDraft: (target: unknown) => ({
         reviewComments: Array.from({ length: mocks.counts.get(JSON.stringify(target)) ?? 0 }),
       }),
-      getDraftSession: (draftId: string) => mocks.sessions.get(draftId) ?? null,
     }),
     subscribe: (listener: () => void) => {
       mocks.listeners.add(listener);
@@ -38,18 +33,15 @@ vi.mock("~/composerDraftStore", () => ({
 
 // Module state outlives a test, so each test uses its own thread.
 const threadRef = (id: string) => scopeThreadRef(EnvironmentId.make("env-1"), ThreadId.make(id));
-const queuedEdit = "queued-edit:env-1:thread-2:run-3" as DraftId;
 
 type ToastOptions = {
   id: string;
   title: string;
-  actionProps?: { onClick: () => void };
   onClose: () => void;
 };
 
 function setup() {
   mocks.counts.clear();
-  mocks.sessions.clear();
   mocks.listeners.clear();
   mocks.add.mockReset();
   mocks.update.mockReset();
@@ -66,11 +58,10 @@ describe("added-to-message toast", () => {
   it("keeps one toast per draft whose count follows the draft", () => {
     const { setCount, added } = setup();
     const thread = threadRef("thread-a");
-    const open = vi.fn();
     setCount(thread, 1);
-    announceAddedToMessage(thread, open);
+    announceAddedToMessage(thread);
     setCount(thread, 2);
-    announceAddedToMessage(thread, open);
+    announceAddedToMessage(thread);
 
     expect(mocks.add).toHaveBeenCalledTimes(1);
     const id = added(0).id;
@@ -87,7 +78,7 @@ describe("added-to-message toast", () => {
     expect(mocks.close).toHaveBeenCalledWith(id);
 
     setCount(thread, 1);
-    announceAddedToMessage(thread, open);
+    announceAddedToMessage(thread);
     expect(mocks.add).toHaveBeenCalledTimes(2);
   });
 
@@ -95,44 +86,25 @@ describe("added-to-message toast", () => {
     const { setCount, added } = setup();
     const thread = threadRef("thread-b");
     setCount(thread, 1);
-    announceAddedToMessage(thread, vi.fn());
+    announceAddedToMessage(thread);
     added(0).onClose();
 
-    announceAddedToMessage(thread, vi.fn());
+    announceAddedToMessage(thread);
     expect(mocks.add).toHaveBeenCalledTimes(2);
     expect(added(1).id).not.toBe(added(0).id);
   });
 
-  it("Show opens the destination captured when the comment was added", () => {
+  it("keeps drafts apart and has no action", () => {
     const { setCount, added } = setup();
     const thread = threadRef("thread-c");
-    const newThreadDraft = "draft-7" as DraftId;
-    const open = vi.fn();
-    mocks.sessions.set(newThreadDraft, { environmentId: "env-1", threadId: "draft-thread" });
+    const queuedEdit = "queued-edit:env-1:thread-c:run-3" as DraftId;
     setCount(thread, 1);
-    announceAddedToMessage(thread, open);
-    setCount(newThreadDraft, 1);
-    announceAddedToMessage(newThreadDraft, open);
+    announceAddedToMessage(thread);
     setCount(queuedEdit, 1);
-    announceAddedToMessage(queuedEdit, open);
-    mocks.sessions.clear();
+    announceAddedToMessage(queuedEdit);
 
-    added(0).actionProps!.onClick();
-    added(1).actionProps!.onClick();
-    added(2).actionProps!.onClick();
-    expect(open.mock.calls.map(([destination]) => destination)).toEqual([
-      { threadRef: thread, draftId: null },
-      { threadRef: { environmentId: "env-1", threadId: "draft-thread" }, draftId: newThreadDraft },
-      { threadRef: { environmentId: "env-1", threadId: "thread-2" }, draftId: null },
-    ]);
-    expect(mocks.close).toHaveBeenCalledTimes(3);
-  });
-
-  it("offers no Show for a draft it cannot route to", () => {
-    const { setCount, added } = setup();
-    const newThreadDraft = "draft-8" as DraftId;
-    setCount(newThreadDraft, 1);
-    announceAddedToMessage(newThreadDraft, vi.fn());
-    expect(added(0).actionProps).toBeUndefined();
+    expect(mocks.add).toHaveBeenCalledTimes(2);
+    expect(added(0).id).not.toBe(added(1).id);
+    expect(mocks.add.mock.calls[0]![0]).not.toHaveProperty("actionProps");
   });
 });

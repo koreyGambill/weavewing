@@ -1664,11 +1664,10 @@ export function queuedRunEditDraftId(threadRef: ScopedThreadRef, runId: string):
   );
 }
 
-/** The thread a queued-run edit draft belongs to, or null for any other draft. */
-export function queuedRunEditThreadRef(draftId: string): ScopedThreadRef | null {
+function queuedRunEditThreadId(draftId: string): ThreadId | null {
   if (!draftId.startsWith(QUEUED_RUN_EDIT_DRAFT_PREFIX)) return null;
   const rest = draftId.slice(QUEUED_RUN_EDIT_DRAFT_PREFIX.length);
-  return parseScopedThreadKey(rest.slice(0, rest.lastIndexOf(":")));
+  return parseScopedThreadKey(rest.slice(0, rest.lastIndexOf(":")))?.threadId ?? null;
 }
 
 function resolveComposerThreadId(
@@ -1684,8 +1683,7 @@ function resolveComposerThreadId(
   }
   return (
     state.draftThreadsByThreadKey[normalizedTarget]?.threadId ??
-    queuedRunEditThreadRef(normalizedTarget)?.threadId ??
-    null
+    queuedRunEditThreadId(normalizedTarget)
   );
 }
 

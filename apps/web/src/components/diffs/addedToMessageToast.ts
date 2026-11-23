@@ -1,21 +1,10 @@
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 
 import { toastManager } from "~/components/ui/toast";
-import { type DraftId, queuedRunEditThreadRef, useComposerDraftStore } from "~/composerDraftStore";
-import { focusThreadDraft } from "~/lib/sideChatPane";
-import { buildThreadRouteParams } from "~/threadRoutes";
+import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 
 type ComposerTarget = ScopedThreadRef | DraftId;
-
-/** Where Show goes: a new thread's draft route when `draftId` is set, otherwise the thread route. */
-export interface ShowDestination {
-  readonly threadRef: ScopedThreadRef;
-  readonly draftId: DraftId | null;
-}
-
-type OpenDestination = (destination: ShowDestination) => Promise<void> | void;
 
 interface OpenToast {
   readonly id: string;
@@ -38,16 +27,6 @@ function reviewCommentCount(target: ComposerTarget): number {
   return useComposerDraftStore.getState().getComposerDraft(target)?.reviewComments.length ?? 0;
 }
 
-/** A queued-run edit draft resolves to its thread; Show opens the thread, not the edit. */
-function resolveShowDestination(target: ComposerTarget): ShowDestination | null {
-  if (typeof target !== "string") return { threadRef: target, draftId: null };
-  const queuedEditThread = queuedRunEditThreadRef(target);
-  if (queuedEditThread) return { threadRef: queuedEditThread, draftId: null };
-  const session = useComposerDraftStore.getState().getDraftSession(target);
-  if (!session) return null;
-  return { threadRef: scopeThreadRef(session.environmentId, session.threadId), draftId: target };
-}
-
 function dismiss(key: string) {
   const open = openToasts.get(key);
   if (!open) return;
@@ -57,7 +36,7 @@ function dismiss(key: string) {
 }
 
 /** One confirmation per draft; its count follows the draft and it closes at zero or on send. */
-export function announceAddedToMessage(target: ComposerTarget, openDestination: OpenDestination) {
+export function announceAddedToMessage(target: ComposerTarget) {
   const key = targetKey(target);
   const count = reviewCommentCount(target);
   const existing = openToasts.get(key);
@@ -66,7 +45,6 @@ export function announceAddedToMessage(target: ComposerTarget, openDestination: 
     toastManager.update(existing.id, { title: titleFor(count), timeout: TOAST_TIMEOUT_MS });
     return;
   }
-  const destination = resolveShowDestination(target);
   const id = `added-to-message:${++toastSequence}`;
   const unsubscribe = useComposerDraftStore.subscribe(() => {
     const open = openToasts.get(key);
@@ -83,17 +61,6 @@ export function announceAddedToMessage(target: ComposerTarget, openDestination: 
     type: "success",
     title: titleFor(count),
     timeout: TOAST_TIMEOUT_MS,
-    ...(destination
-      ? {
-          actionProps: {
-            children: "Show",
-            onClick: () => {
-              dismiss(key);
-              void openDestination(destination);
-            },
-          },
-        }
-      : {}),
     onClose: () => {
       const open = openToasts.get(key);
       if (open?.id !== id) return;
@@ -101,16 +68,4 @@ export function announceAddedToMessage(target: ComposerTarget, openDestination: 
       open.unsubscribe();
     },
   });
-}
-
-/** Show navigates like opening the thread from the sidebar, then reveals its main chat composer. */
-export function useAnnounceAddedToMessage() {
-  const navigate = useNavigate();
-  return (target: ComposerTarget) =>
-    announceAddedToMessage(target, async ({ threadRef, draftId }) => {
-      await (draftId === null
-        ? navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(threadRef) })
-        : navigate({ to: "/draft/$draftId", params: { draftId } }));
-      focusThreadDraft(threadRef);
-    });
 }
