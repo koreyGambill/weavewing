@@ -21,6 +21,8 @@ import {
 export const FileLinksExpect = Schema.Struct({
   /** The final answer has at least this many file pills that open a world file. */
   minWorking: Schema.Number,
+  /** Every pill is an absolute path, which opens wherever the thread's folder is. */
+  absolute: Schema.optional(Schema.Boolean),
 });
 
 /** Resolves `.` and `..` segments, which the file system resolves when the client opens the path. */
@@ -116,7 +118,16 @@ export const gradeFileLinks = (
   const pills = cwd === undefined ? [] : fileLinkPills(finalText ?? "", cwd, worldFiles);
   const broken = pills.filter((pill) => !pill.works).map((pill) => pill.source);
   const working = pills.length - broken.length;
+  const relative = pills.filter((pill) => !pill.source.startsWith("/")).map((pill) => pill.source);
   return [
+    ...(expect.absolute
+      ? [
+          {
+            check: `fileLinks absolute ${pills.length - relative.length}/${pills.length}${relative.length ? `: ${relative.join(", ")}` : ""}`,
+            pass: finalText !== undefined && cwd !== undefined && relative.length === 0,
+          },
+        ]
+      : []),
     {
       check: `fileLinks none broken${broken.length ? `: ${broken.join(", ")}` : ""}`,
       pass: finalText !== undefined && cwd !== undefined && broken.length === 0,

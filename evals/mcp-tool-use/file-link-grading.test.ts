@@ -63,4 +63,10 @@ it("needs a finished answer with enough working pills", () => {
   assert.isTrue(passes("It rebases the last three commits.", 0));
   assert.isFalse(passes(undefined, 0));
   assert.isFalse(passes("`src/index.ts`", 0));
+  const absolute = (text: string) =>
+    gradeFileLinks({ minWorking: 1, absolute: true }, text, cwd, files).every(
+      (check) => check.pass,
+    );
+  assert.isTrue(absolute("[ws.ts:3](/home/user/app/packages/server/src/ws.ts:3)"));
+  assert.isFalse(absolute("`packages/server/src/ws.ts:3`, which works but is relative"));
 });

@@ -273,22 +273,27 @@ Fidelity limits:
 
 ## File links cases
 
-`cases/file-links.ndjson` checks the file references in an agent's final answer. Chat turns every file-shaped Markdown link and inline code span into a pill, resolves it against the thread's cwd, and opens that path. `expect.fileLinks` replays the final answer through the same shared resolver (`file-link-grading.ts`) and fails on any pill that lands on no `world.files` entry, except a bare basename that the client's on-click lookup finds exactly once. `minWorking` sets how many working pills the answer needs, so an answer that cites no files cannot pass. Paths outside the thread cwd, `/home` and `/Users` are ignored.
+`cases/file-links.ndjson` checks the file references in an agent's final answer. Chat turns every file-shaped Markdown link and inline code span into a pill, resolves it against the thread's cwd, and opens that path. `expect.fileLinks` replays the final answer through the same shared resolver (`file-link-grading.ts`) and fails on any pill that lands on no `world.files` entry, except a bare basename that the client's on-click lookup finds exactly once. `minWorking` sets how many working pills the answer needs, so an answer that cites no files cannot pass. `absolute` also fails any relative pill, even one that resolves, because the thread's folder may be a parent of the repository or differ from the agent's current directory. Paths outside the thread cwd, `/home` and `/Users` are ignored.
 
-The three `bad` cases reproduce the most common broken pills from a 2026-11-10 audit of 14,000 pills on three machines: package-relative paths (`cloud/http.ts`), basenames that several packages share (`index.ts:5`), and relative paths into a checkout outside the thread cwd. Recent Claude answers broke about a quarter of their pills; Codex, which already writes absolute Markdown links, broke about 1%. The control asks a general git question that needs no file references.
+Three `bad` cases reproduce the most common broken pills from a 2026-11-10 audit of 14,000 pills on three machines: package-relative paths (`cloud/http.ts`), basenames that several packages share (`index.ts:5`), and relative paths into a checkout outside the thread cwd. Three more, from a 2026-11-23 user report, cite files after repository-relative tool output: `git diff --stat`, `grep -rn`, and `grep` run after `cd` into a subfolder. The control asks a general git question that needs no file references.
 
 ### Results
 
-Passes per case, main's runtime text (3 samples) → this branch's "Link every other file you cite or produce by its absolute path" (6 samples over two runs).
+Passes per case, main's runtime text → this text ("Write every file path in your reply as an absolute path, in links and inline code alike..."), 6 samples per case through `--transport claude-cli` on 2026-11-23. One or two samples per run errored and are left out. "Absolute" is the share of pills across all eight cases whose path is absolute.
 
-| Case                          | Opus 5.5  | Sonnet 5.5 |
+| Case                          | Haiku 5.5 | Sonnet 5.5 |
 | ----------------------------- | --------- | ---------- |
-| file-links-package-relative   | 1/3 → 5/6 | 2/3 → 6/6  |
-| file-links-ambiguous-basename | 0/3 → 1/6 | 0/3 → 1/6  |
-| file-links-other-checkout     | 1/3 → 6/6 | 0/3 → 3/6  |
-| file-links-no-files-control   | 3/3 → 6/6 | 3/3 → 6/6  |
+| file-links-package-relative   | 6/6 → 4/6 | 5/5 → 4/6  |
+| file-links-ambiguous-basename | 0/6 → 1/5 | 1/6 → 1/6  |
+| file-links-other-checkout     | 0/6 → 1/6 | 4/6 → 6/6  |
+| file-links-no-files-control   | 6/6 → 6/6 | 6/6 → 6/6  |
+| scratch-file-markdown-link    | 4/5 → 6/6 | 6/6 → 6/6  |
+| file-links-diff-stat          | 5/6 → 6/6 | 4/6 → 6/6  |
+| file-links-grep-results       | 4/6 → 5/6 | 5/6 → 5/6  |
+| file-links-subfolder-cwd      | 6/6 → 4/5 | 4/6 → 5/6  |
+| Absolute                      | 61% → 74% | 82% → 90%  |
 
-After the change, the first reference to a file is an absolute link. The remaining failures come from two other kinds of span. Some repeat the file later as relative inline code (Sonnet's other-checkout failures). Others quote values rather than cite files, such as `main` set to `src/index.ts` or the import `./ws`. Chat still turns those spans into pills.
+The first reference to a file is nearly always an absolute link. Most remaining relative pills are later mentions in inline code, such as a bare `http.ts:5` after an absolute link, or quoted values such as the import `./ws`. Chat still turns those spans into pills. Asking for absolute bare filenames too made Haiku worse (62% absolute). A 6-sample run of the eight cases cost about $0.30 on Haiku and $1.60 on Sonnet, as the CLI reported.
 
 ## Where T3's text lives
 
