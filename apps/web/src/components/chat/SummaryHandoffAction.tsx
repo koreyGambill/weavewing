@@ -39,16 +39,20 @@ import {
   DialogTrigger,
 } from "../ui/dialog";
 import { Textarea } from "../ui/textarea";
+import { COMPOSER_ICON_COLOR } from "./ComposerControl";
 
 type Handoff = typeof OrchestrationV2RpcSchemas.prepareSummaryHandoff.output.Type;
 
 export function SummaryHandoffAction({
   source,
   compact = false,
+  composer = false,
   throughRunId,
 }: {
   readonly source: ScopedThreadRef;
   readonly compact?: boolean;
+  /** Sized and colored like the composer's attach button, which it sits beside. */
+  readonly composer?: boolean;
   readonly throughRunId?: RunId;
 }) {
   const { environmentId, threadId } = source;
@@ -170,14 +174,17 @@ export function SummaryHandoffAction({
         render={
           <Button
             variant="ghost"
-            size={compact ? "icon-xs" : "xs"}
+            type="button"
+            size={composer ? "icon-sm" : compact ? "icon-xs" : "xs"}
             aria-label={throughRunId ? "Hand off from here" : "Hand off"}
-            title={compact ? (throughRunId ? "Hand off from here" : "Hand off") : undefined}
+            title={
+              compact || composer ? (throughRunId ? "Hand off from here" : "Hand off") : undefined
+            }
           />
         }
       >
-        <FileOutputIcon />
-        {compact ? null : throughRunId ? "Hand off from here" : "Hand off"}
+        <FileOutputIcon className={composer ? COMPOSER_ICON_COLOR : undefined} />
+        {compact || composer ? null : throughRunId ? "Hand off from here" : "Hand off"}
       </DialogTrigger>
       <DialogPopup>
         <DialogHeader>

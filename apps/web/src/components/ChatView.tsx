@@ -4,6 +4,7 @@ import { ContextArchiveRow } from "./chat/ContextArchiveRow";
 import SideChatPane from "./chat/SideChatPane";
 import { Button } from "./ui/button";
 import { ForkConversationButton } from "./chat/ForkConversationButton";
+import { SummaryHandoffAction } from "./chat/SummaryHandoffAction";
 import { SideChatContextButton } from "./chat/SideChatContextButton";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
@@ -3932,13 +3933,41 @@ export default function ChatView(props: ChatViewProps) {
                           {!composerMounted ? null : (
                             <ChatComposer
                               footerLeadingControls={
-                                isServerThread &&
-                                sideChatRefreshAvailable &&
-                                !inlineSideChat &&
-                                (activeThread.lineage.sideChat ||
-                                  serverConfig?.environment.capabilities.sideChatAutoContext !==
-                                    true) ? (
-                                  <SideChatContextButton threadKey={routeThreadKey} />
+                                isServerThread ? (
+                                  <>
+                                    {sideChatRefreshAvailable &&
+                                    !inlineSideChat &&
+                                    (activeThread.lineage.sideChat ||
+                                      serverConfig?.environment.capabilities.sideChatAutoContext !==
+                                        true) ? (
+                                      <SideChatContextButton threadKey={routeThreadKey} />
+                                    ) : null}
+                                    <SummaryHandoffAction
+                                      source={scopeThreadRef(
+                                        activeThread.environmentId,
+                                        activeThread.id,
+                                      )}
+                                      composer
+                                    />
+                                    {activeThread.lineage.sideChat !== true &&
+                                      (() => {
+                                        const source = resolveLatestForkableAssistantItem({
+                                          visibleTurnItems: serverVisibleTurnItems,
+                                          runs: serverProjection?.runs ?? [],
+                                        });
+                                        return source ? (
+                                          <ForkConversationButton
+                                            key={activeThreadKey}
+                                            environmentId={activeThread.environmentId}
+                                            source={source}
+                                            disabled={
+                                              !canOperateThread || activeEnvironmentUnavailable
+                                            }
+                                            onFork={onForkFromRunStable}
+                                          />
+                                        ) : null;
+                                      })()}
+                                  </>
                                 ) : undefined
                               }
                               cornerControls={
@@ -3958,25 +3987,6 @@ export default function ChatView(props: ChatViewProps) {
                                         Bring back
                                       </Button>
                                     ) : null}
-                                    {activeThread.lineage.sideChat !== true &&
-                                      (() => {
-                                        const source = resolveLatestForkableAssistantItem({
-                                          visibleTurnItems: serverVisibleTurnItems,
-                                          runs: serverProjection?.runs ?? [],
-                                        });
-                                        return source ? (
-                                          <ForkConversationButton
-                                            compact
-                                            key={activeThreadKey}
-                                            environmentId={activeThread.environmentId}
-                                            source={source}
-                                            disabled={
-                                              !canOperateThread || activeEnvironmentUnavailable
-                                            }
-                                            onFork={onForkFromRunStable}
-                                          />
-                                        ) : null;
-                                      })()}
                                     <PanelLayoutControls
                                       {...panelToggleControlProps}
                                       compact

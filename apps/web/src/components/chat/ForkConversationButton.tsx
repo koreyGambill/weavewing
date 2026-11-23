@@ -13,9 +13,7 @@ export function ForkConversationButton({
   source,
   disabled,
   onFork,
-  compact = false,
 }: {
-  readonly compact?: boolean;
   readonly environmentId: EnvironmentId;
   readonly source: ThreadStructureVisibleTurnItem;
   readonly disabled: boolean;
@@ -37,8 +35,9 @@ export function ForkConversationButton({
       <TooltipTrigger
         render={
           <Button
-            size={compact ? "icon-micro" : "icon-sm"}
-            variant="ghost-muted"
+            type="button"
+            size="icon-sm"
+            variant="ghost"
             aria-label="Fork conversation"
             disabled={disabled || busy || !available}
             onClick={() => {
@@ -52,7 +51,7 @@ export function ForkConversationButton({
           />
         }
       >
-        <GitForkIcon className={compact ? `size-4 ${COMPOSER_ICON_COLOR}` : "size-4"} />
+        <GitForkIcon className={COMPOSER_ICON_COLOR} />
       </TooltipTrigger>
       <TooltipPopup side="top">
         {busy ? "Forking conversation…" : "Fork through the last finished turn"}
