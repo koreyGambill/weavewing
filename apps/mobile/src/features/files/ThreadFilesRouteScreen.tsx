@@ -39,6 +39,7 @@ import { useSelectedThreadWorktree } from "../../state/use-selected-thread-workt
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { projectEnvironment } from "../../state/projects";
+import { sourceControlEnvironment } from "../../state/sourceControl";
 import type { AssetUrlFailureReason } from "../../state/asset-url-state";
 import {
   Inspector,
@@ -641,6 +642,15 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       : null,
   );
   const metadataPending = !metadata.isSuccess && metadata.error === null;
+  const forgeLink = useEnvironmentQuery(
+    canReadFiles && environmentId !== null && targetPath !== null && metadata.data?.kind === "file"
+      ? sourceControlEnvironment.fileLink({
+          environmentId,
+          input: { path: targetPath, ...(targetLine === null ? {} : { line: targetLine }) },
+        })
+      : null,
+  ).data;
+  const forgeFile = forgeLink?._tag === "Available" ? forgeLink : null;
   const directoryPath = metadata.data?.kind === "directory" ? targetPath : null;
   const [searchQuery, setSearchQuery] = useState("");
   const entriesQuery = useFileTreeEntries({
@@ -910,6 +920,24 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
                     }
                   : {}),
               }),
+          } as const)
+        : null,
+      forgeFile
+        ? ({
+            id: "open-on-forge",
+            title: `Open on ${forgeFile.providerLabel}`,
+            icon: "arrow.up.right.square",
+            inline: false,
+            onPress: () => tryOpenExternalUrl(forgeFile.link.url, "forge-file"),
+          } as const)
+        : null,
+      forgeFile
+        ? ({
+            id: "copy-forge-link",
+            title: `Copy ${forgeFile.providerLabel} link`,
+            icon: "link",
+            inline: false,
+            onPress: () => copyTextWithHaptic(forgeFile.link.url),
           } as const)
         : null,
       isBrowserFile && typeof assetPreviewUri === "string"

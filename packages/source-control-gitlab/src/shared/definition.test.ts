@@ -139,3 +139,15 @@ describe("GitLab remotes", () => {
     expect(recognize("https://notgitlab.example.com/group/repo.git")).toBeNull();
   });
 });
+
+describe("GitLab file URLs", () => {
+  it("links a file under nested groups with GitLab's line range", () => {
+    const base = { host: "gitlab.com", repository: "group/sub/app", ref: "main", path: "src/a.ts" };
+    expect(definition.fileUrl({ ...base, line: 57, endLine: 64 })).toBe(
+      "https://gitlab.com/group/sub/app/-/blob/main/src/a.ts#L57-64",
+    );
+    expect(definition.fileUrl({ ...base, line: 57 })).toBe(
+      "https://gitlab.com/group/sub/app/-/blob/main/src/a.ts#L57",
+    );
+  });
+});

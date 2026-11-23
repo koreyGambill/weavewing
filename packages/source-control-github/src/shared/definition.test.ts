@@ -210,3 +210,28 @@ describe("GitHub media URLs", () => {
     expect(rawFileUrl("https://github.example.com/owner/repo", "a.png")).toBeNull();
   });
 });
+
+describe("GitHub file URLs", () => {
+  const fileUrl = definition.fileUrl;
+  const base = { host: "github.com", repository: "t3tools/t3code", path: "apps/web/a b.ts" };
+
+  it("links a file at a branch, with a line or a range", () => {
+    expect(fileUrl({ ...base, ref: "main" })).toBe(
+      "https://github.com/t3tools/t3code/blob/main/apps/web/a%20b.ts",
+    );
+    expect(fileUrl({ ...base, ref: "feature/x", line: 57, endLine: 64 })).toBe(
+      "https://github.com/t3tools/t3code/blob/feature/x/apps/web/a%20b.ts#L57-L64",
+    );
+    expect(fileUrl({ ...base, ref: "main", line: 9, endLine: 9 })).toBe(
+      "https://github.com/t3tools/t3code/blob/main/apps/web/a%20b.ts#L9",
+    );
+  });
+
+  it("follows an Enterprise Server web URL and refuses paths that escape the repository", () => {
+    expect(
+      fileUrl({ ...base, ref: "main", webUrl: "https://ghe.acme.test/team/app", line: 3 }),
+    ).toBe("https://ghe.acme.test/team/app/blob/main/apps/web/a%20b.ts#L3");
+    expect(fileUrl({ ...base, ref: "main", path: "../secret" })).toBeNull();
+    expect(fileUrl({ ...base, ref: "", path: "a.ts" })).toBeNull();
+  });
+});

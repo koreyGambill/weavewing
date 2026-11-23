@@ -77,3 +77,15 @@ describe("Bitbucket remotes", () => {
     expect(recognize("https://notbitbucket.example.com/workspace/repo.git")).toBeNull();
   });
 });
+
+describe("Bitbucket file URLs", () => {
+  it("links a file under src with Bitbucket's line range", () => {
+    const base = { host: "bitbucket.org", repository: "team/app", ref: "main", path: "src/a.ts" };
+    expect(definition.fileUrl({ ...base, line: 57, endLine: 64 })).toBe(
+      "https://bitbucket.org/team/app/src/main/src/a.ts#lines-57:64",
+    );
+    expect(definition.fileUrl({ ...base, line: 57 })).toBe(
+      "https://bitbucket.org/team/app/src/main/src/a.ts#lines-57",
+    );
+  });
+});

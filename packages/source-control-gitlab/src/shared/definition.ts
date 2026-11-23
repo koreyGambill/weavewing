@@ -1,6 +1,7 @@
 import { SourceControlProviderKind } from "@t3tools/contracts";
 import {
   buildCommitUrl,
+  buildFileUrl,
   changeRequestUrlBelow,
   defineSourceControl,
   isChangeRequestInProjectRepository,
@@ -49,6 +50,10 @@ export const definition = defineSourceControl({
       : `${remoteWebOrigin(host, remoteUrl)}/${repository}/-/merge_requests/${number}`,
   parseChangeRequestUrl: (url) => parseChangeRequestPath(url, CHANGE_REQUEST_PATH),
   commitUrl: (input) => buildCommitUrl(input, "-/commit"),
+  fileUrl: (input) =>
+    buildFileUrl(input, "-/blob", (start, end) =>
+      end === null ? `L${start}` : `L${start}-${end}`,
+    ),
   parseCommitUrl: (url) => parseCommitPath(url, COMMIT_PATH),
   repositoryUrlFromPage: (url) => repositoryUrlFromPagePath(url, REPOSITORY_PAGE_PATH),
   // `!12` already links the merge request itself; `#12` is always an issue.

@@ -92,6 +92,9 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadEnvironmentUsage } from "./xwing/ThreadEnvironments";
 import { XwingEnvironmentsPanel } from "./xwing/XwingEnvironmentsPanel";
+import { FileRemoteMenuSection } from "./files/FileRemoteActions";
+import { isAbsolutePath } from "@t3tools/shared/path";
+import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 
 /** Views that lay out their own padding and scrolling. */
 export const FLUSH_THREAD_TOOLS: ReadonlySet<ThreadContextSection> = new Set([
@@ -302,10 +305,8 @@ function ThreadLinks({
   const [service, setService] = useState("all");
   const { copy, isCopied } = useRowCopy();
   const showsFiles = service === "all" || service === "Files";
-  const files = conversationFileLinks(
-    linkableMessages,
-    shell?.worktreePath ?? project?.workspaceRoot,
-  ).filter(
+  const fileLinkRoot = shell?.worktreePath ?? project?.workspaceRoot;
+  const files = conversationFileLinks(linkableMessages, fileLinkRoot).filter(
     (file) =>
       showsFiles &&
       matchesToolFilter([file.displayPath, ...file.ranges.map(formatFileLinkRange)], filter),
@@ -812,6 +813,11 @@ function ThreadLinks({
                   </MenuItem>
                 ) : null}
                 <MenuItem onClick={() => openFileLink(file)}>Open file</MenuItem>
+                <FileRemoteMenuSection
+                  environmentId={threadRef.environmentId}
+                  absolutePath={fileHostPath(file, fileLinkRoot)}
+                  threadRef={threadRef}
+                />
               </RowActions>
             </div>
           ))}
@@ -836,6 +842,11 @@ function ThreadLinks({
       ) : null}
     </div>
   );
+}
+
+function fileHostPath(file: ConversationFileLink, root: string | undefined): string | null {
+  if (isAbsolutePath(file.filePath)) return file.filePath;
+  return root ? resolvePathLinkTarget(file.panelPath, root) : null;
 }
 
 function fileLinkCopyText(file: ConversationFileLink): string {

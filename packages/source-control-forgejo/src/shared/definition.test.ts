@@ -178,3 +178,19 @@ describe("Forgejo change request host", () => {
     ).toBe("forge.example:3000");
   });
 });
+
+describe("Forgejo file URLs", () => {
+  it("links a branch file on the remote's web origin, port included", () => {
+    expect(
+      definition.fileUrl({
+        host: "forge.example",
+        repository: "team/app",
+        remoteUrl: "http://forge.example:3000/team/app.git",
+        ref: "main",
+        path: "src/a.ts",
+        line: 57,
+        endLine: 64,
+      }),
+    ).toBe("http://forge.example:3000/team/app/src/branch/main/src/a.ts#L57-L64");
+  });
+});

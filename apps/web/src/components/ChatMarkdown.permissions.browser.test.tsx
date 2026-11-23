@@ -174,8 +174,11 @@ async function renderMarkdown(text: string) {
   });
 }
 
+// Forge rows depend on reading files, not on host actions, so these cases leave them out.
 function offeredActions() {
-  return state.choose.mock.lastCall![0].map((item: { id: string }) => item.id);
+  return state.choose.mock
+    .lastCall![0].map((item: { id: string }) => item.id)
+    .filter((id: string) => !id.startsWith("remote:"));
 }
 
 async function setAllowed(allowed: boolean) {

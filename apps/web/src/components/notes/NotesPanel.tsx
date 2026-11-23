@@ -2,9 +2,12 @@ import {
   AuthEnvironmentMaintainScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  type EditorId,
   type EnvironmentId,
+  type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useEffect, useRef, useState } from "react";
 import { CircleHelpIcon, EyeIcon, PencilIcon, SendIcon, SettingsIcon } from "lucide-react";
 import { useEnvironmentQuery } from "../../state/query";
@@ -21,6 +24,7 @@ import { Textarea } from "../ui/textarea";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ChatMarkdown from "../ChatMarkdown";
+import { PinnedFileActions } from "../files/PinnedFileActions";
 import { randomUUID } from "../../lib/utils";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import {
@@ -44,9 +48,16 @@ const imageFiles = (files: FileList) => [...files].filter((file) => file.type.st
 export function NotesPanel({
   environmentId,
   threadId,
+  fileActions,
 }: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  /** Shows the core file actions for the note file; Notes stays bound to that one file. */
+  readonly fileActions?: {
+    readonly projectName: string | null;
+    readonly keybindings: ResolvedKeybindingsConfig;
+    readonly availableEditors: ReadonlyArray<EditorId>;
+  };
 }) {
   const canRead = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   const query = useEnvironmentQuery(
@@ -133,6 +144,17 @@ export function NotesPanel({
           {draft ? (draft.saving ? "Saving…" : draft.dirty ? "Unsaved" : "Saved") : ""}
         </span>
         <div className="flex items-center gap-0.5">
+          {fileActions && draft ? (
+            <>
+              <PinnedFileActions
+                environmentId={environmentId}
+                threadRef={scopeThreadRef(environmentId, threadId)}
+                absolutePath={draft.note.path}
+                {...fileActions}
+              />
+              <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-border" />
+            </>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={

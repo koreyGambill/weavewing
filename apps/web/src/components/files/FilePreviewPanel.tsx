@@ -105,6 +105,7 @@ import { useThreadTerminalActions } from "../terminal/useThreadTerminalActions";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { openEditorFind, SearchableSource } from "./fileFind";
 import { resolveFileHeaderActions } from "./fileHeaderActions.logic";
+import { FileRemoteHeaderActions, useFileLinkState } from "./FileRemoteActions";
 import { fileVimCommand } from "./fileVimCommand";
 import { AttachmentFilePreview } from "./AttachmentFilePreview";
 import { AudioPreview } from "./AudioPreview";
@@ -1567,6 +1568,12 @@ export default function FilePreviewPanel({
     previewPath && absolutePath && !attachment && canOperateTerminal
       ? fileVimCommand(absolutePath, serverConfig?.environment.platform.os === "windows")
       : null;
+  const fileLink = useFileLinkState({
+    environmentId,
+    absolutePath: isFolder ? null : absolutePath,
+    line: revealLine ?? undefined,
+    endLine: revealEndLine ?? undefined,
+  });
   const headerActions = resolveFileHeaderActions({
     absolutePath,
     isFolder,
@@ -1580,6 +1587,7 @@ export default function FilePreviewPanel({
     }),
     searchableText: file.data !== null && !isMedia && !isDocument && !isPdf,
     truncated: file.data?.truncated === true,
+    fileLink: fileLink.state,
   });
   const hasFileTypeActions =
     headerActions.find !== null ||
@@ -1789,6 +1797,11 @@ export default function FilePreviewPanel({
               {pathCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
             </FileSurfaceAction>
           ) : null}
+          <FileRemoteHeaderActions
+            actions={headerActions.remote}
+            provider={fileLink.provider}
+            threadRef={threadRef}
+          />
           {headerActions.explorer ? (
             <FileSurfaceAction
               label={explorerShown ? "Hide file explorer" : "Show file explorer"}
@@ -1799,6 +1812,12 @@ export default function FilePreviewPanel({
               <FolderTree className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
+          <FileRemoteHeaderActions
+            actions={headerActions.remote}
+            provider={fileLink.provider}
+            threadRef={threadRef}
+            overflow
+          />
           {hasFileTypeActions ? (
             <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-border" />
           ) : null}

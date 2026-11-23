@@ -26,6 +26,8 @@ import {
 } from "./MarkdownFileLink.logic";
 import { reportMarkdownActionFailure } from "./markdownActionFailure";
 import { WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
+import type { FileRemoteAction } from "../files/fileHeaderActions.logic";
+import { useRunFileRemoteAction } from "../files/FileRemoteActions";
 
 interface MarkdownFileLinkProps {
   environmentId: EnvironmentId | null;
@@ -43,6 +45,8 @@ interface MarkdownFileLinkProps {
   onOpen?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
+  /** The file's forge actions, read when the menu opens since they need a git lookup. */
+  resolveRemoteActions?: (() => Promise<ReadonlyArray<FileRemoteAction>>) | undefined;
   openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenMedia?: (() => void) | undefined;
@@ -73,7 +77,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   onReveal,
   revealLabel,
   resolveCopyPaths,
+  resolveRemoteActions,
 }: MarkdownFileLinkProps) {
+  const runRemoteAction = useRunFileRemoteAction(threadRef);
   const handleOpenInEditor = () => {
     if (!onOpen) {
       return;
@@ -246,6 +252,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
     try {
       const copyItems = markdownFileCopyMenuItems({ targetPath, workspaceRelativePath });
+      const remoteActions = (await resolveRemoteActions?.().catch(() => [])) ?? [];
       const clicked = await api.contextMenu.show(
         [
           ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
@@ -255,11 +262,25 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             : []),
           ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
           ...copyItems.map(({ id, label }) => ({ id, label })),
+          ...remoteActions.map((action, index) => ({
+            id: `remote:${action.id}`,
+            label: action.label,
+            separatorBefore: index === 0,
+            disabled: action.disabledReason !== null,
+            ...((action.disabledReason ?? action.detail)
+              ? { detail: action.disabledReason ?? action.detail ?? "" }
+              : {}),
+          })),
         ] as const,
         position,
         source,
       );
 
+      const remoteAction = remoteActions.find((action) => clicked === `remote:${action.id}`);
+      if (remoteAction) {
+        runRemoteAction(remoteAction);
+        return;
+      }
       if (clicked === "preview-media") {
         onOpenMedia?.();
         return;
