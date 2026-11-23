@@ -410,6 +410,7 @@ const GROUP_BY_KEY = "t3code:sidebar:group-by";
 // Entries are `${groupBy}:${section key}`, so each grouping remembers its own closed sections.
 const GROUP_BY_COLLAPSED_KEY = "t3code:sidebar:group-by-collapsed";
 const DENSE_ROWS_KEY = "t3code:sidebar:dense-rows";
+const THREAD_NUMBERS_KEY = "t3code:sidebar:thread-numbers";
 const THREAD_ORDER_KEY = "t3code:sidebar:thread-order";
 const isSidebarThreadOrder = Schema.is(SidebarThreadOrder);
 const isSidebarGroupBy = Schema.is(SidebarGroupBy);
@@ -1177,6 +1178,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const boringSidebarEnabled = groupBy === "project";
   const [denseRows, setDenseRows] = useLocalStorage(DENSE_ROWS_KEY, false, Schema.Boolean);
+  const [threadNumbers, setThreadNumbers] = useLocalStorage(
+    THREAD_NUMBERS_KEY,
+    false,
+    Schema.Boolean,
+  );
   const [threadOrder, setThreadOrder] = useLocalStorage(
     THREAD_ORDER_KEY,
     "recency",
@@ -1898,15 +1904,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const settledThreadKeysRef = useRef(settledThreadKeys);
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
 
-  const jumpLabelByKey = (() => {
-    const mapping = new Map<string, string>();
+  const { jumpLabelByKey, positionLabelByKey } = (() => {
+    const labels = new Map<string, string>();
+    const positions = new Map<string, string>();
     for (const [index, threadKey] of orderedThreadKeys.entries()) {
       const jumpCommand = threadJumpCommandForIndex(index);
       if (!jumpCommand) break;
+      positions.set(threadKey, String(index + 1));
       const label = shortcutLabelForCommand(keybindings, jumpCommand);
-      if (label) mapping.set(threadKey, label);
+      if (label) labels.set(threadKey, label);
     }
-    return mapping;
+    return { jumpLabelByKey: labels, positionLabelByKey: positions };
   })();
 
   const navigateToThread = (threadRef: ScopedThreadRef) => {
@@ -3952,17 +3960,27 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       </MenuRadioGroup>
                     </MenuGroup>
                     <MenuSeparator />
-                    {groupBy === "project" ? null : (
+                    <MenuGroup>
+                      <MenuGroupLabel>Show</MenuGroupLabel>
                       <MenuCheckboxItem
-                        checked={denseRows}
-                        onCheckedChange={(checked) => setDenseRows(Boolean(checked))}
+                        variant="switch"
+                        checked={threadNumbers}
+                        onCheckedChange={(checked) => setThreadNumbers(Boolean(checked))}
                       >
-                        Dense rows
+                        Thread numbers
                       </MenuCheckboxItem>
-                    )}
-                    {groupBy === "named" ? (
-                      <>
+                      {groupBy === "project" ? null : (
                         <MenuCheckboxItem
+                          variant="switch"
+                          checked={denseRows}
+                          onCheckedChange={(checked) => setDenseRows(Boolean(checked))}
+                        >
+                          Dense rows
+                        </MenuCheckboxItem>
+                      )}
+                      {groupBy === "named" ? (
+                        <MenuCheckboxItem
+                          variant="switch"
                           checked={threadGroups.ungroupedName !== null}
                           onCheckedChange={(checked) =>
                             setThreadGroups((current) =>
@@ -3972,6 +3990,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         >
                           Ungrouped header
                         </MenuCheckboxItem>
+                      ) : null}
+                    </MenuGroup>
+                    {groupBy === "named" ? (
+                      <>
                         <MenuSeparator />
                         <MenuItem onClick={() => createThreadGroup()}>
                           <PlusIcon />
@@ -4283,6 +4305,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             readOpensPullRequestsInRightPanel={readOpensPullRequestsInRightPanel}
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
+                            }
+                            positionLabel={
+                              threadNumbers ? (positionLabelByKey.get(threadKey) ?? null) : null
                             }
                             onThisComputer={computerLocalityById.get(thread.environmentId) ?? null}
                             environmentLabel={

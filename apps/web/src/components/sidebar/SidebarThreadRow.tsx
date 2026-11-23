@@ -624,6 +624,8 @@ type SidebarThreadRowProps = {
   // Read at click time; a prop would re-render every row on entering or leaving a thread route.
   readOpensPullRequestsInRightPanel: () => boolean;
   jumpLabel: string | null;
+  /** The row's jump number, shown at all times when the user turns thread numbers on. */
+  positionLabel: string | null;
   onThisComputer: boolean | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
@@ -1372,6 +1374,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           >
             {/* `contents` keeps one-line rows a single flex row. */}
             <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
+              {props.positionLabel !== null ? (
+                <span
+                  aria-hidden
+                  data-thread-position
+                  className="shrink-0 font-medium text-muted-foreground text-xs tabular-nums"
+                >
+                  {props.positionLabel}
+                </span>
+              ) : null}
               <ThreadGlyph
                 threadId={thread.id}
                 seed={thread.glyphSeed}
@@ -1564,6 +1575,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         >
           <div className="relative z-10 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
+              {props.positionLabel !== null ? (
+                <span
+                  aria-hidden
+                  data-thread-position
+                  className="shrink-0 font-medium text-muted-foreground text-xs tabular-nums"
+                >
+                  {props.positionLabel}
+                </span>
+              ) : null}
               {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
