@@ -62,10 +62,16 @@ export function FileSurfaceAction(props: {
   readonly label: string;
   readonly pressed?: boolean;
   readonly disabled?: boolean;
+  /** Keeps the action visible and hoverable, with the reason as its tooltip. */
+  readonly disabledReason?: string | null;
   readonly onPress: () => void;
   readonly children: ReactNode;
 }) {
   const pressed = props.pressed;
+  const reason = props.disabledReason ?? null;
+  const onPress = () => {
+    if (reason === null) props.onPress();
+  };
   return (
     <Tooltip>
       <TooltipTrigger
@@ -75,7 +81,8 @@ export function FileSurfaceAction(props: {
               type="button"
               className="shrink-0"
               disabled={props.disabled ?? false}
-              onClick={props.onPress}
+              aria-disabled={reason !== null || undefined}
+              onClick={onPress}
               aria-label={props.label}
               variant="ghost"
               size="icon-micro"
@@ -87,7 +94,8 @@ export function FileSurfaceAction(props: {
               className="shrink-0"
               pressed={pressed}
               disabled={props.disabled ?? false}
-              onPressedChange={props.onPress}
+              aria-disabled={reason !== null || undefined}
+              onPressedChange={onPress}
               aria-label={props.label}
               variant="ghost"
               size="micro"
@@ -97,7 +105,7 @@ export function FileSurfaceAction(props: {
           )
         }
       />
-      <TooltipPopup>{props.label}</TooltipPopup>
+      <TooltipPopup>{reason === null ? props.label : `${props.label}: ${reason}`}</TooltipPopup>
     </Tooltip>
   );
 }

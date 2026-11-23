@@ -1380,7 +1380,7 @@ export function ThreadTileWorkspace(props: {
                                   data-fit-tab={tabId}
                                   data-fit={tabFit}
                                 >
-                                  <Tooltip disabled={tabFit !== "icon"}>
+                                  <Tooltip>
                                     <TooltipTrigger
                                       render={
                                         <button
