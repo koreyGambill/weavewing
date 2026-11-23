@@ -221,6 +221,26 @@ async function renderElement(element: ReactElement, options: { router?: false } 
   });
 }
 
+function inlineSideChat(node: ReactNode, anchorText?: string, id = "side-chat") {
+  return [
+    {
+      id: ThreadId.make(id),
+      anchor:
+        anchorText === undefined
+          ? undefined
+          : {
+              messageId: MessageId.make("reply"),
+              text: anchorText,
+              start: 0,
+              end: anchorText.length,
+              prefix: "",
+              suffix: "",
+            },
+      node,
+    },
+  ];
+}
+
 function renderTimeline(entries: ReadonlyArray<Entry>, props: Partial<TimelineProps> = {}) {
   return renderElement(
     <MessagesTimeline {...baseProps()} timelineEntries={entries as Entry[]} {...props} />,
@@ -1412,17 +1432,18 @@ describe("MessagesTimeline citations", () => {
       {
         onCiteAssistantText: () => true,
         onBranchAssistantText: parentBranch,
-        renderInlineSideChats: () => (
-          <MessagesTimeline
-            {...baseProps()}
-            inFlow
-            routeThreadKey={`environment-local:${source.sourceThreadId}`}
-            timelineEntries={innerEntries}
-            onCiteAssistantText={() => true}
-            onBranchAssistantText={childBranch}
-            stableSideChatRunIds={stableSideChatRunIds}
-          />
-        ),
+        inlineSideChats: () =>
+          inlineSideChat(
+            <MessagesTimeline
+              {...baseProps()}
+              inFlow
+              routeThreadKey={`environment-local:${source.sourceThreadId}`}
+              timelineEntries={innerEntries}
+              onCiteAssistantText={() => true}
+              onBranchAssistantText={childBranch}
+              stableSideChatRunIds={stableSideChatRunIds}
+            />,
+          ),
       },
     );
     await userEvent.tripleClick(screen.getByText(text));
@@ -1442,6 +1463,32 @@ describe("MessagesTimeline citations", () => {
     });
     expect(parentBranch).not.toHaveBeenCalled();
     expect(window.getSelection()?.toString().trim()).toBe(text);
+  });
+
+  it("shows a drill-in after the paragraph its passage ends in", async () => {
+    await using screen = await renderTimeline(
+      [message("Opening idea.\n\nMiddle detail.\n\nClosing note.", { role: "assistant" }, "reply")],
+      {
+        inlineSideChats: () => [
+          ...inlineSideChat(<p>Opening drill</p>, "Opening idea.\n\n", "opening"),
+          ...inlineSideChat(<p>Closing drill</p>, "note", "closing"),
+        ],
+      },
+    );
+    const text = (value: string) => screen.getByText(value, { exact: true }).element();
+    await expect.element(screen.getByText("Opening drill")).toBeVisible();
+    const order = [
+      "Opening idea.",
+      "Opening drill",
+      "Middle detail.",
+      "Closing note.",
+      "Closing drill",
+    ].map(text);
+    for (const [index, node] of order.slice(1).entries()) {
+      expect(order[index]!.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }
   });
 
   it("reveals a citation three inline transcripts deep using the root scroller", async () => {
@@ -1468,12 +1515,12 @@ describe("MessagesTimeline citations", () => {
         }
         citationHistory={{ _tag: "found" }}
         timelineEntries={[message(`Drill ${depth}`, { role: "assistant" }, `drill-${depth}`)]}
-        renderInlineSideChats={depth < 3 ? () => branch(depth + 1) : undefined}
+        inlineSideChats={depth < 3 ? () => inlineSideChat(branch(depth + 1)) : undefined}
       />
     );
     await using screen = await renderTimeline(
       [message("Parent reply", { role: "assistant" }, "parent-reply")],
-      { renderInlineSideChats: () => branch(1) },
+      { inlineSideChats: () => inlineSideChat(branch(1)) },
     );
     await expect.element(screen.getByText("Drill 3", { exact: true })).toBeVisible();
     const deepest = screen.getByText("Drill 3", { exact: true }).element();

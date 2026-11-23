@@ -36,6 +36,9 @@ export function findAssistantCitationSourceAnchor(
 
 const CONTROL_SELECTOR = "button, input, textarea, select, [role=button], [contenteditable]";
 const EXCLUDED_SELECTOR = `${CONTROL_SELECTOR}, [hidden], [aria-hidden=true], script, style, template, noscript, svg`;
+/** Content placed inside a message, such as an inline drill-in, that is not the message's text. */
+export const ASSISTANT_TEXT_SKIP_ATTRIBUTE = "data-assistant-text-skip";
+const SKIP_SELECTOR = `[${ASSISTANT_TEXT_SKIP_ATTRIBUTE}]`;
 const BLOCK_SELECTOR =
   "address, article, aside, blockquote, dd, div, dl, dt, figcaption, figure, footer, h1, h2, h3, h4, h5, h6, header, hr, li, main, nav, ol, p, pre, section, table, td, th, tr, ul";
 
@@ -150,7 +153,7 @@ function readAssistantText(root: HTMLElement) {
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
-    if (element.matches(EXCLUDED_SELECTOR)) return;
+    if (element.matches(EXCLUDED_SELECTOR) || element.matches(SKIP_SELECTOR)) return;
     const block = element.matches(BLOCK_SELECTOR);
     if (block || element.tagName === "BR") separator = true;
     if (element.matches("[data-markdown-math]")) {
@@ -170,13 +173,22 @@ function excludedAncestor(node: Node): Element | null {
   return element?.closest(EXCLUDED_SELECTOR) ?? null;
 }
 
+/** The root itself may sit inside an outer message's skipped content. */
+function skippedWithin(root: HTMLElement, node: Node): boolean {
+  const element = node.nodeType === 1 ? (node as Element) : node.parentElement;
+  const skipped = element?.closest(SKIP_SELECTOR);
+  return !!skipped && skipped !== root && root.contains(skipped);
+}
+
 function isUsableRange(root: HTMLElement, range: Range): boolean {
   if (
     range.collapsed ||
     !root.contains(range.startContainer) ||
     !root.contains(range.endContainer) ||
     excludedAncestor(range.startContainer) !== null ||
-    excludedAncestor(range.endContainer) !== null
+    excludedAncestor(range.endContainer) !== null ||
+    skippedWithin(root, range.startContainer) ||
+    skippedWithin(root, range.endContainer)
   ) {
     return false;
   }

@@ -4,6 +4,7 @@ import type {
   ProviderApprovalDecision,
   ResponseContextRecord,
   RuntimeRequestId,
+  SideChatAnchor,
   WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import {
@@ -44,6 +45,13 @@ export interface TurnItemSource {
   }) => Atom.Atom<AsyncResult.AsyncResult<CommandOutputView, unknown>>;
 }
 
+export interface InlineSideChatEntry {
+  readonly id: ThreadId;
+  /** Unset for a branch from the whole reply, which shows after it. */
+  readonly anchor: SideChatAnchor | undefined;
+  readonly node: ReactNode;
+}
+
 export interface TimelineRowSharedState {
   pendingApprovals: ReadonlyMap<RuntimeRequestId, PendingApproval>;
   respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
@@ -54,7 +62,7 @@ export interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
   /** Absent hides "Reply", as in the guest view. */
   onReplyToResponse: ((response: ResponseContextRecord) => boolean) | undefined;
-  renderInlineSideChats?: ((messageId: MessageId) => ReactNode) | undefined;
+  inlineSideChats?: ((messageId: MessageId) => ReadonlyArray<InlineSideChatEntry>) | undefined;
   stableSideChatRunIds?: ReadonlySet<RunId> | undefined;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;

@@ -75,6 +75,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
 import React, {
+  Fragment,
   Suspense,
   type ComponentProps,
   type ClipboardEvent as ReactClipboardEvent,
@@ -264,6 +265,8 @@ interface ChatMarkdownProps {
   /** The change request's repository, when it can differ from the checkout at `cwd`. */
   sourceControlMediaRepository?: string | undefined;
   headingLevelOffset?: number | undefined;
+  /** Set, finished text marks where each later block starts, numbered from this index. */
+  firstBlockIndex?: number | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -1868,6 +1871,7 @@ function ChatMarkdown({
   parseRawHtml = true,
   extraRemarkPlugins = EMPTY_REMARK_PLUGINS,
   renderInsights = false,
+  firstBlockIndex,
   ...props
 }: ChatMarkdownProps) {
   const { componentState, handleCopy, markdownRef, localMediaPreview, closeLocalMediaPreview } =
@@ -1875,12 +1879,13 @@ function ChatMarkdown({
   const hasInsights = renderInsights && text.includes("★ Insight");
   // Streaming re-renders only the last block; offsets for task edits need the whole text.
   const streamingBlocks =
-    props.isStreaming === true &&
+    (props.isStreaming === true || firstBlockIndex !== undefined) &&
     !inline &&
     extraRemarkPlugins.length === 0 &&
     !props.onTaskListChange
       ? splitMarkdownBlocks(text)
       : null;
+  const markBlocks = firstBlockIndex !== undefined && props.isStreaming !== true;
   const incrementalParsing =
     props.isStreaming === true &&
     !hasInsights &&
@@ -1927,20 +1932,24 @@ function ChatMarkdown({
     >
       <ChatMarkdownRendererContext value={componentState}>
         {blocks.map((source, index) => (
-          <MarkdownSource
-            // oxlint-disable-next-line react/no-array-index-key -- streamed blocks only change at the end
-            key={index}
-            text={source}
-            remarkPlugins={remarkPlugins}
-            rehypePlugins={
-              parseRawHtml
-                ? CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
-                : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
-            }
-            shared={!uncachedPlugins}
-            // Every block before the last is finished, so its parse can be reused.
-            cache={!props.isStreaming || index < blocks.length - 1}
-          />
+          // oxlint-disable-next-line react/no-array-index-key -- streamed blocks only change at the end
+          <Fragment key={index}>
+            {markBlocks && index > 0 ? (
+              <span hidden data-markdown-block={firstBlockIndex + index} />
+            ) : null}
+            <MarkdownSource
+              text={source}
+              remarkPlugins={remarkPlugins}
+              rehypePlugins={
+                parseRawHtml
+                  ? CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
+                  : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
+              }
+              shared={!uncachedPlugins}
+              // Every block before the last is finished, so its parse can be reused.
+              cache={!props.isStreaming || index < blocks.length - 1}
+            />
+          </Fragment>
         ))}
       </ChatMarkdownRendererContext>
       {localMediaPreview ? (

@@ -3350,26 +3350,18 @@ export default function ChatView(props: ChatViewProps) {
     if (branches) branches.push(child);
     else inlineSideChats.set(source, [child]);
   }
-  const renderInlineBranches = (
-    branches: ReadonlyArray<(typeof sideChatShells)[number]> | undefined,
-  ) => {
-    if (!displayedThreadRef || !branches?.length) return null;
-    return (
-      <div className="mt-1.5 flex flex-col gap-1">
-        {branches.map((child) => (
-          <InlineSideChat
-            key={child.id}
-            child={child}
-            depth={inlineSideChatDepth + 1}
-            parentRef={displayedThreadRef}
-            parentPanel={parentPanel ?? sideChatParentPanel}
-            expansion={inlineExpansion}
-            onFocusParentComposer={scheduleComposerFocusStable}
-          />
-        ))}
-      </div>
-    );
-  };
+  const renderInlineBranch = (child: (typeof sideChatShells)[number]) =>
+    displayedThreadRef ? (
+      <InlineSideChat
+        key={child.id}
+        child={child}
+        depth={inlineSideChatDepth + 1}
+        parentRef={displayedThreadRef}
+        parentPanel={parentPanel ?? sideChatParentPanel}
+        expansion={inlineExpansion}
+        onFocusParentComposer={scheduleComposerFocusStable}
+      />
+    ) : null;
 
   if (!activeThread) {
     return embedded ? null : <NoActiveThreadState />;
@@ -3727,12 +3719,23 @@ export default function ChatView(props: ChatViewProps) {
                 onCiteAssistantText={citeAssistantTextStable}
                 onBranchAssistantText={canBranchAssistantText ? branchAssistantText : undefined}
                 stableSideChatRunIds={stableSideChatRunIds}
-                renderInlineSideChats={
+                inlineSideChats={
                   inlineSideChats.size > 0
-                    ? (messageId) => renderInlineBranches(inlineSideChats.get(messageId))
+                    ? (messageId) =>
+                        (inlineSideChats.get(messageId) ?? []).map((child) => ({
+                          id: child.id,
+                          anchor: child.lineage.sideChatAnchor,
+                          node: renderInlineBranch(child),
+                        }))
                     : undefined
                 }
-                inlineBranchHeader={renderInlineBranches(unplacedSideChats)}
+                inlineBranchHeader={
+                  unplacedSideChats.length > 0 && displayedThreadRef ? (
+                    <div className="mt-1.5 flex flex-col gap-1">
+                      {unplacedSideChats.map(renderInlineBranch)}
+                    </div>
+                  ) : null
+                }
                 branchOriginMessageIds={branchOriginMessageIds}
                 inlineSideChatMarkers={inlineSideChatMarkers}
                 followUpMessageIds={followUpMessageIds}

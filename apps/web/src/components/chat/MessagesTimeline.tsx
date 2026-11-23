@@ -240,7 +240,7 @@ interface MessagesTimelineProps {
   citationHistory?: CitedHistory;
   onBranchAssistantText?: ((anchor: SideChatAnchor) => Promise<boolean>) | undefined;
   stableSideChatRunIds?: ReadonlySet<RunId> | undefined;
-  renderInlineSideChats?: ((messageId: MessageId) => ReactNode) | undefined;
+  inlineSideChats?: TimelineRowSharedState["inlineSideChats"];
   inlineBranchHeader?: ReactNode;
   branchOriginMessageIds?: ReadonlySet<string> | undefined;
   inlineSideChatMarkers?: ReadonlyArray<InlineSideChatMarker>;
@@ -386,7 +386,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onCiteAssistantText,
   onBranchAssistantText,
   stableSideChatRunIds,
-  renderInlineSideChats,
+  inlineSideChats,
   inlineBranchHeader,
   branchOriginMessageIds,
   inlineSideChatMarkers,
@@ -1224,7 +1224,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onRespondToApproval,
     citationRequest: readyCitationRequest,
     onReplyToResponse,
-    renderInlineSideChats,
+    inlineSideChats,
     stableSideChatRunIds,
     listRef,
     timestampFormat,

@@ -2,8 +2,10 @@
 const DOCUMENT_WIDE_SYNTAX = /^ {0,3}(?:\[[^\]\n]+\]:|<[A-Za-z!?/]|:::|\$\$)|\[\^/m;
 // A backtick fence's info string cannot contain a backtick, so "```a``` is inline" is a code span.
 const FENCE_PATTERN = /^ {0,3}(`{3,}(?![^`\n]*`)|~{3,})/;
-// After a blank line these still continue the previous block: a list item or indented content.
-const CONTINUATION_PATTERN = /^(?:[ \t]|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
+// After a blank line, indented content may continue the previous block, and a list item may
+// continue a list already in it.
+const INDENTED_PATTERN = /^[ \t]/;
+const LIST_ITEM_PATTERN = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 // Claude insight fences render as one callout, so they stay in one block until the closing rule.
 const INSIGHT_OPEN_PATTERN = /^( {0,3})(`?)★ Insight[ \t]+─{3,}\2[ \t]*$/u;
 const INSIGHT_CLOSE_PATTERN = /^( {0,3})(`?)─{3,}\2[ \t]*$/u;
@@ -21,6 +23,7 @@ export function splitMarkdownBlocks(text: string): string[] | null {
   let fenceIndent = 0;
   let afterBlankLine = false;
   let insightIndent: string | null = null;
+  let blockHasList = false;
   for (const line of text.split("\n")) {
     const opener = FENCE_PATTERN.exec(line)?.[1];
     if (fence !== null) {
@@ -44,11 +47,14 @@ export function splitMarkdownBlocks(text: string): string[] | null {
         afterBlankLine &&
         insightIndent === null &&
         lineStart > blockStart &&
-        !CONTINUATION_PATTERN.test(line)
+        !INDENTED_PATTERN.test(line) &&
+        !(blockHasList && LIST_ITEM_PATTERN.test(line))
       ) {
         blocks.push(text.slice(blockStart, lineStart));
         blockStart = lineStart;
+        blockHasList = false;
       }
+      if (LIST_ITEM_PATTERN.test(line)) blockHasList = true;
       afterBlankLine = false;
       if (insightIndent === null) insightIndent = INSIGHT_OPEN_PATTERN.exec(line)?.[1] ?? null;
       fence = opener ?? null;

@@ -27,6 +27,7 @@ describe("splitMarkdownBlocks", () => {
     "# Title\n\nFirst paragraph with `code` and **bold**.\n\nSecond [link](https://example.com).",
     "- one\n- two\n\n- loose three\n\n  continued\n\nAfter the list.",
     "1. first\n\n2. second\n\nText\n\n3) restarted",
+    "Intro.\n\n- one\n\n- two\n\nLead-in\n- tight\n\n- loose\n\n1. ordered",
     "```ts\nconst a = 1;\n\n\nconst b = 2;\n```\n\nafter\n\n~~~\nx\n\n~~~~\n\ny\n~~~\n\nend",
     "> quote\n\n> another quote\n\n> [!NOTE]\n> alert",
     "| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter the table.",
@@ -48,7 +49,8 @@ describe("splitMarkdownBlocks", () => {
   it("splits only between closed blocks", () => {
     expect(splitMarkdownBlocks("a\n\n```\nb\n\nc\n```\n\n- d\n\n- e\n\nf")).toEqual([
       "a\n\n",
-      "```\nb\n\nc\n```\n\n- d\n\n- e\n\n",
+      "```\nb\n\nc\n```\n\n",
+      "- d\n\n- e\n\n",
       "f",
     ]);
   });

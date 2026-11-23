@@ -5,14 +5,19 @@ import {
   parseAssistantReactions,
 } from "@t3tools/shared/messageReactions";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { MessageId, type RunId, type TurnItemId } from "@t3tools/contracts";
+import { MessageId, type RunId, type ThreadId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
-import { memo, use, useState } from "react";
+import { Fragment, memo, use, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { GitForkIcon, HistoryIcon, ReplyIcon } from "lucide-react";
-import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
+import {
+  ASSISTANT_TEXT_SKIP_ATTRIBUTE,
+  captureAssistantMessageOpening,
+  resolveAssistantCitationRange,
+} from "~/lib/assistantTextSelection";
+import { splitMarkdownBlocks } from "./markdownStreamBlocks";
 import { responseContextRecord } from "~/lib/composerContextRecords";
 import { Button } from "../ui/button";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -36,13 +41,56 @@ import { useUiStateStore } from "~/uiStateStore";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 import { readThreadTurnItems } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
-import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
+import {
+  TimelineRowCtx,
+  TimelineRowActivityCtx,
+  type InlineSideChatEntry,
+  type TimelineRow,
+} from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { vcsEnvironment } from "../../state/vcs";
 
 const NO_VCS_STATUS = Atom.make(AsyncResult.initial());
+const NO_SIDE_CHATS: ReadonlyArray<InlineSideChatEntry> = [];
+const NO_BLOCK_PLACEMENT: ReadonlyMap<ThreadId, number> = new Map();
+
+/** The markdown block, counted from 0, holding the last text `range` selects. */
+function markdownBlockAt(source: HTMLElement, range: Range): number {
+  // A paragraph selection can end at the start of the next block.
+  let last: Node = range.endContainer;
+  const walker = source.ownerDocument.createTreeWalker(
+    range.commonAncestorContainer,
+    NodeFilter.SHOW_TEXT,
+  );
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!range.intersectsNode(node)) continue;
+    const text = node as Text;
+    const start = text === range.startContainer ? range.startOffset : 0;
+    const end = text === range.endContainer ? range.endOffset : text.length;
+    if (text.data.slice(start, end).trim()) last = text;
+  }
+  let block = 0;
+  for (const marker of source.querySelectorAll<HTMLElement>("[data-markdown-block]")) {
+    const slot = marker.closest(`[${ASSISTANT_TEXT_SKIP_ATTRIBUTE}]`);
+    if (slot && source.contains(slot)) continue;
+    if (!(last.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_PRECEDING)) break;
+    block = Number(marker.dataset.markdownBlock);
+  }
+  return block;
+}
+
+function InlineSideChatGroup({ chats }: { chats: ReadonlyArray<InlineSideChatEntry> }) {
+  if (chats.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-col gap-1">
+      {chats.map((chat) => (
+        <Fragment key={chat.id}>{chat.node}</Fragment>
+      ))}
+    </div>
+  );
+}
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -52,16 +100,74 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     row.projectedItem?.item.id,
   );
   const rawText = liveText ?? row.message.text;
-  if (isReactionOnlyAssistantText(rawText, row.message.streaming)) return null;
   const text = parseAssistantReactions(rawText).body;
   const messageText =
     text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
+
+  const sideChats = ctx.inlineSideChats?.(row.message.id) ?? NO_SIDE_CHATS;
+  const anchored = row.message.streaming ? [] : sideChats.filter((chat) => chat.anchor);
+  const blocks = anchored.length > 0 ? splitMarkdownBlocks(messageText) : null;
+  const sourceRef = useRef<HTMLDivElement>(null);
+  const [blockById, setBlockById] = useState(NO_BLOCK_PLACEMENT);
+  const anchorKey = blocks ? JSON.stringify(anchored.map((chat) => [chat.id, chat.anchor])) : "";
+  const placeSideChats = useEffectEvent(() => {
+    const source = sourceRef.current?.firstElementChild;
+    if (!blocks || !(source instanceof HTMLElement)) return;
+    const next = new Map<ThreadId, number>();
+    for (const chat of anchored) {
+      const range = chat.anchor && resolveAssistantCitationRange(source, chat.anchor);
+      if (range) next.set(chat.id, markdownBlockAt(source, range));
+    }
+    setBlockById((current) =>
+      current.size === next.size && [...next].every(([id, block]) => current.get(id) === block)
+        ? current
+        : next,
+    );
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an anchor's block is known only from the rendered text, and the drill-in must move there before paint
+  useLayoutEffect(
+    () => placeSideChats(),
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- new anchors or new text can move a passage to another block.
+    [anchorKey, messageText],
+  );
+
+  if (isReactionOnlyAssistantText(rawText, row.message.streaming)) return null;
+
+  const markdownProps = {
+    renderInsights: true,
+    cwd: ctx.markdownCwd,
+    agentDirectories: () =>
+      ctx.threadRef && row.projectedItem
+        ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
+        : [],
+    threadRef: ctx.threadRef ?? undefined,
+    isStreaming: Boolean(row.message.streaming),
+    lineBreaks: shouldPreserveAssistantLineBreaks(messageText),
+    skills: ctx.skills,
+    headingLevelOffset: MESSAGE_HEADING_LEVEL,
+    onUseArtifactTemplate: ctx.onUseArtifactTemplate,
+    onRunShellCommand: ctx.onRunShellCommand,
+    onImageExpand: ctx.onImageExpand,
+  };
+  // A drill-in follows the block its passage ends in; one in the last block follows the reply.
+  const lastBlock = blocks ? blocks.length - 1 : 0;
+  const placement = new Map<ThreadId, number>();
+  for (const chat of blocks ? anchored : []) {
+    const block = blockById.get(chat.id);
+    if (block !== undefined && block < lastBlock) placement.set(chat.id, block);
+  }
+  const cuts = [...new Set(placement.values())].toSorted((a, b) => a - b);
+  const segments = [...cuts, lastBlock].map((last, index) => ({
+    first: index === 0 ? 0 : cuts[index - 1]! + 1,
+    last,
+  }));
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
         <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
         <div
+          ref={sourceRef}
           data-thread-find-text="true"
           className={row.whileWorking ? "border-l border-border/60 pl-3" : undefined}
         >
@@ -79,27 +185,35 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             request={ctx.citationRequest}
             listRef={ctx.listRef}
           >
-            <ChatMarkdown
-              text={messageText}
-              renderInsights
-              cwd={ctx.markdownCwd}
-              agentDirectories={() =>
-                ctx.threadRef && row.projectedItem
-                  ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
-                  : []
-              }
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={Boolean(row.message.streaming)}
-              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-              skills={ctx.skills}
-              headingLevelOffset={MESSAGE_HEADING_LEVEL}
-              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-              onRunShellCommand={ctx.onRunShellCommand}
-              onImageExpand={ctx.onImageExpand}
-            />
+            {blocks ? (
+              segments.map(({ first, last }) => (
+                <Fragment key={first}>
+                  <ChatMarkdown
+                    {...markdownProps}
+                    text={blocks.slice(first, last + 1).join("")}
+                    firstBlockIndex={first}
+                  />
+                  {last < lastBlock ? (
+                    <div
+                      data-assistant-text-skip=""
+                      data-thread-find-ignore=""
+                      className="my-2 flex flex-col gap-1"
+                    >
+                      {sideChats
+                        .filter((chat) => placement.get(chat.id) === last)
+                        .map((chat) => (
+                          <Fragment key={chat.id}>{chat.node}</Fragment>
+                        ))}
+                    </div>
+                  ) : null}
+                </Fragment>
+              ))
+            ) : (
+              <ChatMarkdown {...markdownProps} text={messageText} />
+            )}
           </AssistantCitationSource>
         </div>
-        {ctx.renderInlineSideChats?.(row.message.id)}
+        <InlineSideChatGroup chats={sideChats.filter((chat) => !placement.has(chat.id))} />
         {ctx.onOpenTurnDiff ? (
           <AssistantChangedFilesSection
             turnSummary={row.assistantTurnDiffSummary}
