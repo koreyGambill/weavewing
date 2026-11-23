@@ -97,6 +97,11 @@ export class ThreadWorkspace extends Context.Service<
     readonly questionSubmit: (
       input: ThreadQuestionSubmitInput,
     ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+    /**
+     * Repairs every thread's question mirror from its workspace file, archived threads included,
+     * so a sync lost to a crash or a failed dispatch heals without a visit. Returns threads checked.
+     */
+    readonly reconcileQuestions: Effect.Effect<number, ThreadWorkspaceError>;
     readonly artifactList: (input: ThreadWorkspaceGetInput) => Effect.Effect<
       ReadonlyArray<{
         id: string;
@@ -131,16 +136,18 @@ const questionTitle = (prompt: string): string => {
   const title = words.slice(0, 8).join(" ").slice(0, 80);
   return title.length < prompt.trim().length ? `${title}…` : title;
 };
-const isWaiting = (question: ThreadQuestion) =>
+const isWaiting = (
+  question: ThreadQuestion,
+): question is ThreadQuestion & { readonly state: "open" | "deferred" } =>
   question.state === "open" || question.state === "deferred";
 const waitingQuestions = (
   workspace: Pick<Workspace, "questions">,
 ): ReadonlyArray<OrchestrationV2ThreadQuestionSummary> =>
-  workspace.questions.flatMap((question) =>
-    question.state === "open" || question.state === "deferred"
-      ? [{ id: question.id, title: questionTitle(question.prompt), state: question.state }]
-      : [],
-  );
+  workspace.questions.filter(isWaiting).map((question) => ({
+    id: question.id,
+    title: questionTitle(question.prompt),
+    state: question.state,
+  }));
 const choiceLabels = (question: ThreadQuestion, chosenOptionIds: ReadonlyArray<string>) =>
   question.options
     .filter((option) => chosenOptionIds.includes(option.id))
@@ -256,7 +263,8 @@ const make = Effect.gen(function* () {
     };
   });
   // The thread mirrors waiting questions so the sidebar count needs no workspace reads. A failed
-  // dispatch leaves the mirror stale only until the next read of this workspace repairs it.
+  // dispatch leaves the mirror stale until the next read of this workspace or the startup
+  // reconcile repairs it.
   const syncQuestions = Effect.fn("ThreadWorkspace.syncQuestions")(function* (
     mirrored: ReadonlyArray<OrchestrationV2ThreadQuestionSummary>,
     workspace: Workspace,
@@ -481,16 +489,18 @@ const make = Effect.gen(function* () {
     }
     return items;
   };
-  // The command and message ids hash the records, so a retry after a failed save replays the send.
+  // The orchestrator dedupes a command id, so a retry after a failed save with the same key
+  // replays the send instead of posting a second message.
   const sendAnswers = Effect.fn("ThreadWorkspace.sendAnswers")(function* (
     current: Workspace,
     records: ReadonlyArray<ArtifactAnswerContextRecord>,
     source: "artifact" | "questions",
+    keyed: string,
   ) {
     const owner = yield* requireThread(current.threadId);
     const serialized = yield* encodeSnapshot(records).pipe(Effect.mapError(storage));
     const key = NodeCrypto.createHash("sha256")
-      .update(`${current.threadId}\n${current.revision}\n${serialized}`)
+      .update(`${current.threadId}\n${keyed}\n${serialized}`)
       .digest("hex");
     yield* threads
       .sendToThread({
@@ -538,6 +548,37 @@ const make = Effect.gen(function* () {
       ? Effect.fail(missingQuestion(id))
       : Effect.succeed({ index, question: workspace.questions[index]! });
   };
+  const StoredWorkspace = Schema.Struct({
+    workspace: Schema.Struct({
+      threadId: ThreadId,
+      questions: Schema.optional(Schema.Array(Schema.Unknown)),
+    }),
+  });
+  const storedWorkspaces = Effect.fn("ThreadWorkspace.storedWorkspaces")(function* () {
+    const files = yield* fs.readDirectory(directory).pipe(
+      Effect.catchIf(
+        (e) => e.reason._tag === "NotFound",
+        () => Effect.succeed([]),
+      ),
+      Effect.mapError(storage),
+    );
+    const stored: Array<{ readonly threadId: ThreadId; readonly hasQuestions: boolean }> = [];
+    for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
+      const value = yield* fs
+        .readFileString(path.join(directory, file))
+        .pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(StoredWorkspace))),
+          Effect.mapError(storage),
+        );
+      if (filePath(value.workspace.threadId) !== path.join(directory, file))
+        return yield* storage("Thread identity mismatch.");
+      stored.push({
+        threadId: value.workspace.threadId,
+        hasQuestions: (value.workspace.questions?.length ?? 0) > 0,
+      });
+    }
+    return stored;
+  });
   const get = Effect.fn("ThreadWorkspace.get")(function* (input: ThreadWorkspaceGetInput) {
     return yield* enrich(yield* read(input.threadId));
   }, lock.withPermit);
@@ -598,32 +639,9 @@ const make = Effect.gen(function* () {
       if (!input.allThreads && input.threadId === undefined)
         return yield* invalid("Choose a thread or allThreads.");
       const ids: ThreadId[] = [];
-      if (input.allThreads) {
-        const files = yield* fs.readDirectory(directory).pipe(
-          Effect.catchIf(
-            (e) => e.reason._tag === "NotFound",
-            () => Effect.succeed([]),
-          ),
-          Effect.mapError(storage),
-        );
-        for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
-          const value = yield* fs
-            .readFileString(path.join(directory, file))
-            .pipe(
-              Effect.flatMap(
-                Schema.decodeUnknownEffect(
-                  Schema.fromJsonString(
-                    Schema.Struct({ workspace: Schema.Struct({ threadId: ThreadId }) }),
-                  ),
-                ),
-              ),
-              Effect.mapError(storage),
-            );
-          if (filePath(value.workspace.threadId) !== path.join(directory, file))
-            return yield* storage("Thread identity mismatch.");
-          ids.push(value.workspace.threadId);
-        }
-      } else if (input.threadId !== undefined) ids.push(input.threadId);
+      if (input.allThreads)
+        ids.push(...(yield* storedWorkspaces()).map((stored) => stored.threadId));
+      else if (input.threadId !== undefined) ids.push(input.threadId);
       const entries: ThreadListEntry[] = [];
       for (const id of ids) {
         const thread = yield* requireThread(id).pipe(
@@ -782,7 +800,7 @@ const make = Effect.gen(function* () {
         });
       }
       if (!records.length) return current;
-      yield* sendAnswers(current, records, "artifact");
+      yield* sendAnswers(current, records, "artifact", String(current.revision));
       const answers = { ...version.answers };
       for (const id of input.questionIds)
         answers[id] = { ...answers[id]!, submittedAt: answers[id]?.submittedAt ?? now };
@@ -920,9 +938,12 @@ const make = Effect.gen(function* () {
       const current = yield* read(input.threadId);
       if (new Set(input.ids).size !== input.ids.length)
         return yield* invalid("Choose each question once.");
+      for (const id of input.ids) yield* findQuestion(current, id);
+      // Workspace order, not argument order, so a retry in any order sends the same message.
+      const chosen = current.questions.filter((question) => input.ids.includes(question.id));
       const records: ArtifactAnswerContextRecord[] = [];
-      for (const id of input.ids) {
-        const { question } = yield* findQuestion(current, id);
+      for (const question of chosen) {
+        const id = question.id;
         const answer = question.answer;
         if (!isWaiting(question)) return yield* invalid(`${id} is already ${question.state}.`);
         if (!answer || (!answer.chosenOptionIds.length && !answer.notes.trim()))
@@ -950,7 +971,9 @@ const make = Effect.gen(function* () {
           note: answer.notes,
         });
       }
-      yield* sendAnswers(current, records, "questions");
+      // Keyed by the thread and answers, not the revision, so a retry after a failed save
+      // replays this send even when an unrelated edit landed in between.
+      yield* sendAnswers(current, records, "questions", "questions");
       const now = DateTime.formatIso(yield* DateTime.now);
       return yield* commitQuestions(
         current,
@@ -986,6 +1009,19 @@ const make = Effect.gen(function* () {
         ),
       };
     }, lock.withPermit),
+    reconcileQuestions: Effect.gen(function* () {
+      // Questions are never deleted, so a file without any has nothing to mirror.
+      const stored = (yield* storedWorkspaces()).filter((entry) => entry.hasQuestions);
+      for (const { threadId } of stored)
+        yield* read(threadId).pipe(
+          Effect.catch((cause) =>
+            cause.code === "not_found"
+              ? Effect.void
+              : Effect.logWarning("Could not reconcile thread questions.", { threadId, cause }),
+          ),
+        );
+      return stored.length;
+    }).pipe(lock.withPermit, Effect.withSpan("ThreadWorkspace.reconcileQuestions")),
     artifactList: Effect.fn("ThreadWorkspace.artifactList")(function* (input) {
       const workspace = yield* read(input.threadId);
       return workspace.artifacts.flatMap((artifact) => {

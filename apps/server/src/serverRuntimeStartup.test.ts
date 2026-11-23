@@ -45,6 +45,7 @@ import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { ServerActivation } from "./serverActivation.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as ThreadWorkspace from "./threadWorkspace/ThreadWorkspace.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 
@@ -73,6 +74,7 @@ it.effect.each([
     };
     const imports = { importedThreadCount: 0, importedMessageCount: 0 };
     const dependencies = Layer.mergeAll(
+      Layer.mock(ThreadWorkspace.ThreadWorkspace)({ reconcileQuestions: Effect.succeed(0) }),
       NodeCrypto.layer,
       Layer.succeed(AgentScope, {
         ...AgentScope.defaultValue(),

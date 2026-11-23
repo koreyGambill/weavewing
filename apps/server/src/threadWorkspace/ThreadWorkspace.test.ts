@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import { expect, it } from "@effect/vitest";
 import {
   RunId,
@@ -74,6 +75,10 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   const syncs: Array<ReadonlyArray<OrchestrationV2ThreadQuestionSummary>> = [];
   const mirror = { questions: [] as ReadonlyArray<OrchestrationV2ThreadQuestionSummary> };
   const dispatchFailures = { remaining: 0 };
+  const threadState = { archivedAt: null as DateTime.Utc | null };
+  // Like the orchestrator's command receipts: a repeated command id delivers nothing new.
+  const delivered: ThreadManagement.ThreadManagementSendInput[] = [];
+  const hooks = { onSend: (): void => undefined };
   const messages: OrchestrationV2ConversationMessage[] = [];
   const run = (): OrchestrationV2Run => ({
     id: RunId.make("run"),
@@ -112,7 +117,12 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
         Effect.sync(() => ({
           ...projection,
           messages,
-          thread: { ...projection.thread, id, questions: mirror.questions },
+          thread: {
+            ...projection.thread,
+            id,
+            questions: mirror.questions,
+            archivedAt: threadState.archivedAt,
+          },
           runs: id === threadId ? [] : [run()],
         })),
       dispatch: (command: OrchestrationV2ServerCommand) => {
@@ -137,6 +147,8 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
       sendToThread: (input) =>
         Effect.sync(() => {
           sends.push(input);
+          if (!delivered.some((sent) => sent.commandId === input.commandId)) delivered.push(input);
+          hooks.onSend();
           return {
             dispatch: { sequence: 1, storedEvents: [] },
             projection,
@@ -165,6 +177,9 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   return {
     service: Context.get(context, Workspaces.ThreadWorkspace),
     sends,
+    delivered,
+    hooks,
+    threadState,
     syncs,
     mirror,
     dispatchFailures,
@@ -774,7 +789,7 @@ it.effect("submits drafted answers to the thread as one user message", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
-it.effect("repairs the thread's question mirror on the next read after a failed sync", () =>
+it.effect("repairs a mirror a failed sync left stale, on the next read or at startup", () =>
   Effect.gen(function* () {
     const h = yield* harness();
     h.dispatchFailures.remaining = 1;
@@ -784,6 +799,64 @@ it.effect("repairs the thread's question mirror on the next read after a failed 
     expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "open" }]);
     yield* h.service.get({ threadId });
     expect(h.syncs).toHaveLength(1);
+
+    // No read follows the failed sync: the next server start reconciles from the file.
+    // Archived threads are reconciled too, so unarchiving shows the right count.
+    h.threadState.archivedAt = at;
+    h.dispatchFailures.remaining = 1;
+    yield* h.service.questionUpdate({ threadId, id: "Q1", state: "deferred" }, "user");
+    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "open" }]);
+    const restarted = Context.get(
+      yield* Layer.build(Layer.fresh(Workspaces.layer).pipe(Layer.provide(h.dependencies))),
+      Workspaces.ThreadWorkspace,
+    );
+    expect(yield* restarted.reconcileQuestions).toBe(1);
+    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "deferred" }]);
+    expect(yield* restarted.reconcileQuestions).toBe(1);
+    expect(h.syncs).toHaveLength(2);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("finishes a submit whose save failed after the send without sending again", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [
+        { prompt: "Database?", options: [choice("pg", "Postgres"), choice("lite", "SQLite")] },
+        { prompt: "Flag name?" },
+      ],
+    });
+    yield* h.service.questionDraft({
+      threadId,
+      answers: {
+        Q1: { chosenOptionIds: ["pg"], notes: "" },
+        Q2: { chosenOptionIds: [], notes: "cache-v2" },
+      },
+    });
+    const directory = h.path.join(h.config.stateDir, "thread-workspaces");
+    h.hooks.onSend = () => NodeFS.chmodSync(directory, 0o500);
+    const failed = yield* failureOf(h.service.questionSubmit({ threadId, ids: ["Q1", "Q2"] }));
+    NodeFS.chmodSync(directory, 0o700);
+    h.hooks.onSend = () => undefined;
+    expect(failed.code).toBe("storage");
+    expect(
+      (yield* h.service.get({ threadId })).questions.map((question) => question.state),
+    ).toEqual(["open", "open"]);
+    const before = yield* h.service.get({ threadId });
+    yield* h.service.update({
+      threadId,
+      expectedRevision: before.revision,
+      changes: [{ text: "Unrelated task" }],
+    });
+    const retried = yield* h.service.questionSubmit({ threadId, ids: ["Q2", "Q1"] });
+    expect(h.sends).toHaveLength(2);
+    expect(h.sends[1]?.commandId).toBe(h.sends[0]?.commandId);
+    expect(h.delivered).toHaveLength(1);
+    expect(retried.questions.map((question) => [question.state, question.answeredBy])).toEqual([
+      ["answered", "user"],
+      ["answered", "user"],
+    ]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
