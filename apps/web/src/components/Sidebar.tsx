@@ -2767,6 +2767,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   })();
   const handleThreadDragEnd = (event: DragEndEvent) => {
     let overId = event.over === null ? null : String(event.over.id);
+    let placedInGroups = false;
     if (isGroupDrag) {
       const drop = groupDropStore.get();
       overId = groupDropStore.shelf()?.overId ?? null;
@@ -2776,14 +2777,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       if (drop !== null && arrangement !== null) {
         const key = String(event.active.id);
         setThreadGroups((current) => placeSidebarThread(current, arrangement, key, drop.target));
-        return;
+        if (sectionByThreadKey.get(key) === "active") return;
+        placedInGroups = true;
       }
     }
     if (projectFolders !== null || derivedSections !== null) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
-    const target =
-      overId === null ? null : resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
+    // A thread placed into the groups from another section still has to join Active.
+    const target = placedInGroups
+      ? { section: "active" as const, pinnedOrder: pinnedKeys, activeOrder: activeKeys }
+      : overId === null
+        ? null
+        : resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
     const activeThread = threadByKey.get(activeKey);
     if (activeSection === undefined || target === null || activeThread === undefined) return;
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);

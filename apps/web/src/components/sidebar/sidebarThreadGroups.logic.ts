@@ -162,14 +162,17 @@ function locate(arrangement: SidebarThreadGroupArrangement, key: string) {
   return null;
 }
 
-/** Where a dragged thread lands for a pointer hit, or null when nothing would change. */
+/**
+ * Where a dragged thread lands for a pointer hit, or null when nothing would change. A thread
+ * not yet arranged, such as one dragged from Pinned or Settled, lands wherever it drops.
+ */
 export function resolveSidebarGroupDrop(
   arrangement: SidebarThreadGroupArrangement,
   draggedKey: string,
   hit: SidebarGroupHit,
 ): SidebarGroupDropTarget | null {
   const source = locate(arrangement, draggedKey);
-  if (source === null || !source.isHead) return null;
+  if (source !== null && !source.isHead) return null;
   const headsWithout = (families: readonly Family[]) =>
     families.map((family) => family[0]!).filter((key) => key !== draggedKey);
   let target: SidebarGroupDropTarget;
@@ -188,6 +191,7 @@ export function resolveSidebarGroupDrop(
     const beforeKey = after ? (heads[heads.indexOf(head) + 1] ?? null) : head;
     target = { groupId: over.groupId, beforeKey };
   }
+  if (source === null) return target;
   const currentNext = source.families[source.index + 1]?.[0] ?? null;
   return target.groupId === source.groupId && target.beforeKey === currentNext ? null : target;
 }

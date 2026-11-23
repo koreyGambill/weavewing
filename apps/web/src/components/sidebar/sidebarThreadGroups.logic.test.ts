@@ -148,9 +148,30 @@ describe("resolveSidebarGroupDrop", () => {
     expect(
       resolveSidebarGroupDrop(arranged, "x", { kind: "thread", key: "pinned", after: false }),
     ).toBe(null);
+  });
+
+  it("places a thread dragged in from Pinned or Settled where it drops", () => {
     expect(
       resolveSidebarGroupDrop(arranged, "pinned", { kind: "thread", key: "a", after: false }),
-    ).toBe(null);
+    ).toEqual({ groupId: "demo", beforeKey: "a" });
+    expect(resolveSidebarGroupDrop(arranged, "settled", { kind: "header", groupId: null })).toEqual(
+      { groupId: null, beforeKey: "x" },
+    );
+
+    const fixed = arrangeSidebarThreadGroups(state([]), families("x", "y"), {
+      hideEmptyGroups: false,
+      threadOrder: "fixed",
+    });
+    const target = resolveSidebarGroupDrop(fixed, "pinned", {
+      kind: "thread",
+      key: "y",
+      after: false,
+    })!;
+    expect(placeSidebarThread(state([]), fixed, "pinned", target).ungroupedOrder).toEqual([
+      "x",
+      "pinned",
+      "y",
+    ]);
   });
 });
 
