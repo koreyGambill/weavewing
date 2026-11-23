@@ -1,5 +1,10 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import type { AssistantCitation, MessageId, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  AssistantCitation,
+  MessageId,
+  ScopedThreadRef,
+  SideChatAnchor,
+} from "@t3tools/contracts";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import {
   resolveAssistantCitationRange,
@@ -7,6 +12,7 @@ import {
 } from "~/lib/assistantTextSelection";
 import { toastManager } from "../ui/toast";
 import { observeResize } from "~/lib/observeResize";
+import { useMessageBookmarks } from "../reviews/FollowUps";
 
 const CITATION_PULSE_DURATION_MS = 650;
 const CITATION_HIGHLIGHT_HOLD_MS = 1575;
@@ -16,6 +22,39 @@ const CITATION_HIGHLIGHT_TOTAL_MS =
 const CITATION_HIGHLIGHT_OPACITY = "--assistant-citation-highlight-opacity";
 const CITATION_HIGHLIGHT_PEAK = 0.45;
 const COMMENT_HIGHLIGHT_NAME = "t3-assistant-citation-comment";
+const BOOKMARK_HIGHLIGHT_NAME = "t3-bookmark";
+
+/**
+ * Marks bookmarked passages in one message, finding them again as its text re-renders. Rows
+ * mount and unmount in any order, so each change reads the registered highlight afresh rather
+ * than holding one another row may have unregistered.
+ */
+function observeBookmarkedPassages(root: HTMLElement, anchors: ReadonlyArray<SideChatAnchor>) {
+  const registry = typeof CSS !== "undefined" ? CSS.highlights : undefined;
+  if (typeof Highlight === "undefined" || !registry) return () => {};
+  let ranges: Range[] = [];
+  const unmark = () => {
+    const highlight = registry.get(BOOKMARK_HIGHLIGHT_NAME);
+    for (const range of ranges) highlight?.delete(range);
+    if (highlight?.size === 0) registry.delete(BOOKMARK_HIGHLIGHT_NAME);
+    ranges = [];
+  };
+  const place = () => {
+    unmark();
+    ranges = anchors.flatMap((anchor) => resolveAssistantCitationRange(root, anchor) ?? []);
+    if (ranges.length === 0) return;
+    const highlight = registry.get(BOOKMARK_HIGHLIGHT_NAME) ?? new Highlight();
+    for (const range of ranges) highlight.add(range);
+    registry.set(BOOKMARK_HIGHLIGHT_NAME, highlight);
+  };
+  place();
+  const observer = new MutationObserver(place);
+  observer.observe(root, { childList: true, subtree: true, characterData: true });
+  return () => {
+    observer.disconnect();
+    unmark();
+  };
+}
 
 export function observeAssistantCitationCommentSource({
   anchor,
@@ -364,12 +403,15 @@ export function AssistantCitationSource({
   request,
   listRef,
   citable = true,
+  bookmarkable = false,
   sideChatSource = false,
   children,
 }: {
   messageId: MessageId;
-  /** False for user messages: follow-ups can reveal them, but their text is not quotable. */
+  /** False for user messages: bookmarks can reveal them, but their text is not quotable. */
   citable?: boolean;
+  /** A message the server stores, so it and its passages can be bookmarked. */
+  bookmarkable?: boolean;
   sideChatSource?: boolean;
   threadRef?: ScopedThreadRef;
   itemKey: string;
@@ -385,12 +427,21 @@ export function AssistantCitationSource({
     if (!root || !request || request.citation.messageId !== messageId) return;
     return observeAssistantCitationSource({ root, itemKey, request, list });
   }, [itemKey, listRef, messageId, request]);
+  const bookmarks = useMessageBookmarks(bookmarkable ? (threadRef ?? null) : null, messageId);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this message's bookmarked passages with the CSS highlight registry while it is mounted
+  useEffect(() => {
+    const root = rootRef.current;
+    const anchors = bookmarks.flatMap((bookmark) => bookmark.anchor ?? []);
+    if (!root || anchors.length === 0) return;
+    return observeBookmarkedPassages(root, anchors);
+  }, [bookmarks]);
 
   return (
     <div
       ref={rootRef}
       data-side-chat-source={sideChatSource || undefined}
       data-assistant-citation-source={citable ? messageId : undefined}
+      data-bookmark-source={bookmarkable ? messageId : undefined}
       data-assistant-citation-environment={citable ? threadRef?.environmentId : undefined}
       data-assistant-citation-thread={citable ? threadRef?.threadId : undefined}
     >

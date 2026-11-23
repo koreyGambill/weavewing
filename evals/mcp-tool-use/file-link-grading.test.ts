@@ -13,7 +13,7 @@ const files = [
   "/home/user/work/worker/src/worker.ts",
 ];
 
-it("grades pills the way chat resolves them against the thread cwd", () => {
+it("credits only pills whose literal path under the thread cwd exists", () => {
   const text = [
     "[http.ts](/home/user/app/packages/server/src/cloud/http.ts#L4)",
     "`packages/server/src/cloud/http.ts:6` and `cloud/http.ts:6`",
@@ -33,12 +33,12 @@ it("grades pills the way chat resolves them against the thread cwd", () => {
     "/home/user/app/packages/server/src/cloud/http.ts#L4": true,
     "/home/user/work/worker/src/worker.ts": true,
     "packages/server/src/cloud/http.ts:6": true,
-    "cloud/http.ts:6": true,
-    "ws.ts:3": true,
-    "cloud/http.ts#L4": true,
+    "cloud/http.ts:6": false,
+    "ws.ts:3": false,
+    "cloud/http.ts#L4": false,
     "./ws.ts": false,
     "./packages/server/src/ws.ts": true,
-    "WS.ts:3": true,
+    "WS.ts:3": false,
     "docs/report.pdf": false,
     "index.ts:5": false,
     "src/index.ts": false,
@@ -63,4 +63,47 @@ it("needs a finished answer with enough working pills", () => {
   assert.isTrue(passes("It rebases the last three commits.", 0));
   assert.isFalse(passes(undefined, 0));
   assert.isFalse(passes("`src/index.ts`", 0));
+  const absolute = (text: string) =>
+    gradeFileLinks({ minWorking: 1, absolute: true }, text, cwd, files).every(
+      (check) => check.pass,
+    );
+  assert.isTrue(absolute("[ws.ts:3](/home/user/app/packages/server/src/ws.ts:3)"));
+  assert.isFalse(absolute("`packages/server/src/ws.ts:3`, which works but is relative"));
+  const cites = (text: string) =>
+    gradeFileLinks(
+      { minWorking: 1, cites: [{ file: "packages/server/src/ws.ts", line: 5 }] },
+      text,
+      cwd,
+      files,
+    ).every((check) => check.pass);
+  assert.isTrue(cites("[ws.ts:3-7](/home/user/app/packages/server/src/ws.ts:3-7)"));
+  assert.isTrue(cites("[ws.ts](/home/user/app/packages/server/src/ws.ts#L5)"));
+  assert.isFalse(cites("[ws.ts](/home/user/app/packages/server/src/ws.ts)"));
+  assert.isFalse(cites("[http.ts:5](/home/user/app/packages/server/src/cloud/http.ts:5)"));
+});
+
+it("reads pills as chat renders them", () => {
+  const pills = (text: string) =>
+    fileLinkPills(text, cwd, files).map(({ source, absolute, works }) => [source, absolute, works]);
+  // Code in a link's label renders inside that link's one pill.
+  assert.deepStrictEqual(
+    pills('[`src/ws.ts`](/home/user/app/packages/server/src/ws.ts "server socket")'),
+    [["/home/user/app/packages/server/src/ws.ts", true, true]],
+  );
+  // file: URLs and percent-encoded destinations decode to the absolute path they open.
+  assert.deepStrictEqual(pills("[ws](file:///home/user/app/packages/server/src/ws.ts#L3)"), [
+    ["file:///home/user/app/packages/server/src/ws.ts#L3", true, true],
+  ]);
+  assert.deepStrictEqual(pills("[ws](/home/user/app/packages/server/src/w%73.ts)"), [
+    ["/home/user/app/packages/server/src/w%73.ts", true, true],
+  ]);
+  // Chat links a bare absolute path in prose.
+  assert.deepStrictEqual(pills("It lives in /home/user/app/packages/server/src/ws.ts:3 today."), [
+    ["/home/user/app/packages/server/src/ws.ts:3", true, true],
+  ]);
+  assert.deepStrictEqual(pills("It imports `./ws` and `../cloud/http`."), []);
+  assert.deepStrictEqual(pills("[ws](packages/server/src/ws.ts) and `~/app/src/ws.ts`"), [
+    ["packages/server/src/ws.ts", false, true],
+    ["~/app/src/ws.ts", false, false],
+  ]);
 });

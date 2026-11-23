@@ -60,15 +60,13 @@ export async function loadCitedHistory(input: {
   readonly signal: AbortSignal;
   readonly readThread: () => Promise<CitedThreadSnapshot | null>;
   readonly loadThrough: () => Promise<HistoryPageResult>;
-  /** A follow-up jump reveals the user's own messages too. */
-  readonly revealsUser?: boolean;
 }): Promise<CitedHistoryOutcome> {
   for (let attempts = 0; ; attempts += 1) {
     const thread = await input.readThread();
     if (thread === null || input.signal.aborted) return { _tag: "aborted" };
     if (thread.loadFailed) return COULD_NOT_LOAD;
-    if (thread.message === "assistant" || (thread.message === "user" && input.revealsUser))
-      return { _tag: "found" };
+    // Bookmarks quote and reveal the user's own messages too.
+    if (thread.message === "assistant" || thread.message === "user") return { _tag: "found" };
     if (thread.message !== null) {
       return {
         _tag: "failed",
@@ -93,7 +91,6 @@ export function resolveCitationPhase(input: {
   readonly messageId: string;
   readonly entries: ReadonlyArray<TimelineEntry>;
   readonly rows: ReadonlyArray<MessagesTimelineRow>;
-  readonly revealsUser?: boolean;
 }): CitationPhase {
   if (input.history._tag === "failed") return { _tag: "failed" };
   const source = input.entries.find(
@@ -103,11 +100,8 @@ export function resolveCitationPhase(input: {
   );
   // The history store can hold the message a render before the entries do.
   if (!source) return { _tag: "loading" };
-  if (
-    source.kind === "message" &&
-    !(source.message.role === "assistant" || (source.message.role === "user" && input.revealsUser))
-  )
-    return { _tag: "failed" };
+  // User text is quotable by bookmarks, so only system messages cannot be revealed.
+  if (source.kind === "message" && source.message.role === "system") return { _tag: "failed" };
   const row = input.rows.find(
     (candidate) =>
       (candidate.kind === "message" && candidate.message.id === input.messageId) ||
@@ -214,7 +208,6 @@ const citedHistoryAtom = Atom.family(
       get.addFinalizer(() => controller.abort());
       void loadCitedHistory({
         signal: controller.signal,
-        revealsUser,
         readThread: () => waitForSettledThread(get.registry, settledThreadAtom, controller.signal),
         loadThrough: async () => {
           const result = await runAtomCommand(
