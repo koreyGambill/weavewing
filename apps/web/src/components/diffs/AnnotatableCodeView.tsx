@@ -19,11 +19,11 @@ import {
 } from "~/reviewCommentContext";
 
 import { nextFileCommentId } from "../files/fileCommentAnnotations";
+import { announceAddedToMessage } from "./addedToMessageToast";
 import {
   ADD_TO_MESSAGE_LABEL,
   ADD_TO_MESSAGE_PLACEHOLDER,
   DiffCommentAnnotation,
-  announceAddedToMessage,
 } from "./DiffCommentAnnotation";
 import { StyledDiffCodeView, type StyledDiffCodeViewOptions } from "./StyledDiffCodeView";
 

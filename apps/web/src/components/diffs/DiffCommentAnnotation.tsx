@@ -1,12 +1,8 @@
-import type { EnvironmentId, ProjectId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { MessageCircle, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
-import { toastManager } from "~/components/ui/toast";
-import type { DraftId } from "~/composerDraftStore";
-import { focusThreadDraft } from "~/lib/sideChatPane";
-import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import {
   PullRequestMarkdownTextarea,
   type PullRequestCompletionScope,
@@ -51,22 +47,6 @@ interface DiffCommentAnnotationProps {
 /** File and diff comments ride along with the composer draft rather than posting anywhere. */
 export const ADD_TO_MESSAGE_LABEL = "Add to message";
 export const ADD_TO_MESSAGE_PLACEHOLDER = "Note for the agent…";
-
-export function announceAddedToMessage(target: ScopedThreadRef | DraftId) {
-  const id = toastManager.add({
-    type: "success",
-    title: "Added to your next message",
-    actionProps: {
-      children: "Show",
-      onClick: () => {
-        toastManager.close(id);
-        // A thread's chat may sit behind another tab in its tile; an unsent draft has no tile.
-        if (typeof target === "string") requestWorkspaceFocus({ area: "composer" });
-        else focusThreadDraft(target);
-      },
-    },
-  });
-}
 
 export function DiffCommentAnnotation({
   environmentId,

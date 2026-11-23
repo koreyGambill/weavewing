@@ -139,11 +139,11 @@ import {
 } from "./fileSurfaceChrome";
 import SourceFilePreview from "./ReadOnlySourcePreview";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
+import { announceAddedToMessage } from "../diffs/addedToMessageToast";
 import {
   ADD_TO_MESSAGE_LABEL,
   ADD_TO_MESSAGE_PLACEHOLDER,
   DiffCommentAnnotation,
-  announceAddedToMessage,
 } from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey } from "./fileContentRevision";
 import {
