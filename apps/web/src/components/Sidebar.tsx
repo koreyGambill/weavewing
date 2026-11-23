@@ -296,6 +296,7 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
+  sidebarGroupToRecord,
   localSidebarThreadGroups,
   withServerSidebarGroups,
   deleteSidebarThreadGroup,
@@ -1730,23 +1731,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             }),
       );
       for (const [key, change] of changed) {
-        const { from, to } = change;
         const thread = changedThreads.get(key);
         if (
           thread === undefined ||
-          (to !== null && isUnnamedSidebarThreadGroup(to)) ||
-          to === thread.sidebarGroup ||
-          // A thread leaving an unnamed group it never synced returns to its local place.
-          (thread.sidebarGroup === undefined &&
-            from !== null &&
-            isUnnamedSidebarThreadGroup(from)) ||
           serverConfigs.get(thread.environmentId)?.environment.capabilities.sidebarGroups !== true
         ) {
           continue;
         }
+        const group = sidebarGroupToRecord(change, thread.sidebarGroup);
+        if (group === undefined) continue;
         void setThreadSidebarGroup({
           environmentId: thread.environmentId,
-          input: { threadId: thread.id, group: to },
+          input: { threadId: thread.id, group },
         });
       }
       setStoredThreadGroups(

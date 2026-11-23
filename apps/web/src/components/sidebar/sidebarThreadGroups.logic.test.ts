@@ -3,6 +3,7 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
+  sidebarGroupToRecord,
   deleteSidebarThreadGroup,
   discardNewSidebarThreadGroup,
   isUnnamedSidebarThreadGroup,
@@ -428,6 +429,18 @@ describe("server-recorded groups", () => {
         ["r2", { from: "Remote", to: null }],
       ]),
     );
+  });
+
+  it("reports a thread placed into Ungrouped from nowhere, and records only real changes", () => {
+    // A settled thread's synced group is hidden, so the thread starts outside every container.
+    const placed = { ...view, ungroupedOrder: ["settled"] };
+    const change = changedSidebarThreadGroupNames(view, placed).get("settled");
+    expect(change).toEqual({ from: null, to: null });
+    expect(sidebarGroupToRecord(change!, "Hidden")).toBeNull();
+    expect(sidebarGroupToRecord(change!, undefined)).toBeUndefined();
+    expect(sidebarGroupToRecord({ from: null, to: "New group" }, "A")).toBeUndefined();
+    expect(sidebarGroupToRecord({ from: "New group", to: null }, undefined)).toBeUndefined();
+    expect(sidebarGroupToRecord({ from: "A", to: "B" }, "A")).toBe("B");
   });
 
   it("refuses a name another group has, or one too long for the server", () => {

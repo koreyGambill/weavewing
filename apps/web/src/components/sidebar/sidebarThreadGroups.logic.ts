@@ -363,27 +363,51 @@ export function localSidebarThreadGroups(
 /** The longest group name a thread's server accepts. */
 export const MAX_SIDEBAR_THREAD_GROUP_NAME_LENGTH = 64;
 
-/** Threads whose group name differs between two states, with the name before and after. */
+/**
+ * Threads an edit placed somewhere new: a different group, or into Ungrouped from nowhere, as
+ * when a settled thread whose group is hidden drops into Ungrouped.
+ */
 export function changedSidebarThreadGroupNames(
   before: SidebarThreadGroups,
   after: SidebarThreadGroups,
 ): Map<string, { readonly from: string | null; readonly to: string | null }> {
-  const nameByKey = (state: SidebarThreadGroups) => {
-    const names = new Map<string, string>();
+  const locationByKey = (state: SidebarThreadGroups) => {
+    const locations = new Map<string, string | null>();
     for (const group of state.groups) {
-      for (const key of group.threadKeys) if (!names.has(key)) names.set(key, group.name);
+      for (const key of group.threadKeys) if (!locations.has(key)) locations.set(key, group.name);
     }
-    return names;
+    for (const key of state.ungroupedOrder) if (!locations.has(key)) locations.set(key, null);
+    return locations;
   };
-  const previous = nameByKey(before);
-  const next = nameByKey(after);
+  const previous = locationByKey(before);
+  const next = locationByKey(after);
   const changed = new Map<string, { readonly from: string | null; readonly to: string | null }>();
-  for (const key of new Set([...previous.keys(), ...next.keys()])) {
-    const from = previous.get(key) ?? null;
-    const to = next.get(key) ?? null;
-    if (from !== to) changed.set(key, { from, to });
+  for (const [key, to] of next) {
+    const from = previous.get(key);
+    if (from !== to) changed.set(key, { from: from ?? null, to });
+  }
+  for (const [key, from] of previous) {
+    if (from !== null && !next.has(key)) changed.set(key, { from, to: null });
   }
   return changed;
+}
+
+/**
+ * The group to record on a thread's server for a placement change, or undefined to record
+ * nothing: unnamed placeholder groups stay local, and an unchanged record is not resent.
+ */
+export function sidebarGroupToRecord(
+  change: { readonly from: string | null; readonly to: string | null },
+  recorded: string | null | undefined,
+): string | null | undefined {
+  const { from, to } = change;
+  if (to !== null && isUnnamedSidebarThreadGroup(to)) return undefined;
+  if (to === (recorded ?? null)) return undefined;
+  // A thread leaving an unnamed group it never synced returns to its local place.
+  if (recorded === undefined && from !== null && isUnnamedSidebarThreadGroup(from)) {
+    return undefined;
+  }
+  return to;
 }
 
 /** The group a thread belongs to, or null for Ungrouped. */
