@@ -44,6 +44,47 @@ export interface FileLinkCandidate {
   readonly path: string;
   /** The candidate ends with the link's whole path, not just its file name. */
   readonly matchesPath: boolean;
+  /** Under a dependency, build, cache or dot folder, or ignored by git: listed only on request. */
+  readonly hidden: boolean;
+}
+
+const NOISE_FOLDERS = new Set([
+  "node_modules",
+  ".git",
+  "vendor",
+  "dist",
+  "build",
+  ".next",
+  ".venv",
+  "target",
+  ".cache",
+]);
+
+/** Whether a search hit, by its path under the searched root, is dependency or generated noise. */
+export function isNoisyFileLinkMatch(rootRelativePath: string, ignored: boolean): boolean {
+  if (ignored) return true;
+  const folders = rootRelativePath.split(/[\\/]/).slice(0, -1);
+  return folders.some((folder) => folder.startsWith(".") || NOISE_FOLDERS.has(folder));
+}
+
+/**
+ * The candidates the picker lists for `query`, a case-insensitive substring of the path. Hidden
+ * candidates are counted, and listed only when `showHidden` is set.
+ */
+export function filterFileLinkCandidates(
+  candidates: ReadonlyArray<FileLinkCandidate>,
+  query: string,
+  showHidden: boolean,
+): { readonly listed: ReadonlyArray<FileLinkCandidate>; readonly hiddenCount: number } {
+  const needle = query.trim().toLowerCase();
+  const matching = needle
+    ? candidates.filter((candidate) => candidate.path.toLowerCase().includes(needle))
+    : candidates;
+  const hiddenCount = matching.filter((candidate) => candidate.hidden).length;
+  return {
+    listed: showHidden ? matching : matching.filter((candidate) => !candidate.hidden),
+    hiddenCount,
+  };
 }
 
 const FIND_LIMIT = 100;
@@ -64,7 +105,11 @@ export async function findFileLinkCandidates(input: {
     query: string,
     limit: number,
   ) => Promise<{
-    readonly entries: ReadonlyArray<{ readonly path: string; readonly kind: string }>;
+    readonly entries: ReadonlyArray<{
+      readonly path: string;
+      readonly kind: string;
+      readonly ignored?: boolean | undefined;
+    }>;
     readonly truncated: boolean;
   } | null>;
 }): Promise<{ readonly candidates: ReadonlyArray<FileLinkCandidate>; readonly complete: boolean }> {
@@ -82,15 +127,20 @@ export async function findFileLinkCandidates(input: {
       const path = resolveWorkspaceFilePath(entry.path, roots[index]!);
       const slashed = path.replaceAll("\\", "/");
       const matchesPath = hasFolders && slashed.endsWith(`/${linkPath}`);
+      const hidden = isNoisyFileLinkMatch(entry.path, entry.ignored === true);
+      const seen = byPath.get(path);
+      // Two roots can reach one file; it stays listed when any root sees it outside the noise.
       byPath.set(path, {
         path,
-        matchesPath: matchesPath || byPath.get(path)?.matchesPath === true,
+        matchesPath: matchesPath || seen?.matchesPath === true,
+        hidden: hidden && (seen?.hidden ?? true),
       });
     }
   }
   const depth = (path: string) => path.split(/[\\/]/).length;
   const candidates = [...byPath.values()].sort(
     (left, right) =>
+      Number(left.hidden) - Number(right.hidden) ||
       Number(right.matchesPath) - Number(left.matchesPath) ||
       depth(left.path) - depth(right.path) ||
       left.path.localeCompare(right.path),

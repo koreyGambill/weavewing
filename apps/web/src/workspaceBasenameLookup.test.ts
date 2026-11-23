@@ -4,7 +4,9 @@ import {
   agentWorkingDirectories,
   authoredFileLinkSuffix,
   fileLinkShownPath,
+  filterFileLinkCandidates,
   findFileLinkCandidates,
+  isNoisyFileLinkMatch,
   verifyRelativeFileLink,
 } from "@t3tools/client-runtime/workspace-basename-lookup";
 
@@ -115,11 +117,11 @@ describe("findFileLinkCandidates", () => {
     });
     expect(found).toEqual({
       candidates: [
-        { path: "/code/b/docs/README.md", matchesPath: true },
-        { path: "/code/weavewing/docs/README.md", matchesPath: true },
-        { path: "/code/a/README.md", matchesPath: false },
-        { path: "/code/weavewing/README.md", matchesPath: false },
-        { path: "/code/a/node_modules/x/README.md", matchesPath: false },
+        { path: "/code/b/docs/README.md", matchesPath: true, hidden: false },
+        { path: "/code/weavewing/docs/README.md", matchesPath: true, hidden: false },
+        { path: "/code/a/README.md", matchesPath: false, hidden: false },
+        { path: "/code/weavewing/README.md", matchesPath: false, hidden: false },
+        { path: "/code/a/node_modules/x/README.md", matchesPath: false, hidden: true },
       ],
       complete: true,
     });
@@ -132,7 +134,7 @@ describe("findFileLinkCandidates", () => {
       search: search({ "/code": { entries: ["a/README.md"], truncated: true } }),
     });
     expect(truncated).toEqual({
-      candidates: [{ path: "/code/a/README.md", matchesPath: false }],
+      candidates: [{ path: "/code/a/README.md", matchesPath: false, hidden: false }],
       complete: false,
     });
     const failed = await findFileLinkCandidates({
@@ -142,6 +144,81 @@ describe("findFileLinkCandidates", () => {
     });
     expect(failed.complete).toBe(false);
     expect(failed.candidates).toHaveLength(1);
+  });
+
+  it("hides git-ignored matches and lists a file any root sees outside the noise", async () => {
+    const found = await findFileLinkCandidates({
+      linkPath: "README.md",
+      roots: ["/code", "/code/app"],
+      search: (root) =>
+        Promise.resolve({
+          entries:
+            root === "/code"
+              ? [
+                  { path: "app/.hidden/README.md", kind: "file" },
+                  { path: "app/gen/README.md", kind: "file", ignored: true },
+                ]
+              : [{ path: ".hidden/README.md", kind: "file" }],
+          truncated: false,
+        }),
+    });
+    expect(found.candidates).toEqual([
+      { path: "/code/app/.hidden/README.md", matchesPath: false, hidden: true },
+      { path: "/code/app/gen/README.md", matchesPath: false, hidden: true },
+    ]);
+  });
+});
+
+describe("isNoisyFileLinkMatch", () => {
+  it("flags dependency, build, cache and dot folders under the searched root", () => {
+    for (const path of [
+      "node_modules/x/README.md",
+      "a/.git/README.md",
+      "vendor/x/README.md",
+      "dist/README.md",
+      "a/build/README.md",
+      ".next/README.md",
+      ".venv/lib/README.md",
+      "target/README.md",
+      ".cache/README.md",
+      "a/.github/README.md",
+    ]) {
+      expect(isNoisyFileLinkMatch(path, false), path).toBe(true);
+    }
+  });
+
+  it("keeps ordinary folders, dot files and names that only contain a noise word", () => {
+    for (const path of ["README.md", "docs/README.md", ".env.md", "builder/README.md"]) {
+      expect(isNoisyFileLinkMatch(path, false), path).toBe(false);
+    }
+    expect(isNoisyFileLinkMatch("docs/README.md", true)).toBe(true);
+  });
+});
+
+describe("filterFileLinkCandidates", () => {
+  const candidates = [
+    { path: "/code/weavewing/README.md", matchesPath: false, hidden: false },
+    { path: "/code/bitwing/README.md", matchesPath: false, hidden: false },
+    { path: "/code/weavewing/node_modules/x/README.md", matchesPath: false, hidden: true },
+  ];
+
+  it("lists visible candidates and counts the hidden ones", () => {
+    expect(filterFileLinkCandidates(candidates, "", false)).toEqual({
+      listed: candidates.slice(0, 2),
+      hiddenCount: 1,
+    });
+    expect(filterFileLinkCandidates(candidates, "", true).listed).toEqual(candidates);
+  });
+
+  it("narrows by a case-insensitive substring of the path, hidden count included", () => {
+    expect(filterFileLinkCandidates(candidates, "  WeaveWing ", false)).toEqual({
+      listed: [candidates[0]],
+      hiddenCount: 1,
+    });
+    expect(filterFileLinkCandidates(candidates, "bitwing", false)).toEqual({
+      listed: [candidates[1]],
+      hiddenCount: 0,
+    });
   });
 });
 
