@@ -47,6 +47,17 @@ import {
   DefaultContextItemText,
 } from "./threadInsights.ts";
 import {
+  AgentContextCommitInput,
+  AgentContextCommitResult,
+  AgentContextError,
+  AgentContextGetInput,
+  AgentContextOverview,
+  AgentContextReadInput,
+  AgentContextSaveInput,
+  AgentContextSaveResult,
+  AgentContextSourceText,
+} from "./agentContext.ts";
+import {
   ThreadNote,
   ThreadNotesSettings,
   ThreadNotesGetInput,
@@ -598,6 +609,10 @@ export const WS_METHODS = {
   threadDefaultContextItem: "threadInsights.defaultContextItem",
   threadTimelineGet: "threadInsights.timeline",
   threadUserTurnsGet: "threadInsights.userTurns",
+  agentContextGet: "agentContext.get",
+  agentContextRead: "agentContext.read",
+  agentContextSave: "agentContext.save",
+  agentContextCommit: "agentContext.commit",
   threadNotesGet: "threadNotes.get",
   threadNotesSave: "threadNotes.save",
   threadNotesSettings: "threadNotes.settings",
@@ -1735,6 +1750,28 @@ const WsThreadDefaultContextItemRpc = Rpc.make(WS_METHODS.threadDefaultContextIt
   payload: DefaultContextItemInput,
   success: DefaultContextItemText,
   error: Schema.Union([ThreadInsightsError, EnvironmentAuthorizationError]),
+});
+
+const agentContextErrors = Schema.Union([AgentContextError, EnvironmentAuthorizationError]);
+const WsAgentContextGetRpc = Rpc.make(WS_METHODS.agentContextGet, {
+  payload: AgentContextGetInput,
+  success: AgentContextOverview,
+  error: agentContextErrors,
+});
+const WsAgentContextReadRpc = Rpc.make(WS_METHODS.agentContextRead, {
+  payload: AgentContextReadInput,
+  success: AgentContextSourceText,
+  error: agentContextErrors,
+});
+const WsAgentContextSaveRpc = Rpc.make(WS_METHODS.agentContextSave, {
+  payload: AgentContextSaveInput,
+  success: AgentContextSaveResult,
+  error: agentContextErrors,
+});
+const WsAgentContextCommitRpc = Rpc.make(WS_METHODS.agentContextCommit, {
+  payload: AgentContextCommitInput,
+  success: AgentContextCommitResult,
+  error: agentContextErrors,
 });
 
 const WsThreadInsightsGetRpc = Rpc.make(WS_METHODS.threadInsightsGet, {
@@ -2923,6 +2960,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadInsightsGetRpc,
   WsThreadDefaultContextGetRpc,
   WsThreadDefaultContextItemRpc,
+  WsAgentContextGetRpc,
+  WsAgentContextReadRpc,
+  WsAgentContextSaveRpc,
+  WsAgentContextCommitRpc,
   WsThreadContextGetRpc,
   WsThreadTimelineGetRpc,
   WsThreadUserTurnsGetRpc,

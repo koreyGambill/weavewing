@@ -165,7 +165,7 @@ const NOT_VISIBLE_CLAUDE_CODEX: Readonly<
       why: "Set by the CLI preset; T3 only appends.",
     },
     {
-      label: "Skills, plugins, agents and slash commands",
+      label: "Plugin agents, slash commands and hooks",
       why: "Claude Code lists them from its config folders.",
     },
     {
@@ -179,16 +179,18 @@ const NOT_VISIBLE_CLAUDE_CODEX: Readonly<
       why: "Part of the model's Codex prompt, not sent through T3.",
     },
     {
-      label: "Skills, config developer_instructions and your own MCP servers",
+      label: "Config developer_instructions and your own MCP servers",
       why: "Codex reads them from its home and config.",
     },
   ],
 };
 
-export const notVisibleFor = (driver: string) =>
+export const notVisibleFor = (driver: string, skillsListed: boolean) =>
   NOT_VISIBLE_CLAUDE_CODEX[driver] ?? [
     {
-      label: "The provider's own prompt, tools and instruction files",
+      label: skillsListed
+        ? "The provider's own prompt, tools and instruction files"
+        : "The provider's own prompt, tools, skills and instruction files",
       why: "The provider loads them itself; T3 does not resolve them.",
     },
   ];

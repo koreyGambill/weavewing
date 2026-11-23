@@ -8,6 +8,7 @@ import {
   AuthSettingsWriteScope,
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
+  ProjectId,
   ProviderInstanceId,
   SecretProviderId,
   ThreadId,
@@ -735,4 +736,82 @@ it.effect("lets only connections that can run host commands grant outside edits"
     yield* writer[WS_METHODS.projectsRevokeOutsideEdits]({ grant });
     expect(handled).toBe(2);
   }),
+);
+
+it.effect(
+  "lets only host-command connections edit agent context, and source control commit it",
+  () =>
+    Effect.gen(function* () {
+      type EditMethod = typeof WS_METHODS.agentContextSave | typeof WS_METHODS.agentContextCommit;
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, EditMethod> =>
+            tag !== WS_METHODS.agentContextSave && tag !== WS_METHODS.agentContextCommit,
+        ),
+      );
+      let handled = 0;
+      const clientWith = (scopes: Parameters<typeof RpcAuthorization.layer>[0]) =>
+        RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(WS_METHODS.agentContextSave, () =>
+                Effect.sync(() => {
+                  handled++;
+                  return { sha256: "new" };
+                }),
+              ),
+              group.toLayerHandler(WS_METHODS.agentContextCommit, () =>
+                Effect.sync(() => {
+                  handled++;
+                  return { commitSha: "abc" };
+                }),
+              ),
+              RpcAuthorization.layer(scopes),
+            ),
+          ),
+        );
+      const target = {
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        projectId: ProjectId.make("project"),
+      };
+      const save = {
+        ...target,
+        realPath: "/home/user/AGENTS.md",
+        contents: "x",
+        expectedSha256: "old",
+      };
+      const commit = {
+        ...target,
+        repoRoot: "/home/user/dotfiles",
+        realPaths: ["/home/user/dotfiles/AGENTS.md"],
+        message: "docs: rules",
+        expectedHead: null,
+      };
+
+      // An instruction file steers agents that run commands, so file access alone is not enough.
+      const fileWriter = yield* clientWith([
+        AuthOrchestrationOperateScope,
+        AuthFilesystemWriteScope,
+      ]);
+      expect(yield* fileWriter[WS_METHODS.agentContextSave](save).pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthTerminalOperateScope,
+      });
+      const terminalOnly = yield* clientWith([AuthTerminalOperateScope]);
+      expect(
+        yield* terminalOnly[WS_METHODS.agentContextSave](save).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthFilesystemWriteScope });
+      expect(
+        yield* terminalOnly[WS_METHODS.agentContextCommit](commit).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthSourceControlWriteScope });
+      expect(handled).toBe(0);
+
+      const editor = yield* clientWith([
+        AuthFilesystemWriteScope,
+        AuthTerminalOperateScope,
+        AuthSourceControlWriteScope,
+      ]);
+      expect(yield* editor[WS_METHODS.agentContextSave](save)).toEqual({ sha256: "new" });
+      expect(yield* editor[WS_METHODS.agentContextCommit](commit)).toEqual({ commitSha: "abc" });
+      expect(handled).toBe(2);
+    }),
 );

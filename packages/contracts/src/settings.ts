@@ -42,6 +42,7 @@ import {
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { OutsideWorkspaceEditGrant, ProjectScript, type ProjectMutation } from "./project.ts";
+import { DEFAULT_LOAD_WATCHERS, LoadWatchers } from "./agentContext.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
@@ -1496,6 +1497,10 @@ export const ServerSettings = Schema.Struct({
   outsideWorkspaceEditGrants: Schema.Array(OutsideWorkspaceEditGrant).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** Which tool calls the Context panel records as knowledge loads. */
+  loadWatchers: LoadWatchers.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_LOAD_WATCHERS)),
+  ),
   /** Server-maintained history keeps old worktrees eligible for cleanup and review diffs. */
   previousWorktreesDirectories: Schema.Array(TrimmedString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -2128,6 +2133,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
   outsideWorkspaceEditGrants: Schema.optionalKey(Schema.Array(OutsideWorkspaceEditGrant)),
+  loadWatchers: Schema.optionalKey(LoadWatchers),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

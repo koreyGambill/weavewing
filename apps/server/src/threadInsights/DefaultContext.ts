@@ -29,6 +29,8 @@ import { ProjectService } from "../project/ProjectService.ts";
 import { codexDefaultReasoningEffortOverride } from "../provider/CodexProvider.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { SkillSources } from "../agentContext/SkillSources.ts";
+import { skillListingText } from "../agentContext/skillProvenance.ts";
 import { providerConfigDir } from "./InstructionFileAllowlist.ts";
 import { notVisibleFor, t3ContextParts, toolExposure } from "./defaultContextParts.ts";
 import {
@@ -108,6 +110,7 @@ const make = Effect.gen(function* () {
   const mcpSessions = yield* McpProviderSessions;
   const catalog = yield* McpToolCatalog.McpToolCatalog;
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
+  const skillSources = yield* SkillSources;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -244,23 +247,19 @@ const make = Effect.gen(function* () {
     );
 
     const convention = FILE_CONVENTIONS[driver];
+    const home = yield* HostProcess.HomeDirectory;
+    const entry = (yield* settings.getSettings.pipe(Effect.option)).pipe(
+      Option.flatMap((value) => Option.fromNullishOr(value.providerInstances[instanceId])),
+      Option.getOrUndefined,
+    );
+    const configDir = yield* providerConfigDir(driver, entry, home).pipe(
+      Effect.provideService(Path.Path, path),
+    );
     if (convention !== undefined && cwd !== null) {
-      const home = yield* HostProcess.HomeDirectory;
       const resolved = yield* resolveInstructionFiles(
         convention,
         cwd,
-        {
-          home,
-          platform: yield* HostProcess.Platform,
-          configDir: yield* providerConfigDir(
-            driver,
-            (yield* settings.getSettings.pipe(Effect.option)).pipe(
-              Option.flatMap((value) => Option.fromNullishOr(value.providerInstances[instanceId])),
-              Option.getOrUndefined,
-            ),
-            home,
-          ).pipe(Effect.provideService(Path.Path, path)),
-        },
+        { home, platform: yield* HostProcess.Platform, configDir },
         (file) => isServerInternal(file).pipe(Effect.orElseSucceed(() => true)),
       ).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
@@ -304,6 +303,36 @@ const make = Effect.gen(function* () {
       if (driver === "claudeAgent" && resolved.insideHome)
         notes.push("Claude Code also reads CLAUDE.md files above $HOME; this preview stops there.");
     }
+
+    const skills = yield* skillSources.list({ instanceId, driver, entry, cwd, configDir });
+    for (const skill of skills.skills) {
+      const also = skill.duplicates.length > 0 ? ` · also ${skill.duplicates.join(", ")}` : "";
+      push(
+        {
+          id: `skill:${skill.name}:${skill.path}`,
+          category: "skills",
+          label: skill.name,
+          source: `${skill.origin.label}${skill.origin.detail ? ` (${skill.origin.detail})` : ""}${skill.shadowed ? " · shadowed, never loads" : skill.listed ? "" : " · hidden from the model"}${also}`,
+          delivery: skill.listed ? "every-turn" : "on-demand",
+          bytes: skill.listingBytes,
+          estimatedTokens: skill.listingTokens,
+          counted: skill.listed,
+          readable: true,
+        },
+        Effect.succeed(
+          skillListingText(driver, {
+            name: skill.name,
+            path: skill.path,
+            enabled: true,
+            ...(skill.description ? { description: skill.description } : {}),
+          }),
+        ),
+      );
+    }
+    if (skills.support === "estimate")
+      notes.push(
+        "Skill listing sizes assume the provider lists each skill as name and description.",
+      );
 
     const exposure = toolExposure(driver);
     const tools = t3.support === "unsupported" ? [] : yield* catalog.list;
@@ -353,6 +382,7 @@ const make = Effect.gen(function* () {
       preview: {
         threadId: input.threadId,
         providerInstanceId: instanceId,
+        projectId,
         driver,
         model,
         cwd,
@@ -360,7 +390,7 @@ const make = Effect.gen(function* () {
         filesSupported: convention !== undefined,
         notes,
         items,
-        notVisible: notVisibleFor(driver),
+        notVisible: notVisibleFor(driver, skills.support !== "unsupported"),
         lastTurn:
           lastFootprint === undefined
             ? null

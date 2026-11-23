@@ -1,9 +1,35 @@
 import type {
+  LoadWatcher,
   OrchestrationV2TurnItem,
   OrchestrationV2TurnItemJson,
   ThreadLoadEvent,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+export interface CompiledLoadWatcher {
+  readonly label: string;
+  readonly kind: LoadWatcher["kind"];
+  readonly pattern: RegExp;
+}
+
+/** Settings validate each pattern on save; one that still fails to compile watches nothing. */
+export function compileLoadWatchers(
+  watchers: ReadonlyArray<LoadWatcher>,
+): ReadonlyArray<CompiledLoadWatcher> {
+  return watchers.flatMap((watcher) => {
+    try {
+      return [{ label: watcher.label, kind: watcher.kind, pattern: new RegExp(watcher.pattern) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+const watcherFor = (
+  watchers: ReadonlyArray<CompiledLoadWatcher>,
+  kind: LoadWatcher["kind"],
+  subject: string,
+) => watchers.find((watcher) => watcher.kind === kind && watcher.pattern.test(subject));
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const instructionPath =
@@ -112,6 +138,7 @@ function shellReads(command: string): { paths: string[]; search: boolean } {
 
 export function projectLoadEvent(
   item: OrchestrationV2TurnItem | OrchestrationV2TurnItemJson,
+  watchers: ReadonlyArray<CompiledLoadWatcher>,
 ): ThreadLoadEvent | null {
   let paths: string[] = [];
   let toolName: string;
@@ -125,7 +152,14 @@ export function projectLoadEvent(
     paths = item.results?.map((entry) => entry.fileName) ?? [];
   } else if (item.type === "dynamic_tool") {
     toolName = item.toolName ?? "tool";
-    if (/^Skill$/i.test(toolName) || /skill.*(?:read|load)|(?:read|load).*skill/i.test(toolName)) {
+    const watcher = watcherFor(watchers, "tool", toolName);
+    if (watcher) {
+      kind = "knowledge";
+      label = `${watcher.label}: ${toolName}`;
+    } else if (
+      /^Skill$/i.test(toolName) ||
+      /skill.*(?:read|load)|(?:read|load).*skill/i.test(toolName)
+    ) {
       kind = "skill";
       if (
         typeof item.input === "object" &&
@@ -162,18 +196,18 @@ export function projectLoadEvent(
     output = item.outputOmitted ? null : outputText(item.output);
   } else if (item.type === "command_execution") {
     const command = shellCommand(item.input);
-    const knowledge = /(?:^|[\s;&|/])overwing\s+(?:search|context|standards)(?:\s|$)/.test(command);
+    const watcher = watcherFor(watchers, "command", command);
     const reads = shellReads(command);
-    if (!knowledge && !reads.paths.length) return null;
+    if (!watcher && !reads.paths.length) return null;
     evidence = "inferred";
     toolName = "shell";
-    kind = knowledge ? "knowledge" : reads.search ? "search" : "file";
-    if (knowledge) label = command.slice(0, 512);
-    paths = knowledge ? [] : reads.paths;
+    kind = watcher ? "knowledge" : reads.search ? "search" : "file";
+    if (watcher) label = `${watcher.label}: ${command}`.slice(0, 512);
+    paths = watcher ? [] : reads.paths;
     output = item.outputOmitted ? null : (item.output ?? null);
   } else return null;
   paths = [...new Set(paths)].slice(0, 64).map((path) => path.slice(0, 512));
-  if (kind !== "search") {
+  if (kind !== "search" && kind !== "knowledge") {
     if (paths.some((path) => skillPath.test(path))) kind = "skill";
     else if (paths.some((path) => instructionPath.test(path))) kind = "instructions";
   }

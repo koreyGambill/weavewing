@@ -1,4 +1,5 @@
 import {
+  DEFAULT_LOAD_WATCHERS,
   ThreadInsightsError,
   type ThreadInsights as Insights,
   type ThreadInsightsGetInput,
@@ -10,7 +11,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
-import { projectLoadEvent } from "./insightProjection.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { compileLoadWatchers, projectLoadEvent } from "./insightProjection.ts";
 
 export class ThreadInsights extends Context.Service<
   ThreadInsights,
@@ -20,6 +22,7 @@ export class ThreadInsights extends Context.Service<
 const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const footprints = yield* InstructionFootprints;
+  const settings = yield* ServerSettingsService;
   const get = Effect.fn("ThreadInsights.get")(function* ({
     threadId,
     runId,
@@ -83,6 +86,12 @@ const make = Effect.gen(function* () {
                   }),
               ),
             );
+    const watchers = compileLoadWatchers(
+      yield* settings.getSettings.pipe(
+        Effect.map((value) => value.loadWatchers),
+        Effect.orElseSucceed(() => DEFAULT_LOAD_WATCHERS),
+      ),
+    );
     return {
       threadId,
       selectedRunId,
@@ -94,7 +103,7 @@ const make = Effect.gen(function* () {
       loads:
         toolRecords?.turnItems
           .flatMap((item) => {
-            const event = projectLoadEvent(item);
+            const event = projectLoadEvent(item, watchers);
             return event === null ? [] : [event];
           })
           .toSorted((a, b) => a.at.localeCompare(b.at)) ?? [],

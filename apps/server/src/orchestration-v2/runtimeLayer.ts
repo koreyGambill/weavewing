@@ -9,6 +9,8 @@ import * as MonitoringFollowup from "../monitoring/MonitoringFollowup.ts";
 import * as ThreadMarks from "../threadWorkspace/ThreadMarks.ts";
 import * as ThreadInsights from "../threadInsights/ThreadInsights.ts";
 import * as DefaultContext from "../threadInsights/DefaultContext.ts";
+import * as AgentContext from "../agentContext/AgentContext.ts";
+import * as SkillSources from "../agentContext/SkillSources.ts";
 import * as McpToolCatalog from "../mcp/McpToolCatalog.ts";
 import * as ThreadTimeline from "../threadInsights/ThreadTimeline.ts";
 import * as InstructionFootprints from "../threadInsights/InstructionFootprints.ts";
@@ -519,8 +521,12 @@ export const layerProduction = Layer.mergeAll(
         layerManagedProjectFoldersProvided,
         layerProjectService,
         McpToolCatalog.layer,
+        SkillSources.layer,
       ),
     ),
+  ),
+  AgentContext.layer.pipe(
+    Layer.provide(Layer.mergeAll(layerProjectService, SkillSources.layer, GitVcsDriver.layer)),
   ),
   ThreadNotes.layer.pipe(
     Layer.provide(Layer.merge(layerOrchestratorProvided, layerThreadManagementProvided)),

@@ -32,6 +32,7 @@ import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.t
 import * as ServerConfig from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
+import { SkillSources } from "../agentContext/SkillSources.ts";
 import { DefaultContext, layer as defaultContextLayer } from "./DefaultContext.ts";
 import { t3ContextParts } from "./defaultContextParts.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
@@ -493,6 +494,9 @@ const serviceLayer = (input: {
           } as never),
         }),
         Layer.mock(McpProviderSessions)({ read: () => Effect.undefined }),
+        Layer.mock(SkillSources)({
+          list: () => Effect.succeed({ support: "unsupported", skills: [] }),
+        }),
         Layer.succeed(
           McpToolCatalog.McpToolCatalog,
           McpToolCatalog.McpToolCatalog.of({

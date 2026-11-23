@@ -21,6 +21,7 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as Sqlite from "../../../persistence/Sqlite.ts";
 import * as AutomationLimits from "../../../scheduledTasks/AutomationLimits.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
+import { ServerSettingsService } from "../../../serverSettings.ts";
 import * as ContextRecords from "../../../threadInsights/ContextRecords.ts";
 import * as Footprints from "../../../threadInsights/InstructionFootprints.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
@@ -118,6 +119,7 @@ it.effect("defaults to compact context pages and lets callers request full tool 
         ),
         Layer.provide(
           ContextRecords.layer.pipe(
+            Layer.provide(ServerSettingsService.layerTest()),
             Layer.provide(
               Layer.mock(Footprints.InstructionFootprints)({
                 list: (threadId, runId) =>

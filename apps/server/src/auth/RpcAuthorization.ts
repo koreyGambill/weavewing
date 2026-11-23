@@ -42,6 +42,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.threadInsightsGet]: AuthOrchestrationReadScope,
   [WS_METHODS.threadContextGet]: AuthOrchestrationReadScope,
   [WS_METHODS.threadDefaultContextGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.agentContextGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.agentContextRead]: AuthFilesystemReadScope,
   [WS_METHODS.threadTimelineGet]: AuthOrchestrationReadScope,
   [WS_METHODS.threadUserTurnsGet]: AuthOrchestrationReadScope,
   [WS_METHODS.threadNotesGet]: AuthOrchestrationReadScope,

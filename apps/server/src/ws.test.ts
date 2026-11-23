@@ -6,6 +6,7 @@ import * as MonitoringDialogue from "./monitoring/MonitoringDialogue.ts";
 import * as ThreadMarks from "./threadWorkspace/ThreadMarks.ts";
 import * as ThreadInsights from "./threadInsights/ThreadInsights.ts";
 import * as DefaultContext from "./threadInsights/DefaultContext.ts";
+import * as AgentContext from "./agentContext/AgentContext.ts";
 import * as ThreadTimeline from "./threadInsights/ThreadTimeline.ts";
 import * as ThreadNotes from "./threadNotes/ThreadNotes.ts";
 import * as ThreadWorkspace from "./threadWorkspace/ThreadWorkspace.ts";
@@ -878,6 +879,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ThreadMarks.ThreadMarks)({}),
   Layer.mock(ThreadInsights.ThreadInsights)({}),
   Layer.mock(DefaultContext.DefaultContext)({}),
+  Layer.mock(AgentContext.AgentContext)({}),
   Layer.mock(ContextRecords.ContextRecords)({}),
   Layer.mock(ThreadTimeline.ThreadTimeline)({}),
   Layer.mock(ThreadNotes.ThreadNotes)({}),
