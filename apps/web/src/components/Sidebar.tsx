@@ -304,6 +304,7 @@ import {
   canMoveSidebarThreadGroup,
   DEFAULT_UNGROUPED_NAME,
   placeSidebarThread,
+  sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
   setSidebarUngroupedHeader,
   resolveSidebarGroupDrop,
@@ -472,6 +473,7 @@ function resolveDraggedOrders(input: {
   readonly threadByKey: ReadonlyMap<string, EnvironmentThreadShell>;
   readonly settledThreads: readonly EnvironmentThreadShell[];
   readonly activeThreads: readonly EnvironmentThreadShell[];
+  readonly threadOrder: SidebarThreadOrder;
 }): typeof NO_DRAGGED_ORDERS {
   const { drag, threadByKey, settledThreads, activeThreads } = input;
   const thread = threadByKey.get(drag.activeKey);
@@ -484,12 +486,19 @@ function resolveDraggedOrders(input: {
       applySidebarThreadDrop(thread, "settled", drag.occurredAt),
     ]).map(threadShellKey),
     activeOrder: groupSidebarThreadFamilies(
-      sortWorkingThreadsBySend([
-        ...others(activeThreads),
-        applySidebarThreadDrop(thread, "active", drag.occurredAt),
-      ]),
+      sortActiveThreads(
+        [...others(activeThreads), applySidebarThreadDrop(thread, "active", drag.occurredAt)],
+        input.threadOrder,
+      ),
     ).map(({ thread }) => threadShellKey(thread)),
   };
+}
+
+function sortActiveThreads(
+  threads: readonly EnvironmentThreadShell[],
+  order: SidebarThreadOrder,
+): EnvironmentThreadShell[] {
+  return order === "fixed" ? sortActiveThreadsByEntry(threads) : sortWorkingThreadsBySend(threads);
 }
 
 function routeThreadOnly(
@@ -870,11 +879,9 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const sortedPinned = groupSidebarThreadFamilies(sortPinnedThreadsForSidebar(pinned)).map(
     ({ thread }) => thread,
   );
-  const sortedActive = groupSidebarThreadFamilies(
-    input.threadOrder === "fixed"
-      ? sortActiveThreadsByEntry(active)
-      : sortWorkingThreadsBySend(active),
-  ).map(({ thread }) => thread);
+  const sortedActive = groupSidebarThreadFamilies(sortActiveThreads(active, input.threadOrder)).map(
+    ({ thread }) => thread,
+  );
   return {
     pinnedThreads:
       optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -1554,11 +1561,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     },
   );
 
-  const [threadGroups, setThreadGroups] = useLocalStorage(
+  const [storedThreadGroups, setStoredThreadGroups] = useLocalStorage(
     THREAD_GROUPS_KEY,
     EMPTY_SIDEBAR_THREAD_GROUPS,
     SidebarThreadGroups,
   );
+  const threadGroups = sidebarThreadGroupsForOrder(storedThreadGroups, threadOrder);
+  const setThreadGroups = (update: (current: SidebarThreadGroups) => SidebarThreadGroups) =>
+    setStoredThreadGroups((current) =>
+      sidebarThreadGroupsForOrder(
+        update(sidebarThreadGroupsForOrder(current, threadOrder)),
+        threadOrder,
+      ),
+    );
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   // A group made moments ago and the groups before it, until the user names it.
   const [newThreadGroup, setNewThreadGroup] = useState<{
@@ -2624,6 +2639,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           threadByKey,
           settledThreads,
           activeThreads,
+          threadOrder,
         });
   const sidebarSortingStrategy = createSidebarSortingStrategy({
     items: sidebarListItems,

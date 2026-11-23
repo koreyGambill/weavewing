@@ -8,6 +8,7 @@ import {
   EMPTY_SIDEBAR_THREAD_GROUPS,
   moveSidebarThreadGroup,
   placeSidebarThread,
+  sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
   setSidebarUngroupedHeader,
   resolveSidebarGroupDrop,
@@ -32,6 +33,7 @@ const state = (
   ungroupedCollapsed: false,
   ungroupedName: null,
   ungroupedIndex: 0,
+  fixedUngroupedOrder: [],
 });
 
 const families = (...keys: string[]) => keys.map((key) => key.split("+"));
@@ -177,6 +179,18 @@ describe("placeSidebarThread", () => {
     expect(
       placeSidebarThread(current, fixed, "a", { groupId: null, beforeKey: "y" }).ungroupedOrder,
     ).toEqual(["filtered-out", "a", "y", "new"]);
+  });
+
+  it("keeps the fixed Ungrouped order when a thread moves under recency order", () => {
+    const stored = { ...state([], ["a", "b", "c"]), fixedUngroupedOrder: ["a", "b", "c"] };
+    const arranged = arrangeSidebarThreadGroups(stored, families("c", "b", "a"), {
+      hideEmptyGroups: false,
+    });
+    const next = placeSidebarThread(stored, arranged, "b", { groupId: null, beforeKey: "a" });
+    expect(next.ungroupedOrder).toEqual(["b", "a", "c"]);
+    const fixed = sidebarThreadGroupsForOrder(next, "fixed");
+    expect(fixed.ungroupedOrder).toEqual(["a", "b", "c"]);
+    expect(sidebarThreadGroupsForOrder(fixed, "fixed")).toEqual(next);
   });
 
   it("reorders under a filter without moving the threads it hides", () => {

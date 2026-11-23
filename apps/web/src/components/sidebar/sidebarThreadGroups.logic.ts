@@ -22,6 +22,10 @@ export const SidebarThreadGroups = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   ungroupedIndex: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  /** Ungrouped's manual order under fixed thread order, kept apart so recency moves leave it be. */
+  fixedUngroupedOrder: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
 });
 export type SidebarThreadGroups = typeof SidebarThreadGroups.Type;
 export type SidebarThreadGroup = SidebarThreadGroups["groups"][number];
@@ -32,7 +36,25 @@ export const EMPTY_SIDEBAR_THREAD_GROUPS: SidebarThreadGroups = {
   ungroupedCollapsed: false,
   ungroupedName: null,
   ungroupedIndex: 0,
+  fixedUngroupedOrder: [],
 };
+
+/**
+ * The groups as one thread order sees them: under fixed order the two Ungrouped orders trade
+ * places, so every edit reads and writes `ungroupedOrder`. Applying it twice restores the state.
+ */
+export function sidebarThreadGroupsForOrder(
+  state: SidebarThreadGroups,
+  order: "recency" | "fixed",
+): SidebarThreadGroups {
+  return order === "fixed"
+    ? {
+        ...state,
+        ungroupedOrder: state.fixedUngroupedOrder,
+        fixedUngroupedOrder: state.ungroupedOrder,
+      }
+    : state;
+}
 
 export const DEFAULT_UNGROUPED_NAME = "Ungrouped";
 
