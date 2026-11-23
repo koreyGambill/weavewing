@@ -250,9 +250,12 @@ import { assetEnvironment, useAssetUrl, useRefreshAssetUrl } from "../../state/a
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { readEnvironmentScope, usePreparedConnection } from "../../state/session";
 import { environmentProjects, projectEnvironment } from "../../state/projects";
+import { filesystemEnvironment } from "../../state/filesystem";
 import {
   agentWorkingDirectories,
+  childFoldersBrowsePath,
   findAgentDirectoryMatch,
+  findChildCheckoutMatch,
   needsWorkspaceBasenameLookup,
   pickProjectLinkMatch,
   pickWorkspaceLinkMatch,
@@ -3006,6 +3009,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     const workspaceRoot = props.workspaceRoot;
     const originalPath = resolveWorkspaceFilePath(workspaceRoot, relativePath);
     const queryOptions = { signal, reportFailure: false, reportDefect: false };
+    const replyAgentDirectories = (source: MarkdownLinkReply) =>
+      agentWorkingDirectories(
+        appAtomRegistry.get(
+          environmentThreadDetails.quietThreadAtom(
+            scopeThreadRef(props.environmentId, props.threadId),
+          ),
+        )?.projection.visibleTurnItems ?? [],
+        source,
+      );
     const searchRoot = (root: string) =>
       executeAtomQuery(
         appAtomRegistry,
@@ -3032,7 +3044,41 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         }),
         queryOptions,
       );
+    const childCheckoutMatch = async () => {
+      if (needsWorkspaceBasenameLookup(relativePath)) return null;
+      const original = await metadataOf(originalPath);
+      if (original._tag !== "Success" || original.value !== null) return null;
+      const listing = await executeAtomQuery(
+        appAtomRegistry,
+        filesystemEnvironment.browse({
+          environmentId: props.environmentId,
+          input: { partialPath: childFoldersBrowsePath(workspaceRoot) },
+        }),
+        queryOptions,
+      );
+      if (listing._tag !== "Success") return null;
+      return findChildCheckoutMatch(
+        relativePath,
+        listing.value.entries,
+        reply === undefined ? [] : replyAgentDirectories(reply),
+        async (paths) => {
+          const metadata = await executeAtomQuery(
+            appAtomRegistry,
+            filesystemEnvironment.getMetadata({
+              environmentId: props.environmentId,
+              input: { paths },
+            }),
+            queryOptions,
+          );
+          return metadata._tag === "Success"
+            ? metadata.value.entries.map((entry) => entry?.kind === "file")
+            : paths.map(() => false);
+        },
+      );
+    };
     const lookup = async () => {
+      const checkout = await childCheckoutMatch();
+      if (checkout !== null) return checkout;
       const own = await searchRoot(workspaceRoot);
       let match = pickWorkspaceLinkMatch(relativePath, workspaceRoot, own.entries);
       const otherProject = match === null;
@@ -3058,14 +3104,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       }
       if (match === null && reply !== undefined && !signal.aborted) {
         // No project has the file, so it opens where the agent last worked, as written.
-        const agentRoots = agentWorkingDirectories(
-          appAtomRegistry.get(
-            environmentThreadDetails.quietThreadAtom(
-              scopeThreadRef(props.environmentId, props.threadId),
-            ),
-          )?.projection.visibleTurnItems ?? [],
-          reply,
-        ).filter((root) => root !== workspaceRoot);
+        const agentRoots = replyAgentDirectories(reply).filter((root) => root !== workspaceRoot);
         const agentPaths = agentRoots.map((root) => resolveWorkspaceFilePath(root, relativePath));
         if (agentPaths.length === 0) return relativePath;
         const [original, ...found] = await Promise.all(

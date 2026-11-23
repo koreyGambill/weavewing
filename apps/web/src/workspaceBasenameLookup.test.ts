@@ -4,6 +4,7 @@ import {
   agentWorkingDirectories,
   claimWorkspaceBasenameLookup,
   findAgentDirectoryMatch,
+  findChildCheckoutMatch,
   pickProjectLinkMatch,
   pickWorkspaceBasenameMatch,
   pickWorkspaceLinkMatch,
@@ -181,6 +182,42 @@ describe("findAgentDirectoryMatch", () => {
       await findAgentDirectoryMatch("config.test.yaml", ["/work/repo-b", "/work/repo-c"], found),
     ).toBe("/work/repo-c/etc/config.test.yaml");
     expect(await findAgentDirectoryMatch("config.test.yaml", ["/work/repo-b"], found)).toBeNull();
+  });
+});
+
+describe("findChildCheckoutMatch", () => {
+  const existing =
+    (files: ReadonlyArray<string>) =>
+    (paths: ReadonlyArray<string>): Promise<ReadonlyArray<boolean>> =>
+      Promise.resolve(paths.map((path) => files.includes(path)));
+  const folders = (...paths: ReadonlyArray<string>) =>
+    paths.map((fullPath) => ({ name: fullPath.slice(fullPath.lastIndexOf("/") + 1), fullPath }));
+
+  it("opens a path cited from a checkout inside a parent folder thread", async () => {
+    expect(
+      await findChildCheckoutMatch(
+        "apps/web/src/foo.ts",
+        folders("/code/bitwing", "/code/weavewing", "/code/.cache"),
+        [],
+        existing(["/code/weavewing/apps/web/src/foo.ts", "/code/.cache/apps/web/src/foo.ts"]),
+      ),
+    ).toBe("/code/weavewing/apps/web/src/foo.ts");
+  });
+
+  it("prefers the checkout the agent worked in when several have the file", async () => {
+    const both = existing(["/code/a/docs/README.md", "/code/b/docs/README.md"]);
+    const checkouts = folders("/code/a", "/code/b");
+    expect(await findChildCheckoutMatch("docs/README.md", checkouts, [], both)).toBeNull();
+    expect(await findChildCheckoutMatch("docs/README.md", checkouts, ["/code/b/docs"], both)).toBe(
+      "/code/b/docs/README.md",
+    );
+  });
+
+  it("checks every folder when there are more than one metadata batch holds", async () => {
+    const many = folders(...Array.from({ length: 70 }, (_, index) => `/code/r${index}`));
+    expect(
+      await findChildCheckoutMatch("src/x.ts", many, [], existing(["/code/r69/src/x.ts"])),
+    ).toBe("/code/r69/src/x.ts");
   });
 });
 
