@@ -1,4 +1,4 @@
-import { workspaceAreaProps } from "../lib/workspaceFocus";
+import { requestWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -41,6 +41,7 @@ import { isTerminalUrl, resolveTerminalLinkTarget } from "../terminal-links";
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
+  isTerminalFindShortcut,
   isTerminalToggleShortcut,
   isThreadNavigationShortcut,
   terminalDeleteShortcutData,
@@ -61,6 +62,7 @@ import { useEnvironmentScope } from "../state/session";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { terminalInputWriter } from "./terminal/terminalInputWriter";
 import type { TerminalMoveMenu } from "./terminal/useTerminalMoveMenus";
+import { TerminalFindBar } from "./terminal/TerminalFindBar";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
@@ -482,6 +484,16 @@ function TerminalSessionViewport({
   const canOpenHostEditor = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canReadFilesystem = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
   const [linkPath, setLinkPath] = useState<string | null>(null);
+  // Null while closed; each find shortcut bumps it so an open bar refocuses.
+  const [findRequestId, setFindRequestId] = useState<number | null>(null);
+  // Opened from elsewhere (the command palette), the bar must win focus from whatever closes next.
+  const openFindFromCommand = () => {
+    setFindRequestId((previous) => (previous ?? 0) + 1);
+    requestWorkspaceFocus({
+      area: "document",
+      selector: `[data-terminal-find="${CSS.escape(terminalId)}"] input`,
+    });
+  };
   const metadataThreadRef = useContext(FileMetadataThreadContext);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const hostname = serverConfig?.hostname;
@@ -996,6 +1008,16 @@ function TerminalSessionViewport({
           return false;
         }
         if (
+          isTerminalFindShortcut(event, currentKeybindings, {
+            alternateScreen: terminalRef.current?.isAlternateScreen() ?? false,
+          })
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          setFindRequestId((previous) => (previous ?? 0) + 1);
+          return false;
+        }
+        if (
           isTerminalToggleShortcut(event, currentKeybindings, options) ||
           isDiffToggleShortcut(event, currentKeybindings, options) ||
           // Match Sidebar's context, or a key it will reject skips the shell.
@@ -1175,6 +1197,7 @@ function TerminalSessionViewport({
       terminalId,
       element: mount,
       focus,
+      openFind: openFindFromCommand,
     });
     return () => {
       unregister();
@@ -1182,11 +1205,27 @@ function TerminalSessionViewport({
     };
   };
   return (
-    <div
-      ref={attachContainer}
-      tabIndex={-1}
-      className="relative h-full w-full overflow-hidden bg-(--terminal-background)"
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={attachContainer}
+        tabIndex={-1}
+        className="relative h-full w-full overflow-hidden bg-(--terminal-background)"
+      />
+      {findRequestId !== null ? (
+        <TerminalFindBar
+          terminalId={terminalId}
+          surface={() => terminalRef.current}
+          focusRequestId={findRequestId}
+          isFindShortcut={(event) =>
+            isTerminalFindShortcut(event, keybindings, { alternateScreen: false })
+          }
+          onClose={() => {
+            setFindRequestId(null);
+            focusTerminal(threadRef, terminalId);
+          }}
+        />
+      ) : null}
+    </div>
   );
 }
 

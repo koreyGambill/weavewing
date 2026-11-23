@@ -34,6 +34,7 @@ interface TerminalFocusTarget {
   readonly element?: HTMLElement;
   /** Returns false when the target cannot take focus yet (hidden, or no operate grant). */
   readonly focus: () => boolean;
+  readonly openFind?: () => void;
 }
 
 const focusTargets = new Set<TerminalFocusTarget>();
@@ -183,6 +184,23 @@ export function restoreFocusOnThreadEnter(
     // A handler navigating elsewhere marks its target before this cleanup runs.
     if (enteredThreadKey === threadKey) enteredThreadKey = null;
   };
+}
+
+/** Opens find in the terminal that last held focus in the thread, while it stays mounted. */
+export function lastFocusedTerminalFind(threadRef: ScopedThreadRef): (() => void) | null {
+  const threadKey = scopedThreadKey(threadRef);
+  const last = lastThreadFocus.get(threadKey);
+  if (!last || last === "composer") return null;
+  for (const target of focusTargets) {
+    if (
+      target.openFind &&
+      target.terminalId === last.terminalId &&
+      scopedThreadKey(target.threadRef) === threadKey
+    ) {
+      return target.openFind;
+    }
+  }
+  return null;
 }
 
 function cancelTerminalFocus(threadRef: ScopedThreadRef): void {

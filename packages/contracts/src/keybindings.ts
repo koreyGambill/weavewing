@@ -95,6 +95,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "navigation.forward",
   "terminal.toggle",
   "terminal.close",
+  "terminal.find",
   "terminal.dropdown",
   "terminal.dropdownExpand",
   "terminal.dropdownPin",

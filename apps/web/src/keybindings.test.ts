@@ -18,6 +18,7 @@ import {
   effectiveShortcutsForCommand,
   formatShortcutLabel,
   isRichTextBoldShortcut,
+  isTerminalFindShortcut,
   resolveChatShortcutCommand,
   resolveShortcutCommand,
   shouldShowThreadJumpHintsForModifiers,
@@ -994,7 +995,9 @@ it("keeps removed terminal and panel commands out of Weavewing", () => {
                 ? "commandPalette.toggle"
                 : !shiftKey && platform !== "MacIntel" && key === "j"
                   ? "terminal.dropdown"
-                  : null,
+                  : !shiftKey && platform !== "MacIntel" && key === "f"
+                    ? "terminal.find"
+                    : null,
           `Ctrl+${shiftKey ? "Shift+" : ""}${key} resolves to the documented terminal action on ${platform}`,
         );
       }
@@ -1013,6 +1016,21 @@ it.each([
       context: { terminalFocus: true },
     }),
     command,
+  );
+});
+
+it.each([
+  ["Linux x86_64", event({ key: "f", ctrlKey: true })],
+  ["Win32", event({ key: "f", ctrlKey: true })],
+  ["MacIntel", event({ key: "f", metaKey: true })],
+] as const)("finds in a focused terminal with Mod+F on %s", (platform, findEvent) => {
+  assert.isTrue(
+    isTerminalFindShortcut(findEvent, DEFAULT_BINDINGS, { alternateScreen: false, platform }),
+  );
+  // Full-screen programs keep Ctrl+F; Cmd+F never reaches them on macOS.
+  assert.equal(
+    isTerminalFindShortcut(findEvent, DEFAULT_BINDINGS, { alternateScreen: true, platform }),
+    platform === "MacIntel",
   );
 });
 

@@ -769,6 +769,34 @@ export class GhosttyTerminalCore {
 
   setSelection(anchor: GhosttyPointInput, end: GhosttyPointInput): void {
     this.ensureActive();
+    this.withSelection(anchor, end, (selection) => {
+      this.runtime.call("ghostty_terminal_set", this.terminal, 21, selection);
+    });
+  }
+
+  /** Plain text of every active-screen row, scrollback included, indexed by screen row. */
+  screenLines(): string[] {
+    this.ensureActive();
+    this.runtime.memoryDataView().setUint16(this.scratch, 0, true);
+    this.runtime.call("ghostty_terminal_get", this.terminal, 1, this.scratch);
+    const cols = this.runtime.memoryDataView().getUint16(this.scratch, true);
+    this.runtime.memoryDataView().setUint32(this.scratch, 0, true);
+    this.runtime.call("ghostty_terminal_get", this.terminal, 14, this.scratch);
+    const total = this.runtime.memoryDataView().getUint32(this.scratch, true);
+    if (cols === 0 || total === 0) return [];
+    const text = this.withSelection(
+      { x: 0, y: 0, tag: 2 },
+      { x: cols - 1, y: total - 1, tag: 2 },
+      (selection) => this.formatSelection(selection, false),
+    );
+    return text.split("\n");
+  }
+
+  private withSelection<T>(
+    anchor: GhosttyPointInput,
+    end: GhosttyPointInput,
+    use: (selection: number) => T,
+  ): T {
     const selectionLayout = this.runtime.layout("GhosttySelection");
     const gridRefSize = this.runtime.layout("GhosttyGridRef").size;
     const selection = this.runtime.alloc(selectionLayout.size);
@@ -786,7 +814,7 @@ export class GhosttyTerminalCore {
       this.runtime
         .bytes(selection + endField.offset, endField.size)
         .set(this.runtime.bytes(endRef, endField.size));
-      this.runtime.call("ghostty_terminal_set", this.terminal, 21, selection);
+      return use(selection);
     } finally {
       this.runtime.free(start, gridRefSize);
       this.runtime.free(endRef, gridRefSize);
@@ -965,13 +993,18 @@ export class GhosttyTerminalCore {
 
   selectionText(): string {
     this.ensureActive();
+    return this.formatSelection(0, true);
+  }
+
+  /** Formats `selection`, or the installed selection when it is 0, as trimmed plain text. */
+  private formatSelection(selection: number, unwrap: boolean): string {
     const options = this.runtime.alloc(SELECTION_FORMAT_OPTIONS_SIZE);
     const optionsView = this.runtime.view(options, SELECTION_FORMAT_OPTIONS_SIZE);
     optionsView.setUint32(0, SELECTION_FORMAT_OPTIONS_SIZE, true);
     optionsView.setUint32(4, 0, true);
-    optionsView.setUint8(8, 1);
+    optionsView.setUint8(8, unwrap ? 1 : 0);
     optionsView.setUint8(9, 1);
-    optionsView.setUint32(12, 0, true);
+    optionsView.setUint32(12, selection, true);
     const written = this.runtime.call("ghostty_wasm_alloc_usize");
     const sizeResult = this.runtime.call(
       "ghostty_terminal_selection_format_buf",

@@ -376,6 +376,19 @@ export function isTerminalCloseShortcut(
   );
 }
 
+/** Ctrl chords yield to full-screen programs, since vim and less page down with Ctrl+F. */
+export function isTerminalFindShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  { alternateScreen, platform }: { alternateScreen: boolean; platform?: string },
+): boolean {
+  if (alternateScreen && event.ctrlKey) return false;
+  return matchesCommandShortcut(event, keybindings, "terminal.find", {
+    ...(platform !== undefined ? { platform } : {}),
+    context: { terminalFocus: true, terminalOpen: true },
+  });
+}
+
 export function isDiffToggleShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
