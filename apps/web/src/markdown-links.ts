@@ -1,12 +1,17 @@
 import { isLocalEditorFileUrl } from "@t3tools/contracts";
 import { renderCodexInlineDirectivesAsMarkdown } from "@t3tools/shared/codexMarkdownDirectives";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
-import { decodeMarkdownLinkEscapes } from "@t3tools/shared/markdownPipeline";
+import {
+  chatMarkdownLinkSources,
+  decodeMarkdownLinkEscapes,
+} from "@t3tools/shared/markdownPipeline";
+import { defaultUrlTransform } from "react-markdown";
 import { fileBasename, isAbsolutePath, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import {
   extractInlineCodeSpans,
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
+  isWindowsDrivePathHref,
   isRelativeFilePath,
   normalizeMarkdownLinkDestination,
   parseMarkdownFileLink,
@@ -57,7 +62,10 @@ interface MarkdownFileLinkSource {
   readonly meta: MarkdownFileLinkMeta;
 }
 
-/** The file links a message renders: link destinations, then inline code naming a path. */
+/**
+ * Candidate file links in a message, keyed as the renderer looks them up. A fast scan, so it can
+ * include links the renderer never shows, such as ones inside code blocks.
+ */
 export function markdownFileLinkSources(
   text: string,
   cwd: string | undefined,
@@ -76,6 +84,34 @@ export function markdownFileLinkSources(
     return meta ? [{ source, meta }] : [];
   });
   return { hrefs, spans };
+}
+
+// Mirrors ChatMarkdown's url transform, which empties hrefs it will not render as links.
+function renderedMarkdownHref(href: string): string | null {
+  if (isWindowsDrivePathHref(href) || isLocalEditorFileHref(href)) return href;
+  return rewriteMarkdownFileUriHref(href) ?? (defaultUrlTransform(href) || null);
+}
+
+/** The file links a message renders, read from the chat renderer's own markdown parse. */
+export function renderedMarkdownFileLinks(
+  text: string,
+  cwd: string | undefined,
+  options: { readonly userMessage?: boolean } = {},
+): MarkdownFileLinkMeta[] {
+  const { hrefs, inlineCode } = chatMarkdownLinkSources(text, options);
+  return [
+    ...hrefs.flatMap((href) => {
+      if (parseComposerContextHref(href)) return [];
+      const rendered = renderedMarkdownHref(href);
+      const meta =
+        rendered && resolveMarkdownFileLinkMeta(normalizeMarkdownLinkHrefKey(rendered), cwd);
+      return meta ? [meta] : [];
+    }),
+    ...inlineCode.flatMap((span) => {
+      const meta = resolveInlineCodeFileLinkMeta(span, cwd);
+      return meta ? [meta] : [];
+    }),
+  ];
 }
 
 export function isLocalEditorFileHref(href: string): boolean {

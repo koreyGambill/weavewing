@@ -39,6 +39,7 @@ export default function LargeTextViewer(props: {
   readonly copyContents?: RefObject<(() => Promise<string>) | null>;
   readonly delimiter: "," | "\t" | null;
   readonly revealLine?: number | null;
+  readonly revealEndLine?: number | null;
   readonly revealRequestId?: number;
   /** A preview's own wrap toggle; omitted follows the word wrap setting. */
   readonly wordWrap?: boolean;
@@ -246,6 +247,7 @@ export default function LargeTextViewer(props: {
           source={!props.delimiter}
           wrap={wordWrap}
           revealLine={meta.complete ? (props.revealLine ?? null) : null}
+          revealEndLine={props.revealEndLine ?? null}
           revealRequestId={props.revealRequestId ?? 0}
           getRows={(page) => pages.get(page)}
           loadPage={(page) => {

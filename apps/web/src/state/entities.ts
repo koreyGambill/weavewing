@@ -30,6 +30,8 @@ import type {
 } from "@t3tools/contracts";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { Atom } from "effect/reactivity";
+import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { selectLinkableMessages, type LinkableMessage } from "../conversationFileLinks";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
 import { environmentPresentations } from "./presentation";
@@ -289,6 +291,32 @@ export function useThreadVisibleTurnItems(
     ref === null
       ? EMPTY_VISIBLE_TURN_ITEMS_ATOM
       : environmentThreadDetails.visibleTurnItemsAtom(ref),
+  );
+}
+
+const EMPTY_LINKABLE_MESSAGES: ReadonlyArray<LinkableMessage> = [];
+const EMPTY_LINKABLE_MESSAGES_ATOM = Atom.make(EMPTY_LINKABLE_MESSAGES).pipe(
+  Atom.withLabel("web-thread-linkable-messages:empty"),
+);
+const linkableMessagesAtomFamily = Atom.family((key: string) => {
+  const ref = parseScopedThreadKey(key);
+  let previous = EMPTY_LINKABLE_MESSAGES;
+  return Atom.make((get) => {
+    if (ref === null) return EMPTY_LINKABLE_MESSAGES;
+    previous = selectLinkableMessages(
+      get(environmentThreadDetails.visibleTurnItemsAtom(ref)),
+      previous,
+    );
+    return previous;
+  }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`web-thread-linkable-messages:${key}`));
+});
+
+/** User messages and finished replies; unchanged while text or reasoning streams. */
+export function useThreadLinkableMessages(
+  ref: ScopedThreadRef | null,
+): ReadonlyArray<LinkableMessage> {
+  return useAtomValue(
+    ref === null ? EMPTY_LINKABLE_MESSAGES_ATOM : linkableMessagesAtomFamily(scopedThreadKey(ref)),
   );
 }
 

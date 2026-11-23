@@ -43,15 +43,28 @@ function countFileLines(contents: string): number {
 }
 
 /** The lines a link names, clamped to the file; a missing or inverted end selects one line. */
+export function clampFileLineRange(
+  lineCount: number,
+  line: number,
+  endLine: number | null,
+): FileLineRange {
+  const start = Math.min(Math.max(1, line), Math.max(1, lineCount));
+  const end = endLine === null ? start : Math.min(Math.max(start, endLine), Math.max(1, lineCount));
+  return { start, end };
+}
+
 export function resolveFileLineRange(
   contents: string,
   line: number,
   endLine: number | null,
 ): FileLineRange {
-  const lineCount = countFileLines(contents);
-  const start = Math.min(Math.max(1, line), lineCount);
-  const end = endLine === null ? start : Math.min(Math.max(start, endLine), lineCount);
-  return { start, end };
+  return clampFileLineRange(countFileLines(contents), line, endLine);
+}
+
+/** The first line to show so `range` sits centered in `visibleLines`, or starts the view. */
+export function centeredRangeFirstLine(range: FileLineRange, visibleLines: number): number {
+  const spare = Math.max(0, visibleLines - (range.end - range.start + 1));
+  return Math.max(1, range.start - Math.floor(spare / 2));
 }
 
 /** One box spanning the first and last line, so a range centers as a block. */

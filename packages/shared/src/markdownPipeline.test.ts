@@ -8,6 +8,7 @@ import {
   CHAT_MARKDOWN_REHYPE_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
+  chatMarkdownLinkSources,
   remarkAssistantInsights,
   remarkEnableOrderedListNumbers,
 } from "./markdownPipeline.ts";
@@ -711,4 +712,27 @@ it("links complete absolute paths in prose and skips shortened ones", () => {
   ]);
   expect(links(`[notes](${path}) and \`${path}\``)).toEqual([path]);
   expect(links(`\`\`\`\n${path}\n\`\`\``)).toEqual([]);
+});
+
+it("collects only the links and inline code chat renders, skipping code blocks", () => {
+  const markdown = [
+    "See [a](src/a.ts:5) and `src/b.ts:9`, then [ref][c].",
+    "",
+    "```ts",
+    "// [fenced](src/fenced.ts:1) and `src/fenced-code.ts`",
+    "```",
+    "",
+    "    [indented](src/indented.ts)",
+    "",
+    '[`src/label.ts`](src/d.ts) <a href="src/html.ts">html</a>',
+    "",
+    "[c]: src/c.ts#L3-L4",
+  ].join("\n");
+  expect(chatMarkdownLinkSources(markdown)).toEqual({
+    hrefs: ["src/a.ts:5", "src/c.ts#L3-L4", "src/d.ts"],
+    inlineCode: ["src/b.ts:9"],
+  });
+  expect(chatMarkdownLinkSources("~/a/b.ts and [x](~/c.ts)", { userMessage: true }).hrefs).toEqual([
+    "~/c.ts",
+  ]);
 });

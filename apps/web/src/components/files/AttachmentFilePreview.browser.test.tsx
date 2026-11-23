@@ -841,8 +841,8 @@ describe("large text preview recovery", () => {
     expect(screen.container.textContent).toContain("C19");
   });
 
-  it("reveals and highlights requested source lines again for a new request", async () => {
-    const view = (line: number, request: number, loaded = true) => (
+  it("reveals and flashes requested source lines and ranges again for a new request", async () => {
+    const view = (line: number, request: number, loaded = true, endLine: number | null = null) => (
       <div style={{ display: "flex", height: 400, width: 600 }}>
         <VirtualTablePreview
           name="log.txt"
@@ -851,6 +851,7 @@ describe("large text preview recovery", () => {
           source
           wrap
           revealLine={line}
+          revealEndLine={endLine}
           revealRequestId={request}
           getRows={(page) =>
             loaded || page === 0
@@ -863,41 +864,32 @@ describe("large text preview recovery", () => {
       </div>
     );
     await using screen = await render(view(500, 1, false));
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toBe(
-        "500",
-      ),
-    );
-    await screen.rerender(view(500, 1));
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toContain(
-        "line-500",
-      ),
-    );
+    const flashed = () =>
+      Array.from(
+        screen.container.querySelectorAll<HTMLElement>("[data-file-link-reveal]"),
+        (row) => Number(row.dataset.previewRow) + 1,
+      );
     const checkVisible = () => {
-      const row = screen.container.querySelector<HTMLElement>('[data-preview-reveal="true"]')!;
+      const row = screen.container.querySelector<HTMLElement>("[data-file-link-reveal]")!;
       const viewport = screen.container.querySelector<HTMLElement>('[tabindex="0"]')!;
       expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(
         viewport.getBoundingClientRect().top - 1,
       );
-      expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(
-        viewport.getBoundingClientRect().bottom + 1,
-      );
+      expect(row.getBoundingClientRect().top).toBeLessThan(viewport.getBoundingClientRect().bottom);
     };
-    await vi.waitFor(checkVisible);
-    await screen.rerender(view(900, 2));
+    // The flash waits for the cited rows to load.
     await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toContain(
-        "line-900",
-      ),
+      expect(screen.container.querySelector('[data-preview-row="499"]')).not.toBeNull(),
     );
+    expect(flashed()).toEqual([]);
+    await screen.rerender(view(500, 1));
+    await vi.waitFor(() => expect(flashed()).toEqual([500]));
+    await vi.waitFor(checkVisible);
+    await screen.rerender(view(900, 2, true, 903));
+    await vi.waitFor(() => expect(flashed()).toEqual([900, 901, 902, 903]));
     await vi.waitFor(checkVisible);
     await screen.rerender(view(999, 3));
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toContain(
-        "line-999",
-      ),
-    );
+    await vi.waitFor(() => expect(flashed()).toEqual([999]));
     await vi.waitFor(checkVisible);
   });
 

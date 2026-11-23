@@ -3,6 +3,13 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "re
 import { observeResize } from "~/lib/observeResize";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { PREVIEW_PAGE_ROWS } from "./largeTextProtocol";
+import {
+  fileLinkFlashNow,
+  playFileLinkFlash,
+  remainingFileLinkFlashMs,
+  stopFileLinkFlash,
+} from "./fileLinkFlash";
+import { centeredRangeFirstLine, clampFileLineRange, type FileLineRange } from "./fileLineReveal";
 
 export default function VirtualTablePreview(props: {
   readonly name: string;
@@ -14,6 +21,7 @@ export default function VirtualTablePreview(props: {
   readonly source?: boolean;
   readonly wrap?: boolean;
   readonly revealLine?: number | null;
+  readonly revealEndLine?: number | null;
   readonly revealRequestId?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -179,6 +187,8 @@ function RowPage(
     firstColumn: number;
     viewportHeight: number;
     limit?: number;
+    /** Source lines flashing after a link reveal. */
+    flash: FileLineRange | null;
   },
 ) {
   const rows = props.getRows(props.page);
@@ -205,13 +215,12 @@ function RowPage(
             aria-rowindex={props.source ? undefined : index + 1}
             className={
               props.source
-                ? `flex min-h-[29px] font-mono ${props.revealLine != null && Math.min(props.count, Math.max(1, props.revealLine)) === index + 1 ? "bg-primary/10" : ""}`
+                ? "flex min-h-[29px] font-mono"
                 : `flex min-h-[29px] border-b border-border/60 ${(index - (props.header ? 1 : 0)) % 2 ? "bg-muted/30" : ""}`
             }
-            data-preview-reveal={
-              props.revealLine != null &&
-              Math.min(props.count, Math.max(1, props.revealLine)) === index + 1
-                ? "true"
+            data-file-link-reveal={
+              props.flash && index + 1 >= props.flash.start && index + 1 <= props.flash.end
+                ? ""
                 : undefined
             }
           >
@@ -255,13 +264,21 @@ function RowPage(
   );
 }
 
-function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
+function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page" | "flash">) {
   const ref = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState({ offset: 0, height: 0, rowHeight: 29 });
   const [top, setTop] = useState(0);
   const handledReveal = useRef<string | null>(null);
-  const pendingReveal = useRef<{ row: number; attempts: number } | null>(null);
+  const pendingReveal = useRef<{
+    row: number;
+    range: FileLineRange;
+    attempts: number;
+  } | null>(null);
+  const [flash, setFlash] = useState<{
+    readonly range: FileLineRange;
+    readonly startedAt: number;
+  } | null>(null);
   const pendingEnd = useRef(false);
   const position = { top, height: props.viewportHeight };
   const scrollHeight = Math.min(8_000_000, props.count * 29);
@@ -312,15 +329,40 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
       pendingReveal.current = null;
       return;
     }
-    const key = `${props.revealRequestId}:${props.revealLine}`;
+    const key = `${props.revealRequestId}:${props.revealLine}:${props.revealEndLine ?? ""}`;
     if (!node || !props.count || handledReveal.current === key) return;
-    const row = Math.min(props.count, Math.max(1, props.revealLine)) - 1;
-    node.scrollTop = Math.max(0, (row - headerRows) * 29) * scale;
+    const range = clampFileLineRange(props.count, props.revealLine, props.revealEndLine ?? null);
+    const firstLine = centeredRangeFirstLine(range, Math.floor(position.height / 29));
+    node.scrollTop = Math.max(0, (firstLine - 1 - headerRows) * 29) * scale;
     setTop(node.scrollTop);
+    setFlash(null);
     pendingEnd.current = false;
-    pendingReveal.current = { row, attempts: 0 };
+    pendingReveal.current = { row: range.start - 1, range, attempts: 0 };
     handledReveal.current = key;
-  }, [props.revealLine, props.revealRequestId, props.count, headerRows, scale]);
+  }, [
+    props.revealLine,
+    props.revealEndLine,
+    props.revealRequestId,
+    props.count,
+    headerRows,
+    scale,
+    position.height,
+  ]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Runs the flash on the rows' container and clears it when the flash ends.
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    if (flash === null) {
+      stopFileLinkFlash(content);
+      return;
+    }
+    playFileLinkFlash(content, flash.startedAt);
+    const timer = setTimeout(
+      () => setFlash(null),
+      remainingFileLinkFlashMs(flash.startedAt, fileLinkFlashNow()),
+    );
+    return () => clearTimeout(timer);
+  }, [flash]);
   const atStart = position.top === 0;
   const rowHeight = () =>
     contentRef.current?.querySelector<HTMLElement>(`[data-preview-row="${first}"]`)?.offsetHeight ||
@@ -393,17 +435,25 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
       return;
     const bounds = row.getBoundingClientRect();
     const viewport = node.getBoundingClientRect();
-    const delta =
-      bounds.top < viewport.top
-        ? bounds.top - viewport.top
-        : Math.min(bounds.bottom, bounds.top + viewport.height) > viewport.bottom
-          ? Math.min(bounds.bottom, bounds.top + viewport.height) - viewport.bottom
-          : 0;
-    if (Math.abs(delta) < 1 || pending.attempts++ >= 8) {
+    const lastRow = content.querySelector<HTMLElement>(
+      `[data-preview-row="${pending.range.end - 1}"]`,
+    );
+    // Rows wrap to different heights, so center on the measured range, not the 29px estimate.
+    const rangeBottom = lastRow
+      ? lastRow.getBoundingClientRect().bottom
+      : bounds.top + bounds.height * (pending.range.end - pending.range.start + 1);
+    const spare = Math.max(0, viewport.height - (rangeBottom - bounds.top));
+    const delta = bounds.top - viewport.top - spare / 2;
+    const previousTop = node.scrollTop;
+    if (Math.abs(delta) >= 1 && pending.attempts++ < 8) {
+      node.scrollTop += delta * (nativeTail ? 1 : (scale * 29) / Math.max(29, bounds.height));
+    }
+    // Settled, or clamped at an edge where the range cannot be centered.
+    if (node.scrollTop === previousTop) {
       pendingReveal.current = null;
+      setFlash({ range: pending.range, startedAt: fileLinkFlashNow() });
       return;
     }
-    node.scrollTop += delta * (nativeTail ? 1 : (scale * 29) / Math.max(29, bounds.height));
     setTop(node.scrollTop);
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Complete End-key scrolling after the final worker row has loaded and its DOM layout has settled.
@@ -490,6 +540,7 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
                 {...props}
                 page={page + offset}
                 limit={visibleEnd - offset * PREVIEW_PAGE_ROWS}
+                flash={flash?.range ?? null}
               />
             ),
           )}
