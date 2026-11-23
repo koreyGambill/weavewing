@@ -1,8 +1,12 @@
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ScopedThreadRef } from "@t3tools/contracts";
 import { MessageCircle, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
+import { toastManager } from "~/components/ui/toast";
+import type { DraftId } from "~/composerDraftStore";
+import { focusThreadDraft } from "~/lib/sideChatPane";
+import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import {
   PullRequestMarkdownTextarea,
   type PullRequestCompletionScope,
@@ -42,6 +46,26 @@ interface DiffCommentAnnotationProps {
   focusOnMount?: boolean;
   /** Set only for pull request comments, where `@` completes the repository's users. */
   completionScope?: PullRequestCompletionScope | null;
+}
+
+/** File and diff comments ride along with the composer draft rather than posting anywhere. */
+export const ADD_TO_MESSAGE_LABEL = "Add to message";
+export const ADD_TO_MESSAGE_PLACEHOLDER = "Note for the agent…";
+
+export function announceAddedToMessage(target: ScopedThreadRef | DraftId) {
+  const id = toastManager.add({
+    type: "success",
+    title: "Added to your next message",
+    actionProps: {
+      children: "Show",
+      onClick: () => {
+        toastManager.close(id);
+        // A thread's chat may sit behind another tab in its tile; an unsent draft has no tile.
+        if (typeof target === "string") requestWorkspaceFocus({ area: "composer" });
+        else focusThreadDraft(target);
+      },
+    },
+  });
 }
 
 export function DiffCommentAnnotation({
@@ -85,18 +109,18 @@ export function DiffCommentAnnotation({
         onPointerDown={(event) => event.stopPropagation()}
       >
         <MessageCircle className="size-3.5 h-5 shrink-0 text-primary/70" aria-hidden="true" />
-        <p
-          className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-5"
-          dir={textDirection(displayedText)}
-        >
-          {displayedText}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="whitespace-pre-wrap text-sm leading-5" dir={textDirection(displayedText)}>
+            {displayedText}
+          </p>
+          <p className="text-3xs text-muted-foreground/70">In your next message</p>
+        </div>
         {onDelete ? (
           <span className="-my-1 -mr-1 flex shrink-0 opacity-0 transition-opacity group-hover/comment:opacity-100 focus-within:opacity-100 max-sm:opacity-100">
             <Button
               variant="ghost-muted"
               size="icon-xs"
-              aria-label="Delete comment"
+              aria-label="Remove from message"
               onClick={onDelete}
             >
               <Trash2 className="size-3" />
@@ -155,7 +179,9 @@ export function DiffCommentAnnotation({
         }}
       />
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
-        <span className="mr-auto text-3xs text-muted-foreground/70">⌘/Ctrl Enter to send</span>
+        <span className="mr-auto text-3xs text-muted-foreground/70">
+          ⌘/Ctrl Enter to {submitLabel.toLowerCase()}
+        </span>
         {speech ? <TextFieldSpeechControls speech={speech} disabled={pending} /> : null}
         <Button variant="ghost-muted" size="xs" onClick={onCancel}>
           Cancel

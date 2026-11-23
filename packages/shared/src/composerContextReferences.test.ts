@@ -283,7 +283,7 @@ describe("provider projection", () => {
     expect(project("a\n")).toContain("3 | a\n4 | \n</context>");
   });
 
-  it("keeps a review excerpt's trailing blank line and whitespace", () => {
+  it("keeps a review excerpt's trailing blank line and whitespace, ranged by its label only", () => {
     const projected = projectComposerContextForProvider({
       text: "[Comment](t3-context://v1/review-comment/ctx_r)",
       records: [
@@ -304,6 +304,8 @@ describe("provider projection", () => {
       ],
     });
     expect(projected).toContain("diff:\n  @@ -3,1 +2,2 @@\n  +two\t\n   \n</context>");
+    // Zero-based row offsets beside a one-based label led agents to cite the wrong line.
+    expect(projected).toContain("range: 2 to 3\nsection:");
   });
 
   it("emits no terminal lines when the captured range is inverted", () => {

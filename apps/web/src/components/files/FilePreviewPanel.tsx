@@ -139,7 +139,12 @@ import {
 } from "./fileSurfaceChrome";
 import SourceFilePreview from "./ReadOnlySourcePreview";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
-import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
+import {
+  ADD_TO_MESSAGE_LABEL,
+  ADD_TO_MESSAGE_PLACEHOLDER,
+  DiffCommentAnnotation,
+  announceAddedToMessage,
+} from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey } from "./fileContentRevision";
 import {
   filePreviewReadErrorMessage,
@@ -930,6 +935,7 @@ function EditableFileSurface({
           contents,
         }),
       );
+      announceAddedToMessage(composerDraftTarget);
     }
     setLineAnnotations((current) =>
       current.map((annotation) => ({
@@ -1074,6 +1080,8 @@ function EditableFileSurface({
                       ])}
                       kind={entry.kind}
                       rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
+                      placeholder={ADD_TO_MESSAGE_PLACEHOLDER}
+                      submitLabel={ADD_TO_MESSAGE_LABEL}
                       text={entry.text}
                       onCancel={() => removeAnnotationEntry(entry.id)}
                       onComment={(text) => submitAnnotationEntry(entry.id, text)}

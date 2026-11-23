@@ -323,7 +323,7 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
     case "review-comment": {
       const lines = [
         `file: ${record.filePath}`,
-        `range: ${record.rangeLabel} (${record.startIndex}-${record.endIndex})`,
+        `range: ${record.rangeLabel}`,
         `section: ${record.sectionTitle}`,
       ];
       if (record.text.trim()) lines.push("comment:", indent(record.text.trim()));
