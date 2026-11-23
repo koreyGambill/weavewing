@@ -204,7 +204,10 @@ type ClaudeUsageResponse = Pick<
   "rate_limits_available" | "rate_limits"
 >;
 
-/** An SDK reply that advertises limits without values is a failed sample. */
+/**
+ * Claude Code answers this way when its claude.ai usage request fails (429, timeout, network)
+ * and it holds no snapshot younger than an hour; the SDK reply does not say which.
+ */
 export function isIncompleteClaudeUsageResponse(response: ClaudeUsageResponse): boolean {
   return response.rate_limits_available && !response.rate_limits;
 }
@@ -222,7 +225,10 @@ export function claudeUsageResponseToLimits(input: {
         checkedAt,
         reason: incomplete ? "probeFailed" : "unsupported",
         ...(incomplete
-          ? { message: "Claude Code reported plan limits but returned no values." }
+          ? {
+              message:
+                "Claude's usage service did not answer, usually because it is rate limiting requests. Limits will appear after a later check succeeds.",
+            }
           : {}),
       }),
       names: { overageIncluded: undefined },

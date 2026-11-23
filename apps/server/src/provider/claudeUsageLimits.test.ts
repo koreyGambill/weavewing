@@ -84,6 +84,25 @@ describe("claudeUsageResponseToLimits", () => {
     ).toEqual({ overageIncluded: "Fable" });
   });
 
+  it("reports a failed claude.ai usage read as a retryable probe failure", () => {
+    // Claude Code 2.1.330 answers this way when GET /api/oauth/usage fails (429, timeout, network)
+    // and it holds no snapshot younger than an hour.
+    expect(
+      claudeUsageResponseToLimits({
+        checkedAt,
+        response: { rate_limits_available: true, rate_limits: null },
+      }).limits,
+    ).toEqual({
+      checkedAt,
+      windows: [],
+      unavailable: {
+        reason: "probeFailed",
+        message:
+          "Claude's usage service did not answer, usually because it is rate limiting requests. Limits will appear after a later check succeeds.",
+      },
+    });
+  });
+
   it("skips a window the endpoint reports without a utilization", () => {
     expect(
       claudeUsageResponseToLimits({
