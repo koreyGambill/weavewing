@@ -27,6 +27,8 @@ export interface ProviderDirs {
   readonly platform: NodeJS.Platform;
   /** The provider's resolved config folder: Claude's config dir or Codex's home. */
   readonly configDir: string;
+  /** Where T3 keeps thread checkouts, which sit under `~/.t3` yet are ordinary repositories. */
+  readonly worktreesDir?: string;
 }
 
 export const FILE_CONVENTIONS: Readonly<Record<string, FileConvention>> = {
@@ -193,11 +195,13 @@ export const resolveInstructionFiles = Effect.fn("DefaultContext.resolveInstruct
     // $HOME or a folder above it is never the repository, even with a dotfiles ~/.git.
     const repo = [gitRoot, workspace].find((dir) => dir !== null && !within(dir, home)) ?? null;
     const inRepo = (file: string) => repo !== null && within(repo, file);
-    // Inside the repository only its own folders count, so a checkout T3 keeps under `~/.t3`
-    // is not mistaken for server state; its `.ssh` or `.git` folders still are blocked.
+    // In a checkout T3 keeps under its worktrees folder only the checkout's own folders count,
+    // since the path to it runs through `~/.t3`. Anywhere else the whole path counts.
+    const t3Checkout =
+      repo !== null && dirs.worktreesDir !== undefined && within(dirs.worktreesDir, repo);
     const blocked = (file: string) =>
       SECRET_NAME.test(path.basename(file)) ||
-      SECRET_PATH.test(`${inRepo(file) ? `/${path.relative(repo!, file)}` : file}/`);
+      SECRET_PATH.test(`${t3Checkout && inRepo(file) ? `/${path.relative(repo!, file)}` : file}/`);
     const readText = (file: string) => readBounded(file).pipe(Effect.orElseSucceed(() => ""));
 
     const files: ResolvedFile[] = [];

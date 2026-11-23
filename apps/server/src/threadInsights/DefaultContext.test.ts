@@ -120,15 +120,35 @@ it.effect(
       yield* write(fs, path.join(checkout, ".git"), "gitdir: elsewhere");
       yield* write(fs, path.join(checkout, "CLAUDE.md"), "@.ssh/keys.md");
       yield* write(fs, path.join(checkout, ".ssh", "keys.md"), "secret");
+      const dirs = {
+        home,
+        platform: "linux" as const,
+        configDir: path.join(home, ".claude"),
+        worktreesDir: path.join(home, ".t3", "worktrees"),
+      };
       const { files } = yield* resolveInstructionFiles(
         FILE_CONVENTIONS.claudeAgent!,
         checkout,
-        { home, platform: "linux", configDir: path.join(home, ".claude") },
+        dirs,
         notInternal,
       );
       expect(files.map((file) => [path.relative(checkout, file.path), file.status])).toEqual([
         ["CLAUDE.md", "expected"],
         [".ssh/keys.md", "secret"],
+      ]);
+
+      // Any other project inside a credential folder keeps that folder's protection.
+      const kube = path.join(home, ".kube");
+      yield* write(fs, path.join(kube, "CLAUDE.md"), "@config");
+      yield* write(fs, path.join(kube, "config"), "token");
+      const kubeFiles = yield* resolveInstructionFiles(
+        FILE_CONVENTIONS.claudeAgent!,
+        kube,
+        dirs,
+        notInternal,
+      );
+      expect(kubeFiles.files.map((file) => [path.relative(kube, file.path), file.status])).toEqual([
+        ["CLAUDE.md", "secret"],
       ]);
     }).pipe(Effect.provide(NodeServices.layer)),
 );

@@ -20,6 +20,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
+import * as ServerConfig from "../config.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as McpToolCatalog from "../mcp/McpToolCatalog.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -115,6 +116,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
+  const serverConfig = yield* ServerConfig.ServerConfig;
   const isServerInternal = yield* makeIsServerInternalPath;
 
   const resolve = Effect.fn("DefaultContext.resolve")(function* (input: DefaultContextGetInput) {
@@ -260,7 +262,12 @@ const make = Effect.gen(function* () {
       const resolved = yield* resolveInstructionFiles(
         convention,
         cwd,
-        { home, platform: yield* HostProcess.Platform, configDir },
+        {
+          home,
+          platform: yield* HostProcess.Platform,
+          configDir,
+          worktreesDir: serverConfig.worktreesDir,
+        },
         (file) => isServerInternal(file).pipe(Effect.orElseSucceed(() => true)),
       ).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),

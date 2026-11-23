@@ -31,6 +31,7 @@ import { sha256 } from "./sourceFiles.ts";
 const claude = ProviderInstanceId.make("claudeAgent");
 const projectId = ProjectId.make("project");
 const input = { providerInstanceId: claude, projectId };
+const codex = ProviderInstanceId.make("codex");
 
 const git = (cwd: string, ...args: string[]) =>
   NodeChildProcess.execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
@@ -52,16 +53,41 @@ const serviceLayer = (home: string, repo: string, worktree: string, lookups: { c
               : Effect.fail(new KnownWorkspaces.UnknownWorkspaceError({ cwd })),
         }),
         Layer.mock(ProviderInstanceRegistry)({
-          getInstance: () => Effect.succeed({ driverKind: "claudeAgent" } as never),
+          getInstance: (id) => Effect.succeed({ driverKind: id } as never),
         }),
         Layer.mock(ServerSettingsService)({
           getSettings: Effect.succeed({
             providerInstances: {
               claudeAgent: { driver: "claudeAgent", config: { homePath: `${home}/.claude` } },
+              codex: { driver: "codex", config: { homePath: `${home}/.codex` } },
             },
           } as never),
         }),
-        SkillSources.layer.pipe(Layer.provide(Layer.mock(ProviderRegistry)({}))),
+        SkillSources.layer.pipe(
+          Layer.provide(
+            Layer.mock(ProviderRegistry)({
+              // Codex reports skills by resolved path, so a linked one names its target.
+              refreshWorkspaceSnapshot: ({ cwd }) =>
+                Effect.succeed([
+                  {
+                    instanceId: codex,
+                    workspaceSnapshots: [
+                      {
+                        cwd,
+                        skills: [
+                          {
+                            name: "linked",
+                            path: `${home}/../elsewhere/notes.md`,
+                            enabled: true,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ] as never),
+            }),
+          ),
+        ),
         GitVcsDriver.layer.pipe(Layer.provide(VcsProcess.layer)),
       ).pipe(Layer.provideMerge(ServerConfig.layerTest(home, home))),
     ),
@@ -134,7 +160,18 @@ const fixture = Effect.gen(function* () {
   const worktree = path.join(root, "worktree");
   yield* fs.makeDirectory(worktree, { recursive: true });
   yield* fs.writeFileString(path.join(worktree, "CLAUDE.md"), "# Worktree rules\n");
-  return { root, home, repo, real, draft, worktree, link: path.join(repo, "CLAUDE.md") };
+  // User-owned config: a global import under ~/.config/gh, and Codex's AGENTS.md kept in a
+  // dotfiles repository.
+  yield* fs.writeFileString(path.join(home, ".claude", "CLAUDE.md"), "@~/.config/gh/notes.md\n");
+  yield* fs.makeDirectory(path.join(home, ".config", "gh"), { recursive: true });
+  yield* fs.writeFileString(path.join(home, ".config", "gh", "notes.md"), "token notes\n");
+  const dotfiles = path.join(root, "dotfiles");
+  yield* fs.makeDirectory(dotfiles, { recursive: true });
+  yield* fs.writeFileString(path.join(dotfiles, "AGENTS.md"), "# Global rules\n");
+  git(dotfiles, "init", "-q", "-b", "main");
+  yield* fs.makeDirectory(path.join(home, ".codex"), { recursive: true });
+  yield* fs.symlink(path.join(dotfiles, "AGENTS.md"), path.join(home, ".codex", "AGENTS.md"));
+  return { root, home, repo, real, draft, worktree, dotfiles, link: path.join(repo, "CLAUDE.md") };
 });
 
 /** Runs `body` against a fresh fixture with HOME pointed at the fixture's home folder. */
@@ -525,4 +562,61 @@ it.effect("lists up to the cap of changed files and says how many there are", ()
       ).toBe("Success");
     }),
   ),
+);
+
+it.effect(
+  "decides linked skills and committable repositories by location, for every provider",
+  () =>
+    withService((service, { root, home, dotfiles }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const codexInput = { providerInstanceId: codex, projectId };
+        const overview = yield* service.get(codexInput);
+        expect(overview.skills.find((skill) => skill.name === "linked")).toMatchObject({
+          editable: false,
+          readOnlyReason: "Linked outside this project.",
+        });
+        // The linked skill's repository holds no source of this project, so it is not committable.
+        git(`${root}/elsewhere`, "init", "-q", "-b", "main");
+        const foreign = yield* Effect.exit(
+          service.commit({
+            ...codexInput,
+            repoRoot: `${root}/elsewhere`,
+            realPaths: [`${root}/elsewhere/notes.md`],
+            message: "chore: planted",
+            expectedHead: null,
+          }),
+        );
+        expect(JSON.stringify(foreign)).toContain("holds no agent context source");
+        // The global AGENTS.md in dotfiles stays editable, and its repository committable.
+        expect(
+          overview.instructions.find((file) => file.realPath === `${dotfiles}/AGENTS.md`),
+        ).toMatchObject({ editable: true, repoRoot: dotfiles });
+        for (const [key, value] of [
+          ["user.name", "Test"],
+          ["user.email", "test@example.com"],
+          ["commit.gpgsign", "false"],
+          ["core.hooksPath", `${root}/no-hooks`],
+        ])
+          git(dotfiles, "config", key!, value!);
+        yield* service.commit({
+          ...codexInput,
+          repoRoot: dotfiles,
+          realPaths: [`${dotfiles}/AGENTS.md`],
+          message: "docs: global rules",
+          expectedHead: null,
+        });
+        expect(git(dotfiles, "log", "--format=%s")).toBe("docs: global rules");
+
+        // A global import inside a credential folder is listed but never readable.
+        const claudeOverview = yield* service.get(input);
+        const credential = `${home}/.config/gh/notes.md`;
+        expect(
+          claudeOverview.instructions.find((file) => file.realPath === credential)?.readable,
+        ).toBe(false);
+        const exit = yield* Effect.exit(service.read({ ...input, realPath: credential }));
+        expect(JSON.stringify(exit)).toContain('"refused"');
+        expect(yield* fs.exists(credential)).toBe(true);
+      }),
+    ),
 );

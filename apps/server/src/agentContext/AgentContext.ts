@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
+import * as ServerConfig from "../config.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -98,6 +99,7 @@ const make = Effect.gen(function* () {
   };
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig.ServerConfig;
   const isServerInternal = yield* makeIsServerInternalPath;
   const internal = (file: string) => isServerInternal(file).pipe(Effect.orElseSucceed(() => true));
 
@@ -180,7 +182,12 @@ const make = Effect.gen(function* () {
         : (yield* resolveInstructionFiles(
             convention,
             cwd,
-            { home, platform: yield* HostProcess.Platform, configDir },
+            {
+              home,
+              platform: yield* HostProcess.Platform,
+              configDir,
+              worktreesDir: serverConfig.worktreesDir,
+            },
             internal,
           ).pipe(
             Effect.provideService(FileSystem.FileSystem, fs),
@@ -200,6 +207,11 @@ const make = Effect.gen(function* () {
     }
     const projectRepo =
       cwd === null ? null : ((yield* repoRootOf(path.join(cwd, ".git"), home, new Map())) ?? cwd);
+    const inProject = (file: string) => projectRepo !== null && within(projectRepo, file);
+    // Skills from the user's own config folders; every other skill is judged by where it lives,
+    // since providers that report resolved paths cannot say how a skill was linked.
+    const userOwned = (skill: (typeof skills.skills)[number]) =>
+      skill.origin.kind === "user" || skill.origin.kind === "codex";
     for (const skill of skills.skills) {
       if (readOnly.has(skill.realPath)) continue;
       readOnly.set(
@@ -209,8 +221,7 @@ const make = Effect.gen(function* () {
           : skill.origin.kind === "npx"
             ? "Installed by npx skills: change the source, then reinstall."
             : // A cloned project could link a skill to a file in another repository.
-              skill.origin.kind === "project" &&
-                (projectRepo === null || !within(projectRepo, skill.realPath))
+              !userOwned(skill) && !inProject(skill.realPath)
               ? LINKED_OUTSIDE
               : yield* readOnlyReason(skill.realPath, home, internal),
       );
@@ -218,18 +229,28 @@ const make = Effect.gen(function* () {
     const editable = new Set(
       [...readOnly].flatMap(([file, reason]) => (reason === null ? [file] : [])),
     );
-    // A skill can link anywhere, so its text is read only from Markdown outside secrets.
-    const skillReadable = Effect.fnUntraced(function* (realPath: string) {
+    // Text is read only from Markdown outside credential and server-state paths, whatever
+    // linked or imported it.
+    const safeToRead = Effect.fnUntraced(function* (realPath: string) {
       return (
         /\.md$/i.test(realPath) && !isCredentialPath(realPath, home) && !(yield* internal(realPath))
       );
     });
-    const readable = new Set(
-      instructions.filter((file) => file.status === "expected").map((file) => file.realPath),
-    );
-    for (const skill of skills.skills) {
-      if (yield* skillReadable(skill.realPath)) readable.add(skill.realPath);
+    const readable = new Set<string>();
+    for (const file of instructions) {
+      if (file.status === "expected" && (yield* safeToRead(file.realPath)))
+        readable.add(file.realPath);
     }
+    for (const skill of skills.skills) {
+      if (yield* safeToRead(skill.realPath)) readable.add(skill.realPath);
+    }
+    // Sources whose repository a commit may name: the project's own, and the user's config.
+    const anchors = new Set([
+      ...instructions.filter((file) => file.status === "expected").map((file) => file.realPath),
+      ...skills.skills
+        .filter((skill) => userOwned(skill) || inProject(skill.realPath))
+        .map((skill) => skill.realPath),
+    ]);
     return {
       driver,
       cwd,
@@ -240,6 +261,7 @@ const make = Effect.gen(function* () {
       readOnly,
       editable,
       readable,
+      anchors,
     };
   });
 
@@ -432,8 +454,7 @@ const make = Effect.gen(function* () {
       // everything. A skill linked out of the project does not vouch for its target's repository.
       const cache = new Map<string, string | null>();
       let holdsSource = false;
-      for (const file of found.readable) {
-        if (found.readOnly.get(file) === LINKED_OUTSIDE) continue;
+      for (const file of found.anchors) {
         if ((yield* repoRootOf(file, found.home, cache)) === input.repoRoot) {
           holdsSource = true;
           break;
