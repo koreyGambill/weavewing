@@ -1,11 +1,11 @@
 ---
 name: test-t3-app
-description: Test T3 Code's web and desktop UI through its built-in Browser panel against isolated development state. Use for browser verification, browser pairing recovery, and test fixtures. Use test-t3-mobile for native mobile verification.
+description: Test T3 Code's web and desktop UI through its browser automation tools against isolated development state. Use for browser verification, browser pairing recovery, and test fixtures. Use test-t3-mobile for native mobile verification.
 ---
 
 # Test T3 web and desktop
 
-Use T3's built-in Browser panel for verification. Follow the recovery steps
+Use T3's browser automation tools for verification. Follow the recovery steps
 below before declaring it unavailable. Do not install or switch to another
 automation system. For native mobile testing, use
 [test-t3-mobile](../test-t3-mobile/SKILL.md).
@@ -34,7 +34,7 @@ with `preview_evaluate`, or run
 When the test needs real provider behavior, use that provider's cheapest
 model, such as Haiku for Claude or Luna for Codex.
 
-## Use the Browser panel
+## Drive a browser tab
 
 Call `preview_status`. If no tab can be automated, call `preview_open`, including
 when status reports `available: false` or `tabId: null`. Status can report
@@ -49,11 +49,17 @@ for a fresh one. Keep using the same tab.
 
 ## Verify and retain
 
-Exercise the affected flow and capture the state that proves it works. Keep
-the server, state, and panel available while the user inspects or iterates.
-An assistant turn ending is not teardown. Stop only processes you started,
-using retained terminal sessions or captured PIDs.
+Exercise the affected flow and capture the state that proves it works.
 
-When sharing is requested, start with `vp run dev --share` and give the user
-a fresh complete pairing URL that you have not consumed. Keep other credentials
-out of screenshots, commits, and replies.
+When handing a tab to the user, explicitly request `open: true` and check
+`preview_status` for its tab ID after navigating. `available: true` means the
+agent can drive the tab. Confirm `visible: true` before saying the page is
+visible in the user's workspace. If the tab remains hidden or its placement
+is unclear, give the user a direct development link they can open in a Browser
+tile or a regular browser.
+
+For a remote handoff, start with `vp run dev --share` and give the user a
+fresh complete pairing URL that you have not consumed. Keep other credentials
+out of screenshots, commits, and replies. Leave the server and test state
+running while the user inspects or iterates. Stop only processes you started,
+using retained terminal sessions or captured PIDs.
