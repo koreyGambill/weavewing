@@ -37,7 +37,7 @@ interface DropdownTerminalState {
   expanded: boolean;
   tabs: readonly DropdownTerminalTab[];
   activeTabId: string;
-  /** Opens a tab on `environmentId` after the active one and shows it. */
+  /** Opens a tab on `target` after the active one and shows it. */
   addTab: (target: DropdownTerminalTarget | null, tabId?: string) => string;
   selectTab: (tabId: string) => void;
   renameTab: (tabId: string, name: string) => void;
