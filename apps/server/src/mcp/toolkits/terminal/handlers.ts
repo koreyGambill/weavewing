@@ -1,5 +1,5 @@
 import {
-  DROPDOWN_TERMINAL_THREAD_ID,
+  isDropdownTerminalThreadId,
   OrchestratorMcpFailure,
   type TerminalError,
   TerminalWriteInput,
@@ -14,7 +14,7 @@ import { TerminalToolkit } from "./tools.ts";
 
 const access = Effect.gen(function* () {
   const { thread } = yield* requireThreadMcpCapability("terminal");
-  if (thread.threadId === DROPDOWN_TERMINAL_THREAD_ID) {
+  if (isDropdownTerminalThreadId(thread.threadId)) {
     return yield* new OrchestratorMcpFailure({
       code: "capability_denied",
       message: "The drop-down terminal is outside the calling thread.",

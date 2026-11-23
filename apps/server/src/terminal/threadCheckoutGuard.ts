@@ -1,5 +1,5 @@
 import {
-  DROPDOWN_TERMINAL_THREAD_ID,
+  isDropdownTerminalThreadId,
   TerminalMoveRefusedError,
   ThreadId,
   TerminalWorkspaceChangedError,
@@ -51,7 +51,7 @@ export const threadCheckoutGuard =
 export const terminalMoveGuard =
   (threads: ThreadManagement.ThreadManagementService["Service"]): TerminalMoveGuard =>
   (input) => {
-    const intoThread = input.toThreadId !== DROPDOWN_TERMINAL_THREAD_ID;
+    const intoThread = !isDropdownTerminalThreadId(input.toThreadId);
     const threadId = intoThread ? input.toThreadId : input.threadId;
     const refuse = (
       reason: "thread-not-found" | "thread-archived",

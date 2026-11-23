@@ -780,6 +780,20 @@ it.layer(
       expect(refused).toBeInstanceOf(TerminalMoveRefusedError);
       yield* manager.write({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID, data: "x" });
       expect(ptyAdapter.processes[0]!.writes).toEqual(["x"]);
+
+      const tab = { threadId: "dropdown-terminal-tab-2", terminalId: DEFAULT_TERMINAL_ID };
+      yield* manager.open(openInput(tab));
+      const betweenTabs = yield* manager
+        .move({ ...tab, toThreadId: "dropdown-terminal", toTerminalId: "term-2" })
+        .pipe(Effect.flip);
+      expect(betweenTabs).toBeInstanceOf(TerminalMoveRefusedError);
+      const moved = yield* manager.move({
+        ...tab,
+        toThreadId: "thread-2",
+        toTerminalId: "term-2",
+        worktreePath: "/checkout",
+      });
+      expect(moved).toMatchObject({ threadId: "thread-2", pid: ptyAdapter.processes[1]!.pid });
     }),
   );
 

@@ -20,7 +20,7 @@ import {
   TerminalProviderInstanceNotFoundError,
   TerminalProviderEnvironmentError,
   TerminalResizeError,
-  DROPDOWN_TERMINAL_THREAD_ID,
+  isDropdownTerminalThreadId,
   TerminalMoveRefusedError,
   TerminalSessionExistsError,
   TerminalSessionLookupError,
@@ -2929,7 +2929,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               options.shellResolver,
               platform,
               baseEnv,
-              session.threadId === DROPDOWN_TERMINAL_THREAD_ID,
+              isDropdownTerminalThreadId(session.threadId),
             ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,
@@ -4072,8 +4072,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     guard: TerminalMoveGuard | undefined,
   ) {
     if (
-      (input.threadId === DROPDOWN_TERMINAL_THREAD_ID) ===
-      (input.toThreadId === DROPDOWN_TERMINAL_THREAD_ID)
+      isDropdownTerminalThreadId(input.threadId) === isDropdownTerminalThreadId(input.toThreadId)
     ) {
       return yield* new TerminalMoveRefusedError({
         threadId: input.threadId,
@@ -4124,8 +4123,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       sessions.delete(fromKey);
       session.threadId = input.toThreadId;
       session.terminalId = toTerminalId;
-      session.worktreePath =
-        input.toThreadId === DROPDOWN_TERMINAL_THREAD_ID ? null : (input.worktreePath ?? null);
+      session.worktreePath = isDropdownTerminalThreadId(input.toThreadId)
+        ? null
+        : (input.worktreePath ?? null);
       session.sessionId = NodeCrypto.randomUUID();
       sessions.set(toKey, session);
       closedSessionKeys.add(fromKey);

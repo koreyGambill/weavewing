@@ -3,8 +3,19 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 export const DEFAULT_TERMINAL_ID = "term-1";
-/** The thread id each environment keeps its drop-down terminals under; no thread can take it. */
+/**
+ * The thread id each environment keeps its first drop-down tab's terminals under; no thread can
+ * take it. Later tabs append a suffix to it.
+ */
 export const DROPDOWN_TERMINAL_THREAD_ID = "dropdown-terminal";
+
+/** Whether `threadId` keys a drop-down terminal tab rather than a thread. */
+export function isDropdownTerminalThreadId(threadId: string): boolean {
+  return (
+    threadId === DROPDOWN_TERMINAL_THREAD_ID ||
+    threadId.startsWith(`${DROPDOWN_TERMINAL_THREAD_ID}-`)
+  );
+}
 export const DEFAULT_MAX_TERMINAL_BUFFER_BYTES = 512 * 1024;
 
 const historyEncoder = new TextEncoder();

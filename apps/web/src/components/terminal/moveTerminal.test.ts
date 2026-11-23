@@ -40,7 +40,17 @@ function moveRecorder(result: "success" | "failure", returnedId?: string) {
 }
 
 beforeEach(() => {
-  useDropdownTerminalStore.setState({ open: false, selectedTarget: null });
+  useDropdownTerminalStore.setState({
+    open: false,
+    tabs: [
+      {
+        id: dropdown.threadId,
+        name: null,
+        target: { environmentId, label: "Local", external: false },
+      },
+    ],
+    activeTabId: dropdown.threadId,
+  });
   useRightPanelStore.setState({
     byThreadKey: {},
     threadPanelVisibilityByThreadKey: {},
@@ -155,11 +165,10 @@ it.each(["failure", "success"] as const)(
   "keeps the local workspace intact when a remote move returns %s",
   async (result) => {
     const remote = EnvironmentId.make("env-2");
-    const pinned = { environmentId, label: "Local", external: false };
     const target = { environmentId: remote, label: "Remote", external: true };
     const source = scopeThreadRef(remote, ThreadId.make("remote-thread"));
     const launch = { cwd: "/remote/project", worktreePath: null };
-    useDropdownTerminalStore.setState({ open: true, selectedTarget: pinned });
+    useDropdownTerminalStore.setState({ open: true });
     useRightPanelStore.getState().openTerminal(dropdown, "term-1");
     useRightPanelStore.getState().openTerminal(source, "term-1", launch);
     const { calls, move } = moveRecorder(result, "moved");
@@ -170,30 +179,53 @@ it.each(["failure", "success"] as const)(
       target,
       move: (request) => {
         expect(request.environmentId).toBe(remote);
-        expect(useDropdownTerminalStore.getState().selectedTarget).toBe(pinned);
+        expect(useDropdownTerminalStore.getState().activeTabId).toBe(dropdown.threadId);
         return move(request);
       },
     });
 
-    expect(calls).toEqual([
-      expect.objectContaining({
-        input: expect.objectContaining({ toThreadId: dropdownTerminalRef(remote).threadId }),
-        sourceTabs: 0,
-      }),
-    ]);
+    const toThreadId = calls[0]?.input.toThreadId ?? "";
+    expect(toThreadId).not.toBe(dropdown.threadId);
+    expect(calls).toEqual([expect.objectContaining({ sourceTabs: 0 })]);
     expect(terminalsIn(dropdown)).toEqual([expect.objectContaining({ resourceId: "term-1" })]);
+    const { tabs, activeTabId } = useDropdownTerminalStore.getState();
     if (result === "success") {
-      expect(useDropdownTerminalStore.getState().selectedTarget).toBe(target);
+      expect(tabs.map((tab) => [tab.id, tab.target?.environmentId])).toEqual([
+        [dropdown.threadId, environmentId],
+        [toThreadId, remote],
+      ]);
+      expect(activeTabId).toBe(toThreadId);
       expect(terminalsIn(source)).toEqual([]);
-      expect(terminalsIn(dropdownTerminalRef(remote))).toEqual([
+      expect(terminalsIn(dropdownTerminalRef(remote, toThreadId))).toEqual([
         expect.objectContaining({ resourceId: "moved" }),
       ]);
     } else {
-      expect(useDropdownTerminalStore.getState().selectedTarget).toBe(pinned);
+      expect(tabs.map((tab) => tab.id)).toEqual([dropdown.threadId]);
+      expect(activeTabId).toBe(dropdown.threadId);
       expect(terminalsIn(source)).toEqual([
         expect.objectContaining({ resourceId: "term-1", launchContext: launch }),
       ]);
-      expect(terminalsIn(dropdownTerminalRef(remote))).toEqual([]);
+      expect(terminalsIn(dropdownTerminalRef(remote, toThreadId))).toEqual([]);
     }
   },
 );
+
+it("moves a terminal into the active tab when it already runs on that machine", async () => {
+  const second = useDropdownTerminalStore
+    .getState()
+    .addTab({ environmentId, label: "Local", external: false });
+  useDropdownTerminalStore.setState({ open: true });
+  useRightPanelStore.getState().openTerminal(thread, "term-1");
+  const { calls, move } = moveRecorder("success");
+
+  await moveTerminalToDropdown({
+    from: thread,
+    terminalId: "term-1",
+    target: { environmentId, label: "Local", external: false },
+    move,
+  });
+
+  expect(calls[0]?.input.toThreadId).toBe(second);
+  expect(useDropdownTerminalStore.getState().tabs).toHaveLength(2);
+  expect(useDropdownTerminalStore.getState().activeTabId).toBe(second);
+});

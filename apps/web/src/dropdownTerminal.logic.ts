@@ -2,13 +2,15 @@ import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   DROPDOWN_TERMINAL_THREAD_ID,
+  isDropdownTerminalThreadId,
   ThreadId,
   type EnvironmentId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 
 import { isEnvironmentOnThisComputer } from "./connection/desktopLocal";
-import type { DropdownTerminalTarget } from "./dropdownTerminalStore";
+import { randomUUID } from "./lib/utils";
+import type { DropdownTerminalTab, DropdownTerminalTarget } from "./dropdownTerminalStore";
 import type { RightPanelSurface } from "./rightPanelStore";
 import { getTileGroups, type ThreadTileLayout } from "./threadTileLayout";
 
@@ -34,11 +36,64 @@ export function dropdownTerminalTarget(
 }
 
 /**
- * Terminal sessions are keyed by a thread id the server does not need to know, so the drop-down
- * keeps its terminals and tiles under one id per machine that no thread can take.
+ * Terminal sessions are keyed by a thread id the server does not need to know, so each drop-down
+ * tab keeps its terminals and tiles under its own id that no thread can take.
  */
-export function dropdownTerminalRef(environmentId: EnvironmentId): ScopedThreadRef {
-  return scopeThreadRef(environmentId, ThreadId.make(DROPDOWN_TERMINAL_THREAD_ID));
+export function dropdownTerminalRef(
+  environmentId: EnvironmentId,
+  tabId: string = DROPDOWN_TERMINAL_THREAD_ID,
+): ScopedThreadRef {
+  return scopeThreadRef(environmentId, ThreadId.make(tabId));
+}
+
+function restoreTarget(saved: unknown): DropdownTerminalTarget | null {
+  if (typeof saved !== "object" || saved === null) return null;
+  const { environmentId, label, external } = saved as Record<string, unknown>;
+  return typeof environmentId === "string" && environmentId !== "" && typeof label === "string"
+    ? { environmentId: environmentId as EnvironmentId, label, external: external === true }
+    : null;
+}
+
+/** Saved tabs that still name a drop-down key, or null when none survive. */
+export function restoreDropdownTerminalTabs(saved: unknown): DropdownTerminalTab[] | null {
+  if (!Array.isArray(saved)) return null;
+  const seen = new Set<string>();
+  const tabs = saved.flatMap((entry: unknown): DropdownTerminalTab[] => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { id, name, target } = entry as Record<string, unknown>;
+    if (typeof id !== "string" || !isDropdownTerminalThreadId(id) || seen.has(id)) return [];
+    seen.add(id);
+    return [
+      {
+        id,
+        name: typeof name === "string" && name.trim() !== "" ? name : null,
+        target: restoreTarget(target),
+      },
+    ];
+  });
+  return tabs.length > 0 ? tabs : null;
+}
+
+export function newDropdownTerminalTabId(): string {
+  return `${DROPDOWN_TERMINAL_THREAD_ID}-${randomUUID()}`;
+}
+
+/** The tab a terminal moved to `environmentId` joins: the active one when it runs there, else the first that does. */
+export function dropdownTerminalTabFor(
+  state: { readonly tabs: readonly DropdownTerminalTab[]; readonly activeTabId: string },
+  environmentId: EnvironmentId,
+): DropdownTerminalTab | null {
+  const active = state.tabs.find((tab) => tab.id === state.activeTabId);
+  if (active?.target?.environmentId === environmentId) return active;
+  return state.tabs.find((tab) => tab.target?.environmentId === environmentId) ?? null;
+}
+
+/** The tab a 1-based jump key picks; 9 always picks the last, as browsers do. */
+export function dropdownTerminalTabAt(
+  tabs: readonly DropdownTerminalTab[],
+  position: number,
+): DropdownTerminalTab | null {
+  return (position === 9 ? tabs.at(-1) : tabs[position - 1]) ?? null;
 }
 
 /** Keeps the bottom edge reachable: at least the minimum, at most the window less a margin. */

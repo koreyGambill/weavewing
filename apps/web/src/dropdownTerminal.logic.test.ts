@@ -7,8 +7,10 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   clampDropdownTerminalHeight,
   dropdownTerminalMoveTargets,
+  dropdownTerminalTabAt,
   dropdownTerminalTarget,
   dropdownTerminalToFocus,
+  restoreDropdownTerminalTabs,
 } from "./dropdownTerminal.logic";
 import { desktopLocalConnectionId } from "./connection/desktopLocal";
 import type { RightPanelSurface } from "./rightPanelStore";
@@ -134,5 +136,33 @@ describe("dropdownTerminalMoveTargets", () => {
       ["shown", null],
       ["old", null],
     ]);
+  });
+});
+
+describe("drop-down tabs", () => {
+  const remote = { environmentId: "remote", label: "Build machine", external: true };
+
+  it("restores saved tabs that still key a drop-down, once each", () => {
+    expect(
+      restoreDropdownTerminalTabs([
+        { id: "dropdown-terminal", name: "main", target: remote },
+        { id: "dropdown-terminal-2", name: "  ", target: { environmentId: "" } },
+        { id: "dropdown-terminal-2", name: "duplicate", target: null },
+        { id: "thread-1", name: "a thread", target: remote },
+        "garbage",
+      ]),
+    ).toEqual([
+      { id: "dropdown-terminal", name: "main", target: remote },
+      { id: "dropdown-terminal-2", name: null, target: null },
+    ]);
+    expect(restoreDropdownTerminalTabs([{ id: "thread-1" }])).toBeNull();
+    expect(restoreDropdownTerminalTabs(undefined)).toBeNull();
+  });
+
+  it("jumps by position, with 9 always the last tab", () => {
+    const tabs = ["a", "b", "c"].map((id) => ({ id, name: null, target: null }));
+    expect(dropdownTerminalTabAt(tabs, 2)?.id).toBe("b");
+    expect(dropdownTerminalTabAt(tabs, 4)).toBeNull();
+    expect(dropdownTerminalTabAt(tabs, 9)?.id).toBe("c");
   });
 });

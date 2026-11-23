@@ -8,7 +8,7 @@ import {
   EMPTY_TERMINAL_BUFFER_STATE,
   type KnownTerminalSession,
 } from "@t3tools/client-runtime/state/terminal";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { DROPDOWN_TERMINAL_THREAD_ID, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -155,7 +155,12 @@ function setup() {
         serverConfig: { scratchWorkspaceRoot, settings: { scratchStartDirectory: "" } },
       }) as EnvironmentPresentation,
   );
-  useDropdownTerminalStore.setState({ open: false, expanded: false, selectedTarget: null });
+  useDropdownTerminalStore.setState({
+    open: false,
+    expanded: false,
+    tabs: [{ id: DROPDOWN_TERMINAL_THREAD_ID, name: null, target: null }],
+    activeTabId: DROPDOWN_TERMINAL_THREAD_ID,
+  });
   useRightPanelStore.setState({ byThreadKey: {} });
   return { local, remote };
 }
@@ -197,7 +202,7 @@ it("keeps a chosen machine across thread navigation, disconnects and reopening",
     fixture.publish();
   });
   await expect.element(input).toHaveFocus();
-  const tabs = terminal.getByRole("tab");
+  const tabs = terminal.getByRole("tab", { name: /^Terminal/ });
   await userEvent.keyboard("{Control>}a{/Control}t");
   await expect.poll(() => tabs.elements()).toHaveLength(2);
 
@@ -302,6 +307,46 @@ it("handles an outside click and keeps the toggle, shell and dialogs working", a
   await toggle.click();
   await expect.element(terminal).not.toBeInTheDocument();
   await expect.element(toggle).toHaveFocus();
+});
+
+it("keeps each tab's shells apart, jumps between tabs by number, and names them", async () => {
+  using _environment = installFakeEnvironment([]);
+  const { local, remote } = setup();
+  await using _screen = await render(fixtureApp());
+  const terminal = page.getByRole("region", { name: "Drop-down terminal" });
+  const tabs = terminal.getByRole("tablist", { name: "Drop-down terminal tabs" });
+  const localTab = tabs.getByRole("tab", { name: "This PC" });
+  const remoteTab = tabs.getByRole("tab", { name: "Build machine" });
+  const input = terminal.getByRole("textbox", { name: "Terminal input" });
+  const terminalsIn = (ref: ReturnType<typeof dropdownTerminalRef>) =>
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).surfaces.filter(
+      (surface) => surface.kind === "terminal",
+    );
+
+  await userEvent.keyboard("{Control>}j{/Control}");
+  await expect.element(localTab).toHaveAttribute("aria-selected", "true");
+  await terminal.getByRole("button", { name: "New drop-down tab" }).click();
+  await terminal.getByRole("button", { name: /Run on/ }).click();
+  await page.getByRole("menuitem", { name: "Build machine", exact: true }).click();
+  await expect.element(remoteTab).toHaveAttribute("aria-selected", "true");
+  await expect.element(input).toHaveFocus();
+  expect(remoteTab.element().closest("[data-external]")).not.toBeNull();
+  expect(localTab.element().closest("[data-external]")).toBeNull();
+  const [first, second] = useDropdownTerminalStore.getState().tabs;
+  expect(terminalsIn(dropdownTerminalRef(local, first!.id))).toHaveLength(1);
+  expect(terminalsIn(dropdownTerminalRef(remote, second!.id))).toHaveLength(1);
+
+  await userEvent.keyboard("{Control>}1{/Control}");
+  await expect.element(localTab).toHaveAttribute("aria-selected", "true");
+  await expect.element(input).toHaveFocus();
+  await userEvent.keyboard("{Control>}2{/Control}");
+  await expect.element(remoteTab).toHaveAttribute("aria-selected", "true");
+
+  await remoteTab.dblClick();
+  await terminal.getByRole("textbox", { name: "Tab name" }).fill("deploy");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(tabs.getByRole("tab", { name: "deploy" })).toBeVisible();
+  expect(useDropdownTerminalStore.getState().tabs[1]?.name).toBe("deploy");
 });
 
 it("inherits the source tab directory for new tabs and splits on the selected machine", async () => {

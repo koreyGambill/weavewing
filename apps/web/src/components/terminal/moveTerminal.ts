@@ -1,13 +1,17 @@
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthTerminalReadScope,
-  DROPDOWN_TERMINAL_THREAD_ID,
+  isDropdownTerminalThreadId,
   type ScopedThreadRef,
   type TerminalMoveInput,
   type TerminalSessionSnapshot,
 } from "@t3tools/contracts";
 
-import { dropdownTerminalRef } from "../../dropdownTerminal.logic";
+import {
+  dropdownTerminalRef,
+  dropdownTerminalTabFor,
+  newDropdownTerminalTabId,
+} from "../../dropdownTerminal.logic";
 import { type DropdownTerminalTarget, useDropdownTerminalStore } from "../../dropdownTerminalStore";
 import { focusTerminal } from "../../lib/terminalFocus";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -75,13 +79,10 @@ export async function moveTerminalTab(input: {
     store.openTerminal(from, terminalId, surface.launchContext);
     // Taking out its last tab hid the drop-down; the restored tab needs it shown again.
     const dropdown = useDropdownTerminalStore.getState();
-    if (
-      from.threadId === DROPDOWN_TERMINAL_THREAD_ID &&
-      !dropdown.open &&
-      (dropdown.selectedTarget === null ||
-        dropdown.selectedTarget.environmentId === from.environmentId)
-    )
-      dropdown.toggle();
+    if (isDropdownTerminalThreadId(from.threadId)) {
+      dropdown.selectTab(from.threadId);
+      if (!dropdown.open) dropdown.toggle();
+    }
     return null;
   }
   const movedId = result.value.terminalId;
@@ -98,7 +99,12 @@ export async function moveTerminalToDropdown(input: {
   readonly target: DropdownTerminalTarget;
   readonly move: Parameters<typeof moveTerminalTab>[0]["move"];
 }): Promise<void> {
-  const threadRef = dropdownTerminalRef(input.target.environmentId);
+  const existing = dropdownTerminalTabFor(
+    useDropdownTerminalStore.getState(),
+    input.target.environmentId,
+  );
+  const tabId = existing?.id ?? newDropdownTerminalTabId();
+  const threadRef = dropdownTerminalRef(input.target.environmentId, tabId);
   const movedId = await moveTerminalTab({
     from: input.from,
     terminalId: input.terminalId,
@@ -111,7 +117,8 @@ export async function moveTerminalToDropdown(input: {
     .getState()
     .applyTileAction(threadRef, { type: "close-tab", tabId: CONVERSATION_TAB_ID });
   const dropdown = useDropdownTerminalStore.getState();
-  dropdown.selectTarget(input.target);
+  if (existing) dropdown.selectTab(tabId);
+  else dropdown.addTab(input.target, tabId);
   if (!dropdown.open) dropdown.toggle();
   focusTerminal(threadRef, movedId);
 }

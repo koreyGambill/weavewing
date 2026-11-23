@@ -173,6 +173,11 @@ export const CLASSIC_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     command,
     when: "modelPickerOpen && isDesktop",
   })),
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
+    key: `mod+${n}`,
+    command: `terminal.dropdownTab.${n}` as const,
+    when: "dropdownTerminalFocus",
+  })),
   { key: "c", command: "usage.cost", when: "usagePageOpen" },
   { key: "t", command: "usage.tokens", when: "usagePageOpen" },
   { key: "l", command: "usage.limits", when: "usagePageOpen" },

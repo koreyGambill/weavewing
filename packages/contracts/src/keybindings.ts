@@ -98,6 +98,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "terminal.dropdown",
   "terminal.dropdownExpand",
   "terminal.dropdownPin",
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => `terminal.dropdownTab.${n}` as const),
   "threadContext.toggle",
   "threadPanel.toggle",
   "view.reopenClosed",

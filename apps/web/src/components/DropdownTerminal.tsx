@@ -4,7 +4,12 @@ import {
   availableScratchWorkspaceRoot,
   scratchWorkspaceLabel,
 } from "@t3tools/client-runtime/operations/projects";
-import { AuthTerminalOperateScope } from "@t3tools/contracts";
+import {
+  AuthTerminalOperateScope,
+  type EnvironmentId,
+  type KeybindingCommand,
+  type ResolvedKeybindingsConfig,
+} from "@t3tools/contracts";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import {
@@ -14,8 +19,10 @@ import {
   Minimize2,
   Pin,
   PinOff,
+  Plus,
   SquareTerminal,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import {
   useEffect,
@@ -31,18 +38,24 @@ import {
   clampDropdownTerminalHeight,
   DROPDOWN_TERMINAL_DEFAULT_HEIGHT,
   dropdownTerminalRef,
+  dropdownTerminalTabAt,
   dropdownTerminalTarget,
   dropdownTerminalToFocus,
 } from "../dropdownTerminal.logic";
-import { type DropdownTerminalTarget, useDropdownTerminalStore } from "../dropdownTerminalStore";
+import {
+  activeDropdownTerminalTab,
+  type DropdownTerminalTab,
+  type DropdownTerminalTarget,
+  useDropdownTerminalStore,
+} from "../dropdownTerminalStore";
 import { isElectron } from "../env";
 import { useDefaultFolderEnvironmentId } from "../hooks/useScratchProject";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
-import { shortcutLabelForCommand } from "../keybindings";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { isEditableFocused } from "../lib/editableFocus";
-import { isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
+import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { focusTerminal, isTerminalFocused } from "../lib/terminalFocus";
 import { cn } from "../lib/utils";
 import {
@@ -69,6 +82,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 const HEIGHT_STORAGE_KEY = "t3code:dropdown-terminal-height";
 const PIN_STORAGE_KEY = "t3code:dropdown-terminal-pinned";
 const NO_PENDING_SURFACES: ReadonlySet<string> = new Set();
+const TAB_JUMP_COMMAND = /^terminal\.dropdownTab\.[1-9]$/;
 const noop = () => {};
 
 /** Owns the toggle key and mounts the panel only while it is open. */
@@ -168,6 +182,175 @@ function HeaderControl(props: {
   );
 }
 
+function DropdownTerminalTabStrip(props: {
+  tabs: readonly DropdownTerminalTab[];
+  activeTabId: string;
+  targetFor: (tab: DropdownTerminalTab) => DropdownTerminalTarget | null;
+  keybindings: ResolvedKeybindingsConfig;
+  onAdd: () => void;
+}) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div
+        role="tablist"
+        aria-label="Drop-down terminal tabs"
+        className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
+      >
+        {props.tabs.map((tab, index) => {
+          const target = props.targetFor(tab);
+          const label = tab.name ?? target?.label ?? "Choose machine";
+          const active = tab.id === props.activeTabId;
+          const jumpKeys =
+            index < 9
+              ? shortcutLabelForCommand(
+                  props.keybindings,
+                  `terminal.dropdownTab.${index === props.tabs.length - 1 ? 9 : index + 1}` as KeybindingCommand,
+                )
+              : null;
+          return (
+            <div
+              key={tab.id}
+              data-external={target?.external ? "" : undefined}
+              className={cn(
+                "group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center rounded-md border text-xs",
+                target?.external
+                  ? "border-external/50 bg-external/10 text-external-foreground"
+                  : "border-transparent text-muted-foreground",
+                active &&
+                  (target?.external
+                    ? "border-external bg-external/25"
+                    : "border-border bg-accent text-foreground"),
+              )}
+            >
+              {renamingId === tab.id ? (
+                <input
+                  aria-label="Tab name"
+                  autoFocus
+                  defaultValue={tab.name ?? ""}
+                  placeholder={target?.label ?? "Tab name"}
+                  className="h-full w-32 min-w-0 bg-transparent px-2 outline-none"
+                  onFocus={(event) => event.currentTarget.select()}
+                  onBlur={(event) => {
+                    useDropdownTerminalStore
+                      .getState()
+                      .renameTab(tab.id, event.currentTarget.value);
+                    setRenamingId(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setRenamingId(null);
+                    }
+                  }}
+                />
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        className="flex h-full min-w-0 items-center px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        onClick={() => useDropdownTerminalStore.getState().selectTab(tab.id)}
+                        onDoubleClick={() => setRenamingId(tab.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "F2") setRenamingId(tab.id);
+                        }}
+                      />
+                    }
+                  >
+                    <span className="truncate">{label}</span>
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom">
+                    {target ? `${label} · ${target.label}` : label}
+                    {target?.external ? " (external)" : ""}
+                    {jumpKeys ? ` (${jumpKeys})` : ""}. Double-click to rename.
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+              {active && renamingId !== tab.id && target && (
+                <CloseDropdownTabButton
+                  tab={tab}
+                  environmentId={target.environmentId}
+                  label={label}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="New drop-down tab"
+              onClick={props.onAdd}
+            />
+          }
+        >
+          <Plus />
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">New drop-down tab</TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
+/** Closes every terminal in the tab, asking first when one is running a command. */
+function CloseDropdownTabButton(props: {
+  tab: DropdownTerminalTab;
+  environmentId: EnvironmentId;
+  label: string;
+}) {
+  const ref = dropdownTerminalRef(props.environmentId, props.tab.id);
+  const knownSessions = useKnownTerminalSessions({
+    environmentId: ref.environmentId,
+    threadId: ref.threadId,
+  });
+  const surfaces = useRightPanelStore(
+    (state) => selectThreadRightPanelState(state.byThreadKey, ref).surfaces,
+  );
+  const terminalLabelsById = new Map(
+    surfaces.flatMap((surface) =>
+      surface.kind === "terminal"
+        ? [
+            [
+              surface.resourceId,
+              resolveTerminalSessionLabel(
+                surface.resourceId,
+                knownSessions?.find((session) => session.target.terminalId === surface.resourceId)
+                  ?.state.summary ?? null,
+              ),
+            ] as const,
+          ]
+        : [],
+    ),
+  );
+  const close = useRightPanelSurfaceClose({ threadRef: ref, terminalLabelsById });
+  const closeTab = async () => {
+    const terminals = [...terminalLabelsById].map(([terminalId, label]) => ({ terminalId, label }));
+    if (terminals.length > 0 && !(await confirmTerminalClose(ref, terminals))) return;
+    close.closeSurfacesWithoutTerminalPrompt(surfaces);
+    useDropdownTerminalStore.getState().removeTab(props.tab.id);
+  };
+  return (
+    <button
+      type="button"
+      aria-label={`Close ${props.label}`}
+      className="mr-1 flex size-5 shrink-0 items-center justify-center rounded-sm opacity-70 outline-none hover:bg-foreground/10 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-3.5"
+      onClick={() => void closeTab()}
+    >
+      <X />
+    </button>
+  );
+}
+
 function DropdownTerminalPanel() {
   const expanded = useDropdownTerminalStore((state) => state.expanded);
   const [pinned, setPinned] = useLocalStorage(PIN_STORAGE_KEY, false, Schema.Boolean);
@@ -190,8 +373,8 @@ function DropdownTerminalPanel() {
     DROPDOWN_TERMINAL_DEFAULT_HEIGHT,
     Schema.Finite,
   );
-  const selectedTarget = useDropdownTerminalStore((state) => state.selectedTarget);
-  const [openedTarget, setOpenedTarget] = useState<DropdownTerminalTarget | null>(null);
+  const tabs = useDropdownTerminalStore((state) => state.tabs);
+  const activeTab = useDropdownTerminalStore(activeDropdownTerminalTab);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -201,14 +384,27 @@ function DropdownTerminalPanel() {
     (environment) => environment.connection.phase === "connected",
   );
   const allowed = useEnvironmentsWithScope(connected, AuthTerminalOperateScope);
-  const pinnedTarget = selectedTarget ?? openedTarget;
-  const targetEnvironmentId = pinnedTarget?.environmentId ?? defaultEnvironmentId;
+  const targetFor = (environmentId: EnvironmentId | null) => {
+    const entry = environments.find((candidate) => candidate.environmentId === environmentId);
+    return entry ? dropdownTerminalTarget(entry, primaryEnvironmentId, isElectron) : null;
+  };
+  const tabTarget = (tab: DropdownTerminalTab) =>
+    targetFor(tab.target?.environmentId ?? defaultEnvironmentId) ?? tab.target;
+  const target = tabTarget(activeTab);
+  const targetEnvironmentId = target?.environmentId ?? null;
   const environment = environments.find((entry) => entry.environmentId === targetEnvironmentId);
-  const target = environment
-    ? dropdownTerminalTarget(environment, primaryEnvironmentId, isElectron)
-    : pinnedTarget;
-  if (pinnedTarget === null && target !== null) setOpenedTarget(target);
-  const disconnected = target !== null && environment?.connection.phase !== "connected";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the tab remembers its machine as last seen, so it keeps it across disconnects and restarts
+  useEffect(() => {
+    const saved = activeTab.target;
+    if (
+      target !== null &&
+      (saved === null || saved.label !== target.label || saved.external !== target.external)
+    ) {
+      useDropdownTerminalStore.getState().setTabTarget(activeTab.id, target);
+    }
+  }, [activeTab.id, activeTab.target, target]);
+  const disconnected =
+    targetEnvironmentId !== null && environment?.connection.phase !== "connected";
   const root = availableScratchWorkspaceRoot(
     environment?.connection.phase,
     environment?.serverConfig,
@@ -229,9 +425,26 @@ function DropdownTerminalPanel() {
   const changedMachine = useRef(false);
   const select = (choice: DropdownTerminalTarget) => {
     changedMachine.current = choice.environmentId !== targetEnvironmentId;
-    useDropdownTerminalStore.getState().selectTarget(choice);
+    useDropdownTerminalStore.getState().setTabTarget(activeTab.id, choice);
   };
   const panelRef = useRef<HTMLElement>(null);
+  const jumpToTab = useEffectEvent((event: KeyboardEvent) => {
+    if (!(event.target instanceof Node) || !panelRef.current?.contains(event.target)) return false;
+    const command = resolveShortcutCommand(
+      event,
+      keybindings.filter((binding) => TAB_JUMP_COMMAND.test(binding.command)),
+      { context: { terminalFocus: isTerminalFocused(), dropdownTerminalFocus: true } },
+    );
+    const tab = command === null ? null : dropdownTerminalTabAt(tabs, Number(command.at(-1)));
+    if (tab === null) return false;
+    // The focused shell would otherwise also read the key.
+    event.preventDefault();
+    event.stopPropagation();
+    useDropdownTerminalStore.getState().selectTab(tab.id);
+    return true;
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tab jump keys apply while focus is in the open panel
+  useEffect(() => registerCommands({}, { capture: true, onKeyDown: jumpToTab }), []);
   const pointerStartedOutside = useRef(false);
   const insideClicks = useRef(new WeakSet<Event>());
 
@@ -308,7 +521,14 @@ function DropdownTerminalPanel() {
       <header className="flex h-9 shrink-0 items-center gap-2 border-b pr-1 pl-3">
         <SquareTerminal className="size-4 shrink-0 text-muted-foreground" />
         <h2 className="sr-only">Terminal</h2>
-        <div className="min-w-0">
+        <DropdownTerminalTabStrip
+          tabs={tabs}
+          activeTabId={activeTab.id}
+          targetFor={tabTarget}
+          keybindings={keybindings}
+          onAdd={() => useDropdownTerminalStore.getState().addTab(target)}
+        />
+        <div className="min-w-0 shrink-0">
           <Menu
             onOpenChange={(open) => {
               if (open) changedMachine.current = false;
@@ -319,7 +539,7 @@ function DropdownTerminalPanel() {
               render={<Button variant="outline" size="compact" className="max-w-full" />}
             >
               <span className="shrink-0">Run on</span>
-              <span className="truncate">{target?.label ?? "Choose machine"}</span>
+              <span className="max-w-40 truncate">{target?.label ?? "Choose machine"}</span>
               <ChevronDown />
             </MenuTrigger>
             <MenuPopup align="start" finalFocus={() => !changedMachine.current}>
@@ -352,7 +572,7 @@ function DropdownTerminalPanel() {
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block" />
+                <span className="hidden max-w-48 min-w-0 truncate text-xs text-muted-foreground lg:block" />
               }
             >
               {folderLabel}
@@ -401,7 +621,12 @@ function DropdownTerminalPanel() {
         </div>
       )}
       {target && root !== null ? (
-        <DropdownTerminalWorkspace key={target.environmentId} target={target} root={root} />
+        <DropdownTerminalWorkspace
+          key={`${activeTab.id}:${target.environmentId}`}
+          tabId={activeTab.id}
+          target={target}
+          root={root}
+        />
       ) : disconnected ? null : (
         <p role="status" className="m-auto p-6 text-sm text-muted-foreground">
           {target
@@ -443,13 +668,15 @@ function DropdownTerminalPanel() {
 }
 
 function DropdownTerminalWorkspace({
+  tabId,
   target,
   root,
 }: {
+  tabId: string;
   target: DropdownTerminalTarget;
   root: string;
 }) {
-  const ref = dropdownTerminalRef(target.environmentId);
+  const ref = dropdownTerminalRef(target.environmentId, tabId);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const canOperate = useEnvironmentScope(target.environmentId, AuthTerminalOperateScope);
   const panelState = useRightPanelStore((state) =>
@@ -502,13 +729,14 @@ function DropdownTerminalWorkspace({
     if (canOperate) focusOnOpen();
   }, [canOperate]);
 
-  // Closing the last terminal hides the drop-down; the next opening starts a fresh one.
+  // Closing a tab's last terminal closes the tab; the only tab hides the drop-down instead.
   const [hadTerminals, setHadTerminals] = useState(false);
   if (terminals.length > 0 && !hadTerminals) setHadTerminals(true);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- hides the panel through its store once its last terminal is gone
   useEffect(() => {
-    if (hadTerminals && terminals.length === 0) useDropdownTerminalStore.getState().close();
-  }, [hadTerminals, terminals.length]);
+    if (hadTerminals && terminals.length === 0)
+      useDropdownTerminalStore.getState().removeTab(tabId);
+  }, [hadTerminals, tabId, terminals.length]);
 
   // A shell that exited has nothing left to confirm.
   const closeExited = (terminalId: string, _target?: unknown, sessionId?: string | null) => {
