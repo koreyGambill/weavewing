@@ -221,6 +221,11 @@ function selectedTextBoundary(range: Range, node: Node, last: boolean): Text | n
   return null;
 }
 
+/** A source's text as citations and bookmarks address it. */
+export function readAssistantSourceText(root: HTMLElement): string {
+  return readAssistantText(root).text;
+}
+
 export function captureAssistantTextSelection(
   viewport: HTMLElement,
   selection: Selection | null,

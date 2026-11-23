@@ -380,6 +380,8 @@ export function MessagesTimeline(props: MessagesTimelineProps) {
   );
 }
 
+const NO_TURN_TIMES: ReadonlyArray<number | null> = [];
+
 const ConversationTimeline = memo(function ConversationTimeline({
   pendingApprovals = EMPTY_PENDING_APPROVALS,
   heldApprovalRequestIds,
@@ -899,7 +901,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onRevealBookmark && bookmarksSupported && !inFlow ? citationThreadRef : null,
     ),
   );
-  const minimapTurnTimes = timelineMinimapItemTimes(markedMinimapItems, rows, userTurns);
+  // Only a thread with bookmarks pays for placing them.
+  const minimapTurnTimes =
+    railBookmarks.length > 0
+      ? timelineMinimapItemTimes(markedMinimapItems, rows, userTurns)
+      : NO_TURN_TIMES;
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false
       ? rows.findIndex((row) => row.id === rememberedPosition.rowId)

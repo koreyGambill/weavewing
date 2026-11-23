@@ -11,6 +11,7 @@ import { use, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } fro
 import { createPortal } from "react-dom";
 import {
   captureAssistantTextSelection,
+  readAssistantSourceText,
   type AssistantCitationSourceAnchor,
 } from "~/lib/assistantTextSelection";
 import {
@@ -213,7 +214,12 @@ export function AssistantSelectionToolbar({
       ? selection
       : null;
   const existingBookmark =
-    bookmarkSource && findOverlappingBookmark(bookmarks, bookmarkSource.citation);
+    bookmarkSource &&
+    findOverlappingBookmark(
+      bookmarks,
+      bookmarkSource.citation,
+      readAssistantSourceText(bookmarkSource.sourceAnchor.source),
+    );
   const applyBookmark = (todo: boolean) => {
     if (!bookmarkSource) return;
     const { messageId, text, start, end, prefix, suffix } = bookmarkSource.citation;

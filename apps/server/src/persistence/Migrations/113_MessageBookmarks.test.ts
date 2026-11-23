@@ -48,8 +48,16 @@ layer("113_MessageBookmarks", (it) => {
       assert.notStrictEqual(rows[0]?.bookmark_id, rows[1]?.bookmark_id);
       // A message has at most one whole-message bookmark.
       yield* Effect.flip(
-        sql`INSERT INTO message_bookmarks (bookmark_id, thread_id, message_id, role, excerpt, todo, flagged_at)
-          VALUES ('again', 't1', 'm1', 'user', '', 0, '')`,
+        sql`INSERT INTO message_bookmarks (bookmark_id, thread_id, message_id, passage_key, role, excerpt, todo, flagged_at)
+          VALUES ('again', 't1', 'm1', '', 'user', '', 0, '')`,
+      );
+      // A rolled-back build still reads its follow-ups.
+      assert.deepStrictEqual(
+        yield* sql`SELECT message_id, excerpt, done_at FROM message_follow_ups ORDER BY message_id`,
+        [
+          { message_id: "m1", excerpt: "open", done_at: null },
+          { message_id: "m2", excerpt: "done", done_at: "2026-01-03T00:00:00.000Z" },
+        ],
       );
     }),
   );

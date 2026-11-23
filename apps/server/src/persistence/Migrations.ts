@@ -238,7 +238,7 @@ const migrationEntries = [
   [110, "TurnItemInlineWorkOutput", Migration0110, false],
   [111, "RepairStaleTitleRegeneration", Migration0111, true],
   [112, "InboxImportance", Migration0112, true],
-  [113, "MessageBookmarks", Migration0113, true],
+  [113, "MessageBookmarks", Migration0113, false],
 ] as const;
 
 // Destructive includes incompatible schema changes and rewrites of existing data.

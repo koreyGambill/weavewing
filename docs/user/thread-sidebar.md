@@ -138,22 +138,26 @@ thread** drafts that note into the landing's thread for you to read and send. Th
 strip badge counts changes waiting for QA and turns red when any failed.
 
 To come back to something later, bookmark it. Hover a message, yours or the
-agent's, and click the bookmark (**Bookmark**), or select text in a message and
-choose **Bookmark** to mark just that passage. A bookmarked message keeps a gold
-mark beside it, bookmarked text stays tinted, and gold bars on the right edge of
-the thread show where each bookmark sits. Click a bar to jump to its bookmark;
-hover it to mark it done or remove it. **Next bookmark** and **Previous bookmark**
-in the command palette do the same, and you can bind keys to them, and to
-**Chat: Bookmark Selection**, in Settings > Keybindings. To remove a bookmark,
-click its mark beside the message, hover its bar, or select the text again.
+agent's, and open its bookmark menu, or select text in a message to mark just that
+passage. **Bookmark** marks it to find again. **Bookmark as to-do** also makes it
+a to-do you can tick off; a bookmark's menu can make it a to-do later or stop it
+being one. A bookmarked message keeps a gold mark beside it, bookmarked text
+stays tinted, and gold bars on the right edge of the thread show where each
+bookmark sits. Click a bar to jump to its bookmark, or hover it to mark it done
+or remove it. Bookmarks too close together share one bar with a count; click it
+to choose one. **Next bookmark** and **Previous bookmark** in the command palette
+step through them, and you can bind keys to them, and to **Chat: Bookmark
+Selection**, in Settings > Keybindings. To remove a bookmark, use its mark beside
+the message, hover its bar, or select its text again.
 
-Bookmarks also show in a **Bookmarks** section at the top of Todos; the Todos
-badge counts them until they're done. Click one to jump to it, tick it once
-you're finished with it, or remove it from its menu. **All** at the top of Todos
-lists open bookmarks across every thread on that thread's environment. Bookmarks
-are yours only: agents never see them. This is unrelated to **Follow-up
-behavior** in Settings, which decides what a message sent while an agent is busy
-does.
+In Todos, the **Bookmarked** section at the top lists this thread's open bookmark
+to-dos, not its plain bookmarks, and the Todos badge counts them until they're
+done. Click one to jump to it, or tick it once you're finished. **All** at the top
+of Todos lists bookmarks across every thread on that thread's environment. Its filter
+shows every bookmark under **All**, open to-dos under **To-do** and finished ones under
+**Done**. Bookmarks are yours only: agents never see them. This is unrelated to
+**Follow-up behavior** in Settings, which decides what a message sent while an
+agent is busy does.
 
 **Timeline** shows when the thread and everything it delegated ran: one row per
 thread, with its delegates and side chats indented beneath it, on a shared clock.

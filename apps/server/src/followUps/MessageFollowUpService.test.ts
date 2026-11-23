@@ -59,12 +59,12 @@ const passage = (messageId: string, start: number, text: string): SideChatAnchor
   prefix: "",
   suffix: "",
 });
-const list = (threadId?: string, all?: boolean) =>
+const list = (threadId?: string, bookmarks?: true) =>
   Effect.gen(function* () {
     const service = yield* Service.MessageFollowUpService;
     return yield* service.list({
       ...(threadId === undefined ? {} : { threadId: ThreadId.make(threadId) }),
-      ...(all === undefined ? {} : { all }),
+      ...(bookmarks === undefined ? {} : { bookmarks }),
     });
   });
 
@@ -120,6 +120,8 @@ it.effect("refuses messages outside the thread, other authors' messages and unfl
       ["t2", "m1", "flag"],
       ["t1", "missing", "flag"],
       ["t1", "s1", "flag"],
+      // Clients before bookmarks could flag only their own messages.
+      ["t1", "m2", "flag"],
       ["t1", "m1", "done"],
       ["t1", "m1", "reopen"],
     ] as const) {
@@ -136,7 +138,7 @@ it.effect("refuses messages outside the thread, other authors' messages and unfl
 it.effect("bookmarks whole replies and several passages, each removable on its own", () =>
   Effect.gen(function* () {
     yield* seed;
-    const reply = yield* update("t1", "m2", "flag");
+    const reply = yield* update("t1", "m2", "flag", { todo: false });
     assert.strictEqual(reply?.role, "assistant");
     assert.isUndefined(reply?.anchor);
     assert.strictEqual(reply?.messageCreatedAt, "2026-01-01T00:00:00.000Z");
@@ -151,18 +153,18 @@ it.effect("bookmarks whole replies and several passages, each removable on its o
       first?.id,
     );
     // A passage is not the whole prompt, so the prompt can still be bookmarked by itself.
-    const whole = yield* update("t1", "m1", "flag");
+    const whole = yield* update("t1", "m1", "flag", { todo: true });
     assert.isUndefined(whole?.anchor);
-    assert.strictEqual((yield* list("t1")).length, 4);
+    assert.strictEqual((yield* list("t1", true)).length, 4);
 
     const done = yield* update("t1", "m1", "done", { bookmarkId: first!.id! });
     assert.strictEqual(done?.id, first?.id);
     assert.isNotNull(done?.doneAt);
-    assert.isNull((yield* list("t1")).find((item) => item.id === whole?.id)?.doneAt);
+    assert.isNull((yield* list("t1", true)).find((item) => item.id === whole?.id)?.doneAt);
 
     assert.isNull(yield* update("t1", "m1", "unflag", { bookmarkId: first!.id! }));
     assert.deepStrictEqual(
-      (yield* list("t1")).map((item) => item.id).toSorted(),
+      (yield* list("t1", true)).map((item) => item.id).toSorted(),
       [reply!.id, second!.id, whole!.id].toSorted(),
     );
     const other = yield* Effect.flip(update("t2", "m1", "done", { bookmarkId: second!.id! }));
@@ -193,5 +195,63 @@ it.effect("keeps plain bookmarks out of to-do states until marked as a to-do", (
     const untodo = yield* update("t1", "m2", "untodo", target);
     assert.isFalse(untodo?.todo);
     assert.isNull(untodo?.doneAt);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect(
+  "shows clients before bookmarks only whole user-message to-dos, and acts on no other",
+  () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const followUp = yield* update("t1", "m1", "flag");
+      const passageOfIt = yield* update("t1", "m1", "flag", {
+        anchor: passage("m1", 4, "pin chats"),
+      });
+      yield* update("t1", "m2", "flag", { todo: true });
+      yield* update("t2", "m3", "flag", { todo: false });
+      assert.deepStrictEqual(
+        (yield* list("t1")).map((item) => item.id),
+        [followUp!.id],
+      );
+      assert.deepStrictEqual(
+        (yield* list()).map((item) => item.id),
+        [followUp!.id],
+      );
+
+      // Removing the follow-up leaves the passage bookmarked in the same message.
+      assert.isNull(yield* update("t1", "m1", "unflag"));
+      assert.deepStrictEqual(
+        (yield* list("t1", true)).filter((item) => item.messageId === "m1").map((item) => item.id),
+        [passageOfIt!.id],
+      );
+      // A plain bookmark is not a follow-up, so a legacy done cannot reach it.
+      assert.strictEqual((yield* Effect.flip(update("t2", "m3", "done"))).code, "not_found");
+      assert.isNull(yield* update("t2", "m3", "unflag"));
+      assert.strictEqual((yield* list("t2", true)).length, 1);
+      // Flagging it the old way makes it a to-do, as a follow-up would be.
+      assert.isTrue((yield* update("t2", "m3", "flag"))?.todo);
+    }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("creates one bookmark when identical requests race", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    for (const target of [{ todo: false }, { anchor: passage("m1", 4, "pin chats"), todo: true }]) {
+      const results = yield* Effect.all(
+        Array.from({ length: 6 }, () => update("t1", "m1", "flag", target)),
+        { concurrency: "unbounded" },
+      );
+      assert.strictEqual(new Set(results.map((item) => item?.id)).size, 1);
+    }
+    assert.strictEqual((yield* list("t1", true)).length, 2);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("keeps different quotes saved at the same offsets apart", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const first = yield* update("t1", "m1", "flag", { anchor: passage("m1", 4, "pin chats") });
+    const moved = yield* update("t1", "m1", "flag", { anchor: passage("m1", 4, "pin rooms") });
+    assert.notStrictEqual(first?.id, moved?.id);
   }).pipe(Effect.provide(testLayer)),
 );

@@ -130,12 +130,14 @@ export function timelineMinimapItemTimes(
   rows: ReadonlyArray<MessagesTimelineRow>,
   userTurns: ReadonlyArray<ThreadUserTurn> | undefined,
 ): ReadonlyArray<number | null> {
+  const unloadedTimes = new Map(
+    userTurns?.map((turn) => [turn.messageId as string, turn.createdAt]),
+  );
   return items.map((item) => {
     const createdAt =
       item.rowIndex >= 0
         ? rows[item.rowIndex]?.createdAt
-        : userTurns?.find((turn) => turn.messageId === (item.revealMessageId ?? item.id))
-            ?.createdAt;
+        : unloadedTimes.get(item.revealMessageId ?? item.id);
     return createdAt ? Date.parse(createdAt) : null;
   });
 }

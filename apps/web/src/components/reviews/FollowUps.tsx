@@ -47,12 +47,17 @@ import {
   isOpenBookmarkTodo,
 } from "./bookmarks.logic";
 
+/** Servers before bookmarks list only follow-ups, and reject the `bookmarks` mode. */
 function useFollowUpsAtom(environmentId: EnvironmentId | null, threadId?: ThreadId) {
   const readable = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
+  const bookmarks = useMessageBookmarksSupported(environmentId);
   return environmentId && readable
     ? messageFollowUpsList({
         environmentId,
-        input: threadId === undefined ? { all: true } : { threadId },
+        input: {
+          ...(threadId === undefined ? {} : { threadId }),
+          ...(bookmarks ? { bookmarks: true as const } : {}),
+        },
       })
     : null;
 }
@@ -356,7 +361,10 @@ export function FollowUpSection({
 }) {
   const query = useFollowUps(environmentId, threadId);
   const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
-  const [filter, setFilter] = useState<BookmarkFilter>("all");
+  const bookmarksSupported = useMessageBookmarksSupported(environmentId);
+  const [chosenFilter, setFilter] = useState<BookmarkFilter>("all");
+  // Older servers list only open follow-ups across threads, so there is nothing to filter.
+  const filter = bookmarksSupported ? chosenFilter : "todo";
   if (query.error) return <p role="alert">{query.error}</p>;
   const scoped = threadId !== undefined;
   const items =
@@ -367,22 +375,23 @@ export function FollowUpSection({
           ? true
           : isBookmarkTodo(item) && (filter === "done") === (item.doneAt !== null),
     ) ?? [];
-  const filterControl = scoped ? null : (
-    <ToggleGroup
-      aria-label="Filter bookmarks"
-      size="segmented-compact"
-      className="w-full *:flex-1"
-      value={[filter]}
-      onValueChange={(value) => {
-        const next = value[0];
-        if (next === "all" || next === "todo" || next === "done") setFilter(next);
-      }}
-    >
-      <ToggleGroupItem value="all">All</ToggleGroupItem>
-      <ToggleGroupItem value="todo">To-do</ToggleGroupItem>
-      <ToggleGroupItem value="done">Done</ToggleGroupItem>
-    </ToggleGroup>
-  );
+  const filterControl =
+    scoped || !bookmarksSupported ? null : (
+      <ToggleGroup
+        aria-label="Filter bookmarks"
+        size="segmented-compact"
+        className="w-full *:flex-1"
+        value={[filter]}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next === "all" || next === "todo" || next === "done") setFilter(next);
+        }}
+      >
+        <ToggleGroupItem value="all">All</ToggleGroupItem>
+        <ToggleGroupItem value="todo">To-do</ToggleGroupItem>
+        <ToggleGroupItem value="done">Done</ToggleGroupItem>
+      </ToggleGroup>
+    );
   if (!items.length)
     return !scoped && query.data ? (
       <div className="space-y-2">

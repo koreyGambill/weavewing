@@ -30,15 +30,20 @@ export const MessageFollowUp = Schema.Struct({
 export type MessageFollowUp = typeof MessageFollowUp.Type;
 
 /**
- * With a thread, all its bookmarks. Without one, every bookmark across the environment when `all`
- * is set, else only open to-dos, as clients before bookmarks expect.
+ * With `bookmarks`, every bookmark: one thread's, or every thread's. Without it, what clients
+ * before bookmarks expect: whole user-message to-dos, a thread's open and done ones, or every
+ * thread's open ones.
  */
 export const MessageFollowUpListInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
-  all: Schema.optional(Schema.Boolean),
+  bookmarks: Schema.optional(Schema.Literal(true)),
 });
 export type MessageFollowUpListInput = typeof MessageFollowUpListInput.Type;
 
+/**
+ * A request with none of `bookmarkId`, `anchor` and `todo` comes from a client before bookmarks:
+ * it acts only on its message's whole user-message to-do, and `flag` makes one.
+ */
 export const MessageFollowUpUpdateInput = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,

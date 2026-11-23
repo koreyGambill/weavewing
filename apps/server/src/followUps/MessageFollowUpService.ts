@@ -80,16 +80,19 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // What a client before bookmarks knew as a follow-up.
+  const legacyFollowUp = sql`f.passage_key = '' AND f.role = 'user' AND f.todo = 1`;
+
   const list = Effect.fn("MessageFollowUpService.list")(function* (
     input: MessageFollowUpListInput,
   ) {
-    return yield* select(
+    const scope =
       input.threadId !== undefined
         ? sql`f.thread_id = ${input.threadId}`
-        : input.all === true
+        : input.bookmarks
           ? sql`1 = 1`
-          : sql`f.todo = 1 AND f.done_at IS NULL`,
-    );
+          : sql`f.done_at IS NULL`;
+    return yield* select(input.bookmarks ? scope : sql`${scope} AND ${legacyFollowUp}`);
   }, Effect.mapError(storageError));
 
   const notFound = (input: MessageFollowUpUpdateInput) =>
@@ -97,16 +100,19 @@ const make = Effect.gen(function* () {
       code: "not_found",
       message:
         input.action === "flag"
-          ? `Message ${input.messageId} is not a user or assistant message in thread ${input.threadId}.`
+          ? `Message ${input.messageId} cannot be bookmarked in thread ${input.threadId}.`
           : `Message ${input.messageId} has no such bookmark.`,
     });
 
   const update = Effect.fn("MessageFollowUpService.update")(
     function* (input: MessageFollowUpUpdateInput) {
+      const legacy =
+        input.bookmarkId === undefined && input.anchor === undefined && input.todo === undefined;
       const key =
-        input.bookmarkId === undefined
-          ? sql`f.thread_id = ${input.threadId} AND f.message_id = ${input.messageId} AND f.anchor_json IS NULL`
-          : sql`f.thread_id = ${input.threadId} AND f.bookmark_id = ${input.bookmarkId}`;
+        input.bookmarkId !== undefined
+          ? sql`f.thread_id = ${input.threadId} AND f.bookmark_id = ${input.bookmarkId}`
+          : sql`f.thread_id = ${input.threadId} AND f.message_id = ${input.messageId}
+              AND ${legacy ? legacyFollowUp : sql`f.passage_key = ''`}`;
       const now = DateTime.formatIso(yield* DateTime.now);
       const selectOne = (where: Statement.Fragment) =>
         select(where).pipe(Effect.map(([item]) => item ?? null));
@@ -119,25 +125,25 @@ const make = Effect.gen(function* () {
           const [message] = yield* sql<{ readonly text: string | null; readonly role: string }>`
           SELECT ${messageSearchText(sql)} AS text, role FROM orchestration_v2_projection_messages messages
           WHERE message_id = ${input.messageId} AND thread_id = ${input.threadId}
-            AND role IN ('user', 'assistant')`;
+            AND role IN ${legacy ? sql`('user')` : sql`('user', 'assistant')`}`;
           if (message === undefined) return yield* notFound(input);
-          const sameBookmark =
-            anchor === undefined
-              ? sql`f.anchor_json IS NULL`
-              : sql`json_extract(f.anchor_json, '$.start') = ${anchor.start}
-                  AND json_extract(f.anchor_json, '$.end') = ${anchor.end}`;
-          const existing = yield* selectOne(
-            sql`f.thread_id = ${input.threadId} AND f.message_id = ${input.messageId} AND ${sameBookmark}`,
-          );
-          if (existing !== null) return existing;
+          const passageKey =
+            anchor === undefined ? "" : `${anchor.start}:${anchor.end}:${anchor.text}`;
           const id = yield* random.uuidV4();
-          yield* sql`INSERT INTO message_bookmarks
-            (bookmark_id, thread_id, message_id, role, excerpt, anchor_json, todo, flagged_at)
-          VALUES (${id}, ${input.threadId}, ${input.messageId}, ${message.role},
+          // One statement, so concurrent identical requests converge on one row. A legacy flag
+          // also makes an existing plain whole-message bookmark a to-do.
+          const [row] = yield* sql<{ readonly bookmark_id: string }>`INSERT INTO message_bookmarks
+            (bookmark_id, thread_id, message_id, passage_key, role, excerpt, anchor_json, todo, flagged_at)
+          VALUES (${id}, ${input.threadId}, ${input.messageId}, ${passageKey}, ${message.role},
             ${followUpExcerpt(anchor?.text ?? message.text ?? "")},
             ${anchor === undefined ? null : yield* encodeAnchor(anchor)},
-            ${input.todo === false ? 0 : 1}, ${now})`;
-          return yield* selectOne(sql`f.bookmark_id = ${id}`);
+            ${input.todo === false ? 0 : 1}, ${now})
+          ON CONFLICT (thread_id, message_id, passage_key)
+            DO UPDATE SET todo = ${legacy ? sql`1` : sql`todo`}
+          RETURNING bookmark_id`;
+          return row === undefined
+            ? null
+            : yield* selectOne(sql`f.bookmark_id = ${row.bookmark_id}`);
         }
         case "unflag":
           yield* sql`DELETE FROM message_bookmarks AS f WHERE ${key}`;
@@ -155,10 +161,9 @@ const make = Effect.gen(function* () {
                 : sql`done_at = ${input.action === "done" ? sql`coalesce(done_at, ${now})` : sql`NULL`}`;
           const onlyTodo =
             input.action === "done" || input.action === "reopen" ? sql`AND f.todo = 1` : sql``;
-          const touched = yield* sql<{
+          const [row] = yield* sql<{
             readonly bookmark_id: string;
           }>`UPDATE message_bookmarks AS f SET ${change} WHERE ${key} ${onlyTodo} RETURNING bookmark_id`;
-          const [row] = touched;
           if (row === undefined) return yield* notFound(input);
           return yield* selectOne(sql`f.bookmark_id = ${row.bookmark_id}`);
         }

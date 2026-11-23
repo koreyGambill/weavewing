@@ -2,7 +2,7 @@ import { DraftProjectPicker } from "./chat/DraftProjectPicker";
 import { openDraftProjectPicker } from "~/draftProjectPicker";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { lastFocusedTerminalFind } from "~/lib/terminalFocus";
-import { hasThreadBookmarks, stepThreadBookmark } from "./chat/threadBookmarkActions";
+import { stepThreadBookmark, useThreadBookmarkCount } from "./chat/threadBookmarkActions";
 import { bookmarkInPlaceNavigation } from "./reviews/bookmarks.logic";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { useInboxEnvironments } from "../state/inbox";
@@ -719,6 +719,7 @@ function OpenCommandPaletteDialog(props: {
   const activeThreadKey = activeThread
     ? scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))
     : null;
+  const activeThreadBookmarkCount = useThreadBookmarkCount(activeThreadKey);
   const previewPanelThreadRef = activeThread
     ? scopeThreadRef(activeThread.environmentId, activeThread.id)
     : activeDraftThread
@@ -1312,7 +1313,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThreadKey !== null && hasThreadBookmarks(activeThreadKey)) {
+  if (activeThreadKey !== null && activeThreadBookmarkCount > 0) {
     for (const direction of ["next", "previous"] as const) {
       actionItems.push({
         kind: "action",

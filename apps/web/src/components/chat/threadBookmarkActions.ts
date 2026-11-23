@@ -34,7 +34,12 @@ export const useThreadBookmarkTrails = create<Readonly<Record<string, ThreadBook
   () => ({}),
 );
 
-/** Offers a shown thread's bookmarks to next and previous while its rail is mounted. */
+const NO_BOOKMARKS: ReadonlyArray<MessageFollowUp> = [];
+
+/**
+ * Offers a shown thread's bookmarks to next and previous while its rail is mounted. Taking them
+ * away keeps the current bookmark, so a list that changes under it does not restart navigation.
+ */
 export function publishThreadBookmarks(
   threadKey: string,
   environmentId: EnvironmentId,
@@ -46,9 +51,10 @@ export function publishThreadBookmarks(
   }));
   return () =>
     useThreadBookmarkTrails.setState((trails) => {
-      if (trails[threadKey]?.bookmarks !== bookmarks) return trails;
-      const { [threadKey]: _, ...rest } = trails;
-      return rest;
+      const trail = trails[threadKey];
+      return trail?.bookmarks === bookmarks
+        ? { ...trails, [threadKey]: { ...trail, bookmarks: NO_BOOKMARKS } }
+        : trails;
     });
 }
 
@@ -71,6 +77,13 @@ export function stepThreadBookmark(
   if (!trail || !bookmark) return null;
   markCurrentThreadBookmark(threadKey, bookmark);
   return { environmentId: trail.environmentId, bookmark };
+}
+
+/** How many bookmarks a shown thread offers; components re-render as it changes. */
+export function useThreadBookmarkCount(threadKey: string | null): number {
+  return useThreadBookmarkTrails((trails) =>
+    threadKey === null ? 0 : (trails[threadKey]?.bookmarks.length ?? 0),
+  );
 }
 
 export function hasThreadBookmarks(threadKey: string): boolean {

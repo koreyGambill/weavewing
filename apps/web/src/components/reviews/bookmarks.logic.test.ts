@@ -6,7 +6,7 @@ import {
   bookmarkKey,
   bookmarkMenuActions,
   bookmarkNavigation,
-  bookmarkRailIndices,
+  bookmarkRailBars,
   bookmarkUpdate,
   findOverlappingBookmark,
   orderBookmarks,
@@ -84,14 +84,31 @@ describe("adjacentBookmark", () => {
 });
 
 describe("findOverlappingBookmark", () => {
+  const messageId = MessageId.make("reply");
+  const text = `abcfirst${".".repeat(32)}second`;
+
   it("finds a passage the selection touches in the same message only", () => {
-    const messageId = MessageId.make("reply");
-    expect(findOverlappingBookmark(ordered, { messageId, start: 6, end: 12 })?.id).toBe(
+    expect(findOverlappingBookmark(ordered, { messageId, start: 6, end: 12 }, text)?.id).toBe(
       "earlier-passage",
     );
-    expect(findOverlappingBookmark(ordered, { messageId, start: 8, end: 40 })).toBeNull();
+    expect(findOverlappingBookmark(ordered, { messageId, start: 8, end: 40 }, text)).toBeNull();
     expect(
-      findOverlappingBookmark(ordered, { messageId: MessageId.make("prompt"), start: 0, end: 50 }),
+      findOverlappingBookmark(
+        ordered,
+        { messageId: MessageId.make("prompt"), start: 0, end: 50 },
+        text,
+      ),
+    ).toBeNull();
+  });
+
+  it("matches a passage where its text now is, and nothing once its text is gone", () => {
+    const moved = `Hello ${text}`;
+    expect(findOverlappingBookmark(ordered, { messageId, start: 9, end: 11 }, moved)?.id).toBe(
+      "earlier-passage",
+    );
+    expect(findOverlappingBookmark(ordered, { messageId, start: 3, end: 5 }, moved)).toBeNull();
+    expect(
+      findOverlappingBookmark(ordered, { messageId, start: 3, end: 8 }, "abcfrist"),
     ).toBeNull();
   });
 });
@@ -122,20 +139,27 @@ describe("bookmarkNavigation", () => {
   });
 });
 
-describe("bookmarkRailIndices", () => {
-  it("lines bookmarks up with the turn they fall in, stepping down within a turn", () => {
-    const turns = [Date.parse(at(0)), Date.parse(at(4)), Date.parse(at(9))];
-    expect(bookmarkRailIndices(ordered, turns)).toEqual([
-      { turn: 0, rank: 0 },
-      { turn: 1, rank: 0 },
-      { turn: 1, rank: 1 },
-      { turn: 1, rank: 2 },
+describe("bookmarkRailBars", () => {
+  const turns = [Date.parse(at(0)), Date.parse(at(4)), Date.parse(at(9))];
+  const keys = (bars: ReturnType<typeof bookmarkRailBars>) =>
+    bars.map((bar) => [bar.top, bar.bookmarks.map(bookmarkKey)]);
+
+  it("puts each bookmark beside its turn and merges bookmarks of one turn into one bar", () => {
+    expect(keys(bookmarkRailBars(ordered, turns, 400))).toEqual([
+      [0, ["prompt"]],
+      [50, ["whole-reply", "earlier-passage", "later-passage"]],
+    ]);
+  });
+
+  it("merges bars of neighbouring turns when the rail is too short to tell them apart", () => {
+    expect(keys(bookmarkRailBars(ordered, turns, 12))).toEqual([
+      [0, ["prompt", "whole-reply", "earlier-passage", "later-passage"]],
     ]);
   });
 
   it("puts bookmarks before the first known turn at the top", () => {
-    expect(bookmarkRailIndices([prompt], [null, Date.parse(at(3))])).toEqual([
-      { turn: 0, rank: 0 },
+    expect(keys(bookmarkRailBars([prompt], [null, Date.parse(at(3))], 400))).toEqual([
+      [0, ["prompt"]],
     ]);
   });
 });

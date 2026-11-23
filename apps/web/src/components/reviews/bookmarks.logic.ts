@@ -9,6 +9,7 @@ import {
   assistantCitationNavigation,
   messageRevealNavigation,
 } from "../../lib/assistantCitationNavigation";
+import { findAssistantCitationText } from "../../lib/assistantTextSelection";
 
 /** Servers before bookmarks send no id: their one bookmark per message is the whole message. */
 export const bookmarkKey = (bookmark: MessageFollowUp) => bookmark.id ?? bookmark.messageId;
@@ -25,19 +26,24 @@ export function bookmarkUpdate(
   };
 }
 
-/** The passage bookmark a selection lands on, so the toolbar can offer to remove it. */
+/**
+ * The passage bookmark a selection lands on, so the toolbar can offer to remove it. Saved
+ * passages are found again in the message's current text, as the tint finds them, so a passage
+ * whose text moved is matched where it now is and one that no longer resolves matches nothing.
+ */
 export function findOverlappingBookmark(
   bookmarks: ReadonlyArray<MessageFollowUp>,
   selection: Pick<SideChatAnchor, "messageId" | "start" | "end">,
+  messageText: string,
 ): MessageFollowUp | null {
   return (
-    bookmarks.find(
-      (bookmark) =>
-        bookmark.anchor !== undefined &&
-        bookmark.messageId === selection.messageId &&
-        bookmark.anchor.start < selection.end &&
-        selection.start < bookmark.anchor.end,
-    ) ?? null
+    bookmarks.find((bookmark) => {
+      if (bookmark.anchor === undefined || bookmark.messageId !== selection.messageId) {
+        return false;
+      }
+      const found = findAssistantCitationText(messageText, bookmark.anchor);
+      return found !== null && found.start < selection.end && selection.start < found.end;
+    }) ?? null
   );
 }
 
@@ -86,26 +92,56 @@ export function bookmarkInPlaceNavigation(environmentId: EnvironmentId, bookmark
   return { to: ".", hash, state, resetScroll: false } as const;
 }
 
+/** Bars closer than this many pixels read as one, so the rail merges them. */
+const RAIL_BAR_MIN_GAP_PX = 8;
+
+export interface BookmarkRailBar {
+  /** Percent of the rail's height, matching the left minimap's strips. */
+  readonly top: number;
+  /** In transcript order; more than one means a merged bar with a chooser. */
+  readonly bookmarks: ReadonlyArray<MessageFollowUp>;
+}
+
 /**
- * Places each bookmark beside the minimap turn it belongs to. `turnTimes` are the minimap items'
- * times in their order; a bookmark sits at the last turn that started at or before its message,
- * and `rank` counts the bookmarks before it in that turn so the rail can stack them.
+ * Places each bookmark beside the minimap turn it falls in: the last turn that started at or
+ * before its message. `turnTimes` are the minimap items' times in their order, null when unknown.
+ * Bookmarks whose bars would sit closer than a few pixels on a rail `railHeight` pixels tall share
+ * one bar, so a crowded or compressed rail stays legible.
  */
-export function bookmarkRailIndices(
+export function bookmarkRailBars(
   ordered: ReadonlyArray<MessageFollowUp>,
   turnTimes: ReadonlyArray<number | null>,
-): ReadonlyArray<{ readonly turn: number; readonly rank: number }> {
-  const perTurn = new Map<number, number>();
-  return ordered.map((bookmark) => {
-    const time = messageTime(bookmark);
-    let turn = 0;
-    for (const [index, turnTime] of turnTimes.entries()) {
-      if (turnTime !== null && turnTime <= time) turn = index;
+  railHeight: number,
+): ReadonlyArray<BookmarkRailBar> {
+  const slots = Math.max(1, turnTimes.length);
+  const known: Array<{ readonly time: number; readonly turn: number }> = [];
+  for (const [turn, time] of turnTimes.entries()) {
+    if (time !== null && (known.length === 0 || time >= known.at(-1)!.time)) {
+      known.push({ time, turn });
     }
-    const seen = perTurn.get(turn) ?? 0;
-    perTurn.set(turn, seen + 1);
-    return { turn, rank: seen };
-  });
+  }
+  const turnOf = (time: number) => {
+    let low = 0;
+    let high = known.length - 1;
+    let found = 0;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (known[middle]!.time <= time) {
+        found = known[middle]!.turn;
+        low = middle + 1;
+      } else high = middle - 1;
+    }
+    return found;
+  };
+  const minGapPercent = railHeight > 0 ? (RAIL_BAR_MIN_GAP_PX / railHeight) * 100 : 0;
+  const bars: Array<{ top: number; bookmarks: MessageFollowUp[] }> = [];
+  for (const bookmark of ordered) {
+    const top = slots <= 1 ? 50 : (turnOf(messageTime(bookmark)) / (slots - 1)) * 100;
+    const last = bars.at(-1);
+    if (last && top - last.top <= minGapPercent) last.bookmarks.push(bookmark);
+    else bars.push({ top, bookmarks: [bookmark] });
+  }
+  return bars;
 }
 
 /** Servers before bookmarks send no `todo`, and every follow-up they hold is a to-do. */
