@@ -15,9 +15,10 @@ import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
 import { HostImageUrlContext } from "./chat/hostImageUrl";
 import { getSyntaxHighlighterPromise } from "~/lib/syntaxHighlighting";
 
-const { workspaceSearch, filesystemMetadata } = vi.hoisted(() => ({
+const { workspaceSearch, filesystemMetadata, filesystemBrowse } = vi.hoisted(() => ({
   workspaceSearch: vi.fn(),
   filesystemMetadata: vi.fn(),
+  filesystemBrowse: vi.fn(),
 }));
 const parsedSources = vi.hoisted(() => [] as string[]);
 vi.mock(import("mdast-util-from-markdown"), async (original) => {
@@ -34,7 +35,11 @@ vi.mock(import("mdast-util-from-markdown"), async (original) => {
 vi.mock(import("../state/use-atom-query-runner"), async (original) => ({
   ...(await original()),
   useAtomQueryRunner: ((family: unknown) =>
-    family === filesystemEnvironment.getMetadata ? filesystemMetadata : workspaceSearch) as never,
+    family === filesystemEnvironment.getMetadata
+      ? filesystemMetadata
+      : family === filesystemEnvironment.browse
+        ? filesystemBrowse
+        : workspaceSearch) as never,
 }));
 
 // Atoms derived from the server config run in the real registry over a missing config.
@@ -174,6 +179,9 @@ function setup() {
   renderDiagram.mockReset();
   workspaceSearch.mockReset().mockResolvedValue(AsyncResult.success({ entries: [] }));
   filesystemMetadata.mockReset().mockResolvedValue(AsyncResult.success({ entries: [null] }));
+  filesystemBrowse
+    .mockReset()
+    .mockResolvedValue(AsyncResult.success({ parentPath: "/", entries: [] }));
 }
 
 function renderText(text: string, props: Partial<Parameters<typeof ChatMarkdown>[0]> = {}) {

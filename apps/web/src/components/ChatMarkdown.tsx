@@ -175,8 +175,10 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { projectEnvironment } from "../state/projects";
 import { filesystemEnvironment } from "../state/filesystem";
 import {
+  childFoldersBrowsePath,
   claimWorkspaceBasenameLookup,
   findAgentDirectoryMatch,
+  findChildCheckoutMatch,
   needsWorkspaceBasenameLookup,
   pickProjectLinkMatch,
   pickWorkspaceLinkMatch,
@@ -579,6 +581,10 @@ function useChatMarkdownState({
     reportFailure: false,
     refresh: true,
   });
+  const browseFilesystem = useAtomQueryRunner(filesystemEnvironment.browse, {
+    reportFailure: false,
+    reportDefect: false,
+  });
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
@@ -795,6 +801,25 @@ function useChatMarkdownState({
       openPreview,
     });
   };
+  const findChildCheckoutFileMatch = async (relativePath: string, root: string) => {
+    if (environmentId === null) return null;
+    const listing = await browseFilesystem({
+      environmentId,
+      input: { partialPath: childFoldersBrowsePath(root) },
+    });
+    if (listing._tag !== "Success") return null;
+    return findChildCheckoutMatch(
+      relativePath,
+      listing.value.entries,
+      agentDirectories?.() ?? [],
+      async (paths) => {
+        const metadata = await getFilesystemMetadata({ environmentId, input: { paths } });
+        return metadata._tag === "Success"
+          ? metadata.value.entries.map((entry) => entry?.kind === "file")
+          : paths.map(() => false);
+      },
+    );
+  };
   const findWorkspaceFileMatch = async (fileLinkMeta: MarkdownFileLinkMeta) => {
     const workspaceRelativePath = fileLinkMeta.workspaceLookupPath;
     if (
@@ -815,6 +840,8 @@ function useChatMarkdownState({
         input: { paths: [resolveWorkspaceFilePath(workspaceRelativePath, cwd)] },
       });
       if (metadata._tag !== "Success" || metadata.value.entries[0] !== null) return null;
+      const checkoutMatch = await findChildCheckoutFileMatch(workspaceRelativePath, cwd);
+      if (checkoutMatch !== null) return checkoutMatch;
     }
     const searchRoot = async (root: string) => {
       const rootQuery = workspaceLinkLookupQuery(workspaceRelativePath, root);

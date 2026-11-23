@@ -158,6 +158,48 @@ export async function findAgentDirectoryMatch(
   return null;
 }
 
+function isWithinDirectory(path: string, directory: string): boolean {
+  const base = directory.replace(/[/\\]+$/, "");
+  return path === base || path.startsWith(`${base}/`) || path.startsWith(`${base}\\`);
+}
+
+/** The `filesystem.browse` input that lists the folders directly inside `root`. */
+export function childFoldersBrowsePath(root: string): string {
+  return /[\\/]$/.test(root) ? root : `${root}/`;
+}
+
+/**
+ * The file a folder-shaped path names inside one of the folders directly below a thread rooted
+ * at a parent such as `~/code`. Agents cite paths from the repository they worked in, and that
+ * tree can be too large for a search of the parent to reach.
+ */
+export async function findChildCheckoutMatch(
+  relativePath: string,
+  childFolders: ReadonlyArray<{ readonly name: string; readonly fullPath: string }>,
+  agentDirectories: ReadonlyArray<string>,
+  filesExist: (paths: ReadonlyArray<string>) => Promise<ReadonlyArray<boolean>>,
+): Promise<string | null> {
+  if (needsWorkspaceBasenameLookup(relativePath)) return null;
+  const checkouts = childFolders
+    .filter((folder) => !folder.name.startsWith("."))
+    .map((folder) => folder.fullPath);
+  if (checkouts.length === 0) return null;
+  const candidates = checkouts.map((checkout) => resolveWorkspaceFilePath(relativePath, checkout));
+  const batches: Array<ReadonlyArray<string>> = [];
+  for (let start = 0; start < candidates.length; start += FILESYSTEM_METADATA_BATCH_LIMIT) {
+    batches.push(candidates.slice(start, start + FILESYSTEM_METADATA_BATCH_LIMIT));
+  }
+  const exists = (await Promise.all(batches.map(filesExist))).flat();
+  const found = checkouts.flatMap((checkout, index) =>
+    exists[index] ? [{ checkout, path: candidates[index]! }] : [],
+  );
+  if (found.length === 1) return found[0]!.path;
+  const worked = found.filter(({ checkout }) =>
+    agentDirectories.some((directory) => isWithinDirectory(directory, checkout)),
+  );
+  return worked.length === 1 ? worked[0]!.path : null;
+}
+
 // A quoted string or a comment is one token, so `cd` inside either is not read as a command.
 const SHELL_TOKEN = /(?<![^\s;&|()])#[^\n]*|"[^"]*"|'[^']*'|[;&|()\n]|[ \t]+|[^\s;&|()"']+/g;
 const SHELL_NAME = /(?:^|\/)(?:ba|z|da)?sh$/;
