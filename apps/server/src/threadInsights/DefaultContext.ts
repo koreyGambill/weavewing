@@ -291,7 +291,9 @@ const make = Effect.gen(function* () {
             // A file read on demand is never expected to load with the session.
             ...(linked && (status === "expected" || status === "not-loaded") ? {} : { status }),
           },
-          readable ? readBounded(file.realPath).pipe(Effect.orElseSucceed(() => "")) : undefined,
+          readable
+            ? readBounded(file.realPath, { singleLink: true }).pipe(Effect.orElseSucceed(() => ""))
+            : undefined,
         );
       }
       const projectBytes = resolved.files

@@ -106,6 +106,33 @@ it("marks drivers without a known injection path unsupported", () => {
   expect(parts("kiro", false).groups[0]?.delivery).toBe("first-prompt");
 });
 
+it.effect(
+  "reads a checkout T3 keeps under its home, while secret folders inside it stay blocked",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const base = yield* fs.realPath(
+        yield* fs.makeTempDirectoryScoped({ prefix: "default-ctx-" }),
+      );
+      const home = path.join(base, "home");
+      const checkout = path.join(home, ".t3", "worktrees", "project", "feature");
+      yield* write(fs, path.join(checkout, ".git"), "gitdir: elsewhere");
+      yield* write(fs, path.join(checkout, "CLAUDE.md"), "@.ssh/keys.md");
+      yield* write(fs, path.join(checkout, ".ssh", "keys.md"), "secret");
+      const { files } = yield* resolveInstructionFiles(
+        FILE_CONVENTIONS.claudeAgent!,
+        checkout,
+        { home, platform: "linux", configDir: path.join(home, ".claude") },
+        notInternal,
+      );
+      expect(files.map((file) => [path.relative(checkout, file.path), file.status])).toEqual([
+        ["CLAUDE.md", "expected"],
+        [".ssh/keys.md", "secret"],
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it("finds @ imports outside code and ignores fenced or inline ones", () => {
   expect(
     importReferences(
