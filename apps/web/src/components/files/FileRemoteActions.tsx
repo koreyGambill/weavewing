@@ -28,31 +28,42 @@ import { sourceControlEnvironment } from "~/state/sourceControl";
 import {
   type FileLinkState,
   type FileRemoteAction,
+  fileLinkRanges,
+  resolveFileRangeActions,
   resolveFileRemoteActions,
-} from "./fileHeaderActions.logic";
+} from "@t3tools/client-runtime/file-remote-actions";
 import { FileSurfaceAction } from "./fileSurfaceChrome";
 
-/** Null when the file has no host path or this connection cannot read files. */
-export function useFileLinkState(input: {
+/** The file as the file reader takes it: a workspace-relative path with its workspace, or a host path. */
+export interface FileLinkTarget {
   readonly environmentId: EnvironmentId;
-  readonly absolutePath: string | null;
+  readonly cwd?: string | undefined;
+  /** Null when the surface shows no single file. */
+  readonly path: string | null;
   readonly line?: number | undefined;
   readonly endLine?: number | undefined;
-}): { readonly state: FileLinkState | null; readonly provider: string | null } {
-  const canRead = useEnvironmentScope(input.environmentId, AuthFilesystemReadScope);
+}
+
+/** Null when the surface shows no file or this connection cannot read files. */
+export function useFileLinkState(target: FileLinkTarget): {
+  readonly state: FileLinkState | null;
+  readonly provider: string | null;
+} {
+  const canRead = useEnvironmentScope(target.environmentId, AuthFilesystemReadScope);
   const query = useEnvironmentQuery(
-    canRead && input.absolutePath !== null
+    canRead && target.path !== null
       ? sourceControlEnvironment.fileLink({
-          environmentId: input.environmentId,
+          environmentId: target.environmentId,
           input: {
-            path: input.absolutePath,
-            ...(input.line === undefined ? {} : { line: input.line }),
-            ...(input.endLine === undefined ? {} : { endLine: input.endLine }),
+            path: target.path,
+            ...(target.cwd ? { cwd: target.cwd } : {}),
+            ...(target.line === undefined ? {} : { line: target.line }),
+            ...(target.endLine === undefined ? {} : { endLine: target.endLine }),
           },
         })
       : null,
   );
-  if (!canRead || input.absolutePath === null) return { state: null, provider: null };
+  if (!canRead || target.path === null) return { state: null, provider: null };
   const link = query.data;
   return {
     state:
@@ -175,19 +186,59 @@ function FileRemoteMenuItems(props: {
   ));
 }
 
-/** Forge rows for a file row's menu; it reads git only while the menu is open. */
+/**
+ * Forge rows for a file row's menu; it reads git only while the menu is open. One cited range
+ * goes into the links; several each get their own open and copy pair.
+ */
 export function FileRemoteMenuSection(props: {
   readonly environmentId: EnvironmentId;
-  readonly absolutePath: string | null;
+  readonly cwd: string | undefined;
+  readonly path: string;
+  readonly ranges: ReadonlyArray<{ readonly line: number; readonly endLine?: number }>;
+  readonly formatRange: (range: { readonly line: number; readonly endLine?: number }) => string;
   readonly threadRef: ScopedThreadRef;
 }) {
-  const link = useFileLinkState(props);
+  const ranges = fileLinkRanges(props.ranges);
+  const link = useFileLinkState({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    path: props.path,
+    line: ranges.main?.line,
+    endLine: ranges.main?.endLine,
+  });
   const run = useRunFileRemoteAction(props.threadRef);
   if (link.state === null) return null;
   return (
     <>
       <MenuSeparator />
       <FileRemoteMenuItems actions={resolveFileRemoteActions(link.state)} onRun={run} />
+      {ranges.each.map((range) => (
+        <FileRangeMenuItems key={props.formatRange(range)} {...props} range={range} onRun={run} />
+      ))}
     </>
+  );
+}
+
+function FileRangeMenuItems(props: {
+  readonly environmentId: EnvironmentId;
+  readonly cwd: string | undefined;
+  readonly path: string;
+  readonly range: { readonly line: number; readonly endLine?: number };
+  readonly formatRange: (range: { readonly line: number; readonly endLine?: number }) => string;
+  readonly onRun: (action: FileRemoteAction) => void;
+}) {
+  const link = useFileLinkState({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    path: props.path,
+    line: props.range.line,
+    endLine: props.range.endLine,
+  });
+  if (link.state === null) return null;
+  return (
+    <FileRemoteMenuItems
+      actions={resolveFileRangeActions(link.state, props.formatRange(props.range))}
+      onRun={props.onRun}
+    />
   );
 }

@@ -234,7 +234,9 @@ export const SourceControlStarredInput = Schema.Struct({
 export type SourceControlStarredInput = typeof SourceControlStarredInput.Type;
 
 export const SourceControlFileLinkInput = Schema.Struct({
-  /** An absolute host path, as the file tiles read it. */
+  /** The workspace a relative path stays inside; optional for an absolute or `~/` path. */
+  cwd: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4096))),
+  /** Workspace-relative, absolute or `~/`, as the file reader takes it. */
   path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
   line: Schema.optional(PositiveInt),
   endLine: Schema.optional(PositiveInt),
@@ -264,6 +266,8 @@ export const SourceControlFileLink = Schema.Union([
     providerLabel: TrimmedNonEmptyString,
     remoteName: TrimmedNonEmptyString,
     choice: SourceControlFileLinkRefChoice,
+    /** The checked out branch; null when HEAD is detached. */
+    branch: Schema.NullOr(TrimmedNonEmptyString),
     /** The chosen ref's link. */
     link: SourceControlFileLinkTarget,
     defaultBranch: Schema.NullOr(SourceControlFileLinkTarget),
@@ -271,7 +275,13 @@ export const SourceControlFileLink = Schema.Union([
     currentBranch: Schema.NullOr(SourceControlFileLinkTarget),
   }),
   Schema.TaggedStruct("Unavailable", {
-    reason: Schema.Literals(["not-repository", "unsupported-host", "no-branch"]),
+    reason: Schema.Literals([
+      "not-repository",
+      "unsupported-host",
+      "no-branch",
+      "network-path",
+      "outside-workspace",
+    ]),
     /** The remote's host, for `unsupported-host`. */
     host: Schema.optional(TrimmedNonEmptyString),
   }),

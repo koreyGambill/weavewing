@@ -144,8 +144,10 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useOpenLink } from "../browser/useOpenLink";
-import { resolveFileRemoteActions } from "./files/fileHeaderActions.logic";
-import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+import {
+  fileLinkPreflight,
+  resolveFileRemoteActions,
+} from "@t3tools/client-runtime/file-remote-actions";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useStartTriage } from "../hooks/useStartTriage";
 import { pickTriageEnvironment } from "../lib/triageTarget";
@@ -743,6 +745,10 @@ function OpenCommandPaletteDialog(props: {
     return surface?.kind === "file" && surface.attachment === undefined ? surface : null;
   });
   const openForgeLink = useOpenLink(previewPanelThreadRef);
+  const canReadActiveFiles = useEnvironmentScope(
+    activeThread?.environmentId ?? null,
+    AuthFilesystemReadScope,
+  );
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
       ?.serverConfig?.threadFind === true;
@@ -1478,10 +1484,12 @@ function OpenCommandPaletteDialog(props: {
   if (activeThread !== null && activeFileSurface !== null && activeFileRoot) {
     const environmentId = activeThread.environmentId;
     const project = projectByKey.get(`${environmentId}:${activeThread.projectId}`);
-    const forge = project?.repositoryIdentity?.provider
-      ? sourceControlClients.get(project.repositoryIdentity.provider).label
-      : "remote";
-    const path = resolvePathLinkTarget(activeFileSurface.relativePath, activeFileRoot);
+    const preflight = fileLinkPreflight({
+      canReadFiles: canReadActiveFiles,
+      identity: project?.repositoryIdentity,
+    });
+    const forge = preflight.forge;
+    const path = activeFileSurface.relativePath;
     const line = activeFileSurface.revealLine ?? undefined;
     const endLine = activeFileSurface.revealEndLine;
     actionItems.push({
@@ -1489,12 +1497,14 @@ function OpenCommandPaletteDialog(props: {
       value: "action:open-file-on-forge",
       searchTerms: ["open", "file", "source", "remote", "browser", forge],
       title: `Open current file on ${forge}`,
-      description: activeFileSurface.relativePath,
+      description: preflight.disabledReason ?? activeFileSurface.relativePath,
+      disabled: preflight.disabledReason !== null,
       icon: <ExternalLinkIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         const result = await loadFileLink({
           environmentId,
           input: {
+            cwd: activeFileRoot,
             path,
             ...(line === undefined ? {} : { line }),
             ...(endLine === undefined ? {} : { endLine }),

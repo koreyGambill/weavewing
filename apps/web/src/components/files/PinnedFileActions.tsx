@@ -38,7 +38,7 @@ export function PinnedFileActions(props: {
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
   const fileLink = useFileLinkState({
     environmentId: props.environmentId,
-    absolutePath: props.absolutePath,
+    path: props.absolutePath,
   });
   const actions = resolveFileHeaderActions({
     absolutePath: props.absolutePath,

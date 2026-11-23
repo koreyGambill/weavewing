@@ -8,10 +8,16 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { isNetworkPath } from "@t3tools/shared/path";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { unsetInheritedRepositoryEnv } from "../vcs/VcsProcess.ts";
+import { localRealPath } from "../workspace/localRealPath.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { toWslDrivePath } from "../workspace/wslDrivePath.ts";
 import { sourceControlDefinitions } from "./sourceControlDefinitions.ts";
 
 export class SourceControlFileLinks extends Context.Service<
@@ -21,6 +27,8 @@ export class SourceControlFileLinks extends Context.Service<
     readonly fileLink: (input: SourceControlFileLinkInput) => Effect.Effect<SourceControlFileLink>;
   }
 >()("t3/sourceControl/SourceControlFileLinks") {}
+
+const GIT_PROBE_TIMEOUT = "2 seconds";
 
 /** Default branch when the file is there; else the branch's upstream; else default anyway. */
 function chooseFileLinkRef(facts: {
@@ -39,13 +47,60 @@ function chooseFileLinkRef(facts: {
 const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const path = yield* Path.Path;
-  const env = unsetInheritedRepositoryEnv(process.env, yield* HostProcess.Platform);
+  // A partial clone would otherwise fetch the objects a probe reads (git 2.44 and later).
+  const env = {
+    ...unsetInheritedRepositoryEnv(process.env, yield* HostProcess.Platform),
+    GIT_NO_LAZY_FETCH: "1",
+  };
+
+  /**
+   * The real path the file reader would read, or why there is none. A relative path stays
+   * inside its workspace, and no network path is touched, even through a link.
+   */
+  const resolveFile = Effect.fn("SourceControlFileLinks.resolveFile")(function* (
+    input: SourceControlFileLinkInput,
+  ) {
+    const hostPath =
+      input.path.startsWith("~/") || input.path.startsWith("~\\")
+        ? expandHomePath(input.path, yield* HostProcess.HomeDirectory)
+        : yield* toWslDrivePath(input.path).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          );
+    if (isNetworkPath(hostPath) || (input.cwd !== undefined && isNetworkPath(input.cwd))) {
+      return { unavailable: "network-path" } as const;
+    }
+    const realPath = (value: string) => Effect.promise(() => localRealPath(value));
+    if (path.isAbsolute(hostPath)) {
+      const real = yield* realPath(hostPath);
+      return real === null ? ({ unavailable: "network-path" } as const) : { real };
+    }
+    if (input.cwd === undefined) return { unavailable: "outside-workspace" } as const;
+    const target = yield* workspacePaths
+      .resolveRelativePathWithinRoot({ workspaceRoot: input.cwd, relativePath: input.path })
+      .pipe(Effect.option);
+    if (target._tag === "None") return { unavailable: "outside-workspace" } as const;
+    const [realRoot, real] = yield* Effect.all([
+      realPath(path.resolve(input.cwd)),
+      realPath(target.value.absolutePath),
+    ]);
+    if (realRoot === null || real === null) return { unavailable: "network-path" } as const;
+    const relative = path.relative(realRoot, real);
+    return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
+      ? ({ unavailable: "outside-workspace" } as const)
+      : { real };
+  });
 
   const fileLink: SourceControlFileLinks["Service"]["fileLink"] = Effect.fn(
     "SourceControlFileLinks.fileLink",
   )(function* (input) {
-    const directory = path.dirname(input.path);
+    const file = yield* resolveFile(input);
+    if (file.unavailable !== undefined) {
+      return { _tag: "Unavailable", reason: file.unavailable } as const;
+    }
+    const directory = path.dirname(file.real);
     const identity = yield* resolver.resolve(directory);
     if (identity === null) return { _tag: "Unavailable", reason: "not-repository" } as const;
     const [host = "", ...repositoryPath] = identity.canonicalKey.split("/");
@@ -65,6 +120,7 @@ const make = Effect.gen(function* () {
           command: "git",
           args: ["-C", directory, ...args],
           env,
+          timeout: GIT_PROBE_TIMEOUT,
           timeoutBehavior: "timedOutResult",
         })
         .pipe(
@@ -73,48 +129,67 @@ const make = Effect.gen(function* () {
           ),
           Effect.orElseSucceed(() => null),
         );
+    const refExists = (ref: string) =>
+      git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).pipe(
+        Effect.map((sha) => sha !== null),
+      );
     const remote = identity.locator.remoteName;
+    const remoteBranchPrefix = `refs/remotes/${remote}/`;
     const [prefix, headRef, remoteHead] = yield* Effect.all(
       [
         git(["rev-parse", "--show-prefix"]),
         git(["symbolic-ref", "-q", "HEAD"]),
-        git(["symbolic-ref", "-q", `refs/remotes/${remote}/HEAD`]),
+        git(["symbolic-ref", "-q", `${remoteBranchPrefix}HEAD`]),
       ],
       { concurrency: "unbounded" },
     );
     if (prefix === null) return { _tag: "Unavailable", reason: "not-repository" } as const;
-    const repoPath = `${prefix}${path.basename(input.path)}`;
+    const repoPath = `${prefix}${path.basename(file.real)}`;
 
-    const remoteBranchPrefix = `refs/remotes/${remote}/`;
-    // Clones made without `origin/HEAD`, such as some worktree tools', still fetch `main`.
-    const defaultBranch =
+    // A remote HEAD can name a branch the remote renamed and a prune removed, and clones made
+    // without one still fetch `main`, so each candidate must exist locally.
+    let defaultBranch: string | null = null;
+    for (const candidate of [
       remoteHead?.startsWith(remoteBranchPrefix) === true
         ? remoteHead.slice(remoteBranchPrefix.length)
-        : ((yield* git([
-            "for-each-ref",
-            "--format=%(refname:lstrip=3)",
-            `${remoteBranchPrefix}main`,
-            `${remoteBranchPrefix}master`,
-          ]))
-            ?.split("\n")
-            .find((name) => name === "main" || name === "master") ?? null);
+        : null,
+      "main",
+      "master",
+    ]) {
+      if (candidate !== null && (yield* refExists(`${remoteBranchPrefix}${candidate}`))) {
+        defaultBranch = candidate;
+        break;
+      }
+    }
+    const branch = headRef?.startsWith("refs/heads/") ? headRef.slice("refs/heads/".length) : null;
     const upstream =
       headRef === null
         ? null
         : yield* git([
             "for-each-ref",
-            "--format=%(upstream:remotename)%00%(upstream:remoteref)",
+            "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream)",
             headRef,
           ]);
-    const [upstreamRemote, upstreamRef = ""] = upstream?.split("\0") ?? [];
+    const [upstreamRemote, upstreamRef = "", trackingRef = ""] = upstream?.split("\0") ?? [];
+    // A branch whose upstream was deleted on the remote keeps its config but loses its ref.
     const upstreamBranch =
-      upstreamRemote === remote && upstreamRef.startsWith("refs/heads/")
+      upstreamRemote === remote &&
+      upstreamRef.startsWith("refs/heads/") &&
+      trackingRef !== "" &&
+      (yield* refExists(trackingRef))
         ? upstreamRef.slice("refs/heads/".length)
         : null;
+    // Lists the tree entry, so a partial clone needs no blob to answer.
     const existsOnDefault =
       defaultBranch !== null &&
-      (yield* git(["cat-file", "-e", `${remoteBranchPrefix}${defaultBranch}:${repoPath}`])) !==
-        null;
+      ((yield* git([
+        "ls-tree",
+        "--full-tree",
+        "--name-only",
+        `${remoteBranchPrefix}${defaultBranch}`,
+        "--",
+        repoPath,
+      ])) ?? "") !== "";
 
     const target = (ref: string | null) => {
       if (ref === null) return null;
@@ -141,6 +216,7 @@ const make = Effect.gen(function* () {
       providerLabel: definition.label,
       remoteName: remote,
       choice: chosen.choice,
+      branch,
       link,
       defaultBranch: target(defaultBranch),
       currentBranch: target(upstreamBranch),

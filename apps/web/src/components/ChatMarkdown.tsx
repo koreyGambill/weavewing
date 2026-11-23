@@ -5,7 +5,7 @@ import {
   inlineCodeFilePathCandidate,
 } from "@t3tools/shared/markdownLinks";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskList";
-import { isAbsolutePath, isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
+import { isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 import {
   AuthFilesystemReadScope,
@@ -183,7 +183,6 @@ import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { textDirection } from "~/textDirection";
 import { useOpenLink } from "../browser/useOpenLink";
 import { sourceControlEnvironment } from "../state/sourceControl";
-import { resolveFileRemoteActions } from "./files/fileHeaderActions.logic";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import {
@@ -963,27 +962,24 @@ function useChatMarkdownState({
         resolveCopyPaths={async () =>
           markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
         }
-        resolveRemoteActions={
-          environmentId === null
+        loadFileLink={
+          environmentId === null || panelPath === null || isAppBundle
             ? undefined
             : async () => {
-                const { absolutePath } = await resolveHostPath();
-                if (!isAbsolutePath(absolutePath)) return [];
+                // The path the preview opens, so a relative one stays inside `cwd` as there.
                 const result = await loadFileLink({
                   environmentId,
                   input: {
-                    path: absolutePath,
+                    path: panelPath,
+                    ...(cwd ? { cwd } : {}),
                     ...(fileLinkMeta.line === undefined ? {} : { line: fileLinkMeta.line }),
                     ...(fileLinkMeta.endLine === undefined
                       ? {}
                       : { endLine: fileLinkMeta.endLine }),
                   },
                 });
-                return resolveFileRemoteActions(
-                  result._tag === "Success"
-                    ? { status: "ready", link: result.value }
-                    : { status: "failed" },
-                );
+                if (result._tag === "Success") return result.value;
+                throw new Error("Could not read the file's repository");
               }
         }
         onOpenInPanel={(path) => openFileInPanel(fileLinkMeta, path)}

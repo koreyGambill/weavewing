@@ -7,6 +7,7 @@ import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as SourceControlFileLinks from "./SourceControlFileLinks.ts";
 
 const git = (cwd: string, args: ReadonlyArray<string>) =>
@@ -48,6 +49,7 @@ const publishBranch = (cwd: string) =>
 
 const layer = SourceControlFileLinks.layer.pipe(
   Layer.provideMerge(RepositoryIdentityResolver.layer),
+  Layer.provideMerge(WorkspacePaths.layer),
   Layer.provideMerge(ProcessRunner.layer),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -64,6 +66,7 @@ it.layer(layer)("SourceControlFileLinks", (it) => {
         providerLabel: "GitHub",
         remoteName: "origin",
         choice: "default",
+        branch: "feature/x",
         link: { ref: "main", url: "https://github.com/acme/app/blob/main/src/a.ts#L57-L64" },
         defaultBranch: {
           ref: "main",
@@ -136,6 +139,114 @@ it.layer(layer)("SourceControlFileLinks", (it) => {
         _tag: "Unavailable",
         reason: "unsupported-host",
         host: "code.example.test",
+      });
+    }),
+  );
+  it.effect("finds a workspace-relative path inside its workspace", () =>
+    Effect.gen(function* () {
+      const { cwd } = yield* makeCheckout;
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      expect(yield* links.fileLink({ cwd, path: "src/a.ts" })).toMatchObject({
+        choice: "default",
+        link: { url: "https://github.com/acme/app/blob/main/src/a.ts" },
+      });
+    }),
+  );
+
+  it.effect("refuses relative paths that leave the workspace, by name or through a link", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { cwd } = yield* makeCheckout;
+      const sibling = yield* makeCheckout;
+      yield* fileSystem.symlink(path.join(sibling.cwd, "src"), path.join(cwd, "elsewhere"));
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      const outside = { _tag: "Unavailable", reason: "outside-workspace" };
+      expect(
+        yield* links.fileLink({ cwd, path: `../${path.basename(sibling.cwd)}/src/a.ts` }),
+      ).toEqual(outside);
+      expect(yield* links.fileLink({ cwd, path: "elsewhere/a.ts" })).toEqual(outside);
+      expect(yield* links.fileLink({ path: "src/a.ts" })).toEqual(outside);
+    }),
+  );
+
+  it.effect("never follows a network path, named or reached through a parent link", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { cwd } = yield* makeCheckout;
+      yield* fileSystem.symlink("//fileserver/share", path.join(cwd, "share"));
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      const network = { _tag: "Unavailable", reason: "network-path" };
+      expect(yield* links.fileLink({ path: "//fileserver/share/a.ts" })).toEqual(network);
+      expect(yield* links.fileLink({ path: path.join(cwd, "share", "a.ts") })).toEqual(network);
+      expect(yield* links.fileLink({ cwd, path: "share/a.ts" })).toEqual(network);
+    }),
+  );
+
+  it.effect("skips a remote HEAD whose branch was renamed and pruned", () =>
+    Effect.gen(function* () {
+      const { cwd, file } = yield* makeCheckout;
+      yield* git(cwd, ["update-ref", "refs/remotes/origin/master", "refs/remotes/origin/main"]);
+      yield* git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"]);
+      yield* git(cwd, ["update-ref", "-d", "refs/remotes/origin/master"]);
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      expect(yield* links.fileLink({ path: file("a.ts") })).toMatchObject({
+        choice: "default",
+        link: { ref: "main" },
+      });
+    }),
+  );
+
+  it.effect("treats an upstream the remote deleted as no upstream", () =>
+    Effect.gen(function* () {
+      const { cwd, file } = yield* makeCheckout;
+      yield* publishBranch(cwd);
+      yield* git(cwd, ["update-ref", "-d", "refs/remotes/origin/feature/x"]);
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      expect(yield* links.fileLink({ path: file("new.ts") })).toMatchObject({
+        choice: "default-without-upstream",
+        branch: "feature/x",
+        currentBranch: null,
+      });
+    }),
+  );
+
+  it.effect("reports a detached HEAD apart from a branch without an upstream", () =>
+    Effect.gen(function* () {
+      const { cwd, file } = yield* makeCheckout;
+      yield* git(cwd, ["switch", "--detach"]);
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      expect(yield* links.fileLink({ path: file("new.ts") })).toMatchObject({
+        choice: "default-without-upstream",
+        branch: null,
+      });
+    }),
+  );
+
+  it.effect("reads a blobless clone's default branch without fetching", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { cwd: source } = yield* makeCheckout;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-file-links-blobless-" });
+      const bare = path.join(root, "remote.git");
+      const clone = path.join(root, "clone");
+      yield* git(root, ["clone", "--bare", "--branch", "main", source, bare]);
+      yield* git(bare, ["config", "uploadpack.allowFilter", "true"]);
+      yield* git(root, ["clone", "--filter=blob:none", "--no-checkout", `file://${bare}`, clone]);
+      // Any lazy fetch now fails: the remote is gone and its new URL cannot be reached.
+      yield* fileSystem.remove(bare, { recursive: true });
+      yield* git(clone, ["remote", "set-url", "origin", "git@github.com:acme/app.git"]);
+      yield* git(clone, ["config", "core.sshCommand", "false"]);
+      yield* git(clone, ["config", "protocol.file.allow", "never"]);
+      expect((yield* git(clone, ["cat-file", "-e", "origin/main:src/a.ts"])).code).not.toBe(0);
+      yield* fileSystem.makeDirectory(path.join(clone, "src"));
+      yield* fileSystem.writeFileString(path.join(clone, "src", "a.ts"), "a\n");
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      expect(yield* links.fileLink({ path: path.join(clone, "src", "a.ts") })).toMatchObject({
+        choice: "default",
+        link: { ref: "main" },
       });
     }),
   );

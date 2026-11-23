@@ -1570,7 +1570,8 @@ export default function FilePreviewPanel({
       : null;
   const fileLink = useFileLinkState({
     environmentId,
-    absolutePath: isFolder ? null : absolutePath,
+    cwd,
+    path: isFolder || absolutePath === null ? null : relativePath,
     line: revealLine ?? undefined,
     endLine: revealEndLine ?? undefined,
   });

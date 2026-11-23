@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { SourceControlFileLink, SourceControlProviderKind } from "@t3tools/contracts";
-
-import { resolveFileHeaderActions, resolveFileRemoteActions } from "./fileHeaderActions.logic";
+import { resolveFileHeaderActions } from "./fileHeaderActions.logic";
 
 const workspaceFile = {
   absolutePath: "/repo/src/index.ts",
@@ -95,68 +93,5 @@ describe("resolveFileHeaderActions", () => {
       fileLink: { status: "loading" },
     });
     expect(actions.remote).toEqual([]);
-  });
-});
-
-const target = (ref: string) => ({ ref, url: `https://github.com/a/b/blob/${ref}/x.ts` });
-const available = (
-  link: Partial<Extract<SourceControlFileLink, { _tag: "Available" }>>,
-): SourceControlFileLink => ({
-  _tag: "Available",
-  provider: "github" as SourceControlProviderKind,
-  providerLabel: "GitHub",
-  remoteName: "origin",
-  choice: "default",
-  link: target("main"),
-  defaultBranch: target("main"),
-  currentBranch: target("feature"),
-  ...link,
-});
-const byId = (actions: ReturnType<typeof resolveFileRemoteActions>) =>
-  Object.fromEntries(actions.map((action) => [action.id, action]));
-
-describe("resolveFileRemoteActions", () => {
-  it("names the forge and the chosen ref", () => {
-    const actions = byId(resolveFileRemoteActions({ status: "ready", link: available({}) }));
-    expect(actions["open-on-forge"]).toMatchObject({
-      label: "Open on GitHub",
-      url: "https://github.com/a/b/blob/main/x.ts",
-      detail: "main, the default branch",
-      disabledReason: null,
-    });
-    expect(actions["copy-forge-link"]).toMatchObject({ label: "Copy GitHub link", kind: "copy" });
-  });
-
-  it("says why it linked the current branch or fell back to the default", () => {
-    const current = byId(
-      resolveFileRemoteActions({
-        status: "ready",
-        link: available({ choice: "current", link: target("feature") }),
-      }),
-    );
-    expect(current["open-on-forge"]?.detail).toContain("the current branch");
-    const fallback = byId(
-      resolveFileRemoteActions({
-        status: "ready",
-        link: available({ choice: "default-without-upstream", currentBranch: null }),
-      }),
-    );
-    expect(fallback["open-on-forge"]?.detail).toContain("no upstream on origin");
-    expect(fallback["open-current-branch"]).toMatchObject({
-      url: null,
-      disabledReason: "This branch has no upstream on origin",
-    });
-  });
-
-  it("disables every forge action, with a reason, when the file has no forge page", () => {
-    const actions = resolveFileRemoteActions({
-      status: "ready",
-      link: { _tag: "Unavailable", reason: "unsupported-host", host: "code.example.test" },
-    });
-    expect(actions[0]).toMatchObject({
-      label: "Open on remote",
-      disabledReason: "T3 Code cannot link files on code.example.test",
-    });
-    expect(actions.every((action) => action.disabledReason !== null)).toBe(true);
   });
 });

@@ -5,8 +5,13 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuSource, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { memo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import type {
+  ContextMenuSource,
+  EnvironmentId,
+  ScopedThreadRef,
+  SourceControlFileLink,
+} from "@t3tools/contracts";
+import { memo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { FolderIcon } from "lucide-react";
 
 import { contextMenuSourceOf } from "../../contextMenuSource";
@@ -26,7 +31,12 @@ import {
 } from "./MarkdownFileLink.logic";
 import { reportMarkdownActionFailure } from "./markdownActionFailure";
 import { WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
-import type { FileRemoteAction } from "../files/fileHeaderActions.logic";
+import {
+  createFileLinkLookup,
+  type FileLinkLookup,
+  type FileRemoteAction,
+  resolveFileRemoteActions,
+} from "@t3tools/client-runtime/file-remote-actions";
 import { useRunFileRemoteAction } from "../files/FileRemoteActions";
 
 interface MarkdownFileLinkProps {
@@ -45,8 +55,8 @@ interface MarkdownFileLinkProps {
   onOpen?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
-  /** The file's forge actions, read when the menu opens since they need a git lookup. */
-  resolveRemoteActions?: (() => Promise<ReadonlyArray<FileRemoteAction>>) | undefined;
+  /** The file's forge link, read on hover or menu open since it needs a git lookup. */
+  loadFileLink?: (() => Promise<SourceControlFileLink>) | undefined;
   openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenMedia?: (() => void) | undefined;
@@ -77,9 +87,18 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   onReveal,
   revealLabel,
   resolveCopyPaths,
-  resolveRemoteActions,
+  loadFileLink,
 }: MarkdownFileLinkProps) {
   const runRemoteAction = useRunFileRemoteAction(threadRef);
+  // Hover starts the lookup so the menu usually opens with its forge rows; each open reads anew.
+  const fileLinkLookup = useRef<FileLinkLookup | null>(null);
+  const lookupFileLink = () => {
+    if (!loadFileLink) return null;
+    const lookup = fileLinkLookup.current ?? createFileLinkLookup(loadFileLink);
+    fileLinkLookup.current = lookup;
+    void lookup.start();
+    return lookup;
+  };
   const handleOpenInEditor = () => {
     if (!onOpen) {
       return;
@@ -252,7 +271,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
     try {
       const copyItems = markdownFileCopyMenuItems({ targetPath, workspaceRelativePath });
-      const remoteActions = (await resolveRemoteActions?.().catch(() => [])) ?? [];
+      const lookup = lookupFileLink();
+      const settled = lookup?.settled() ?? null;
+      const remoteActions = settled === null ? [] : resolveFileRemoteActions(settled);
       const clicked = await api.contextMenu.show(
         [
           ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
@@ -262,20 +283,29 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             : []),
           ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
           ...copyItems.map(({ id, label }) => ({ id, label })),
-          ...remoteActions.map((action, index) => ({
-            id: `remote:${action.id}`,
-            label: action.label,
-            separatorBefore: index === 0,
-            disabled: action.disabledReason !== null,
-            ...((action.disabledReason ?? action.detail)
-              ? { detail: action.disabledReason ?? action.detail ?? "" }
-              : {}),
-          })),
+          ...(lookup !== null && settled === null
+            ? [
+                {
+                  id: "remote:loading",
+                  label: "Forge links",
+                  detail: "Loading…",
+                  separatorBefore: true,
+                },
+              ]
+            : remoteMenuItems(remoteActions)),
         ] as const,
         position,
         source,
       );
 
+      fileLinkLookup.current = null;
+      if (clicked === "remote:loading" && lookup !== null) {
+        const actions = resolveFileRemoteActions(await lookup.start());
+        const picked = await api.contextMenu.show(remoteMenuItems(actions), position, source);
+        const action = actions.find(({ id }) => picked === `remote:${id}`);
+        if (action) runRemoteAction(action);
+        return;
+      }
       const remoteAction = remoteActions.find((action) => clicked === `remote:${action.id}`);
       if (remoteAction) {
         runRemoteAction(remoteAction);
@@ -368,6 +398,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
                 handleOpenInFilePreview();
               }}
               onContextMenu={handleContextMenu}
+              onPointerEnter={() => void lookupFileLink()}
             >
               <FileTagChipContent
                 icon={
@@ -392,6 +423,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               data-markdown-copy={copyMarkdown}
               onClick={handleContextMenu}
               onContextMenu={handleContextMenu}
+              onPointerEnter={() => void lookupFileLink()}
             >
               <FileTagChipContent
                 icon={
@@ -414,6 +446,18 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     </Tooltip>
   );
 }, areMarkdownFileLinkPropsEqual);
+
+function remoteMenuItems(actions: ReadonlyArray<FileRemoteAction>) {
+  return actions.map((action, index) => ({
+    id: `remote:${action.id}`,
+    label: action.label,
+    separatorBefore: index === 0,
+    disabled: action.disabledReason !== null,
+    ...((action.disabledReason ?? action.detail)
+      ? { detail: action.disabledReason ?? action.detail ?? "" }
+      : {}),
+  }));
+}
 
 function areMarkdownFileLinkPropsEqual(
   previous: Readonly<MarkdownFileLinkProps>,
