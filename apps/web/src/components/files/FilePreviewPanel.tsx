@@ -55,7 +55,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
-import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
+import { FolderTree, Globe2, SquareArrowOutUpRightIcon, WrapTextIcon } from "lucide-react";
 import { OutsideEditAccess } from "./OutsideEditAccess";
 import { hostEditState } from "./OutsideEditAccess.logic";
 import * as Schema from "effect/Schema";
@@ -71,6 +71,7 @@ import {
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
+import { shouldShowOpenInPicker } from "~/components/chat/OpenInPicker.logic";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { useRemoteOpenState } from "~/remoteOpen";
@@ -103,6 +104,7 @@ import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useThreadTerminalActions } from "../terminal/useThreadTerminalActions";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { openEditorFind, SearchableSource } from "./fileFind";
+import { resolveFileHeaderActions } from "./fileHeaderActions.logic";
 import { fileVimCommand } from "./fileVimCommand";
 import { AttachmentFilePreview } from "./AttachmentFilePreview";
 import { AudioPreview } from "./AudioPreview";
@@ -1511,6 +1513,31 @@ export default function FilePreviewPanel({
     previewPath && absolutePath && !attachment && canOperateTerminal
       ? fileVimCommand(absolutePath, serverConfig?.environment.platform.os === "windows")
       : null;
+  const headerActions = resolveFileHeaderActions({
+    absolutePath,
+    isFolder,
+    isHostFile,
+    openInSupported: shouldShowOpenInPicker({
+      activeProjectName: projectName,
+      activeThreadEnvironmentId: environmentId,
+      primaryEnvironmentId,
+      hostEnvironmentId,
+      remoteOpenMode: remoteOpenState.mode,
+    }),
+    searchableText: file.data !== null && !isMedia && !isDocument && !isPdf,
+    truncated: file.data?.truncated === true,
+  });
+  const hasFileTypeActions =
+    headerActions.find !== null ||
+    (canToggleRendered && renderedMode !== null) ||
+    showsRawText ||
+    canOpenInBrowser;
+  const explorerShown = explorerOpen && headerActions.explorer?.disabledReason === null;
+  const { copyToClipboard: copyPath, isCopied: pathCopied } = useCopyToClipboard({
+    target: "file path",
+    onError: (error) =>
+      toastManager.add({ type: "error", title: "Could not copy path", description: error.message }),
+  });
   const openInVim = async () => {
     if (!vimCommand) return;
     const launched = terminalActions.launchTerminal({
@@ -1674,10 +1701,7 @@ export default function FilePreviewPanel({
               onChange={file.refresh}
             />
           ) : null}
-          {absolutePath &&
-          (environmentId === primaryEnvironmentId ||
-            environmentId === hostEnvironmentId ||
-            remoteOpenState.mode !== "local-exec") ? (
+          {headerActions.openIn?.disabledReason === null && absolutePath ? (
             <OpenInPicker
               environmentId={environmentId}
               keybindings={keybindings}
@@ -1689,9 +1713,42 @@ export default function FilePreviewPanel({
               revealFileManager={revealsInFileManager}
               {...(vimCommand ? { onOpenInVim: () => void openInVim() } : {})}
             />
+          ) : headerActions.openIn ? (
+            <FileSurfaceAction
+              label="Open file in preferred editor"
+              disabledReason={headerActions.openIn.disabledReason}
+              onPress={() => undefined}
+            >
+              <SquareArrowOutUpRightIcon className="size-3.5" />
+            </FileSurfaceAction>
           ) : null}
-          {canFindFile ? (
-            <FileSurfaceAction label="Find in file" onPress={() => requestFileFind()}>
+          {headerActions.copyPath && absolutePath ? (
+            <FileSurfaceAction
+              label={pathCopied ? "Copied path" : "Copy path"}
+              onPress={() => void copyPath(absolutePath, undefined)}
+            >
+              {pathCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+            </FileSurfaceAction>
+          ) : null}
+          {headerActions.explorer ? (
+            <FileSurfaceAction
+              label={explorerShown ? "Hide file explorer" : "Show file explorer"}
+              pressed={explorerShown}
+              disabledReason={headerActions.explorer.disabledReason}
+              onPress={toggleExplorer}
+            >
+              <FolderTree className="size-3.5" />
+            </FileSurfaceAction>
+          ) : null}
+          {hasFileTypeActions ? (
+            <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-border" />
+          ) : null}
+          {headerActions.find ? (
+            <FileSurfaceAction
+              label="Find in file"
+              disabledReason={headerActions.find.disabledReason}
+              onPress={() => requestFileFind()}
+            >
               <SearchIcon className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
@@ -1732,15 +1789,6 @@ export default function FilePreviewPanel({
           {canOpenInBrowser ? (
             <FileSurfaceAction label="Open file in preview browser" onPress={handleOpenInBrowser}>
               <Globe2 className="size-3.5" />
-            </FileSurfaceAction>
-          ) : null}
-          {!isHostFile && previewPath !== null ? (
-            <FileSurfaceAction
-              label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
-              pressed={explorerOpen}
-              onPress={toggleExplorer}
-            >
-              <FolderTree className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
         </div>
