@@ -25,6 +25,7 @@ import * as LayerMap from "effect/LayerMap";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
 
 import type {
   ProjectEntry,
@@ -635,6 +636,8 @@ const isSharedScratchDirectory = Effect.fn("WorkspaceSearchIndex.isSharedScratch
 // inside it by that repository's own rules. Nothing watches them, so the list is reused until a
 // refresh, until a repository is added or removed, or for this long.
 const CHILD_REPOSITORY_FILES_TTL_MS = 30_000;
+// A rebuild stops here; repositories not yet listed leave the result marked truncated.
+const CHILD_REPOSITORY_REBUILD_DEADLINE_MS = 15_000;
 // Each repository keeps the single-workspace cap; the parent stops at a few repositories' worth.
 const CHILD_REPOSITORY_MAX_ENTRIES = WORKSPACE_INDEX_MAX_ENTRIES * 4;
 // `ls-files -s` records run about 120 bytes; reading stops well past `limit` records, never short.
@@ -688,7 +691,8 @@ const confirmChildRepositories = Effect.fn("WorkspaceSearchIndex.confirmChildRep
           .pipe(Effect.orElseSucceed(() => undefined));
         if (!topLevel || topLevel.exitCode !== 0) return [];
         const top = yield* Effect.promise(() =>
-          NodeFSP.realpath(topLevel.stdout.trim()).catch(() => null),
+          // Only git's line break goes; a folder name may itself end in spaces.
+          NodeFSP.realpath(topLevel.stdout.replace(/\r?\n$/, "")).catch(() => null),
         );
         return top === real ? [name] : [];
       }),
@@ -767,10 +771,13 @@ const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles"
       allowNonZeroExit: true,
       timeoutMs: 10_000,
       maxOutputBytes: Math.min(16 * 1024 * 1024, limit * CHILD_REPOSITORY_RECORD_BYTES),
-      outputMode: "truncate",
+      outputMode: "truncate-and-stop",
     })
     .pipe(Effect.orElseSucceed(() => undefined));
-  if (!result || result.exitCode !== 0) return { paths: [] as string[], truncated: true };
+  // A read stopped at the limit ends git early, so only a full read must exit cleanly.
+  if (!result || (result.exitCode !== 0 && !result.stdoutTruncated)) {
+    return { paths: [] as string[], truncated: true };
+  }
   // A cut-off read ends mid-record, so its last record is dropped.
   const stdout = result.stdoutTruncated
     ? result.stdout.slice(0, result.stdout.lastIndexOf("\0") + 1)
@@ -781,6 +788,35 @@ const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles"
     truncated: result.stdoutTruncated || parsed.truncated,
   };
 });
+
+/**
+ * One result per key, kept for `ttlMs`. While a build runs, every caller gets that build, even
+ * after the key changes or the result expires; the build belongs to `scope`, not to its callers.
+ */
+export function makeSingleFlightCache<A>(scope: Scope.Scope, ttlMs: number) {
+  let cached:
+    | { readonly key: string; readonly expiresAt: number; readonly fiber: Fiber.Fiber<A> }
+    | undefined;
+  let running: Fiber.Fiber<A> | undefined;
+  return {
+    acquire: Effect.fnUntraced(function* (key: string, build: () => Effect.Effect<A>) {
+      if (running) return running;
+      const now = yield* Clock.currentTimeMillis;
+      if (cached && cached.key === key && cached.expiresAt > now) return cached.fiber;
+      const fiber = yield* build().pipe(
+        Effect.ensuring(Effect.sync(() => (running = undefined))),
+        Effect.forkIn(scope),
+      );
+      // A build that finished while forking is no longer running.
+      if (fiber.pollUnsafe() === undefined) running = fiber;
+      cached = { key, expiresAt: now + ttlMs, fiber };
+      return fiber;
+    }),
+    invalidate: () => {
+      cached = undefined;
+    },
+  };
+}
 
 const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratchIndex")(function* (
   cwd: string,
@@ -806,26 +842,39 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
   const buildChildFiles = Effect.fn("WorkspaceSearchIndex.buildChildRepositoryFiles")(function* (
     candidates: ReadonlyArray<string>,
   ) {
-    const repositories = yield* confirmChildRepositories(vcsProcess, cwd, candidates);
+    const deadline = (yield* Clock.currentTimeMillis) + CHILD_REPOSITORY_REBUILD_DEADLINE_MS;
+    const beforeDeadline = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) => Effect.timeoutOption(effect, Math.max(0, deadline - now))),
+      );
+    const confirmed = yield* beforeDeadline(confirmChildRepositories(vcsProcess, cwd, candidates));
+    if (Option.isNone(confirmed)) return { entries: [], truncated: true } satisfies ChildFiles;
+    const repositories = confirmed.value;
     const entries: ProjectEntry[] = [];
     let truncated = false;
     for (let start = 0; start < repositories.length; start += CHILD_REPOSITORY_LIST_CONCURRENCY) {
       const wave = repositories.slice(start, start + CHILD_REPOSITORY_LIST_CONCURRENCY);
       const share = Math.floor((CHILD_REPOSITORY_MAX_ENTRIES - entries.length) / wave.length);
-      // Once the parent's budget is spent, no further repository is read at all.
-      if (share === 0) {
+      // Once the parent's budget or time is spent, no further repository is read at all.
+      if (share === 0 || (yield* Clock.currentTimeMillis) >= deadline) {
         truncated = true;
         break;
       }
       const listed = yield* Effect.forEach(
         wave,
         (repository) =>
-          listRepositoryFiles(
-            vcsProcess,
-            cwd,
-            repository,
-            hostIsWindows,
-            Math.min(WORKSPACE_INDEX_MAX_ENTRIES, share),
+          beforeDeadline(
+            listRepositoryFiles(
+              vcsProcess,
+              cwd,
+              repository,
+              hostIsWindows,
+              Math.min(WORKSPACE_INDEX_MAX_ENTRIES, share),
+            ),
+          ).pipe(
+            Effect.map((result) =>
+              Option.getOrElse(result, () => ({ paths: [] as string[], truncated: true })),
+            ),
           ),
         { concurrency: "unbounded" },
       );
@@ -836,28 +885,15 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
     }
     return { entries, truncated } satisfies ChildFiles;
   });
-  let childFiles:
-    | {
-        readonly repositories: string;
-        readonly expiresAt: number;
-        readonly result: Fiber.Fiber<ChildFiles>;
-      }
-    | undefined;
+  const childFiles = makeSingleFlightCache<ChildFiles>(scope, CHILD_REPOSITORY_FILES_TTL_MS);
   const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
     function* () {
       if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
       const candidates = yield* listRepositoryCandidates(cwd);
-      const key = candidates.join("\0");
-      const now = yield* Clock.currentTimeMillis;
-      if (!childFiles || childFiles.repositories !== key || childFiles.expiresAt <= now) {
-        // Searches that arrive during a rebuild join it; it belongs to the index, not to them.
-        childFiles = {
-          repositories: key,
-          expiresAt: now + CHILD_REPOSITORY_FILES_TTL_MS,
-          result: yield* buildChildFiles(candidates).pipe(Effect.forkIn(scope)),
-        };
-      }
-      return yield* Fiber.join(childFiles.result);
+      const fiber = yield* childFiles.acquire(candidates.join("\0"), () =>
+        buildChildFiles(candidates),
+      );
+      return yield* Fiber.join(fiber);
     },
   );
 
@@ -923,7 +959,7 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
       ),
     ),
     refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(function* () {
-      childFiles = undefined;
+      childFiles.invalidate();
     }),
   });
 });

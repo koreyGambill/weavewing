@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { decideFileLinkTap, isAbsoluteLinkDestination } from "./fileLinkTap";
+import { decideFileLinkTap, decideMediaLinkTap, isAbsoluteLinkDestination } from "./fileLinkTap";
 
 describe("decideFileLinkTap", () => {
   const reader = (kinds: ReadonlyArray<string | null | Error>) => {
@@ -35,6 +35,34 @@ describe("decideFileLinkTap", () => {
     expect(await tap("/repo/notes.md", host.readKind)).toBe("open");
     expect(await tap("file:///repo/notes.md", host.readKind)).toBe("open");
     expect(host.reads).toEqual([]);
+  });
+});
+
+describe("decideMediaLinkTap", () => {
+  const tapMedia = (href: string, kinds: ReadonlyArray<string | null>) => {
+    const reads: Array<string> = [];
+    let next = 0;
+    const readKind = (path: string) => {
+      reads.push(path);
+      return Promise.resolve(kinds[next++] ?? null);
+    };
+    return {
+      reads,
+      tap: () => decideMediaLinkTap({ href, mediaPath: "/repo/shots", canRead: true, readKind }),
+    };
+  };
+
+  it("reads a relative media link afresh on every tap, so a cached folder is never reused", async () => {
+    const media = tapMedia("./shots", ["directory", "file"]);
+    expect(await media.tap()).toBe("folder");
+    expect(await media.tap()).toBe("preview");
+    expect(media.reads).toEqual(["/repo/shots", "/repo/shots"]);
+  });
+
+  it("previews an absolute media link without reading it", async () => {
+    const media = tapMedia("/repo/shots", ["directory"]);
+    expect(await media.tap()).toBe("preview");
+    expect(media.reads).toEqual([]);
   });
 });
 

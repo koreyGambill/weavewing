@@ -31,3 +31,20 @@ export async function decideFileLinkTap(input: {
   if (kind === null) return "open";
   return kind.value === "file" ? "open" : "missing";
 }
+
+/**
+ * Where a tapped media link opens: a folder named like media opens as a folder, anything else in
+ * the preview. A relative link is read fresh on every tap; an absolute one opens as written.
+ */
+export async function decideMediaLinkTap(input: {
+  readonly href: string;
+  readonly mediaPath: string | null;
+  readonly canRead: boolean;
+  readonly readKind: (path: string) => Promise<string | null>;
+}): Promise<"folder" | "preview"> {
+  if (isAbsoluteLinkDestination(input.href) || input.mediaPath === null || !input.canRead) {
+    return "preview";
+  }
+  const kind = await input.readKind(input.mediaPath).catch(() => null);
+  return kind === "directory" ? "folder" : "preview";
+}

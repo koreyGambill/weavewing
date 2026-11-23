@@ -257,6 +257,41 @@ describe("runProcess", () => {
     }),
   );
 
+  it.effect("stops reading and kills the process at the limit when asked to", () =>
+    Effect.gen(function* () {
+      const killed = yield* Deferred.make<void>();
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Deferred.await(killed).pipe(Effect.as(ChildProcessSpawner.ExitCode(143))),
+            isRunning: Effect.succeed(true),
+            kill: () => Deferred.succeed(killed, undefined).pipe(Effect.asVoid),
+            unref: Effect.succeed(Effect.void),
+            stdin: Sink.drain,
+            // Writes until killed, and holds stderr open until then.
+            stdout: Stream.encodeText(Stream.forever(Stream.make("x".repeat(64)))),
+            stderr: Stream.fromEffect(Deferred.await(killed)).pipe(Stream.drain),
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+          }),
+        ),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["endless-stdout"],
+        maxOutputBytes: 128,
+        outputMode: "truncate-and-stop",
+      });
+
+      expect(result.stdoutTruncated).toBe(true);
+      expect(result.stdout.length).toBeLessThanOrEqual(128);
+      expect(yield* Deferred.isDone(killed)).toBe(true);
+    }),
+  );
+
   it.effect("writes stdin before waiting for exit", () =>
     Effect.gen(function* () {
       const stdinWritten = yield* Deferred.make<void>();

@@ -1020,3 +1020,102 @@ it.effect("rebuilds a shared scratch folder's repository list once for concurren
     }),
   ).pipe(Effect.provide(testLayer)),
 );
+
+const slowListingFixture = Effect.fn(function* (prefix: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const vcsProcess = yield* VcsProcess.VcsProcess;
+  const home = yield* fs.makeTempDirectoryScoped({ prefix });
+  const cwd = path.join(home, "code");
+  const addRepository = Effect.fn(function* (name: string) {
+    yield* fs.makeDirectory(path.join(cwd, name), { recursive: true });
+    yield* fs.writeFileString(path.join(cwd, name, "README.md"), "");
+    yield* vcsProcess.run({
+      operation: "test.gitInit",
+      command: "git",
+      args: ["init"],
+      cwd: path.join(cwd, name),
+    });
+  });
+  yield* addRepository("first");
+  const started = yield* Deferred.make<void>();
+  const gate = yield* Deferred.make<void>();
+  const slow = VcsProcess.VcsProcess.of({
+    ...vcsProcess,
+    run: (input) =>
+      input.operation === "WorkspaceSearchIndex.listRepositoryFiles"
+        ? Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(gate)),
+            Effect.andThen(vcsProcess.run(input)),
+          )
+        : vcsProcess.run(input),
+  });
+  const index = yield* WorkspaceSearchIndex.make(cwd).pipe(
+    Effect.provideService(HostProcess.HomeDirectory, home),
+    Effect.provideService(VcsProcess.VcsProcess, slow),
+  );
+  return { index, started };
+});
+
+it.effect("hands every caller the running rebuild, even after its key changes or expires", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cache = WorkspaceSearchIndex.makeSingleFlightCache<string>(yield* Effect.scope, 30_000);
+      const gate = yield* Deferred.make<void>();
+      let builds = 0;
+      const build = (value: string) => () =>
+        Effect.sync(() => (builds += 1)).pipe(
+          Effect.andThen(Deferred.await(gate)),
+          Effect.as(value),
+        );
+      const first = yield* cache.acquire("a", build("first"));
+      yield* TestClock.adjust("31 seconds");
+      const second = yield* cache.acquire("b", build("second"));
+      expect(second).toBe(first);
+      yield* Deferred.succeed(gate, undefined);
+      expect(yield* Fiber.join(second)).toBe("first");
+      expect(builds).toBe(1);
+      // Once it has finished, the changed key builds afresh.
+      expect(yield* Fiber.join(yield* cache.acquire("b", build("third")))).toBe("third");
+      expect(builds).toBe(2);
+    }),
+  ),
+);
+
+it.effect("ends a rebuild at its deadline and marks the result truncated", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixture = yield* slowListingFixture("t3-scratch-deadline-");
+      const search = yield* Effect.forkChild(fixture.index.search("readme", 20, "file"));
+      yield* Deferred.await(fixture.started);
+      yield* TestClock.adjust("15 seconds");
+      expect(yield* Fiber.join(search)).toEqual({ entries: [], truncated: true });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("keeps a trailing space in a child repository's folder name", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-space-" });
+      const repo = path.join(home, "code", "repo ");
+      yield* fs.makeDirectory(repo, { recursive: true });
+      yield* fs.writeFileString(path.join(repo, "README.md"), "");
+      yield* vcsProcess.run({
+        operation: "test.gitInit",
+        command: "git",
+        args: ["init"],
+        cwd: repo,
+      });
+      const index = yield* WorkspaceSearchIndex.make(path.join(home, "code")).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
+      expect(
+        (yield* index.search("readme", 20, "file")).entries.map((entry) => entry.path),
+      ).toEqual(["repo /README.md"]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
