@@ -154,7 +154,9 @@ function OpenContentSearchDialog(props: {
       return;
     }
     props.onOpenChange(false);
-    useRightPanelStore.getState().openFile(target.threadRef, match.path, match.lineNumber);
+    useRightPanelStore
+      .getState()
+      .openFile(target.threadRef, match.path, { line: match.lineNumber });
   };
   const fileCount = new Set(matches.map((match) => match.path)).size;
   const showSearchStatus =

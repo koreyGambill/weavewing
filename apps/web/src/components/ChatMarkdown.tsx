@@ -3,8 +3,6 @@ import { buildFileLinkParentSuffixByPath, fileLinkLabel } from "@t3tools/shared/
 import {
   isWindowsDrivePathHref,
   normalizeMarkdownLinkDestination,
-  extractInlineCodeSpans,
-  extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
 } from "@t3tools/shared/markdownLinks";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskList";
@@ -19,7 +17,6 @@ import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
   CHAT_MARKDOWN_REHYPE_PLUGINS,
-  decodeMarkdownLinkEscapes,
   remarkAssistantInsights,
 } from "@t3tools/shared/markdownPipeline";
 import { useAtomValue } from "@effect/atom-react";
@@ -102,10 +99,7 @@ import { AssistantCitationEmbed } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { mathKind } from "@t3tools/shared/markdownMath";
 import remarkMath from "remark-math";
-import {
-  artifactTemplateFromHastProperties,
-  renderCodexInlineDirectivesAsMarkdown,
-} from "@t3tools/shared/codexMarkdownDirectives";
+import { artifactTemplateFromHastProperties } from "@t3tools/shared/codexMarkdownDirectives";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { MarkdownMath } from "./chat/MarkdownMath";
 import {
@@ -142,6 +136,8 @@ import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
 import {
   isLocalEditorFileHref,
+  markdownFileLinkSources,
+  normalizeMarkdownLinkHrefKey,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
@@ -341,8 +337,6 @@ function CodexArtifactTemplateCard(props: {
   );
 }
 
-const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
-
 function orderedListGutterStyle(
   itemValues: ReadonlyArray<unknown>,
   start: unknown,
@@ -401,14 +395,6 @@ const GITHUB_ALERT_PRESENTATIONS: Record<
     titleClassName: "text-red-600 dark:text-red-400",
   },
 };
-
-function normalizeMarkdownLinkHrefKey(href: string): string {
-  const normalizedHref = normalizeMarkdownLinkDestination(href);
-  const rewrittenHref = rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
-  return WINDOWS_DRIVE_PATH_REGEX.test(rewrittenHref)
-    ? rewrittenHref.replaceAll("\\", "/")
-    : rewrittenHref;
-}
 
 // Heading ids are added after sanitizing, which would prefix them a second time.
 const CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS = [
@@ -481,15 +467,11 @@ function fileLinkSourcesKey(
   cwd: string | undefined,
   imageBaseDir: string | undefined,
 ): string {
-  const hrefs = extractMarkdownLinkHrefs(renderCodexInlineDirectivesAsMarkdown(text))
-    .filter((href) => !parseComposerContextHref(href))
-    .map(decodeMarkdownLinkEscapes)
-    .map(normalizeMarkdownLinkHrefKey)
-    .filter((href) => resolveMarkdownFileLinkMeta(href, cwd, imageBaseDir ?? cwd));
-  const spans = extractInlineCodeSpans(text).filter((span) =>
-    resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd),
-  );
-  return JSON.stringify([[...new Set(hrefs)], [...new Set(spans)]]);
+  const sources = markdownFileLinkSources(text, cwd, imageBaseDir ?? cwd);
+  return JSON.stringify([
+    [...new Set(sources.hrefs.map(({ source }) => source))],
+    [...new Set(sources.spans.map(({ source }) => source))],
+  ]);
 }
 
 function resolveFileLinkSources(
@@ -902,7 +884,7 @@ function useChatMarkdownState({
     const openAt = (path: string) =>
       useRightPanelStore
         .getState()
-        .openFile(threadRef, path, fileLinkMeta.line, getClientSettings().linkTileDestination);
+        .openFile(threadRef, path, fileLinkMeta, getClientSettings().linkTileDestination);
     if (
       fileLinkMeta.workspaceLookupPath === null ||
       !cwd ||

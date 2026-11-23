@@ -131,6 +131,7 @@ import {
 import { installFileEditorDismissal } from "./fileEditorDismissal";
 import {
   FILE_LINK_REVEAL_ATTRIBUTE,
+  FILE_LINK_REVEAL_FLASH_MS,
   FILE_LINK_REVEAL_UNSAFE_CSS,
   FILE_SURFACE_SUBHEADER_CLASS,
   FileSurfaceAction,
@@ -138,7 +139,12 @@ import {
   FileSurfaceLoading,
 } from "./fileSurfaceChrome";
 import SourceFilePreview from "./ReadOnlySourcePreview";
-import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
+import {
+  type FileLineRange,
+  resolveCenteredFileLineScrollTop,
+  resolveFileLineRange,
+  spanLineGeometry,
+} from "./fileLineReveal";
 import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey } from "./fileContentRevision";
 import {
@@ -174,6 +180,7 @@ interface FilePreviewPanelProps {
   availableEditors: ReadonlyArray<EditorId>;
   openInShortcutEnabled: boolean;
   revealLine: number | null;
+  revealEndLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
   onNavigateFolder: (relativePath: string, folderTrail: string, keepSource: boolean) => void;
@@ -491,33 +498,16 @@ function WorkspaceDocumentPreview(props: {
   );
 }
 
-function clampFileLine(contents: string, requestedLine: number): number {
-  let lineCount = 1;
-  for (let index = 0; index < contents.length; index += 1) {
-    const character = contents.charCodeAt(index);
-    if (character === 10) {
-      lineCount += 1;
-    } else if (character === 13) {
-      lineCount += 1;
-      if (contents.charCodeAt(index + 1) === 10) index += 1;
+function updateFileLinkReveal(fileContainer: HTMLElement, range: FileLineRange | null): void {
+  const root = fileContainer.shadowRoot ?? fileContainer;
+  for (const element of root.querySelectorAll<HTMLElement>("[data-line], [data-column-number]")) {
+    const line = Number(element.dataset.line ?? element.dataset.columnNumber);
+    if (range !== null && line >= range.start && line <= range.end) {
+      element.setAttribute(FILE_LINK_REVEAL_ATTRIBUTE, "");
+    } else {
+      element.removeAttribute(FILE_LINK_REVEAL_ATTRIBUTE);
     }
   }
-  return Math.min(Math.max(1, requestedLine), lineCount);
-}
-
-function updateFileLinkReveal(fileContainer: HTMLElement, line: number | null): void {
-  const root = fileContainer.shadowRoot ?? fileContainer;
-  for (const element of root.querySelectorAll<HTMLElement>(`[${FILE_LINK_REVEAL_ATTRIBUTE}]`)) {
-    element.removeAttribute(FILE_LINK_REVEAL_ATTRIBUTE);
-  }
-  if (line === null) return;
-
-  root
-    .querySelector<HTMLElement>(`[data-line="${line}"]`)
-    ?.setAttribute(FILE_LINK_REVEAL_ATTRIBUTE, "");
-  root
-    .querySelector<HTMLElement>(`[data-column-number="${line}"]`)
-    ?.setAttribute(FILE_LINK_REVEAL_ATTRIBUTE, "");
 }
 
 const REVEAL_MAX_ATTEMPTS = 30;
@@ -527,6 +517,10 @@ const REVEAL_GUARD_TOLERANCE_PX = 2;
 
 interface FileRevealState {
   frameId: number | null;
+  /** Lines flashing now; cleared after the flash so rows the virtualizer re-creates stay plain. */
+  flash: FileLineRange | null;
+  flashTimer: ReturnType<typeof setTimeout> | null;
+  flashRequestId: number | null;
   cancelGuard: (() => void) | null;
   handledRequestId: number | null;
   latestRequestId: number | null;
@@ -539,6 +533,7 @@ interface FileRevealState {
 function useFileLineReveal(
   relativePath: string | null,
   revealLine: number | null,
+  revealEndLine: number | null,
   revealRequestId: number,
 ): FilePostRender {
   const [revealStatesByPath] = useState(() => new Map<string, FileRevealState>());
@@ -549,6 +544,9 @@ function useFileLineReveal(
     const existingState = revealStatesByPath.get(relativePath);
     const state: FileRevealState = existingState ?? {
       frameId: null,
+      flash: null,
+      flashTimer: null,
+      flashRequestId: null,
       cancelGuard: null,
       handledRequestId: null,
       latestRequestId: null,
@@ -570,23 +568,52 @@ function useFileLineReveal(
       }
     };
 
+    const stopFlash = () => {
+      if (state.flashTimer !== null) clearTimeout(state.flashTimer);
+      state.flashTimer = null;
+      state.flash = null;
+    };
+
+    const startFlash = (range: FileLineRange) => {
+      stopFlash();
+      state.flash = range;
+      state.flashRequestId = revealRequestId;
+      // Drop the attribute and flush styles first so a repeat click restarts the animation.
+      updateFileLinkReveal(fileContainer, null);
+      void fileContainer.offsetWidth;
+      updateFileLinkReveal(fileContainer, range);
+      state.flashTimer = setTimeout(() => {
+        state.flashTimer = null;
+        state.flash = null;
+        updateFileLinkReveal(fileContainer, null);
+      }, FILE_LINK_REVEAL_FLASH_MS);
+    };
+
     const scrollContainer = fileContainer.closest<HTMLElement>(".file-preview-virtualizer");
 
     if (phase === "unmount") {
       // A view torn down before its restore ran never showed the saved offset, so keep it.
       const restorePending = state.restoreFrameId !== null;
       cancelPendingReveal();
+      stopFlash();
       if (scrollContainer && !restorePending) state.scrollTop = scrollContainer.scrollTop;
       state.scrollContainer = null;
       return;
     }
 
-    const contents = instance.file?.contents;
-    const targetLine =
-      revealLine === null || contents === undefined ? null : clampFileLine(contents, revealLine);
-    updateFileLinkReveal(fileContainer, targetLine);
+    updateFileLinkReveal(fileContainer, state.flash);
 
-    if (!(instance instanceof VirtualizedFile)) return;
+    if (!(instance instanceof VirtualizedFile)) {
+      const contents = instance.file?.contents;
+      if (
+        revealLine !== null &&
+        contents !== undefined &&
+        state.flashRequestId !== revealRequestId
+      ) {
+        startFlash(resolveFileLineRange(contents, revealLine, revealEndLine));
+      }
+      return;
+    }
 
     if (state.latestRequestId !== revealRequestId) {
       cancelPendingReveal();
@@ -634,9 +661,10 @@ function useFileLineReveal(
       return;
     }
 
-    const resolveScrollTarget = (line: number): number | null => {
-      const linePosition = instance.getLinePosition(line);
-      if (!linePosition) return null;
+    const resolveScrollTarget = (range: FileLineRange): number | null => {
+      const firstPosition = instance.getLinePosition(range.start);
+      const lastPosition = instance.getLinePosition(range.end);
+      if (!firstPosition || !lastPosition) return null;
 
       const scrollContainerRect = scrollContainer.getBoundingClientRect();
       const fileTop =
@@ -644,8 +672,12 @@ function useFileLineReveal(
         fileContainer.getBoundingClientRect().top -
         scrollContainerRect.top;
       const root = fileContainer.shadowRoot ?? fileContainer;
-      const renderedLineElement = root.querySelector<HTMLElement>(`[data-line="${line}"]`);
-      const renderedLineRect = renderedLineElement?.getBoundingClientRect();
+      const firstRect = root
+        .querySelector<HTMLElement>(`[data-line="${range.start}"]`)
+        ?.getBoundingClientRect();
+      const lastRect = root
+        .querySelector<HTMLElement>(`[data-line="${range.end}"]`)
+        ?.getBoundingClientRect();
 
       return resolveCenteredFileLineScrollTop({
         scrollTop: scrollContainer.scrollTop,
@@ -653,19 +685,14 @@ function useFileLineReveal(
         viewportTop: scrollContainerRect.top,
         viewportHeight: scrollContainer.clientHeight,
         fileTop,
-        estimatedLine: linePosition,
-        ...(renderedLineRect && renderedLineRect.height > 0
-          ? {
-              renderedLine: {
-                top: renderedLineRect.top,
-                height: renderedLineRect.height,
-              },
-            }
+        estimatedLine: spanLineGeometry(firstPosition, lastPosition),
+        ...(firstRect && lastRect && firstRect.height > 0 && lastRect.height > 0
+          ? { renderedLine: spanLineGeometry(firstRect, lastRect) }
           : {}),
       });
     };
 
-    const guardScrollTarget = (line: number) => {
+    const guardScrollTarget = (range: FileLineRange) => {
       let framesLeft = REVEAL_GUARD_FRAMES;
       let guardFrameId: number | null = null;
       const cancelGuard = () => {
@@ -695,7 +722,7 @@ function useFileLineReveal(
           cancelGuard();
           return;
         }
-        const targetTop = resolveScrollTarget(line);
+        const targetTop = resolveScrollTarget(range);
         if (
           targetTop !== null &&
           Math.abs(scrollContainer.scrollTop - targetTop) > REVEAL_GUARD_TOLERANCE_PX
@@ -718,18 +745,20 @@ function useFileLineReveal(
         // Wait for contents and metrics; missing data would clamp fresh-mount reveals to line 1 and mark them
         // handled.
         const currentContents = instance.file?.contents;
-        const line =
-          currentContents === undefined ? null : clampFileLine(currentContents, revealLine);
-        const targetTop = line === null ? null : resolveScrollTarget(line);
-        if (line === null || targetTop === null) {
+        const range =
+          currentContents === undefined
+            ? null
+            : resolveFileLineRange(currentContents, revealLine, revealEndLine);
+        const targetTop = range === null ? null : resolveScrollTarget(range);
+        if (range === null || targetTop === null) {
           if (attempt < REVEAL_MAX_ATTEMPTS) scheduleReveal(attempt + 1);
           return;
         }
-        updateFileLinkReveal(fileContainer, line);
 
         scrollContainer.scrollTop = targetTop;
         state.handledRequestId = revealRequestId;
-        guardScrollTarget(line);
+        startFlash(range);
+        guardScrollTarget(range);
       });
     };
 
@@ -1194,6 +1223,7 @@ export default function FilePreviewPanel({
   availableEditors,
   openInShortcutEnabled,
   revealLine,
+  revealEndLine,
   revealRequestId,
   onOpenFile,
   onNavigateFolder,
@@ -1550,7 +1580,12 @@ export default function FilePreviewPanel({
       await terminalActions.writeToTerminal(launched.terminalId, vimCommand);
     }
   };
-  const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
+  const onFilePostRender = useFileLineReveal(
+    relativePath,
+    revealLine,
+    revealEndLine,
+    revealRequestId,
+  );
   // Mounting the file read under the workspace mutation id refetches it after each mutation.
   useAtomMount(
     canReadFiles &&

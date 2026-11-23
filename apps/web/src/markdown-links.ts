@@ -1,6 +1,11 @@
 import { isLocalEditorFileUrl } from "@t3tools/contracts";
+import { renderCodexInlineDirectivesAsMarkdown } from "@t3tools/shared/codexMarkdownDirectives";
+import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
+import { decodeMarkdownLinkEscapes } from "@t3tools/shared/markdownPipeline";
 import { fileBasename, isAbsolutePath, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import {
+  extractInlineCodeSpans,
+  extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
   isRelativeFilePath,
   normalizeMarkdownLinkDestination,
@@ -35,6 +40,42 @@ export function rewriteMarkdownFileUriHref(href: string | undefined): string | n
   if (!href) return null;
   const target = parseFileUrlHref(normalizeMarkdownLinkDestination(href));
   return target ? `${target.path}${target.hash}` : null;
+}
+
+const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
+
+export function normalizeMarkdownLinkHrefKey(href: string): string {
+  const normalizedHref = normalizeMarkdownLinkDestination(href);
+  const rewrittenHref = rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
+  return WINDOWS_DRIVE_PATH_REGEX.test(rewrittenHref)
+    ? rewrittenHref.replaceAll("\\", "/")
+    : rewrittenHref;
+}
+
+interface MarkdownFileLinkSource {
+  readonly source: string;
+  readonly meta: MarkdownFileLinkMeta;
+}
+
+/** The file links a message renders: link destinations, then inline code naming a path. */
+export function markdownFileLinkSources(
+  text: string,
+  cwd: string | undefined,
+  baseDir: string | undefined = cwd,
+): { hrefs: MarkdownFileLinkSource[]; spans: MarkdownFileLinkSource[] } {
+  const hrefs = extractMarkdownLinkHrefs(renderCodexInlineDirectivesAsMarkdown(text)).flatMap(
+    (href) => {
+      if (parseComposerContextHref(href)) return [];
+      const source = normalizeMarkdownLinkHrefKey(decodeMarkdownLinkEscapes(href));
+      const meta = resolveMarkdownFileLinkMeta(source, cwd, baseDir);
+      return meta ? [{ source, meta }] : [];
+    },
+  );
+  const spans = extractInlineCodeSpans(text).flatMap((source) => {
+    const meta = resolveInlineCodeFileLinkMeta(source, cwd, baseDir);
+    return meta ? [{ source, meta }] : [];
+  });
+  return { hrefs, spans };
 }
 
 export function isLocalEditorFileHref(href: string): boolean {

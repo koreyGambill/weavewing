@@ -694,6 +694,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   margin-left: var(--live-activity-focus-width);
 }
 
+@property --file-link-reveal-strength {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 @property --assistant-citation-highlight-opacity {
   syntax: "<number>";
   inherits: true;

@@ -73,6 +73,7 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
       return (
         typeof surface.relativePath === "string" &&
         (surface.revealLine === null || Number.isSafeInteger(surface.revealLine)) &&
+        (surface.revealEndLine === undefined || Number.isSafeInteger(surface.revealEndLine)) &&
         Number.isSafeInteger(surface.revealRequestId) &&
         (surface.attachment === undefined || isAttachment(surface.attachment))
       );

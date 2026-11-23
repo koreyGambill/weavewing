@@ -12,6 +12,9 @@ export const FILE_SURFACE_SUBHEADER_CLASS =
 
 export const FILE_LINK_REVEAL_ATTRIBUTE = "data-file-link-reveal";
 
+/** How long linked lines stay tinted: a hold, then a fade. */
+export const FILE_LINK_REVEAL_FLASH_MS = 1400;
+
 export const FILE_LINK_REVEAL_UNSAFE_CSS = `
   ${DIFF_SURFACE_THEME_UNSAFE_CSS}
 
@@ -23,6 +26,24 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     color: var(--code-foreground, var(--foreground)) !important;
   }
 
+  /* --file-link-reveal-strength is registered in index.css so it interpolates; a
+     registration inside this shadow root would be ignored. */
+  @keyframes file-link-reveal-flash {
+    0%, 70% { --file-link-reveal-strength: 1; }
+    100% { --file-link-reveal-strength: 0; }
+  }
+
+  [${FILE_LINK_REVEAL_ATTRIBUTE}] {
+    animation: file-link-reveal-flash ${FILE_LINK_REVEAL_FLASH_MS}ms ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [${FILE_LINK_REVEAL_ATTRIBUTE}] {
+      animation: none;
+      --file-link-reveal-strength: 1;
+    }
+  }
+
   /* Tint through --diffs-line-bg, not background-color. The editor paints row
      tints on a layer below its text selection; a background on the row itself
      covers the selection and makes selected text on this line invisible. */
@@ -30,12 +51,12 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     --diffs-line-bg: light-dark(
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 82%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 18% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-override, var(--diffs-selection-base))
       ),
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 75%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 25% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-override, var(--diffs-selection-base))
       )
     ) !important;
@@ -45,16 +66,15 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     background-color: light-dark(
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 75%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 25% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-number-override, var(--diffs-selection-base))
       ),
       color-mix(
         in lab,
-        var(--diffs-computed-diff-line-bg) 60%,
+        var(--diffs-computed-diff-line-bg) calc(100% - 40% * var(--file-link-reveal-strength)),
         var(--diffs-bg-selection-number-override, var(--diffs-selection-base))
       )
     ) !important;
-    color: var(--diffs-selection-number-fg) !important;
   }
 `;
 

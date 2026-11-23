@@ -21,6 +21,9 @@ import { SidebarSearchField } from "./sidebar/SidebarSearchField";
 import { CheckedLabel, ToolFilterMenuTrigger } from "./ToolFilterMenuTrigger";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { getClientSettings } from "../hooks/useSettings";
+import { useRenderedAppearance } from "../hooks/useTheme";
+import { useRightPanelStore } from "../rightPanelStore";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { cn } from "../lib/utils";
 import { formatElapsedDurationLabel } from "../timestampFormat";
@@ -31,12 +34,20 @@ import {
   visibleMarks,
   type LinkSort,
 } from "./threadToolFilters.logic";
+import {
+  conversationFileLinks,
+  formatFileLinkRange,
+  type ConversationFileLink,
+  type FileLinkRange,
+} from "./conversationFileLinks.logic";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { createPortal } from "react-dom";
 import {
   useProject,
   useQuietThreadProjection,
   useThreadRelationshipShells,
   useThreadShell,
+  useTimelineVisibleTurnItems,
 } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "../state/session";
@@ -273,10 +284,31 @@ function ThreadLinks({
         })
       : null,
   );
+  const project = useProject(
+    shell ? { environmentId: threadRef.environmentId, projectId: shell.projectId } : null,
+  );
+  const turnItems = useTimelineVisibleTurnItems(threadRef);
+  const theme = useRenderedAppearance();
   const preferences = useLinkPreferences();
   const [filter, setFilter] = useState("");
   const [service, setService] = useState("all");
   const { copy, isCopied } = useRowCopy();
+  const files = conversationFileLinks(
+    turnItems.flatMap(({ item }) =>
+      item.type === "user_message" || (item.type === "assistant_message" && !item.streaming)
+        ? [item]
+        : [],
+    ),
+    shell?.worktreePath ?? project?.workspaceRoot,
+  ).filter(
+    (file) =>
+      (service === "all" || service === "Files") &&
+      matchesToolFilter([file.displayPath, ...file.ranges.map(formatFileLinkRange)], filter),
+  );
+  const openFileLink = (file: ConversationFileLink, range?: FileLinkRange) =>
+    useRightPanelStore
+      .getState()
+      .openFile(threadRef, file.panelPath, range, getClientSettings().linkTileDestination);
   const ticketStates = workspace.data?.items.flatMap((item) => item.linkStates ?? []) ?? [];
   const tickets = [
     ...new Set(
@@ -315,7 +347,7 @@ function ThreadLinks({
     hour24: preferences.hour24,
   });
   const services = [...new Set(allMarks.map((mark) => mark.service))].toSorted();
-  const nothing = !tickets.length && !pullRequests.length && !rows.length;
+  const nothing = !tickets.length && !pullRequests.length && !rows.length && !files.length;
   const filtered = filter.trim() !== "" || service !== "all";
   const copyLabel = filtered ? "Copy shown links" : "Copy all links";
   const markLine = (mark: (typeof rows)[number]) =>
@@ -340,7 +372,7 @@ function ThreadLinks({
           url: pullRequest.url,
           ...(pullRequest.snapshot?.title ? { title: pullRequest.snapshot.title } : {}),
         })),
-        marks: rows.map(markLine),
+        marks: [...rows.map(markLine), ...files.map(fileLinkCopyText)],
       }),
       "all",
     );
@@ -396,7 +428,7 @@ function ThreadLinks({
                     value={service}
                     onValueChange={(next) => setService(String(next))}
                   >
-                    {["all", "Ticket", "Pull request", ...services].map((name) => (
+                    {["all", "Ticket", "Pull request", "Files", ...services].map((name) => (
                       <MenuRadioItem key={name} value={name}>
                         <CheckedLabel>{name === "all" ? "All" : name}</CheckedLabel>
                       </MenuRadioItem>
@@ -684,6 +716,76 @@ function ThreadLinks({
           })}
         </section>
       ) : null}
+      {files.length ? (
+        <section className="space-y-1">
+          <SectionHeading>
+            Files <span className="tabular-nums">{files.length}</span>
+          </SectionHeading>
+          {files.map((file) => (
+            <div key={file.filePath} className={rowClass}>
+              <PierreEntryIcon
+                pathValue={file.basename}
+                kind="file"
+                theme={theme}
+                className="mt-0.5 size-3.5 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        className="block max-w-full truncate text-left text-primary hover:underline"
+                        onClick={() => openFileLink(file)}
+                      />
+                    }
+                  >
+                    {file.basename}
+                  </TooltipTrigger>
+                  <TooltipPopup>{file.displayPath}</TooltipPopup>
+                </Tooltip>
+                <p className="break-all text-3xs text-muted-foreground">{file.displayPath}</p>
+                {file.ranges.length ? (
+                  <div className="mt-0.5 flex flex-wrap gap-1">
+                    {file.ranges.map((range) => {
+                      const label = formatFileLinkRange(range);
+                      return (
+                        <Button
+                          key={label}
+                          variant="outline"
+                          size="micro"
+                          aria-label={`Open ${file.basename} at line ${label}`}
+                          onClick={() => openFileLink(file, range)}
+                        >
+                          {label}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              <RowActions
+                label={file.basename}
+                copyLabel="Copy path"
+                copied={isCopied(`file:${file.filePath}`)}
+                onCopy={() => copy(file.filePath, `file:${file.filePath}`)}
+              >
+                <MenuItem onClick={() => copy(file.filePath, `file:${file.filePath}`)}>
+                  Copy path
+                </MenuItem>
+                {file.ranges.length ? (
+                  <MenuItem
+                    onClick={() => copy(fileLinkCopyText(file), `file-lines:${file.filePath}`)}
+                  >
+                    Copy path and lines
+                  </MenuItem>
+                ) : null}
+                <MenuItem onClick={() => openFileLink(file)}>Open file</MenuItem>
+              </RowActions>
+            </div>
+          ))}
+        </section>
+      ) : null}
       {marks.error ? <p role="alert">Could not load links.</p> : null}
       {nothing && canRead ? (
         filtered ? (
@@ -696,13 +798,19 @@ function ThreadLinks({
             <EmptyDescription>
               {marks.isPending
                 ? "Loading links…"
-                : "The ticket, pull requests and links from the conversation appear here."}
+                : "The ticket, pull requests, and links and files from the conversation appear here."}
             </EmptyDescription>
           </Empty>
         )
       ) : null}
     </div>
   );
+}
+
+function fileLinkCopyText(file: ConversationFileLink): string {
+  return file.ranges.length
+    ? `${file.displayPath}:${file.ranges.map(formatFileLinkRange).join(", ")}`
+    : file.displayPath;
 }
 
 function ThreadArtifacts({ threadRef }: { threadRef: ScopedThreadRef }) {
