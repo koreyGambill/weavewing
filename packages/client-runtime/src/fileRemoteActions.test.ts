@@ -6,11 +6,12 @@ import type {
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  createFileLinkLookup,
   fileLinkRanges,
+  pressTimeFileActions,
   fileLinkPreflight,
   resolveFileRangeActions,
   resolveFileRemoteActions,
+  resolvePressedFileAction,
   settleFileLink,
 } from "./fileRemoteActions.ts";
 
@@ -138,18 +139,35 @@ describe("settleFileLink", () => {
   });
 });
 
-describe("createFileLinkLookup", () => {
-  it("runs one lookup, and shows its result only once it is in", async () => {
-    const link = available({});
-    const load = vi.fn(() => Promise.resolve(link));
-    const lookup = createFileLinkLookup(load);
-    expect(lookup.settled()).toBeNull();
-    const first = lookup.start();
-    const second = lookup.start();
-    await expect(first).resolves.toEqual({ status: "ready", link });
-    await second;
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(lookup.settled()).toEqual({ status: "ready", link });
+describe("resolvePressedFileAction", () => {
+  it("returns the pressed action with its link, or with the reason it has none", async () => {
+    await expect(
+      resolvePressedFileAction("copy-forge-link", Promise.resolve(available({}))),
+    ).resolves.toMatchObject({ id: "copy-forge-link", url: target("main").url });
+    await expect(
+      resolvePressedFileAction(
+        "open-current-branch",
+        Promise.resolve(available({ currentBranch: null, branch: null })),
+      ),
+    ).resolves.toMatchObject({
+      url: null,
+      disabledReason: "HEAD is detached, so there is no current branch",
+    });
+  });
+});
+
+describe("pressTimeFileActions", () => {
+  it("offers the chosen rows under the forge's name, disabled only by a known reason", () => {
+    const ids = ["open-on-forge", "copy-forge-link"];
+    expect(pressTimeFileActions({ forge: "GitHub", disabledReason: null }, ids)).toEqual([
+      { id: "open-on-forge", label: "Open on GitHub", kind: "open", disabledReason: null },
+      { id: "copy-forge-link", label: "Copy GitHub link", kind: "copy", disabledReason: null },
+    ]);
+    expect(
+      pressTimeFileActions({ forge: "remote", disabledReason: "No files" }).every(
+        (row) => row.disabledReason === "No files",
+      ),
+    ).toBe(true);
   });
 });
 
@@ -173,6 +191,9 @@ describe("fileLinkPreflight", () => {
     ).toBe("This connection cannot read files");
     expect(fileLinkPreflight({ canReadFiles: true, identity: null }).disabledReason).toBe(
       "This project is not a git repository with a remote",
+    );
+    expect(fileLinkPreflight({ canReadFiles: true, identity: undefined }).disabledReason).toBe(
+      null,
     );
     expect(
       fileLinkPreflight({ canReadFiles: true, identity: identity("code.example.test/a/b") })

@@ -194,7 +194,9 @@ export function fileLinkPreflight(input: {
       : sourceControlClients.find(input.identity.provider);
   const forge = definition?.label ?? "remote";
   if (!input.canReadFiles) return { forge, disabledReason: "This connection cannot read files" };
-  if (input.identity === null || input.identity === undefined)
+  // Unknown until the server reads git, so the press decides.
+  if (input.identity === undefined) return { forge, disabledReason: null };
+  if (input.identity === null)
     return { forge, disabledReason: "This project is not a git repository with a remote" };
   if (definition?.fileUrl === undefined)
     return {
@@ -204,40 +206,32 @@ export function fileLinkPreflight(input: {
   return { forge, disabledReason: null };
 }
 
-export interface FileLinkLookup {
-  /** Starts the lookup once; later calls share it. Never longer than the timeout. */
-  readonly start: () => Promise<FileLinkState>;
-  /** The result once it is in, so a menu can show it without waiting. */
-  readonly settled: () => FileLinkState | null;
+/** The forge rows a menu shows before any lookup, disabled only for a reason known up front. */
+export function pressTimeFileActions(
+  preflight: { readonly forge: string; readonly disabledReason: string | null },
+  ids?: ReadonlyArray<string>,
+): ReadonlyArray<Pick<FileRemoteAction, "id" | "label" | "kind" | "disabledReason">> {
+  return FILE_REMOTE_TARGETS.filter((entry) => ids === undefined || ids.includes(entry.id)).map(
+    (entry) => ({
+      id: entry.id,
+      label: entry.label(preflight.forge),
+      kind: entry.kind,
+      disabledReason: preflight.disabledReason,
+    }),
+  );
 }
 
-/** One lookup a menu shows at once when it is done, or waits on from a loading row. */
-export function createFileLinkLookup(
-  load: () => Promise<SourceControlFileLink>,
+/**
+ * Reads git for a pressed row, bounded by the menu timeout: the action to run, whose null `url`
+ * comes with the reason it cannot, such as no upstream or a timeout.
+ */
+export async function resolvePressedFileAction(
+  id: string,
+  lookup: Promise<SourceControlFileLink>,
   timeoutMs: number = FILE_LINK_TIMEOUT_MS,
-): FileLinkLookup {
-  let pending: Promise<FileLinkState> | null = null;
-  let result: FileLinkState | null = null;
-  return {
-    start: () => {
-      pending ??= settleFileLink(Promise.resolve().then(load), timeoutMs).then(
-        (state) => (result = state),
-      );
-      return pending;
-    },
-    settled: () => result,
-  };
-}
-
-/** The forge rows before any lookup, for a menu that reads git only when a row is pressed. */
-export function fileRemoteActionRows(
-  forge: string,
-): ReadonlyArray<Pick<FileRemoteAction, "id" | "label" | "kind">> {
-  return FILE_REMOTE_TARGETS.map((entry) => ({
-    id: entry.id,
-    label: entry.label(forge),
-    kind: entry.kind,
-  }));
+): Promise<FileRemoteAction> {
+  const actions = resolveFileRemoteActions(await settleFileLink(lookup, timeoutMs));
+  return actions.find((action) => action.id === id) ?? actions[0]!;
 }
 
 interface CitedRange {

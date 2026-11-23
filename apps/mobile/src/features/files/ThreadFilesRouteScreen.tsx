@@ -48,9 +48,8 @@ import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import {
   fileLinkPreflight,
-  fileRemoteActionRows,
-  resolveFileRemoteActions,
-  settleFileLink,
+  pressTimeFileActions,
+  resolvePressedFileAction,
 } from "@t3tools/client-runtime/file-remote-actions";
 import type { AssetUrlFailureReason } from "../../state/asset-url-state";
 import {
@@ -687,11 +686,9 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
     }).then((result) =>
       result._tag === "Success" ? result.value : Promise.reject(new Error("lookup failed")),
     );
-    const action = resolveFileRemoteActions(await settleFileLink(lookup)).find(
-      (candidate) => candidate.id === id,
-    );
-    if (!action?.url) {
-      Alert.alert(action?.label ?? "Forge link", action?.disabledReason ?? "No link for this file");
+    const action = await resolvePressedFileAction(id, lookup);
+    if (!action.url) {
+      Alert.alert(action.label, action.disabledReason ?? "No link for this file");
       return;
     }
     if (action.kind === "copy") copyTextWithHaptic(action.url);
@@ -969,14 +966,14 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
           } as const)
         : null,
       ...(metadata.data?.kind === "file"
-        ? fileRemoteActionRows(forgePreflight.forge).map((row) => ({
+        ? pressTimeFileActions(forgePreflight).map((row) => ({
             id: row.id,
             title: row.label,
             icon: row.kind === "copy" ? "link" : "arrow.up.right.square",
             inline: false,
-            ...(forgePreflight.disabledReason === null
+            ...(row.disabledReason === null
               ? {}
-              : { disabled: true, subtitle: forgePreflight.disabledReason }),
+              : { disabled: true, subtitle: row.disabledReason }),
             onPress: () => void runForgeAction(row.id),
           }))
         : []),

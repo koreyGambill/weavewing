@@ -7,42 +7,39 @@ import { isNetworkPath } from "@t3tools/shared/path";
 const MAX_LINK_HOPS = 40;
 
 /**
- * `realpath` without ever touching a network path: links are read one component at a time, and
- * a link whose target is a network path is refused before it is followed, since opening one makes
- * Windows sign in to its host with the user's NTLM credentials. Missing trailing components are
- * kept as written. Null for a network path, a link loop, or a component that cannot be read.
+ * `realpath` that never touches a network path, which makes Windows sign in to its host with
+ * NTLM: the normalized path is lstat'd a component at a time, and a link restarts the walk at
+ * its normalized target. Components below a missing one are kept. Null on any refusal.
  */
 export async function localRealPath(absolutePath: string): Promise<string | null> {
-  if (isNetworkPath(absolutePath) || !NodePath.isAbsolute(absolutePath)) return null;
-  const components = (value: string) =>
-    value
-      .slice(NodePath.parse(value).root.length)
+  if (!NodePath.isAbsolute(absolutePath)) return null;
+  let target = NodePath.resolve(absolutePath);
+  for (let hops = 0; hops <= MAX_LINK_HOPS; hops++) {
+    if (isNetworkPath(target)) return null;
+    const root = NodePath.parse(target).root;
+    const parts = target
+      .slice(root.length)
       .split(/[\\/]+/u)
-      .filter((part) => part !== "" && part !== ".");
-  let resolved = NodePath.parse(absolutePath).root;
-  const pending = components(absolutePath);
-  let hops = 0;
-  while (pending.length > 0) {
-    const part = pending.shift()!;
-    if (part === "..") {
-      resolved = NodePath.dirname(resolved);
-      continue;
-    }
-    const next = NodePath.join(resolved, part);
-    const stat = await NodeFSP.lstat(next).catch((error: NodeJS.ErrnoException) =>
-      error.code === "ENOENT" || error.code === "ENOTDIR" ? undefined : null,
-    );
-    if (stat === null) return null;
-    if (stat === undefined) return NodePath.join(next, ...pending);
-    if (!stat.isSymbolicLink()) {
+      .filter((part) => part !== "");
+    let resolved = root;
+    let link: string | null = null;
+    for (const [index, part] of parts.entries()) {
+      const next = NodePath.join(resolved, part);
+      const stat = await NodeFSP.lstat(next).catch((error: NodeJS.ErrnoException) =>
+        error.code === "ENOENT" || error.code === "ENOTDIR" ? undefined : null,
+      );
+      if (stat === null) return null;
+      if (stat === undefined) return NodePath.join(next, ...parts.slice(index + 1));
+      if (stat.isSymbolicLink()) {
+        const linkTarget = await NodeFSP.readlink(next).catch(() => null);
+        if (linkTarget === null || isNetworkPath(linkTarget)) return null;
+        link = NodePath.resolve(resolved, linkTarget, ...parts.slice(index + 1));
+        break;
+      }
       resolved = next;
-      continue;
     }
-    if (++hops > MAX_LINK_HOPS) return null;
-    const target = await NodeFSP.readlink(next).catch(() => null);
-    if (target === null || isNetworkPath(target)) return null;
-    if (NodePath.isAbsolute(target)) resolved = NodePath.parse(target).root;
-    pending.unshift(...components(target));
+    if (link === null) return resolved;
+    target = link;
   }
-  return resolved;
+  return null;
 }

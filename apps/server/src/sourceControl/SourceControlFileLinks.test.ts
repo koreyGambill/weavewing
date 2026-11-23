@@ -6,7 +6,6 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as SourceControlFileLinks from "./SourceControlFileLinks.ts";
 
@@ -48,11 +47,41 @@ const publishBranch = (cwd: string) =>
   });
 
 const layer = SourceControlFileLinks.layer.pipe(
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
   Layer.provideMerge(WorkspacePaths.layer),
   Layer.provideMerge(ProcessRunner.layer),
   Layer.provideMerge(NodeServices.layer),
 );
+
+/** The real runner, noting every command the service starts. */
+const recordingLinks = (commands: Array<string>) =>
+  SourceControlFileLinks.layer.pipe(
+    Layer.provide(WorkspacePaths.layer),
+    Layer.provide(
+      Layer.effect(
+        ProcessRunner.ProcessRunner,
+        Effect.map(ProcessRunner.make(), (runner) =>
+          ProcessRunner.ProcessRunner.of({
+            ...runner,
+            run: (input) => {
+              commands.push(input.command);
+              return runner.run(input);
+            },
+          }),
+        ),
+      ),
+    ),
+    Layer.provide(NodeServices.layer),
+  );
+
+const objectCount = (cwd: string) =>
+  git(cwd, ["count-objects", "-v"]).pipe(
+    Effect.map((result) =>
+      result.stdout
+        .split("\n")
+        .filter((line) => /^(count|in-pack):/u.test(line))
+        .reduce((sum, line) => sum + Number(line.split(":")[1]), 0),
+    ),
+  );
 
 it.layer(layer)("SourceControlFileLinks", (it) => {
   it.effect("links the default branch when the file is already there, with its range", () =>
@@ -224,30 +253,71 @@ it.layer(layer)("SourceControlFileLinks", (it) => {
     }),
   );
 
-  it.effect("reads a blobless clone's default branch without fetching", () =>
+  it.effect("reads a treeless clone with a reachable remote without fetching", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { cwd: source } = yield* makeCheckout;
-      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-file-links-blobless-" });
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-file-links-treeless-" });
       const bare = path.join(root, "remote.git");
       const clone = path.join(root, "clone");
       yield* git(root, ["clone", "--bare", "--branch", "main", source, bare]);
       yield* git(bare, ["config", "uploadpack.allowFilter", "true"]);
-      yield* git(root, ["clone", "--filter=blob:none", "--no-checkout", `file://${bare}`, clone]);
-      // Any lazy fetch now fails: the remote is gone and its new URL cannot be reached.
-      yield* fileSystem.remove(bare, { recursive: true });
+      yield* git(root, ["clone", "--filter=tree:0", "--no-checkout", `file://${bare}`, clone]);
+      // The forge spelling for recognition, still fetching from the local remote.
       yield* git(clone, ["remote", "set-url", "origin", "git@github.com:acme/app.git"]);
-      yield* git(clone, ["config", "core.sshCommand", "false"]);
-      yield* git(clone, ["config", "protocol.file.allow", "never"]);
-      expect((yield* git(clone, ["cat-file", "-e", "origin/main:src/a.ts"])).code).not.toBe(0);
+      yield* git(clone, ["config", `url.file://${bare}.insteadOf`, "git@github.com:acme/app.git"]);
       yield* fileSystem.makeDirectory(path.join(clone, "src"));
       yield* fileSystem.writeFileString(path.join(clone, "src", "a.ts"), "a\n");
+      const before = yield* objectCount(clone);
       const links = yield* SourceControlFileLinks.SourceControlFileLinks;
       expect(yield* links.fileLink({ path: path.join(clone, "src", "a.ts") })).toMatchObject({
-        choice: "default",
+        _tag: "Available",
         link: { ref: "main" },
       });
+      expect(yield* objectCount(clone)).toBe(before);
+      // Plain git does fetch the trees, so the remote was reachable all along.
+      yield* git(clone, ["ls-tree", "-r", "origin/main"]);
+      expect(yield* objectCount(clone)).toBeGreaterThan(before);
+    }),
+  );
+
+  it.effect("reads a path that looks like pathspec magic literally", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { cwd } = yield* makeCheckout;
+      yield* git(cwd, ["switch", "main"]);
+      yield* fileSystem.writeFileString(path.join(cwd, ":README.md"), "magic\n");
+      yield* git(cwd, ["add", "--", ":(literal):README.md"]);
+      yield* git(cwd, ["commit", "-m", "magic"]);
+      yield* git(cwd, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+      const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+      expect(yield* links.fileLink({ path: path.join(cwd, ":README.md") })).toMatchObject({
+        choice: "default",
+        link: { url: "https://github.com/acme/app/blob/main/%3AREADME.md" },
+      });
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("SourceControlFileLinks forge contact", (it) => {
+  it.effect("names the forge from git config alone, starting no forge CLI", () =>
+    Effect.gen(function* () {
+      const { cwd, file } = yield* makeCheckout.pipe(Effect.provide(ProcessRunner.layer));
+      yield* git(cwd, ["remote", "set-url", "origin", "git@gitlab.com:acme/app.git"]).pipe(
+        Effect.provide(ProcessRunner.layer),
+      );
+      const commands: Array<string> = [];
+      const link = yield* Effect.gen(function* () {
+        const links = yield* SourceControlFileLinks.SourceControlFileLinks;
+        return yield* links.fileLink({ path: file("a.ts") });
+      }).pipe(Effect.provide(recordingLinks(commands)));
+      expect(link).toMatchObject({
+        providerLabel: "GitLab",
+        link: { url: "https://gitlab.com/acme/app/-/blob/main/src/a.ts" },
+      });
+      expect(new Set(commands)).toEqual(new Set(["git"]));
     }),
   );
 });

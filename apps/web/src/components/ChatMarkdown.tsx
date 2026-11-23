@@ -152,7 +152,7 @@ import { hostEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { cn } from "../lib/utils";
 import { resolveRemoteOpenState, useRemoteOpenResolution } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
-import { readThreadShell, useProjects } from "../state/entities";
+import { readThreadShell, useProjects, useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
 import { assetEnvironment } from "../state/assets";
@@ -183,6 +183,7 @@ import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { textDirection } from "~/textDirection";
 import { useOpenLink } from "../browser/useOpenLink";
 import { sourceControlEnvironment } from "../state/sourceControl";
+import { fileLinkPreflight } from "@t3tools/client-runtime/file-remote-actions";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import {
@@ -649,6 +650,17 @@ function useChatMarkdownState({
     isMacOS,
   } = useAtomValue(markdownServerConfigFieldsAtom(environmentId));
   const projects = useProjects();
+  const canReadFiles = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
+  const threadShell = useThreadShell(threadRef ?? null);
+  // Files usually sit in the checkout at `cwd`; any other repository is read when a row is chosen.
+  const forgePreflight = fileLinkPreflight({
+    canReadFiles,
+    identity: projects.find(
+      (project) =>
+        project.environmentId === environmentId &&
+        (project.workspaceRoot === cwd || project.id === threadShell?.projectId),
+    )?.repositoryIdentity,
+  });
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
   const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors, cwd);
@@ -962,24 +974,27 @@ function useChatMarkdownState({
         resolveCopyPaths={async () =>
           markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
         }
-        loadFileLink={
+        fileLink={
           environmentId === null || panelPath === null || isAppBundle
             ? undefined
-            : async () => {
-                // The path the preview opens, so a relative one stays inside `cwd` as there.
-                const result = await loadFileLink({
-                  environmentId,
-                  input: {
-                    path: panelPath,
-                    ...(cwd ? { cwd } : {}),
-                    ...(fileLinkMeta.line === undefined ? {} : { line: fileLinkMeta.line }),
-                    ...(fileLinkMeta.endLine === undefined
-                      ? {}
-                      : { endLine: fileLinkMeta.endLine }),
-                  },
-                });
-                if (result._tag === "Success") return result.value;
-                throw new Error("Could not read the file's repository");
+            : {
+                ...forgePreflight,
+                load: async () => {
+                  // The path the preview opens, so a relative one stays inside `cwd` as there.
+                  const result = await loadFileLink({
+                    environmentId,
+                    input: {
+                      path: panelPath,
+                      ...(cwd ? { cwd } : {}),
+                      ...(fileLinkMeta.line === undefined ? {} : { line: fileLinkMeta.line }),
+                      ...(fileLinkMeta.endLine === undefined
+                        ? {}
+                        : { endLine: fileLinkMeta.endLine }),
+                    },
+                  });
+                  if (result._tag === "Success") return result.value;
+                  throw new Error("Could not read the file's repository");
+                },
               }
         }
         onOpenInPanel={(path) => openFileInPanel(fileLinkMeta, path)}

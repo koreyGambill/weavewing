@@ -11,7 +11,7 @@ import type {
   ScopedThreadRef,
   SourceControlFileLink,
 } from "@t3tools/contracts";
-import { memo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { FolderIcon } from "lucide-react";
 
 import { contextMenuSourceOf } from "../../contextMenuSource";
@@ -32,10 +32,8 @@ import {
 import { reportMarkdownActionFailure } from "./markdownActionFailure";
 import { WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
 import {
-  createFileLinkLookup,
-  type FileLinkLookup,
-  type FileRemoteAction,
-  resolveFileRemoteActions,
+  pressTimeFileActions,
+  resolvePressedFileAction,
 } from "@t3tools/client-runtime/file-remote-actions";
 import { useRunFileRemoteAction } from "../files/FileRemoteActions";
 
@@ -55,8 +53,14 @@ interface MarkdownFileLinkProps {
   onOpen?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
-  /** The file's forge link, read on hover or menu open since it needs a git lookup. */
-  loadFileLink?: (() => Promise<SourceControlFileLink>) | undefined;
+  /** The forge rows; git is read only when one is chosen. */
+  fileLink?:
+    | {
+        readonly forge: string;
+        readonly disabledReason: string | null;
+        readonly load: () => Promise<SourceControlFileLink>;
+      }
+    | undefined;
   openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenMedia?: (() => void) | undefined;
@@ -87,18 +91,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   onReveal,
   revealLabel,
   resolveCopyPaths,
-  loadFileLink,
+  fileLink,
 }: MarkdownFileLinkProps) {
   const runRemoteAction = useRunFileRemoteAction(threadRef);
-  // Hover starts the lookup so the menu usually opens with its forge rows; each open reads anew.
-  const fileLinkLookup = useRef<FileLinkLookup | null>(null);
-  const lookupFileLink = () => {
-    if (!loadFileLink) return null;
-    const lookup = fileLinkLookup.current ?? createFileLinkLookup(loadFileLink);
-    fileLinkLookup.current = lookup;
-    void lookup.start();
-    return lookup;
-  };
   const handleOpenInEditor = () => {
     if (!onOpen) {
       return;
@@ -225,7 +220,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     })();
   };
 
-  const handleCopy = (resolveValue: () => Promise<string>, title: string) => {
+  const handleCopy = (resolveValue: () => Promise<string>, title: string, raw = false) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
       toastManager.add(
         stackedThreadToast({
@@ -237,7 +232,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
       return;
     }
 
-    const value = resolveValue().then((text) => formatFilePathForClipboard(text, targetPath));
+    const value = resolveValue().then((text) =>
+      raw ? text : formatFilePathForClipboard(text, targetPath),
+    );
     // Start the write before workspace lookup finishes so Safari retains the user gesture.
     const write =
       typeof navigator.clipboard.write === "function" && typeof ClipboardItem !== "undefined"
@@ -271,9 +268,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
     try {
       const copyItems = markdownFileCopyMenuItems({ targetPath, workspaceRelativePath });
-      const lookup = lookupFileLink();
-      const settled = lookup?.settled() ?? null;
-      const remoteActions = settled === null ? [] : resolveFileRemoteActions(settled);
+      const forgeRows = fileLink
+        ? pressTimeFileActions(fileLink, ["open-on-forge", "copy-forge-link"])
+        : [];
       const clicked = await api.contextMenu.show(
         [
           ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
@@ -283,32 +280,41 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             : []),
           ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
           ...copyItems.map(({ id, label }) => ({ id, label })),
-          ...(lookup !== null && settled === null
-            ? [
-                {
-                  id: "remote:loading",
-                  label: "Forge links",
-                  detail: "Loading…",
-                  separatorBefore: true,
-                },
-              ]
-            : remoteMenuItems(remoteActions)),
+          ...forgeRows.map((row, index) => ({
+            id: `remote:${row.id}`,
+            label: row.label,
+            separatorBefore: index === 0,
+            disabled: row.disabledReason !== null,
+            ...(row.disabledReason === null ? {} : { detail: row.disabledReason }),
+          })),
         ] as const,
         position,
         source,
       );
 
-      fileLinkLookup.current = null;
-      if (clicked === "remote:loading" && lookup !== null) {
-        const actions = resolveFileRemoteActions(await lookup.start());
-        const picked = await api.contextMenu.show(remoteMenuItems(actions), position, source);
-        const action = actions.find(({ id }) => picked === `remote:${id}`);
-        if (action) runRemoteAction(action);
-        return;
-      }
-      const remoteAction = remoteActions.find((action) => clicked === `remote:${action.id}`);
-      if (remoteAction) {
-        runRemoteAction(remoteAction);
+      const forgeRow = forgeRows.find((row) => clicked === `remote:${row.id}`);
+      if (fileLink && forgeRow) {
+        const pressed = resolvePressedFileAction(forgeRow.id, fileLink.load());
+        if (forgeRow.kind === "copy") {
+          const link = pressed.then(
+            (action) =>
+              action.url ??
+              Promise.reject(new Error(action.disabledReason ?? "No link for this file")),
+          );
+          handleCopy(() => link, `${fileLink.forge} link`, true);
+          return;
+        }
+        void pressed.then((action) =>
+          action.url === null
+            ? toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: `Could not open on ${fileLink.forge}`,
+                  description: action.disabledReason ?? "No link for this file",
+                }),
+              )
+            : runRemoteAction(action),
+        );
         return;
       }
       if (clicked === "preview-media") {
@@ -398,7 +404,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
                 handleOpenInFilePreview();
               }}
               onContextMenu={handleContextMenu}
-              onPointerEnter={() => void lookupFileLink()}
             >
               <FileTagChipContent
                 icon={
@@ -423,7 +428,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               data-markdown-copy={copyMarkdown}
               onClick={handleContextMenu}
               onContextMenu={handleContextMenu}
-              onPointerEnter={() => void lookupFileLink()}
             >
               <FileTagChipContent
                 icon={
@@ -446,18 +450,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     </Tooltip>
   );
 }, areMarkdownFileLinkPropsEqual);
-
-function remoteMenuItems(actions: ReadonlyArray<FileRemoteAction>) {
-  return actions.map((action, index) => ({
-    id: `remote:${action.id}`,
-    label: action.label,
-    separatorBefore: index === 0,
-    disabled: action.disabledReason !== null,
-    ...((action.disabledReason ?? action.detail)
-      ? { detail: action.disabledReason ?? action.detail ?? "" }
-      : {}),
-  }));
-}
 
 function areMarkdownFileLinkPropsEqual(
   previous: Readonly<MarkdownFileLinkProps>,

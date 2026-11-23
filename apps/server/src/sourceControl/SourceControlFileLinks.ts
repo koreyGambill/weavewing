@@ -13,7 +13,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { isNetworkPath } from "@t3tools/shared/path";
 
 import * as ProcessRunner from "../processRunner.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import { localRepositoryIdentity } from "../project/RepositoryIdentityResolver.ts";
 import { unsetInheritedRepositoryEnv } from "../vcs/VcsProcess.ts";
 import { localRealPath } from "../workspace/localRealPath.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -29,6 +29,9 @@ export class SourceControlFileLinks extends Context.Service<
 >()("t3/sourceControl/SourceControlFileLinks") {}
 
 const GIT_PROBE_TIMEOUT = "2 seconds";
+// No transport on any git version, so a partial clone cannot fetch what a probe reads, and paths
+// such as `:README.md` stay paths.
+const GIT_OFFLINE_OPTIONS = ["-c", "protocol.allow=never", "--literal-pathspecs"];
 
 /** Default branch when the file is there; else the branch's upstream; else default anyway. */
 function chooseFileLinkRef(facts: {
@@ -46,11 +49,9 @@ function chooseFileLinkRef(facts: {
 
 const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
-  const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const path = yield* Path.Path;
-  // A partial clone would otherwise fetch the objects a probe reads (git 2.44 and later).
   const env = {
     ...unsetInheritedRepositoryEnv(process.env, yield* HostProcess.Platform),
     GIT_NO_LAZY_FETCH: "1",
@@ -101,7 +102,33 @@ const make = Effect.gen(function* () {
       return { _tag: "Unavailable", reason: file.unavailable } as const;
     }
     const directory = path.dirname(file.real);
-    const identity = yield* resolver.resolve(directory);
+    // Null when git exits non-zero, times out or cannot start: every probe is optional.
+    const git = (args: ReadonlyArray<string>) =>
+      processRunner
+        .run({
+          command: "git",
+          args: ["-C", directory, ...GIT_OFFLINE_OPTIONS, ...args],
+          env,
+          timeout: GIT_PROBE_TIMEOUT,
+          timeoutBehavior: "timedOutResult",
+        })
+        .pipe(
+          Effect.map((result) =>
+            result.code === 0 && !result.timedOut ? result.stdout.replace(/\r?\n$/u, "") : null,
+          ),
+          Effect.orElseSucceed(() => null),
+        );
+    // `git config` as written, so no forge CLI runs and `insteadOf` cannot change the forge.
+    const [location, remoteConfig] = yield* Effect.all(
+      [
+        git(["rev-parse", "--show-toplevel", "--show-prefix"]),
+        git(["config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"]),
+      ],
+      { concurrency: "unbounded" },
+    );
+    if (location === null) return { _tag: "Unavailable", reason: "not-repository" } as const;
+    const [rootPath = "", prefix = ""] = location.split("\n");
+    const identity = localRepositoryIdentity(remoteConfig ?? "", rootPath);
     if (identity === null) return { _tag: "Unavailable", reason: "not-repository" } as const;
     const [host = "", ...repositoryPath] = identity.canonicalKey.split("/");
     const definition =
@@ -113,37 +140,19 @@ const make = Effect.gen(function* () {
       return { _tag: "Unavailable", reason: "unsupported-host", host } as const;
     }
 
-    // Null when git exits non-zero, times out or cannot start: every probe is optional.
-    const git = (args: ReadonlyArray<string>) =>
-      processRunner
-        .run({
-          command: "git",
-          args: ["-C", directory, ...args],
-          env,
-          timeout: GIT_PROBE_TIMEOUT,
-          timeoutBehavior: "timedOutResult",
-        })
-        .pipe(
-          Effect.map((result) =>
-            result.code === 0 && !result.timedOut ? result.stdout.replace(/\r?\n$/u, "") : null,
-          ),
-          Effect.orElseSucceed(() => null),
-        );
     const refExists = (ref: string) =>
       git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).pipe(
         Effect.map((sha) => sha !== null),
       );
     const remote = identity.locator.remoteName;
     const remoteBranchPrefix = `refs/remotes/${remote}/`;
-    const [prefix, headRef, remoteHead] = yield* Effect.all(
+    const [headRef, remoteHead] = yield* Effect.all(
       [
-        git(["rev-parse", "--show-prefix"]),
         git(["symbolic-ref", "-q", "HEAD"]),
         git(["symbolic-ref", "-q", `${remoteBranchPrefix}HEAD`]),
       ],
       { concurrency: "unbounded" },
     );
-    if (prefix === null) return { _tag: "Unavailable", reason: "not-repository" } as const;
     const repoPath = `${prefix}${path.basename(file.real)}`;
 
     // A remote HEAD can name a branch the remote renamed and a prune removed, and clones made
