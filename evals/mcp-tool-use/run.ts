@@ -64,6 +64,11 @@ import { EnvironmentToolkit } from "../../apps/server/src/mcp/toolkits/environme
 import { HtmlToolkit } from "../../apps/server/src/mcp/toolkits/html/tools.ts";
 import { ReviewToolkit } from "../../apps/server/src/mcp/toolkits/reviews/tools.ts";
 import { MessageToolkit } from "../../apps/server/src/mcp/toolkits/message/tools.ts";
+import {
+  QUESTION_TOOL_NAMES,
+  QuestionToolkit,
+} from "../../apps/server/src/mcp/toolkits/questions/tools.ts";
+import { t3OpenQuestionsContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
 import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
@@ -332,6 +337,19 @@ export const McpToolUseCase = Schema.Struct({
     harness: Schema.optional(Schema.Literals(["claude", "codex"])),
     /** The Linked environments beta is on, so T3 lists its link tools. */
     linkedEnvironments: Schema.optional(Schema.Boolean),
+    /**
+     * The Agent questions beta is on: T3 lists the question tools, adds their text, and puts these
+     * open and deferred questions ahead of the user's `prompt`.
+     */
+    questions: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          title: Schema.String,
+          state: Schema.Literals(["open", "deferred"]),
+        }),
+      ),
+    ),
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
@@ -508,6 +526,7 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   HtmlToolkit,
   ReviewToolkit,
   MessageToolkit,
+  QuestionToolkit,
 ].flatMap((toolkit): ReadonlyArray<Tool.Any> => Object.values(toolkit.tools));
 // McpHttpServer decodes arguments with each tool's JSON codec, which drops undeclared keys.
 const t3InputDecoders = new Map(
@@ -563,11 +582,18 @@ const pastedSecret = (name: string, input: Readonly<Record<string, unknown>>) =>
 const hiddenFromSubagents = enabledWhen(McpInvocationContext.hiddenFromSubagents);
 // The Linked environments beta starts off, and T3 lists its tools only while it is on.
 const hiddenWhileLinksOff = enabledWhen(McpInvocationContext.hiddenWhileLinksOff);
-const visibleT3Tools = (options: { readonly subagent?: boolean; readonly links?: boolean }) =>
+// T3 lists the question tools only to sessions the Agent questions setting grants them.
+const visibleT3Tools = (options: {
+  readonly subagent?: boolean;
+  readonly links?: boolean;
+  readonly questionTools?: boolean;
+}) =>
   t3Tools.filter(
     (tool) =>
       (options.links === true || !hiddenWhileLinksOff.has(tool.name)) &&
-      !(options.subagent === true && hiddenFromSubagents.has(tool.name)),
+      !(options.subagent === true && hiddenFromSubagents.has(tool.name)) &&
+      (options.questionTools === true ||
+        !QUESTION_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))),
   );
 
 /**
@@ -575,11 +601,12 @@ const visibleT3Tools = (options: { readonly subagent?: boolean; readonly links?:
  * `browser` say whether the thread holds the `device` and `preview` capabilities, as agent device
  * and browser access decide.
  */
-const claudeQueryOptions = (model: Model, device = true, browser = true) => {
+const claudeQueryOptions = (model: Model, device = true, browser = true, questions = false) => {
   // Refs whose text follows a capability read its flag; older ones ignore it.
   const input: Parameters<typeof makeClaudeQueryOptions>[0] & {
     readonly deviceToolsAvailable?: boolean;
     readonly browserToolsAvailable?: boolean;
+    readonly questionToolsAvailable?: boolean;
   } = {
     modelSelection: { instanceId: ProviderInstanceId.make(CLAUDE_PROVIDER), model },
     nativeThreadId: "mcp-tool-use-eval",
@@ -588,13 +615,14 @@ const claudeQueryOptions = (model: Model, device = true, browser = true) => {
     mcpServers: { "t3-code": { type: "http", url: "http://127.0.0.1/mcp" } },
     deviceToolsAvailable: device,
     browserToolsAvailable: browser,
+    questionToolsAvailable: questions,
   };
   return makeClaudeQueryOptions(input);
 };
 
 /** Text T3 appends to Claude Code's system prompt. Delegated children get the same text. */
-export const t3SystemAppend = (model: Model, device = true, browser = true) => {
-  const { systemPrompt } = claudeQueryOptions(model, device, browser);
+export const t3SystemAppend = (model: Model, device = true, browser = true, questions = false) => {
+  const { systemPrompt } = claudeQueryOptions(model, device, browser, questions);
   if (isRecord(systemPrompt) && systemPrompt.type === "preset" && systemPrompt.append) {
     return systemPrompt.append;
   }
@@ -683,6 +711,8 @@ export const buildBase = (
     readonly deviceAccess?: boolean;
     /** false: the thread has no agent browser access, so T3's text leaves the browser out. */
     readonly browserAccess?: boolean;
+    /** The Agent questions setting is on: T3 lists the question tools and adds their text. */
+    readonly questionTools?: boolean;
   },
 ) => {
   const t3 = visibleT3Tools(options);
@@ -708,7 +738,7 @@ export const buildBase = (
   const { model } = options;
   const append = options.nativeSubagent
     ? ""
-    : t3SystemAppend(model, options.deviceAccess, options.browserAccess);
+    : t3SystemAppend(model, options.deviceAccess, options.browserAccess, options.questionTools);
   const modelLine = `You are powered by the model named ${MODELS[model]}. The exact model ID is ${model}.`;
   const joined = systemTexts.join("\n");
   // The capture's home directory names its user. Cases use `/home/user` paths instead.
@@ -777,6 +807,8 @@ const buildCodexBase = (
     readonly deviceAccess?: boolean;
     /** false: the thread has no agent browser access, so T3's text leaves the browser out. */
     readonly browserAccess?: boolean;
+    /** The Agent questions setting is on: T3 lists the question tools and adds their text. */
+    readonly questionTools?: boolean;
   },
 ): Base => {
   const t3 = visibleT3Tools(options);
@@ -812,7 +844,11 @@ const buildCodexBase = (
   });
   const context = buildCodexAdditionalContext(
     { model: options.model, reasoningEffort: effort },
-    { browser: options.browserAccess ?? true, device: options.deviceAccess ?? true },
+    {
+      browser: options.browserAccess ?? true,
+      device: options.deviceAccess ?? true,
+      questions: options.questionTools ?? false,
+    },
   );
   input.push(
     ...Object.entries(context).map(([key, entry]) => message(`<${key}>${entry.value}</${key}>`)),
@@ -1161,8 +1197,14 @@ export const buildMessages = (sample: Sample) => {
     testCase.promptContext === undefined
       ? testCase.prompt
       : projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext });
-  const prompt =
-    sideChatContext === undefined ? userText : withInlineContext(sideChatContext, userText);
+  // T3 lists open questions ahead of a user's own message, after any side-chat context.
+  const inlineContext = [
+    sideChatContext ?? "",
+    role === "top" ? t3OpenQuestionsContext(testCase.setup.questions ?? []) : "",
+  ]
+    .filter((part) => part !== "")
+    .join("\n\n");
+  const prompt = inlineContext === "" ? userText : withInlineContext(inlineContext, userText);
   const childPrompt = () => taskPrompt({ task: prompt, role: delegateRole });
   if (testCase.prompt !== "")
     push("user", text(role === "delegated-child" ? childPrompt() : prompt));
@@ -1256,6 +1298,16 @@ export const t3Default = (
     };
   };
   switch (name) {
+    case "question_ask": {
+      const asked = Array.isArray(input.questions) ? input.questions.length : 0;
+      const last = Math.max(
+        0,
+        ...(sample.testCase.setup.questions ?? []).map((question) => Number(question.id.slice(1))),
+      );
+      return { ids: Array.from({ length: asked }, (_, index) => `Q${last + index + 1}`) };
+    }
+    case "question_update":
+      return { id: input.id, state: input.state };
     case "t3_thread_launch":
       return newThread(input, input.message);
     case "create_threads":
@@ -2503,6 +2555,7 @@ export const cliInvocation = (
             config.model,
             world?.deviceAgentAccess !== false,
             world?.browserAgentAccess !== false,
+            testCase.setup.questions !== undefined,
           ),
         ];
   const args = [
@@ -2935,6 +2988,7 @@ const main = Effect.gen(function* () {
     deviceAccess: boolean,
     browserAccess: boolean,
     links: boolean,
+    questionTools: boolean,
   ): Effect.Effect<Base, Schema.SchemaError> =>
     codex
       ? decodeCodexCapture(template).pipe(
@@ -2947,6 +3001,7 @@ const main = Effect.gen(function* () {
               links,
               deviceAccess,
               browserAccess,
+              questionTools,
             }),
           ),
         )
@@ -2960,6 +3015,7 @@ const main = Effect.gen(function* () {
               links,
               deviceAccess,
               browserAccess,
+              questionTools,
             });
             return role === "native-subagent"
               ? Effect.promise(() =>
@@ -2970,19 +3026,29 @@ const main = Effect.gen(function* () {
         );
   // Codex has no native subagents; its cases with that role run as top-level threads.
   const baseKey = ({ setup }: McpToolUseCase) =>
-    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.world?.browserAgentAccess !== false}:${setup.linkedEnvironments === true}`;
-  const base = yield* buildFor("top", true, true, false);
-  const bases = new Map<string, Base>([["top:true:true:false", base]]);
+    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.world?.browserAgentAccess !== false}:${setup.linkedEnvironments === true}:${setup.questions !== undefined}`;
+  const base = yield* buildFor("top", true, true, false, false);
+  const bases = new Map<string, Base>([["top:true:true:false:false", base]]);
   for (const testCase of selected) {
     const key = baseKey(testCase);
     if (bases.has(key)) continue;
-    const [role = "top", device, browser, links] = key.split(":") as [
+    const [role = "top", device, browser, links, questions] = key.split(":") as [
       McpToolUseCase["setup"]["role"],
       string,
       string,
       string,
+      string,
     ];
-    bases.set(key, yield* buildFor(role, device === "true", browser === "true", links === "true"));
+    bases.set(
+      key,
+      yield* buildFor(
+        role,
+        device === "true",
+        browser === "true",
+        links === "true",
+        questions === "true",
+      ),
+    );
   }
   const baseFor = (testCase: McpToolUseCase) => bases.get(baseKey(testCase)) ?? base;
   const effort = flags.effort ?? base.codex?.reasoning.effort ?? "high";
