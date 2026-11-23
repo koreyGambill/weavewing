@@ -16,10 +16,12 @@ export const Route = createFileRoute("/_chat/settings/agent-context")({
     const provider = text(raw.provider);
     const projectId = text(raw.projectId);
     const source = text(raw.source);
+    const worktree = text(raw.worktree);
     return {
       ...(provider === undefined ? {} : { provider }),
       ...(projectId === undefined ? {} : { projectId: ProjectId.make(projectId) }),
       ...(source === undefined ? {} : { source }),
+      ...(worktree === undefined ? {} : { worktree }),
     };
   },
   component: SettingsAgentContextRoute,

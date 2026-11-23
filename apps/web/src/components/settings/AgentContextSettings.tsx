@@ -4,7 +4,9 @@ import {
   AgentContextError,
   AuthFilesystemReadScope,
   AuthSettingsWriteScope,
+  type AgentContextGetInput,
   type AgentContextInstruction,
+  type AgentContextReadInput,
   type AgentContextOverview,
   type AgentContextRepo,
   type AgentContextSkill,
@@ -17,9 +19,10 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { ChevronRightIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { type ReactNode, useState } from "react";
 
+import { cn } from "~/lib/utils";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import {
   agentContextCommit,
@@ -45,6 +48,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -80,10 +84,13 @@ const focusSource = (realPath: string) =>
 export function AgentContextSettings({
   provider,
   projectId,
+  worktree,
   source,
 }: {
   readonly provider?: string | undefined;
   readonly projectId?: string | undefined;
+  /** The thread's checkout, which instruction files and skills are discovered from. */
+  readonly worktree?: string | undefined;
   /** A source's path to scroll to once it loads. */
   readonly source?: string | undefined;
 }) {
@@ -112,6 +119,7 @@ export function AgentContextSettings({
       environmentId={environment.environmentId}
       initialProvider={provider}
       initialProjectId={projectId}
+      initialWorktree={worktree}
       focusPath={source}
     />
   );
@@ -121,11 +129,13 @@ function EnvironmentAgentContext({
   environmentId,
   initialProvider,
   initialProjectId,
+  initialWorktree,
   focusPath,
 }: {
   readonly environmentId: EnvironmentId;
   readonly initialProvider: string | undefined;
   readonly initialProjectId: string | undefined;
+  readonly initialWorktree: string | undefined;
   readonly focusPath: string | undefined;
 }) {
   const projects = useProjects().filter(
@@ -141,11 +151,15 @@ function EnvironmentAgentContext({
     providers.find((entry) => entry.instanceId === "claudeAgent") ??
     providers[0];
   const project = projects.find((entry) => entry.id === projectId) ?? projects[0];
+  // The linked thread's checkout applies only while its project stays selected.
+  const worktree =
+    initialWorktree !== undefined && project?.id === initialProjectId ? initialWorktree : undefined;
   const input =
     provider && project
       ? {
           providerInstanceId: ProviderInstanceId.make(provider.instanceId),
           projectId: ProjectId.make(project.id),
+          ...(worktree === undefined ? {} : { worktreePath: worktree }),
         }
       : null;
   const query = useEnvironmentQuery(input ? agentContextGet({ environmentId, input }) : null);
@@ -153,6 +167,35 @@ function EnvironmentAgentContext({
   const [showCompiled, setShowCompiled] = useState(false);
   const providerLabel = (entry: (typeof providers)[number]) =>
     entry.displayName ?? entry.instanceId;
+
+  const middle = (
+    <>
+      <LoadWatchersSection environmentId={environmentId} />
+      {input !== null && (
+        <SettingsSection
+          title="Compiled"
+          headerAction={
+            <Button
+              size="xs"
+              variant="outline"
+              aria-expanded={showCompiled}
+              onClick={() => setShowCompiled((value) => !value)}
+            >
+              {showCompiled ? "Hide compiled" : "View compiled"}
+            </Button>
+          }
+        >
+          {showCompiled ? (
+            <CompiledView environmentId={environmentId} input={input} overview={overview ?? null} />
+          ) : (
+            <p className="px-4 py-3 text-xs text-muted-foreground">
+              What a new session receives for this provider and project, in order.
+            </p>
+          )}
+        </SettingsSection>
+      )}
+    </>
+  );
 
   return (
     <SettingsPageContainer>
@@ -214,8 +257,9 @@ function EnvironmentAgentContext({
           </div>
         </div>
         <p className="px-4 pb-3 text-xs text-muted-foreground">
-          Every file and skill that shapes what a new session receives. Saving writes the real file
-          a link points to; commit each repository separately.
+          Every file and skill that shapes what a new session receives
+          {overview?.cwd ? ` in ${overview.cwd}` : ""}. Saving writes the real file a link points
+          to; commit each repository separately.
         </p>
         {query.error && (
           <p role="alert" className="px-4 py-3 text-sm text-destructive-foreground">
@@ -233,61 +277,51 @@ function EnvironmentAgentContext({
           </p>
         ))}
       </SettingsSection>
-      {overview != null && input !== null && (
+      {overview != null && input !== null ? (
         <AgentContextSections
           environmentId={environmentId}
+          target={input}
           overview={overview}
           focusPath={focusPath}
           onSaved={() => query.refresh()}
-        />
-      )}
-      <LoadWatchersSection environmentId={environmentId} />
-      {input !== null && (
-        <SettingsSection
-          title="Compiled"
-          headerAction={
-            <Button
-              size="xs"
-              variant="outline"
-              aria-expanded={showCompiled}
-              onClick={() => setShowCompiled((value) => !value)}
-            >
-              {showCompiled ? "Hide compiled" : "View compiled"}
-            </Button>
-          }
         >
-          {showCompiled ? (
-            <CompiledView environmentId={environmentId} input={input} overview={overview ?? null} />
-          ) : (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
-              What a new session receives for this provider and project, in order.
-            </p>
-          )}
-        </SettingsSection>
+          {middle}
+        </AgentContextSections>
+      ) : (
+        middle
       )}
     </SettingsPageContainer>
   );
 }
 
+/** Instructions and the standards index, then `children`, then commits and the long skill list. */
 function AgentContextSections({
   environmentId,
+  target,
   overview,
   focusPath,
   onSaved,
+  children,
 }: {
   readonly environmentId: EnvironmentId;
+  /** The provider, project and checkout the overview came from; reads and writes reuse it. */
+  readonly target: DiscoveryTarget;
   readonly overview: AgentContextOverview;
   readonly focusPath: string | undefined;
   readonly onSaved: () => void;
+  readonly children: ReactNode;
 }) {
   const canSave = useAtomValue(agentContextSave.permissionAtom(environmentId));
   const canRead = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
   const [editing, setEditing] = useState<{
     realPath: string;
     title: string;
+    editable: boolean;
     opener: HTMLElement;
   } | null>(null);
   const [committing, setCommitting] = useState<{ root: string; opener: HTMLElement } | null>(null);
+  // Files a commit left out, stated beside their repository until the next commit there.
+  const [leftOut, setLeftOut] = useState<ReadonlyMap<string, ReadonlyArray<string>>>(new Map());
   const totals = agentContextTotals(overview);
   const home = homeOf([
     ...overview.instructions.map((file) => file.realPath),
@@ -301,9 +335,9 @@ function AgentContextSections({
   const commits = pendingCommits(overview);
   const repoOf = (root: string | null) =>
     root === null ? undefined : overview.repos.find((repo) => repo.root === root);
-  const edit = (realPath: string, title: string) => (opener: HTMLElement) =>
-    setEditing({ realPath, title, opener });
-  const editable = canSave && canRead;
+  const canEdit = canSave && canRead;
+  const open = (source: SourceFields, title: string) => (opener: HTMLElement) =>
+    setEditing({ realPath: source.realPath, title, editable: source.editable && canEdit, opener });
 
   return (
     <>
@@ -346,8 +380,9 @@ function AgentContextSections({
                     ? "credential or state file, not read"
                     : "outside the instruction folders, not read"
               }
-              canEdit={editable}
-              onEdit={edit(file.realPath, shortenPath(file.path, home))}
+              canEdit={canEdit}
+              canRead={canRead}
+              onOpen={open(file, shortenPath(file.path, home))}
             />
           ))
         )}
@@ -378,6 +413,42 @@ function AgentContextSections({
           ))
         )}
       </SettingsSection>
+      {children}
+      {/* Always present, so a save never inserts a section above the rows below it. */}
+      <SettingsSection title="Uncommitted edits">
+        {commits.length === 0 ? (
+          <p className="px-4 py-3 text-xs text-muted-foreground">
+            No uncommitted changes in these sources.
+          </p>
+        ) : (
+          commits.map((repo) => (
+            <div key={repo.root} className="flex items-center gap-3 px-4 py-3 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{shortenPath(repo.root, home)}</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {repo.dirty.length}
+                  {repo.dirtyTruncated ? "+" : ""} changed{" "}
+                  {repo.dirty.length === 1 ? "file" : "files"}
+                  {repo.branch ? ` on ${repo.branch}` : " on a detached HEAD"}
+                </span>
+                {(leftOut.get(repo.root)?.length ?? 0) > 0 && (
+                  <span className="block text-xs text-warning-foreground">
+                    Left uncommitted: {leftOut.get(repo.root)!.join(", ")}
+                  </span>
+                )}
+              </span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={(event) => setCommitting({ root: repo.root, opener: event.currentTarget })}
+              >
+                Commit…
+              </Button>
+            </div>
+          ))
+        )}
+      </SettingsSection>
       <SettingsSection
         title={`Skills (${overview.skills.length})`}
         headerAction={
@@ -397,64 +468,33 @@ function AgentContextSections({
         ) : (
           groupSkills(overview.skills).map((group) => (
             <div key={group.label}>
-              <h3 className="px-4 pt-3 text-3xs font-semibold tracking-wide text-muted-foreground uppercase">
+              <h3 className="px-4 pt-3 pb-1 text-3xs font-semibold tracking-wide text-muted-foreground uppercase">
                 {group.label}
                 {group.skills[0]?.origin.detail ? ` · ${group.skills[0].origin.detail}` : ""}
               </h3>
               {group.skills.map((skill) => (
-                <SourceRow
+                <SkillRow
                   key={`${skill.name}:${skill.path}`}
-                  title={skill.name}
-                  tags={[
-                    ...(skill.shadowed ? ["shadowed"] : []),
-                    ...(!skill.listed && !skill.shadowed ? ["not listed"] : []),
-                  ]}
-                  warning={
-                    skill.duplicates.length > 0 ? `also ${skill.duplicates.join(", ")}` : undefined
-                  }
-                  source={skill}
+                  skill={skill}
                   focus={focusPath === skill.path || focusPath === skill.realPath}
                   repo={repoOf(skill.repoRoot)}
                   home={home}
-                  depth={0}
-                  tokens={skill.listed ? `~${formatTokens(skill.listingTokens)} tok/turn` : "0 tok"}
-                  canEdit={editable}
-                  onEdit={edit(skill.realPath, skill.name)}
+                  canEdit={canEdit}
+                  canRead={canRead}
+                  onOpen={open(skill, skill.name)}
                 />
               ))}
             </div>
           ))
         )}
       </SettingsSection>
-      {commits.length > 0 && (
-        <SettingsSection title="Uncommitted edits">
-          {commits.map(({ repo, realPaths }) => (
-            <div key={repo.root} className="flex items-center gap-3 px-4 py-3 text-sm">
-              <span className="min-w-0 flex-1">
-                <span className="font-medium">{shortenPath(repo.root, home)}</span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {realPaths.length} modified {realPaths.length === 1 ? "source" : "sources"}
-                  {repo.branch ? ` on ${repo.branch}` : " on a detached HEAD"}
-                </span>
-              </span>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={(event) => setCommitting({ root: repo.root, opener: event.currentTarget })}
-              >
-                Commit…
-              </Button>
-            </div>
-          ))}
-        </SettingsSection>
-      )}
       {editing !== null && (
         <SourceEditor
           environmentId={environmentId}
-          overview={overview}
+          target={target}
           realPath={editing.realPath}
           title={editing.title}
+          editable={editing.editable}
           opener={editing.opener}
           onClose={() => setEditing(null)}
           onSaved={onSaved}
@@ -463,12 +503,15 @@ function AgentContextSections({
       {committing !== null && (
         <CommitDialog
           environmentId={environmentId}
-          overview={overview}
-          pending={commits.find((entry) => entry.repo.root === committing.root)}
+          target={target}
+          repo={commits.find((entry) => entry.root === committing.root)}
           opener={committing.opener}
           home={home}
           onClose={() => setCommitting(null)}
-          onCommitted={onSaved}
+          onCommitted={(root, left) => {
+            setLeftOut((current) => new Map(current).set(root, left));
+            onSaved();
+          }}
         />
       )}
     </>
@@ -477,13 +520,68 @@ function AgentContextSections({
 
 type SourceFields = Pick<
   AgentContextSkill,
-  "realPath" | "linked" | "bytes" | "repoRoot" | "modified" | "editable" | "readOnlyReason"
+  | "realPath"
+  | "linked"
+  | "bytes"
+  | "repoRoot"
+  | "modified"
+  | "editable"
+  | "readable"
+  | "readOnlyReason"
 >;
+
+/** Edit for a source this connection may change, View for any other readable one. */
+function OpenButton({
+  source,
+  canEdit,
+  canRead,
+  label,
+  onOpen,
+}: {
+  readonly source: SourceFields;
+  readonly canEdit: boolean;
+  readonly canRead: boolean;
+  readonly label: string;
+  readonly onOpen: (opener: HTMLElement) => void;
+}) {
+  const edits = source.editable && canEdit;
+  return (
+    <Button
+      size="xs"
+      variant="outline"
+      aria-label={`${edits ? "Edit" : "View"} ${label}`}
+      disabled={!source.readable || !canRead}
+      onClick={(event) => onOpen(event.currentTarget)}
+    >
+      {edits ? "Edit" : "View"}
+    </Button>
+  );
+}
+
+function RepoState({
+  source,
+  repo,
+  home,
+}: {
+  readonly source: SourceFields;
+  readonly repo: AgentContextRepo | undefined;
+  readonly home: string | null;
+}) {
+  return repo === undefined ? (
+    <span>not in a git repository</span>
+  ) : (
+    <>
+      <span>{shortenPath(repo.root, home)}</span>
+      <Badge size="sm" variant={source.modified ? "warning" : "success"}>
+        {source.modified ? "modified" : "clean"}
+      </Badge>
+    </>
+  );
+}
 
 function SourceRow({
   title,
   tags,
-  warning,
   source,
   focus,
   repo,
@@ -491,11 +589,11 @@ function SourceRow({
   depth,
   tokens,
   canEdit,
-  onEdit,
+  canRead,
+  onOpen,
 }: {
   readonly title: string;
   readonly tags: ReadonlyArray<string>;
-  readonly warning?: string | undefined;
   readonly source: SourceFields;
   /** Scrolls the row into view when it mounts, for links from a thread's Context panel. */
   readonly focus: boolean;
@@ -504,7 +602,8 @@ function SourceRow({
   readonly depth: number;
   readonly tokens: string;
   readonly canEdit: boolean;
-  readonly onEdit: (opener: HTMLElement) => void;
+  readonly canRead: boolean;
+  readonly onOpen: (opener: HTMLElement) => void;
 }) {
   return (
     <div
@@ -522,72 +621,142 @@ function SourceRow({
               {tag}
             </Badge>
           ))}
-          {warning && (
-            <Badge size="sm" variant="warning">
-              {warning}
-            </Badge>
-          )}
         </div>
         <p className="truncate text-xs text-muted-foreground">
           {source.linked ? "→ " : ""}
           {shortenPath(source.realPath, home)}
         </p>
         <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {repo === undefined ? (
-            <span>not in a git repository</span>
-          ) : (
-            <>
-              <span>{shortenPath(repo.root, home)}</span>
-              <Badge size="sm" variant={source.modified ? "warning" : "success"}>
-                {source.modified ? "modified" : "clean"}
-              </Badge>
-            </>
-          )}
+          <RepoState source={source} repo={repo} home={home} />
           <span className="tabular-nums">
             · {formatBytes(source.bytes)} · {tokens}
           </span>
         </p>
-        {!source.editable && (
-          <p className="text-xs text-muted-foreground">
-            Read-only: {source.readOnlyReason ?? "not a source this page edits."}
-          </p>
+        {!source.editable && source.readOnlyReason && (
+          <p className="text-xs text-muted-foreground">Read-only: {source.readOnlyReason}</p>
         )}
       </div>
-      <Button
-        size="xs"
-        variant="outline"
-        disabled={!source.editable || !canEdit}
-        onClick={(event) => onEdit(event.currentTarget)}
-      >
-        Edit
-      </Button>
+      <OpenButton
+        source={source}
+        canEdit={canEdit}
+        canRead={canRead}
+        label={title}
+        onOpen={onOpen}
+      />
     </div>
   );
 }
 
+/** One line per skill; the real path, repository and size open below it. */
+function SkillRow({
+  skill,
+  focus,
+  repo,
+  home,
+  canEdit,
+  canRead,
+  onOpen,
+}: {
+  readonly skill: AgentContextSkill;
+  readonly focus: boolean;
+  readonly repo: AgentContextRepo | undefined;
+  readonly home: string | null;
+  readonly canEdit: boolean;
+  readonly canRead: boolean;
+  readonly onOpen: (opener: HTMLElement) => void;
+}) {
+  const [expanded, setExpanded] = useState(focus);
+  const state = skill.shadowed ? "shadowed" : skill.unlisted;
+  return (
+    <div
+      id={sourceElementId(skill.realPath)}
+      ref={focus ? focusElement : undefined}
+      tabIndex={-1}
+      className="px-4 py-1 outline-none focus-visible:bg-muted"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-2 focus-visible:outline-ring"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={cn("size-3.5 shrink-0 text-muted-foreground", expanded && "rotate-90")}
+          />
+          <span className="min-w-0 truncate text-sm">{skill.name}</span>
+          {state && (
+            <Badge size="sm" variant="outline">
+              {state}
+            </Badge>
+          )}
+          {skill.modified && (
+            <Badge size="sm" variant="warning">
+              modified
+            </Badge>
+          )}
+          {skill.duplicates.length > 0 && (
+            <Badge size="sm" variant="warning" className="min-w-0 shrink">
+              <span className="truncate">also {skill.duplicates.join(", ")}</span>
+            </Badge>
+          )}
+        </button>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {skill.listed ? `~${formatTokens(skill.listingTokens)} tok/turn` : "0 tok"}
+        </span>
+        <OpenButton
+          source={skill}
+          canEdit={canEdit}
+          canRead={canRead}
+          label={skill.name}
+          onOpen={onOpen}
+        />
+      </div>
+      {expanded && (
+        <div className="space-y-0.5 pt-0.5 pb-1 pl-5 text-xs text-muted-foreground">
+          <p className="break-all">
+            {skill.linked ? `${shortenPath(skill.path, home)} → ` : ""}
+            {shortenPath(skill.realPath, home)}
+          </p>
+          <p className="flex flex-wrap items-center gap-1.5">
+            <RepoState source={skill} repo={repo} home={home} />
+            <span className="tabular-nums">· {formatBytes(skill.bytes)}</span>
+          </p>
+          {state === "user-only" && <p>Only you can invoke it; the model never sees it listed.</p>}
+          {state === "off" && <p>Turned off in the provider's settings.</p>}
+          {state === "shadowed" && <p>Another skill with this name loads instead.</p>}
+          {!skill.editable && skill.readOnlyReason && <p>Read-only: {skill.readOnlyReason}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type DiscoveryTarget = AgentContextGetInput;
+
 function SourceEditor({
   environmentId,
-  overview,
+  target,
   realPath,
   title,
+  editable,
   opener,
   onClose,
   onSaved,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly overview: AgentContextOverview;
+  readonly target: DiscoveryTarget;
   readonly realPath: string;
   readonly title: string;
+  /** False opens the text read-only, with no Save. */
+  readonly editable: boolean;
   /** Takes focus back when the dialog closes. */
   readonly opener: HTMLElement;
   readonly onClose: () => void;
-  readonly onSaved: () => void;
+  readonly onSaved: (realPath: string) => void;
 }) {
-  const input = {
-    providerInstanceId: overview.providerInstanceId,
-    projectId: overview.projectId,
-    realPath,
-  };
+  const input = { ...target, realPath };
   const read = useEnvironmentQuery(agentContextRead({ environmentId, input }));
   return (
     <Dialog
@@ -598,8 +767,12 @@ function SourceEditor({
     >
       <DialogPopup className="max-w-3xl" finalFocus={() => opener}>
         <DialogHeader>
-          <DialogTitle>Edit {title}</DialogTitle>
-          <DialogDescription className="break-all">Saves to {realPath}</DialogDescription>
+          <DialogTitle>
+            {editable ? "Edit" : "View"} {title}
+          </DialogTitle>
+          <DialogDescription className="break-all">
+            {editable ? "Saves to" : "Read-only:"} {realPath}
+          </DialogDescription>
         </DialogHeader>
         {read.error ? (
           <DialogPanel>
@@ -613,7 +786,7 @@ function SourceEditor({
               Loading…
             </p>
           </DialogPanel>
-        ) : (
+        ) : editable ? (
           <EditorBody
             key={read.data.sha256}
             environmentId={environmentId}
@@ -623,8 +796,21 @@ function SourceEditor({
             generated={read.data.generated}
             onReload={() => read.refresh()}
             onClose={onClose}
-            onSaved={onSaved}
+            onSaved={() => onSaved(realPath)}
           />
+        ) : (
+          <>
+            <DialogPanel>
+              <pre className="max-h-[60vh] overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap break-words">
+                {read.data.text}
+              </pre>
+            </DialogPanel>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>
+                Close
+              </Button>
+            </DialogFooter>
+          </>
         )}
       </DialogPopup>
     </Dialog>
@@ -642,11 +828,7 @@ function EditorBody({
   onSaved,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly input: {
-    providerInstanceId: ProviderInstanceId;
-    projectId: ProjectId;
-    realPath: string;
-  };
+  readonly input: AgentContextReadInput;
   readonly text: string;
   readonly sha256: string;
   readonly generated: Parameters<typeof splitGenerated>[1];
@@ -663,11 +845,6 @@ function EditorBody({
     <>
       <DialogPanel>
         <div className="grid gap-2">
-          {failure && (
-            <p role="alert" className="text-sm text-destructive-foreground">
-              {failure.message}
-            </p>
-          )}
           {segments.map((segment, index) =>
             segment.generated ? (
               <div key={segment.start} className="grid gap-1">
@@ -696,6 +873,13 @@ function EditorBody({
         </div>
       </DialogPanel>
       <DialogFooter>
+        {/* In the footer, clamped to the buttons' height, so a failure never moves Save. */}
+        <p
+          role="alert"
+          className="mr-auto line-clamp-2 min-w-0 flex-1 text-xs text-destructive-foreground"
+        >
+          {failure?.message}
+        </p>
         {failure?.conflict && (
           <Button variant="outline" onClick={onReload}>
             Reload, discarding my edits
@@ -743,26 +927,30 @@ function commandError(result: {
 
 function CommitDialog({
   environmentId,
-  overview,
-  pending,
+  target,
+  repo,
   home,
   opener,
   onClose,
   onCommitted,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly overview: AgentContextOverview;
-  readonly pending: ReturnType<typeof pendingCommits>[number] | undefined;
+  readonly target: DiscoveryTarget;
+  readonly repo: AgentContextRepo | undefined;
   readonly home: string | null;
   readonly opener: HTMLElement;
   readonly onClose: () => void;
-  readonly onCommitted: () => void;
+  /** `left` names the changed files the commit did not include. */
+  readonly onCommitted: (root: string, left: ReadonlyArray<string>) => void;
 }) {
   const commit = useAtomCommand(agentContextCommit, { reportFailure: false });
   const canCommit = useAtomValue(agentContextCommit.permissionAtom(environmentId));
   const [message, setMessage] = useState("");
+  const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const files = repo?.dirty ?? [];
+  const chosen = files.filter((file) => !excluded.has(file.path));
   return (
     <Dialog
       open
@@ -772,22 +960,48 @@ function CommitDialog({
     >
       <DialogPopup className="max-w-lg" finalFocus={() => opener}>
         <DialogHeader>
-          <DialogTitle>Commit agent context edits</DialogTitle>
+          <DialogTitle>Commit {repo ? shortenPath(repo.root, home) : "changes"}</DialogTitle>
           <DialogDescription>
-            Commits only these files in{" "}
-            {pending ? shortenPath(pending.repo.root, home) : "the repository"}. Other changes stay
-            as they are. Undo with git revert.
+            Commits the checked files by path. Anything already staged that you leave unchecked
+            stays staged. Undo with git revert.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <div className="grid gap-3">
-            <ul className="grid gap-0.5 text-xs">
-              {pending?.realPaths.map((file) => (
-                <li key={file} className="truncate font-mono">
-                  {pending ? file.slice(pending.repo.root.length + 1) : file}
-                </li>
+            <div className="grid max-h-72 overflow-y-auto rounded-md border">
+              {files.map((file) => (
+                <label
+                  key={file.path}
+                  className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 not-last:border-b"
+                >
+                  <Checkbox
+                    checked={!excluded.has(file.path)}
+                    onCheckedChange={(checked) =>
+                      setExcluded((current) => {
+                        const next = new Set(current);
+                        if (checked) next.delete(file.path);
+                        else next.add(file.path);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-xs">{file.path}</span>
+                    {file.untracked && (
+                      <span className="block text-xs text-muted-foreground">
+                        untracked: commit it, or move or delete it
+                      </span>
+                    )}
+                  </span>
+                </label>
               ))}
-            </ul>
+            </div>
+            {repo?.dirtyTruncated && (
+              <p className="text-xs text-muted-foreground">
+                Only the first {files.length} changed files are listed; commit the rest in a
+                terminal.
+              </p>
+            )}
             <div className="grid gap-1.5">
               <Label htmlFor="agent-context-commit-message">Commit message</Label>
               <Textarea
@@ -802,37 +1016,46 @@ function CommitDialog({
                 Committing needs source control permission on this environment.
               </p>
             )}
-            {failure && (
-              <p role="alert" className="text-sm text-destructive-foreground">
-                {failure}
-              </p>
-            )}
           </div>
         </DialogPanel>
         <DialogFooter>
+          <p
+            role="alert"
+            className="mr-auto line-clamp-2 min-w-0 flex-1 text-xs text-destructive-foreground"
+          >
+            {failure}
+          </p>
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button
-            disabled={!canCommit || busy || pending === undefined || message.trim() === ""}
+            disabled={
+              !canCommit ||
+              busy ||
+              repo === undefined ||
+              chosen.length === 0 ||
+              message.trim() === ""
+            }
             onClick={async () => {
-              if (pending === undefined) return;
+              if (repo === undefined) return;
               setBusy(true);
               setFailure(null);
               const result = await commit({
                 environmentId,
                 input: {
-                  providerInstanceId: overview.providerInstanceId,
-                  projectId: overview.projectId,
-                  repoRoot: pending.repo.root,
-                  realPaths: pending.realPaths,
+                  ...target,
+                  repoRoot: repo.root,
+                  realPaths: chosen.map((file) => `${repo.root}/${file.path}`),
                   message: message.trim(),
-                  expectedHead: pending.repo.head,
+                  expectedHead: repo.head,
                 },
               });
               setBusy(false);
               if (result._tag === "Success") {
-                onCommitted();
+                onCommitted(
+                  repo.root,
+                  files.filter((file) => excluded.has(file.path)).map((file) => file.path),
+                );
                 onClose();
                 return;
               }
@@ -852,14 +1075,14 @@ type WatcherRow = LoadWatcher & { readonly id: string };
 const toRows = (watchers: ReadonlyArray<LoadWatcher>): ReadonlyArray<WatcherRow> => {
   const seen = new Map<string, number>();
   return watchers.map((watcher) => {
-    const base = `${watcher.kind}:${watcher.label}:${watcher.pattern}`;
+    const base = `${watcher.kind}:${watcher.label}:${watcher.match}`;
     const count = seen.get(base) ?? 0;
     seen.set(base, count + 1);
     return { ...watcher, id: `${base}:${count}` };
   });
 };
 const toWatchers = (rows: ReadonlyArray<WatcherRow>): ReadonlyArray<LoadWatcher> =>
-  rows.map(({ label, kind, pattern }) => ({ label, kind, pattern }));
+  rows.map(({ label, kind, match }) => ({ label, kind, match }));
 const sameWatchers = (left: ReadonlyArray<LoadWatcher>, right: ReadonlyArray<LoadWatcher>) =>
   JSON.stringify(toWatchers(left as ReadonlyArray<WatcherRow>)) ===
   JSON.stringify(toWatchers(right as ReadonlyArray<WatcherRow>));
@@ -889,21 +1112,21 @@ function LoadWatchersSection({ environmentId }: { readonly environmentId: Enviro
               {
                 label: "",
                 kind: "command",
-                pattern: "",
+                match: "",
                 id: `new:${Date.now()}:${watchers.length}`,
               },
             ])
           }
         >
           <PlusIcon />
-          Add pattern
+          Add watcher
         </Button>
       }
     >
       <p className="px-4 py-3 text-xs text-muted-foreground">
-        Tool calls that match a watcher show in a thread's Context panel as knowledge loads, under
-        the watcher's label. Command patterns match the shell command; tool patterns match the tool
-        name. Both are regular expressions.
+        Tool calls that match a watcher show in a thread's Inspect › Loads as knowledge loads, under
+        the watcher's label. A shell command watcher matches when its words appear in that order in
+        the command. A tool watcher matches the tool's name; * stands for any run of characters.
       </p>
       {watchers.length === 0 && (
         <p className="px-4 py-3 text-xs text-muted-foreground">No watchers; nothing is recorded.</p>
@@ -937,14 +1160,14 @@ function LoadWatchersSection({ environmentId }: { readonly environmentId: Enviro
               </SelectPopup>
             </Select>
             <Input
-              aria-label={`Watcher ${index + 1} pattern`}
+              aria-label={`Watcher ${index + 1} match`}
               aria-invalid={errors[index] !== null}
               className="min-w-48 flex-1"
               font="mono"
-              value={watcher.pattern}
+              value={watcher.match}
               disabled={!canWrite}
-              placeholder="Regular expression"
-              onChange={(event) => update(watcher.id, { pattern: event.target.value })}
+              placeholder={watcher.kind === "command" ? "overwing search" : "mcp__vault__*"}
+              onChange={(event) => update(watcher.id, { match: event.target.value })}
             />
             <Button
               size="icon-xs"
@@ -989,7 +1212,7 @@ function LoadWatchersSection({ environmentId }: { readonly environmentId: Enviro
                 loadWatchers: watchers.map((watcher) => ({
                   ...watcher,
                   label: watcher.label.trim(),
-                  pattern: watcher.pattern.trim(),
+                  match: watcher.match.trim(),
                 })),
               },
               { onSaved: () => setDraft(null) },
@@ -1018,13 +1241,17 @@ function CompiledView({
   overview,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly input: { providerInstanceId: ProviderInstanceId; projectId: ProjectId };
+  readonly input: DiscoveryTarget;
   readonly overview: AgentContextOverview | null;
 }) {
   const request = {
     threadId: PREVIEW_THREAD_ID,
     providerInstanceId: input.providerInstanceId,
-    draft: { projectId: input.projectId, worktreePath: null, interactionMode: "default" as const },
+    draft: {
+      projectId: input.projectId,
+      worktreePath: input.worktreePath ?? null,
+      interactionMode: "default" as const,
+    },
   };
   const query = useEnvironmentQuery(threadDefaultContextGet({ environmentId, input: request }));
   const preview = query.data;

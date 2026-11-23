@@ -24,16 +24,18 @@ describe("watcherErrors", () => {
   it("names the first problem with each watcher", () => {
     expect(
       watcherErrors([
-        { label: "overwing", kind: "command", pattern: "overwing\\s+search" },
-        { label: " ", kind: "command", pattern: "x" },
-        { label: "vault", kind: "tool", pattern: "" },
-        { label: "broken", kind: "tool", pattern: "(" },
+        { label: "overwing", kind: "command", match: "overwing search" },
+        { label: " ", kind: "command", match: "x" },
+        { label: "vault", kind: "tool", match: "" },
+        { label: "regex", kind: "tool", match: "mcp__(a|b)" },
+        { label: "long", kind: "command", match: "a b c d e f g h i" },
       ]),
     ).toEqual([
       null,
       "Add a label.",
-      "Add a pattern.",
-      expect.stringMatching(/^Invalid regular expression: /),
+      "Add words to match.",
+      "Use letters, digits, _ . : - and * for any run of characters.",
+      "Use at most 8 words.",
     ]);
   });
 });

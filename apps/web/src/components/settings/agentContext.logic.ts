@@ -3,7 +3,7 @@ import {
   type AgentContextOverview,
   type AgentContextSkill,
   type LoadWatcher,
-  loadWatcherPatternError,
+  loadWatcherError,
 } from "@t3tools/contracts";
 
 const ORIGIN_ORDER: ReadonlyArray<AgentContextSkill["origin"]["kind"]> = [
@@ -48,18 +48,9 @@ export function agentContextTotals(overview: AgentContextOverview) {
   return { sessionTokens, listingTokens, duplicates: duplicateNames.size };
 }
 
-/** Modified, editable sources per repository, which the repository's Commit action commits. */
-export function pendingCommits(overview: AgentContextOverview) {
-  const files = new Map<string, Set<string>>();
-  for (const source of [...overview.instructions, ...overview.skills]) {
-    if (!source.modified || !source.editable || source.repoRoot === null) continue;
-    files.set(source.repoRoot, (files.get(source.repoRoot) ?? new Set()).add(source.realPath));
-  }
-  return overview.repos.flatMap((repo) => {
-    const realPaths = files.get(repo.root);
-    return realPaths === undefined ? [] : [{ repo, realPaths: [...realPaths].toSorted() }];
-  });
-}
+/** Repositories with anything to commit; their Commit action offers every changed file. */
+export const pendingCommits = (overview: AgentContextOverview) =>
+  overview.repos.filter((repo) => repo.dirty.length > 0);
 
 export interface TextSegment {
   /** The segment's first line in the loaded file, which keys it while its text changes. */
@@ -95,10 +86,7 @@ export const joinSegments = (segments: ReadonlyArray<TextSegment>) =>
 
 /** One message per watcher, null where the watcher is valid. */
 export function watcherErrors(watchers: ReadonlyArray<LoadWatcher>) {
-  return watchers.map((watcher) => {
-    if (watcher.label.trim() === "") return "Add a label.";
-    if (watcher.pattern.trim() === "") return "Add a pattern.";
-    const error = loadWatcherPatternError(watcher.pattern);
-    return error;
-  });
+  return watchers.map((watcher) =>
+    watcher.label.trim() === "" ? "Add a label." : loadWatcherError(watcher),
+  );
 }

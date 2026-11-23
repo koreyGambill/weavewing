@@ -10,7 +10,7 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { CheckIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CopyIcon, SlidersHorizontalIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 
@@ -183,6 +183,7 @@ export function DefaultContextPanel({
                     <FileRows
                       items={items}
                       threadRef={threadRef}
+                      preview={preview}
                       home={home}
                       canOpen={canReadFiles}
                     />
@@ -310,11 +311,13 @@ function StatusMark({ item }: { readonly item: DefaultContextItem }) {
 function FileRows({
   items,
   threadRef,
+  preview,
   home,
   canOpen,
 }: {
   readonly items: ReadonlyArray<DefaultContextItem>;
   readonly threadRef: ScopedThreadRef;
+  readonly preview: DefaultContextPreview;
   readonly home: string | null;
   readonly canOpen: boolean;
 }) {
@@ -325,6 +328,7 @@ function FileRows({
       item={item}
       childrenOf={childrenOf}
       threadRef={threadRef}
+      preview={preview}
       home={home}
       canOpen={canOpen}
       indent={item.depth ?? 0}
@@ -337,6 +341,7 @@ function FileRow({
   item,
   childrenOf,
   threadRef,
+  preview,
   home,
   canOpen,
   indent,
@@ -344,6 +349,7 @@ function FileRow({
   readonly item: DefaultContextItem;
   readonly childrenOf: ReadonlyMap<string, ReadonlyArray<DefaultContextItem>>;
   readonly threadRef: ScopedThreadRef;
+  readonly preview: DefaultContextPreview;
   readonly home: string | null;
   readonly canOpen: boolean;
   readonly indent: number;
@@ -379,27 +385,38 @@ function FileRow({
   );
   return (
     <div style={indent ? { paddingLeft: `${indent * 8}px` } : undefined}>
-      {linkable ? (
-        <button
-          type="button"
-          onClick={() => {
-            useRightPanelStore.getState().openFile(threadRef, item.label);
-            // A read-only file has no editor; the request then lapses and focus stays here.
-            requestWorkspaceFocus({
-              area: "document",
-              selector: `[data-file-content-focus][data-file-path="${CSS.escape(item.label)}"]`,
-            });
-          }}
-          className={cn(
-            rowClass,
-            "group/file cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring",
-          )}
+      <div className="flex min-w-0 items-center">
+        {linkable ? (
+          <button
+            type="button"
+            onClick={() => {
+              useRightPanelStore.getState().openFile(threadRef, item.label);
+              // A read-only file has no editor; the request then lapses and focus stays here.
+              requestWorkspaceFocus({
+                area: "document",
+                selector: `[data-file-content-focus][data-file-path="${CSS.escape(item.label)}"]`,
+              });
+            }}
+            className={cn(
+              rowClass,
+              "group/file cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring",
+            )}
+          >
+            {content}
+          </button>
+        ) : (
+          <div className={rowClass}>{content}</div>
+        )}
+        <AgentContextLink
+          environmentId={threadRef.environmentId}
+          preview={preview}
+          source={item.label}
+          label={`Open ${item.label} in Settings › Agent context`}
+          icon
         >
-          {content}
-        </button>
-      ) : (
-        <div className={rowClass}>{content}</div>
-      )}
+          <SlidersHorizontalIcon aria-hidden="true" />
+        </AgentContextLink>
+      </div>
       {!item.readable && status !== undefined && (
         <p className="ml-4 text-muted-foreground">{status}</p>
       )}
@@ -425,6 +442,7 @@ function FileRow({
                 item={child}
                 childrenOf={childrenOf}
                 threadRef={threadRef}
+                preview={preview}
                 home={home}
                 canOpen={canOpen}
                 indent={0}
@@ -492,18 +510,21 @@ function AgentContextLink({
   preview,
   source,
   label,
+  icon = false,
   children,
 }: {
   readonly environmentId: EnvironmentId;
   readonly preview: DefaultContextPreview;
   readonly source?: string;
   readonly label: string;
+  /** A compact icon button beside a row, rather than a text link. */
+  readonly icon?: boolean;
   readonly children: ReactNode;
 }) {
   return (
     <Button
       variant="ghost"
-      size="xs"
+      size={icon ? "icon-xs" : "xs"}
       aria-label={label}
       render={
         <Link
@@ -512,6 +533,8 @@ function AgentContextLink({
             machine: environmentId,
             provider: preview.providerInstanceId,
             ...(preview.projectId === undefined ? {} : { projectId: preview.projectId }),
+            // Settings discovers from the same checkout the thread runs in.
+            ...(preview.cwd === null ? {} : { worktree: preview.cwd }),
             ...(source === undefined ? {} : { source }),
           }}
         />

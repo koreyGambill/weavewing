@@ -131,10 +131,16 @@ such as a user copy and a plugin copy.
 
 **Edit** saves to the real file, so links keep pointing at it. If the file
 changed since you opened it, the save stops and asks you to reload. Text between
-`<!-- overwing standards` markers is generated and read-only here. After saving,
-**Commit…** commits only the edited files in that repository, with your message.
-Plugin and `npx skills` copies are read-only, because updating them replaces
-local edits.
+`<!-- overwing standards` markers is generated and read-only here. Plugin and
+`npx skills` copies, and project skills that link outside the project, open
+read-only with **View**.
+
+**Uncommitted edits** lists each repository with changes. **Commit…** offers
+every changed file in it, untracked files included and marked, all checked.
+Uncheck anything to leave it out; the page then names the files it left
+uncommitted.
 
 **Load watchers** decide which tool calls Inspect's Loads view labels as
-knowledge loads. Match a shell command or a tool name with a regular expression.
+knowledge loads. A shell command watcher matches its words in order, such as
+`overwing search`. A tool watcher matches the tool name, where `*` matches any
+run of characters, such as `mcp__vault__*`.
