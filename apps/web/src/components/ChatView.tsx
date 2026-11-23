@@ -12,7 +12,7 @@ import { ThreadTileWorkspace } from "./chat/ThreadTileWorkspace";
 import { useMoveToDropdownMenu } from "./terminal/useTerminalMoveMenus";
 import { LegacyTerminalTileBridge } from "./chat/LegacyTerminalTileBridge";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
-import { requestWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
+import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
@@ -54,7 +54,6 @@ import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { isThreadEnvironmentLocked, resolveDraftHeroState } from "./ChatView.logic";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
-import { composerTargetKey, registerComposerReveal } from "./diffs/addedToMessageToast";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import { useStableCallback } from "../hooks/useStableCallback";
@@ -573,19 +572,6 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
   });
   const composerDraftTarget = queuedRunEdit.draftTarget;
-  const revealComposer = useStableCallback(() => {
-    revealWorkspaceThread(workspaceThreadRef, routeThreadRef);
-    requestWorkspaceFocus({
-      area: "document",
-      selector: `[data-chat-composer-thread="${CSS.escape(routeThreadKey)}"] [contenteditable="true"]`,
-    });
-  });
-  const composerToastKey = composerTargetKey(composerDraftTarget);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scopes the "Added to your next message" toast to the composer showing this draft
-  useEffect(
-    () => registerComposerReveal(composerToastKey, revealComposer),
-    [composerToastKey, revealComposer],
-  );
   const reportedModelSelection = serverProjection
     ? deriveReportedModelSelection(serverProjection)
     : null;

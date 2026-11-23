@@ -139,7 +139,7 @@ import {
 } from "./fileSurfaceChrome";
 import SourceFilePreview from "./ReadOnlySourcePreview";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
-import { announceAddedToMessage } from "../diffs/addedToMessageToast";
+import { useAnnounceAddedToMessage } from "../diffs/addedToMessageToast";
 import {
   ADD_TO_MESSAGE_LABEL,
   ADD_TO_MESSAGE_PLACEHOLDER,
@@ -836,6 +836,7 @@ function EditableFileSurface({
   onEditorChange,
 }: EditableFileSurfaceProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
+  const announceAddedToMessage = useAnnounceAddedToMessage();
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
   const promptCommentIds = new Set(
     useComposerDraftStore(

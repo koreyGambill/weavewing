@@ -7,12 +7,12 @@ Projects review comments from the file and diff tiles through the real provider 
 ```sh
 cd evals
 pnpm context-line-refs --dry-run
-pnpm context-line-refs --out runs/line-refs --task cite --model claude-sonnet-5-5
+pnpm context-line-refs --out runs/line-refs --model claude-sonnet-5-5
 ```
 
 - It uses your local Claude login through `claude -p`, with no tools, settings or MCP servers.
-- Flags: `--task sed|cite` (default `sed`), `--model <id>` (default `claude-haiku-5-5`), `--case <id>` (repeatable), `--samples <n>` (default 3), `--baseline <earlier run>` (adds that run's pass counts beside these), `--from <earlier run>` (re-grades its saved outputs without calling a model), `--dry-run` (print each projected message).
-- `sed` asks for the one `sed -i` command that applies the comment. `cite` asks for the targeted file and lines as JSON. Both tasks fail a reply that names the wrong file. `cite` is the stricter check: before the fix, Sonnet cited line 19 in 4 of 5 samples.
+- Flags: `--model <id>` (default `claude-haiku-5-5`), `--case <id>` (repeatable), `--samples <n>` (default 3), `--baseline <earlier run>` (adds that run's pass counts for the selected cases), `--from <earlier run>` (re-grades its saved outputs without calling a model), `--dry-run` (print each projected message). Both saved runs must be `cite` runs; the runner refuses anything else.
+- The agent replies with the targeted file and lines as JSON. A wrong file or wrong lines fail. Before the fix, Sonnet cited line 19 for an L20 comment in 4 of 5 samples.
 - Cost: one call per case per sample. Five samples of every case cost about $0.005 on Haiku and $0.08 on Sonnet.
 
 ## Add a case

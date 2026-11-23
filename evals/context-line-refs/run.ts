@@ -12,7 +12,7 @@ import {
   projectComposerContextForProvider,
 } from "@t3tools/shared/composerContextReferences";
 import { cases, type Case } from "./cases.ts";
-import { grade, TASK_NAMES, type Task } from "./grade.ts";
+import { grade } from "./grade.ts";
 
 const { values } = NodeUtil.parseArgs({
   options: {
@@ -20,22 +20,16 @@ const { values } = NodeUtil.parseArgs({
     model: { type: "string", default: "claude-haiku-5-5" },
     case: { type: "string", multiple: true },
     samples: { type: "string", default: "3" },
-    task: { type: "string", default: "sed" },
     baseline: { type: "string" },
     from: { type: "string" },
     "dry-run": { type: "boolean", default: false },
   },
 });
 
-const TASKS: Record<Task, string> = {
-  sed: "You are a coding agent without file access in this turn. Reply with only the one shell command that applies the user's request, as `sed -i` with a numeric line address. No prose.",
-  cite: 'You are a coding agent. Before editing, record which lines the user\'s comment targets. Reply with only JSON: {"file": string, "startLine": number, "endLine": number}.',
-};
-const isTask = (value: string): value is Task =>
-  (TASK_NAMES as ReadonlyArray<string>).includes(value);
-if (!isTask(values.task)) throw new Error(`--task must be one of ${TASK_NAMES.join(", ")}`);
-const task: Task = values.task;
-const TASK = TASKS[task];
+const TASK =
+  'You are a coding agent. Before editing, record which lines the user\'s comment targets. Reply with only JSON: {"file": string, "startLine": number, "endLine": number}.';
+// Saved runs name their task so a re-grade never applies this grader to another task's outputs.
+const TASK_NAME = "cite";
 
 export function buildPrompt(entry: Case): string {
   const contextId = ComposerContextId.make(`review-comment_${entry.id}`);
@@ -99,6 +93,7 @@ const ask = (model: string, prompt: string, cwd: string) =>
 const selected = values.case ? cases.filter((entry) => values.case!.includes(entry.id)) : cases;
 
 interface Row {
+  readonly task?: string;
   readonly case: string;
   readonly sample: number;
   readonly output: string;
@@ -107,11 +102,22 @@ interface Row {
   readonly reason: string;
 }
 
-const readRows = async (dir: string): Promise<ReadonlyArray<Row>> =>
-  (await NodeFSP.readFile(NodePath.join(dir, "results.ndjson"), "utf8"))
+const savedTask = async (dir: string, rows: ReadonlyArray<Row>) =>
+  rows[0]?.task ??
+  /task (\w+)/.exec(await NodeFSP.readFile(NodePath.join(dir, "summary.md"), "utf8"))?.[1];
+
+/** Reads a saved run of this task, limited to the selected cases. */
+async function readRows(dir: string): Promise<ReadonlyArray<Row>> {
+  const rows = (await NodeFSP.readFile(NodePath.join(dir, "results.ndjson"), "utf8"))
     .split("\n")
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as Row);
+  const task = await savedTask(dir, rows);
+  if (task !== TASK_NAME)
+    throw new Error(`${dir} is a ${task ?? "unnamed"} run, not ${TASK_NAME}.`);
+  const ids = new Set(selected.map((entry) => entry.id));
+  return rows.filter((row) => ids.has(row.case));
+}
 
 const passCount = (rows: ReadonlyArray<Row>, id: string) => {
   const own = rows.filter((row) => row.case === id);
@@ -128,14 +134,16 @@ async function sampleModel(): Promise<ReadonlyArray<Row>> {
       try {
         const { result, costUsd } = await ask(values.model, buildPrompt(entry), cwd);
         return {
+          task: TASK_NAME,
           case: entry.id,
           sample,
           output: result.trim(),
           costUsd,
-          ...grade(entry, result, task),
+          ...grade(entry, result),
         };
       } catch (error) {
-        return { case: entry.id, sample, output: "", pass: false, reason: String(error) };
+        const reason = String(error);
+        return { task: TASK_NAME, case: entry.id, sample, output: "", pass: false, reason };
       }
     }),
   );
@@ -146,10 +154,13 @@ async function sampleModel(): Promise<ReadonlyArray<Row>> {
 /** Re-grades saved outputs so a grader change needs no new model calls. */
 async function regrade(dir: string): Promise<ReadonlyArray<Row>> {
   const byId = new Map(cases.map((entry) => [entry.id, entry]));
-  return (await readRows(dir)).flatMap((row) => {
+  return (await readRows(dir)).map((row) => {
     const entry = byId.get(row.case);
-    if (!entry || !selected.includes(entry)) return [];
-    return [{ ...row, ...(row.output ? grade(entry, row.output, task) : {}) }];
+    return {
+      ...row,
+      task: TASK_NAME,
+      ...(entry && row.output ? grade(entry, row.output) : {}),
+    };
   });
 }
 
@@ -168,7 +179,7 @@ if (values["dry-run"]) {
     rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
   );
   const lines = [
-    `model ${values.from ? `(re-graded from ${values.from})` : values.model}, task ${task}`,
+    `model ${values.from ? `(re-graded from ${values.from})` : values.model}, task ${TASK_NAME}`,
     "",
     baseline ? "| case | baseline | pass | outputs |" : "| case | pass | outputs |",
     baseline ? "|---|---|---|---|" : "|---|---|---|",

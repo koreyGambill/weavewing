@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { DraftId } from "~/composerDraftStore";
 
+import { announceAddedToMessage } from "./addedToMessageToast";
+
 const mocks = vi.hoisted(() => ({
   counts: new Map<string, number>(),
+  sessions: new Map<string, { environmentId: string; threadId: string }>(),
   listeners: new Set<() => void>(),
   add: vi.fn(),
   update: vi.fn(),
@@ -15,13 +18,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("~/components/ui/toast", () => ({
   toastManager: { add: mocks.add, update: mocks.update, close: mocks.close },
 }));
+vi.mock("~/lib/sideChatPane", () => ({ focusThreadDraft: vi.fn() }));
 vi.mock("~/composerDraftStore", () => ({
+  queuedRunEditThreadRef: (draftId: string) =>
+    draftId.startsWith("queued-edit:") ? { environmentId: "env-1", threadId: "thread-2" } : null,
   useComposerDraftStore: {
     getState: () => ({
-      getComposerDraft: (target: unknown) => {
-        const count = mocks.counts.get(JSON.stringify(target)) ?? 0;
-        return { reviewComments: Array.from({ length: count }) };
-      },
+      getComposerDraft: (target: unknown) => ({
+        reviewComments: Array.from({ length: mocks.counts.get(JSON.stringify(target)) ?? 0 }),
+      }),
+      getDraftSession: (draftId: string) => mocks.sessions.get(draftId) ?? null,
     }),
     subscribe: (listener: () => void) => {
       mocks.listeners.add(listener);
@@ -30,88 +36,103 @@ vi.mock("~/composerDraftStore", () => ({
   },
 }));
 
-const thread = scopeThreadRef(EnvironmentId.make("env-1"), ThreadId.make("thread-1"));
-const queuedEdit = "queued-edit:thread-1:run-2" as DraftId;
+// Module state outlives a test, so each test uses its own thread.
+const threadRef = (id: string) => scopeThreadRef(EnvironmentId.make("env-1"), ThreadId.make(id));
+const queuedEdit = "queued-edit:env-1:thread-2:run-3" as DraftId;
 
-async function setup() {
-  vi.resetModules();
+type ToastOptions = {
+  id: string;
+  title: string;
+  actionProps?: { onClick: () => void };
+  onClose: () => void;
+};
+
+function setup() {
   mocks.counts.clear();
+  mocks.sessions.clear();
   mocks.listeners.clear();
   mocks.add.mockReset();
   mocks.update.mockReset();
   mocks.close.mockReset();
-  const module = await import("./addedToMessageToast");
   const setCount = (target: unknown, count: number) => {
     mocks.counts.set(JSON.stringify(target), count);
     for (const listener of mocks.listeners) listener();
   };
-  const clickShow = (options: { actionProps: { onClick: () => void } }) =>
-    options.actionProps.onClick();
-  return { ...module, setCount, clickShow };
+  const added = (index: number) => mocks.add.mock.calls[index]![0] as ToastOptions;
+  return { setCount, added };
 }
 
 describe("added-to-message toast", () => {
-  it("updates one toast per draft and keeps drafts apart", async () => {
-    const { announceAddedToMessage, setCount } = await setup();
+  it("keeps one toast per draft whose count follows the draft", () => {
+    const { setCount, added } = setup();
+    const thread = threadRef("thread-a");
+    const open = vi.fn();
     setCount(thread, 1);
-    announceAddedToMessage(thread);
+    announceAddedToMessage(thread, open);
     setCount(thread, 2);
-    announceAddedToMessage(thread);
-    setCount(queuedEdit, 1);
-    announceAddedToMessage(queuedEdit);
+    announceAddedToMessage(thread, open);
 
-    expect(mocks.add).toHaveBeenCalledTimes(2);
-    const threadToastId = mocks.add.mock.calls[0]?.[0].id;
-    expect(mocks.update).toHaveBeenCalledWith(
-      threadToastId,
-      expect.objectContaining({ title: "2 comments in your next message" }),
-    );
-    expect(mocks.add.mock.calls[1]?.[0].id).not.toBe(threadToastId);
-  });
+    expect(mocks.add).toHaveBeenCalledTimes(1);
+    const id = added(0).id;
+    expect(mocks.update).toHaveBeenLastCalledWith(id, {
+      title: "2 comments in your next message",
+      timeout: 5_000,
+    });
 
-  it("dismisses once the draft holds no comments, then starts fresh", async () => {
-    const { announceAddedToMessage, setCount } = await setup();
+    // A removal retitles without restarting the countdown.
     setCount(thread, 1);
-    announceAddedToMessage(thread);
-    const id = mocks.add.mock.calls[0]?.[0].id;
+    expect(mocks.update).toHaveBeenLastCalledWith(id, { title: "Added to your next message" });
 
     setCount(thread, 0);
     expect(mocks.close).toHaveBeenCalledWith(id);
 
     setCount(thread, 1);
-    announceAddedToMessage(thread);
+    announceAddedToMessage(thread, open);
     expect(mocks.add).toHaveBeenCalledTimes(2);
-    expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it("dismisses when its composer stops showing the draft", async () => {
-    const { announceAddedToMessage, composerTargetKey, registerComposerReveal, setCount } =
-      await setup();
-    const unregister = registerComposerReveal(composerTargetKey(thread), vi.fn());
+  it("starts fresh after the toast closes on its own", () => {
+    const { setCount, added } = setup();
+    const thread = threadRef("thread-b");
     setCount(thread, 1);
-    announceAddedToMessage(thread);
+    announceAddedToMessage(thread, vi.fn());
+    added(0).onClose();
 
-    unregister();
-    expect(mocks.close).toHaveBeenCalledWith(mocks.add.mock.calls[0]?.[0].id);
+    announceAddedToMessage(thread, vi.fn());
+    expect(mocks.add).toHaveBeenCalledTimes(2);
+    expect(added(1).id).not.toBe(added(0).id);
   });
 
-  it("Show reveals only the composer that owns the draft", async () => {
-    const {
-      announceAddedToMessage,
-      composerTargetKey,
-      registerComposerReveal,
-      setCount,
-      clickShow,
-    } = await setup();
-    const revealThread = vi.fn();
-    const revealEdit = vi.fn();
-    registerComposerReveal(composerTargetKey(thread), revealThread);
-    registerComposerReveal(composerTargetKey(queuedEdit), revealEdit);
+  it("Show opens the destination captured when the comment was added", () => {
+    const { setCount, added } = setup();
+    const thread = threadRef("thread-c");
+    const newThreadDraft = "draft-7" as DraftId;
+    const open = vi.fn();
+    mocks.sessions.set(newThreadDraft, { environmentId: "env-1", threadId: "draft-thread" });
+    setCount(thread, 1);
+    announceAddedToMessage(thread, open);
+    setCount(newThreadDraft, 1);
+    announceAddedToMessage(newThreadDraft, open);
     setCount(queuedEdit, 1);
-    announceAddedToMessage(queuedEdit);
+    announceAddedToMessage(queuedEdit, open);
+    mocks.sessions.clear();
 
-    clickShow(mocks.add.mock.calls[0]![0]);
-    expect(revealEdit).toHaveBeenCalledTimes(1);
-    expect(revealThread).not.toHaveBeenCalled();
+    added(0).actionProps!.onClick();
+    added(1).actionProps!.onClick();
+    added(2).actionProps!.onClick();
+    expect(open.mock.calls.map(([destination]) => destination)).toEqual([
+      { threadRef: thread, draftId: null },
+      { threadRef: { environmentId: "env-1", threadId: "draft-thread" }, draftId: newThreadDraft },
+      { threadRef: { environmentId: "env-1", threadId: "thread-2" }, draftId: null },
+    ]);
+    expect(mocks.close).toHaveBeenCalledTimes(3);
+  });
+
+  it("offers no Show for a draft it cannot route to", () => {
+    const { setCount, added } = setup();
+    const newThreadDraft = "draft-8" as DraftId;
+    setCount(newThreadDraft, 1);
+    announceAddedToMessage(newThreadDraft, vi.fn());
+    expect(added(0).actionProps).toBeUndefined();
   });
 });

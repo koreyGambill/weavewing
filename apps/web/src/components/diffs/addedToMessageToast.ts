@@ -1,82 +1,116 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 
 import { toastManager } from "~/components/ui/toast";
-import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { type DraftId, queuedRunEditThreadRef, useComposerDraftStore } from "~/composerDraftStore";
+import { focusThreadDraft } from "~/lib/sideChatPane";
+import { buildThreadRouteParams } from "~/threadRoutes";
 
 type ComposerTarget = ScopedThreadRef | DraftId;
 
+/** Where Show goes: a new thread's draft route when `draftId` is set, otherwise the thread route. */
+export interface ShowDestination {
+  readonly threadRef: ScopedThreadRef;
+  readonly draftId: DraftId | null;
+}
+
+type OpenDestination = (destination: ShowDestination) => Promise<void> | void;
+
 interface OpenToast {
   readonly id: string;
+  count: number;
   readonly unsubscribe: () => void;
 }
 
-const revealers = new Map<string, () => void>();
 const openToasts = new Map<string, OpenToast>();
 let toastSequence = 0;
-// Explicit so an update restarts the countdown; base-ui keeps the old timer otherwise.
+// Explicit so a new add restarts the countdown; base-ui keeps the old timer otherwise.
 const TOAST_TIMEOUT_MS = 5_000;
 
-export function composerTargetKey(target: ComposerTarget): string {
-  return typeof target === "string" ? `draft:${target}` : `thread:${scopedThreadKey(target)}`;
-}
+const targetKey = (target: ComposerTarget) =>
+  typeof target === "string" ? `draft:${target}` : `thread:${scopedThreadKey(target)}`;
+
+const titleFor = (count: number) =>
+  count > 1 ? `${count} comments in your next message` : "Added to your next message";
 
 function reviewCommentCount(target: ComposerTarget): number {
   return useComposerDraftStore.getState().getComposerDraft(target)?.reviewComments.length ?? 0;
 }
 
-function release(key: string) {
-  const open = openToasts.get(key);
-  if (!open) return;
-  openToasts.delete(key);
-  open.unsubscribe();
+/** A queued-run edit draft resolves to its thread; Show opens the thread, not the edit. */
+function resolveShowDestination(target: ComposerTarget): ShowDestination | null {
+  if (typeof target !== "string") return { threadRef: target, draftId: null };
+  const queuedEditThread = queuedRunEditThreadRef(target);
+  if (queuedEditThread) return { threadRef: queuedEditThread, draftId: null };
+  const session = useComposerDraftStore.getState().getDraftSession(target);
+  if (!session) return null;
+  return { threadRef: scopeThreadRef(session.environmentId, session.threadId), draftId: target };
 }
 
 function dismiss(key: string) {
   const open = openToasts.get(key);
   if (!open) return;
-  release(key);
+  openToasts.delete(key);
+  open.unsubscribe();
   toastManager.close(open.id);
 }
 
-/**
- * Lets the toast reach the composer that owns `key`. The returned cleanup runs when that composer
- * stops showing the draft, which also retires its toast so Show never lands on another composer.
- */
-export function registerComposerReveal(key: string, reveal: () => void): () => void {
-  revealers.set(key, reveal);
-  return () => {
-    if (revealers.get(key) === reveal) revealers.delete(key);
-    dismiss(key);
-  };
-}
-
-/** One confirmation per draft: repeat adds update it, and it closes once the draft holds none. */
-export function announceAddedToMessage(target: ComposerTarget) {
-  const key = composerTargetKey(target);
+/** One confirmation per draft; its count follows the draft and it closes at zero or on send. */
+export function announceAddedToMessage(target: ComposerTarget, openDestination: OpenDestination) {
+  const key = targetKey(target);
   const count = reviewCommentCount(target);
-  const title = count > 1 ? `${count} comments in your next message` : "Added to your next message";
   const existing = openToasts.get(key);
-  const id = existing?.id ?? `added-to-message:${++toastSequence}`;
-  const options = {
-    type: "success" as const,
-    title,
-    timeout: TOAST_TIMEOUT_MS,
-    actionProps: {
-      children: "Show",
-      onClick: () => {
-        dismiss(key);
-        revealers.get(key)?.();
-      },
-    },
-  };
   if (existing) {
-    toastManager.update(id, options);
+    existing.count = count;
+    toastManager.update(existing.id, { title: titleFor(count), timeout: TOAST_TIMEOUT_MS });
     return;
   }
+  const destination = resolveShowDestination(target);
+  const id = `added-to-message:${++toastSequence}`;
   const unsubscribe = useComposerDraftStore.subscribe(() => {
-    if (reviewCommentCount(target) === 0) dismiss(key);
+    const open = openToasts.get(key);
+    if (!open) return;
+    const next = reviewCommentCount(target);
+    if (next === 0) return dismiss(key);
+    if (next === open.count) return;
+    open.count = next;
+    toastManager.update(open.id, { title: titleFor(next) });
   });
-  openToasts.set(key, { id, unsubscribe });
-  toastManager.add({ id, ...options, onClose: () => release(key) });
+  openToasts.set(key, { id, count, unsubscribe });
+  toastManager.add({
+    id,
+    type: "success",
+    title: titleFor(count),
+    timeout: TOAST_TIMEOUT_MS,
+    ...(destination
+      ? {
+          actionProps: {
+            children: "Show",
+            onClick: () => {
+              dismiss(key);
+              void openDestination(destination);
+            },
+          },
+        }
+      : {}),
+    onClose: () => {
+      const open = openToasts.get(key);
+      if (open?.id !== id) return;
+      openToasts.delete(key);
+      open.unsubscribe();
+    },
+  });
+}
+
+/** Show navigates like opening the thread from the sidebar, then reveals its main chat composer. */
+export function useAnnounceAddedToMessage() {
+  const navigate = useNavigate();
+  return (target: ComposerTarget) =>
+    announceAddedToMessage(target, async ({ threadRef, draftId }) => {
+      await (draftId === null
+        ? navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(threadRef) })
+        : navigate({ to: "/draft/$draftId", params: { draftId } }));
+      focusThreadDraft(threadRef);
+    });
 }
