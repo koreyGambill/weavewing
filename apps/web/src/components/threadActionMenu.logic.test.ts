@@ -26,6 +26,29 @@ const baseState: ThreadActionMenuState = {
 };
 
 describe("buildThreadActionMenuItems", () => {
+  it.each([
+    [[], false, false],
+    [[], true, true],
+    [[{ id: "g", name: "G" }], true, true],
+  ])(
+    "offers Move up and down only when the list is reorderable (%j, %s)",
+    (options, reorderable, shown) => {
+      const items = buildThreadActionMenuItems({
+        ...baseState,
+        groups: {
+          options,
+          current: null,
+          ungroupedName: "Ungrouped",
+          reorderable,
+          canMoveUp: true,
+          canMoveDown: false,
+        },
+      });
+      const ids = items.map((item) => item.id);
+      expect(ids.includes("move-up") && ids.includes("move-down")).toBe(shown);
+    },
+  );
+
   it.each([false, true])(
     "disables both lifecycle directions without permission (reversed: %s)",
     (reversed) => {

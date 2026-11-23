@@ -8,6 +8,7 @@ import {
   isUnnamedSidebarThreadGroup,
   localSidebarThreadGroups,
   EMPTY_SIDEBAR_THREAD_GROUPS,
+  hasSidebarManualThreadOrder,
   moveSidebarThreadGroup,
   placeSidebarThread,
   sidebarThreadGroupsForOrder,
@@ -194,6 +195,24 @@ describe("placeSidebarThread", () => {
     const fixed = sidebarThreadGroupsForOrder(next, "fixed");
     expect(fixed.ungroupedOrder).toEqual(["a", "b", "c"]);
     expect(sidebarThreadGroupsForOrder(fixed, "fixed")).toEqual(next);
+  });
+
+  it("reorders fixed order without any groups, and leaves a group-free recency list alone", () => {
+    expect(hasSidebarManualThreadOrder(EMPTY_SIDEBAR_THREAD_GROUPS, "recency")).toBe(false);
+    expect(hasSidebarManualThreadOrder(state([["demo", []]]), "recency")).toBe(true);
+    expect(hasSidebarManualThreadOrder(EMPTY_SIDEBAR_THREAD_GROUPS, "fixed")).toBe(true);
+
+    const view = sidebarThreadGroupsForOrder(EMPTY_SIDEBAR_THREAD_GROUPS, "fixed");
+    const arranged = arrangeSidebarThreadGroups(view, families("a", "b", "c"), {
+      hideEmptyGroups: false,
+      threadOrder: "fixed",
+    });
+    const stored = sidebarThreadGroupsForOrder(
+      stepSidebarThread(view, arranged, "c", -1)!,
+      "fixed",
+    );
+    expect(stored.fixedUngroupedOrder).toEqual(["a", "c", "b"]);
+    expect(stored.ungroupedOrder).toEqual([]);
   });
 
   it("reorders under a filter without moving the threads it hides", () => {

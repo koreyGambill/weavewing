@@ -56,6 +56,14 @@ export function sidebarThreadGroupsForOrder(
     : state;
 }
 
+/** Whether Active follows the user's arrangement; without groups, only fixed order has one. */
+export function hasSidebarManualThreadOrder(
+  state: SidebarThreadGroups,
+  order: "recency" | "fixed",
+): boolean {
+  return order === "fixed" || state.groups.length > 0;
+}
+
 export const DEFAULT_UNGROUPED_NAME = "Ungrouped";
 
 /** A thread with its visible forks; the head key places the whole family. */

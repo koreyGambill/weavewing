@@ -115,6 +115,8 @@ export interface ThreadActionMenuState {
     readonly current: string | null;
     /** Ungrouped's header name, or "Ungrouped" when it has no header. */
     readonly ungroupedName: string;
+    /** Whether Active keeps a manual order that Move up and down can change. */
+    readonly reorderable: boolean;
     readonly canMoveUp: boolean;
     readonly canMoveDown: boolean;
   } | null;
@@ -232,7 +234,7 @@ export function buildThreadActionMenuItems(
               },
             ],
           },
-          ...(state.groups.options.length > 0
+          ...(state.groups.reorderable
             ? [
                 { id: "move-up" as const, label: "Move up", disabled: !state.groups.canMoveUp },
                 {

@@ -306,6 +306,7 @@ import {
   moveSidebarThreadGroup,
   canMoveSidebarThreadGroup,
   DEFAULT_UNGROUPED_NAME,
+  hasSidebarManualThreadOrder,
   placeSidebarThread,
   sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
@@ -677,7 +678,7 @@ function useSidebarThreads(input: {
           },
         );
   const threadGroupArrangement: SidebarThreadGroupArrangement | null =
-    threadGroups === null || threadGroups.groups.length === 0
+    threadGroups === null || !hasSidebarManualThreadOrder(threadGroups, threadOrder)
       ? null
       : arrangeSidebarThreadGroups(
           threadGroups,
@@ -727,7 +728,8 @@ function useSidebarThreads(input: {
             ...section(group.id, group.name, group.collapsed, families),
             headerless: false,
           }));
-          const headerless = threadGroups.ungroupedName === null;
+          const headerless =
+            threadGroups.ungroupedName === null || threadGroups.groups.length === 0;
           sections.splice(threadGroupArrangement.ungroupedAt, 0, {
             ...section(
               null,
@@ -3343,6 +3345,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       options: (threadGroupsView ?? threadGroups).groups,
                       current: sidebarThreadGroupOf(threadGroupsView ?? threadGroups, threadKey),
                       ungroupedName: threadGroups.ungroupedName ?? DEFAULT_UNGROUPED_NAME,
+                      reorderable: threadGroupArrangement !== null,
                       canMoveUp:
                         threadGroupArrangement !== null &&
                         stepSidebarThread(
