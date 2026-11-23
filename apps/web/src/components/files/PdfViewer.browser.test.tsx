@@ -287,7 +287,7 @@ it("follows a link to another page and exposes a web link", async () => {
   }
 });
 
-it("repaints the resized bitmap without exposing a blank page", async () => {
+it("keeps the bitmap through a drag and repaints once at the final size", async () => {
   const url = URL.createObjectURL(testPdf());
   try {
     const container = document.createElement("div");
@@ -301,16 +301,30 @@ it("repaints the resized bitmap without exposing a blank page", async () => {
       return page!;
     });
     const initialWidth = canvas.width;
-    let pixel: number[] | undefined;
+    const paints: Array<{ width: number; pixel: number[] }> = [];
     const observer = new MutationObserver(() => {
-      if (canvas.width !== initialWidth) {
-        pixel ??= Array.from(canvas.getContext("2d")!.getImageData(0, 0, 1, 1).data);
-      }
+      paints.push({
+        width: canvas.width,
+        pixel: Array.from(canvas.getContext("2d")!.getImageData(0, 0, 1, 1).data),
+      });
     });
     observer.observe(canvas, { attributeFilter: ["width"] });
     try {
-      container.style.width = "400px";
-      await vi.waitFor(() => expect(pixel).toEqual([255, 255, 255, 255]));
+      for (const width of [470, 440, 400]) {
+        container.style.width = `${width}px`;
+        await vi.waitFor(
+          () =>
+            expect(canvas.getBoundingClientRect().width).toBe(region.element().clientWidth - 32),
+          { interval: 5 },
+        );
+        expect(canvas.width).toBe(initialWidth);
+      }
+      const finalWidth = Math.ceil(
+        (region.element().clientWidth - 32) * Math.min(2, window.devicePixelRatio),
+      );
+      await vi.waitFor(() =>
+        expect(paints).toEqual([{ width: finalWidth, pixel: [255, 255, 255, 255] }]),
+      );
     } finally {
       observer.disconnect();
     }

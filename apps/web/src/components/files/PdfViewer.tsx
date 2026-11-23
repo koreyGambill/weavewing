@@ -32,6 +32,7 @@ import "./pdfViewer.css";
 
 const MAX_PAGES = 2000;
 const MAX_FIND_TEXT = 4 * 1024 * 1024;
+const RESIZE_PAINT_DELAY_MS = 150;
 
 const MAX_POSITIONS = 50;
 type PdfPosition = PdfViewState & { width: number; ratios: readonly number[] };
@@ -64,6 +65,7 @@ function PdfPage(props: {
   document: PDFDocumentProxy;
   index: number;
   width: number;
+  paintWidth: number;
   query: string;
   onSize: (index: number, ratio: number) => void;
   onError: (error: string) => void;
@@ -74,7 +76,7 @@ function PdfPage(props: {
   const canvas = useRef<HTMLCanvasElement>(null);
   const text = useRef<HTMLDivElement>(null);
   const linkLayer = useRef<HTMLDivElement>(null);
-  const { document: pdf, index, width, onSize, onError } = props;
+  const { document: pdf, index, paintWidth, onSize, onError } = props;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Render the PDF page canvas and text layer, cancelling tasks and releasing pdf.js page resources on cleanup.
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +92,7 @@ function PdfPage(props: {
       }
       const natural = page.getViewport({ scale: 1 });
       onSize(index, natural.height / natural.width);
-      const viewport = page.getViewport({ scale: width / natural.width });
+      const viewport = page.getViewport({ scale: paintWidth / natural.width });
       const ratio = Math.min(
         2,
         window.devicePixelRatio || 1,
@@ -157,7 +159,7 @@ function PdfPage(props: {
       // Release operator lists when virtual pages leave the viewport.
       void Promise.allSettled([paint?.promise]).then(() => loadedPage?.cleanup());
     };
-  }, [pdf, index, width, onSize, onError]);
+  }, [pdf, index, paintWidth, onSize, onError]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Highlight pdf.js-owned text nodes and observe asynchronous text layer mutations for the current search query.
   useEffect(() => {
     const node = text.current;
@@ -201,7 +203,11 @@ function PdfPage(props: {
   return (
     <>
       <canvas ref={canvas} aria-label={`Page ${index + 1}`} className="block h-full w-full" />
-      <div ref={text} data-pdf-text-layer />
+      <div
+        ref={text}
+        data-pdf-text-layer
+        style={{ "--pdf-resize-scale": props.width / paintWidth } as CSSProperties}
+      />
       {links.length ? (
         <div ref={linkLayer} className="pointer-events-none absolute inset-0">
           {links.map((link) => {
@@ -271,6 +277,7 @@ export default function PdfViewer(props: {
   const [zoom, setZoom] = useState(initialView.zoom);
   const [pageWidth, setPageWidth] = useState(612);
   const [viewport, setViewport] = useState({ width: 600, height: 800 });
+  const [paintViewportWidth, setPaintViewportWidth] = useState(viewport.width);
   const [scrollTop, setScrollTop] = useState(0);
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<number[]>([]);
@@ -338,11 +345,33 @@ export default function PdfViewer(props: {
   useLayoutEffect(() => {
     const node = scroll.current;
     if (!node) return;
-    const update = () => setViewport({ width: node.clientWidth, height: node.clientHeight });
-    update();
-    return observeResize(node, update);
+    let width = node.clientWidth;
+    let paintTimer: ReturnType<typeof setTimeout> | undefined;
+    setViewport({ width, height: node.clientHeight });
+    setPaintViewportWidth(width);
+
+    const disconnect = observeResize(node, () => {
+      const nextWidth = node.clientWidth;
+      const height = node.clientHeight;
+      setViewport((previous) =>
+        previous.width === nextWidth && previous.height === height
+          ? previous
+          : { width: nextWidth, height },
+      );
+      if (nextWidth === width) return;
+      width = nextWidth;
+      // Keep the current bitmap scaled during a drag. Rasterize at the final size.
+      clearTimeout(paintTimer);
+      paintTimer = setTimeout(() => setPaintViewportWidth(nextWidth), RESIZE_PAINT_DELAY_MS);
+    });
+
+    return () => {
+      clearTimeout(paintTimer);
+      disconnect();
+    };
   }, []);
   const { scale, width } = pdfPageWidth(viewport.width, pageWidth, zoom);
+  const { width: paintWidth } = pdfPageWidth(paintViewportWidth, pageWidth, zoom);
   const offsets = pdfPageOffsets(ratios, width);
   const current = currentPdfPage(offsets, ratios.length, scrollTop);
   const visible = visiblePdfPages(ratios, offsets, scrollTop, viewport.height);
@@ -607,6 +636,7 @@ export default function PdfViewer(props: {
                   document={pdf}
                   index={index}
                   width={width}
+                  paintWidth={paintWidth}
                   query={query}
                   onSize={onSize}
                   onError={setError}
