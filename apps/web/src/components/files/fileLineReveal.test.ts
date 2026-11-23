@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  clampFileLineRange,
   resolveCenteredFileLineScrollTop,
   resolveFileLineRange,
   spanLineGeometry,
@@ -56,5 +57,14 @@ describe("resolveFileLineRange", () => {
 
   it("counts CRLF and lone CR line endings once each", () => {
     expect(resolveFileLineRange("a\r\nb\rc", 1, 9)).toEqual({ start: 1, end: 3 });
+  });
+});
+
+describe("large-file ranges", () => {
+  it("clamps a range to the line count, as the large-file viewer counts rows", () => {
+    expect(clampFileLineRange(2_000_000, 57, 64)).toEqual({ start: 57, end: 64 });
+    expect(clampFileLineRange(100, 95, 400)).toEqual({ start: 95, end: 100 });
+    expect(clampFileLineRange(100, 57, null)).toEqual({ start: 57, end: 57 });
+    expect(clampFileLineRange(0, 3, 4)).toEqual({ start: 1, end: 1 });
   });
 });

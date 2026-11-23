@@ -133,7 +133,6 @@ import {
 import { installFileEditorDismissal } from "./fileEditorDismissal";
 import {
   FILE_LINK_REVEAL_ATTRIBUTE,
-  FILE_LINK_REVEAL_FLASH_MS,
   FILE_LINK_REVEAL_UNSAFE_CSS,
   FILE_SURFACE_SUBHEADER_CLASS,
   FileSurfaceAction,
@@ -142,12 +141,23 @@ import {
 } from "./fileSurfaceChrome";
 import SourceFilePreview from "./ReadOnlySourcePreview";
 import {
+  fileLinkFlashNow,
+  playFileLinkFlash,
+  remainingFileLinkFlashMs,
+  stopFileLinkFlash,
+} from "./fileLinkFlash";
+import {
   type FileLineRange,
   resolveCenteredFileLineScrollTop,
   resolveFileLineRange,
   spanLineGeometry,
 } from "./fileLineReveal";
-import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
+import { announceAddedToMessage } from "../diffs/addedToMessageToast";
+import {
+  ADD_TO_MESSAGE_LABEL,
+  ADD_TO_MESSAGE_PLACEHOLDER,
+  DiffCommentAnnotation,
+} from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey } from "./fileContentRevision";
 import {
   filePreviewReadErrorMessage,
@@ -520,9 +530,11 @@ const REVEAL_GUARD_TOLERANCE_PX = 2;
 interface FileRevealState {
   frameId: number | null;
   /** Lines flashing now; cleared after the flash so rows the virtualizer re-creates stay plain. */
-  flash: FileLineRange | null;
+  flash: { readonly range: FileLineRange; readonly startedAt: number } | null;
   flashTimer: ReturnType<typeof setTimeout> | null;
   flashRequestId: number | null;
+  /** The view that last rendered, which the flash timer clears. */
+  flashContainer: HTMLElement | null;
   cancelGuard: (() => void) | null;
   handledRequestId: number | null;
   latestRequestId: number | null;
@@ -549,6 +561,7 @@ function useFileLineReveal(
       flash: null,
       flashTimer: null,
       flashRequestId: null,
+      flashContainer: null,
       cancelGuard: null,
       handledRequestId: null,
       latestRequestId: null,
@@ -574,21 +587,24 @@ function useFileLineReveal(
       if (state.flashTimer !== null) clearTimeout(state.flashTimer);
       state.flashTimer = null;
       state.flash = null;
+      const container = state.flashContainer;
+      if (container) {
+        updateFileLinkReveal(container, null);
+        stopFileLinkFlash(container);
+      }
     };
 
     const startFlash = (range: FileLineRange) => {
       stopFlash();
-      state.flash = range;
+      const startedAt = fileLinkFlashNow();
+      state.flash = { range, startedAt };
       state.flashRequestId = revealRequestId;
-      // Drop the attribute and flush styles first so a repeat click restarts the animation.
-      updateFileLinkReveal(fileContainer, null);
-      void fileContainer.offsetWidth;
       updateFileLinkReveal(fileContainer, range);
-      state.flashTimer = setTimeout(() => {
-        state.flashTimer = null;
-        state.flash = null;
-        updateFileLinkReveal(fileContainer, null);
-      }, FILE_LINK_REVEAL_FLASH_MS);
+      playFileLinkFlash(fileContainer, startedAt);
+      state.flashTimer = setTimeout(
+        stopFlash,
+        remainingFileLinkFlashMs(startedAt, fileLinkFlashNow()),
+      );
     };
 
     const scrollContainer = fileContainer.closest<HTMLElement>(".file-preview-virtualizer");
@@ -597,13 +613,18 @@ function useFileLineReveal(
       // A view torn down before its restore ran never showed the saved offset, so keep it.
       const restorePending = state.restoreFrameId !== null;
       cancelPendingReveal();
-      stopFlash();
       if (scrollContainer && !restorePending) state.scrollTop = scrollContainer.scrollTop;
       state.scrollContainer = null;
+      if (state.flashContainer === fileContainer) state.flashContainer = null;
       return;
     }
 
-    updateFileLinkReveal(fileContainer, state.flash);
+    // Another open of this file supersedes the running flash, with or without a line.
+    if (state.flash !== null && state.flashRequestId !== revealRequestId) stopFlash();
+    state.flashContainer = fileContainer;
+    updateFileLinkReveal(fileContainer, state.flash?.range ?? null);
+    // A re-rendered or re-created view resumes the flash where it is rather than restarting it.
+    if (state.flash !== null) playFileLinkFlash(fileContainer, state.flash.startedAt);
 
     if (!(instance instanceof VirtualizedFile)) {
       const contents = instance.file?.contents;
@@ -961,6 +982,7 @@ function EditableFileSurface({
           contents,
         }),
       );
+      announceAddedToMessage(composerDraftTarget);
     }
     setLineAnnotations((current) =>
       current.map((annotation) => ({
@@ -1105,6 +1127,8 @@ function EditableFileSurface({
                       ])}
                       kind={entry.kind}
                       rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
+                      placeholder={ADD_TO_MESSAGE_PLACEHOLDER}
+                      submitLabel={ADD_TO_MESSAGE_LABEL}
                       text={entry.text}
                       onCancel={() => removeAnnotationEntry(entry.id)}
                       onComment={(text) => submitAnnotationEntry(entry.id, text)}
@@ -1986,6 +2010,7 @@ export default function FilePreviewPanel({
               delimiter={renderTable ? tableDelimiter : null}
               workspaceMutationId={workspaceMutationId}
               revealLine={revealLine}
+              revealEndLine={revealEndLine}
               revealRequestId={revealRequestId}
               wordWrap={wordWrap}
             />
@@ -2141,6 +2166,7 @@ export function WorkspaceLargeTextPreview(props: {
   delimiter: "," | "\t" | null;
   workspaceMutationId: string | null;
   revealLine: number | null;
+  revealEndLine?: number | null;
   revealRequestId: number;
   wordWrap: boolean;
 }) {
@@ -2244,6 +2270,7 @@ export function WorkspaceLargeTextPreview(props: {
           src={src}
           delimiter={props.delimiter}
           revealLine={props.revealLine}
+          revealEndLine={props.revealEndLine ?? null}
           revealRequestId={props.revealRequestId}
           wordWrap={props.wordWrap}
         />

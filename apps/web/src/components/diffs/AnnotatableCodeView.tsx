@@ -19,7 +19,12 @@ import {
 } from "~/reviewCommentContext";
 
 import { nextFileCommentId } from "../files/fileCommentAnnotations";
-import { DiffCommentAnnotation } from "./DiffCommentAnnotation";
+import { announceAddedToMessage } from "./addedToMessageToast";
+import {
+  ADD_TO_MESSAGE_LABEL,
+  ADD_TO_MESSAGE_PLACEHOLDER,
+  DiffCommentAnnotation,
+} from "./DiffCommentAnnotation";
 import { StyledDiffCodeView, type StyledDiffCodeViewOptions } from "./StyledDiffCodeView";
 
 interface DiffCommentAnnotationEntry {
@@ -221,7 +226,10 @@ export function AnnotatableCodeView({
       range: entry.range,
       text,
     });
-    if (comment) addReviewComment(composerDraftTarget, comment);
+    if (comment) {
+      addReviewComment(composerDraftTarget, comment);
+      announceAddedToMessage(composerDraftTarget);
+    }
     setSelectedLines(null);
     setDraft(null);
     setDraftText("");
@@ -310,6 +318,8 @@ export function AnnotatableCodeView({
                 ])}
                 kind={entry.kind}
                 rangeLabel={entry.rangeLabel}
+                placeholder={ADD_TO_MESSAGE_PLACEHOLDER}
+                submitLabel={ADD_TO_MESSAGE_LABEL}
                 text={entry.kind === "draft" ? draftText : entry.text}
                 onTextChange={setDraftText}
                 onCancel={() => removeEntry(entry.id)}

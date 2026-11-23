@@ -24,6 +24,8 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { getClientSettings } from "../hooks/useSettings";
 import { useRenderedAppearance } from "../hooks/useTheme";
 import { useRightPanelStore } from "../rightPanelStore";
+import { threadEnvironment } from "../state/threads";
+import { useAtomCommand } from "../state/use-atom-command";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { cn } from "../lib/utils";
 import { formatElapsedDurationLabel } from "../timestampFormat";
@@ -39,7 +41,7 @@ import {
   formatFileLinkRange,
   type ConversationFileLink,
   type FileLinkRange,
-} from "./conversationFileLinks.logic";
+} from "../conversationFileLinks";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { createPortal } from "react-dom";
 import {
@@ -47,7 +49,8 @@ import {
   useQuietThreadProjection,
   useThreadRelationshipShells,
   useThreadShell,
-  useTimelineVisibleTurnItems,
+  useThreadHistory,
+  useThreadLinkableMessages,
 } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "../state/session";
@@ -287,24 +290,27 @@ function ThreadLinks({
   const project = useProject(
     shell ? { environmentId: threadRef.environmentId, projectId: shell.projectId } : null,
   );
-  const turnItems = useTimelineVisibleTurnItems(threadRef);
+  const linkableMessages = useThreadLinkableMessages(threadRef);
+  const history = useThreadHistory(threadRef);
+  const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
+    label: "load earlier thread history",
+    reportFailure: false,
+  });
   const theme = useRenderedAppearance();
   const preferences = useLinkPreferences();
   const [filter, setFilter] = useState("");
   const [service, setService] = useState("all");
   const { copy, isCopied } = useRowCopy();
+  const showsFiles = service === "all" || service === "Files";
   const files = conversationFileLinks(
-    turnItems.flatMap(({ item }) =>
-      item.type === "user_message" || (item.type === "assistant_message" && !item.streaming)
-        ? [item]
-        : [],
-    ),
+    linkableMessages,
     shell?.worktreePath ?? project?.workspaceRoot,
   ).filter(
     (file) =>
-      (service === "all" || service === "Files") &&
+      showsFiles &&
       matchesToolFilter([file.displayPath, ...file.ranges.map(formatFileLinkRange)], filter),
   );
+  const filesFromPartialHistory = showsFiles && (history.hasMoreHistory || history.error !== null);
   const openFileLink = (file: ConversationFileLink, range?: FileLinkRange) =>
     useRightPanelStore
       .getState()
@@ -716,13 +722,38 @@ function ThreadLinks({
           })}
         </section>
       ) : null}
-      {files.length ? (
+      {files.length || filesFromPartialHistory ? (
         <section className="space-y-1">
           <SectionHeading>
             Files <span className="tabular-nums">{files.length}</span>
           </SectionHeading>
+          {filesFromPartialHistory ? (
+            <div className="flex items-center gap-1 px-1.5 text-3xs text-muted-foreground">
+              <span>From loaded messages</span>
+              {history.hasMoreHistory ? (
+                <Button
+                  variant="ghost-muted"
+                  size="micro"
+                  disabled={history.loading}
+                  onClick={() =>
+                    void loadEarlierHistory({
+                      environmentId: threadRef.environmentId,
+                      input: { threadId: threadRef.threadId },
+                    })
+                  }
+                >
+                  {history.loading ? "Loading…" : "Load earlier"}
+                </Button>
+              ) : null}
+              {history.error !== null ? (
+                <p role="status" className="min-w-0 text-muted-foreground">
+                  {history.error}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {files.map((file) => (
-            <div key={file.filePath} className={rowClass}>
+            <div key={file.key} className={rowClass}>
               <PierreEntryIcon
                 pathValue={file.basename}
                 kind="file"

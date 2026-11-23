@@ -841,8 +841,82 @@ describe("large text preview recovery", () => {
     expect(screen.container.textContent).toContain("C19");
   });
 
-  it("reveals and highlights requested source lines again for a new request", async () => {
-    const view = (line: number, request: number, loaded = true) => (
+  const revealView = (
+    line: number | null,
+    request: number,
+    endLine: number | null = null,
+    loaded = true,
+  ) => (
+    <div data-testid="tile" style={{ display: "flex", height: 400, width: 600 }}>
+      <VirtualTablePreview
+        name="log.txt"
+        count={1000}
+        columns={1}
+        source
+        wrap
+        revealLine={line}
+        revealEndLine={endLine}
+        revealRequestId={request}
+        getRows={(page) =>
+          loaded || page === 0
+            ? Array.from({ length: 32 }, (_, i) => [
+                "line-" + (page * 32 + i + 1) + " wrapped source text".repeat(20),
+              ])
+            : undefined
+        }
+      />
+    </div>
+  );
+  const tintedLines = (container: HTMLElement) =>
+    Array.from(
+      container.querySelectorAll<HTMLElement>("[data-file-link-reveal]"),
+      (row) => Number(row.dataset.previewRow) + 1,
+    );
+  const expectStartVisible = (container: HTMLElement) => {
+    const row = container
+      .querySelector<HTMLElement>("[data-file-link-reveal]")!
+      .getBoundingClientRect();
+    const viewport = container
+      .querySelector<HTMLElement>('[tabindex="0"]')!
+      .getBoundingClientRect();
+    // Row-index scrolling is approximate, so the start only needs to be plainly on screen.
+    expect(row.bottom).toBeGreaterThan(viewport.top + 20);
+    expect(row.top).toBeLessThan(viewport.bottom - 20);
+  };
+
+  it("tints exactly the cited lines and clears the tint when superseded or touched", async () => {
+    await using screen = await render(revealView(500, 1, null, false));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([500]));
+    await vi.waitFor(() => expectStartVisible(screen.container));
+    await screen.rerender(revealView(500, 1));
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector("[data-file-link-reveal]")?.textContent).toContain(
+        "line-500",
+      ),
+    );
+    await vi.waitFor(() => expectStartVisible(screen.container));
+
+    await screen.rerender(revealView(900, 2, 903));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([900, 901, 902, 903]));
+    await vi.waitFor(() => expectStartVisible(screen.container));
+
+    await screen.rerender(revealView(null, 3));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([]));
+
+    await screen.rerender(revealView(120, 4));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([120]));
+    screen.container
+      .querySelector('[tabindex="0"]')!
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([]));
+
+    await screen.rerender(revealView(999, 5));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([999]));
+    await vi.waitFor(() => expectStartVisible(screen.container));
+  });
+
+  it("places a revealed line in the last screenful once its wrapped rows load", async () => {
+    const view = (loaded: boolean) => (
       <div style={{ display: "flex", height: 400, width: 600 }}>
         <VirtualTablePreview
           name="log.txt"
@@ -850,55 +924,50 @@ describe("large text preview recovery", () => {
           columns={1}
           source
           wrap
-          revealLine={line}
-          revealRequestId={request}
+          revealLine={999}
+          revealRequestId={1}
           getRows={(page) =>
-            loaded || page === 0
-              ? Array.from({ length: 32 }, (_, i) => [
-                  "line-" + (page * 32 + i + 1) + " wrapped source text".repeat(20),
-                ])
+            loaded || page < 30
+              ? Array.from({ length: 32 }, (_, i) => {
+                  const line = page * 32 + i + 1;
+                  return [`line-${line}` + (line === 989 ? " wrapped text".repeat(400) : "")];
+                })
               : undefined
           }
         />
       </div>
     );
-    await using screen = await render(view(500, 1, false));
+    await using screen = await render(view(false));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([999]));
+    await screen.rerender(view(true));
     await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toBe(
-        "500",
-      ),
-    );
-    await screen.rerender(view(500, 1));
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toContain(
-        "line-500",
-      ),
-    );
-    const checkVisible = () => {
-      const row = screen.container.querySelector<HTMLElement>('[data-preview-reveal="true"]')!;
-      const viewport = screen.container.querySelector<HTMLElement>('[tabindex="0"]')!;
-      expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(
-        viewport.getBoundingClientRect().top - 1,
-      );
-      expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(
-        viewport.getBoundingClientRect().bottom + 1,
-      );
-    };
-    await vi.waitFor(checkVisible);
-    await screen.rerender(view(900, 2));
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toContain(
-        "line-900",
-      ),
-    );
-    await vi.waitFor(checkVisible);
-    await screen.rerender(view(999, 3));
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector('[data-preview-reveal="true"]')?.textContent).toContain(
+      expect(screen.container.querySelector("[data-file-link-reveal]")?.textContent).toContain(
         "line-999",
       ),
     );
-    await vi.waitFor(checkVisible);
+    await vi.waitFor(() => expectStartVisible(screen.container));
+  });
+
+  it("does not replay a handled reveal when its tile is hidden and shown", async () => {
+    await using screen = await render(revealView(500, 1));
+    await vi.waitFor(() => expect(tintedLines(screen.container)).toEqual([500]));
+    const viewport = () => screen.container.querySelector<HTMLElement>('[tabindex="0"]');
+    viewport()!.scrollTop = 0;
+    viewport()!.dispatchEvent(new Event("scroll"));
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector('[data-preview-row="0"]')).not.toBeNull(),
+    );
+
+    const tile = screen.getByTestId("tile").element() as HTMLElement;
+    tile.style.display = "none";
+    await vi.waitFor(() => expect(viewport()).toBeNull());
+    tile.style.display = "flex";
+    await vi.waitFor(() => expect(viewport()).not.toBeNull());
+
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector('[data-preview-row="0"]')).not.toBeNull(),
+    );
+    expect(viewport()!.scrollTop).toBeLessThan(29);
   });
 
   it.each(

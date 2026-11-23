@@ -61,7 +61,10 @@ interface MarkdownFileLinkSource {
   readonly meta: MarkdownFileLinkMeta;
 }
 
-/** The file links a message renders: link destinations, then inline code naming a path. */
+/**
+ * Candidate file links in a message, keyed as the renderer looks them up. A fast scan, so it can
+ * include links the renderer never shows, such as ones inside code blocks.
+ */
 export function markdownFileLinkSources(
   text: string,
   cwd: string | undefined,

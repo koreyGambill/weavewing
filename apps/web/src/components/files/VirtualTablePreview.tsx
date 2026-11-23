@@ -3,6 +3,14 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "re
 import { observeResize } from "~/lib/observeResize";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { PREVIEW_PAGE_ROWS } from "./largeTextProtocol";
+import { clampFileLineRange, type FileLineRange } from "./fileLineReveal";
+
+const REVEAL_TINT_MS = 2000;
+
+interface LineReveal {
+  readonly key: string;
+  readonly range: FileLineRange;
+}
 
 export default function VirtualTablePreview(props: {
   readonly name: string;
@@ -14,9 +22,29 @@ export default function VirtualTablePreview(props: {
   readonly source?: boolean;
   readonly wrap?: boolean;
   readonly revealLine?: number | null;
+  readonly revealEndLine?: number | null;
   readonly revealRequestId?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // The rows unmount while the tile is hidden, so the handled request lives here and showing
+  // the tile again does not replay it.
+  const [handledRevealKey, setHandledRevealKey] = useState<string | null>(null);
+  const [tint, setTint] = useState<LineReveal | null>(null);
+  const revealKey =
+    props.revealLine == null
+      ? null
+      : `${props.revealRequestId ?? 0}:${props.revealLine}:${props.revealEndLine ?? ""}`;
+  // A tint belongs to its request: a newer one, with or without a line, hides it.
+  const tintedLines = tint !== null && tint.key === revealKey ? tint.range : null;
+  const clearTint = () => {
+    if (tint !== null) setTint(null);
+  };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Clears the reveal tint after a moment; the user may also clear it by scrolling or clicking.
+  useEffect(() => {
+    if (tint === null) return;
+    const timer = setTimeout(() => setTint(null), REVEAL_TINT_MS);
+    return () => clearTimeout(timer);
+  }, [tint]);
   const [left, setLeft] = useState(0);
   const [size, setSize] = useState({ width: 0, height: 600 });
   const { width } = size;
@@ -76,6 +104,10 @@ export default function VirtualTablePreview(props: {
     <div
       ref={ref}
       className="relative min-h-0 flex-1 overflow-x-auto contain-strict"
+      onPointerDownCapture={clearTint}
+      onWheelCapture={clearTint}
+      onTouchStartCapture={clearTint}
+      onKeyDownCapture={clearTint}
       onScroll={(event) => {
         event.currentTarget.style.setProperty(
           "--preview-scroll-left",
@@ -164,6 +196,13 @@ export default function VirtualTablePreview(props: {
             rowHeader={rowHeader}
             firstColumn={firstColumn}
             viewportHeight={size.height - (props.source ? 0 : 29)}
+            revealKey={revealKey}
+            handledRevealKey={handledRevealKey}
+            onReveal={(reveal) => {
+              setHandledRevealKey(reveal.key);
+              setTint(reveal);
+            }}
+            tintedLines={tintedLines}
           />
         </div>
       ) : null}
@@ -179,6 +218,8 @@ function RowPage(
     firstColumn: number;
     viewportHeight: number;
     limit?: number;
+    /** Lines a link just revealed. */
+    tintedLines: FileLineRange | null;
   },
 ) {
   const rows = props.getRows(props.page);
@@ -197,6 +238,10 @@ function RowPage(
         const row = rows?.[local];
         const index = start + local;
         if (props.header && index === 0) return null;
+        const tinted =
+          props.tintedLines !== null &&
+          index + 1 >= props.tintedLines.start &&
+          index + 1 <= props.tintedLines.end;
         return (
           <div
             key={local}
@@ -205,15 +250,10 @@ function RowPage(
             aria-rowindex={props.source ? undefined : index + 1}
             className={
               props.source
-                ? `flex min-h-[29px] font-mono ${props.revealLine != null && Math.min(props.count, Math.max(1, props.revealLine)) === index + 1 ? "bg-primary/10" : ""}`
+                ? `flex min-h-[29px] font-mono ${tinted ? "bg-primary/10" : ""}`
                 : `flex min-h-[29px] border-b border-border/60 ${(index - (props.header ? 1 : 0)) % 2 ? "bg-muted/30" : ""}`
             }
-            data-preview-reveal={
-              props.revealLine != null &&
-              Math.min(props.count, Math.max(1, props.revealLine)) === index + 1
-                ? "true"
-                : undefined
-            }
+            data-file-link-reveal={tinted ? "" : undefined}
           >
             <div
               role={props.source ? undefined : "rowheader"}
@@ -255,14 +295,19 @@ function RowPage(
   );
 }
 
-function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
+function ScaledRows(
+  props: Omit<Parameters<typeof RowPage>[0], "page"> & {
+    revealKey: string | null;
+    handledRevealKey: string | null;
+    onReveal: (reveal: LineReveal) => void;
+  },
+) {
   const ref = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState({ offset: 0, height: 0, rowHeight: 29 });
   const [top, setTop] = useState(0);
-  const handledReveal = useRef<string | null>(null);
-  const pendingReveal = useRef<{ row: number; attempts: number } | null>(null);
   const pendingEnd = useRef(false);
+  const tailReveal = useRef<number | null>(null);
   const position = { top, height: props.viewportHeight };
   const scrollHeight = Math.min(8_000_000, props.count * 29);
   // Chromium caps a scroll surface at 33 million pixels. Scale the track for
@@ -304,24 +349,61 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
     node.scrollTop = Math.min(maxFirst * 29, logicalTop) * scale + nativeOffset;
     setTop(node.scrollTop);
   });
+  const { revealKey, revealLine, revealEndLine, count, handledRevealKey, onReveal } = props;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Scroll the DOM viewport to a requested line after its virtual track has committed.
   useLayoutEffect(() => {
     const node = ref.current;
-    if (props.revealLine == null) {
-      handledReveal.current = null;
-      pendingReveal.current = null;
-      return;
-    }
-    const key = `${props.revealRequestId}:${props.revealLine}`;
-    if (!node || !props.count || handledReveal.current === key) return;
-    const row = Math.min(props.count, Math.max(1, props.revealLine)) - 1;
-    node.scrollTop = Math.max(0, (row - headerRows) * 29) * scale;
+    if (revealKey === null || revealLine == null) return;
+    if (!node || !count || handledRevealKey === revealKey) return;
+    const range = clampFileLineRange(count, revealLine, revealEndLine ?? null);
+    // Row-index scrolling puts the cited start first among the mounted rows, so it stays mounted
+    // however tall its wrapped text is. Rounding up keeps it from landing on the row above.
+    node.scrollTop = Math.ceil(Math.max(0, range.start - 1 - headerRows) * 29 * scale);
     setTop(node.scrollTop);
     pendingEnd.current = false;
-    pendingReveal.current = { row, attempts: 0 };
-    handledReveal.current = key;
-  }, [props.revealLine, props.revealRequestId, props.count, headerRows, scale]);
+    tailReveal.current = range.start - 1 - headerRows >= maxFirst ? range.start - 1 : null;
+    onReveal({ key: revealKey, range });
+  }, [
+    revealKey,
+    revealLine,
+    revealEndLine,
+    count,
+    handledRevealKey,
+    onReveal,
+    headerRows,
+    scale,
+    maxFirst,
+  ]);
   const atStart = position.top === 0;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Places a revealed row in the native tail; those rows have real heights, so row-index scrolling cannot.
+  useLayoutEffect(() => {
+    const node = ref.current;
+    const content = contentRef.current;
+    const target = tailReveal.current;
+    if (!node || !content || target === null || !nativeTail) return;
+    // Placeholder rows above the target change height when their text arrives, so wait for
+    // every row from the first mounted one through the target, and for the measured layout.
+    for (let index = first; index <= target; index += 1) {
+      if (!props.getRows(Math.floor(index / PREVIEW_PAGE_ROWS))?.[index % PREVIEW_PAGE_ROWS]) {
+        return;
+      }
+    }
+    const row = content.querySelector<HTMLElement>(`[data-preview-row="${target}"]`);
+    const firstRow = content.querySelector<HTMLElement>(`[data-preview-row="${first}"]`);
+    if (
+      !row ||
+      (!atStart &&
+        (layout.height !== content.clientHeight ||
+          layout.offset !==
+            (firstRow
+              ? firstRow.getBoundingClientRect().top - content.getBoundingClientRect().top
+              : 0)))
+    )
+      return;
+    tailReveal.current = null;
+    node.scrollTop += row.getBoundingClientRect().top - node.getBoundingClientRect().top;
+    setTop(node.scrollTop);
+  });
   const rowHeight = () =>
     contentRef.current?.querySelector<HTMLElement>(`[data-preview-row="${first}"]`)?.offsetHeight ||
     29;
@@ -331,6 +413,7 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
     const delta =
       event.deltaY * (event.deltaMode === 1 ? 29 : event.deltaMode === 2 ? node.clientHeight : 1);
     if (!delta) return;
+    tailReveal.current = null;
     event.preventDefault();
     pendingEnd.current = false;
     node.scrollTop += delta * (nativeTail ? 1 : (scale * 29) / rowHeight());
@@ -366,46 +449,6 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
     update();
     return observeResize(node, update);
   }, [first, atStart]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Correct the DOM scroll position once a requested worker row has loaded and its actual bounds are measurable.
-  useLayoutEffect(() => {
-    const pending = pendingReveal.current;
-    const node = ref.current;
-    const row =
-      pending &&
-      contentRef.current?.querySelector<HTMLElement>(`[data-preview-row="${pending.row}"]`);
-    if (
-      !pending ||
-      !node ||
-      !row ||
-      !props.getRows(Math.floor(pending.row / PREVIEW_PAGE_ROWS))?.[pending.row % PREVIEW_PAGE_ROWS]
-    )
-      return;
-    const content = contentRef.current!;
-    const firstRow = content.querySelector<HTMLElement>(`[data-preview-row="${first}"]`);
-    if (
-      !atStart &&
-      (layout.height !== content.clientHeight ||
-        layout.offset !==
-          (firstRow
-            ? firstRow.getBoundingClientRect().top - content.getBoundingClientRect().top
-            : 0))
-    )
-      return;
-    const bounds = row.getBoundingClientRect();
-    const viewport = node.getBoundingClientRect();
-    const delta =
-      bounds.top < viewport.top
-        ? bounds.top - viewport.top
-        : Math.min(bounds.bottom, bounds.top + viewport.height) > viewport.bottom
-          ? Math.min(bounds.bottom, bounds.top + viewport.height) - viewport.bottom
-          : 0;
-    if (Math.abs(delta) < 1 || pending.attempts++ >= 8) {
-      pendingReveal.current = null;
-      return;
-    }
-    node.scrollTop += delta * (nativeTail ? 1 : (scale * 29) / Math.max(29, bounds.height));
-    setTop(node.scrollTop);
-  });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Complete End-key scrolling after the final worker row has loaded and its DOM layout has settled.
   useLayoutEffect(() => {
     const node = ref.current;
@@ -435,7 +478,11 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
       ref={ref}
       tabIndex={0}
       className="min-h-0 flex-1 overflow-auto"
+      onPointerDown={() => {
+        tailReveal.current = null;
+      }}
       onKeyDown={(event) => {
+        tailReveal.current = null;
         const node = event.currentTarget;
         const delta =
           event.key === "ArrowDown"
@@ -454,7 +501,6 @@ function ScaledRows(props: Omit<Parameters<typeof RowPage>[0], "page">) {
         } else if (event.key === "Home" || event.key === "End") {
           event.preventDefault();
           pendingEnd.current = event.key === "End";
-          pendingReveal.current = null;
           node.scrollTop = event.key === "Home" ? 0 : node.scrollHeight;
           setTop(node.scrollTop);
         }

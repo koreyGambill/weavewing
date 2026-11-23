@@ -696,7 +696,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 @property --file-link-reveal-strength {
   syntax: "<number>";
-  inherits: false;
+  inherits: true;
   initial-value: 0;
 }
 

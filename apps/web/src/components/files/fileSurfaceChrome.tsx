@@ -12,9 +12,6 @@ export const FILE_SURFACE_SUBHEADER_CLASS =
 
 export const FILE_LINK_REVEAL_ATTRIBUTE = "data-file-link-reveal";
 
-/** How long linked lines stay tinted: a hold, then a fade. */
-export const FILE_LINK_REVEAL_FLASH_MS = 1400;
-
 export const FILE_LINK_REVEAL_UNSAFE_CSS = `
   ${DIFF_SURFACE_THEME_UNSAFE_CSS}
 
@@ -26,20 +23,10 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     color: var(--code-foreground, var(--foreground)) !important;
   }
 
-  /* --file-link-reveal-strength is registered in index.css so it interpolates; a
-     registration inside this shadow root would be ignored. */
-  @keyframes file-link-reveal-flash {
-    0%, 70% { --file-link-reveal-strength: 1; }
-    100% { --file-link-reveal-strength: 0; }
-  }
-
-  [${FILE_LINK_REVEAL_ATTRIBUTE}] {
-    animation: file-link-reveal-flash ${FILE_LINK_REVEAL_FLASH_MS}ms ease-out both;
-  }
-
+  /* Rows inherit --file-link-reveal-strength from the container, which playFileLinkFlash
+     animates. It is registered in index.css; a registration in this shadow root is ignored. */
   @media (prefers-reduced-motion: reduce) {
     [${FILE_LINK_REVEAL_ATTRIBUTE}] {
-      animation: none;
       --file-link-reveal-strength: 1;
     }
   }
