@@ -59,9 +59,17 @@ type DirtyFile = AgentContextRepo["dirty"][number];
 export const dirtyLabel = (file: DirtyFile) =>
   file.origPath === undefined ? file.path : `${file.origPath} → ${file.path}`;
 
-/** Secret-looking untracked files start unchecked; everything else is committed. */
-export const initialExclusions = (files: ReadonlyArray<DirtyFile>) =>
-  new Set(files.filter((file) => file.secret).map((file) => file.path));
+/**
+ * Files a commit leaves out: those a person unchecked, and secret-looking untracked files they
+ * have not checked, including ones that appear when the list refreshes.
+ */
+export const excludedPaths = (
+  files: ReadonlyArray<DirtyFile>,
+  choices: ReadonlyMap<string, boolean>,
+) =>
+  new Set(
+    files.filter((file) => !(choices.get(file.path) ?? !file.secret)).map((file) => file.path),
+  );
 
 /** The paths a commit names: a rename takes its earlier path too, or the deletion stays behind. */
 export const commitPaths = (root: string, files: ReadonlyArray<DirtyFile>) =>

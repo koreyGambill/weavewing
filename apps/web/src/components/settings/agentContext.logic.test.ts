@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   commitPaths,
-  initialExclusions,
+  excludedPaths,
   joinSegments,
   leftUncommitted,
   splitGenerated,
@@ -56,8 +56,15 @@ describe("commit selection", () => {
   const repo = { root: "/repo", head: null, branch: "main", dirty, dirtyCount: 5 };
 
   it("commits both sides of a rename and leaves secret-looking files unchecked", () => {
-    const excluded = initialExclusions(dirty);
+    const excluded = excludedPaths(dirty, new Map());
     expect([...excluded]).toEqual([".env"]);
+    // A secret-looking file that appears on refresh starts unchecked; a person's choice wins.
+    const refreshed = [...dirty, { path: "id_rsa", untracked: true, secret: true }];
+    const choices = new Map([
+      [".env", true],
+      ["scratch.txt", false],
+    ]);
+    expect([...excludedPaths(refreshed, choices)]).toEqual(["scratch.txt", "id_rsa"]);
     expect(
       commitPaths(
         "/repo",

@@ -57,7 +57,7 @@ import {
   agentContextTotals,
   commitPaths,
   dirtyLabel,
-  initialExclusions,
+  excludedPaths,
   leftUncommitted,
   groupSkills,
   joinSegments,
@@ -948,12 +948,12 @@ function CommitDialog({
   const commit = useAtomCommand(agentContextCommit, { reportFailure: false });
   const canCommit = useAtomValue(agentContextCommit.permissionAtom(environmentId));
   const [message, setMessage] = useState("");
-  const [excluded, setExcluded] = useState<ReadonlySet<string>>(() =>
-    initialExclusions(repo?.dirty ?? []),
-  );
+  // Choices persist by path; a file with none follows the default as the list refreshes.
+  const [choices, setChoices] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const files = repo?.dirty ?? [];
+  const excluded = excludedPaths(files, choices);
   const chosen = files.filter((file) => !excluded.has(file.path));
   return (
     <Dialog
@@ -981,12 +981,7 @@ function CommitDialog({
                   <Checkbox
                     checked={!excluded.has(file.path)}
                     onCheckedChange={(checked) =>
-                      setExcluded((current) => {
-                        const next = new Set(current);
-                        if (checked) next.delete(file.path);
-                        else next.add(file.path);
-                        return next;
-                      })
+                      setChoices((current) => new Map(current).set(file.path, checked))
                     }
                   />
                   <span className="min-w-0 flex-1">
