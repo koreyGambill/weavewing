@@ -122,11 +122,18 @@ in Settings.
 ## Copy pull request references
 
 With a PR open in a tile or on the Pull requests page, use `mod+shift+c`
-to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
-Both shortcuts can be changed in Settings. Search for “Copy Link or Thread”
+to copy its URL. Copying its number with a `#` prefix has no default key; bind
+one in Settings. Search for “Copy Link or Thread”
 or “Copy Number”. They copy the selected PR and leave terminal input alone.
 Without a PR, `mod+shift+c` copies the thread itself, which pastes into a
 composer as a thread chip.
+
+## Move between threads
+
+`mod+shift+j` and `mod+arrowdown` open the next thread in the sidebar, and `mod+shift+k` and
+`mod+arrowup` open the previous one. They follow the sidebar's order, so choose **Fixed** under
+the sidebar's View menu to keep each thread in the same place. `mod+arrowup` and `mod+arrowdown`
+leave terminal input alone.
 
 ## Find in a diff
 

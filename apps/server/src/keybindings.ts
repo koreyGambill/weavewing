@@ -126,6 +126,15 @@ function switchTilePreset(
   ];
 }
 
+// Ctrl/Cmd+Shift+J and K left the Browser panel and Copy Number for thread navigation.
+const THREAD_NAV_KEYS_MIGRATION = "weavewing.thread-nav-keys.v1";
+const retiredThreadNavKeyRules: readonly KeybindingRule[] = [
+  { key: "mod+shift+j", command: "preview.toggle", when: "isMac || !terminalFocus" },
+  // Files saved before the terminal-keys migration gave it a condition.
+  { key: "mod+shift+j", command: "preview.toggle" },
+  { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
+];
+
 const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   readonly id: string;
   readonly alongside: KeybindingRule;
@@ -219,6 +228,34 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
           command: `workspace.tile.${direction}Tab`,
           when: "isMac",
         },
+      },
+    ] as const;
+  }),
+  ...(
+    [
+      ["previous", "[", "k", "arrowup"],
+      ["next", "]", "j", "arrowdown"],
+    ] as const
+  ).flatMap(([direction, bracket, vimKey, arrow]) => {
+    const alongside = {
+      key: `mod+shift+${bracket}`,
+      command: `thread.${direction}`,
+      when: "!isMac",
+    } as const;
+    return [
+      {
+        id: `${THREAD_NAV_KEYS_MIGRATION}.vim-${direction}`,
+        alongside,
+        rule: {
+          key: `mod+shift+${vimKey}`,
+          command: `thread.${direction}`,
+          when: "isMac || !terminalFocus",
+        },
+      },
+      {
+        id: `${THREAD_NAV_KEYS_MIGRATION}.arrow-${direction}`,
+        alongside,
+        rule: { key: `mod+${arrow}`, command: `thread.${direction}`, when: "!terminalFocus" },
       },
     ] as const;
   }),
@@ -891,6 +928,9 @@ const make = Effect.gen(function* () {
       const migrateMacTabKeys = pendingLateDefaults.some((late) =>
         late.id.startsWith("weavewing.mac-tab-keys."),
       );
+      const migrateThreadNavKeys = pendingLateDefaults.some((late) =>
+        late.id.startsWith(THREAD_NAV_KEYS_MIGRATION),
+      );
       const migrateLeader = !appliedMigrationIds.has("weavewing.leader.v1");
       const enabled = leaderEnabled(compileResolvedKeybindingsConfig(runtimeConfig.keybindings));
       const defaults = defaultKeybindingsForMode(enabled);
@@ -898,6 +938,11 @@ const make = Effect.gen(function* () {
         .filter((rule) => !(migrateLeader && enabled && isClassicTileDefault(rule)))
         // The untouched old second New thread key gives way to the project picker.
         .filter((rule) => !isSameKeybindingRule(rule, oldNewThreadKey))
+        .filter(
+          (rule) =>
+            !migrateThreadNavKeys ||
+            !retiredThreadNavKeyRules.some((retired) => isSameKeybindingRule(rule, retired)),
+        )
         .map((rule) => {
           if (!pickerKeyTaken && isSameKeybindingRule(rule, oldPickerKey)) return pickerKey;
           if (migrateSearchKeys && (rule.when === undefined || rule.when === "!terminalFocus")) {
@@ -936,8 +981,8 @@ const make = Effect.gen(function* () {
           )
             return { ...rule, when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)" };
           if (
-            ((rule.command === "view.reopenClosed" && rule.key === "mod+shift+t") ||
-              (rule.command === "preview.toggle" && rule.key === "mod+shift+j")) &&
+            rule.command === "view.reopenClosed" &&
+            rule.key === "mod+shift+t" &&
             rule.when === undefined
           )
             return { ...rule, when: "isMac || !terminalFocus" };

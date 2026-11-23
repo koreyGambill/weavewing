@@ -528,6 +528,39 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("moves Ctrl/Cmd+Shift+J and K from the Browser panel to thread navigation", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const retired = [
+        { key: "mod+shift+j", command: "preview.toggle", when: "isMac || !terminalFocus" },
+        { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
+      ] as const;
+      // A config saved before the move, which holds every old default.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...SharedKeybindings.defaultKeybindingsForMode(true).filter(
+          (rule) => rule.command !== "thread.next" && rule.command !== "thread.previous",
+        ),
+        { key: "mod+shift+[", command: "thread.previous", when: "!isMac" },
+        { key: "mod+shift+]", command: "thread.next", when: "!isMac" },
+        ...retired,
+      ]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.notDeepInclude(persisted, retired[0]);
+      assert.notDeepInclude(persisted, retired[1]);
+      assert.includeDeepMembers(
+        persisted.filter((rule) => rule.command === "thread.next"),
+        [
+          { key: "mod+shift+j", command: "thread.next", when: "isMac || !terminalFocus" },
+          { key: "mod+arrowdown", command: "thread.next", when: "!terminalFocus" },
+        ],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
@@ -1414,11 +1447,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         command: "thread.jump.6",
         when: "!modelPickerOpen && isDesktop && (isMac || !terminalFocus)",
       });
-      assert.deepInclude(upgraded, {
-        key: "mod+shift+j",
-        command: "preview.toggle",
-        when: "isMac || !terminalFocus",
-      });
+      // The Browser panel gave Ctrl/Cmd+Shift+J to thread navigation.
+      assert.isFalse(upgraded.some((rule) => rule.command === "preview.toggle"));
       // The old second New thread key becomes the project picker's.
       assert.deepEqual(
         upgraded.filter((rule) => rule.key === "mod+shift+o" || rule.key === "mod+alt+shift+o"),
