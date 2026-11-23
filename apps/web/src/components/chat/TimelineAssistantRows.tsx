@@ -32,6 +32,12 @@ import {
   useQuietThreadShell,
 } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
+import {
+  MessageBookmarkMarker,
+  MessageFollowUpButton,
+  useMessageBookmarks,
+  useMessageBookmarksSupported,
+} from "../reviews/FollowUps";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -165,6 +171,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
           data-thread-find-text="true"
           className={row.whileWorking ? "border-l border-border/60 pl-3" : undefined}
         >
+          <AssistantMessageBookmarkMarker messageId={row.message.id} />
           <AssistantCitationSource
             messageId={row.message.id}
             sideChatSource={
@@ -178,6 +185,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             itemKey={row.id}
             request={ctx.citationRequest}
             listRef={ctx.listRef}
+            bookmarkable={!row.message.streaming}
           >
             {blocks ? (
               segments.map(({ first, last }) => (
@@ -401,6 +409,9 @@ function AssistantMessageMeta({
       {!message.streaming && projectedItem ? (
         <AssistantReplyButton message={message} itemId={projectedItem.sourceItemId} />
       ) : null}
+      {!message.streaming && projectedItem?.item.type === "assistant_message" ? (
+        <AssistantBookmarkButton messageId={message.id} />
+      ) : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
@@ -412,6 +423,30 @@ function AssistantMessageMeta({
         </Tooltip>
       )}
     </div>
+  );
+}
+
+function AssistantBookmarkButton({ messageId }: { messageId: MessageId }) {
+  const { threadRef } = use(TimelineRowCtx);
+  const supported = useMessageBookmarksSupported(threadRef?.environmentId ?? null);
+  const bookmarks = useMessageBookmarks(threadRef, messageId);
+  if (!threadRef || !supported) return null;
+  return (
+    <MessageFollowUpButton threadRef={threadRef} messageId={messageId} bookmarks={bookmarks} />
+  );
+}
+
+function AssistantMessageBookmarkMarker({ messageId }: { messageId: MessageId }) {
+  const { threadRef } = use(TimelineRowCtx);
+  const bookmarks = useMessageBookmarks(threadRef, messageId);
+  if (!threadRef) return null;
+  // The content lane clips its gutter, so the marker floats at the end of the first line.
+  return (
+    <MessageBookmarkMarker
+      threadRef={threadRef}
+      bookmarks={bookmarks}
+      className="static float-end ms-2 mt-1"
+    />
   );
 }
 

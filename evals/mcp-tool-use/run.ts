@@ -118,6 +118,7 @@ import {
 const MODELS = {
   "claude-sonnet-5-5": "Sonnet 5.5",
   "claude-opus-5-5": "Opus 5.5",
+  "claude-haiku-5-5": "Haiku 5.5",
   "gpt-6.1-sol": "GPT-6.1 Sol",
   "gpt-6-astra": "GPT-6 Astra",
 } as const;
@@ -334,6 +335,8 @@ export const McpToolUseCase = Schema.Struct({
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
+    /** The thread's folder, such as a parent of the repository, in place of the template's cwd. */
+    threadCwd: Schema.optional(Schema.String),
     priorTurns: Schema.optional(
       Schema.Array(
         Schema.Struct({
@@ -932,7 +935,18 @@ type CliCost = { usd: number; unreported: number };
 
 const SHELL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "WebFetch"]);
 
-export const makeSample = (testCase: McpToolUseCase, base: Base): Sample => {
+const withThreadCwd = (base: Base, cwd: string | undefined): Base => {
+  const from = base.environment.cwd;
+  if (cwd === undefined || cwd === from) return base;
+  const { system, reminders, environment, codex } = base;
+  const moved = JSON.parse(
+    JSON.stringify({ system, reminders, environment, codex }).replaceAll(from, cwd),
+  ) as Pick<Base, "system" | "reminders" | "environment" | "codex">;
+  return { ...base, ...moved };
+};
+
+export const makeSample = (testCase: McpToolUseCase, templateBase: Base): Sample => {
+  const base = withThreadCwd(templateBase, testCase.setup.threadCwd);
   const prior = testCase.setup.priorTurns ?? [];
   const priorCalls = prior.flatMap((turn) => turn.toolCalls ?? []);
   const repo = testCase.setup.world?.repo ?? "acme/app";
@@ -2300,10 +2314,11 @@ export const ranCalls = (
 const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
   testCase: McpToolUseCase,
   config: Config,
-  base: Base,
+  templateBase: Base,
   spent: { readonly usage: Usage; readonly shellUsage: Usage },
 ) {
-  const sample = { ...makeSample(testCase, base), shellUsage: spent.shellUsage };
+  const sample = { ...makeSample(testCase, templateBase), shellUsage: spent.shellUsage };
+  const { base } = sample;
   yield* withDevices(sample);
   yield* withBackgroundWait(sample);
   const runPromise = Effect.runPromiseWith(yield* Effect.context<HttpClient.HttpClient>());
@@ -2518,14 +2533,15 @@ export const cliInvocation = (
 export const runSampleCli = Effect.fn("evaluateMcpToolUse.runSampleCli")(function* (
   testCase: McpToolUseCase,
   config: Config,
-  base: Base,
+  templateBase: Base,
   spent: { readonly usage: Usage; readonly shellUsage: Usage; readonly cliCost: CliCost },
 ) {
   const sample = {
-    ...makeSample(testCase, base),
+    ...makeSample(testCase, templateBase),
     shellUsage: spent.shellUsage,
     cliCost: spent.cliCost,
   };
+  const { base } = sample;
   yield* withDevices(sample);
   yield* withBackgroundWait(sample);
   const { history, input, args } = cliInvocation(sample, config);

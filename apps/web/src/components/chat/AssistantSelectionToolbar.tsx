@@ -5,11 +5,13 @@ import {
   type ScopedThreadRef,
   type SideChatAnchor,
 } from "@t3tools/contracts";
-import { GitBranchIcon, QuoteIcon } from "lucide-react";
-import { use, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { BookmarkIcon, GitBranchIcon, ListTodoIcon, QuoteIcon } from "lucide-react";
+import { use, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   captureAssistantTextSelection,
+  readAssistantSourceText,
   type AssistantCitationSourceAnchor,
 } from "~/lib/assistantTextSelection";
 import {
@@ -17,7 +19,11 @@ import {
   observeSelectionActions,
   resolveSelectionMenuPlacement,
 } from "~/lib/selectionActions";
+import { messageFollowUpsUpdate, useMessageFollowUpUpdate } from "../../state/messageFollowUps";
+import { findOverlappingBookmark, bookmarkUpdate } from "../reviews/bookmarks.logic";
+import { useMessageBookmarksSupported, useThreadFollowUpList } from "../reviews/FollowUps";
 import { Button } from "../ui/button";
+import { setSelectionBookmarkToggle } from "./threadBookmarkActions";
 import { BackgroundThreadContext } from "./backgroundThread";
 
 export function AssistantSelectionToolbar({
@@ -42,6 +48,12 @@ export function AssistantSelectionToolbar({
     sourceAnchor: AssistantCitationSourceAnchor;
   } | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const bookmarksSupported = useMessageBookmarksSupported(threadRef.environmentId);
+  const canBookmark =
+    useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId)) &&
+    bookmarksSupported;
+  const bookmarks = useThreadFollowUpList(bookmarksSupported ? threadRef : null);
+  const updateBookmark = useMessageFollowUpUpdate();
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
   const backgroundThread = use(BackgroundThreadContext);
 
@@ -75,7 +87,8 @@ export function AssistantSelectionToolbar({
     const update = () => {
       const nativeSelection = window.getSelection();
       const captured = captureAssistantTextSelection(viewport, nativeSelection);
-      const messageId = captured?.source.dataset.assistantCitationSource;
+      const messageId =
+        captured?.source.dataset.assistantCitationSource ?? captured?.source.dataset.bookmarkSource;
       if (
         !captured ||
         !messageId ||
@@ -196,7 +209,48 @@ export function AssistantSelectionToolbar({
     };
   }, [backgroundThread, inFlow, onBranch, threadRef, viewport]);
 
+  const bookmarkSource =
+    selection !== null && canBookmark && selection.sourceAnchor.source.dataset.bookmarkSource
+      ? selection
+      : null;
+  const existingBookmark =
+    bookmarkSource &&
+    findOverlappingBookmark(
+      bookmarks,
+      bookmarkSource.citation,
+      readAssistantSourceText(bookmarkSource.sourceAnchor.source),
+    );
+  const applyBookmark = (todo: boolean) => {
+    if (!bookmarkSource) return;
+    const { messageId, text, start, end, prefix, suffix } = bookmarkSource.citation;
+    if (!existingBookmark && text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH) return;
+    void updateBookmark(
+      threadRef.environmentId,
+      existingBookmark
+        ? bookmarkUpdate(existingBookmark, "unflag")
+        : {
+            threadId: threadRef.threadId,
+            messageId,
+            action: "flag",
+            todo,
+            anchor: { messageId, text, start, end, prefix, suffix },
+          },
+    );
+    window.getSelection()?.removeAllRanges();
+    actionsRef.current?.cancel();
+    setSelection(null);
+  };
+  const applyBookmarkFromShortcut = useEffectEvent(() => applyBookmark(false));
+  const shortcutAvailable = bookmarkSource !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- offers this selection's bookmark toggle to the keyboard shortcut while the toolbar shows
+  useEffect(
+    () =>
+      shortcutAvailable ? setSelectionBookmarkToggle(() => applyBookmarkFromShortcut()) : undefined,
+    [shortcutAvailable],
+  );
+
   if (!selection) return null;
+  const citable = selection.sourceAnchor.source.dataset.assistantCitationSource !== undefined;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
     actionsRef.current?.cancel();
@@ -208,6 +262,7 @@ export function AssistantSelectionToolbar({
     dismiss();
     return true;
   };
+  if (!citable && !bookmarkSource) return null;
   const branch =
     !tooLong && onBranch && selection.sourceAnchor.source.hasAttribute("data-side-chat-source")
       ? onBranch
@@ -228,23 +283,62 @@ export function AssistantSelectionToolbar({
         }
       }}
     >
-      <Button
-        type="button"
-        size="xs"
-        variant="ghost"
-        disabled={tooLong}
-        aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
-        onClick={cite}
-      >
-        <QuoteIcon aria-hidden="true" className="size-3.5 text-primary" />
-        {tooLong ? "Shorten selection" : "Cite"}
-      </Button>
+      {citable ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          disabled={tooLong}
+          aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
+          onClick={cite}
+        >
+          <QuoteIcon aria-hidden="true" className="size-3.5 text-primary" />
+          {tooLong ? "Shorten selection" : "Cite"}
+        </Button>
+      ) : null}
+      {bookmarkSource ? (
+        <>
+          {citable ? <ToolbarDivider /> : null}
+          {existingBookmark ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-pressed
+              onClick={() => applyBookmark(false)}
+            >
+              <BookmarkIcon aria-hidden="true" className="size-3.5 fill-current text-warning" />
+              Remove bookmark
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={tooLong}
+                onClick={() => applyBookmark(false)}
+              >
+                <BookmarkIcon aria-hidden="true" className="size-3.5 text-warning" />
+                Bookmark
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={tooLong}
+                onClick={() => applyBookmark(true)}
+              >
+                <ListTodoIcon aria-hidden="true" className="size-3.5 text-warning" />
+                Bookmark as to-do
+              </Button>
+            </>
+          )}
+        </>
+      ) : null}
       {branch ? (
         <>
-          <div
-            aria-hidden="true"
-            className="bg-primary/35 group-data-[orientation=column]:mx-1 group-data-[orientation=column]:h-px group-data-[orientation=row]:my-1 group-data-[orientation=row]:w-px"
-          />
+          <ToolbarDivider />
           <Button
             type="button"
             size="xs"
@@ -269,5 +363,14 @@ export function AssistantSelectionToolbar({
       ) : null}
     </div>,
     document.body,
+  );
+}
+
+function ToolbarDivider() {
+  return (
+    <div
+      aria-hidden="true"
+      className="bg-primary/35 group-data-[orientation=column]:mx-1 group-data-[orientation=column]:h-px group-data-[orientation=row]:my-1 group-data-[orientation=row]:w-px"
+    />
   );
 }
