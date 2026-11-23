@@ -811,7 +811,6 @@ describe("MessagesTimeline messages", () => {
           {...props}
           timelineEntries={loaded ? [old, ...answers, recent] : [...answers, recent]}
           branchOriginMessageIds={new Set(["old"])}
-          followUpMessageIds={new Set(["old"])}
           userTurns={userTurns}
           onRevealMessage={(messageId) =>
             setRequest({
@@ -833,7 +832,7 @@ describe("MessagesTimeline messages", () => {
       .focus();
     await userEvent.keyboard("{Home}");
     await expect
-      .element(screen.getByRole("button", { name: /Old question · Side chat branch · Follow up/ }))
+      .element(screen.getByRole("button", { name: /Old question · Side chat branch/ }))
       .toBeVisible();
     await userEvent.keyboard("[Space]");
 

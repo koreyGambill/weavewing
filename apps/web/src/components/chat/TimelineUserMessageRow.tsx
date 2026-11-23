@@ -64,9 +64,9 @@ import { GuestMessageName, guestBubbleClassName } from "./guestMessageStyle";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import {
+  MessageBookmarkMarker,
   MessageFollowUpButton,
-  MessageFollowUpGlyph,
-  useMessageFollowUp,
+  useMessageBookmarks,
 } from "../reviews/FollowUps";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -269,10 +269,12 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
       ) : null}
       <AssistantCitationSource
         messageId={row.message.id}
+        {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
         itemKey={row.id}
         request={ctx.citationRequest}
         listRef={ctx.listRef}
         citable={false}
+        bookmarkable
       >
         <UserMessageContent row={row} />
       </AssistantCitationSource>
@@ -390,7 +392,7 @@ function UserTimelineRow({
   const { onImageExpand, onFileOpen } = ctx;
   const coarsePointer = useMediaQuery({ pointer: "coarse" });
   const userMessage = resolveUserMessagePresentation(row.message);
-  const followUp = useMessageFollowUp(ctx.threadRef ?? null, row.message.id);
+  const bookmarks = useMessageBookmarks(ctx.threadRef ?? null, row.message.id);
   const sender = userMessage.sender;
   const resources = selectMessageImageResources(row.message.attachments);
   const previewUrls = useAssetUrls(ctx.activeThreadEnvironmentId, resources);
@@ -798,7 +800,7 @@ function UserTimelineRow({
           <MessageFollowUpButton
             threadRef={ctx.threadRef}
             messageId={row.message.id}
-            followUp={followUp}
+            bookmarks={bookmarks}
           />
         ) : null}
       </div>
@@ -877,7 +879,9 @@ function UserTimelineRow({
         )}
         data-user-message-bubble=""
       >
-        {followUp && !cardBody ? <MessageFollowUpGlyph followUp={followUp} /> : null}
+        {ctx.threadRef && !cardBody ? (
+          <MessageBookmarkMarker threadRef={ctx.threadRef} bookmarks={bookmarks} />
+        ) : null}
         {/* Outside the fold so a collapsed message still has a heading to navigate to. */}
         {mediaAboveText || cardBody ? null : (
           <MessageAuthorHeading>

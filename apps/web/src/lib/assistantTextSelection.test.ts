@@ -324,6 +324,16 @@ describe("captureAssistantTextSelection", () => {
     expect(capture(source, nativeSelection([control, 0], [control, control.length]))).toBeNull();
   });
 
+  it("captures a user message, which bookmarks quote but citations do not", () => {
+    const text = textNode("Can we pin chats?");
+    const source = new SelectionNode("DIV", "", { "data-bookmark-source": "user" }).append(
+      new SelectionNode("P").append(text),
+    );
+    const captured = capture(source, nativeSelection([text, 7], [text, 16]));
+    expect(captured?.source).toBe(source);
+    expect(captured?.selector.text).toBe("pin chats");
+  });
+
   it("keeps exact multiline Unicode text and omits interior controls and hidden text", () => {
     const first = textNode("Before 😀 ");
     const code = textNode("first line\r\n  second line\t🚀");
