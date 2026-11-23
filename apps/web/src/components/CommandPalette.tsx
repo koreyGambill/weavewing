@@ -1,6 +1,7 @@
 import { DraftProjectPicker } from "./chat/DraftProjectPicker";
 import { openDraftProjectPicker } from "~/draftProjectPicker";
 import { openCommandPalette } from "~/commandPaletteBus";
+import { lastFocusedTerminalFind } from "~/lib/terminalFocus";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { useInboxEnvironments } from "../state/inbox";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
@@ -1304,6 +1305,23 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.find",
       run: async () => {
         openThreadFind(activeThreadKey);
+      },
+    });
+  }
+
+  const focusedTerminalFind = previewPanelThreadRef
+    ? lastFocusedTerminalFind(previewPanelThreadRef)
+    : null;
+  if (focusedTerminalFind) {
+    actionItems.push({
+      kind: "action",
+      value: "find-in-terminal",
+      title: "Find in terminal",
+      searchTerms: ["find", "search", "terminal", "scrollback"],
+      icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "terminal.find",
+      run: async () => {
+        focusedTerminalFind();
       },
     });
   }

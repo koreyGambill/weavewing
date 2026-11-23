@@ -107,6 +107,7 @@ export const CLASSIC_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
   { key: "mod+f", command: "preview.find", when: "previewFocus" },
+  { key: "mod+f", command: "terminal.find", when: "terminalFocus" },
   { key: "mod+k", command: "search.toggle" },
   { key: "ctrl+k", command: "search.toggle", when: "isMac" },
   { key: "mod+p", command: "commandPalette.toggle" },

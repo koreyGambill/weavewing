@@ -18,6 +18,7 @@ import {
   type GhosttyCellRange,
   type GhosttyCellMetrics,
 } from "./renderer";
+import { findTerminalMatches, type TerminalFindMatch } from "./find";
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { isMonospaceFamily } from "../../appearanceFonts";
 import { observeResize } from "../../lib/observeResize";
@@ -1033,6 +1034,43 @@ export class GhosttyTerminalSurface {
     this.selectionBase = null;
     this.setSelectionAutoscroll(0);
     this.options.onSelectionChange();
+    this.forceFullRender = true;
+    this.requestRender();
+  }
+
+  /** Case-insensitive matches across scrollback and the screen, in screen-row order. */
+  findMatches(query: string): TerminalFindMatch[] {
+    return findTerminalMatches(this.core.screenLines(), query);
+  }
+
+  /** The screen row at the top of the viewport. */
+  viewportTop(): number {
+    return this.readScrollbarState()?.offset ?? 0;
+  }
+
+  /** Scrolls a match into view, centered when it was off screen, and selects it. */
+  revealMatch(match: TerminalFindMatch): void {
+    const state = this.readScrollbarState();
+    if (state === null) return;
+    if (match.row < state.offset || match.row >= state.offset + state.len) {
+      this.scrollViewport(match.row - Math.floor(state.len / 2) - state.offset);
+    }
+    const top = this.readScrollbarState()?.offset ?? state.offset;
+    const row = this.core.snapshot().rowData[match.row - top];
+    if (!row) return;
+    const startX = terminalColumnAtOffset(row, match.start);
+    const lastX = terminalColumnAtOffset(row, Math.max(match.start, match.end - 1));
+    const endX = row.cells[lastX + 1]?.wide === GHOSTTY_CELL_WIDE.spacerTail ? lastX + 1 : lastX;
+    this.linkActivationRequestId += 1;
+    this.clearPrimedCopy();
+    this.core.setSelection({ x: startX, y: match.row, tag: 2 }, { x: endX, y: match.row, tag: 2 });
+    this.selectionAnchorScreen = { x: startX, y: match.row };
+    this.selectionEnd = this.core.screenPointToViewport(endX, match.row);
+    this.selectionMode = "cell";
+    this.selectionBase = null;
+    this.setSelectionAutoscroll(0);
+    this.options.onSelectionChange();
+    // core.snapshot() above consumed Ghostty's dirty rows, so the next frame must repaint all.
     this.forceFullRender = true;
     this.requestRender();
   }

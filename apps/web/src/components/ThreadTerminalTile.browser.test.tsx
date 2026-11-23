@@ -622,7 +622,6 @@ it("passes EOF and common shell control keys through a terminal tile", async () 
     "c",
     "d",
     "e",
-    "f",
     "g",
     "h",
     "k",
@@ -644,6 +643,10 @@ it("passes EOF and common shell control keys through a terminal tile", async () 
   }
   expect(
     fixture.pressKey?.(new KeyboardEvent("keydown", { key: "w", code: "KeyW", ctrlKey: true })),
+  ).toBe(false);
+  // Ctrl+F opens terminal find outside full-screen programs.
+  expect(
+    fixture.pressKey?.(new KeyboardEvent("keydown", { key: "f", code: "KeyF", ctrlKey: true })),
   ).toBe(false);
   fixture.typeIntoSurface?.("\u0004");
   expect(fixture.writes).toEqual([{ threadId: threadRef.threadId, data: "\u0004" }]);

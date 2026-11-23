@@ -561,6 +561,30 @@ describe("GhosttyTerminalCore scrollback", () => {
       core.dispose();
     }
   });
+
+  it("reads scrollback and screen text one line per screen row", async () => {
+    const core = await GhosttyTerminalCore.create(
+      6,
+      3,
+      8,
+      16,
+      {
+        foreground: { r: 255, g: 255, b: 255 },
+        background: { r: 0, g: 0, b: 0 },
+        cursor: { r: 255, g: 255, b: 255 },
+      },
+      () => {},
+    );
+    try {
+      core.write("first\r\n\r\nwrapped-line\r\n界x  \r\nlast");
+      const lines = core.screenLines();
+      const scrollbar = core.scrollbarState()!;
+      expect(lines.slice(0, 6)).toEqual(["first", "", "wrappe", "d-line", "界x", "last"]);
+      expect(scrollbar.total).toBe(6);
+    } finally {
+      core.dispose();
+    }
+  });
 });
 
 describe("GhosttyTerminalCore mouse encoding", () => {
