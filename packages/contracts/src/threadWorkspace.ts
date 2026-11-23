@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ArtifactQuestion, ArtifactAnswer } from "./artifactQuestions.ts";
 import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -73,11 +74,33 @@ export const ThreadArtifactMetadata = Schema.Struct({
   createdAt: IsoDateTime,
   unansweredQuestions: Revision,
 });
+/** Deferred questions stay visible but no longer count as waiting on the user. */
+export const ThreadQuestionState = Schema.Literals([
+  "open",
+  "deferred",
+  "answered",
+  "withdrawn",
+  "replaced",
+]);
+export type ThreadQuestionState = typeof ThreadQuestionState.Type;
+/** A question an agent raised without stopping its turn. `id` is server-assigned: Q1, Q2, ... */
+export const ThreadQuestion = Schema.Struct({
+  ...ArtifactQuestion.fields,
+  state: ThreadQuestionState,
+  createdAt: IsoDateTime,
+  closedAt: Schema.NullOr(IsoDateTime),
+  /** A draft while `submittedAt` is null; for an agent-recorded answer, what the agent understood. */
+  answer: Schema.NullOr(ArtifactAnswer),
+  answeredBy: Schema.NullOr(Schema.Literals(["user", "agent"])),
+  replacedBy: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ThreadQuestion = typeof ThreadQuestion.Type;
 export const ThreadWorkspace = Schema.Struct({
   threadId: ThreadId,
   revision: Revision,
   items: Schema.Array(ListItem),
   artifacts: Schema.Array(ThreadArtifact),
+  questions: Schema.Array(ThreadQuestion).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   summaryNotes: Schema.String,
   childPreamble: Schema.String,
   updatedAt: Schema.NullOr(IsoDateTime),
@@ -166,6 +189,56 @@ export const ThreadArtifactSubmitInput = Schema.Struct({
   questionIds: Schema.Array(TrimmedNonEmptyString),
 });
 export type ThreadArtifactSubmitInput = typeof ThreadArtifactSubmitInput.Type;
+
+export const ThreadQuestionAskInput = Schema.Struct({
+  threadId: ThreadId,
+  questions: Schema.Array(
+    Schema.Struct({
+      prompt: ArtifactQuestion.fields.prompt,
+      details: ArtifactQuestion.fields.details,
+      options: Schema.optional(
+        Schema.Array(
+          Schema.Struct({
+            id: TrimmedNonEmptyString,
+            label: TrimmedNonEmptyString,
+            description: Schema.optional(Schema.String),
+          }),
+        ),
+      ),
+      recommendedOptionIds: Schema.optional(ArtifactQuestion.fields.recommendedOptionIds),
+      multiSelect: Schema.optional(ArtifactQuestion.fields.multiSelect),
+      replaces: Schema.optional(TrimmedNonEmptyString),
+    }),
+  ).check(Schema.isMinLength(1)),
+});
+export type ThreadQuestionAskInput = typeof ThreadQuestionAskInput.Type;
+export const ThreadQuestionUpdateInput = Schema.Struct({
+  threadId: ThreadId,
+  id: TrimmedNonEmptyString,
+  state: Schema.Literals(["open", "deferred", "answered", "withdrawn"]),
+  answer: Schema.optional(
+    Schema.Struct({
+      chosenOptionIds: Schema.optional(ArtifactAnswer.fields.chosenOptionIds),
+      notes: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type ThreadQuestionUpdateInput = typeof ThreadQuestionUpdateInput.Type;
+export const ThreadQuestionDraftInput = Schema.Struct({
+  threadId: ThreadId,
+  answers: Schema.Record(
+    Schema.String,
+    Schema.Struct({ chosenOptionIds: ArtifactAnswer.fields.chosenOptionIds, notes: Schema.String }),
+  ),
+});
+export type ThreadQuestionDraftInput = typeof ThreadQuestionDraftInput.Type;
+export const ThreadQuestionSubmitInput = Schema.Struct({
+  threadId: ThreadId,
+  ids: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+});
+export type ThreadQuestionSubmitInput = typeof ThreadQuestionSubmitInput.Type;
+/** The `artifactId` of an answer record that answers a thread question rather than an artifact. */
+export const THREAD_QUESTIONS_ARTIFACT_ID = "thread-questions";
 
 /** Linked work stays handed off until its ticket closes or its lane is ready for review. */
 export const listItemNeedsHandoff = (item: Pick<ListItem, "linkStates">) =>

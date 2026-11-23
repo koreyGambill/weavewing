@@ -556,6 +556,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["beta tab autocomplete predict next message claude codex ghost text"],
   },
   {
+    id: "agent-questions-beta",
+    title: "Agent questions",
+    to: "/settings/labs",
+    scope: "environment",
+    searchTerms: ["beta ask decision question answer pending waiting count sidebar defer"],
+  },
+  {
     id: "simlock-hosts",
     title: "Simlock device hosts (alpha)",
     to: "/settings/labs",

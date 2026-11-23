@@ -217,6 +217,7 @@ import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapsh
 import {
   T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+  T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
@@ -2179,6 +2180,7 @@ export function claudePreparedContextEntries(
     { key: "t3_code_background", text: CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS },
     { key: "t3_code_send_to_user", text: CLAUDE_SEND_TO_USER_INSTRUCTIONS },
     { key: "t3_code_devices", text: T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH },
+    { key: "t3_code_questions", text: T3_CODE_QUESTION_TOOL_INSTRUCTIONS },
   ];
   let remainder = append;
   const entries: { key: string; text: string }[] = [];
@@ -2199,6 +2201,7 @@ export function claudePreparedContextEntries(
 export function claudeSystemPromptAppend(input: {
   readonly hasT3Mcp: boolean;
   readonly deviceTools: boolean;
+  readonly questionTools?: boolean;
   readonly launchAppend?: ReadonlyArray<string>;
 }): string {
   return [
@@ -2207,7 +2210,8 @@ export function claudeSystemPromptAppend(input: {
         ? T3_CODE_ORCHESTRATION_INSTRUCTIONS +
           CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
           CLAUDE_SEND_TO_USER_INSTRUCTIONS +
-          (input.deviceTools ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n` : "")
+          (input.deviceTools ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n` : "") +
+          (input.questionTools ? `\n${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n` : "")
         : ""),
     ...(input.launchAppend ?? []),
   ].join("\n\n");
@@ -2230,6 +2234,8 @@ export function makeClaudeQueryOptions(input: {
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   /** The thread's T3 MCP session holds the `device` capability. */
   readonly deviceToolsAvailable?: boolean;
+  /** The thread's T3 MCP session holds the `questions` capability. */
+  readonly questionToolsAvailable?: boolean;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -2382,6 +2388,7 @@ export function makeClaudeQueryOptions(input: {
       append: claudeSystemPromptAppend({
         hasT3Mcp: input.mcpServers !== undefined,
         deviceTools: deviceInstructions,
+        questionTools: input.mcpServers !== undefined && input.questionToolsAvailable === true,
         launchAppend: launchAppendSystemPrompt,
       }),
     },
@@ -2527,6 +2534,8 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__evidence_record",
   "mcp__t3-code__evidence_read",
   "mcp__t3-code__send_to_user",
+  "mcp__t3-code__question_ask",
+  "mcp__t3-code__question_update",
 ];
 
 // request_secret can wait an hour; exceed Claude's default 60 s timeout.
@@ -12899,6 +12908,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { mcpServers: mcpOverrides.mcpServers }),
             deviceToolsAvailable: mcpSession?.capabilities?.has("device") === true,
+            questionToolsAvailable: mcpSession?.capabilities?.has("questions") === true,
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
               ? {}

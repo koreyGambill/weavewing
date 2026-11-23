@@ -7,7 +7,9 @@ import {
   T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_SECTIONS,
+  T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
   t3AcpPromptWithInstructions,
+  t3OpenQuestionsContext,
   t3OrchestrationPrompt,
   t3OrchestrationSystemPrompt,
 } from "./orchestrationInstructions.ts";
@@ -46,6 +48,45 @@ describe("T3 delegation instructions", () => {
         /Ordinary coding tasks need no|run_in_background:false|children start no agents|keep reviews fresh/i,
       );
     }
+  });
+});
+
+describe("T3 question instructions", () => {
+  it("reach every prompt transport only when the session holds the questions capability", () => {
+    assert.notInclude(T3_CODE_QUESTION_TOOL_INSTRUCTIONS, "ToolSearch");
+    const state = { interactionMode: "default", hasT3Mcp: true, hasDeviceTools: false } as const;
+    for (const [questions, text] of [true, false].flatMap((hasQuestionTools) =>
+      [
+        t3OrchestrationSystemPrompt(true, false, hasQuestionTools)!,
+        t3OrchestrationPrompt({
+          prompt: "Build it.",
+          hasT3Mcp: true,
+          hasDeviceTools: false,
+          hasQuestionTools,
+          orchestrationDelivered: false,
+          deviceInstructionsDelivered: false,
+        }),
+        t3AcpPromptWithInstructions({ prompt: "Build it.", state: { ...state, hasQuestionTools } }),
+      ].map((text) => [hasQuestionTools, text] as const),
+    )) {
+      if (questions) assert.include(text, T3_CODE_QUESTION_TOOL_INSTRUCTIONS);
+      else assert.notInclude(text, "question_ask");
+    }
+    assert.equal(
+      t3OrchestrationSystemPrompt(true, false),
+      t3OrchestrationSystemPrompt(true, false, false),
+    );
+  });
+
+  it("lists waiting questions on one line and deferred ones marked", () => {
+    assert.equal(t3OpenQuestionsContext([]), "");
+    assert.equal(
+      t3OpenQuestionsContext([
+        { id: "Q1", title: "Which database?", state: "open" },
+        { id: "Q3", title: "Flag name?", state: "deferred" },
+      ]),
+      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q3 Flag name? (deferred)",
+    );
   });
 });
 

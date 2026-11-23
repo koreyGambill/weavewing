@@ -11,6 +11,9 @@ import {
   ThreadId,
   type OrchestrationV2Run,
   type OrchestrationV2ConversationMessage,
+  type OrchestrationV2ServerCommand,
+  THREAD_QUESTIONS_ARTIFACT_ID,
+  type OrchestrationV2ThreadQuestionSummary,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
@@ -68,6 +71,9 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   let staleClosed = false;
   let laneStatus: OrchestrationV2Run["status"] = "running";
   const sends: ThreadManagement.ThreadManagementSendInput[] = [];
+  const syncs: Array<ReadonlyArray<OrchestrationV2ThreadQuestionSummary>> = [];
+  const mirror = { questions: [] as ReadonlyArray<OrchestrationV2ThreadQuestionSummary> };
+  const dispatchFailures = { remaining: 0 };
   const messages: OrchestrationV2ConversationMessage[] = [];
   const run = (): OrchestrationV2Run => ({
     id: RunId.make("run"),
@@ -106,9 +112,26 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
         Effect.sync(() => ({
           ...projection,
           messages,
-          thread: { ...projection.thread, id },
+          thread: { ...projection.thread, id, questions: mirror.questions },
           runs: id === threadId ? [] : [run()],
         })),
+      dispatch: (command: OrchestrationV2ServerCommand) => {
+        if (dispatchFailures.remaining > 0) {
+          dispatchFailures.remaining--;
+          return Effect.fail(
+            new Orchestrator.OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: "unavailable",
+            }),
+          );
+        }
+        if (command.type === "thread.questions.sync") {
+          syncs.push(command.questions);
+          mirror.questions = command.questions;
+        }
+        return Effect.succeed({ sequence: 1, storedEvents: [] });
+      },
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       sendToThread: (input) =>
@@ -142,6 +165,9 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   return {
     service: Context.get(context, Workspaces.ThreadWorkspace),
     sends,
+    syncs,
+    mirror,
+    dispatchFailures,
     messages,
     fs,
     path,
@@ -589,6 +615,178 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+const choice = (id: string, label: string) => ({ id, label });
+const failureOf = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.flip);
+
+it.effect("moves questions through their states with ids that are never reused", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const ask = (prompt: string, replaces?: string) =>
+      h.service.questionAsk({
+        threadId,
+        questions: [
+          {
+            prompt,
+            options: [choice("pg", "Postgres"), choice("lite", "SQLite")],
+            ...(replaces === undefined ? {} : { replaces }),
+          },
+        ],
+      });
+    const update = (
+      id: string,
+      state: "open" | "deferred" | "answered" | "withdrawn",
+      by: "user" | "agent" = "agent",
+      answer?: { chosenOptionIds?: string[]; notes?: string },
+    ) =>
+      h.service.questionUpdate(
+        { threadId, id, state, ...(answer === undefined ? {} : { answer }) },
+        by,
+      );
+    const asked = yield* h.service.questionAsk({
+      threadId,
+      questions: [
+        { prompt: "Which database should the cache use for local development?" },
+        { prompt: "Ship behind a flag?" },
+      ],
+    });
+    expect(asked.questions.map((question) => [question.id, question.state])).toEqual([
+      ["Q1", "open"],
+      ["Q2", "open"],
+    ]);
+    expect(h.mirror.questions).toEqual([
+      { id: "Q1", title: "Which database should the cache use for local…", state: "open" },
+      { id: "Q2", title: "Ship behind a flag?", state: "open" },
+    ]);
+    yield* update("Q1", "deferred", "user");
+    expect(h.mirror.questions.map((question) => question.state)).toEqual(["deferred", "open"]);
+    yield* update("Q1", "open", "agent");
+    const answered = yield* update("Q2", "answered", "agent", { notes: "Yes, default off" });
+    expect(answered.questions[1]).toMatchObject({
+      state: "answered",
+      answeredBy: "agent",
+      answer: { chosenOptionIds: [], notes: "Yes, default off" },
+    });
+    expect(answered.questions[1]?.closedAt).not.toBeNull();
+    yield* update("Q1", "withdrawn", "user");
+    expect(h.mirror.questions).toEqual([]);
+    const reopened = yield* update("Q2", "open", "user");
+    expect(reopened.questions[1]).toMatchObject({
+      state: "open",
+      closedAt: null,
+      answeredBy: null,
+      answer: { notes: "Yes, default off", submittedAt: null },
+    });
+    yield* ask("Which database?");
+    const replaced = yield* ask("Which database, now that SQLite is out?", "Q3");
+    expect(replaced.questions.map((question) => [question.id, question.state])).toEqual([
+      ["Q1", "withdrawn"],
+      ["Q2", "open"],
+      ["Q3", "replaced"],
+      ["Q4", "open"],
+    ]);
+    expect(replaced.questions[2]?.replacedBy).toBe("Q4");
+    expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q2", "Q4"]);
+
+    for (const [attempt, code] of [
+      [update("Q1", "withdrawn"), "invalid"],
+      [update("Q1", "answered", "agent", { notes: "late" }), "invalid"],
+      [update("Q4", "open"), "invalid"],
+      [update("Q4", "answered", "agent"), "invalid"],
+      [update("Q4", "answered", "agent", { notes: "  " }), "invalid"],
+      [update("Q4", "answered", "agent", { chosenOptionIds: ["mysql"] }), "invalid"],
+      [update("Q4", "answered", "agent", { chosenOptionIds: ["pg", "lite"] }), "invalid"],
+      [update("Q4", "answered", "user", { notes: "Postgres" }), "invalid"],
+      [update("Q9", "withdrawn"), "not_found"],
+      [ask("Again?", "Q9"), "not_found"],
+      [ask("Again?", "Q3"), "invalid"],
+      [
+        h.service.questionAsk({
+          threadId,
+          questions: [{ prompt: "Pick", options: [choice("a", "A")], recommendedOptionIds: ["b"] }],
+        }),
+        "invalid",
+      ],
+    ] as const)
+      expect((yield* failureOf(attempt)).code).toBe(code);
+    yield* update("Q4", "deferred", "user");
+    expect((yield* failureOf(update("Q4", "deferred", "user"))).code).toBe("invalid");
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("submits drafted answers to the thread as one user message", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [
+        { prompt: "Database?", options: [choice("pg", "Postgres"), choice("lite", "SQLite")] },
+        { prompt: "Name of the flag?" },
+        { prompt: "Release this week?" },
+      ],
+    });
+    expect(
+      (yield* failureOf(
+        h.service.questionDraft({
+          threadId,
+          answers: { Q1: { chosenOptionIds: ["mysql"], notes: "" } },
+        }),
+      )).code,
+    ).toBe("invalid");
+    yield* h.service.questionDraft({
+      threadId,
+      answers: {
+        Q1: { chosenOptionIds: ["pg"], notes: "" },
+        Q2: { chosenOptionIds: [], notes: "cache-v2" },
+      },
+    });
+    expect(h.sends).toHaveLength(0);
+    expect((yield* failureOf(h.service.questionSubmit({ threadId, ids: ["Q1", "Q3"] }))).code).toBe(
+      "invalid",
+    );
+    expect(h.sends).toHaveLength(0);
+    const submitted = yield* h.service.questionSubmit({ threadId, ids: ["Q1", "Q2"] });
+    expect(h.sends).toHaveLength(1);
+    expect(h.sends[0]).toMatchObject({ origin: { kind: "user" }, createdBy: "user" });
+    expect(h.sends[0]?.context?.records).toEqual([
+      expect.objectContaining({
+        kind: "artifact-answer",
+        artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+        questionId: "Q1",
+        question: "Database?",
+        choice: "Postgres",
+      }),
+      expect.objectContaining({ questionId: "Q2", choice: "", note: "cache-v2" }),
+    ]);
+    expect(submitted.questions.map((question) => [question.state, question.answeredBy])).toEqual([
+      ["answered", "user"],
+      ["answered", "user"],
+      ["open", null],
+    ]);
+    expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q3"]);
+    expect((yield* failureOf(h.service.questionSubmit({ threadId, ids: ["Q1"] }))).code).toBe(
+      "invalid",
+    );
+    expect(
+      (yield* failureOf(
+        h.service.questionDraft({ threadId, answers: { Q1: { chosenOptionIds: [], notes: "x" } } }),
+      )).code,
+    ).toBe("invalid");
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("repairs the thread's question mirror on the next read after a failed sync", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    h.dispatchFailures.remaining = 1;
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Ship it?" }] });
+    expect(h.mirror.questions).toEqual([]);
+    yield* h.service.get({ threadId });
+    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "open" }]);
+    yield* h.service.get({ threadId });
+    expect(h.syncs).toHaveLength(1);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("migrates a legacy file once and persists mark annotations outside the list", () =>
   Effect.gen(function* () {
     const h = yield* harness();
@@ -603,6 +801,7 @@ it.effect("migrates a legacy file once and persists mark annotations outside the
     const original = yield* h.fs.readFileString(file);
     const first = yield* h.service.get({ threadId });
     expect(first.revision).toBe(fixture.revision);
+    expect(first.questions).toEqual([]);
     expect(first.items.find((item) => item.id === "work-1")?.details).toContain(
       "Verified sample behavior",
     );
@@ -636,6 +835,16 @@ it.effect("migrates a legacy file once and persists mark annotations outside the
     yield* reloaded.get({ threadId });
     expect(yield* h.fs.readFileString(file)).toBe(cleanedFile);
     expect(yield* h.fs.readFileString(`${file}.format2.bak`)).toBe(original);
+    // Files written before thread questions existed open without them, and the next write adds them.
+    const { questions: _questions, ...withoutQuestions } = JSON.parse(cleanedFile).workspace;
+    yield* h.fs.writeFileString(
+      file,
+      JSON.stringify({ formatVersion: 3, workspace: withoutQuestions }),
+    );
+    expect((yield* reloaded.get({ threadId })).questions).toEqual([]);
+    const asked = yield* reloaded.questionAsk({ threadId, questions: [{ prompt: "Ship it?" }] });
+    expect(asked.questions.map((question) => question.id)).toEqual(["Q1"]);
+    expect(JSON.parse(yield* h.fs.readFileString(file)).workspace.questions).toHaveLength(1);
     yield* h.fs.writeFileString(file, original);
     yield* h.fs.writeFileString(`${file}.format2.bak`, "Preexisting backup bytes");
     yield* reloaded.get({ threadId });

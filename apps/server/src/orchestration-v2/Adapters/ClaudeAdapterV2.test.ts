@@ -97,6 +97,7 @@ import { TerminalToolkit } from "../../mcp/toolkits/terminal/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { ReviewToolkit } from "../../mcp/toolkits/reviews/tools.ts";
 import { MessageToolkit } from "../../mcp/toolkits/message/tools.ts";
+import { QuestionToolkit } from "../../mcp/toolkits/questions/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
 import { XwingToolkit } from "../../mcp/toolkits/xwing/tools.ts";
 import { ThemeToolkit } from "../../mcp/toolkits/theme/tools.ts";
@@ -820,6 +821,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(HtmlToolkit.tools),
       ...Object.values(ReviewToolkit.tools),
       ...Object.values(MessageToolkit.tools),
+      ...Object.values(QuestionToolkit.tools),
     ]
       .filter((tool) => Context.get(tool.annotations, Tool.Readonly))
       .map((tool) => `mcp__t3-code__${tool.name}`)

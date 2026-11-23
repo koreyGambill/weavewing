@@ -22,6 +22,7 @@ export interface T3PartInputs {
   readonly hasT3Mcp: boolean;
   readonly browserTools: boolean;
   readonly deviceTools: boolean;
+  readonly questionTools?: boolean;
 }
 
 export interface T3PartGroup {
@@ -61,6 +62,7 @@ export function t3ContextParts(input: T3PartInputs): T3Parts {
       const append = claudeSystemPromptAppend({
         hasT3Mcp: input.hasT3Mcp,
         deviceTools: input.hasT3Mcp && input.deviceTools,
+        questionTools: input.hasT3Mcp && input.questionTools === true,
       });
       const entries = claudePreparedContextEntries(append);
       return {
@@ -71,7 +73,11 @@ export function t3ContextParts(input: T3PartInputs): T3Parts {
     case "codex": {
       const context = buildCodexAdditionalContext(
         { model: input.model, reasoningEffort: input.reasoningEffort },
-        { browser: input.browserTools, device: input.deviceTools },
+        {
+          browser: input.browserTools,
+          device: input.deviceTools,
+          questions: input.questionTools === true,
+        },
       );
       const entries = Object.entries(context).map(([key, entry]) => ({ key, text: entry.value }));
       return {
@@ -82,7 +88,11 @@ export function t3ContextParts(input: T3PartInputs): T3Parts {
       };
     }
     case "opencode": {
-      const orchestration = t3OrchestrationSystemPrompt(input.hasT3Mcp, input.deviceTools);
+      const orchestration = t3OrchestrationSystemPrompt(
+        input.hasT3Mcp,
+        input.deviceTools,
+        input.questionTools,
+      );
       const text = [runtime("OpenCode"), ...(orchestration ? [orchestration] : [])].join("\n\n");
       return {
         support: "estimate",
@@ -94,6 +104,7 @@ export function t3ContextParts(input: T3PartInputs): T3Parts {
         prompt: "",
         hasT3Mcp: input.hasT3Mcp,
         hasDeviceTools: input.deviceTools,
+        hasQuestionTools: input.questionTools === true,
         orchestrationDelivered: false,
         deviceInstructionsDelivered: false,
       });
@@ -131,6 +142,7 @@ export function t3ContextParts(input: T3PartInputs): T3Parts {
       interactionMode: input.interactionMode,
       hasT3Mcp: input.hasT3Mcp,
       hasDeviceTools: input.deviceTools,
+      hasQuestionTools: input.questionTools === true,
     },
   });
   return {

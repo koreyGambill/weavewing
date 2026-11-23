@@ -284,6 +284,7 @@ export function migrateWorkspace(old: typeof LegacyWorkspace.Type, now: string):
     threadId: old.threadId,
     revision: old.revision,
     items,
+    questions: [],
     artifacts: [
       ...artifacts,
       ...designs.map((row): ThreadArtifact => {

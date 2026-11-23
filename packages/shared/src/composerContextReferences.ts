@@ -9,6 +9,7 @@ import {
   type KnownComposerContextRecord,
   type ScopedThreadRef,
   type ThreadContextRecord,
+  THREAD_QUESTIONS_ARTIFACT_ID,
 } from "@t3tools/contracts";
 
 import { expandAssistantCitationsForProvider } from "./assistantCitations.ts";
@@ -333,6 +334,12 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
       return lines.join("\n");
     }
     case "artifact-answer":
+      if (record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID)
+        return [
+          `question ${record.questionId}: ${record.question}`,
+          `choice: ${record.choice}`,
+          `note: ${record.note}`,
+        ].join("\n");
       return [
         `artifactId: ${record.artifactId}`,
         `title: ${record.title}`,

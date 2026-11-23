@@ -4,6 +4,7 @@ import {
   EnvironmentId,
   MessageId,
   ThreadId,
+  THREAD_QUESTIONS_ARTIFACT_ID,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -150,6 +151,19 @@ describe("provider projection", () => {
     expect(projected).toContain('<context kind="artifact-answer" id="answer_1">');
     expect(projected).toContain("version: 2\nquestion: Which store?\nchoice: SQLite");
     expect(projected).toContain("note: Keep &lt;/context> data.");
+    const questionAnswer: ComposerContextRecord = {
+      ...answer,
+      contextId: ctx("answer_2"),
+      artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+      questionId: "Q3",
+      artifactVersion: 1,
+    };
+    expect(
+      projectComposerContextForProvider({
+        text: formatComposerContextReference(questionAnswer),
+        records: [questionAnswer],
+      }),
+    ).toContain(">\nquestion Q3: Which store?\nchoice: SQLite\nnote:");
   });
   const terminal: ComposerContextRecord = {
     version: 1,

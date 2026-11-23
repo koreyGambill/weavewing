@@ -9,6 +9,17 @@ import {
   MessageId,
   ComposerContextId,
   parseArtifactQuestions,
+  artifactAnswerFits,
+  artifactQuestionIsConsistent,
+  THREAD_QUESTIONS_ARTIFACT_ID,
+  type ArtifactAnswerContextRecord,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2ThreadQuestionSummary,
+  type ThreadQuestion,
+  type ThreadQuestionAskInput,
+  type ThreadQuestionDraftInput,
+  type ThreadQuestionSubmitInput,
+  type ThreadQuestionUpdateInput,
   type ThreadArtifactAnswerInput,
   type ThreadArtifactSubmitInput,
   listItemNeedsHandoff,
@@ -70,6 +81,22 @@ export class ThreadWorkspace extends Context.Service<
     readonly artifactRead: (
       input: ThreadArtifactReadInput,
     ) => Effect.Effect<ThreadArtifactVersion, ThreadWorkspaceError>;
+    /** Adds questions without blocking the asking turn; ids continue Q1, Q2, ... per thread. */
+    readonly questionAsk: (
+      input: ThreadQuestionAskInput,
+    ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+    /** Only the agent records an answer here; the user answers through drafts and submit. */
+    readonly questionUpdate: (
+      input: ThreadQuestionUpdateInput,
+      by: "user" | "agent",
+    ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+    readonly questionDraft: (
+      input: ThreadQuestionDraftInput,
+    ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
+    /** Answers every listed question in one user message, so they start one turn. */
+    readonly questionSubmit: (
+      input: ThreadQuestionSubmitInput,
+    ) => Effect.Effect<Workspace, ThreadWorkspaceError>;
     readonly artifactList: (input: ThreadWorkspaceGetInput) => Effect.Effect<
       ReadonlyArray<{
         id: string;
@@ -89,11 +116,36 @@ export const emptyWorkspace = (threadId: ThreadId): Workspace => ({
   revision: 0,
   items: [],
   artifacts: [],
+  questions: [],
   summaryNotes: "",
   childPreamble: "",
   updatedAt: null,
 });
 const invalid = (message: string) => new ThreadWorkspaceError({ code: "invalid", message });
+const missingQuestion = (id: string) =>
+  new ThreadWorkspaceError({ code: "not_found", message: `${id} does not exist in this thread.` });
+
+/** The first words of a question, for the thread list and an agent's turn context. */
+const questionTitle = (prompt: string): string => {
+  const words = prompt.replace(/\s+/g, " ").trim().split(" ");
+  const title = words.slice(0, 8).join(" ").slice(0, 80);
+  return title.length < prompt.trim().length ? `${title}…` : title;
+};
+const isWaiting = (question: ThreadQuestion) =>
+  question.state === "open" || question.state === "deferred";
+const waitingQuestions = (
+  workspace: Pick<Workspace, "questions">,
+): ReadonlyArray<OrchestrationV2ThreadQuestionSummary> =>
+  workspace.questions.flatMap((question) =>
+    question.state === "open" || question.state === "deferred"
+      ? [{ id: question.id, title: questionTitle(question.prompt), state: question.state }]
+      : [],
+  );
+const choiceLabels = (question: ThreadQuestion, chosenOptionIds: ReadonlyArray<string>) =>
+  question.options
+    .filter((option) => chosenOptionIds.includes(option.id))
+    .map((option) => option.label)
+    .join(", ");
 const storage = (cause: unknown) =>
   new ThreadWorkspaceError({
     code: "storage",
@@ -203,8 +255,37 @@ const make = Effect.gen(function* () {
       })),
     };
   });
+  // The thread mirrors waiting questions so the sidebar count needs no workspace reads. A failed
+  // dispatch leaves the mirror stale only until the next read of this workspace repairs it.
+  const syncQuestions = Effect.fn("ThreadWorkspace.syncQuestions")(function* (
+    mirrored: ReadonlyArray<OrchestrationV2ThreadQuestionSummary>,
+    workspace: Workspace,
+  ) {
+    const questions = waitingQuestions(workspace);
+    if (NodeUtil.isDeepStrictEqual(mirrored, questions)) return;
+    yield* orchestrator
+      .dispatch({
+        type: "thread.questions.sync",
+        commandId: CommandId.make(`questions-sync:${NodeCrypto.randomUUID()}`),
+        threadId: workspace.threadId,
+        questions: [...questions],
+      })
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not mirror thread questions; the next read retries.", {
+            threadId: workspace.threadId,
+            cause,
+          }),
+        ),
+      );
+  });
   const read = Effect.fn("ThreadWorkspace.read")(function* (threadId: ThreadId) {
-    yield* requireThread(threadId);
+    const thread: OrchestrationV2AppThread = yield* requireThread(threadId);
+    const workspace = yield* load(threadId);
+    yield* syncQuestions(thread.questions ?? [], workspace);
+    return workspace;
+  });
+  const load = Effect.fn("ThreadWorkspace.load")(function* (threadId: ThreadId) {
     const contents = yield* fs.readFileString(filePath(threadId)).pipe(
       Effect.catchIf(
         (e) => e.reason._tag === "NotFound",
@@ -399,6 +480,63 @@ const make = Effect.gen(function* () {
       else items[index] = item;
     }
     return items;
+  };
+  // The command and message ids hash the records, so a retry after a failed save replays the send.
+  const sendAnswers = Effect.fn("ThreadWorkspace.sendAnswers")(function* (
+    current: Workspace,
+    records: ReadonlyArray<ArtifactAnswerContextRecord>,
+    source: "artifact" | "questions",
+  ) {
+    const owner = yield* requireThread(current.threadId);
+    const serialized = yield* encodeSnapshot(records).pipe(Effect.mapError(storage));
+    const key = NodeCrypto.createHash("sha256")
+      .update(`${current.threadId}\n${current.revision}\n${serialized}`)
+      .digest("hex");
+    yield* threads
+      .sendToThread({
+        origin: { kind: "user" },
+        projectId: owner.projectId,
+        threadId: current.threadId,
+        commandId: CommandId.make(
+          `${source === "artifact" ? "artifact" : "questions"}-submit:${key}`,
+        ),
+        messageId: MessageId.make(`${source}:${key}`),
+        text: records
+          .map(
+            (record) =>
+              `[${record.label}](${formatComposerContextHref("artifact-answer", record.contextId)})`,
+          )
+          .join("\n\n"),
+        context: { version: 1, records: [...records] },
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new ThreadWorkspaceError({
+              code: "thread",
+              message: "Answers are saved; sending to chat failed. Retry sending.",
+              cause,
+            }),
+        ),
+      );
+  });
+  const commitQuestions = Effect.fn("ThreadWorkspace.commitQuestions")(function* (
+    current: Workspace,
+    questions: ReadonlyArray<ThreadQuestion>,
+  ) {
+    const next = yield* commit(current, { ...current, questions }, current.revision);
+    yield* syncQuestions(waitingQuestions(current), next);
+    return next;
+  });
+  const findQuestion = (workspace: Workspace, id: string) => {
+    const index = workspace.questions.findIndex((question) => question.id === id);
+    return index < 0
+      ? Effect.fail(missingQuestion(id))
+      : Effect.succeed({ index, question: workspace.questions[index]! });
   };
   const get = Effect.fn("ThreadWorkspace.get")(function* (input: ThreadWorkspaceGetInput) {
     return yield* enrich(yield* read(input.threadId));
@@ -644,40 +782,7 @@ const make = Effect.gen(function* () {
         });
       }
       if (!records.length) return current;
-      const owner = yield* requireThread(input.threadId);
-      const serialized = yield* encodeSnapshot(records).pipe(Effect.mapError(storage));
-      const key = NodeCrypto.createHash("sha256")
-        .update(`${input.threadId}\n${current.revision}\n${serialized}`)
-        .digest("hex");
-      yield* threads
-        .sendToThread({
-          origin: { kind: "user" },
-          projectId: owner.projectId,
-          threadId: input.threadId,
-          commandId: CommandId.make(`artifact-submit:${key}`),
-          messageId: MessageId.make(`artifact:${key}`),
-          text: records
-            .map(
-              (record) =>
-                `[${record.label}](${formatComposerContextHref("artifact-answer", record.contextId)})`,
-            )
-            .join("\n\n"),
-          context: { version: 1, records },
-          attachments: [],
-          mode: "queue",
-          createdBy: "user",
-          creationSource: "web",
-        })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new ThreadWorkspaceError({
-                code: "thread",
-                message: "Answers are saved; sending to chat failed. Retry sending.",
-                cause,
-              }),
-          ),
-        );
+      yield* sendAnswers(current, records, "artifact");
       const answers = { ...version.answers };
       for (const id of input.questionIds)
         answers[id] = { ...answers[id]!, submittedAt: answers[id]?.submittedAt ?? now };
@@ -697,6 +802,169 @@ const make = Effect.gen(function* () {
           ),
         },
         input.expectedRevision,
+      );
+    }, lock.withPermit),
+    questionAsk: Effect.fn("ThreadWorkspace.questionAsk")(function* (input) {
+      const current = yield* read(input.threadId);
+      const now = DateTime.formatIso(yield* DateTime.now);
+      const questions = [...current.questions];
+      for (const ask of input.questions) {
+        // Questions are never deleted, so a position-based id is never reused in a thread.
+        const question: ThreadQuestion = {
+          id: `Q${questions.length + 1}`,
+          prompt: ask.prompt,
+          ...(ask.details === undefined ? {} : { details: ask.details }),
+          options: (ask.options ?? []).map((option) => ({
+            id: option.id,
+            label: option.label,
+            description: option.description ?? "",
+          })),
+          recommendedOptionIds: ask.recommendedOptionIds ?? [],
+          multiSelect: ask.multiSelect ?? false,
+          state: "open",
+          createdAt: now,
+          closedAt: null,
+          answer: null,
+          answeredBy: null,
+          replacedBy: null,
+        };
+        if (!artifactQuestionIsConsistent(question))
+          return yield* invalid(
+            `Option ids and recommendations of "${questionTitle(ask.prompt)}" must match its options.`,
+          );
+        if (ask.replaces !== undefined) {
+          const { index, question: old } = yield* findQuestion(
+            { ...current, questions },
+            ask.replaces,
+          );
+          if (!isWaiting(old))
+            return yield* invalid(
+              `${old.id} is ${old.state}; only an open or deferred question can be replaced.`,
+            );
+          questions[index] = { ...old, state: "replaced", closedAt: now, replacedBy: question.id };
+        }
+        questions.push(question);
+      }
+      return yield* commitQuestions(current, questions);
+    }, lock.withPermit),
+    questionUpdate: Effect.fn("ThreadWorkspace.questionUpdate")(function* (input, by) {
+      const current = yield* read(input.threadId);
+      const { index, question } = yield* findQuestion(current, input.id);
+      const now = DateTime.formatIso(yield* DateTime.now);
+      let next: ThreadQuestion;
+      switch (input.state) {
+        case "open":
+          if (question.state === "open") return yield* invalid(`${question.id} is already open.`);
+          next = {
+            ...question,
+            state: "open",
+            closedAt: null,
+            answeredBy: null,
+            replacedBy: null,
+            answer: question.answer && { ...question.answer, submittedAt: null },
+          };
+          break;
+        case "deferred":
+          if (question.state !== "open")
+            return yield* invalid(
+              `${question.id} is ${question.state}; only an open question can be deferred.`,
+            );
+          next = { ...question, state: "deferred" };
+          break;
+        case "withdrawn":
+          if (!isWaiting(question))
+            return yield* invalid(`${question.id} is already ${question.state}.`);
+          next = { ...question, state: "withdrawn", closedAt: now };
+          break;
+        case "answered": {
+          if (!isWaiting(question))
+            return yield* invalid(`${question.id} is already ${question.state}.`);
+          if (by === "user") return yield* invalid("Submit answers so the agent receives them.");
+          const chosenOptionIds = input.answer?.chosenOptionIds ?? [];
+          const notes = input.answer?.notes ?? "";
+          if (!chosenOptionIds.length && !notes.trim())
+            return yield* invalid(`Record the answer to ${question.id} as you understood it.`);
+          if (!artifactAnswerFits(question, chosenOptionIds))
+            return yield* invalid(`Answer choices must be options of ${question.id}.`);
+          next = {
+            ...question,
+            state: "answered",
+            closedAt: now,
+            answeredBy: "agent",
+            answer: { chosenOptionIds, notes, submittedAt: now },
+          };
+          break;
+        }
+      }
+      const questions = [...current.questions];
+      questions[index] = next;
+      return yield* commitQuestions(current, questions);
+    }, lock.withPermit),
+    questionDraft: Effect.fn("ThreadWorkspace.questionDraft")(function* (input) {
+      const current = yield* read(input.threadId);
+      const questions = [...current.questions];
+      for (const [id, answer] of Object.entries(input.answers)) {
+        const { index, question } = yield* findQuestion(current, id);
+        if (!isWaiting(question))
+          return yield* invalid(`${id} is ${question.state}; reopen it to answer.`);
+        if (!artifactAnswerFits(question, answer.chosenOptionIds))
+          return yield* invalid(`Answer choices must be options of ${id}.`);
+        questions[index] = {
+          ...question,
+          answer: { ...answer, submittedAt: null, draftRevision: current.revision + 1 },
+        };
+      }
+      return yield* commitQuestions(current, questions);
+    }, lock.withPermit),
+    questionSubmit: Effect.fn("ThreadWorkspace.questionSubmit")(function* (input) {
+      const current = yield* read(input.threadId);
+      if (new Set(input.ids).size !== input.ids.length)
+        return yield* invalid("Choose each question once.");
+      const records: ArtifactAnswerContextRecord[] = [];
+      for (const id of input.ids) {
+        const { question } = yield* findQuestion(current, id);
+        const answer = question.answer;
+        if (!isWaiting(question)) return yield* invalid(`${id} is already ${question.state}.`);
+        if (!answer || (!answer.chosenOptionIds.length && !answer.notes.trim()))
+          return yield* invalid(`Choose an answer or add a note to ${id} before sending.`);
+        const title = `${question.id}: ${questionTitle(question.prompt)}`;
+        const key = NodeCrypto.createHash("sha256")
+          .update(
+            yield* encodeSnapshot([input.threadId, question, answer]).pipe(
+              Effect.mapError(storage),
+            ),
+          )
+          .digest("hex");
+        records.push({
+          contextId: ComposerContextId.make(`answer_${key}`),
+          kind: "artifact-answer",
+          label: sanitizeComposerContextLabel(title, "artifact-answer"),
+          artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+          questionId: question.id,
+          answerRevision: answer.draftRevision ?? 0,
+          title: title.slice(0, 200),
+          version: 1,
+          artifactVersion: 1,
+          question: question.prompt,
+          choice: choiceLabels(question, answer.chosenOptionIds),
+          note: answer.notes,
+        });
+      }
+      yield* sendAnswers(current, records, "questions");
+      const now = DateTime.formatIso(yield* DateTime.now);
+      return yield* commitQuestions(
+        current,
+        current.questions.map((question) =>
+          input.ids.includes(question.id) && question.answer
+            ? {
+                ...question,
+                state: "answered" as const,
+                closedAt: now,
+                answeredBy: "user" as const,
+                answer: { ...question.answer, submittedAt: now },
+              }
+            : question,
+        ),
       );
     }, lock.withPermit),
     artifactRead: Effect.fn("ThreadWorkspace.artifactRead")(function* (input) {

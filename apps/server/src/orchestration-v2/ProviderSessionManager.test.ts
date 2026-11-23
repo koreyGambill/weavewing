@@ -815,6 +815,7 @@ function runBrowserAccessScenario(input: {
   readonly deviceOverride?: boolean;
   readonly enableAgentDeviceAccess?: boolean;
   readonly enableDeviceSupport?: boolean;
+  readonly agentQuestionsEnabled?: boolean;
   readonly createThread?: boolean;
   readonly projectExists?: boolean;
   readonly delegatedBy?: ThreadId;
@@ -875,6 +876,9 @@ function runBrowserAccessScenario(input: {
             ...(input.enableDeviceSupport === undefined
               ? {}
               : { enableDeviceSupport: input.enableDeviceSupport }),
+            ...(input.agentQuestionsEnabled === undefined
+              ? {}
+              : { agentQuestionsEnabled: input.agentQuestionsEnabled }),
             projectSettingsOverrides: {
               [projectId]: {
                 enableAgentBrowserAccess: input.projectOverride,
@@ -5727,5 +5731,23 @@ it.effect("ProviderSessionManagerV2 gives a delegated child its project's device
       delegatedBy: ThreadId.make("thread-provider-session-manager-parent"),
     });
     assert.isTrue(child?.capabilities?.has("device"));
+  }),
+);
+
+it.effect.each([
+  { name: "a thread while the setting is on", enabled: true, child: false, granted: true },
+  { name: "a thread while the setting is off", enabled: false, child: false, granted: false },
+  { name: "a delegated child", enabled: true, child: true, granted: false },
+] as const)("ProviderSessionManagerV2 grants question tools to $name only when on", (input) =>
+  Effect.gen(function* () {
+    const config = yield* runBrowserAccessScenario({
+      enableAgentBrowserAccess: true,
+      projectOverride: true,
+      agentQuestionsEnabled: input.enabled,
+      ...(input.child
+        ? { delegatedBy: ThreadId.make("thread-provider-session-manager-parent") }
+        : {}),
+    });
+    assert.strictEqual(config?.capabilities?.has("questions"), input.granted);
   }),
 );

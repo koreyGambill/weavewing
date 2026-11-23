@@ -81,6 +81,9 @@ import {
   ThreadArtifactWriteInput,
   ThreadArtifactAnswerInput,
   ThreadArtifactSubmitInput,
+  ThreadQuestionDraftInput,
+  ThreadQuestionSubmitInput,
+  ThreadQuestionUpdateInput,
 } from "./threadWorkspace.ts";
 import {
   ReviewArtifact,
@@ -625,6 +628,9 @@ export const WS_METHODS = {
   threadArtifactWrite: "threadWorkspace.artifactWrite",
   threadArtifactAnswer: "threadWorkspace.artifactAnswer",
   threadArtifactSubmit: "threadWorkspace.artifactSubmit",
+  threadQuestionUpdate: "threadWorkspace.questionUpdate",
+  threadQuestionDraft: "threadWorkspace.questionDraft",
+  threadQuestionSubmit: "threadWorkspace.questionSubmit",
   reviewsCreate: "reviews.create",
   reviewsList: "reviews.list",
   reviewsGet: "reviews.get",
@@ -1861,6 +1867,21 @@ const WsThreadArtifactSubmitRpc = Rpc.make(WS_METHODS.threadArtifactSubmit, {
   success: ThreadWorkspace,
   error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
 });
+const WsThreadQuestionUpdateRpc = Rpc.make(WS_METHODS.threadQuestionUpdate, {
+  payload: ThreadQuestionUpdateInput,
+  success: ThreadWorkspace,
+  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
+});
+const WsThreadQuestionDraftRpc = Rpc.make(WS_METHODS.threadQuestionDraft, {
+  payload: ThreadQuestionDraftInput,
+  success: ThreadWorkspace,
+  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
+});
+const WsThreadQuestionSubmitRpc = Rpc.make(WS_METHODS.threadQuestionSubmit, {
+  payload: ThreadQuestionSubmitInput,
+  success: ThreadWorkspace,
+  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
+});
 
 const WsReviewsCreateRpc = Rpc.make(WS_METHODS.reviewsCreate, {
   payload: ReviewCreateInput,
@@ -2973,6 +2994,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadArtifactWriteRpc,
   WsThreadArtifactAnswerRpc,
   WsThreadArtifactSubmitRpc,
+  WsThreadQuestionUpdateRpc,
+  WsThreadQuestionDraftRpc,
+  WsThreadQuestionSubmitRpc,
   WsReviewsCreateRpc,
   WsReviewsListRpc,
   WsReviewsGetRpc,

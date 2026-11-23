@@ -57,6 +57,7 @@ import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
+import * as ThreadWorkspace from "../threadWorkspace/ThreadWorkspace.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -1938,7 +1939,10 @@ it.effect(
 it.effect("lists optional tools to a deferring client only after tool_search loads them", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const scopeFor = (token: string): McpInvocationContext.McpThreadInvocationScope => ({
+      const scopeFor = (
+        token: string,
+        capabilities: ReadonlyArray<McpInvocationContext.McpCapability> = ["orchestration"],
+      ): McpInvocationContext.McpThreadInvocationScope => ({
         environmentId,
         requestNamespace: token,
         thread: {
@@ -1947,12 +1951,13 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
           providerInstanceId: ProviderInstanceId.make("copilot"),
         },
         client: undefined,
-        capabilities: new Set(["orchestration"]),
+        capabilities: new Set(capabilities),
         issuedAt: 1,
       });
       const scopes = new Map([
         ["deferringToken", scopeFor("deferringToken")],
         ["otherToken", scopeFor("otherToken")],
+        ["askingToken", scopeFor("askingToken", ["orchestration", "questions"])],
       ]);
       const tool = (name: string, description: string) =>
         Tool.make(name, {
@@ -1978,6 +1983,7 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
             }),
           ),
           McpHttpServer.layerToolSearch,
+          McpHttpServer.layerQuestionToolkit.pipe(Layer.provide(ThreadWorkspace.layerTest)),
         ),
       ).pipe(
         Layer.provide(ServerSettings.layerTest()),
@@ -2042,6 +2048,10 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
               rpc("tools/call", { name, arguments: args }).pipe(
                 Effect.map((body) => (body as { result: { structuredContent?: unknown } }).result),
               ),
+            callError: (name: string, args: object) =>
+              rpc("tools/call", { name, arguments: args }).pipe(
+                Effect.map((body) => (body as { error?: unknown }).error),
+              ),
           };
         });
 
@@ -2057,6 +2067,32 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
       ).toEqual({ tools: [{ name: "preview_open", description: "Opens a browser preview." }] });
       expect(yield* deferring.listed).toEqual(["delegate_task", "preview_open", "tool_search"]);
       expect(yield* other.listed).toEqual(["delegate_task", "preview_open", "schedule_task"]);
+
+      // Question tools follow the session's `questions` capability, which the Labs setting grants.
+      expect(
+        (yield* deferring.call("tool_search", { query: "question_ask question_update" }))
+          .structuredContent,
+      ).toEqual({ tools: [] });
+      expect(yield* other.callError("question_ask", { questions: [{ prompt: "Ship?" }] })).toEqual(
+        expect.objectContaining({ code: expect.any(Number) }),
+      );
+      const asking = yield* session("askingToken", false);
+      expect(yield* asking.listed).toEqual([
+        "delegate_task",
+        "preview_open",
+        "question_ask",
+        "question_update",
+        "schedule_task",
+      ]);
+      const askingDeferred = yield* session("askingToken", true);
+      expect(
+        (
+          (yield* askingDeferred.call("tool_search", { query: "question_ask" }))
+            .structuredContent as {
+            tools: ReadonlyArray<{ name: string }>;
+          }
+        ).tools.map((found) => found.name),
+      ).toContain("question_ask");
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

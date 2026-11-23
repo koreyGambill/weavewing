@@ -58,6 +58,32 @@ export const T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH = deviceToolInstr
   ` Load them with ToolSearch \`select:${T3_CODE_DEVICE_TOOLS.map((tool) => `mcp__t3-code__${tool}`).join(",")}\`.`,
 );
 
+/** Guidance for sessions holding the `questions` capability, which the Labs setting grants. */
+export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
+
+- A decision that is the user's to make but that you can work around for now, such as by choosing a safe default, goes to \`question_ask\` once, never only into your reply. Ask as soon as you spot it, then keep working. A question you cannot continue without still uses your blocking question tool.
+- The user sees open questions in the thread, so never mention them in later replies unless the user's message is about one.
+- The user's messages list your open questions. When one answers a question, call \`question_update\` with \`answered\` and the answer as you understood it; when one makes a question moot, \`withdrawn\`.`;
+
+/** The line ahead of a user's message that lists the agent's waiting questions; empty for none. */
+export function t3OpenQuestionsContext(
+  questions: ReadonlyArray<{
+    readonly id: string;
+    readonly title: string;
+    readonly state: "open" | "deferred";
+  }>,
+): string {
+  if (questions.length === 0) return "";
+  const list = questions
+    .map((question) =>
+      question.state === "deferred"
+        ? `${question.id} ${question.title} (deferred)`
+        : `${question.id} ${question.title}`,
+    )
+    .join("; ");
+  return `Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: ${list}`;
+}
+
 // ACP only: some ACP agents accept the injected MCP server but never expose
 // its tools, so they need the terminal transport other harnesses never use.
 const T3_CODE_ACP_MCP_FALLBACK_INSTRUCTIONS = `ACP fallback: if the T3 tools are absent and \`T3_ACP_MCP_NODE\` is present, call them through the terminal: \`ELECTRON_RUN_AS_NODE=1 "$T3_ACP_MCP_NODE" \${T3_ACP_MCP_ENTRYPOINT:+"$T3_ACP_MCP_ENTRYPOINT"} acp-mcp-call orchestrator_capabilities '{}'\` (\`T3_ACP_MCP_ENTRYPOINT\` is unset for a standalone executable). Delegate with \`acp-mcp-call delegate_task '{"task":"...","target":{"providerInstanceId":"...","model":"..."},"mode":"async","clientRequestId":"..."}'\`.`;
@@ -74,6 +100,7 @@ export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasT3Mcp: boolean;
   readonly hasDeviceTools: boolean;
+  readonly hasQuestionTools?: boolean;
 }
 
 /** ACP lacks system/developer fields; inject context on first prompt and tool/mode changes. */
@@ -88,7 +115,8 @@ export function t3AcpPromptWithInstructions(input: {
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
     input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
-    input.previousState.hasDeviceTools === input.state.hasDeviceTools
+    input.previousState.hasDeviceTools === input.state.hasDeviceTools &&
+    input.previousState.hasQuestionTools === input.state.hasQuestionTools
   ) {
     return input.prompt;
   }
@@ -100,6 +128,7 @@ export function t3AcpPromptWithInstructions(input: {
       ? [
           T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(),
           ...(input.state.hasDeviceTools ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
+          ...(input.state.hasQuestionTools ? [T3_CODE_QUESTION_TOOL_INSTRUCTIONS] : []),
           T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
           T3_CODE_ACP_MCP_FALLBACK_INSTRUCTIONS,
         ]
@@ -113,10 +142,12 @@ export function t3AcpPromptWithInstructions(input: {
   );
 }
 
-const orchestrationInstructions = (hasDeviceTools: boolean) =>
-  hasDeviceTools
-    ? `${T3_CODE_ORCHESTRATION_INSTRUCTIONS}\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS}\n`
-    : T3_CODE_ORCHESTRATION_INSTRUCTIONS;
+const orchestrationInstructions = (hasDeviceTools: boolean, hasQuestionTools: boolean) =>
+  [
+    T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+    ...(hasDeviceTools ? [`${T3_CODE_DEVICE_TOOL_INSTRUCTIONS}\n`] : []),
+    ...(hasQuestionTools ? [`${T3_CODE_QUESTION_TOOL_INSTRUCTIONS}\n`] : []),
+  ].join("\n");
 
 function prependT3OrchestrationInstructions(
   prompt: string,
@@ -137,6 +168,7 @@ export function t3OrchestrationPrompt(input: {
   readonly origin?: TurnOrigin | undefined;
   readonly hasT3Mcp: boolean;
   readonly hasDeviceTools: boolean;
+  readonly hasQuestionTools?: boolean;
   readonly orchestrationDelivered: boolean;
   readonly deviceInstructionsDelivered: boolean;
 }): string {
@@ -144,7 +176,7 @@ export function t3OrchestrationPrompt(input: {
   if (!input.orchestrationDelivered) {
     return prependT3OrchestrationInstructions(
       input.prompt,
-      orchestrationInstructions(input.hasDeviceTools),
+      orchestrationInstructions(input.hasDeviceTools, input.hasQuestionTools === true),
       input.origin,
     );
   }
@@ -160,6 +192,7 @@ export function t3OrchestrationPrompt(input: {
 export function t3OrchestrationSystemPrompt(
   hasT3Mcp: boolean,
   hasDeviceTools: boolean,
+  hasQuestionTools = false,
 ): string | undefined {
-  return hasT3Mcp ? orchestrationInstructions(hasDeviceTools) : undefined;
+  return hasT3Mcp ? orchestrationInstructions(hasDeviceTools, hasQuestionTools) : undefined;
 }

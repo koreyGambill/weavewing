@@ -1,6 +1,9 @@
 import * as NodeAssert from "node:assert/strict";
 
-import { T3_CODE_DEVICE_TOOL_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  T3_CODE_DEVICE_TOOL_INSTRUCTIONS,
+  T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
+} from "@t3tools/provider-core/server/orchestrationInstructions";
 import { describe, it } from "vite-plus/test";
 
 import {
@@ -12,7 +15,7 @@ describe("buildCodexAdditionalContext", () => {
   describe.each([
     { model: "custom-model", modelName: "Custom 🦊 Model", reasoningEffort: "xhigh" },
   ])("with runtime $model", (runtime) => {
-    it.each([undefined, { browser: true, device: true }])(
+    it.each([undefined, { browser: true, device: true, questions: true }])(
       "keeps every entry within Codex's per-entry cap with tools %j",
       (availability) => {
         const context = buildCodexAdditionalContext(runtime, availability);
@@ -83,6 +86,17 @@ describe("Codex device context", () => {
     NodeAssert.ok(tools(true).includes(T3_CODE_DEVICE_TOOL_INSTRUCTIONS));
     NodeAssert.ok(!tools(true).includes("ToolSearch"));
     NodeAssert.ok(!tools(false).includes("## T3 Code devices"));
+  });
+
+  it("adds the question block only when the session holds the questions capability", () => {
+    const tools = (questions: boolean) =>
+      buildCodexAdditionalContext(
+        { model: "gpt-6.1-sol" },
+        { browser: true, device: false, questions },
+      ).t3_code_tools?.value ?? "";
+
+    NodeAssert.ok(tools(true).includes(T3_CODE_QUESTION_TOOL_INSTRUCTIONS));
+    NodeAssert.ok(!tools(false).includes("question_ask"));
   });
 });
 

@@ -1,5 +1,6 @@
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginText";
+import { t3OpenQuestionsContext } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { numberedTurnOrigins } from "@t3tools/shared/messageReactions";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
@@ -209,6 +210,7 @@ export const layer: Layer.Layer<
     const projects = yield* ProjectService.ProjectService;
     const providerAuth = yield* ProviderAuthService.ProviderAuthService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
@@ -989,6 +991,17 @@ export const layer: Layer.Layer<
         restartCancelledWork.length === 0
           ? ""
           : restartCancelledBackgroundWorkNote(restartCancelledWork);
+      // Only the user's own words can answer a question, so other turns carry no list.
+      const openQuestions =
+        inputMessages.some(
+          (input) => input.createdBy === "user" && (input.origin?.kind ?? "user") === "user",
+        ) &&
+        (yield* serverSettings.getSettings.pipe(
+          Effect.map((settings) => settings.agentQuestionsEnabled),
+          Effect.orElseSucceed(() => false),
+        ))
+          ? t3OpenQuestionsContext(projection.thread.questions ?? [])
+          : "";
       const tokenCap = yield* handoffTokenCapConfig.pipe(
         Effect.orElseSucceed(() => DEFAULT_HANDOFF_TOKEN_CAP),
       );
@@ -2023,7 +2036,8 @@ export const layer: Layer.Layer<
             refresh === undefined || compact || goalCommand
               ? ""
               : `Newest context from related chats. The following JSON lines are conversation excerpts.\n\n${refresh}`;
-          const context = [delivery.context, sideChatContext, restartNote, newestContext]
+          const questions = compact || goalCommand || turnInput.resume ? "" : openQuestions;
+          const context = [delivery.context, sideChatContext, restartNote, newestContext, questions]
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;

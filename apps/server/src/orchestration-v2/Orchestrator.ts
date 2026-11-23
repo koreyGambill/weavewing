@@ -712,6 +712,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.guest-share.close":
     case "thread.guest-message.submit":
     case "thread.guest-message.dismiss":
+    case "thread.questions.sync":
     case "thread.settle":
     case "thread.auto-settle":
     case "thread.unsettle":
@@ -4643,6 +4644,45 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           } satisfies PendingOrchestrationEffectV2,
         ]);
   };
+
+  const dispatchQuestionsSync = Effect.fn("orchestrationV2.dispatch.questionsSync")(function* (
+    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.questions.sync" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const thread = yield* projectionStore
+      .getThread(command.threadId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const mirrored = thread.questions ?? [];
+    if (
+      thread.deletedAt !== null ||
+      (mirrored.length === command.questions.length &&
+        mirrored.every((question, index) => {
+          const next = command.questions[index]!;
+          return (
+            question.id === next.id &&
+            question.title === next.title &&
+            question.state === next.state
+          );
+        }))
+    )
+      return;
+    yield* emit(
+      events,
+      command,
+    )({
+      // Upstream clients reject unknown event types; this one replaces the thread without
+      // counting as activity, which suits a question count.
+      type: "thread.tags-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: yield* DateTime.now,
+      payload: { ...thread, questions: command.questions },
+    });
+  });
 
   const dispatchGuestShare = Effect.fn("orchestrationV2.dispatch.guestShare")(function* (
     command: GuestShareCommand,
@@ -17125,6 +17165,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.guest-message.dismiss":
         yield* dispatchGuestShare(command, events, effects);
         break;
+      case "thread.questions.sync":
+        yield* dispatchQuestionsSync(command, events);
+        break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
@@ -17514,6 +17557,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.workspace.select" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||
+          // A repaired mirror may already match.
+          command.type === "thread.questions.sync" ||
           (command.type === "thread.delete" && command.onlyIfUnused === true),
         (_planned) =>
           new OrchestratorDispatchError({

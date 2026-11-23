@@ -108,6 +108,7 @@ describe("thread tool signals", () => {
     revision: 1,
     items,
     artifacts,
+    questions: [],
     summaryNotes: "",
     childPreamble: "",
     updatedAt: null,

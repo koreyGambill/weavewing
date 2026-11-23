@@ -23,6 +23,7 @@ export function LabsSettingsPanel() {
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
         <PromptSuggestionsRow />
+        <AgentQuestionsRow />
         <SimlockHostsRow />
         <FastWorktreeCheckoutRow />
       </SettingsSection>
@@ -159,6 +160,27 @@ function PromptSuggestionsRow() {
             updateSettings({ promptSuggestionsEnabled: Boolean(checked) })
           }
           aria-label="Suggest next prompt"
+        />
+      }
+    />
+  );
+}
+
+function AgentQuestionsRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("agent-questions-beta")}
+      settingKeys={["agentQuestionsEnabled"]}
+      description="Agents ask for the decisions they need as questions and keep working, and each thread counts the questions waiting on you. Agents already running follow a change after they restart."
+      control={
+        <ScopedSwitch
+          settingKeys={["agentQuestionsEnabled"]}
+          checked={settings.agentQuestionsEnabled}
+          onCheckedChange={(checked) => updateSettings({ agentQuestionsEnabled: Boolean(checked) })}
+          aria-label="Agent questions"
         />
       }
     />

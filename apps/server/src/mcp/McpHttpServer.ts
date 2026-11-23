@@ -94,6 +94,8 @@ import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { MessageToolkit } from "./toolkits/message/tools.ts";
 import * as MessageHandlers from "./toolkits/message/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import * as QuestionHandlers from "./toolkits/questions/handlers.ts";
+import { QuestionToolkit } from "./toolkits/questions/tools.ts";
 import * as ReviewHandlers from "./toolkits/reviews/handlers.ts";
 import { ReviewToolkit } from "./toolkits/reviews/tools.ts";
 import { MCP_HTTP_PATH } from "../httpCors.ts";
@@ -1269,6 +1271,19 @@ export const layerThreadToolkit = toolkitRegistration(ThreadToolkit, ThreadHandl
 
 export const layerReviewToolkit = toolkitRegistration(ReviewToolkit, ReviewHandlers.layer);
 
+// Untraced: it runs once per question tool on every list request.
+const questionToolsVisible = McpServer.visibility(
+  Effect.fnUntraced(function* () {
+    const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
+    return Option.isSome(scope) && scope.value.capabilities.has("questions");
+  }),
+);
+
+export const layerQuestionToolkit = toolkitRegistration(
+  QuestionToolkit,
+  QuestionHandlers.layer,
+).pipe(Layer.provide(questionToolsVisible.layer));
+
 const layerMessageToolkit = toolkitRegistration(MessageToolkit, MessageHandlers.layer);
 
 const layerWorktreeToolkitRegistration = toolkitRegistration(
@@ -1371,6 +1386,7 @@ export const layerTools = Layer.mergeAll(
   layerDeviceToolkit,
   layerHtmlToolkit,
   layerReviewToolkit,
+  layerQuestionToolkit,
   layerMessageToolkit,
 );
 

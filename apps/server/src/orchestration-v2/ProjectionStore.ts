@@ -1781,6 +1781,14 @@ function buildVisibleTurnItems(input: {
   );
 }
 
+// Absent until the thread's first question, like the mirror it counts.
+const openQuestionCount = (thread: Pick<OrchestrationV2AppThread, "questions">) =>
+  thread.questions === undefined
+    ? {}
+    : {
+        openQuestionCount: thread.questions.filter((question) => question.state === "open").length,
+      };
+
 function pendingRuntimeRequestSummary(
   request: OrchestrationV2ThreadProjection["runtimeRequests"][number] | null,
 ): OrchestrationV2PendingRuntimeRequestSummary | null {
@@ -1997,6 +2005,7 @@ export function threadShellFromProjection(
     ),
     pendingRuntimeRequest,
     pendingGuestMessageCount: pendingGuestMessageCount(projection.thread.guestShare),
+    ...openQuestionCount(projection.thread),
     // Thread detail owns message bodies. Keeping them out of shell rows makes
     // initial hydration and streaming updates independent of transcript size.
     latestVisibleMessage: null,
@@ -2334,6 +2343,7 @@ function shellFromState(input: {
     usageLimitResetAt: input.state.usageLimitResetAt,
     pendingRuntimeRequest: input.state.pendingRuntimeRequest,
     pendingGuestMessageCount: pendingGuestMessageCount(input.state.thread.guestShare),
+    ...openQuestionCount(input.state.thread),
     latestVisibleMessage: null,
     latestUserMessageAt: input.state.latestUserMessageAt,
     latestUserAuthoredMessageAt: input.state.latestUserAuthoredMessageAt,

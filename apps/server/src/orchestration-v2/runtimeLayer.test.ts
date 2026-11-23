@@ -3739,8 +3739,32 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           step,
         );
       }
+      assert.isUndefined(shellOf(yield* orchestrator.getShellSnapshot()).openQuestionCount);
+      for (const [step, states, expected] of [
+        ["ask", ["open", "open"], 2],
+        ["defer", ["deferred", "open"], 1],
+        ["repeat", ["deferred", "open"], 1],
+        ["reopen", ["open", "open"], 2],
+        ["close", [], 0],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: "thread.questions.sync",
+          commandId: CommandId.make(`runtime-layer-lifecycle-questions-${step}`),
+          threadId,
+          questions: states.map((state, index) => ({
+            id: `Q${index + 1}`,
+            title: "Which database?",
+            state,
+          })),
+        });
+        assert.strictEqual(
+          shellOf(yield* orchestrator.getShellSnapshot()).openQuestionCount,
+          expected,
+          step,
+        );
+      }
       const taggedShell = shellOf(yield* orchestrator.getShellSnapshot());
-      // Tags and sidebar groups are not activity, so the thread keeps its place in thread lists.
+      // Tags, sidebar groups and question counts are not activity, so the thread keeps its place.
       assert.equal(
         DateTime.toEpochMillis(taggedShell.updatedAt),
         DateTime.toEpochMillis(untaggedShell.updatedAt),

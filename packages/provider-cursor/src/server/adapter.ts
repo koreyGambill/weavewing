@@ -2613,6 +2613,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
           mcpServers: Record<string, McpServerConfig> | undefined,
           hasDeviceTools: boolean,
+          hasQuestionTools: boolean,
           delivered: { readonly orchestration: boolean; readonly device: boolean },
           interrupted: string | undefined,
         ) {
@@ -2633,6 +2634,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
             }),
             hasT3Mcp: mcpServers !== undefined,
             hasDeviceTools,
+            hasQuestionTools,
             orchestrationDelivered: delivered.orchestration,
             deviceInstructionsDelivered: delivered.device,
           });
@@ -2746,6 +2748,8 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                       turnInput,
                       mcpServers,
                       hasDeviceTools,
+                      mcpServers !== undefined &&
+                        mcpSession?.capabilities?.has("questions") === true,
                       delivered,
                       dropped?.text,
                     );

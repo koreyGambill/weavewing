@@ -101,11 +101,12 @@ const normalize = (target: string) => {
 const layerWorktreeLocation = (
   worktreesDir = managedWorktreesDir,
   worktreeProvider: "t3" | "xwing" | "off" = "t3",
+  agentQuestionsEnabled = false,
 ) =>
   Layer.mergeAll(
     Path.layer,
     Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as ServerConfig.ServerConfig["Service"]),
-    ServerSettings.layerTest({ worktreeProvider }),
+    ServerSettings.layerTest({ worktreeProvider, agentQuestionsEnabled }),
   );
 
 function startWithMissingWorktree(
@@ -448,6 +449,8 @@ it.each([
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  readonly questions?: OrchestrationV2ThreadProjection["thread"]["questions"];
+  readonly agentQuestionsEnabled?: boolean;
   readonly sideChatRefresh?: string;
   readonly origin?: TurnOrigin;
   readonly discovery?: Discovery.DevelopmentEnvironmentDiscovery["Service"];
@@ -578,6 +581,7 @@ function makeLocalCommandHarness(input: {
       worktreePath: input.worktreePath ?? null,
       forkedFrom: null,
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+      ...(input.questions === undefined ? {} : { questions: input.questions }),
     } as OrchestrationV2ThreadProjection["thread"],
     runs: [
       ...(input.previousNativeSession
@@ -1341,7 +1345,7 @@ function makeLocalCommandHarness(input: {
         }),
         IdAllocator.layer,
         Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),
-        layerWorktreeLocation(input.worktreesDir),
+        layerWorktreeLocation(input.worktreesDir, "t3", input.agentQuestionsEnabled),
         input.fileSystem === undefined
           ? FileSystem.layerNoop({ exists: () => Effect.succeed(true) })
           : Layer.succeed(FileSystem.FileSystem, input.fileSystem),
@@ -2312,6 +2316,40 @@ effectIt.effect("includes a persisted newest-context snapshot in the provider in
     expect(text).toContain("Pinned at submit");
     expect(text).toMatch(/User message:\nMy own prompt$/);
     expect(text).not.toContain("SIDE_CHAT_CONTEXT");
+  }),
+);
+
+effectIt.effect.each([
+  { name: "a user message", enabled: true, expected: true },
+  { name: "a user message while the setting is off", enabled: false, expected: false },
+  {
+    name: "a scheduled task",
+    enabled: true,
+    expected: false,
+    origin: { kind: "scheduled-task", title: "Nightly" },
+  },
+] as const)("lists open questions ahead of $name only when the user spoke", (input) =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "My own prompt",
+      sideChat: { contextRun: "delivered" },
+      agentQuestionsEnabled: input.enabled,
+      questions: [
+        { id: "Q1", title: "Which database?", state: "open" },
+        { id: "Q2", title: "Flag name?", state: "deferred" },
+      ],
+      ...("origin" in input ? { origin: input.origin } : {}),
+    });
+    yield* harness.start;
+    const text = harness.startTurn.mock.calls[0]?.[0].message.text ?? "";
+    if (input.expected)
+      expect(text).toBe(
+        withInlineContext(
+          "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q2 Flag name? (deferred)",
+          "My own prompt",
+        ),
+      );
+    else expect(text).not.toContain("open questions");
   }),
 );
 

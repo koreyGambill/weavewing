@@ -207,6 +207,7 @@ const make = Effect.gen(function* () {
       hasT3Mcp: true,
       browserTools: session?.browserToolsAvailable ?? true,
       deviceTools: session?.capabilities?.has("device") ?? false,
+      questionTools: session?.capabilities?.has("questions") ?? false,
     });
     const addParts = (
       group: { delivery: DefaultContextItem["delivery"]; source: string },

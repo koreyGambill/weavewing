@@ -26,6 +26,31 @@ export type ArtifactAnswer = typeof ArtifactAnswer.Type;
 
 const decodeQuestion = Schema.decodeUnknownSync(ArtifactQuestion);
 
+/** Option ids are unique and recommendations name options, at most one for a single choice. */
+export function artifactQuestionIsConsistent(
+  question: Pick<ArtifactQuestion, "options" | "recommendedOptionIds" | "multiSelect">,
+): boolean {
+  const options = new Set(question.options.map((option) => option.id));
+  return (
+    options.size === question.options.length &&
+    new Set(question.recommendedOptionIds).size === question.recommendedOptionIds.length &&
+    question.recommendedOptionIds.every((id) => options.has(id)) &&
+    (question.multiSelect || question.recommendedOptionIds.length <= 1)
+  );
+}
+
+/** The chosen ids are distinct options of the question, at most one for a single choice. */
+export function artifactAnswerFits(
+  question: Pick<ArtifactQuestion, "options" | "multiSelect">,
+  chosenOptionIds: ReadonlyArray<string>,
+): boolean {
+  return (
+    new Set(chosenOptionIds).size === chosenOptionIds.length &&
+    (question.multiSelect || chosenOptionIds.length <= 1) &&
+    chosenOptionIds.every((choice) => question.options.some((option) => option.id === choice))
+  );
+}
+
 /** Reads validated question blocks embedded in Markdown documents. */
 export function parseArtifactQuestions(content: string): readonly ArtifactQuestion[] {
   const questions = [
@@ -33,14 +58,7 @@ export function parseArtifactQuestions(content: string): readonly ArtifactQuesti
   ].map((match) => decodeQuestion(JSON.parse(match[1]!)));
   const ids = new Set<string>();
   for (const question of questions) {
-    const options = new Set(question.options.map((option) => option.id));
-    if (
-      ids.has(question.id) ||
-      options.size !== question.options.length ||
-      new Set(question.recommendedOptionIds).size !== question.recommendedOptionIds.length ||
-      question.recommendedOptionIds.some((id) => !options.has(id)) ||
-      (!question.multiSelect && question.recommendedOptionIds.length > 1)
-    )
+    if (ids.has(question.id) || !artifactQuestionIsConsistent(question))
       throw new Error("Question ids, options and recommendations must be consistent.");
     ids.add(question.id);
   }

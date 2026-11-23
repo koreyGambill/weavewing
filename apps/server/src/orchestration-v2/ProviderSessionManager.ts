@@ -453,6 +453,13 @@ export const layerWithOptions = (
             Effect.map((settings) => settings.promptSuggestionsEnabled),
             Effect.orElseSucceed(() => false),
           );
+      // Labs flag, read when a credential is issued, so a session's tools and instructions agree.
+      const agentQuestionsEnabled = Option.isNone(serverSettings)
+        ? Effect.succeed(false)
+        : serverSettings.value.getSettings.pipe(
+            Effect.map((settings) => settings.agentQuestionsEnabled),
+            Effect.orElseSucceed(() => false),
+          );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -578,6 +585,9 @@ export const layerWithOptions = (
                   Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
                   Effect.orElseSucceed(() => false),
                 );
+                // A delegated child reports to its parent instead of asking the user.
+                const questionTools = !subagent && (yield* agentQuestionsEnabled);
+                if (questionTools) capabilities.add("questions");
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before async validation so release cannot revoke between validation and reservation.
@@ -599,6 +609,7 @@ export const layerWithOptions = (
                     resolved.thread.providerInstanceId === providerInstanceId &&
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    resolved.capabilities.has("questions") === questionTools &&
                     // A credential issued while the lineage read failed is replaced once it works.
                     (resolved.thread.subagent === true) === subagent
                   ) {
