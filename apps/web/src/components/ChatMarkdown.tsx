@@ -152,7 +152,7 @@ import { hostEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { cn } from "../lib/utils";
 import { resolveRemoteOpenState, useRemoteOpenResolution } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
-import { readThreadShell, useProjects, useThreadShell } from "../state/entities";
+import { readThreadShell, useProjects } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
 import { assetEnvironment } from "../state/assets";
@@ -651,16 +651,8 @@ function useChatMarkdownState({
   } = useAtomValue(markdownServerConfigFieldsAtom(environmentId));
   const projects = useProjects();
   const canReadFiles = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
-  const threadShell = useThreadShell(threadRef ?? null);
-  // Files usually sit in the checkout at `cwd`; any other repository is read when a row is chosen.
-  const forgePreflight = fileLinkPreflight({
-    canReadFiles,
-    identity: projects.find(
-      (project) =>
-        project.environmentId === environmentId &&
-        (project.workspaceRoot === cwd || project.id === threadShell?.projectId),
-    )?.repositoryIdentity,
-  });
+  // A linked file can sit in any repository, so its forge is known only once a row is chosen.
+  const forgePreflight = fileLinkPreflight({ canReadFiles, identity: undefined });
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
   const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors, cwd);

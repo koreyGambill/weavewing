@@ -267,6 +267,8 @@ it.layer(layer)("SourceControlFileLinks", (it) => {
       // The forge spelling for recognition, still fetching from the local remote.
       yield* git(clone, ["remote", "set-url", "origin", "git@github.com:acme/app.git"]);
       yield* git(clone, ["config", `url.file://${bare}.insteadOf`, "git@github.com:acme/app.git"]);
+      // Outranks `protocol.allow=never`, so only the environment's allowlist keeps it closed.
+      yield* git(clone, ["config", "protocol.file.allow", "always"]);
       yield* fileSystem.makeDirectory(path.join(clone, "src"));
       yield* fileSystem.writeFileString(path.join(clone, "src", "a.ts"), "a\n");
       const before = yield* objectCount(clone);

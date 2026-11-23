@@ -21,6 +21,18 @@ describe("localRealPath", () => {
     );
   });
 
+  it.skipIf(NodePath.sep !== "/")(
+    "keeps a backslash as a filename character on POSIX",
+    async () => {
+      await using root = await NodeFSP.mkdtempDisposable(
+        NodePath.join(NodeOS.tmpdir(), "t3-real-"),
+      );
+      const file = NodePath.join(await NodeFSP.realpath(root.path), "docs\\name.md");
+      await NodeFSP.writeFile(file, "doc\n");
+      expect(await localRealPath(file)).toBe(file);
+    },
+  );
+
   it("checks a link target's components the same way", async () => {
     await using root = await NodeFSP.mkdtempDisposable(NodePath.join(NodeOS.tmpdir(), "t3-real-"));
     await NodeFSP.symlink("//fileserver/share", NodePath.join(root.path, "share"));

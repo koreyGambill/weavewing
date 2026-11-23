@@ -55,6 +55,8 @@ const make = Effect.gen(function* () {
   const env = {
     ...unsetInheritedRepositoryEnv(process.env, yield* HostProcess.Platform),
     GIT_NO_LAZY_FETCH: "1",
+    // An empty allowlist overrides any `protocol.<name>.allow`, which `protocol.allow` does not.
+    GIT_ALLOW_PROTOCOL: "",
   };
 
   /**

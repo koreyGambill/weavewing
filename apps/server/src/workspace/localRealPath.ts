@@ -19,7 +19,8 @@ export async function localRealPath(absolutePath: string): Promise<string | null
     const root = NodePath.parse(target).root;
     const parts = target
       .slice(root.length)
-      .split(/[\\/]+/u)
+      // A `\` is a filename character on POSIX; resolve already turned `/` into `\` on Windows.
+      .split(NodePath.sep)
       .filter((part) => part !== "");
     let resolved = root;
     let link: string | null = null;
