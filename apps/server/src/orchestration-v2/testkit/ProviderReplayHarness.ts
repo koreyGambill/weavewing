@@ -456,6 +456,8 @@ export function layerWithRegistry<Error>(
         layerRuntime,
         layerServerConfig,
         layerServerSettings,
+        // The same store the session manager fills, so turn start sees each session's capabilities.
+        McpProviderSessions.layer,
       ),
     ),
   );

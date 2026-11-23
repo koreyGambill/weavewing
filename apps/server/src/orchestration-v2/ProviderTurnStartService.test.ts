@@ -59,6 +59,8 @@ import { layerRealGit } from "./ProviderTurnStartService.testkit.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import type { McpProviderSessionConfig } from "@t3tools/provider-core/server/mcpSession";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import { withInlineContext } from "./ContextHandoffDelivery.ts";
 import * as EventSink from "./EventSink.ts";
@@ -101,12 +103,11 @@ const normalize = (target: string) => {
 const layerWorktreeLocation = (
   worktreesDir = managedWorktreesDir,
   worktreeProvider: "t3" | "xwing" | "off" = "t3",
-  agentQuestionsEnabled = false,
 ) =>
   Layer.mergeAll(
     Path.layer,
     Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as ServerConfig.ServerConfig["Service"]),
-    ServerSettings.layerTest({ worktreeProvider, agentQuestionsEnabled }),
+    ServerSettings.layerTest({ worktreeProvider }),
   );
 
 function startWithMissingWorktree(
@@ -182,6 +183,7 @@ function startWithMissingWorktree(
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(McpProviderSessions.McpProviderSessions)({ read: () => Effect.undefined }),
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
         }),
@@ -450,7 +452,8 @@ it.each([
 function makeLocalCommandHarness(input: {
   readonly text: string;
   readonly questions?: OrchestrationV2ThreadProjection["thread"]["questions"];
-  readonly agentQuestionsEnabled?: boolean;
+  /** The thread's MCP session holds the `questions` capability. */
+  readonly questionTools?: boolean;
   readonly sideChatRefresh?: string;
   readonly origin?: TurnOrigin;
   readonly discovery?: Discovery.DevelopmentEnvironmentDiscovery["Service"];
@@ -1304,6 +1307,16 @@ function makeLocalCommandHarness(input: {
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(McpProviderSessions.McpProviderSessions)({
+          read: () =>
+            Effect.succeed(
+              input.questionTools === true
+                ? ({
+                    capabilities: new Set(["questions"]),
+                  } as Partial<McpProviderSessionConfig> as McpProviderSessionConfig)
+                : undefined,
+            ),
+        }),
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:test")),
         }),
@@ -1345,7 +1358,7 @@ function makeLocalCommandHarness(input: {
         }),
         IdAllocator.layer,
         Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),
-        layerWorktreeLocation(input.worktreesDir, "t3", input.agentQuestionsEnabled),
+        layerWorktreeLocation(input.worktreesDir),
         input.fileSystem === undefined
           ? FileSystem.layerNoop({ exists: () => Effect.succeed(true) })
           : Layer.succeed(FileSystem.FileSystem, input.fileSystem),
@@ -2321,7 +2334,11 @@ effectIt.effect("includes a persisted newest-context snapshot in the provider in
 
 effectIt.effect.each([
   { name: "a user message", enabled: true, expected: true },
-  { name: "a user message while the setting is off", enabled: false, expected: false },
+  {
+    name: "a user message in a session without the questions capability",
+    enabled: false,
+    expected: false,
+  },
   {
     name: "a scheduled task",
     enabled: true,
@@ -2333,7 +2350,7 @@ effectIt.effect.each([
     const harness = makeLocalCommandHarness({
       text: "My own prompt",
       sideChat: { contextRun: "delivered" },
-      agentQuestionsEnabled: input.enabled,
+      questionTools: input.enabled,
       questions: [
         { id: "Q1", title: "Which database?", state: "open" },
         { id: "Q2", title: "Flag name?", state: "deferred" },

@@ -45,6 +45,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as DevelopmentEnvironmentDiscovery from "../developmentEnvironments/DevelopmentEnvironmentDiscovery.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { makeRestoreMissingWorktree } from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
@@ -188,6 +189,7 @@ export const layer: Layer.Layer<
   | Path.Path
   | ServerConfig.ServerConfig
   | ServerSettings.ServerSettingsService
+  | McpProviderSessions.McpProviderSessions
   | GitWorkflowService.GitWorkflowService
   | ProjectService.ProjectService
   | ProviderAuthService.ProviderAuthService
@@ -210,7 +212,7 @@ export const layer: Layer.Layer<
     const projects = yield* ProjectService.ProjectService;
     const providerAuth = yield* ProviderAuthService.ProviderAuthService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
-    const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
@@ -991,15 +993,13 @@ export const layer: Layer.Layer<
         restartCancelledWork.length === 0
           ? ""
           : restartCancelledBackgroundWorkNote(restartCancelledWork);
-      // Only the user's own words can answer a question, so other turns carry no list.
+      // Only the user's own words can answer a question, so other turns carry no list. The
+      // session's capability gates it, as it gates the tools and instructions the line refers to.
       const openQuestions =
         inputMessages.some(
           (input) => input.createdBy === "user" && (input.origin?.kind ?? "user") === "user",
         ) &&
-        (yield* serverSettings.getSettings.pipe(
-          Effect.map((settings) => settings.agentQuestionsEnabled),
-          Effect.orElseSucceed(() => false),
-        ))
+        (yield* mcpSessions.read(projection.thread.id))?.capabilities?.has("questions") === true
           ? t3OpenQuestionsContext(projection.thread.questions ?? [])
           : "";
       const tokenCap = yield* handoffTokenCapConfig.pipe(
