@@ -62,12 +62,7 @@ export function TimelineMinimap({
   const activeItem = resolveTimelineMinimapPreview(
     resolvedActiveIndex === null ? null : (items[resolvedActiveIndex] ?? null),
   );
-  const activeMarks = [
-    activeItem?.branchOrigin ? "Side chat branch" : null,
-    activeItem?.followUp ? "Follow up" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const activeMarks = activeItem?.branchOrigin ? "Side chat branch" : "";
   const navigationInteractive =
     resolveTimelineMinimapNavigationInteractive(hitStripWidth) && !passThrough;
   const activeTopPercent =
@@ -205,13 +200,11 @@ export function TimelineMinimap({
                   aria-hidden="true"
                   className={cn(
                     "pointer-events-none absolute left-0 h-0.5 w-6 origin-left -translate-y-1/2 rounded-full transition-transform duration-150 after:absolute after:inset-0 after:rounded-full after:opacity-0 after:transition-opacity after:duration-150 data-[in-view=true]:after:opacity-100",
-                    item.followUp
-                      ? "bg-warning/80 after:bg-warning"
-                      : item.branchOrigin
-                        ? "bg-info/80 after:bg-info"
-                        : activeDistance === 0
-                          ? "bg-muted-foreground/60 after:bg-foreground/55"
-                          : "bg-muted-foreground/25 after:bg-foreground/55",
+                    item.branchOrigin
+                      ? "bg-info/80 after:bg-info"
+                      : activeDistance === 0
+                        ? "bg-muted-foreground/60 after:bg-foreground/55"
+                        : "bg-muted-foreground/25 after:bg-foreground/55",
                     activeDistance === 0
                       ? "scale-x-100"
                       : activeDistance === 1
@@ -232,11 +225,7 @@ export function TimelineMinimap({
                     }
                   }}
                   style={{ top }}
-                >
-                  {item.followUp && item.branchOrigin ? (
-                    <span className="absolute inset-x-0 top-1 h-0.5 rounded-full bg-info" />
-                  ) : null}
-                </span>
+                />
               );
             })}
             {activeItem ? (

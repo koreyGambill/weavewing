@@ -18,7 +18,6 @@ export interface TimelineMinimapItem {
   readonly branchOrigin?: boolean | undefined;
   readonly sideChat?: true;
   readonly revealMessageId?: MessageId;
-  readonly followUp?: boolean | undefined;
 }
 
 export interface InlineSideChatMarker {
@@ -120,6 +119,25 @@ export function mergeUnloadedUserTurns(
     })),
     ...loaded,
   ];
+}
+
+/**
+ * When each minimap item's turn started, or null when unknown. A module function, not a closure
+ * in the timeline's render, so the render's context does not keep its rows alive.
+ */
+export function timelineMinimapItemTimes(
+  items: ReadonlyArray<TimelineMinimapItem>,
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  userTurns: ReadonlyArray<ThreadUserTurn> | undefined,
+): ReadonlyArray<number | null> {
+  return items.map((item) => {
+    const createdAt =
+      item.rowIndex >= 0
+        ? rows[item.rowIndex]?.createdAt
+        : userTurns?.find((turn) => turn.messageId === (item.revealMessageId ?? item.id))
+            ?.createdAt;
+    return createdAt ? Date.parse(createdAt) : null;
+  });
 }
 
 function resolveFinalAssistantTextForTurn(

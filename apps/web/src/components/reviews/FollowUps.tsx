@@ -3,17 +3,17 @@ import {
   AuthOrchestrationReadScope,
   type EnvironmentId,
   type MessageFollowUp,
+  type MessageFollowUpUpdateInput,
   type MessageId,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { FlagIcon, MoreHorizontalIcon } from "lucide-react";
+import { BookmarkIcon, MoreHorizontalIcon } from "lucide-react";
 import { AsyncResult } from "effect/reactivity";
-import { useRef } from "react";
+import { Fragment, useRef, useState } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { messageRevealNavigation } from "../../lib/assistantCitationNavigation";
 import { cn } from "../../lib/utils";
 import {
   messageFollowUpsList,
@@ -21,20 +21,38 @@ import {
   useMessageFollowUpUpdate,
 } from "../../state/messageFollowUps";
 import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
+import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Empty, EmptyDescription, EmptyMedia } from "../ui/empty";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
+import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  bookmarkKey,
+  bookmarkMenuActions,
+  bookmarkNavigation,
+  bookmarkUpdate,
+  isBookmarkTodo,
+  isOpenBookmarkTodo,
+} from "./bookmarks.logic";
 
 function useFollowUpsAtom(environmentId: EnvironmentId | null, threadId?: ThreadId) {
   const readable = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   return environmentId && readable
     ? messageFollowUpsList({
         environmentId,
-        input: threadId === undefined ? {} : { threadId },
+        input: threadId === undefined ? { all: true } : { threadId },
       })
     : null;
 }
@@ -43,11 +61,11 @@ function useFollowUps(environmentId: EnvironmentId | null, threadId?: ThreadId) 
   return useEnvironmentQuery(useFollowUpsAtom(environmentId, threadId));
 }
 
-const NO_FOLLOW_UPS: ReadonlyArray<MessageFollowUp> = [];
+const NO_BOOKMARKS: ReadonlyArray<MessageFollowUp> = [];
 const followUpsOf = (result: AsyncResult.AsyncResult<ReadonlyArray<MessageFollowUp>, unknown>) =>
-  AsyncResult.getOrElse(result, () => NO_FOLLOW_UPS);
+  AsyncResult.getOrElse(result, () => NO_BOOKMARKS);
 
-/** One thread's follow-ups, for per-message lookups that render on every timeline row. */
+/** One thread's bookmarks, for per-message lookups that render on every timeline row. */
 export function useThreadFollowUpList(threadRef: ScopedThreadRef | null) {
   return useEnvironmentQuerySelector(
     useFollowUpsAtom(threadRef?.environmentId ?? null, threadRef?.threadId),
@@ -55,66 +73,159 @@ export function useThreadFollowUpList(threadRef: ScopedThreadRef | null) {
   );
 }
 
-/** Open follow-ups of one thread, for the Todos strip badge. */
+/** Open bookmark to-dos of one thread, for the Todos strip badge. */
 export function useOpenFollowUpCount(threadRef: ScopedThreadRef | null) {
-  return useThreadFollowUpList(threadRef).filter((item) => item.doneAt === null).length;
+  return useThreadFollowUpList(threadRef).filter(isOpenBookmarkTodo).length;
 }
 
-export function useMessageFollowUp(threadRef: ScopedThreadRef | null, messageId: MessageId) {
-  return useThreadFollowUpList(threadRef).find((item) => item.messageId === messageId) ?? null;
+/** Every bookmark on one message: the whole message and its passages. */
+export function useMessageBookmarks(threadRef: ScopedThreadRef | null, messageId: MessageId) {
+  return useThreadFollowUpList(threadRef).filter((item) => item.messageId === messageId);
 }
 
-/** Message action row toggle; the user's own reminder, never shown to agents. */
-export function MessageFollowUpButton({
-  threadRef,
-  messageId,
-  followUp,
-}: {
-  threadRef: ScopedThreadRef;
-  messageId: MessageId;
-  followUp: MessageFollowUp | null;
-}) {
-  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId));
-  const update = useMessageFollowUpUpdate();
-  if (!canWrite) return null;
-  const label = followUp ? "Remove follow-up" : "Follow up later";
+/** Whether the server takes plain bookmarks, assistant messages and passages. */
+export function useMessageBookmarksSupported(environmentId: EnvironmentId | null) {
+  const configs = useServerConfigs();
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost-muted"
-            aria-label={label}
-            aria-pressed={followUp !== null}
-            onClick={() =>
-              void update(threadRef.environmentId, {
-                threadId: threadRef.threadId,
-                messageId,
-                action: followUp ? "unflag" : "flag",
-              })
-            }
-          />
-        }
-      >
-        <FlagIcon className={cn("size-3", followUp && "fill-current text-warning")} />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{label}</TooltipPopup>
-    </Tooltip>
+    environmentId !== null &&
+    configs.get(environmentId)?.environment.capabilities.messageBookmarks === true
   );
 }
 
-/** Stays visible beside a flagged message while its action row is hidden. */
-export function MessageFollowUpGlyph({ followUp }: { followUp: MessageFollowUp }) {
+function BookmarkMenuItems({
+  environmentId,
+  bookmark,
+}: {
+  environmentId: EnvironmentId;
+  bookmark: MessageFollowUp;
+}) {
+  const update = useMessageFollowUpUpdate();
+  return bookmarkMenuActions(bookmark).map(({ label, action }) => (
+    <MenuItem
+      key={action}
+      onClick={() => void update(environmentId, bookmarkUpdate(bookmark, action))}
+    >
+      {label}
+    </MenuItem>
+  ));
+}
+
+/** Message action row menu for the whole-message bookmark; never shown to agents. */
+export function MessageFollowUpButton({
+  threadRef,
+  messageId,
+  bookmarks,
+}: {
+  threadRef: ScopedThreadRef;
+  messageId: MessageId;
+  bookmarks: ReadonlyArray<MessageFollowUp>;
+}) {
+  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId));
+  const supported = useMessageBookmarksSupported(threadRef.environmentId);
+  const update = useMessageFollowUpUpdate();
+  if (!canWrite) return null;
+  const whole = bookmarks.find((item) => item.anchor === undefined) ?? null;
+  const flag = (todo: boolean) =>
+    void update(threadRef.environmentId, {
+      threadId: threadRef.threadId,
+      messageId,
+      action: "flag",
+      todo,
+    });
+  const label = whole ? "Bookmarked" : "Bookmark";
   return (
-    <FlagIcon
-      aria-label={followUp.doneAt ? "Followed up" : "Flagged to follow up"}
-      className={cn(
-        "absolute -start-5 top-3.5 size-3",
-        followUp.doneAt ? "text-muted-foreground/60" : "fill-current text-warning",
-      )}
-    />
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost-muted"
+                  aria-label={label}
+                  aria-pressed={whole !== null}
+                />
+              }
+            />
+          }
+        >
+          <BookmarkIcon className={cn("size-3", whole && "fill-current text-warning")} />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+      <MenuPopup align="end">
+        {whole ? (
+          <BookmarkMenuItems environmentId={threadRef.environmentId} bookmark={whole} />
+        ) : (
+          <>
+            {supported ? <MenuItem onClick={() => flag(false)}>Bookmark</MenuItem> : null}
+            <MenuItem onClick={() => flag(true)}>Bookmark as to-do</MenuItem>
+          </>
+        )}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/**
+ * Stays beside a bookmarked message while its action row is hidden, and opens the menu of each
+ * of the message's bookmarks.
+ */
+export function MessageBookmarkMarker({
+  threadRef,
+  bookmarks,
+  className,
+}: {
+  threadRef: ScopedThreadRef;
+  bookmarks: ReadonlyArray<MessageFollowUp>;
+  className?: string;
+}) {
+  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId));
+  if (bookmarks.length === 0) return null;
+  const doneOnly = bookmarks.every((item) => isBookmarkTodo(item) && item.doneAt !== null);
+  const label = bookmarks.length === 1 ? "Bookmark" : `${bookmarks.length} bookmarks`;
+  return (
+    <Menu>
+      <MenuTrigger
+        disabled={!canWrite}
+        render={
+          <button
+            type="button"
+            aria-label={`${label} actions`}
+            className={cn(
+              "absolute -start-5 top-3.5 inline-flex cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default",
+              className,
+            )}
+          />
+        }
+      >
+        <BookmarkIcon
+          aria-hidden
+          className={cn(
+            "size-3",
+            doneOnly ? "text-muted-foreground/60" : "fill-current text-warning",
+          )}
+        />
+      </MenuTrigger>
+      <MenuPopup align="start">
+        {bookmarks.map((item, index) => (
+          <Fragment key={bookmarkKey(item)}>
+            {index > 0 ? <MenuSeparator /> : null}
+            <MenuGroup>
+              <MenuGroupLabel>
+                <span className="block max-w-64 truncate">
+                  {item.anchor === undefined ? "Whole message" : `“${item.excerpt}”`}
+                  {isBookmarkTodo(item) ? (item.doneAt ? " · done" : " · to-do") : ""}
+                </span>
+              </MenuGroupLabel>
+              <BookmarkMenuItems environmentId={threadRef.environmentId} bookmark={item} />
+            </MenuGroup>
+          </Fragment>
+        ))}
+      </MenuPopup>
+    </Menu>
   );
 }
 
@@ -151,36 +262,40 @@ function FollowUpRow({
   const nowMinute = useNowMinute();
   const rowRef = useRef<HTMLDivElement>(null);
   const focusAfterMenu = useRef<HTMLElement | null>(null);
+  const todo = isBookmarkTodo(item);
   const done = item.doneAt !== null;
   const text = item.excerpt || "Message without text";
   const elapsed = formatElapsedDurationLabel(item.flaggedAt, Date.parse(`${nowMinute}:00.000Z`));
-  const change = (action: "done" | "reopen" | "unflag") =>
-    void update(environmentId, { threadId: item.threadId, messageId: item.messageId, action });
-  const jump = () =>
-    void navigate(messageRevealNavigation(environmentId, item.threadId, item.messageId));
+  const change = (action: MessageFollowUpUpdateInput["action"]) =>
+    void update(environmentId, bookmarkUpdate(item, action));
+  const jump = () => void navigate(bookmarkNavigation(environmentId, item));
   return (
     <div
       ref={rowRef}
       role="listitem"
       className="flex min-w-0 items-start gap-1.5 rounded-md py-1 pr-0.5 hover:bg-muted/40"
     >
-      <Checkbox
-        className="mt-0.5"
-        aria-label={done ? `Reopen ${text}` : `Mark followed up: ${text}`}
-        checked={done}
-        disabled={!canWrite}
-        onCheckedChange={() => {
-          if (!done && hidesDone) focusAfterRow(rowRef.current)?.focus();
-          change(done ? "reopen" : "done");
-        }}
-      />
+      {todo ? (
+        <Checkbox
+          className="mt-0.5"
+          aria-label={done ? `Reopen ${text}` : `Mark done: ${text}`}
+          checked={done}
+          disabled={!canWrite}
+          onCheckedChange={() => {
+            if (!done && hidesDone) focusAfterRow(rowRef.current)?.focus();
+            change(done ? "reopen" : "done");
+          }}
+        />
+      ) : (
+        <BookmarkIcon aria-hidden className="mt-1 size-3 shrink-0 fill-current text-warning" />
+      )}
       <button
         type="button"
         className={cn(
           "line-clamp-2 min-w-0 flex-1 text-left leading-5 wrap-anywhere hover:underline",
           done && "text-muted-foreground line-through",
         )}
-        aria-label={`Jump to message: ${text}`}
+        aria-label={`Jump to bookmark: ${text}`}
         onClick={jump}
       >
         {text}
@@ -203,16 +318,20 @@ function FollowUpRow({
               return next ?? true;
             }}
           >
-            <MenuItem onClick={jump}>Jump to message</MenuItem>
-            <MenuItem
-              disabled={!canWrite}
-              onClick={() => {
-                focusAfterMenu.current = focusAfterRow(rowRef.current);
-                change("unflag");
-              }}
-            >
-              Remove flag
-            </MenuItem>
+            <MenuItem onClick={jump}>Jump to bookmark</MenuItem>
+            {bookmarkMenuActions(item).map(({ label, action }) => (
+              <MenuItem
+                key={action}
+                disabled={!canWrite}
+                onClick={() => {
+                  const leaves = action === "unflag" || (hidesDone && action === "done");
+                  if (leaves) focusAfterMenu.current = focusAfterRow(rowRef.current);
+                  change(action);
+                }}
+              >
+                {label}
+              </MenuItem>
+            ))}
           </MenuPopup>
         </Menu>
       </div>
@@ -220,9 +339,11 @@ function FollowUpRow({
   );
 }
 
+type BookmarkFilter = "all" | "todo" | "done";
+
 /**
- * With a thread, its follow-ups above the todo tree, absent while it has none. Without one, the
- * environment's open follow-ups grouped by thread.
+ * With a thread, its open bookmark to-dos above the todo tree, absent while it has none. Without
+ * one, every bookmark on the environment grouped by thread, filtered to to-dos when asked.
  */
 export function FollowUpSection({
   environmentId,
@@ -235,35 +356,70 @@ export function FollowUpSection({
 }) {
   const query = useFollowUps(environmentId, threadId);
   const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
+  const [filter, setFilter] = useState<BookmarkFilter>("all");
   if (query.error) return <p role="alert">{query.error}</p>;
-  const items = query.data?.filter((item) => showDone || item.doneAt === null) ?? [];
+  const scoped = threadId !== undefined;
+  const items =
+    query.data?.filter((item) =>
+      scoped
+        ? isBookmarkTodo(item) && (showDone || item.doneAt === null)
+        : filter === "all"
+          ? true
+          : isBookmarkTodo(item) && (filter === "done") === (item.doneAt !== null),
+    ) ?? [];
+  const filterControl = scoped ? null : (
+    <ToggleGroup
+      aria-label="Filter bookmarks"
+      size="segmented-compact"
+      className="w-full *:flex-1"
+      value={[filter]}
+      onValueChange={(value) => {
+        const next = value[0];
+        if (next === "all" || next === "todo" || next === "done") setFilter(next);
+      }}
+    >
+      <ToggleGroupItem value="all">All</ToggleGroupItem>
+      <ToggleGroupItem value="todo">To-do</ToggleGroupItem>
+      <ToggleGroupItem value="done">Done</ToggleGroupItem>
+    </ToggleGroup>
+  );
   if (!items.length)
-    return threadId === undefined && query.data ? (
-      <Empty size="compact">
-        <EmptyMedia variant="icon">
-          <FlagIcon />
-        </EmptyMedia>
-        <EmptyDescription>
-          No follow-ups. Flag a message you send to come back to it later.
-        </EmptyDescription>
-      </Empty>
+    return !scoped && query.data ? (
+      <div className="space-y-2">
+        {filterControl}
+        <Empty size="compact">
+          <EmptyMedia variant="icon">
+            <BookmarkIcon />
+          </EmptyMedia>
+          <EmptyDescription>
+            {filter === "all"
+              ? "No bookmarks. Bookmark a message or a passage to come back to it later."
+              : filter === "todo"
+                ? "No open bookmark to-dos."
+                : "No done bookmark to-dos."}
+          </EmptyDescription>
+        </Empty>
+      </div>
     ) : null;
   const groups = new Map<ThreadId, MessageFollowUp[]>();
   for (const item of items) groups.set(item.threadId, [...(groups.get(item.threadId) ?? []), item]);
   return (
     <section
       data-follow-ups
-      aria-label="Follow-ups"
+      aria-label={scoped ? "Bookmarked" : "Bookmarks"}
       className="space-y-1 border-b border-border/60 pb-2"
     >
       <h3 className="flex items-center gap-1.5 px-0.5 text-3xs font-medium tracking-wide text-muted-foreground uppercase">
-        <FlagIcon aria-hidden className="size-3" />
-        Follow up
-        <span className="tabular-nums">{items.filter((item) => item.doneAt === null).length}</span>
+        <BookmarkIcon aria-hidden className="size-3" />
+        {scoped ? "Bookmarked" : "Bookmarks"}
+        <span className="tabular-nums">
+          {scoped ? items.filter((item) => item.doneAt === null).length : items.length}
+        </span>
       </h3>
+      {filterControl}
       {[...groups].map(([groupThreadId, group]) => (
         <div key={groupThreadId} className="space-y-0.5">
-          {threadId === undefined ? (
+          {scoped ? null : (
             <Link
               to="/$environmentId/$threadId"
               params={{ environmentId, threadId: groupThreadId }}
@@ -271,14 +427,14 @@ export function FollowUpSection({
             >
               {group[0]!.threadTitle || "Untitled thread"}
             </Link>
-          ) : null}
+          )}
           <div role="list">
             {group.map((item) => (
               <FollowUpRow
-                key={item.messageId}
+                key={bookmarkKey(item)}
                 environmentId={environmentId}
                 item={item}
-                hidesDone={!showDone}
+                hidesDone={scoped ? !showDone : filter !== "all"}
                 canWrite={canWrite}
               />
             ))}

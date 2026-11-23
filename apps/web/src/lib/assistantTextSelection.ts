@@ -230,7 +230,10 @@ export function captureAssistantTextSelection(
   const first = selectedTextBoundary(range, range.commonAncestorContainer, false);
   const last = selectedTextBoundary(range, range.commonAncestorContainer, true);
   if (first === null || last === null) return null;
-  const source = first.parentElement?.closest<HTMLElement>("[data-assistant-citation-source]");
+  // User messages are not quotable but can be bookmarked, so they are sources too.
+  const source = first.parentElement?.closest<HTMLElement>(
+    "[data-assistant-citation-source], [data-bookmark-source]",
+  );
   if (!source || !viewport.contains(source)) return null;
 
   // Paragraph selection can end at the next block's offset 0 or a parent

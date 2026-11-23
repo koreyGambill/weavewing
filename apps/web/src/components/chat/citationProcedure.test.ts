@@ -57,20 +57,16 @@ describe("loadCitedHistory", () => {
     });
   });
 
-  it("rejects a citation that names a user message, unless a follow-up reveals it", async () => {
-    const history = scriptedHistory([{ message: "user", hasMoreHistory: false }]);
-    await expect(history.run()).resolves.toMatchObject({
+  it("finds user messages, which bookmarks quote, and rejects other items", async () => {
+    await expect(
+      scriptedHistory([{ message: "user", hasMoreHistory: false }]).run(),
+    ).resolves.toEqual({ _tag: "found" });
+    await expect(
+      scriptedHistory([{ message: "other", hasMoreHistory: false }]).run(),
+    ).resolves.toMatchObject({
       _tag: "failed",
       title: "The citation does not refer to an assistant response",
     });
-    await expect(
-      loadCitedHistory({
-        signal: new AbortController().signal,
-        readThread: async () => ({ message: "user", hasMoreHistory: false }),
-        loadThrough: async () => ({ _tag: "noop" }),
-        revealsUser: true,
-      }),
-    ).resolves.toEqual({ _tag: "found" });
   });
 
   it("stops on a failed page", async () => {
@@ -206,21 +202,14 @@ describe("resolveCitationPhase", () => {
     ).toEqual({ _tag: "ready", rowId: messageId });
   });
 
-  it("fails for a citation that names a user message", () => {
-    const userEntry: TimelineEntry = {
-      ...entry,
-      message: { ...entry.message, role: "user" },
-    } as TimelineEntry;
-    expect(phase({ entries: [userEntry] })).toEqual({ _tag: "failed" });
-    expect(
-      resolveCitationPhase({
-        history: { _tag: "loading" },
-        messageId,
-        entries: [userEntry],
-        rows: [row],
-        revealsUser: true,
-      }),
-    ).toEqual({ _tag: "ready", rowId: "cited-row" });
+  it("reveals a quoted user message and fails for a system message", () => {
+    const withRole = (role: "user" | "system") =>
+      ({ ...entry, message: { ...entry.message, role } }) as TimelineEntry;
+    expect(phase({ entries: [withRole("system")] })).toEqual({ _tag: "failed" });
+    expect(phase({ entries: [withRole("user")], rows: [row] })).toEqual({
+      _tag: "ready",
+      rowId: "cited-row",
+    });
   });
 
   it("fails when the history procedure failed", () => {

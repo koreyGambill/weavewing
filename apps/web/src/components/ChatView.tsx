@@ -83,6 +83,7 @@ import {
   isProviderNativeSubagentThread,
   isStableForkRun,
   type EnvironmentId,
+  type MessageFollowUp,
   type MessageId,
   type RunId,
   type ModelSelection,
@@ -321,6 +322,12 @@ import {
   RevertConfirmHost,
 } from "./chat/ChatOverlayHosts";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
+import { bookmarkInPlaceNavigation } from "./reviews/bookmarks.logic";
+import {
+  hasThreadBookmarks,
+  selectionBookmarkToggle,
+  stepThreadBookmark,
+} from "./chat/threadBookmarkActions";
 import { useCitedHistory } from "./chat/citationProcedure";
 import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
@@ -333,7 +340,6 @@ import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
 import { InlineSideChat } from "./chat/InlineSideChat";
 import { useSideChatSource } from "./chat/useSideChatSource";
-import { useThreadFollowUpList } from "./reviews/FollowUps";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -1694,8 +1700,6 @@ export default function ChatView(props: ChatViewProps) {
     canOperateThread &&
     serverConfig?.environment.capabilities.sideChatContextRefresh === true &&
     (activeThread?.lineage.sideChat === true || sideChatShells.length > 0);
-  const followUps = useThreadFollowUpList(isServerThread ? displayedThreadRef : null);
-  const followUpMessageIds = new Set(followUps.map((item) => item.messageId));
   const branchRunIds = new Set(
     sideChatShells.flatMap((shell) =>
       shell.lineage.sideChatAnchor === undefined &&
@@ -1731,6 +1735,11 @@ export default function ChatView(props: ChatViewProps) {
           input: { threadId: userTurnsRef.threadId },
         }),
   ).data?.turns;
+  // Stable, so the timeline's cached rail never holds an earlier render and its thread structures.
+  const revealBookmark = useStableCallback((bookmark: MessageFollowUp) => {
+    if (displayedThreadRef === null) return;
+    void navigate(bookmarkInPlaceNavigation(displayedThreadRef.environmentId, bookmark));
+  });
   const revealUserTurn = (messageId: MessageId) => {
     if (userTurnsRef === null) return;
     const { hash, state } = messageRevealNavigation(
@@ -2799,6 +2808,13 @@ export default function ChatView(props: ChatViewProps) {
     }
   });
 
+  const stepBookmark = (event: KeyboardEvent, direction: "next" | "previous") => {
+    const threadKey = displayedThreadRef === null ? null : scopedThreadKey(displayedThreadRef);
+    if (threadKey === null || !hasThreadBookmarks(threadKey)) return false;
+    if (event.repeat) return;
+    const step = stepThreadBookmark(threadKey, direction);
+    if (step) void navigate(bookmarkInPlaceNavigation(step.environmentId, step.bookmark));
+  };
   useChatShortcuts({
     enabled: activeThreadId !== null && !backgroundThread,
     embedded,
@@ -2820,6 +2836,13 @@ export default function ChatView(props: ChatViewProps) {
       ...threadLifecycleShortcuts,
       "thread.copyReference": ({ event }) => {
         if (!event.repeat) copyActiveThreadReference();
+      },
+      "chat.nextBookmark": ({ event }) => stepBookmark(event, "next"),
+      "chat.previousBookmark": ({ event }) => stepBookmark(event, "previous"),
+      "chat.bookmarkSelection": ({ event }) => {
+        const toggle = selectionBookmarkToggle();
+        if (!toggle) return false;
+        if (!event.repeat) toggle();
       },
       "chat.find": ({ event }) => {
         if (event.target instanceof Element && event.target.closest("[data-file-find-scope]"))
@@ -3742,7 +3765,6 @@ export default function ChatView(props: ChatViewProps) {
                 }
                 branchOriginMessageIds={branchOriginMessageIds}
                 inlineSideChatMarkers={inlineSideChatMarkers}
-                followUpMessageIds={followUpMessageIds}
                 onReplyToResponse={replyToResponseStable}
                 {...(isServerThread &&
                 canOperateThread &&
@@ -3838,6 +3860,7 @@ export default function ChatView(props: ChatViewProps) {
                   ? {}
                   : { historyControls: threadHistoryControls })}
                 {...(userTurns === undefined ? {} : { userTurns, onRevealMessage: revealUserTurn })}
+                {...(isServerThread ? { onRevealBookmark: revealBookmark } : {})}
               />
             </WorkspaceMutationIdContext>
 

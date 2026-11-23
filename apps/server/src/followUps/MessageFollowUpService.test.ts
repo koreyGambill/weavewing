@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { MessageId, ThreadId } from "@t3tools/contracts";
+import { MessageId, ThreadId, type SideChatAnchor } from "@t3tools/contracts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -8,7 +9,10 @@ import * as TestClock from "effect/testing/TestClock";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Service from "./MessageFollowUpService.ts";
 
-const testLayer = Service.layer.pipe(Layer.provideMerge(Sqlite.layerMemory));
+const testLayer = Service.layer.pipe(
+  Layer.provideMerge(Sqlite.layerMemory),
+  Layer.provide(SecureRandom.layerWebCrypto),
+);
 
 const seed = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -31,7 +35,12 @@ const seed = Effect.gen(function* () {
 const update = (
   threadId: string,
   messageId: string,
-  action: "flag" | "unflag" | "done" | "reopen",
+  action: "flag" | "unflag" | "done" | "reopen" | "todo" | "untodo",
+  target: {
+    readonly bookmarkId?: string;
+    readonly anchor?: SideChatAnchor;
+    readonly todo?: boolean;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const service = yield* Service.MessageFollowUpService;
@@ -39,12 +48,24 @@ const update = (
       threadId: ThreadId.make(threadId),
       messageId: MessageId.make(messageId),
       action,
+      ...target,
     });
   });
-const list = (threadId?: string) =>
+const passage = (messageId: string, start: number, text: string): SideChatAnchor => ({
+  messageId: MessageId.make(messageId),
+  text,
+  start,
+  end: start + text.length,
+  prefix: "",
+  suffix: "",
+});
+const list = (threadId?: string, all?: boolean) =>
   Effect.gen(function* () {
     const service = yield* Service.MessageFollowUpService;
-    return yield* service.list(threadId === undefined ? {} : { threadId: ThreadId.make(threadId) });
+    return yield* service.list({
+      ...(threadId === undefined ? {} : { threadId: ThreadId.make(threadId) }),
+      ...(all === undefined ? {} : { all }),
+    });
   });
 
 it.effect("flags with a server-side excerpt and walks every reverse state", () =>
@@ -99,12 +120,78 @@ it.effect("refuses messages outside the thread, other authors' messages and unfl
       ["t2", "m1", "flag"],
       ["t1", "missing", "flag"],
       ["t1", "s1", "flag"],
-      ["t1", "m2", "flag"],
       ["t1", "m1", "done"],
       ["t1", "m1", "reopen"],
     ] as const) {
       const error = yield* Effect.flip(update(threadId, messageId, action));
       assert.strictEqual(error.code, "not_found");
     }
+    const elsewhere = yield* Effect.flip(
+      update("t1", "m1", "flag", { anchor: passage("m2", 0, "Yes") }),
+    );
+    assert.strictEqual(elsewhere.code, "not_found");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("bookmarks whole replies and several passages, each removable on its own", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const reply = yield* update("t1", "m2", "flag");
+    assert.strictEqual(reply?.role, "assistant");
+    assert.isUndefined(reply?.anchor);
+    assert.strictEqual(reply?.messageCreatedAt, "2026-01-01T00:00:00.000Z");
+
+    const first = yield* update("t1", "m1", "flag", { anchor: passage("m1", 4, "pin chats") });
+    const second = yield* update("t1", "m1", "flag", { anchor: passage("m1", 0, "can") });
+    assert.strictEqual(first?.role, "user");
+    assert.strictEqual(first?.excerpt, "pin chats");
+    assert.deepStrictEqual(first?.anchor, passage("m1", 4, "pin chats"));
+    assert.strictEqual(
+      (yield* update("t1", "m1", "flag", { anchor: passage("m1", 4, "pin chats") }))?.id,
+      first?.id,
+    );
+    // A passage is not the whole prompt, so the prompt can still be bookmarked by itself.
+    const whole = yield* update("t1", "m1", "flag");
+    assert.isUndefined(whole?.anchor);
+    assert.strictEqual((yield* list("t1")).length, 4);
+
+    const done = yield* update("t1", "m1", "done", { bookmarkId: first!.id! });
+    assert.strictEqual(done?.id, first?.id);
+    assert.isNotNull(done?.doneAt);
+    assert.isNull((yield* list("t1")).find((item) => item.id === whole?.id)?.doneAt);
+
+    assert.isNull(yield* update("t1", "m1", "unflag", { bookmarkId: first!.id! }));
+    assert.deepStrictEqual(
+      (yield* list("t1")).map((item) => item.id).toSorted(),
+      [reply!.id, second!.id, whole!.id].toSorted(),
+    );
+    const other = yield* Effect.flip(update("t2", "m1", "done", { bookmarkId: second!.id! }));
+    assert.strictEqual(other.code, "not_found");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("keeps plain bookmarks out of to-do states until marked as a to-do", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const plain = yield* update("t1", "m2", "flag", { todo: false });
+    assert.isFalse(plain?.todo);
+    // Clients before bookmarks send no `todo`, and their follow-ups were to-dos.
+    assert.isTrue((yield* update("t2", "m3", "flag"))?.todo);
+    const target = { bookmarkId: plain!.id! };
+    assert.strictEqual((yield* Effect.flip(update("t1", "m2", "done", target))).code, "not_found");
+    assert.deepStrictEqual(
+      (yield* list()).map((item) => item.messageId),
+      ["m3"],
+    );
+    assert.deepStrictEqual(
+      (yield* list(undefined, true)).map((item) => item.messageId).toSorted(),
+      ["m2", "m3"],
+    );
+
+    assert.isTrue((yield* update("t1", "m2", "todo", target))?.todo);
+    assert.isNotNull((yield* update("t1", "m2", "done", target))?.doneAt);
+    const untodo = yield* update("t1", "m2", "untodo", target);
+    assert.isFalse(untodo?.todo);
+    assert.isNull(untodo?.doneAt);
   }).pipe(Effect.provide(testLayer)),
 );

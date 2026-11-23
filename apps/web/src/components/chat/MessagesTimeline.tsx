@@ -13,10 +13,12 @@ import {
   deriveTimelineMinimapItems,
   insertInlineSideChatMinimapItems,
   mergeUnloadedUserTurns,
+  timelineMinimapItemTimes,
   type InlineSideChatMarker,
 } from "./timelineMinimapItems";
 import {
   type AssistantCitation,
+  type MessageFollowUp,
   type SideChatAnchor,
   type EnvironmentId,
   MessageId,
@@ -83,7 +85,7 @@ import {
 } from "./timelineScrollAnchoring";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import { isMessageReveal, type AssistantCitationRequest } from "./AssistantCitationSource";
+import { type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget } from "./useAssistantCitationTarget";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { resolveCitationPhase, type CitedHistory } from "./citationProcedure";
@@ -113,6 +115,9 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import { TimelineMinimap } from "./TimelineMinimap";
+import { BookmarkRail } from "./BookmarkRail";
+import { orderBookmarks } from "../reviews/bookmarks.logic";
+import { useMessageBookmarksSupported, useThreadFollowUpList } from "../reviews/FollowUps";
 import {
   type TimelineRowSharedState,
   type TimelineRowActivityState,
@@ -244,7 +249,6 @@ interface MessagesTimelineProps {
   inlineBranchHeader?: ReactNode;
   branchOriginMessageIds?: ReadonlySet<string> | undefined;
   inlineSideChatMarkers?: ReadonlyArray<InlineSideChatMarker>;
-  followUpMessageIds?: ReadonlySet<string> | undefined;
   onCiteAssistantText?: (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
@@ -356,6 +360,8 @@ interface MessagesTimelineProps {
   /** The user's own turns from the server, so the turn rail reaches past the loaded rows. */
   userTurns?: ReadonlyArray<ThreadUserTurn>;
   onRevealMessage?: (messageId: MessageId) => void;
+  /** Unset hides the bookmark rail, as in the guest view. */
+  onRevealBookmark?: ((bookmark: MessageFollowUp) => void) | undefined;
   findExpanded?: boolean;
   findQuery?: string;
   activeFindMatch?: ThreadFindMatch | null;
@@ -390,7 +396,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   inlineBranchHeader,
   branchOriginMessageIds,
   inlineSideChatMarkers,
-  followUpMessageIds,
   onReplyToResponse,
   isWorking,
   runlessWorkActive = false,
@@ -467,6 +472,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   historyControls,
   userTurns,
   onRevealMessage,
+  onRevealBookmark,
 }: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   // Snapshot restore positions on identity changes; ongoing scroll writes must not move them.
@@ -784,7 +790,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ? timelineEntries.find(
           (entry) =>
             (entry.kind === "message" &&
-              (entry.message.role === "assistant" || isMessageReveal(citationRequest.citation)) &&
+              entry.message.role !== "system" &&
               entry.message.id === citationRequest.citation.messageId) ||
             (entry.kind === "sent-message" && entry.id === citationRequest.citation.messageId),
         )
@@ -880,15 +886,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rows,
     inlineSideChatMarkers,
   );
-  const markedMinimapItems =
-    branchOriginMessageIds?.size || followUpMessageIds?.size
-      ? minimapItems.map((item) => ({
-          ...item,
-          branchOrigin: item.branchOrigin || branchOriginMessageIds?.has(item.id),
-          followUp: followUpMessageIds?.has(item.id),
-        }))
-      : minimapItems;
+  const markedMinimapItems = branchOriginMessageIds?.size
+    ? minimapItems.map((item) => ({
+        ...item,
+        branchOrigin: item.branchOrigin || branchOriginMessageIds.has(item.id),
+      }))
+    : minimapItems;
   const minimapRowIndices = minimapItems.map((item) => item.rowIndex);
+  const bookmarksSupported = useMessageBookmarksSupported(citationThreadRef?.environmentId ?? null);
+  const railBookmarks = orderBookmarks(
+    useThreadFollowUpList(
+      onRevealBookmark && bookmarksSupported && !inFlow ? citationThreadRef : null,
+    ),
+  );
+  const minimapTurnTimes = timelineMinimapItemTimes(markedMinimapItems, rows, userTurns);
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false
       ? rows.findIndex((row) => row.id === rememberedPosition.rowId)
@@ -956,7 +967,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ? resolveCitationPhase({
           history: citationHistory,
           messageId: citationRequest.citation.messageId,
-          revealsUser: isMessageReveal(citationRequest.citation),
           entries: timelineEntries,
           rows,
         })
@@ -1652,6 +1662,18 @@ const ConversationTimeline = memo(function ConversationTimeline({
                     });
                   }}
                 />
+                {onRevealBookmark && citationThreadRef && railBookmarks.length > 0 ? (
+                  <BookmarkRail
+                    threadKey={routeThreadKey}
+                    environmentId={citationThreadRef.environmentId}
+                    bookmarks={railBookmarks}
+                    turnTimes={minimapTurnTimes}
+                    onJump={(bookmark) => {
+                      navigateTimeline();
+                      onRevealBookmark(bookmark);
+                    }}
+                  />
+                ) : null}
               </>
             )}
           </TooltipScrollDismissArea>

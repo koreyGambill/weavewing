@@ -2,6 +2,8 @@ import { DraftProjectPicker } from "./chat/DraftProjectPicker";
 import { openDraftProjectPicker } from "~/draftProjectPicker";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { lastFocusedTerminalFind } from "~/lib/terminalFocus";
+import { hasThreadBookmarks, stepThreadBookmark } from "./chat/threadBookmarkActions";
+import { bookmarkInPlaceNavigation } from "./reviews/bookmarks.logic";
 import { useToolSidebarStore } from "../toolSidebarStore";
 import { useInboxEnvironments } from "../state/inbox";
 import { useThreadContextSidebarStore } from "../threadContextSidebarStore";
@@ -68,6 +70,7 @@ import {
   ArrowLeftIcon,
   BellIcon,
   BoxesIcon,
+  BookmarkIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckCheckIcon,
@@ -1307,6 +1310,23 @@ function OpenCommandPaletteDialog(props: {
         openThreadFind(activeThreadKey);
       },
     });
+  }
+
+  if (activeThreadKey !== null && hasThreadBookmarks(activeThreadKey)) {
+    for (const direction of ["next", "previous"] as const) {
+      actionItems.push({
+        kind: "action",
+        value: `bookmark-${direction}`,
+        title: direction === "next" ? "Next bookmark" : "Previous bookmark",
+        searchTerms: ["bookmark", "jump", direction],
+        icon: <BookmarkIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: direction === "next" ? "chat.nextBookmark" : "chat.previousBookmark",
+        run: async () => {
+          const step = stepThreadBookmark(activeThreadKey, direction);
+          if (step) await navigate(bookmarkInPlaceNavigation(step.environmentId, step.bookmark));
+        },
+      });
+    }
   }
 
   const focusedTerminalFind = previewPanelThreadRef
