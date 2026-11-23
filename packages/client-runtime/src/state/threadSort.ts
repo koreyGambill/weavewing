@@ -251,6 +251,27 @@ export function sortPinnedThreadsByOrderKey<
   return [...keyed, ...keyless];
 }
 
+/** Oldest first by when each thread entered Active, so a new or unsettled thread joins the end. */
+export function sortActiveThreadsByEntry<
+  T extends {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly unsettledAt?: string | null | undefined;
+    readonly environmentId?: string | undefined;
+  },
+>(threads: readonly T[]): T[] {
+  if (threads.length < 2) return [...threads];
+  const timestamps = new Map(
+    threads.map((thread) => [thread, activeThreadAnchorTimestampMs(thread)]),
+  );
+  return [...threads].sort(
+    (left, right) =>
+      timestamps.get(left)! - timestamps.get(right)! ||
+      left.id.localeCompare(right.id) ||
+      (left.environmentId ?? "").localeCompare(right.environmentId ?? ""),
+  );
+}
+
 export function sortActiveThreadsByOrderKey<
   T extends {
     readonly id: string;

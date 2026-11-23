@@ -3,7 +3,8 @@ import * as Schema from "effect/Schema";
 
 /**
  * The user's own groups of active threads, keyed by scoped thread key so a group can span
- * projects and servers. Threads missing from `ungroupedOrder` top Ungrouped in recency order.
+ * projects and servers. Threads missing from `ungroupedOrder` top Ungrouped in recency order, or
+ * join its end in fixed order.
  * Ungrouped is headerless above the groups until named, then sits before `groups[ungroupedIndex]`.
  */
 export const SidebarThreadGroups = Schema.Struct({
@@ -46,6 +47,8 @@ export interface SidebarThreadGroupArrangement {
   readonly ungrouped: Family[];
   /** How many of the shown groups sit above Ungrouped. */
   readonly ungroupedAt: number;
+  /** Ungrouped threads missing from `ungroupedOrder` follow the ordered ones instead of leading. */
+  readonly freshAtEnd: boolean;
 }
 
 /** `groupId` null is Ungrouped; `beforeKey` null is the end of the container. */
@@ -58,12 +61,16 @@ export type SidebarGroupHit =
   | { readonly kind: "header"; readonly groupId: string | null }
   | { readonly kind: "thread"; readonly key: string; readonly after: boolean };
 
-/** Lays out active thread families, given in recency order, into the user's groups. */
+/** Lays out active thread families, given in display order, into the user's groups. */
 export function arrangeSidebarThreadGroups(
   state: SidebarThreadGroups,
   families: ReadonlyArray<Family>,
   // `keepGroupId` names a group the user is naming, which stays shown even when empty.
-  options: { readonly hideEmptyGroups: boolean; readonly keepGroupId?: string | null },
+  options: {
+    readonly hideEmptyGroups: boolean;
+    readonly keepGroupId?: string | null;
+    readonly threadOrder?: "recency" | "fixed";
+  },
 ): SidebarThreadGroupArrangement {
   const familyByHead = new Map(families.map((family) => [family[0]!, family]));
   const grouped = new Set<string>();
@@ -95,10 +102,12 @@ export function arrangeSidebarThreadGroups(
         entry.families.length > 0 ||
         entry.group.id === options.keepGroupId,
     );
+  const freshAtEnd = options.threadOrder === "fixed";
   return {
     groups: shown.map(({ entry }) => entry),
-    ungrouped: [...fresh, ...ranked],
+    ungrouped: freshAtEnd ? [...ranked, ...fresh] : [...fresh, ...ranked],
     ungroupedAt: shown.filter(({ index }) => index < ungroupedIndex).length,
+    freshAtEnd,
   };
 }
 
@@ -186,7 +195,10 @@ export function placeSidebarThread(
   // a shelf hides keep their places.
   const shownBefore = arrangement.ungrouped.map((family) => family[0]!);
   const stored = new Set(state.ungroupedOrder);
-  const order = [...shownBefore.filter((entry) => !stored.has(entry)), ...state.ungroupedOrder];
+  const fresh = shownBefore.filter((entry) => !stored.has(entry));
+  const order = arrangement.freshAtEnd
+    ? [...state.ungroupedOrder, ...fresh]
+    : [...fresh, ...state.ungroupedOrder];
   if (!order.includes(key)) {
     const at = target.beforeKey === null ? -1 : order.indexOf(target.beforeKey);
     order.splice(at === -1 ? order.length : at, 0, key);

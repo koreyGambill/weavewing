@@ -6,6 +6,7 @@ import {
   pinOrderKeyBetween,
   planPinnedReorder,
   resolveSettledThreadTimestamp,
+  sortActiveThreadsByEntry,
   sortActiveThreadsByOrderKey,
   sortSettledThreads,
   sortThreads,
@@ -251,6 +252,21 @@ describe("generateSpreadPinOrderKeys", () => {
       }
     },
   );
+});
+
+describe("sortActiveThreadsByEntry", () => {
+  it("appends new and reopened threads after the ones already active", () => {
+    const sorted = sortActiveThreadsByEntry([
+      { id: "new", createdAt: "2026-03-09T11:00:00.000Z" },
+      {
+        id: "reopened",
+        createdAt: "2026-03-01T09:00:00.000Z",
+        unsettledAt: "2026-03-09T12:00:00.000Z",
+      },
+      { id: "first", createdAt: "2026-03-09T09:00:00.000Z" },
+    ]);
+    expect(sorted.map((thread) => thread.id)).toEqual(["first", "new", "reopened"]);
+  });
 });
 
 describe("sortActiveThreadsByOrderKey", () => {

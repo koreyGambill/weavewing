@@ -47,6 +47,13 @@ describe("arrangeSidebarThreadGroups", () => {
     expect(arranged.groups.map((group) => heads(group.families))).toEqual([["c", "a"]]);
     // e and f are new to the manual order, so they sit above it in recency order.
     expect(heads(arranged.ungrouped)).toEqual(["e", "f", "d", "b"]);
+    // In fixed order they join the end instead, so placed threads never shift down.
+    const fixed = arrangeSidebarThreadGroups(
+      state([["demo", ["c", "a"]]], ["d", "b"]),
+      families("e", "a", "b", "c", "d", "f"),
+      { hideEmptyGroups: false, threadOrder: "fixed" },
+    );
+    expect(heads(fixed.ungrouped)).toEqual(["d", "b", "e", "f"]);
   });
 
   it("keeps a fork with its parent wherever the parent is placed", () => {
@@ -162,6 +169,14 @@ describe("placeSidebarThread", () => {
     const next = placeSidebarThread(current, arranged, "a", { groupId: null, beforeKey: "y" });
     expect(next.groups[0]!.threadKeys).toEqual([]);
     expect(next.ungroupedOrder).toEqual(["new", "filtered-out", "a", "y"]);
+
+    const fixed = arrangeSidebarThreadGroups(current, families("a", "y", "new"), {
+      hideEmptyGroups: false,
+      threadOrder: "fixed",
+    });
+    expect(
+      placeSidebarThread(current, fixed, "a", { groupId: null, beforeKey: "y" }).ungroupedOrder,
+    ).toEqual(["filtered-out", "a", "y", "new"]);
   });
 
   it("reorders under a filter without moving the threads it hides", () => {

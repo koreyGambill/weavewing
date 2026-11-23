@@ -18,6 +18,15 @@ export const SIDEBAR_GROUP_BY_LABEL: Record<SidebarGroupBy, string> = {
   model: "Model",
 };
 
+/** How Active orders its threads: latest send first, or fixed in the order they arrived. */
+export const SidebarThreadOrder = Schema.Literals(["recency", "fixed"]);
+export type SidebarThreadOrder = typeof SidebarThreadOrder.Type;
+
+export const SIDEBAR_THREAD_ORDER_LABEL: Record<SidebarThreadOrder, string> = {
+  recency: "Recency",
+  fixed: "Fixed",
+};
+
 export interface SidebarDerivedSection<T> {
   readonly key: string;
   readonly label: string;

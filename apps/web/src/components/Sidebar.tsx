@@ -33,7 +33,10 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import { asLaunchingThread } from "@t3tools/client-runtime/state/thread-inbox";
-import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  sortActiveThreadsByEntry,
+  sortSettledThreads,
+} from "@t3tools/client-runtime/state/thread-sort";
 import {
   nextShownOrder,
   threadSearchMatchKey,
@@ -315,7 +318,9 @@ import {
 } from "./sidebar/sidebarThreadGroups.logic";
 import {
   SIDEBAR_GROUP_BY_LABEL,
+  SIDEBAR_THREAD_ORDER_LABEL,
   SidebarGroupBy,
+  SidebarThreadOrder,
   sectionSidebarFamilies,
 } from "./sidebar/sidebarGroupBy.logic";
 import {
@@ -404,6 +409,8 @@ const GROUP_BY_KEY = "t3code:sidebar:group-by";
 // Entries are `${groupBy}:${section key}`, so each grouping remembers its own closed sections.
 const GROUP_BY_COLLAPSED_KEY = "t3code:sidebar:group-by-collapsed";
 const DENSE_ROWS_KEY = "t3code:sidebar:dense-rows";
+const THREAD_ORDER_KEY = "t3code:sidebar:thread-order";
+const isSidebarThreadOrder = Schema.is(SidebarThreadOrder);
 const isSidebarGroupBy = Schema.is(SidebarGroupBy);
 const CollapsedGroupBySections = Schema.Array(Schema.String);
 // Group ids are UUIDs, so this never names a real group.
@@ -440,6 +447,7 @@ interface SidebarThreadPartitionInput {
   readonly routeRowThreadKey: string | null;
   /** The servers chosen in the filter, or null for every server. */
   readonly environmentScope: ReadonlySet<string> | null;
+  readonly threadOrder: SidebarThreadOrder;
 }
 
 function scrollSidebarToTop(content: HTMLElement | null) {
@@ -520,6 +528,7 @@ function useSidebarThreads(input: {
     readonly collapsedKeys: ReadonlySet<string>;
   } | null;
   readonly environmentScope: ReadonlySet<string> | null;
+  readonly threadOrder: SidebarThreadOrder;
 }) {
   const {
     projectScopeKey,
@@ -537,6 +546,7 @@ function useSidebarThreads(input: {
     renamingGroupId,
     derivedGrouping,
     environmentScope,
+    threadOrder,
   } = input;
   const nowMinute = useNowMinute();
   // Minute-quantized clocks would delay second-precise snooze wakes by up to a minute.
@@ -575,6 +585,7 @@ function useSidebarThreads(input: {
     automationFilter,
     routeRowThreadKey,
     environmentScope,
+    threadOrder,
   });
 
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = partition;
@@ -651,6 +662,7 @@ function useSidebarThreads(input: {
               automationFilter === "only" ||
               environmentScope !== null,
             keepGroupId: renamingGroupId,
+            threadOrder,
           },
         );
   const threadGroupSections =
@@ -858,9 +870,11 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const sortedPinned = groupSidebarThreadFamilies(sortPinnedThreadsForSidebar(pinned)).map(
     ({ thread }) => thread,
   );
-  const sortedActive = groupSidebarThreadFamilies(sortWorkingThreadsBySend(active)).map(
-    ({ thread }) => thread,
-  );
+  const sortedActive = groupSidebarThreadFamilies(
+    input.threadOrder === "fixed"
+      ? sortActiveThreadsByEntry(active)
+      : sortWorkingThreadsBySend(active),
+  ).map(({ thread }) => thread);
   return {
     pinnedThreads:
       optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -1156,6 +1170,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const boringSidebarEnabled = groupBy === "project";
   const [denseRows, setDenseRows] = useLocalStorage(DENSE_ROWS_KEY, false, Schema.Boolean);
+  const [threadOrder, setThreadOrder] = useLocalStorage(
+    THREAD_ORDER_KEY,
+    "recency",
+    SidebarThreadOrder,
+  );
   const [collapsedGroupBySections, setCollapsedGroupBySections] = useLocalStorage(
     GROUP_BY_COLLAPSED_KEY,
     [],
@@ -1593,6 +1612,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeRowThreadKey,
     automationFilter,
     environmentScope,
+    threadOrder,
     folderGroups: boringSidebarEnabled
       ? scopedProjectGroups.length === 0
         ? // An archived project keeps a folder for its active threads, below the rest.
@@ -3890,6 +3910,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           <MenuRadioItem key={option} value={option} closeOnClick>
                             <span className="flex items-center justify-between gap-2">
                               {SIDEBAR_GROUP_BY_LABEL[option]}
+                              <MenuRadioItemIndicator />
+                            </span>
+                          </MenuRadioItem>
+                        ))}
+                      </MenuRadioGroup>
+                    </MenuGroup>
+                    <MenuSeparator />
+                    <MenuGroup>
+                      <MenuGroupLabel>Order</MenuGroupLabel>
+                      <MenuRadioGroup
+                        value={threadOrder}
+                        onValueChange={(value) => {
+                          if (isSidebarThreadOrder(value)) setThreadOrder(value);
+                        }}
+                      >
+                        {SidebarThreadOrder.literals.map((option) => (
+                          <MenuRadioItem key={option} value={option} closeOnClick>
+                            <span className="flex items-center justify-between gap-2">
+                              {SIDEBAR_THREAD_ORDER_LABEL[option]}
                               <MenuRadioItemIndicator />
                             </span>
                           </MenuRadioItem>
