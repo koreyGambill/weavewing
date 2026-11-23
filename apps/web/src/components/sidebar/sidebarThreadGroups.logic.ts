@@ -260,8 +260,17 @@ const REMOTE_GROUP_ID_PREFIX = "remote:";
 export function withServerSidebarGroups(
   state: SidebarThreadGroups,
   serverGroupByKey: ReadonlyMap<string, string | null>,
+  options: {
+    /** Threads that may show a group this machine lacks; other unknown names stay hidden. */
+    readonly shownKeys: ReadonlySet<string>;
+    /** A group being named keeps its members here until the name is confirmed. */
+    readonly keepGroupId?: string | null;
+  },
 ): SidebarThreadGroups {
   if (serverGroupByKey.size === 0) return state;
+  const kept = new Set(
+    state.groups.find((group) => group.id === options.keepGroupId)?.threadKeys ?? [],
+  );
   const localByName = new Map<string, SidebarThreadGroup>();
   for (const group of state.groups) {
     if (!localByName.has(group.name)) localByName.set(group.name, group);
@@ -270,7 +279,7 @@ export function withServerSidebarGroups(
     state.groups.map((group) => [
       group.id,
       group.threadKeys.filter((key) => {
-        const recorded = serverGroupByKey.get(key);
+        const recorded = kept.has(key) ? undefined : serverGroupByKey.get(key);
         return recorded === undefined || (recorded !== null && localByName.get(recorded) === group);
       }),
     ]),
@@ -278,13 +287,14 @@ export function withServerSidebarGroups(
   const usedIds = new Set(state.groups.map((group) => group.id));
   const remote = new Map<string, SidebarThreadGroup & { threadKeys: string[] }>();
   for (const [key, name] of serverGroupByKey) {
-    if (name === null) continue;
+    if (name === null || kept.has(key)) continue;
     const local = localByName.get(name);
     if (local !== undefined) {
       const keys = keysById.get(local.id)!;
       if (!keys.includes(key)) keys.push(key);
       continue;
     }
+    if (!options.shownKeys.has(key)) continue;
     let group = remote.get(name);
     if (group === undefined) {
       let id = `${REMOTE_GROUP_ID_PREFIX}${name}`;
@@ -312,27 +322,40 @@ export function withServerSidebarGroups(
 
 /**
  * What this machine keeps after an edit made on `withServerSidebarGroups` output: a group seen
- * only through a thread's server record stays unsaved until the user changes or moves it.
+ * only through a thread's server record stays unsaved until the user changes or moves it, and
+ * then becomes a local group, along with the derived groups above it so the order holds.
  */
 export function localSidebarThreadGroups(
   next: SidebarThreadGroups,
   view: SidebarThreadGroups,
+  makeId: () => string,
 ): SidebarThreadGroups {
   const viewIndex = new Map(view.groups.map((group, index) => [group.id, index]));
-  const groups = next.groups.filter((group, index) => {
-    if (!group.id.startsWith(REMOTE_GROUP_ID_PREFIX)) return true;
+  const isDerived = (group: SidebarThreadGroup) => group.id.startsWith(REMOTE_GROUP_ID_PREFIX);
+  const adopted = next.groups.map((group, index) => {
+    if (!isDerived(group)) return false;
     const before = viewIndex.get(group.id);
     if (before === undefined || view.groups[before] !== group) return true;
     return (view.groups[before - 1]?.id ?? null) !== (next.groups[index - 1]?.id ?? null);
   });
-  return groups.length === next.groups.length ? next : { ...next, groups };
+  const lastAdopted = adopted.lastIndexOf(true);
+  if (next.groups.every((group) => !isDerived(group))) return next;
+  return {
+    ...next,
+    groups: next.groups.flatMap((group, index) =>
+      !isDerived(group) ? [group] : index <= lastAdopted ? [{ ...group, id: makeId() }] : [],
+    ),
+  };
 }
 
-/** Threads whose group name differs between two states, with the name each now has. */
+/** The longest group name a thread's server accepts. */
+export const MAX_SIDEBAR_THREAD_GROUP_NAME_LENGTH = 64;
+
+/** Threads whose group name differs between two states, with the name before and after. */
 export function changedSidebarThreadGroupNames(
   before: SidebarThreadGroups,
   after: SidebarThreadGroups,
-): Map<string, string | null> {
+): Map<string, { readonly from: string | null; readonly to: string | null }> {
   const nameByKey = (state: SidebarThreadGroups) => {
     const names = new Map<string, string>();
     for (const group of state.groups) {
@@ -342,10 +365,11 @@ export function changedSidebarThreadGroupNames(
   };
   const previous = nameByKey(before);
   const next = nameByKey(after);
-  const changed = new Map<string, string | null>();
+  const changed = new Map<string, { readonly from: string | null; readonly to: string | null }>();
   for (const key of new Set([...previous.keys(), ...next.keys()])) {
-    const name = next.get(key) ?? null;
-    if ((previous.get(key) ?? null) !== name) changed.set(key, name);
+    const from = previous.get(key) ?? null;
+    const to = next.get(key) ?? null;
+    if (from !== to) changed.set(key, { from, to });
   }
   return changed;
 }
@@ -434,8 +458,10 @@ export function renameSidebarThreadGroup(
   name: string,
 ): SidebarThreadGroups {
   const trimmed = name.trim();
-  if (trimmed.length === 0) return state;
+  if (trimmed.length === 0 || trimmed.length > MAX_SIDEBAR_THREAD_GROUP_NAME_LENGTH) return state;
   if (id === null) return { ...state, ungroupedName: trimmed };
+  // Groups match across machines by name, so two groups cannot share one.
+  if (state.groups.some((group) => group.id !== id && group.name === trimmed)) return state;
   return {
     ...state,
     groups: state.groups.map((group) => (group.id === id ? { ...group, name: trimmed } : group)),

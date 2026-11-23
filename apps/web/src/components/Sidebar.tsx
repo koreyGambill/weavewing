@@ -533,6 +533,8 @@ function useSidebarThreads(input: {
   // The user's own groups for active threads; null when folders own the active area.
   readonly threadGroups: SidebarThreadGroups | null;
   readonly renamingGroupId: string | null;
+  // A group the user has not named yet; its members stay local until they do.
+  readonly pendingGroupId: string | null;
   // Set when Group by is a thread property: sections active threads by it instead of groups.
   readonly derivedGrouping: {
     readonly sectionOf: (thread: EnvironmentThreadShell) => {
@@ -663,12 +665,16 @@ function useSidebarThreads(input: {
       : withServerSidebarGroups(
           input.threadGroups,
           new Map(
-            activeThreads.flatMap((thread) =>
+            threads.flatMap((thread) =>
               thread.sidebarGroup === undefined
                 ? []
                 : [[threadShellKey(thread), thread.sidebarGroup] as const],
             ),
           ),
+          {
+            shownKeys: new Set(activeThreads.map(threadShellKey)),
+            keepGroupId: input.pendingGroupId,
+          },
         );
   const threadGroupArrangement: SidebarThreadGroupArrangement | null =
     threadGroups === null || threadGroups.groups.length === 0
@@ -1596,23 +1602,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     SidebarThreadGroups,
   );
   const threadGroups = sidebarThreadGroupsForOrder(storedThreadGroups, threadOrder);
-  // Edits apply to what the user sees, server-recorded groups included; membership changes go
-  // back to each thread's server so other machines group it the same way.
-  const setThreadGroups = (update: (current: SidebarThreadGroups) => SidebarThreadGroups) => {
-    const view = threadGroupsView ?? threadGroups;
-    const next = update(view);
-    for (const [key, group] of changedSidebarThreadGroupNames(view, next)) {
-      const thread = threadByKey.get(key);
-      if (thread === undefined || !serverConfigs.has(thread.environmentId)) continue;
-      void setThreadSidebarGroup({
-        environmentId: thread.environmentId,
-        input: { threadId: thread.id, group },
-      });
-    }
-    setStoredThreadGroups(
-      sidebarThreadGroupsForOrder(localSidebarThreadGroups(next, view), threadOrder),
-    );
-  };
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   // A group made moments ago and the groups before it, until the user names it.
   const [newThreadGroup, setNewThreadGroup] = useState<{
@@ -1678,6 +1667,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
     threadGroups: groupBy === "named" ? threadGroups : null,
     renamingGroupId,
+    pendingGroupId: newThreadGroup?.id ?? null,
     derivedGrouping:
       groupBy === "computer" || groupBy === "provider" || groupBy === "model"
         ? {
@@ -1721,6 +1711,47 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         : [...current, entry],
     );
   });
+  // Edits apply to what the user sees, server-recorded groups included; membership changes go
+  // back to each thread's server so other machines group it the same way. Stable so a menu
+  // that resolves later edits the latest groups.
+  const setThreadGroups = useStableCallback(
+    (update: (current: SidebarThreadGroups) => SidebarThreadGroups) => {
+      const view = threadGroupsView ?? threadGroups;
+      const next = update(view);
+      const changed = changedSidebarThreadGroupNames(view, next);
+      const changedThreads = new Map(
+        changed.size === 0
+          ? []
+          : listedThreads.flatMap((thread) => {
+              const key = threadShellKey(thread);
+              return changed.has(key) ? [[key, thread] as const] : [];
+            }),
+      );
+      for (const [key, change] of changed) {
+        const { from, to } = change;
+        const thread = changedThreads.get(key);
+        if (
+          thread === undefined ||
+          (to !== null && isUnnamedSidebarThreadGroup(to)) ||
+          to === thread.sidebarGroup ||
+          // A thread leaving an unnamed group it never synced returns to its local place.
+          (thread.sidebarGroup === undefined &&
+            from !== null &&
+            isUnnamedSidebarThreadGroup(from)) ||
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.sidebarGroups !== true
+        ) {
+          continue;
+        }
+        void setThreadSidebarGroup({
+          environmentId: thread.environmentId,
+          input: { threadId: thread.id, group: to },
+        });
+      }
+      setStoredThreadGroups(
+        sidebarThreadGroupsForOrder(localSidebarThreadGroups(next, view, randomUUID), threadOrder),
+      );
+    },
+  );
   // Stable for drag sensor options, which must keep their identity, yet reads the latest layout.
   const readThreadGroupArrangement = useStableCallback(() => threadGroupArrangement);
   const readSectionByThreadKey = useStableCallback(() => sectionByThreadKey);

@@ -328,50 +328,71 @@ describe("server-recorded groups", () => {
     ["A", ["a1", "moved"]],
     ["B", ["b1"]],
   ]);
-  const view = withServerSidebarGroups(
-    local,
-    new Map<string, string | null>([
-      ["moved", "B"],
-      ["b1", null],
-      ["r1", "Remote"],
-      ["r2", "Remote"],
-    ]),
-  );
+  const recorded = new Map<string, string | null>([
+    ["moved", "B"],
+    ["b1", null],
+    ["r1", "Remote"],
+    ["r2", "Remote"],
+    ["r3", "Second"],
+    ["settled", "Hidden"],
+  ]);
+  const shownKeys = new Set(["a1", "moved", "b1", "r1", "r2", "r3"]);
+  const view = withServerSidebarGroups(local, recorded, { shownKeys });
+  let ids = 0;
+  const makeId = () => `local-${++ids}`;
 
-  it("places threads by their recorded group and shows unknown names after local groups", () => {
+  it("places threads by their recorded group and shows unknown names only for shown threads", () => {
     expect(view.groups.map((group) => [group.name, group.threadKeys])).toEqual([
       ["A", ["a1"]],
       ["B", ["moved"]],
       ["Remote", ["r1", "r2"]],
+      ["Second", ["r3"]],
     ]);
   });
 
-  it("keeps a remote-only group off this machine until the user edits or moves it", () => {
-    expect(localSidebarThreadGroups(view, view).groups.map((group) => group.name)).toEqual([
+  it("leaves a group being named with its local members", () => {
+    const naming = addSidebarThreadGroup(local, {
+      id: "new",
+      name: "New group",
+      threadKey: "moved",
+    });
+    const shown = withServerSidebarGroups(naming, recorded, { shownKeys, keepGroupId: "new" });
+    expect(shown.groups.find((group) => group.id === "new")?.threadKeys).toEqual(["moved"]);
+  });
+
+  it("saves a remote-only group once edited or moved, keeping the derived groups above it", () => {
+    expect(localSidebarThreadGroups(view, view, makeId).groups.map((g) => g.name)).toEqual([
       "A",
       "B",
     ]);
-    const remoteId = view.groups[2]!.id;
+    const second = view.groups[3]!.id;
     for (const edited of [
-      toggleSidebarThreadGroup(view, remoteId),
-      moveSidebarThreadGroup(view, remoteId, -1),
+      toggleSidebarThreadGroup(view, second),
+      moveSidebarThreadGroup(view, second, -1),
     ]) {
-      expect(localSidebarThreadGroups(edited, view).groups.some((g) => g.id === remoteId)).toBe(
-        true,
-      );
+      const saved = localSidebarThreadGroups(edited, view, makeId).groups;
+      expect(saved.map((group) => group.name)).toEqual(edited.groups.map((group) => group.name));
+      expect(saved.some((group) => group.id.startsWith("remote:"))).toBe(false);
     }
   });
 
   it("reports each thread whose group name an edit changes", () => {
     const renamed = renameSidebarThreadGroup(view, "A", "Alpha");
-    expect(changedSidebarThreadGroupNames(view, renamed)).toEqual(new Map([["a1", "Alpha"]]));
+    expect(changedSidebarThreadGroupNames(view, renamed)).toEqual(
+      new Map([["a1", { from: "A", to: "Alpha" }]]),
+    );
     const deleted = deleteSidebarThreadGroup(view, view.groups[2]!.id);
     expect(changedSidebarThreadGroupNames(view, deleted)).toEqual(
       new Map([
-        ["r1", null],
-        ["r2", null],
+        ["r1", { from: "Remote", to: null }],
+        ["r2", { from: "Remote", to: null }],
       ]),
     );
+  });
+
+  it("refuses a name another group has, or one too long for the server", () => {
+    expect(renameSidebarThreadGroup(view, "A", "B")).toBe(view);
+    expect(renameSidebarThreadGroup(view, "A", "x".repeat(65))).toBe(view);
   });
 });
 

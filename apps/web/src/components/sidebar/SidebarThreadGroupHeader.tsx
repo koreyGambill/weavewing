@@ -18,6 +18,7 @@ import type {
   SidebarGroupHitRow,
   SidebarShelfHit,
 } from "./sidebarThreadGroups.logic";
+import { MAX_SIDEBAR_THREAD_GROUP_NAME_LENGTH } from "./sidebarThreadGroups.logic";
 
 const GROUP_DOT_CLASS_NAME = {
   attention: "bg-warning",
@@ -74,6 +75,7 @@ function GroupNameInput(props: {
       autoFocus
       defaultValue={props.name}
       aria-label="Group name"
+      maxLength={MAX_SIDEBAR_THREAD_GROUP_NAME_LENGTH}
       onFocus={(event) => event.currentTarget.select()}
       onKeyDown={handleKeyDown}
       onBlur={(event) => {
