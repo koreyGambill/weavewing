@@ -3942,13 +3942,16 @@ export default function ChatView(props: ChatViewProps) {
                                         true) ? (
                                       <SideChatContextButton threadKey={routeThreadKey} />
                                     ) : null}
-                                    <SummaryHandoffAction
-                                      source={scopeThreadRef(
-                                        activeThread.environmentId,
-                                        activeThread.id,
-                                      )}
-                                      composer
-                                    />
+                                    {/* A side chat pane has its own Hand off in its header. */}
+                                    {embedded ? null : (
+                                      <SummaryHandoffAction
+                                        source={scopeThreadRef(
+                                          activeThread.environmentId,
+                                          activeThread.id,
+                                        )}
+                                        composer
+                                      />
+                                    )}
                                     {activeThread.lineage.sideChat !== true &&
                                       (() => {
                                         const source = resolveLatestForkableAssistantItem({

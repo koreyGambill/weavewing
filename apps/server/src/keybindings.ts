@@ -1025,6 +1025,12 @@ const make = Effect.gen(function* () {
       for (const { id, alongside, rule } of pendingLateDefaults) {
         if (enabled && isClassicTileDefault(rule)) continue;
         if (id === "weavewing.terminal-keys.v1" && closeConflict) continue;
+        // A key the user bound under any condition stays theirs; conditions may overlap.
+        if (
+          id.startsWith(THREAD_NAV_KEYS_MIGRATION) &&
+          customConfig.some((entry) => encodedShortcut(entry) === encodedShortcut(rule))
+        )
+          continue;
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
           ![...customConfig, ...missingDefaults].some((entry) =>

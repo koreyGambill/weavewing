@@ -561,6 +561,29 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("leaves a user's own Ctrl/Cmd+Shift+J alone during the thread key move", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const custom = {
+        key: "mod+shift+j",
+        command: "preview.toggle",
+        when: "!terminalFocus",
+      } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+[", command: "thread.previous", when: "!isMac" },
+        { key: "mod+shift+]", command: "thread.next", when: "!isMac" },
+        custom,
+      ]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepStrictEqual(
+        persisted.filter((rule) => rule.key === "mod+shift+j"),
+        [custom],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
