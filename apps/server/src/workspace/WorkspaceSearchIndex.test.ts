@@ -511,6 +511,105 @@ it.effect("keeps shared scratch search shallow and skips dependency trees", () =
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect(
+  "searches the repositories directly inside a shared scratch folder by their own rules",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const vcsProcess = yield* VcsProcess.VcsProcess;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-repos-" });
+        const cwd = path.join(home, "code");
+        const write = Effect.fn(function* (relativePath: string) {
+          yield* fs.makeDirectory(path.dirname(path.join(cwd, relativePath)), { recursive: true });
+          yield* fs.writeFileString(path.join(cwd, relativePath), "");
+        });
+        const gitInit = (repository: string) =>
+          vcsProcess.run({
+            operation: "test.gitInit",
+            command: "git",
+            args: ["init"],
+            cwd: path.join(cwd, repository),
+          });
+        for (const file of [
+          "alpha/README.md",
+          "alpha/secret.md",
+          "beta/README.md",
+          "beta/docs/README.md",
+          "beta/.vendor/README.md",
+          ".hidden/README.md",
+          "plain/README.md",
+          "notes.md",
+        ]) {
+          yield* write(file);
+        }
+        yield* fs.writeFileString(path.join(cwd, "alpha", ".gitignore"), "secret.md\n");
+        for (const repository of ["alpha", "beta", ".hidden"]) yield* gitInit(repository);
+        const index = yield* WorkspaceSearchIndex.make(cwd).pipe(
+          Effect.provideService(HostProcess.HomeDirectory, home),
+        );
+        const paths = (query: string) =>
+          index
+            .search(query, 20, "file")
+            .pipe(Effect.map((result) => result.entries.map((e) => e.path)));
+
+        expect(yield* paths("readme.md")).toEqual([
+          "beta/README.md",
+          "alpha/README.md",
+          "beta/docs/README.md",
+        ]);
+        expect(yield* paths("secret")).toEqual([]);
+        expect(yield* paths("notes")).toEqual(["notes.md"]);
+        // The listing stays the parent's own top level.
+        expect((yield* index.list()).entries.map((entry) => entry.path)).toEqual([
+          "alpha",
+          "beta",
+          "notes.md",
+          "plain",
+        ]);
+
+        yield* write("gamma/README.md");
+        yield* gitInit("gamma");
+        expect(yield* paths("gamma")).toEqual(["gamma/README.md"]);
+        yield* write("beta/CHANGES.md");
+        expect(yield* paths("changes")).toEqual([]);
+        yield* index.refresh();
+        expect(yield* paths("changes")).toEqual(["beta/CHANGES.md"]);
+      }),
+    ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("keeps a shared scratch folder inside a repository to its own top level", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-in-repo-" });
+      const cwd = path.join(home, "code");
+      yield* fs.makeDirectory(path.join(cwd, "inner"), { recursive: true });
+      yield* fs.writeFileString(path.join(cwd, "inner", "README.md"), "");
+      yield* vcsProcess.run({
+        operation: "test.gitInit",
+        command: "git",
+        args: ["init"],
+        cwd: home,
+      });
+      yield* vcsProcess.run({
+        operation: "test.gitInit",
+        command: "git",
+        args: ["init"],
+        cwd: path.join(cwd, "inner"),
+      });
+      const index = yield* WorkspaceSearchIndex.make(cwd).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
+      expect((yield* index.search("readme", 20, "file")).entries).toEqual([]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 function fakeSymlinkFinder(
   directories: ReadonlyArray<string>,
   options: {

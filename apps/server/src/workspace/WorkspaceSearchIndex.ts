@@ -630,8 +630,125 @@ const isSharedScratchDirectory = Effect.fn("WorkspaceSearchIndex.isSharedScratch
   Effect.orElseSucceed(() => false),
 );
 
-// Shared scratch roots can contain many repositories; never scan or watch their descendants.
-const makeSharedScratchIndex = (cwd: string) => {
+// Searching a parent outside git, such as ~/code, lists the files of each repository directly
+// inside it by that repository's own rules. Nothing watches them, so the list is reused until a
+// refresh, until a repository is added or removed, or for this long.
+const CHILD_REPOSITORY_FILES_TTL_MS = 30_000;
+// Each repository keeps the single-workspace cap; the parent stops at a few repositories' worth.
+const CHILD_REPOSITORY_MAX_ENTRIES = WORKSPACE_INDEX_MAX_ENTRIES * 4;
+const CHILD_REPOSITORY_CONCURRENCY = 8;
+
+// An unreadable parent lists no repositories, leaving its top-level search as before.
+const listChildRepositories = (cwd: string) =>
+  Effect.promise(async () => {
+    const names: string[] = [];
+    for await (const entry of await NodeFSP.opendir(cwd)) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      // A worktree's `.git` is a file; either form marks a repository.
+      const marker = await NodeFSP.stat(NodePath.join(cwd, entry.name, ".git")).catch(() => null);
+      if (marker !== null) names.push(entry.name);
+    }
+    return names.toSorted();
+  }).pipe(Effect.catchDefect(() => Effect.succeed<string[]>([])));
+
+const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles")(function* (
+  vcsProcess: VcsProcess.VcsProcess["Service"],
+  cwd: string,
+  repository: string,
+  hostIsWindows: boolean,
+) {
+  const result = yield* vcsProcess
+    .run({
+      operation: "WorkspaceSearchIndex.listRepositoryFiles",
+      command: "git",
+      args: [
+        "-c",
+        "core.fsmonitor=false",
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+      ],
+      cwd: NodePath.join(cwd, repository),
+      allowNonZeroExit: true,
+      timeoutMs: 10_000,
+      maxOutputBytes: 16 * 1024 * 1024,
+    })
+    .pipe(Effect.orElseSucceed(() => undefined));
+  if (!result || result.exitCode !== 0) return { paths: [] as string[], truncated: true };
+  // Dot folders hold vendored or tool state (a repository's `.repos` can outnumber its source).
+  const paths = result.stdout
+    .split("\0")
+    .filter((entry) => entry.length > 0 && !/(?:^|[\\/])\.[^\\/]*[\\/]/.test(entry));
+  return {
+    paths: paths
+      .slice(0, WORKSPACE_INDEX_MAX_ENTRIES)
+      .map((entry) => `${repository}/${toPosixPath(entry, hostIsWindows)}`),
+    truncated: result.stdoutTruncated || paths.length > WORKSPACE_INDEX_MAX_ENTRIES,
+  };
+});
+
+const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratchIndex")(function* (
+  cwd: string,
+) {
+  const vcsProcess = yield* VcsProcess.VcsProcess;
+  const hostIsWindows = yield* HostProcess.isWindows;
+  // A parent that is itself inside a repository keeps listing only its own top level.
+  const insideRepository = yield* vcsProcess
+    .run({
+      operation: "WorkspaceSearchIndex.sharedScratchInsideRepository",
+      command: "git",
+      args: ["rev-parse", "--is-inside-work-tree"],
+      cwd,
+      allowNonZeroExit: true,
+      timeoutMs: 10_000,
+    })
+    .pipe(
+      Effect.map((result) => result.exitCode === 0 && result.stdout.trim() === "true"),
+      Effect.orElseSucceed(() => false),
+    );
+  let childFiles:
+    | {
+        readonly repositories: string;
+        readonly expiresAt: number;
+        readonly result: { readonly entries: ProjectEntry[]; readonly truncated: boolean };
+      }
+    | undefined;
+  const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
+    function* () {
+      if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
+      const repositories = yield* listChildRepositories(cwd);
+      const key = repositories.join("\0");
+      const now = yield* Clock.currentTimeMillis;
+      if (childFiles && childFiles.repositories === key && childFiles.expiresAt > now) {
+        return childFiles.result;
+      }
+      const listed = yield* Effect.forEach(
+        repositories,
+        (repository) => listRepositoryFiles(vcsProcess, cwd, repository, hostIsWindows),
+        { concurrency: CHILD_REPOSITORY_CONCURRENCY },
+      );
+      const paths = listed.flatMap((repository) => repository.paths);
+      const result = {
+        entries: paths
+          .slice(0, CHILD_REPOSITORY_MAX_ENTRIES)
+          .map((entryPath): ProjectEntry => ({ path: entryPath, kind: "file" })),
+        truncated:
+          paths.length > CHILD_REPOSITORY_MAX_ENTRIES ||
+          listed.some((repository) => repository.truncated),
+      };
+      childFiles = {
+        repositories: key,
+        expiresAt: now + CHILD_REPOSITORY_FILES_TTL_MS,
+        result,
+      };
+      return result;
+    },
+  );
+
   const list = Effect.fn("WorkspaceSearchIndex.listSharedScratch")(function* () {
     return yield* Effect.tryPromise({
       try: async () => {
@@ -665,16 +782,21 @@ const makeSharedScratchIndex = (cwd: string) => {
     list,
     search: Effect.fn("WorkspaceSearchIndex.searchSharedScratch")(
       function* (query, limit, kind, imageOnly) {
-        const result = yield* list();
-        const entries = result.entries.filter(
-          (entry) =>
-            (kind === undefined || entry.kind === kind) &&
-            (!imageOnly || (entry.kind === "file" && isProjectFaviconPath(entry.path))) &&
-            scoreSubsequenceMatch(entry.path.toLowerCase(), query.toLowerCase()) !== null,
+        const [topLevel, children] = yield* Effect.all([list(), listChildRepositoryFiles()]);
+        const normalizedQuery = query.toLowerCase();
+        const ranked = [...topLevel.entries, ...children.entries].flatMap((entry) => {
+          if (kind !== undefined && entry.kind !== kind) return [];
+          if (imageOnly && !(entry.kind === "file" && isProjectFaviconPath(entry.path))) return [];
+          const score = scoreSubsequenceMatch(entry.path.toLowerCase(), normalizedQuery);
+          return score === null ? [] : [{ entry, score }];
+        });
+        ranked.sort(
+          (left, right) =>
+            left.score - right.score || left.entry.path.localeCompare(right.entry.path),
         );
         return {
-          entries: entries.slice(0, limit),
-          truncated: result.truncated || entries.length > limit,
+          entries: ranked.slice(0, limit).map(({ entry }) => entry),
+          truncated: topLevel.truncated || children.truncated || ranked.length > limit,
         };
       },
     ),
@@ -688,15 +810,17 @@ const makeSharedScratchIndex = (cwd: string) => {
         }),
       ),
     ),
-    refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(() => Effect.void),
+    refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(function* () {
+      childFiles = undefined;
+    }),
   });
-};
+});
 
 export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
   cwd: string,
   variant: WorkspaceSearchIndexVariant = "paths",
 ) {
-  if (yield* isSharedScratchDirectory(cwd)) return makeSharedScratchIndex(cwd);
+  if (yield* isSharedScratchDirectory(cwd)) return yield* makeSharedScratchIndex(cwd);
   const hostIsWindows = yield* HostProcess.isWindows;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
