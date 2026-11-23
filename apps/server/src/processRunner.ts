@@ -29,8 +29,7 @@ export interface ProcessRunInput {
   /** Runs after successful spawn, before cancellation can interrupt acquisition. */
   readonly onSpawn?: (() => void) | undefined;
   readonly maxOutputBytes?: number | undefined;
-  /** `truncate-and-stop` ends the read at the limit and kills the process, instead of draining. */
-  readonly outputMode?: "error" | "truncate" | "truncate-and-stop" | undefined;
+  readonly outputMode?: "error" | "truncate" | undefined;
   readonly truncatedMarker?: string | undefined;
   /** Timed-out results discard partial stdout/stderr. */
   readonly timeoutBehavior?: "error" | "timedOutResult" | undefined;
@@ -158,7 +157,7 @@ const collectText = Effect.fnUntraced(function* (input: {
   readonly streamName: "stdout" | "stderr";
   readonly stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>;
   readonly maxOutputBytes: number;
-  readonly outputMode: "error" | "truncate" | "truncate-and-stop";
+  readonly outputMode: "error" | "truncate";
   readonly truncatedMarker: string;
 }) {
   const stream = input.stream.pipe(
@@ -175,21 +174,9 @@ const collectText = Effect.fnUntraced(function* (input: {
     ),
   );
 
-  if (input.outputMode !== "error") {
-    let seen = 0;
-    // One chunk past the limit is read so a cut is detected even when output lands exactly on it.
-    const limited =
-      input.outputMode === "truncate-and-stop"
-        ? stream.pipe(
-            Stream.takeWhile((chunk) => {
-              const take = seen <= input.maxOutputBytes;
-              seen += chunk.byteLength;
-              return take;
-            }),
-          )
-        : stream;
+  if (input.outputMode === "truncate") {
     return yield* collectUint8StreamText({
-      stream: limited,
+      stream,
       maxBytes: input.maxOutputBytes,
       truncatedMarker: input.truncatedMarker,
     });
@@ -350,47 +337,32 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
           ),
         );
 
-  // The other stream ends only when the process does, so a cut read stops the process at once.
-  const stopAtLimit = <A extends { readonly truncated: boolean }, E>(
-    collect: Effect.Effect<A, E>,
-  ) =>
-    outputMode === "truncate-and-stop"
-      ? collect.pipe(
-          Effect.tap((output) =>
-            output.truncated ? child.kill().pipe(Effect.ignore) : Effect.void,
-          ),
-        )
-      : collect;
   const [stdout, stderr] = yield* Effect.all(
     [
-      stopAtLimit(
-        collectText({
-          command: input.command,
-          args: input.args,
-          cwd: input.cwd,
-          spawnCwd: input.spawnCwd,
-          streamName: "stdout",
-          stream: onStdoutChunk
-            ? child.stdout.pipe(Stream.tap((chunk) => Effect.sync(() => onStdoutChunk(chunk))))
-            : child.stdout,
-          maxOutputBytes,
-          outputMode,
-          truncatedMarker,
-        }),
-      ),
-      stopAtLimit(
-        collectText({
-          command: input.command,
-          args: input.args,
-          cwd: input.cwd,
-          spawnCwd: input.spawnCwd,
-          streamName: "stderr",
-          stream: child.stderr,
-          maxOutputBytes,
-          outputMode,
-          truncatedMarker,
-        }),
-      ),
+      collectText({
+        command: input.command,
+        args: input.args,
+        cwd: input.cwd,
+        spawnCwd: input.spawnCwd,
+        streamName: "stdout",
+        stream: onStdoutChunk
+          ? child.stdout.pipe(Stream.tap((chunk) => Effect.sync(() => onStdoutChunk(chunk))))
+          : child.stdout,
+        maxOutputBytes,
+        outputMode,
+        truncatedMarker,
+      }),
+      collectText({
+        command: input.command,
+        args: input.args,
+        cwd: input.cwd,
+        spawnCwd: input.spawnCwd,
+        streamName: "stderr",
+        stream: child.stderr,
+        maxOutputBytes,
+        outputMode,
+        truncatedMarker,
+      }),
       writeStdin,
     ],
     { concurrency: "unbounded" },

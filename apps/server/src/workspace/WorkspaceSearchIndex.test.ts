@@ -1057,29 +1057,87 @@ const slowListingFixture = Effect.fn(function* (prefix: string) {
   return { index, started };
 });
 
-it.effect("hands every caller the running rebuild, even after its key changes or expires", () =>
+it.effect("keeps the paths a listing read before its output cap", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const cache = WorkspaceSearchIndex.makeSingleFlightCache<string>(yield* Effect.scope, 30_000);
-      const gate = yield* Deferred.make<void>();
-      let builds = 0;
-      const build = (value: string) => () =>
-        Effect.sync(() => (builds += 1)).pipe(
-          Effect.andThen(Deferred.await(gate)),
-          Effect.as(value),
-        );
-      const first = yield* cache.acquire("a", build("first"));
-      yield* TestClock.adjust("31 seconds");
-      const second = yield* cache.acquire("b", build("second"));
-      expect(second).toBe(first);
-      yield* Deferred.succeed(gate, undefined);
-      expect(yield* Fiber.join(second)).toBe("first");
-      expect(builds).toBe(1);
-      // Once it has finished, the changed key builds afresh.
-      expect(yield* Fiber.join(yield* cache.acquire("b", build("third")))).toBe("third");
-      expect(builds).toBe(2);
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-capped-listing-" });
+      const repo = path.join(cwd, "repo");
+      // Records this long fill the output cap before the entry limit is reached.
+      const folder = ["a", "b", "c"].map((letter) => letter.repeat(230)).join("/");
+      yield* fs.makeDirectory(path.join(repo, folder), { recursive: true });
+      for (let file = 0; file < 8; file++) {
+        yield* fs.writeFileString(path.join(repo, folder, `${file}.md`), "");
+      }
+      yield* vcsProcess.run({
+        operation: "test.gitInit",
+        command: "git",
+        args: ["init"],
+        cwd: repo,
+      });
+      const listed = yield* WorkspaceSearchIndex.listRepositoryFiles(
+        vcsProcess,
+        cwd,
+        "repo",
+        false,
+        3,
+      );
+      expect(listed.truncated).toBe(true);
+      expect(listed.paths.length).toBeGreaterThan(0);
+      for (const listedPath of listed.paths) {
+        expect(listedPath).toMatch(new RegExp(`^repo/${folder}/\\d\\.md$`));
+      }
     }),
-  ),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.live("shares one rebuild among concurrent searches and rebuilds after a refresh", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-shared-" });
+      const repo = path.join(home, "code", "repo");
+      yield* fs.makeDirectory(repo, { recursive: true });
+      yield* fs.writeFileString(path.join(repo, "README.md"), "");
+      yield* vcsProcess.run({
+        operation: "test.gitInit",
+        command: "git",
+        args: ["init"],
+        cwd: repo,
+      });
+      let listings = 0;
+      const counting = VcsProcess.VcsProcess.of({
+        ...vcsProcess,
+        run: (input) => {
+          if (input.operation === "WorkspaceSearchIndex.listRepositoryFiles") listings += 1;
+          return vcsProcess.run(input);
+        },
+      });
+      const index = yield* WorkspaceSearchIndex.make(path.join(home, "code")).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+        Effect.provideService(VcsProcess.VcsProcess, counting),
+      );
+      const paths = index
+        .search("md", 20, "file")
+        .pipe(Effect.map((result) => result.entries.map((entry) => entry.path)));
+      expect(
+        yield* Effect.all(
+          Array.from({ length: 4 }, () => paths),
+          { concurrency: "unbounded" },
+        ),
+      ).toEqual(Array.from({ length: 4 }, () => ["repo/README.md"]));
+      expect(listings).toBe(1);
+
+      yield* fs.writeFileString(path.join(repo, "NOTES.md"), "");
+      yield* index.refresh();
+      expect(yield* paths).toEqual(["repo/NOTES.md", "repo/README.md"]);
+      expect(listings).toBe(2);
+    }),
+  ).pipe(Effect.provide(testLayer)),
 );
 
 it.effect("ends a rebuild at its deadline and marks the result truncated", () =>
@@ -1094,14 +1152,14 @@ it.effect("ends a rebuild at its deadline and marks the result truncated", () =>
   ).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("keeps a trailing space in a child repository's folder name", () =>
+it.effect.each(["repo ", "repo\r"])("keeps a child repository named %j as it is", (name) =>
   Effect.scoped(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const vcsProcess = yield* VcsProcess.VcsProcess;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-space-" });
-      const repo = path.join(home, "code", "repo ");
+      const repo = path.join(home, "code", name);
       yield* fs.makeDirectory(repo, { recursive: true });
       yield* fs.writeFileString(path.join(repo, "README.md"), "");
       yield* vcsProcess.run({
@@ -1115,7 +1173,7 @@ it.effect("keeps a trailing space in a child repository's folder name", () =>
       );
       expect(
         (yield* index.search("readme", 20, "file")).entries.map((entry) => entry.path),
-      ).toEqual(["repo /README.md"]);
+      ).toEqual([`${name}/README.md`]);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

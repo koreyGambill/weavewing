@@ -17,7 +17,6 @@ import type {
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
-import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -25,7 +24,6 @@ import * as LayerMap from "effect/LayerMap";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import type * as Scope from "effect/Scope";
 
 import type {
   ProjectEntry,
@@ -691,8 +689,10 @@ const confirmChildRepositories = Effect.fn("WorkspaceSearchIndex.confirmChildRep
           .pipe(Effect.orElseSucceed(() => undefined));
         if (!topLevel || topLevel.exitCode !== 0) return [];
         const top = yield* Effect.promise(() =>
-          // Only git's line break goes; a folder name may itself end in spaces.
-          NodeFSP.realpath(topLevel.stdout.replace(/\r?\n$/, "")).catch(() => null),
+          // Only git's own line break goes; a folder name may end in spaces or a carriage return.
+          NodeFSP.realpath(
+            topLevel.stdout.endsWith("\n") ? topLevel.stdout.slice(0, -1) : topLevel.stdout,
+          ).catch(() => null),
         );
         return top === real ? [name] : [];
       }),
@@ -740,7 +740,7 @@ export function parseRepositoryFileRecords(
   return { paths, truncated };
 }
 
-const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles")(function* (
+export const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles")(function* (
   vcsProcess: VcsProcess.VcsProcess["Service"],
   cwd: string,
   repository: string,
@@ -771,10 +771,10 @@ const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles"
       allowNonZeroExit: true,
       timeoutMs: 10_000,
       maxOutputBytes: Math.min(16 * 1024 * 1024, limit * CHILD_REPOSITORY_RECORD_BYTES),
-      outputMode: "truncate-and-stop",
+      outputMode: "truncate",
     })
     .pipe(Effect.orElseSucceed(() => undefined));
-  // A read stopped at the limit ends git early, so only a full read must exit cleanly.
+  // Output past the cap is drained, not read, so a capped listing keeps the paths it got.
   if (!result || (result.exitCode !== 0 && !result.stdoutTruncated)) {
     return { paths: [] as string[], truncated: true };
   }
@@ -789,41 +789,11 @@ const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles"
   };
 });
 
-/**
- * One result per key, kept for `ttlMs`. While a build runs, every caller gets that build, even
- * after the key changes or the result expires; the build belongs to `scope`, not to its callers.
- */
-export function makeSingleFlightCache<A>(scope: Scope.Scope, ttlMs: number) {
-  let cached:
-    | { readonly key: string; readonly expiresAt: number; readonly fiber: Fiber.Fiber<A> }
-    | undefined;
-  let running: Fiber.Fiber<A> | undefined;
-  return {
-    acquire: Effect.fnUntraced(function* (key: string, build: () => Effect.Effect<A>) {
-      if (running) return running;
-      const now = yield* Clock.currentTimeMillis;
-      if (cached && cached.key === key && cached.expiresAt > now) return cached.fiber;
-      const fiber = yield* build().pipe(
-        Effect.ensuring(Effect.sync(() => (running = undefined))),
-        Effect.forkIn(scope),
-      );
-      // A build that finished while forking is no longer running.
-      if (fiber.pollUnsafe() === undefined) running = fiber;
-      cached = { key, expiresAt: now + ttlMs, fiber };
-      return fiber;
-    }),
-    invalidate: () => {
-      cached = undefined;
-    },
-  };
-}
-
 const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratchIndex")(function* (
   cwd: string,
 ) {
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const hostIsWindows = yield* HostProcess.isWindows;
-  const scope = yield* Effect.scope;
   // A parent that is itself inside a repository keeps listing only its own top level.
   const insideRepository = yield* vcsProcess
     .run({
@@ -839,9 +809,8 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
       Effect.orElseSucceed(() => false),
     );
   type ChildFiles = { readonly entries: ProjectEntry[]; readonly truncated: boolean };
-  const buildChildFiles = Effect.fn("WorkspaceSearchIndex.buildChildRepositoryFiles")(function* (
-    candidates: ReadonlyArray<string>,
-  ) {
+  const buildChildFiles = Effect.fn("WorkspaceSearchIndex.buildChildRepositoryFiles")(function* () {
+    const candidates = yield* listRepositoryCandidates(cwd);
     const deadline = (yield* Clock.currentTimeMillis) + CHILD_REPOSITORY_REBUILD_DEADLINE_MS;
     const beforeDeadline = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Clock.currentTimeMillis.pipe(
@@ -885,15 +854,21 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
     }
     return { entries, truncated } satisfies ChildFiles;
   });
-  const childFiles = makeSingleFlightCache<ChildFiles>(scope, CHILD_REPOSITORY_FILES_TTL_MS);
+  // Concurrent searches share one rebuild, and its result is reused while fresh.
+  const [cachedChildFiles, invalidateChildFiles] = yield* Effect.cachedInvalidateWithTTL(
+    buildChildFiles(),
+    CHILD_REPOSITORY_FILES_TTL_MS,
+  );
+  let listedRepositories: string | undefined;
   const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
     function* () {
       if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
-      const candidates = yield* listRepositoryCandidates(cwd);
-      const fiber = yield* childFiles.acquire(candidates.join("\0"), () =>
-        buildChildFiles(candidates),
-      );
-      return yield* Fiber.join(fiber);
+      const key = (yield* listRepositoryCandidates(cwd)).join("\0");
+      if (key !== listedRepositories) {
+        listedRepositories = key;
+        yield* invalidateChildFiles;
+      }
+      return yield* cachedChildFiles;
     },
   );
 
@@ -959,7 +934,7 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
       ),
     ),
     refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(function* () {
-      childFiles.invalidate();
+      yield* invalidateChildFiles;
     }),
   });
 });

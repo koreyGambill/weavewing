@@ -249,7 +249,6 @@ import { ThreadMcpApp } from "./McpAppWebView";
 import { assetEnvironment, useAssetUrl, useRefreshAssetUrl } from "../../state/assets";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { readEnvironmentScope, usePreparedConnection } from "../../state/session";
-import { projectEnvironment } from "../../state/projects";
 import { filesystemEnvironment } from "../../state/filesystem";
 import { safeDecodeURIComponent } from "@t3tools/shared/markdownLinks";
 import {
@@ -2970,6 +2969,19 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     // A v1 link names no environment, so it falls back to this message's.
     return scopeThreadRef(props.environmentId, link.threadId);
   };
+  // A tap reads the host afresh through the metadata request, never a cached answer.
+  const readTappedEntryKind = async (path: string, signal: AbortSignal) => {
+    const result = await executeAtomQuery(
+      appAtomRegistry,
+      filesystemEnvironment.getMetadata({
+        environmentId: props.environmentId,
+        input: { paths: [path] },
+      }),
+      { signal, refresh: true, reportFailure: false, reportDefect: false },
+    );
+    if (result._tag !== "Success") throw new Error("The file could not be read.");
+    return result.value.entries[0]?.kind ?? null;
+  };
   const onMarkdownLinkPress = (
     href: string,
     imageEmbed = false,
@@ -3019,18 +3031,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         href,
         mediaPath: typeof mediaPath === "string" ? mediaPath : null,
         canRead: readEnvironmentScope(props.environmentId, AuthFilesystemReadScope),
-        readKind: async (path) => {
-          const result = await executeAtomQuery(
-            appAtomRegistry,
-            projectEnvironment.fileMetadata({
-              environmentId: props.environmentId,
-              input: { path },
-            }),
-            { signal: request.signal, refresh: true, reportFailure: false, reportDefect: false },
-          );
-          if (result._tag !== "Success") throw new Error("The file could not be read.");
-          return result.value?.kind ?? null;
-        },
+        readKind: (path) => readTappedEntryKind(path, request.signal),
       }).then((outcome) => {
         if (request.signal.aborted) return;
         if (outcome === "folder" && typeof mediaPath === "string") {
@@ -3066,18 +3067,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         href,
         fullPath,
         canRead: readEnvironmentScope(props.environmentId, AuthFilesystemReadScope),
-        readKind: async (path) => {
-          const result = await executeAtomQuery(
-            appAtomRegistry,
-            filesystemEnvironment.getMetadata({
-              environmentId: props.environmentId,
-              input: { paths: [path] },
-            }),
-            { signal: request.signal, refresh: true, reportFailure: false, reportDefect: false },
-          );
-          if (result._tag !== "Success") throw new Error("The file could not be read.");
-          return result.value.entries[0]?.kind ?? null;
-        },
+        readKind: (path) => readTappedEntryKind(path, request.signal),
       }).then((outcome) => {
         if (request.signal.aborted) return;
         if (outcome === "open") {
