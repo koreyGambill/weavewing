@@ -87,7 +87,8 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   // A different link drops the last result, so a late read can never land on it.
   if (check !== null && check.key !== checkKey) setCheck(null);
   const verifiedPath = verifyPath && check?.key === checkKey ? check.path : null;
-  const confirmed = verifyPath === undefined || verifiedPath !== null;
+  // Only a confirmed relative link reads metadata; an absolute link renders from what was written.
+  const confirmed = verifiedPath !== null;
   const shownPath = fileLinkShownPath(authoredPath, verifiedPath);
   // Nothing reads an unconfirmed relative link's guessed path, the icon and tooltip included.
   const readPath = verifiedPath ?? iconPath;
@@ -363,6 +364,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                verifyOnOpen(true);
                 if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
                   handleOpenInEditor();
                   return;
@@ -396,7 +398,10 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               aria-haspopup="menu"
               className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, "select-text")}
               data-markdown-copy={copyMarkdown}
-              onClick={handleContextMenu}
+              onClick={(event) => {
+                verifyOnOpen(true);
+                handleContextMenu(event);
+              }}
               onContextMenu={handleContextMenu}
             >
               <FileTagChipContent

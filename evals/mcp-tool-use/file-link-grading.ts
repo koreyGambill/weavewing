@@ -1,22 +1,13 @@
 import * as Schema from "effect/Schema";
 import { splitFilePathPosition } from "@t3tools/shared/fileLinks";
 import {
-  audioMimeTypeFromExtension,
-  mediaMimeTypeFromExtension,
-} from "@t3tools/shared/mediaPreview";
-import {
   extractInlineCodeSpans,
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
   isMarkdownFileLinkLabel,
   normalizeMarkdownLinkDestination,
-  parseMarkdownFileLink,
   resolveMarkdownFileLinkTarget,
 } from "@t3tools/shared/markdownLinks";
-import {
-  needsWorkspaceBasenameLookup,
-  pickWorkspaceLinkMatch,
-} from "../../packages/client-runtime/src/workspaceBasenameLookup.ts";
 
 export const FileLinksExpect = Schema.Struct({
   /** The final answer has at least this many file pills that open a world file. */
@@ -33,31 +24,10 @@ const normalizeAbsolutePath = (path: string) => {
   return `/${segments.join("/")}`;
 };
 
-/** Mobile opens these in a preview at the literal path, with no workspace lookup. */
-const opensAsPreview = (path: string) => {
-  const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
-  return (
-    extension === ".pdf" ||
-    mediaMimeTypeFromExtension(extension) !== null ||
-    audioMimeTypeFromExtension(extension) !== null
-  );
-};
-
-/** The client opens an exact basename match, or a case-insensitive one when only one exists. */
-const uniqueBasename = (name: string, entries: ReadonlyArray<{ readonly path: string }>) => {
-  const basenames = entries.map((entry) => entry.path.split("/").at(-1) ?? "");
-  const exact = basenames.filter((basename) => basename === name).length;
-  return (
-    exact === 1 ||
-    (exact === 0 &&
-      basenames.filter((basename) => basename.toLowerCase() === name.toLowerCase()).length === 1)
-  );
-};
-
 /**
  * Chat turns every file-shaped markdown link and inline code span into a pill resolved against
- * the thread's cwd. A pill is broken when it lands on no world file or directory and the client's
- * on-click lookup (basename, repeated prefix, unique suffix) finds no one file under the cwd.
+ * the thread's cwd. A pill works only when that literal path is a world file or directory: the
+ * client opens nothing else in its place.
  */
 export const fileLinkPills = (
   finalText: string,
@@ -88,20 +58,7 @@ export const fileLinkPills = (
     const path = normalizeAbsolutePath(splitFilePathPosition(target).path);
     // System paths such as /usr/bin/node are not what these cases test; the workspace always is.
     if (!path.startsWith(`${cwd}/`) && !/^\/(?:home|Users)\//.test(path)) return [];
-    const relative = parseMarkdownFileLink(source)?.path ?? path;
-    const entries = files.flatMap((file) =>
-      file.startsWith(`${cwd}/`)
-        ? [{ path: file.slice(cwd.length + 1), kind: "file" as const }]
-        : [],
-    );
-    const works =
-      files.some((file) => file === path || file.startsWith(`${path}/`)) ||
-      (!relative.startsWith("/") &&
-        !opensAsPreview(path) &&
-        // The client opens the first of several same-named files, which may be the wrong one.
-        (needsWorkspaceBasenameLookup(relative)
-          ? uniqueBasename(relative, entries)
-          : pickWorkspaceLinkMatch(relative, cwd, entries) !== null));
+    const works = files.some((file) => file === path || file.startsWith(`${path}/`));
     return [{ source, path, works }];
   });
 };

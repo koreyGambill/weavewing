@@ -250,6 +250,7 @@ import { assetEnvironment, useAssetUrl, useRefreshAssetUrl } from "../../state/a
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { readEnvironmentScope, usePreparedConnection } from "../../state/session";
 import { projectEnvironment } from "../../state/projects";
+import { filesystemEnvironment } from "../../state/filesystem";
 import { safeDecodeURIComponent } from "@t3tools/shared/markdownLinks";
 import {
   resolveThreadLink,
@@ -269,12 +270,7 @@ import { environmentThreadShells, threadEnvironment } from "../../state/threads"
 import { ThreadWorkflowOpening, useWorkflowOpening } from "./thread-workflow-opening";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useV2ItemSupport } from "../../state/v2-item-support";
-import {
-  fileRoutePathSegments,
-  isAbsolutePath,
-  resolveFileLinkPath,
-  resolveWorkspaceRelativeFilePath,
-} from "../files/filePath";
+import { fileRoutePathSegments, isAbsolutePath } from "../files/filePath";
 import { waitForThreadShell } from "./threadForkNavigation";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
@@ -3045,17 +3041,46 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 
     const presentation = resolveMarkdownLinkPresentation(href);
     if (presentation.kind === "file") {
-      const path = resolveFileLinkPath(props.workspaceRoot, presentation.path);
-      if (path === null) return;
-      // A link opens where it points; a missing file shows as missing rather than a guess.
-      const target = resolveWorkspaceRelativeFilePath(props.workspaceRoot, path) ?? path;
-      void Haptics.selectionAsync();
-      navigation.navigate("ThreadFile", {
-        environmentId: String(props.environmentId),
-        threadId: String(props.threadId),
-        path: fileRoutePathSegments(target),
-        ...(presentation.line ? { line: String(presentation.line) } : {}),
-      });
+      // Open and copy share this target, so a tap opens exactly what Copy path copies.
+      const target = resolveFileChipTarget(href, props.workspaceRoot);
+      if (!target) return;
+      const openPath = target.relativePath ?? target.fullPath;
+      if (!openPath) return;
+      const open = () => {
+        if (request.signal.aborted) return;
+        void Haptics.selectionAsync();
+        navigation.navigate("ThreadFile", {
+          environmentId: String(props.environmentId),
+          threadId: String(props.threadId),
+          path: fileRoutePathSegments(openPath),
+          ...(presentation.line ? { line: String(presentation.line) } : {}),
+        });
+      };
+      if (
+        isAbsolutePath(presentation.path) ||
+        !target.fullPath ||
+        !readEnvironmentScope(props.environmentId, AuthFilesystemReadScope)
+      ) {
+        open();
+        return;
+      }
+      // A relative link opens only where it points; a fresh read says when nothing is there.
+      void executeAtomQuery(
+        appAtomRegistry,
+        filesystemEnvironment.getMetadata({
+          environmentId: props.environmentId,
+          input: { paths: [target.fullPath] },
+        }),
+        { signal: request.signal, reportFailure: false, reportDefect: false },
+      ).then((result) => {
+        if (request.signal.aborted) return;
+        if (result._tag !== "Success" || result.value.entries[0]?.kind === "file") {
+          open();
+          return;
+        }
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Dialog.alert("No file there", `${safeDecodeURIComponent(href)}\n\n${target.fullPath}`);
+      }, open);
       return;
     }
 

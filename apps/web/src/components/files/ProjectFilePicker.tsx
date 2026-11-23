@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";
 import { useTheme } from "~/hooks/useTheme";
-import { useRightPanelStore } from "~/rightPanelStore";
+import { useRightPanelStore, type FileLineReveal } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
@@ -18,6 +18,9 @@ import { useProjectFilePickerQuery } from "./projectFilesQueryState";
 
 interface ProjectFilePickerProps {
   readonly query?: string;
+  readonly initialQuery?: string;
+  /** Where the picked file opens, such as a missing chat link's line range. */
+  readonly reveal?: FileLineReveal;
   readonly onQueryChange?: (query: string) => void;
   readonly setOpen: (open: boolean) => void;
 }
@@ -73,7 +76,7 @@ function EmptyProjectFilePicker(props: ProjectFilePickerProps) {
 
 function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveProjectTarget }) {
   const { target } = props;
-  const [localQuery, setLocalQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState(props.initialQuery ?? "");
   const query = props.query ?? localQuery;
   const setQuery = props.onQueryChange ?? setLocalQuery;
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
@@ -107,7 +110,7 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
     ),
     icon: <PierreEntryIcon pathValue={match.path} kind="file" theme={resolvedTheme} />,
     run: async () => {
-      useRightPanelStore.getState().openFile(target.threadRef, match.path);
+      useRightPanelStore.getState().openFile(target.threadRef, match.path, props.reveal);
     },
   }));
 

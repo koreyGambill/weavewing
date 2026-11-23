@@ -37,9 +37,10 @@ export function resolveWorkspaceFilePath(cwd: string, relativePath: string): str
   return joinPath(cwd, relativePath, separator);
 }
 
-function normalizeRelativePath(value: string): string | null {
+// `\` separates folders only on Windows; on POSIX it is part of a file name such as `notes\week.md`.
+function normalizeRelativePath(value: string, windows: boolean): string | null {
   const segments: string[] = [];
-  for (const segment of value.replaceAll("\\", "/").split("/")) {
+  for (const segment of (windows ? value.replaceAll("\\", "/") : value).split("/")) {
     if (segment.length === 0 || segment === ".") {
       continue;
     }
@@ -64,7 +65,9 @@ export function resolveFileLinkPath(
     const expanded = resolvePathLinkTarget(targetPath, workspaceRoot);
     return isAbsolutePath(expanded) ? expanded : null;
   }
-  return isAbsolutePath(targetPath) ? targetPath : normalizeRelativePath(targetPath);
+  return isAbsolutePath(targetPath)
+    ? targetPath
+    : normalizeRelativePath(targetPath, workspaceRoot ? isWindowsPathStyle(workspaceRoot) : false);
 }
 
 export function resolveWorkspaceRelativeFilePath(
@@ -79,9 +82,11 @@ export function resolveWorkspaceRelativeFilePath(
     return null;
   }
 
-  const normalizedTarget = targetPath.replaceAll("\\", "/");
-  const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
-  const caseInsensitive = isWindowsAbsolutePath(targetPath) || isWindowsAbsolutePath(workspaceRoot);
+  const windows = isWindowsAbsolutePath(targetPath) || isWindowsAbsolutePath(workspaceRoot);
+  const slashed = (path: string) => (windows ? path.replaceAll("\\", "/") : path);
+  const normalizedTarget = slashed(targetPath);
+  const normalizedRoot = slashed(workspaceRoot).replace(/\/+$/, "");
+  const caseInsensitive = windows;
   const comparableTarget = caseInsensitive ? normalizedTarget.toLowerCase() : normalizedTarget;
   const comparableRoot = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
   if (!comparableTarget.startsWith(`${comparableRoot}/`)) {
@@ -92,7 +97,7 @@ export function resolveWorkspaceRelativeFilePath(
   if (relativePath.split("/").includes("..")) {
     return null;
   }
-  return normalizeRelativePath(relativePath);
+  return normalizeRelativePath(relativePath, windows);
 }
 
 export function isVideoPreviewFile(path: string): boolean {

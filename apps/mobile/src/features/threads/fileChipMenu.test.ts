@@ -20,6 +20,21 @@ it("copies native paths from a relative file chip in a Windows workspace", () =>
 });
 
 describe("resolveFileChipTarget", () => {
+  it("keeps an encoded backslash in a POSIX file name and splits on it only on Windows", () => {
+    expect(resolveFileChipTarget("./notes%5Cweek.md", "/repo")).toEqual({
+      fullPath: "/repo/notes\\week.md",
+      relativePath: "notes\\week.md",
+    });
+    expect(resolveFileChipTarget("/repo/notes%5Cweek.md", "/repo")).toEqual({
+      fullPath: "/repo/notes\\week.md",
+      relativePath: "notes\\week.md",
+    });
+    expect(resolveFileChipTarget("./notes%5Cweek.md", "C:\\repo")).toEqual({
+      fullPath: "C:\\repo\\notes\\week.md",
+      relativePath: "notes/week.md",
+    });
+  });
+
   it("resolves a workspace-relative link to both paths", () => {
     expect(resolveFileChipTarget("src/app.ts:12", "/repo")).toEqual({
       fullPath: "/repo/src/app.ts",

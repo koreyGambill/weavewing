@@ -605,25 +605,41 @@ describe("ChatMarkdown relative file links", () => {
     expect(chip(screen.container).getAttribute("href")).toBe("notes/a.md");
   });
 
-  it("opens the link where it points on click, without reading or searching first", async () => {
+  it("opens the link where it points on click and checks it, without a hover first", async () => {
     setup();
+    filesystemMetadata.mockResolvedValueOnce(metadata("file"));
     using openFile = vi
       .spyOn(useRightPanelStore.getState(), "openFile")
       .mockImplementation(() => {});
     await using screen = await renderText("[Notes](physics/notes/a.md#L4-L8)", {
       cwd: "/school",
       threadRef,
-      agentDirectories: () => ["/work/physics"],
     });
     await act(async () => chip(screen.container).click());
     expect(openFile).toHaveBeenCalledExactlyOnceWith(
       threadRef,
       "physics/notes/a.md",
-      expect.objectContaining({ line: 4, endLine: 8, searchFolders: ["/work/physics"] }),
+      expect.objectContaining({ line: 4, endLine: 8 }),
       "tile-2",
     );
+    expect(filesystemMetadata).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ input: { paths: ["/school/physics/notes/a.md"] } }),
+    );
     expect(workspaceSearch).not.toHaveBeenCalled();
-    expect(filesystemMetadata).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(chip(screen.container).getAttribute("href")).toBe("/school/physics/notes/a.md#L4-L8"),
+    );
+  });
+
+  it("shows an absolute link exactly as written", async () => {
+    setup();
+    await using screen = await renderText("[Notes](/school/notes/a.md#L4-L8)", {
+      cwd: "/school",
+      threadRef,
+    });
+    expect(chip(screen.container).getAttribute("href")).toBe("/school/notes/a.md#L4-L8");
+    await userEvent.hover(chip(screen.container));
+    await expect.element(page.getByText("/school/notes/a.md#L4-L8")).toBeVisible();
   });
 });
 

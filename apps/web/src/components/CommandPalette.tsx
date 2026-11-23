@@ -321,6 +321,7 @@ function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPalette
         groups: [{ value: "themes", label: "Change theme", items: [] }],
       };
     case "search":
+    case "files":
     case undefined:
       return null;
   }
@@ -420,7 +421,16 @@ function CommandPaletteDialog(props: {
           setOpen={props.setOpen}
         />
       ) : props.mode === "files" ? (
-        <ProjectFilePicker setOpen={props.setOpen} />
+        <ProjectFilePicker
+          key={props.session}
+          setOpen={props.setOpen}
+          {...(props.openIntent?.kind === "files"
+            ? {
+                initialQuery: props.openIntent.query,
+                ...(props.openIntent.reveal ? { reveal: props.openIntent.reveal } : {}),
+              }
+            : {})}
+        />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
       ) : (

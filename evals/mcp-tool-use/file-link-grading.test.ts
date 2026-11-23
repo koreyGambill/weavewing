@@ -13,7 +13,7 @@ const files = [
   "/home/user/work/worker/src/worker.ts",
 ];
 
-it("grades pills the way chat resolves them against the thread cwd", () => {
+it("credits only pills whose literal path under the thread cwd exists", () => {
   const text = [
     "[http.ts](/home/user/app/packages/server/src/cloud/http.ts#L4)",
     "`packages/server/src/cloud/http.ts:6` and `cloud/http.ts:6`",
@@ -33,12 +33,12 @@ it("grades pills the way chat resolves them against the thread cwd", () => {
     "/home/user/app/packages/server/src/cloud/http.ts#L4": true,
     "/home/user/work/worker/src/worker.ts": true,
     "packages/server/src/cloud/http.ts:6": true,
-    "cloud/http.ts:6": true,
-    "ws.ts:3": true,
-    "cloud/http.ts#L4": true,
+    "cloud/http.ts:6": false,
+    "ws.ts:3": false,
+    "cloud/http.ts#L4": false,
     "./ws.ts": false,
     "./packages/server/src/ws.ts": true,
-    "WS.ts:3": true,
+    "WS.ts:3": false,
     "docs/report.pdf": false,
     "index.ts:5": false,
     "src/index.ts": false,

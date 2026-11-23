@@ -223,8 +223,6 @@ interface ChatMarkdownProps {
   inline?: boolean;
   text: string;
   cwd: string | undefined;
-  /** Folders the agent worked in before writing `text`, the latest first; read when a link opens. */
-  agentDirectories?: (() => ReadonlyArray<string>) | undefined;
   threadRef?: ScopedThreadRef | undefined;
   pullRequestPanelRef?: ScopedThreadRef | undefined;
   environmentId?: EnvironmentId | undefined;
@@ -486,7 +484,6 @@ function useChatMarkdownState({
   text,
   inline = false,
   cwd,
-  agentDirectories,
   threadRef,
   pullRequestPanelRef,
   environmentId: explicitEnvironmentId,
@@ -783,18 +780,9 @@ function useChatMarkdownState({
   };
   const openFileInPanel = (fileLinkMeta: MarkdownFileLinkMeta, panelPath: string) => {
     if (!threadRef) return;
-    useRightPanelStore.getState().openFile(
-      threadRef,
-      panelPath,
-      {
-        ...fileLinkMeta,
-        // The missing-file view offers these folders when the user asks to find the file.
-        ...(fileLinkMeta.workspaceLookupPath === null
-          ? {}
-          : { searchFolders: agentDirectories?.() ?? [] }),
-      },
-      getClientSettings().linkTileDestination,
-    );
+    useRightPanelStore
+      .getState()
+      .openFile(threadRef, panelPath, fileLinkMeta, getClientSettings().linkTileDestination);
   };
   const fileLinkChip = (
     fileLinkMeta: MarkdownFileLinkMeta,
