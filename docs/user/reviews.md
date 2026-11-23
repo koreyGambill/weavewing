@@ -137,8 +137,9 @@ read-only with **View**.
 
 **Uncommitted edits** lists each repository with changes. **Commit…** offers
 every changed file in it, untracked files included and marked, all checked.
-Uncheck anything to leave it out; the page then names the files it left
-uncommitted.
+Files that look like secrets, such as `.env`, start unchecked: move them, delete
+them, or add them to `.gitignore`. Uncheck anything to leave it out; the page then
+names the files it left uncommitted. A failed commit leaves Git's index as it was.
 
 **Load watchers** decide which tool calls Inspect's Loads view labels as
 knowledge loads. A shell command watcher matches its words in order, such as

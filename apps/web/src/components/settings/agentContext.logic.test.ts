@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { joinSegments, splitGenerated, watcherErrors } from "./agentContext.logic";
+import {
+  commitPaths,
+  initialExclusions,
+  joinSegments,
+  leftUncommitted,
+  splitGenerated,
+  watcherErrors,
+} from "./agentContext.logic";
 
 describe("splitGenerated", () => {
   it("keeps generated blocks apart and restores the file byte for byte", () => {
@@ -36,6 +43,34 @@ describe("watcherErrors", () => {
       "Add words to match.",
       "Use letters, digits, _ . : - and * for any run of characters.",
       "Use at most 8 words.",
+    ]);
+  });
+});
+
+describe("commit selection", () => {
+  const dirty = [
+    { path: "renamed.md", origPath: "notes.md", untracked: false, secret: false },
+    { path: "scratch.txt", untracked: true, secret: false },
+    { path: ".env", untracked: true, secret: true },
+  ];
+  const repo = { root: "/repo", head: null, branch: "main", dirty, dirtyCount: 5 };
+
+  it("commits both sides of a rename and leaves secret-looking files unchecked", () => {
+    const excluded = initialExclusions(dirty);
+    expect([...excluded]).toEqual([".env"]);
+    expect(
+      commitPaths(
+        "/repo",
+        dirty.filter((file) => !excluded.has(file.path)),
+      ),
+    ).toEqual(["/repo/renamed.md", "/repo/notes.md", "/repo/scratch.txt"]);
+  });
+
+  it("names what stays uncommitted, including files past the listing cap", () => {
+    expect(leftUncommitted(repo, new Set(["renamed.md", ".env"]))).toEqual([
+      "notes.md → renamed.md",
+      ".env",
+      "2 more not listed",
     ]);
   });
 });

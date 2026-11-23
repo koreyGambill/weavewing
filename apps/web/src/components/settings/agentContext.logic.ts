@@ -1,6 +1,7 @@
 import {
   type AgentContextGeneratedRange,
   type AgentContextOverview,
+  type AgentContextRepo,
   type AgentContextSkill,
   type LoadWatcher,
   loadWatcherError,
@@ -51,6 +52,33 @@ export function agentContextTotals(overview: AgentContextOverview) {
 /** Repositories with anything to commit; their Commit action offers every changed file. */
 export const pendingCommits = (overview: AgentContextOverview) =>
   overview.repos.filter((repo) => repo.dirty.length > 0);
+
+type DirtyFile = AgentContextRepo["dirty"][number];
+
+/** A rename shows where it came from. */
+export const dirtyLabel = (file: DirtyFile) =>
+  file.origPath === undefined ? file.path : `${file.origPath} → ${file.path}`;
+
+/** Secret-looking untracked files start unchecked; everything else is committed. */
+export const initialExclusions = (files: ReadonlyArray<DirtyFile>) =>
+  new Set(files.filter((file) => file.secret).map((file) => file.path));
+
+/** The paths a commit names: a rename takes its earlier path too, or the deletion stays behind. */
+export const commitPaths = (root: string, files: ReadonlyArray<DirtyFile>) =>
+  files.flatMap((file) =>
+    [file.path, ...(file.origPath === undefined ? [] : [file.origPath])].map(
+      (entry) => `${root}/${entry}`,
+    ),
+  );
+
+/** What a commit leaves behind: the rows left unchecked, and any the listing could not show. */
+export function leftUncommitted(repo: AgentContextRepo, excluded: ReadonlySet<string>) {
+  const unlisted = repo.dirtyCount - repo.dirty.length;
+  return [
+    ...repo.dirty.filter((file) => excluded.has(file.path)).map(dirtyLabel),
+    ...(unlisted > 0 ? [`${unlisted} more not listed`] : []),
+  ];
+}
 
 export interface TextSegment {
   /** The segment's first line in the loaded file, which keys it while its text changes. */

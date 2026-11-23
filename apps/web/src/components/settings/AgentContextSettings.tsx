@@ -55,6 +55,10 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Textarea } from "../ui/textarea";
 import {
   agentContextTotals,
+  commitPaths,
+  dirtyLabel,
+  initialExclusions,
+  leftUncommitted,
   groupSkills,
   joinSegments,
   pendingCommits,
@@ -427,9 +431,7 @@ function AgentContextSections({
                 <span className="font-medium">{shortenPath(repo.root, home)}</span>
                 <span className="text-muted-foreground">
                   {" "}
-                  · {repo.dirty.length}
-                  {repo.dirtyTruncated ? "+" : ""} changed{" "}
-                  {repo.dirty.length === 1 ? "file" : "files"}
+                  · {repo.dirtyCount} changed {repo.dirtyCount === 1 ? "file" : "files"}
                   {repo.branch ? ` on ${repo.branch}` : " on a detached HEAD"}
                 </span>
                 {(leftOut.get(repo.root)?.length ?? 0) > 0 && (
@@ -946,7 +948,9 @@ function CommitDialog({
   const commit = useAtomCommand(agentContextCommit, { reportFailure: false });
   const canCommit = useAtomValue(agentContextCommit.permissionAtom(environmentId));
   const [message, setMessage] = useState("");
-  const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set());
+  const [excluded, setExcluded] = useState<ReadonlySet<string>>(() =>
+    initialExclusions(repo?.dirty ?? []),
+  );
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const files = repo?.dirty ?? [];
@@ -986,19 +990,23 @@ function CommitDialog({
                     }
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-xs">{file.path}</span>
-                    {file.untracked && (
+                    <span className="block truncate font-mono text-xs">{dirtyLabel(file)}</span>
+                    {file.secret ? (
+                      <span className="block text-xs text-warning-foreground">
+                        looks like a secret: move it, delete it, or add it to .gitignore
+                      </span>
+                    ) : file.untracked ? (
                       <span className="block text-xs text-muted-foreground">
                         untracked: commit it, or move or delete it
                       </span>
-                    )}
+                    ) : null}
                   </span>
                 </label>
               ))}
             </div>
-            {repo?.dirtyTruncated && (
-              <p className="text-xs text-muted-foreground">
-                Only the first {files.length} changed files are listed; commit the rest in a
+            {repo !== undefined && repo.dirtyCount > files.length && (
+              <p className="text-xs text-warning-foreground">
+                {repo.dirtyCount - files.length} more changed files not shown; commit them from a
                 terminal.
               </p>
             )}
@@ -1045,17 +1053,14 @@ function CommitDialog({
                 input: {
                   ...target,
                   repoRoot: repo.root,
-                  realPaths: chosen.map((file) => `${repo.root}/${file.path}`),
+                  realPaths: commitPaths(repo.root, chosen),
                   message: message.trim(),
                   expectedHead: repo.head,
                 },
               });
               setBusy(false);
               if (result._tag === "Success") {
-                onCommitted(
-                  repo.root,
-                  files.filter((file) => excluded.has(file.path)).map((file) => file.path),
-                );
+                onCommitted(repo.root, leftUncommitted(repo, excluded));
                 onClose();
                 return;
               }
