@@ -100,6 +100,7 @@ import { serverEnvironment } from "~/state/server";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
+import { FileLinkFinder } from "./FileLinkFinder";
 
 import { useThreadTerminalActions } from "../terminal/useThreadTerminalActions";
 import { useRightPanelStore } from "../../rightPanelStore";
@@ -182,6 +183,8 @@ interface FilePreviewPanelProps {
   revealLine: number | null;
   revealEndLine: number | null;
   revealRequestId: number;
+  /** Set when a relative chat link opened this file; the missing-file view can search them. */
+  linkSearchFolders?: ReadonlyArray<string> | undefined;
   onOpenFile: (relativePath: string) => void;
   onNavigateFolder: (relativePath: string, folderTrail: string, keepSource: boolean) => void;
   /** Retained descendant breadcrumb path after navigating up; see navigateFolder. */
@@ -1225,6 +1228,7 @@ export default function FilePreviewPanel({
   revealLine,
   revealEndLine,
   revealRequestId,
+  linkSearchFolders,
   onOpenFile,
   onNavigateFolder,
   folderTrail,
@@ -1976,6 +1980,18 @@ export default function FilePreviewPanel({
                     </code>
                     . Check the link's path or locate the file in Files.
                   </p>
+                ) : null}
+                {linkSearchFolders !== undefined && !attachment ? (
+                  <FileLinkFinder
+                    key={`${revealRequestId}:${relativePath}`}
+                    environmentId={environmentId}
+                    threadRef={threadRef}
+                    cwd={cwd}
+                    relativePath={relativePath}
+                    searchFolders={linkSearchFolders}
+                    revealLine={revealLine}
+                    revealEndLine={revealEndLine}
+                  />
                 ) : null}
               </div>
             </div>

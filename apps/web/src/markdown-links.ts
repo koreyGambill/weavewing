@@ -12,7 +12,11 @@ import {
   parseMarkdownFileLink,
   resolveMarkdownFileLinkTarget,
 } from "@t3tools/shared/markdownLinks";
-import { parseFileUrlHref, splitFilePathPosition } from "@t3tools/shared/fileLinks";
+import {
+  formatFilePathPosition,
+  parseFileUrlHref,
+  splitFilePathPosition,
+} from "@t3tools/shared/fileLinks";
 
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
 import { isTerminalLinkActivation } from "./terminal-links";
@@ -143,5 +147,16 @@ function buildFileLinkMetaFromTarget(targetPath: string, cwd?: string) {
     basename: fileBasename(path),
     ...(line !== undefined ? { line } : {}),
     ...(column !== undefined ? { column } : {}),
+  };
+}
+
+/** A chip's copy targets: the link's own path, never a file found in its place. */
+export function markdownFileCopyPaths(meta: MarkdownFileLinkMeta) {
+  return {
+    fullPath: meta.targetPath,
+    relativePath: formatFilePathPosition({
+      ...meta,
+      path: meta.workspaceRelativePath ?? meta.filePath,
+    }),
   };
 }

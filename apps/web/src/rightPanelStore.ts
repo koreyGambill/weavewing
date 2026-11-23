@@ -94,6 +94,8 @@ export type RightPanelSurface =
       /** Last line of a linked range such as `:57-64`; absent for a single line. */
       revealEndLine?: number;
       revealRequestId: number;
+      /** Folders a missing linked file may be searched for in, besides the thread's projects. */
+      linkSearchFolders?: ReadonlyArray<string>;
       attachment?: ChatFileAttachment;
       /** Deepest workspace path retained for navigating back down after moving up. */
       folderTrail?: string;
@@ -330,6 +332,7 @@ const fileSurface = (
   relativePath: string,
   reveal: { line: number | null; endLine: number | null },
   revealRequestId: number,
+  linkSearchFolders?: ReadonlyArray<string>,
 ): RightPanelSurface => ({
   id: `file:${relativePath}`,
   kind: "file",
@@ -337,6 +340,7 @@ const fileSurface = (
   revealLine: reveal.line,
   ...(reveal.endLine === null ? {} : { revealEndLine: reveal.endLine }),
   revealRequestId,
+  ...(linkSearchFolders === undefined ? {} : { linkSearchFolders }),
 });
 
 const attachmentSurface = (attachment: ChatFileAttachment): RightPanelSurface => ({
@@ -657,6 +661,8 @@ const closeAction = (
 export interface FileLineReveal {
   readonly line?: number | undefined;
   readonly endLine?: number | undefined;
+  /** Folders the linking reply worked in, which the missing-file view may search. */
+  readonly searchFolders?: ReadonlyArray<string> | undefined;
 }
 
 function normalizeRevealLine(line: unknown): number | null {
@@ -1228,6 +1234,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               relativePath,
               normalizeReveal(reveal ?? {}),
               (existing?.revealRequestId ?? 0) + 1,
+              reveal?.searchFolders,
             );
             const next = activated(
               {

@@ -6,11 +6,6 @@ import {
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
 } from "./markdown-links";
-import {
-  markdownFileCopyPaths,
-  markdownFileEditorTarget,
-  resolveMarkdownFileHostPath,
-} from "./markdownFileHostPath";
 
 describe("isLocalEditorFileHref", () => {
   it("accepts absolute file deep links of known editors", () => {
@@ -112,27 +107,5 @@ describe("resolveInlineCodeFileLinkMeta", () => {
     expect(
       resolveInlineCodeFileLinkMeta("example.uk/index.html", "/Users/julius/project"),
     ).toBeNull();
-  });
-});
-
-describe("chat file chip paths", () => {
-  const cwd = String.raw`C:\Users\alice\project`;
-
-  it("opens and copies the indexed file for a bare filename, preserving its line and column", async () => {
-    const meta = resolveMarkdownFileLinkMeta("user.ts:261:7", cwd);
-    if (!meta) throw new Error("Expected a file link");
-    const hostPath = await resolveMarkdownFileHostPath({
-      meta,
-      cwd,
-      findWorkspaceMatch: async () => "src/discord/events/user.ts",
-    });
-
-    expect(markdownFileEditorTarget(meta, hostPath)).toBe(
-      String.raw`C:\Users\alice\project\src\discord\events\user.ts:261:7`,
-    );
-    expect(markdownFileCopyPaths(meta, hostPath, cwd)).toEqual({
-      fullPath: String.raw`C:\Users\alice\project\src\discord\events\user.ts:261:7`,
-      relativePath: "src/discord/events/user.ts:261:7",
-    });
   });
 });

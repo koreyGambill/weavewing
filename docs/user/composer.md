@@ -427,6 +427,11 @@ selected folder. Each tab keeps its folder; a new Files tab starts at the worksp
 
 Follow an agent's file link, or move a Files tab above the workspace, to read files
 outside it.
+
+A relative file link opens at that path in the thread's folder and nowhere else. When no
+file is there, the file view offers **Find** for that file name. It lists the matching
+files in the thread's folder, your projects and the folders the agent worked in; pick
+one to open it at the linked lines.
 On web and desktop, instruction files that agents load from a provider's config folder
 or `~/.config` open ready to edit. Other files open read-only.
 

@@ -2,121 +2,149 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   agentWorkingDirectories,
-  claimWorkspaceBasenameLookup,
-  findAgentDirectoryMatch,
-  findChildCheckoutMatch,
-  pickProjectLinkMatch,
-  pickWorkspaceBasenameMatch,
-  pickWorkspaceLinkMatch,
-  workspaceLinkLookupQuery,
+  authoredFileLinkSuffix,
+  fileLinkShownPath,
+  findFileLinkCandidates,
+  verifyRelativeFileLink,
 } from "@t3tools/client-runtime/workspace-basename-lookup";
 
-describe("pickWorkspaceBasenameMatch", () => {
-  const entries = [
-    { path: "apps/web/src/components/ChatView.test.tsx", kind: "file" as const },
-    { path: "apps/web/src/components/ChatView.tsx", kind: "file" as const },
-  ];
-
-  it("takes the first exact filename match, not the closest fuzzy one", () => {
-    expect(pickWorkspaceBasenameMatch("ChatView.tsx", entries)).toBe(
-      "apps/web/src/components/ChatView.tsx",
-    );
+describe("fileLinkShownPath", () => {
+  it("keeps the position exactly as the agent wrote it", () => {
+    expect(authoredFileLinkSuffix("./notes.md#L4-L8")).toBe("#L4-L8");
+    expect(authoredFileLinkSuffix("src/a.ts:12:3")).toBe(":12:3");
+    expect(authoredFileLinkSuffix("src/a.ts:4-8")).toBe(":4-8");
+    expect(authoredFileLinkSuffix("src/a.ts")).toBe("");
+    expect(fileLinkShownPath("./notes.md#L4-L8", "/code/notes.md")).toBe("/code/notes.md#L4-L8");
   });
 
-  // regression: #6297 a bare filename resolves to a file, never a same-named directory
-  it("ignores directories", () => {
-    expect(
-      pickWorkspaceBasenameMatch("components", [
-        { path: "apps/web/src/components", kind: "directory" },
-        { path: "apps/web/src/components/components", kind: "file" },
-      ]),
-    ).toBe("apps/web/src/components/components");
-  });
-
-  it("prefers the exactly-cased file over a case-only twin", () => {
-    expect(
-      pickWorkspaceBasenameMatch("foo.ts", [
-        { path: "src/Foo.ts", kind: "file" },
-        { path: "src/foo.ts", kind: "file" },
-      ]),
-    ).toBe("src/foo.ts");
-  });
-
-  it("falls back to case-insensitive when only the casing differs", () => {
-    expect(pickWorkspaceBasenameMatch("chatview.tsx", entries)).toBe(
-      "apps/web/src/components/ChatView.tsx",
-    );
-  });
-
-  it("returns null when the case-insensitive fallback is ambiguous", () => {
-    expect(
-      pickWorkspaceBasenameMatch("FOO.ts", [
-        { path: "src/Foo.ts", kind: "file" },
-        { path: "src/foo.ts", kind: "file" },
-      ]),
-    ).toBeNull();
+  it("shows the link as written until a read finds the file", () => {
+    expect(fileLinkShownPath("./notes.md#L4-L8", null)).toBe("./notes.md#L4-L8");
+    expect(fileLinkShownPath("/code/x.ts#L2", null)).toBe("/code/x.ts#L2");
   });
 });
 
-describe("chat file links an agent shortened", () => {
-  const cwd = "/home/user/acme";
-  const entries = [
-    { path: "packages/server/src/cloud/http.ts", kind: "file" as const },
-    { path: "packages/server/src/cloud", kind: "directory" as const },
-    { path: "packages/web/src/api/http.ts", kind: "file" as const },
-    { path: "packages/server/src/index.ts", kind: "file" as const },
-    { path: "packages/web/src/index.ts", kind: "file" as const },
-  ];
-
-  it("searches for package-relative paths and repeated prefixes, not exact ones", () => {
-    expect(workspaceLinkLookupQuery("cloud/http.ts", cwd)).toBe("cloud/http.ts");
-    expect(workspaceLinkLookupQuery("acme/packages/web/src/index.ts", cwd)).toBe(
-      "packages/web/src/index.ts",
-    );
-    expect(workspaceLinkLookupQuery("./cloud/http.ts", cwd)).toBeNull();
-    expect(workspaceLinkLookupQuery("~/acme/src/config.ts", cwd)).toBeNull();
-    expect(workspaceLinkLookupQuery("packages/server/", cwd)).toBeNull();
-  });
-
-  it("opens the one file a package-relative path is the suffix of", () => {
-    expect(pickWorkspaceLinkMatch("cloud/http.ts", cwd, entries)).toBe(
-      "packages/server/src/cloud/http.ts",
-    );
-    expect(pickWorkspaceLinkMatch("acme/packages/web/src/index.ts", cwd, entries)).toBe(
-      "packages/web/src/index.ts",
-    );
-  });
-
-  it("opens nothing when the suffix names several files or splits a segment", () => {
-    expect(pickWorkspaceLinkMatch("src/index.ts", cwd, entries)).toBeNull();
-    expect(pickWorkspaceLinkMatch("ud/http.ts", cwd, entries)).toBeNull();
-  });
-});
-
-describe("chat file links into another project", () => {
-  const appB = {
-    root: "/home/user/app-b",
-    entries: [{ path: "src/api/rules/categories.ts", kind: "file" as const }],
+describe("verifyRelativeFileLink", () => {
+  const kinds = (byPath: Record<string, "file" | "directory">) => {
+    const reads: Array<string> = [];
+    return {
+      reads,
+      kindOf: (path: string) => {
+        reads.push(path);
+        return Promise.resolve(byPath[path] ?? null);
+      },
+    };
   };
 
-  // regression: #10553 a path the agent cited inside another registered project
-  it("resolves to the absolute path in the one project that has the file", () => {
+  it("confirms only a file at the literal path under the thread root", async () => {
+    const host = kinds({ "/code/src/a.ts": "file", "/code/src/dir.ts": "directory" });
+    expect(await verifyRelativeFileLink({ linkPath: "src/a.ts", root: "/code", ...host })).toBe(
+      "/code/src/a.ts",
+    );
+    expect(await verifyRelativeFileLink({ linkPath: "./src/a.ts", root: "/code", ...host })).toBe(
+      "/code/src/a.ts",
+    );
     expect(
-      pickProjectLinkMatch("rules/categories.ts", [
-        { root: "/home/user/app-c", entries: [] },
-        appB,
-      ]),
-    ).toBe("/home/user/app-b/src/api/rules/categories.ts");
+      await verifyRelativeFileLink({ linkPath: "src/dir.ts", root: "/code", ...host }),
+    ).toBeNull();
+    expect(
+      await verifyRelativeFileLink({ linkPath: "src/missing.ts", root: "/code", ...host }),
+    ).toBeNull();
   });
 
-  it("opens nothing when several projects have the file", () => {
+  it("never looks anywhere but the literal path", async () => {
+    const host = kinds({ "/code/weavewing/src/a.ts": "file" });
     expect(
-      pickProjectLinkMatch("rules/categories.ts", [appB, { ...appB, root: "/home/user/app-c" }]),
+      await verifyRelativeFileLink({ linkPath: "src/a.ts", root: "/code", ...host }),
+    ).toBeNull();
+    expect(host.reads).toEqual(["/code/src/a.ts"]);
+  });
+
+  it("reads nothing for an absolute or home link", async () => {
+    const host = kinds({ "/code/src/a.ts": "file" });
+    expect(
+      await verifyRelativeFileLink({ linkPath: "/code/src/a.ts", root: "/code", ...host }),
+    ).toBeNull();
+    expect(await verifyRelativeFileLink({ linkPath: "~/a.ts", root: "/code", ...host })).toBeNull();
+    expect(host.reads).toEqual([]);
+  });
+
+  it("treats a failed read as unconfirmed", async () => {
+    expect(
+      await verifyRelativeFileLink({
+        linkPath: "src/a.ts",
+        root: "/code",
+        kindOf: () => Promise.reject(new Error("offline")),
+      }),
     ).toBeNull();
   });
 });
 
-// regression: #35337 a path the agent cited inside a checkout no project is rooted at
+describe("findFileLinkCandidates", () => {
+  const search =
+    (byRoot: Record<string, { entries: ReadonlyArray<string>; truncated?: boolean } | null>) =>
+    (root: string) => {
+      const result = byRoot[root];
+      return Promise.resolve(
+        result === null || result === undefined
+          ? result === null
+            ? null
+            : { entries: [], truncated: false }
+          : {
+              entries: result.entries.map((path) => ({ path, kind: "file" })),
+              truncated: result.truncated ?? false,
+            },
+      );
+    };
+
+  it("lists every file of that name across the roots, whole-path then shallow matches first", async () => {
+    const found = await findFileLinkCandidates({
+      linkPath: "docs/README.md",
+      roots: ["/code", "/code/weavewing", "/code"],
+      search: search({
+        "/code": {
+          entries: [
+            "a/README.md",
+            "b/docs/README.md",
+            "b/docs/README.mdx",
+            "a/node_modules/x/README.md",
+            "c/readme.md",
+          ],
+        },
+        "/code/weavewing": { entries: ["README.md", "docs/README.md"] },
+      }),
+    });
+    expect(found).toEqual({
+      candidates: [
+        { path: "/code/b/docs/README.md", matchesPath: true },
+        { path: "/code/weavewing/docs/README.md", matchesPath: true },
+        { path: "/code/a/README.md", matchesPath: false },
+        { path: "/code/weavewing/README.md", matchesPath: false },
+        { path: "/code/a/node_modules/x/README.md", matchesPath: false },
+      ],
+      complete: true,
+    });
+  });
+
+  it("marks the list incomplete when a search was cut off or failed", async () => {
+    const truncated = await findFileLinkCandidates({
+      linkPath: "README.md",
+      roots: ["/code", "/work"],
+      search: search({ "/code": { entries: ["a/README.md"], truncated: true } }),
+    });
+    expect(truncated).toEqual({
+      candidates: [{ path: "/code/a/README.md", matchesPath: false }],
+      complete: false,
+    });
+    const failed = await findFileLinkCandidates({
+      linkPath: "README.md",
+      roots: ["/code", "/work"],
+      search: search({ "/code": { entries: ["a/README.md"] }, "/work": null }),
+    });
+    expect(failed.complete).toBe(false);
+    expect(failed.candidates).toHaveLength(1);
+  });
+});
+
 describe("agentWorkingDirectories", () => {
   const directories = (...commands: ReadonlyArray<string>) =>
     agentWorkingDirectories(
@@ -151,82 +179,5 @@ describe("agentWorkingDirectories", () => {
         "cd /work/e\\ f && cd `pwd`/x",
       ),
     ).toEqual(["/work/d"]);
-  });
-});
-
-// regression: #35337 a bare file name the agent cited from a subfolder of an unregistered checkout
-describe("findAgentDirectoryMatch", () => {
-  const search = (found: Record<string, ReadonlyArray<string>>) => (root: string) =>
-    Promise.resolve({
-      root,
-      entries: (found[root] ?? []).map((path) => ({ path, kind: "file" as const })),
-    });
-
-  it("opens the one file of that name in the latest folder the agent worked in", async () => {
-    expect(
-      await findAgentDirectoryMatch(
-        "config.test.yaml",
-        ["/work/repo-b/server", "/work/repo-b", "/work/repo-c"],
-        search({
-          "/work/repo-b/server": ["config.test.yaml"],
-          "/work/repo-b": ["server/config.test.yaml"],
-          "/work/repo-c": ["config.test.yaml"],
-        }),
-      ),
-    ).toBe("/work/repo-b/server/config.test.yaml");
-  });
-
-  it("passes over a folder without the file, and opens nothing when none has it", async () => {
-    const found = search({ "/work/repo-c": ["etc/config.test.yaml"] });
-    expect(
-      await findAgentDirectoryMatch("config.test.yaml", ["/work/repo-b", "/work/repo-c"], found),
-    ).toBe("/work/repo-c/etc/config.test.yaml");
-    expect(await findAgentDirectoryMatch("config.test.yaml", ["/work/repo-b"], found)).toBeNull();
-  });
-});
-
-describe("findChildCheckoutMatch", () => {
-  const existing =
-    (files: ReadonlyArray<string>) =>
-    (paths: ReadonlyArray<string>): Promise<ReadonlyArray<boolean>> =>
-      Promise.resolve(paths.map((path) => files.includes(path)));
-  const folders = (...paths: ReadonlyArray<string>) =>
-    paths.map((fullPath) => ({ name: fullPath.slice(fullPath.lastIndexOf("/") + 1), fullPath }));
-
-  it("opens a path cited from a checkout inside a parent folder thread", async () => {
-    expect(
-      await findChildCheckoutMatch(
-        "apps/web/src/foo.ts",
-        folders("/code/bitwing", "/code/weavewing", "/code/.cache"),
-        [],
-        existing(["/code/weavewing/apps/web/src/foo.ts", "/code/.cache/apps/web/src/foo.ts"]),
-      ),
-    ).toBe("/code/weavewing/apps/web/src/foo.ts");
-  });
-
-  it("prefers the checkout the agent worked in when several have the file", async () => {
-    const both = existing(["/code/a/docs/README.md", "/code/b/docs/README.md"]);
-    const checkouts = folders("/code/a", "/code/b");
-    expect(await findChildCheckoutMatch("docs/README.md", checkouts, [], both)).toBeNull();
-    expect(await findChildCheckoutMatch("docs/README.md", checkouts, ["/code/b/docs"], both)).toBe(
-      "/code/b/docs/README.md",
-    );
-  });
-
-  it("checks every folder when there are more than one metadata batch holds", async () => {
-    const many = folders(...Array.from({ length: 70 }, (_, index) => `/code/r${index}`));
-    expect(
-      await findChildCheckoutMatch("src/x.ts", many, [], existing(["/code/r69/src/x.ts"])),
-    ).toBe("/code/r69/src/x.ts");
-  });
-});
-
-describe("claimWorkspaceBasenameLookup", () => {
-  it("keeps only the newest claim, whatever order the lookups settle in", () => {
-    const first = claimWorkspaceBasenameLookup();
-    const second = claimWorkspaceBasenameLookup();
-
-    expect(second()).toBe(true);
-    expect(first()).toBe(false);
   });
 });

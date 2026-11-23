@@ -1,4 +1,5 @@
 import { useAssetUrlState } from "../../assets/assetUrls";
+import { fileLinkShownPath } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import {
   isAtomCommandInterrupted,
@@ -13,7 +14,7 @@ import { contextMenuSourceOf } from "../../contextMenuSource";
 import { readLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { shouldOpenMarkdownFileLinkInEditor } from "../../markdown-links";
-import type { markdownFileCopyPaths } from "../../markdownFileHostPath";
+import type { markdownFileCopyPaths } from "../../markdown-links";
 import { documentChipKindForFileName } from "../../pierre-icons";
 import { ContextChip } from "../ContextChip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -29,8 +30,11 @@ import { WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
 
 interface MarkdownFileLinkProps {
   environmentId: EnvironmentId | null;
-  href: string;
   targetPath: string;
+  /** The destination as the agent wrote it, shown until a read confirms a relative link's file. */
+  authoredPath: string;
+  /** Reads where a relative link points; absent for links that open as written. */
+  verifyPath?: (() => Promise<string | null>) | undefined;
   iconPath: string;
   isAppBundle?: boolean;
   workspaceRelativePath: string | null;
@@ -52,10 +56,14 @@ interface MarkdownFileLinkProps {
 
 const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link";
 
+// Every tooltip open reads afresh; only the newest read may update its chip.
+let fileLinkCheckSequence = 0;
+
 export const MarkdownFileLink = memo(function MarkdownFileLink({
   environmentId,
-  href,
   targetPath,
+  authoredPath,
+  verifyPath,
   iconPath,
   isAppBundle = false,
   workspaceRelativePath,
@@ -74,6 +82,25 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   revealLabel,
   resolveCopyPaths,
 }: MarkdownFileLinkProps) {
+  const checkKey = `${environmentId}\u0000${targetPath}\u0000${authoredPath}`;
+  const [check, setCheck] = useState<{ id: number; key: string; path: string | null } | null>(null);
+  // A different link drops the last result, so a late read can never land on it.
+  if (check !== null && check.key !== checkKey) setCheck(null);
+  const verifiedPath = verifyPath && check?.key === checkKey ? check.path : null;
+  const confirmed = verifyPath === undefined || verifiedPath !== null;
+  const shownPath = fileLinkShownPath(authoredPath, verifiedPath);
+  // Nothing reads an unconfirmed relative link's guessed path, the icon and tooltip included.
+  const readPath = verifiedPath ?? iconPath;
+  const verifyOnOpen = (open: boolean) => {
+    if (!open || !verifyPath) return;
+    fileLinkCheckSequence += 1;
+    const id = fileLinkCheckSequence;
+    const key = checkKey;
+    const settle = (path: string | null) =>
+      setCheck((previous) => (previous?.id === id ? { id, key, path } : previous));
+    setCheck({ id, key, path: null });
+    verifyPath().then(settle, () => settle(null));
+  };
   const handleOpenInEditor = () => {
     if (!onOpen) {
       return;
@@ -323,14 +350,14 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   const chipKind = documentChipKindForFileName(iconPath) ?? "mention";
 
   return (
-    <Tooltip>
+    <Tooltip onOpenChange={verifyOnOpen}>
       <TooltipTrigger
         render={
           hasPrimaryAction ? (
             <ContextChip
               kind={chipKind}
               dir="ltr"
-              render={<a href={href} />}
+              render={<a href={shownPath} />}
               className={MARKDOWN_FILE_LINK_CLASS_NAME}
               data-markdown-copy={copyMarkdown}
               onClick={(event) => {
@@ -350,12 +377,12 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             >
               <FileTagChipContent
                 icon={
-                  isAppBundle ? (
-                    <AppBundleIcon environmentId={environmentId} path={iconPath} />
+                  isAppBundle && confirmed ? (
+                    <AppBundleIcon environmentId={environmentId} path={readPath} />
                   ) : undefined
                 }
-                path={iconPath}
-                environmentId={environmentId}
+                path={readPath}
+                environmentId={confirmed ? environmentId : null}
                 label={label}
                 theme={theme}
               />
@@ -374,12 +401,12 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             >
               <FileTagChipContent
                 icon={
-                  isAppBundle ? (
-                    <AppBundleIcon environmentId={environmentId} path={iconPath} />
+                  isAppBundle && confirmed ? (
+                    <AppBundleIcon environmentId={environmentId} path={readPath} />
                   ) : undefined
                 }
-                path={iconPath}
-                environmentId={environmentId}
+                path={readPath}
+                environmentId={confirmed ? environmentId : null}
                 label={label}
                 theme={theme}
               />
@@ -388,7 +415,11 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         }
       />
       <TooltipPopup side="top" variant="code">
-        <WorkspaceEntryTooltip path={iconPath} label={targetPath} environmentId={environmentId} />
+        <WorkspaceEntryTooltip
+          path={readPath}
+          label={shownPath}
+          environmentId={confirmed ? environmentId : null}
+        />
       </TooltipPopup>
     </Tooltip>
   );
@@ -399,8 +430,9 @@ function areMarkdownFileLinkPropsEqual(
   next: Readonly<MarkdownFileLinkProps>,
 ): boolean {
   return (
-    previous.href === next.href &&
     previous.targetPath === next.targetPath &&
+    previous.authoredPath === next.authoredPath &&
+    previous.verifyPath === next.verifyPath &&
     previous.iconPath === next.iconPath &&
     previous.environmentId === next.environmentId &&
     previous.workspaceRelativePath === next.workspaceRelativePath &&

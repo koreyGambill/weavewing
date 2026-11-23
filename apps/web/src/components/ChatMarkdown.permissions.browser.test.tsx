@@ -239,28 +239,6 @@ it("does not launch an editor after revocation during a native context menu", as
   expect(state.openEditor).not.toHaveBeenCalled();
 });
 
-it("does not reveal a file after revocation during its workspace lookup", async () => {
-  using _setup = setup();
-  let finishLookup: () => void = () => {
-    throw new Error("Lookup not started");
-  };
-  state.search.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finishLookup = () => resolve(AsyncResult.success({ entries: [] }));
-      }),
-  );
-  state.choose.mockResolvedValue("reveal");
-  await using screen = await renderMarkdown("[Readme](readme.md)");
-  await screen.openContextMenu();
-  expect(state.search).toHaveBeenCalledOnce();
-  await act(async () => {
-    state.allowed = false;
-    finishLookup();
-  });
-  expect(state.openEditor).not.toHaveBeenCalled();
-});
-
 it.each(["link-to-thread", "unlink-from-thread"])(
   "rechecks %s after a native context menu returns",
   async (action) => {
@@ -306,7 +284,7 @@ it("preserves keyboard activation of a file-options button", async () => {
   await using screen = await render(
     <MarkdownFileLink
       environmentId={null}
-      href="readme.md"
+      authoredPath="readme.md"
       targetPath="readme.md"
       iconPath="readme.md"
       workspaceRelativePath="readme.md"
