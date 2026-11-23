@@ -319,9 +319,9 @@ describe("rightPanelStore", () => {
       getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA))[0]
         ?.activeTabId,
     ).toBe("browser:existing");
-    store.openFile(refA, "existing.ts", 1);
+    store.openFile(refA, "existing.ts", { line: 1 });
     selectConversation();
-    store.openFile(refA, "existing.ts", 20);
+    store.openFile(refA, "existing.ts", { line: 20 });
     expect(
       getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA))[0]
         ?.activeTabId,
@@ -1202,7 +1202,7 @@ describe("rightPanelStore", () => {
   it("switches to a tab that already shows the folder instead of replacing it", () => {
     const store = useRightPanelStore.getState();
     store.openFile(refA, "apps");
-    store.openFile(refA, "apps/web/src", 12);
+    store.openFile(refA, "apps/web/src", { line: 12 });
 
     store.navigateFolder(refA, "file:apps/web/src", "apps", "apps/web/src");
     const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
@@ -1216,7 +1216,7 @@ describe("rightPanelStore", () => {
     const store = useRightPanelStore.getState();
     const state = () =>
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
-    store.openFile(refA, "src/app.ts", 40);
+    store.openFile(refA, "src/app.ts", { line: 40 });
 
     store.navigateFolder(refA, "file:src/app.ts", "src", "src/app.ts", true);
     expect(state().activeSurfaceId).toBe("file:src");
@@ -1375,9 +1375,9 @@ describe("rightPanelStore", () => {
     ).toEqual(["file:attachment:shared-id", "attachment:shared-id"]);
   });
 
-  it("updates line reveal requests when reopening a file surface", () => {
-    useRightPanelStore.getState().openFile(refA, "src/index.ts", 42);
-    useRightPanelStore.getState().openFile(refA, "src/index.ts", 87);
+  it("updates line and range reveal requests when reopening a file surface", () => {
+    useRightPanelStore.getState().openFile(refA, "src/index.ts", { line: 42 });
+    useRightPanelStore.getState().openFile(refA, "src/index.ts", { line: 87, endLine: 95 });
 
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA),
@@ -1390,27 +1390,32 @@ describe("rightPanelStore", () => {
           kind: "file",
           relativePath: "src/index.ts",
           revealLine: 87,
+          revealEndLine: 95,
           revealRequestId: 2,
         },
       ],
     });
 
-    useRightPanelStore.getState().openFile(refA, "src/index.ts");
-
+    useRightPanelStore.getState().openFile(refA, "src/index.ts", { line: 87, endLine: 87 });
     expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA),
-    ).toMatchObject({
-      isOpen: true,
-      activeSurfaceId: "file:src/index.ts",
-      surfaces: [
-        {
-          id: "file:src/index.ts",
-          kind: "file",
-          relativePath: "src/index.ts",
-          revealLine: null,
-          revealRequestId: 3,
-        },
-      ],
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces[0],
+    ).toEqual({
+      id: "file:src/index.ts",
+      kind: "file",
+      relativePath: "src/index.ts",
+      revealLine: 87,
+      revealRequestId: 3,
+    });
+
+    useRightPanelStore.getState().openFile(refA, "src/index.ts", { endLine: 95 });
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces[0],
+    ).toEqual({
+      id: "file:src/index.ts",
+      kind: "file",
+      relativePath: "src/index.ts",
+      revealLine: null,
+      revealRequestId: 4,
     });
   });
 

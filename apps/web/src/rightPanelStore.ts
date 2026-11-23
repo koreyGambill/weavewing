@@ -91,6 +91,8 @@ export type RightPanelSurface =
       kind: "file";
       relativePath: string;
       revealLine: number | null;
+      /** Last line of a linked range such as `:57-64`; absent for a single line. */
+      revealEndLine?: number;
       revealRequestId: number;
       attachment?: ChatFileAttachment;
       /** Deepest workspace path retained for navigating back down after moving up. */
@@ -201,7 +203,7 @@ interface RightPanelStoreState {
   openFile: (
     ref: ScopedThreadRef,
     relativePath: string,
-    line?: number,
+    reveal?: FileLineReveal,
     destination?: LinkTileDestination,
   ) => void;
   /** Re-roots one Files tab; null returns it to the workspace root. */
@@ -326,13 +328,14 @@ const browserSurface = (tabId: string | null): RightPanelSurface =>
 
 const fileSurface = (
   relativePath: string,
-  revealLine: number | null,
+  reveal: { line: number | null; endLine: number | null },
   revealRequestId: number,
 ): RightPanelSurface => ({
   id: `file:${relativePath}`,
   kind: "file",
   relativePath,
-  revealLine,
+  revealLine: reveal.line,
+  ...(reveal.endLine === null ? {} : { revealEndLine: reveal.endLine }),
   revealRequestId,
 });
 
@@ -650,9 +653,24 @@ const closeAction = (
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
 ): Partial<RightPanelStoreState> => userAction(state, threadKey, updater, true);
 
-function normalizeRevealLine(line: number | undefined): number | null {
-  if (line === undefined || !Number.isFinite(line)) return null;
+/** A line, or `line` through `endLine`, to scroll to and flash when a file opens. */
+export interface FileLineReveal {
+  readonly line?: number | undefined;
+  readonly endLine?: number | undefined;
+}
+
+function normalizeRevealLine(line: unknown): number | null {
+  if (typeof line !== "number" || !Number.isFinite(line)) return null;
   return Math.max(1, Math.trunc(line));
+}
+
+function normalizeReveal(reveal: { readonly line?: unknown; readonly endLine?: unknown }): {
+  line: number | null;
+  endLine: number | null;
+} {
+  const line = normalizeRevealLine(reveal.line);
+  const endLine = normalizeRevealLine(reveal.endLine);
+  return { line, endLine: line !== null && endLine !== null && endLine > line ? endLine : null };
 }
 
 export function migratePersistedRightPanelState(persistedState: unknown): {
@@ -694,18 +712,25 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       surface = rest;
                     }
                     if (surface.kind === "file") {
-                      const revealLine =
-                        typeof surface.revealLine === "number" &&
-                        Number.isFinite(surface.revealLine)
-                          ? Math.max(1, Math.trunc(surface.revealLine))
-                          : null;
+                      const { revealEndLine: _persistedEndLine, ...rest } = surface;
+                      const reveal = normalizeReveal({
+                        line: surface.revealLine,
+                        endLine: surface.revealEndLine,
+                      });
                       const revealRequestId =
                         typeof surface.revealRequestId === "number" &&
                         Number.isSafeInteger(surface.revealRequestId) &&
                         surface.revealRequestId >= 0
                           ? surface.revealRequestId
                           : 0;
-                      return [{ ...surface, revealLine, revealRequestId }];
+                      return [
+                        {
+                          ...rest,
+                          revealLine: reveal.line,
+                          ...(reveal.endLine === null ? {} : { revealEndLine: reveal.endLine }),
+                          revealRequestId,
+                        },
+                      ];
                     }
                     if (surface.kind === "pull-request") {
                       if (
@@ -1175,7 +1200,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           }));
         }),
-      openFile: (ref, requestedPath, line, destination) =>
+      openFile: (ref, requestedPath, reveal, destination) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             if (requestedPath === ".") {
@@ -1201,7 +1226,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             );
             const surface = fileSurface(
               relativePath,
-              normalizeRevealLine(line),
+              normalizeReveal(reveal ?? {}),
               (existing?.revealRequestId ?? 0) + 1,
             );
             const next = activated(
@@ -1228,7 +1253,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             const target: RightPanelSurface =
               relativePath === ""
                 ? { ...singletonSurface("files"), ...trail }
-                : { ...fileSurface(relativePath, null, 1), ...trail };
+                : { ...fileSurface(relativePath, { line: null, endLine: null }, 1), ...trail };
             const source = current.surfaces[index]!;
             const existing = current.surfaces.some(
               (surface, i) => i !== index && surface.id === target.id,

@@ -92,7 +92,7 @@ const tools: Record<ThreadContextSection, { title: string; icon: LucideIcon; abo
     title: "Links",
     icon: LinkIcon,
     about:
-      "The thread's ticket and pull requests, then web links found in the conversation. It fills as agents link work and post URLs.",
+      "The thread's ticket and pull requests, then web links and files linked in the conversation. It fills as agents link work, post URLs and cite files; click a file's lines to open it there.",
   },
   related: {
     title: "Related",

@@ -70,5 +70,5 @@ it("ignores composing keys in the search", async () => {
 
   await userEvent.keyboard("{Enter}");
   expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
-  expect(openFile).toHaveBeenCalledExactlyOnceWith(threadRef, "a.ts", 1);
+  expect(openFile).toHaveBeenCalledExactlyOnceWith(threadRef, "a.ts", { line: 1 });
 });

@@ -1,10 +1,7 @@
 import { clientHostEnvironmentAtom } from "../state/clientHostEnvironment";
 import { buildFileLinkParentSuffixByPath, fileLinkLabel } from "@t3tools/shared/fileLinks";
 import {
-  isWindowsDrivePathHref,
   normalizeMarkdownLinkDestination,
-  extractInlineCodeSpans,
-  extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
 } from "@t3tools/shared/markdownLinks";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskList";
@@ -19,7 +16,6 @@ import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
   CHAT_MARKDOWN_REHYPE_PLUGINS,
-  decodeMarkdownLinkEscapes,
   remarkAssistantInsights,
 } from "@t3tools/shared/markdownPipeline";
 import { useAtomValue } from "@effect/atom-react";
@@ -94,7 +90,6 @@ import type {
 } from "react-markdown";
 import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import type { Pluggable, PluggableList } from "unified";
-import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
@@ -102,10 +97,7 @@ import { AssistantCitationEmbed } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { mathKind } from "@t3tools/shared/markdownMath";
 import remarkMath from "remark-math";
-import {
-  artifactTemplateFromHastProperties,
-  renderCodexInlineDirectivesAsMarkdown,
-} from "@t3tools/shared/codexMarkdownDirectives";
+import { artifactTemplateFromHastProperties } from "@t3tools/shared/codexMarkdownDirectives";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { MarkdownMath } from "./chat/MarkdownMath";
 import {
@@ -141,10 +133,10 @@ import { useRenderedAppearance } from "../hooks/useTheme";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
 import {
-  isLocalEditorFileHref,
+  markdownFileLinkSources,
+  normalizeMarkdownLinkHrefKey,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
-  rewriteMarkdownFileUriHref,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import {
@@ -202,7 +194,7 @@ import {
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
-import { createMarkdownRenderer } from "./chat/markdownRenderer";
+import { chatMarkdownUrlTransform, createMarkdownRenderer } from "./chat/markdownRenderer";
 import { splitMarkdownBlocks } from "./chat/markdownStreamBlocks";
 import { MarkdownMermaidCodeBlock } from "./chat/MarkdownMermaidCodeBlock";
 import { MarkdownTable } from "./chat/MarkdownTable";
@@ -341,8 +333,6 @@ function CodexArtifactTemplateCard(props: {
   );
 }
 
-const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
-
 function orderedListGutterStyle(
   itemValues: ReadonlyArray<unknown>,
   start: unknown,
@@ -402,14 +392,6 @@ const GITHUB_ALERT_PRESENTATIONS: Record<
   },
 };
 
-function normalizeMarkdownLinkHrefKey(href: string): string {
-  const normalizedHref = normalizeMarkdownLinkDestination(href);
-  const rewrittenHref = rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
-  return WINDOWS_DRIVE_PATH_REGEX.test(rewrittenHref)
-    ? rewrittenHref.replaceAll("\\", "/")
-    : rewrittenHref;
-}
-
 // Heading ids are added after sanitizing, which would prefix them a second time.
 const CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS = [
   ...CHAT_MARKDOWN_REHYPE_PLUGINS,
@@ -423,15 +405,6 @@ const CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS = [
   rehypeTextDirection,
   rehypeChipPunctuation,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
-
-function markdownUrlTransform(href: string) {
-  if (parseAssistantCitationHref(href)) return href;
-  if (parseComposerContextHref(href)) return href;
-  if (parseThreadLinkHref(href)) return href;
-  if (isWindowsDrivePathHref(href)) return href;
-  if (isLocalEditorFileHref(href)) return href;
-  return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
-}
 
 const NO_MARKDOWN_EDITORS: ReadonlyArray<EditorId> = [];
 
@@ -481,15 +454,11 @@ function fileLinkSourcesKey(
   cwd: string | undefined,
   imageBaseDir: string | undefined,
 ): string {
-  const hrefs = extractMarkdownLinkHrefs(renderCodexInlineDirectivesAsMarkdown(text))
-    .filter((href) => !parseComposerContextHref(href))
-    .map(decodeMarkdownLinkEscapes)
-    .map(normalizeMarkdownLinkHrefKey)
-    .filter((href) => resolveMarkdownFileLinkMeta(href, cwd, imageBaseDir ?? cwd));
-  const spans = extractInlineCodeSpans(text).filter((span) =>
-    resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd),
-  );
-  return JSON.stringify([[...new Set(hrefs)], [...new Set(spans)]]);
+  const sources = markdownFileLinkSources(text, cwd, imageBaseDir ?? cwd);
+  return JSON.stringify([
+    [...new Set(sources.hrefs.map(({ source }) => source))],
+    [...new Set(sources.spans.map(({ source }) => source))],
+  ]);
 }
 
 function resolveFileLinkSources(
@@ -902,7 +871,7 @@ function useChatMarkdownState({
     const openAt = (path: string) =>
       useRightPanelStore
         .getState()
-        .openFile(threadRef, path, fileLinkMeta.line, getClientSettings().linkTileDestination);
+        .openFile(threadRef, path, fileLinkMeta, getClientSettings().linkTileDestination);
     if (
       fileLinkMeta.workspaceLookupPath === null ||
       !cwd ||
@@ -1864,7 +1833,7 @@ function markdownRenderer(remarkPlugins: PluggableList, rehypePlugins: Pluggable
       remarkPlugins,
       rehypePlugins,
       components: CHAT_MARKDOWN_COMPONENTS,
-      urlTransform: markdownUrlTransform,
+      urlTransform: chatMarkdownUrlTransform,
     });
     byRehype.set(rehypePlugins, renderer);
   }
@@ -1893,7 +1862,7 @@ const MarkdownSource = memo(function MarkdownSource({
         remarkPlugins,
         rehypePlugins,
         components: CHAT_MARKDOWN_COMPONENTS,
-        urlTransform: markdownUrlTransform,
+        urlTransform: chatMarkdownUrlTransform,
       });
   const element = render(text);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Caching during render would make React Compiler rebuild the element when `cache` flips.

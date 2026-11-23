@@ -9,7 +9,7 @@ const answerWithReviewComment = [
   '<t3_context version="1">',
   '<context kind="review-comment" id="review-comment_c1">',
   "file: notes.md",
-  "range: L2 (2-2)",
+  "range: L2",
   "comment:",
   "  Rename this",
   "diff:",

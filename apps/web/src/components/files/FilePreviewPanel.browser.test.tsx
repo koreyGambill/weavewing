@@ -160,6 +160,7 @@ function filePreview(relativePath: string, workspaceMutationId: string | null = 
       availableEditors={[]}
       openInShortcutEnabled={false}
       revealLine={null}
+      revealEndLine={null}
       revealRequestId={0}
       onOpenFile={vi.fn()}
       onNavigateFolder={vi.fn()}
