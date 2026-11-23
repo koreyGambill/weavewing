@@ -63,6 +63,7 @@ import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageL
 import {
   type ClaudeScopedLimitNames,
   claudeUsageResponseToLimits,
+  isIncompleteClaudeUsageResponse,
   recordClaudeUsageResponse,
 } from "./claudeUsageLimits.ts";
 import {
@@ -588,6 +589,9 @@ const probeClaudeCapabilities = (
                 rate_limits: usageResult.success.rate_limits,
               }
             : undefined;
+        if (usage && isIncompleteClaudeUsageResponse(usage)) {
+          yield* Effect.logWarning("Claude usage read returned no plan limits.");
+        }
         const effortCapSources = parseClaudeEffortCapSources(
           settingsResult && Result.isSuccess(settingsResult) ? settingsResult.success : undefined,
         );
