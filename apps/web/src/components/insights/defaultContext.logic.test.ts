@@ -67,24 +67,27 @@ describe("defaultContextSummary", () => {
           item({ label: "runtime", bytes: 800, estimatedTokens: 200 }),
           item({ label: "AGENTS.md", category: "files", bytes: 9, status: "unexpected" }),
           item({ label: "append", category: "custom", bytes: 9, counted: false }),
+          item({ label: "tdd", category: "skills", bytes: 40, estimatedTokens: 10 }),
         ],
         { injectedBytes: 800 },
       ),
     );
     expect(summary).toMatchObject({
-      bytes: 1609,
-      tokens: 400,
+      bytes: 1649,
+      tokens: 410,
       attention: 2,
       injectedDiff: 9,
     });
     expect(summary.categories.map((category) => [category.category, category.share])).toEqual([
-      ["t3", 800 / 1609],
-      ["files", 409 / 1609],
-      ["tools", 400 / 1609],
+      ["t3", 800 / 1649],
+      ["files", 409 / 1649],
+      ["skills", 40 / 1649],
+      ["tools", 400 / 1649],
     ]);
     expect(summary.groups.map((group) => [group.category, group.items.length])).toEqual([
       ["t3", 1],
       ["files", 2],
+      ["skills", 1],
       ["tools", 2],
       ["custom", 1],
     ]);

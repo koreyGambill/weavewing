@@ -115,3 +115,26 @@ not be added to the provider's totals.
 
 Hidden provider harness instructions remain unknown. Earlier turns without an
 instruction snapshot stay unavailable rather than inheriting today's prompt.
+
+## Agent context
+
+**Settings › Agent context** shows everything that shapes what a new session
+receives for one provider and project: instruction files with their `@` imports,
+skills grouped by where they come from, and the compiled order under **View
+compiled**. **Edit in Settings** in the Inspect panel opens the same view for a
+thread.
+
+Each row names the real file behind any link, its Git repository and whether it
+has uncommitted changes, and its estimated size. Skills show what their listing
+costs on every turn and flag the same skill offered from more than one place,
+such as a user copy and a plugin copy.
+
+**Edit** saves to the real file, so links keep pointing at it. If the file
+changed since you opened it, the save stops and asks you to reload. Text between
+`<!-- overwing standards` markers is generated and read-only here. After saving,
+**Commit…** commits only the edited files in that repository, with your message.
+Plugin and `npx skills` copies are read-only, because updating them replaces
+local edits.
+
+**Load watchers** decide which tool calls Inspect's Loads view labels as
+knowledge loads. Match a shell command or a tool name with a regular expression.

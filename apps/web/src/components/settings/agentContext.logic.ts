@@ -1,0 +1,104 @@
+import {
+  type AgentContextGeneratedRange,
+  type AgentContextOverview,
+  type AgentContextSkill,
+  type LoadWatcher,
+  loadWatcherPatternError,
+} from "@t3tools/contracts";
+
+const ORIGIN_ORDER: ReadonlyArray<AgentContextSkill["origin"]["kind"]> = [
+  "managed",
+  "user",
+  "codex",
+  "npx",
+  "plugin",
+  "project",
+  "other",
+];
+
+/** Skills grouped by where they come from, the user's own sources first. */
+export function groupSkills(skills: ReadonlyArray<AgentContextSkill>) {
+  const groups = new Map<string, { label: string; kind: string; skills: AgentContextSkill[] }>();
+  for (const skill of skills) {
+    const group = groups.get(skill.origin.label) ?? {
+      label: skill.origin.label,
+      kind: skill.origin.kind,
+      skills: [],
+    };
+    group.skills.push(skill);
+    groups.set(skill.origin.label, group);
+  }
+  return [...groups.values()].toSorted(
+    (a, b) =>
+      ORIGIN_ORDER.indexOf(a.kind as AgentContextSkill["origin"]["kind"]) -
+        ORIGIN_ORDER.indexOf(b.kind as AgentContextSkill["origin"]["kind"]) ||
+      a.label.localeCompare(b.label),
+  );
+}
+
+/** What a new session pays for instructions, and each turn for the skill listing. */
+export function agentContextTotals(overview: AgentContextOverview) {
+  const sessionTokens = overview.instructions
+    .filter((file) => file.status === "expected" && file.scope !== "link")
+    .reduce((sum, file) => sum + file.estimatedTokens, 0);
+  const listingTokens = overview.skills.reduce((sum, skill) => sum + skill.listingTokens, 0);
+  const duplicateNames = new Set(
+    overview.skills.filter((skill) => skill.duplicates.length > 0).map((skill) => skill.baseName),
+  );
+  return { sessionTokens, listingTokens, duplicates: duplicateNames.size };
+}
+
+/** Modified, editable sources per repository, which the repository's Commit action commits. */
+export function pendingCommits(overview: AgentContextOverview) {
+  const files = new Map<string, Set<string>>();
+  for (const source of [...overview.instructions, ...overview.skills]) {
+    if (!source.modified || !source.editable || source.repoRoot === null) continue;
+    files.set(source.repoRoot, (files.get(source.repoRoot) ?? new Set()).add(source.realPath));
+  }
+  return overview.repos.flatMap((repo) => {
+    const realPaths = files.get(repo.root);
+    return realPaths === undefined ? [] : [{ repo, realPaths: [...realPaths].toSorted() }];
+  });
+}
+
+export interface TextSegment {
+  /** The segment's first line in the loaded file, which keys it while its text changes. */
+  readonly start: number;
+  readonly generated: boolean;
+  readonly text: string;
+}
+
+/** Splits a file into editable text and generated blocks; joining the segments restores it. */
+export function splitGenerated(
+  text: string,
+  ranges: ReadonlyArray<AgentContextGeneratedRange>,
+): ReadonlyArray<TextSegment> {
+  const lines = text.split("\n");
+  const segments: TextSegment[] = [];
+  // A segment holds whole lines, so the join's newlines are exactly the ones between segments.
+  const pushLines = (generated: boolean, from: number, to: number) => {
+    if (to > from)
+      segments.push({ start: from, generated, text: lines.slice(from, to).join("\n") });
+  };
+  let next = 0;
+  for (const range of ranges) {
+    pushLines(false, next, range.startLine - 1);
+    pushLines(true, range.startLine - 1, range.endLine);
+    next = range.endLine;
+  }
+  pushLines(false, next, lines.length);
+  return segments;
+}
+
+export const joinSegments = (segments: ReadonlyArray<TextSegment>) =>
+  segments.map((segment) => segment.text).join("\n");
+
+/** One message per watcher, null where the watcher is valid. */
+export function watcherErrors(watchers: ReadonlyArray<LoadWatcher>) {
+  return watchers.map((watcher) => {
+    if (watcher.label.trim() === "") return "Add a label.";
+    if (watcher.pattern.trim() === "") return "Add a pattern.";
+    const error = loadWatcherPatternError(watcher.pattern);
+    return error;
+  });
+}
