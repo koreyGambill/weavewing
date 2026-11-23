@@ -4,6 +4,7 @@ import {
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
   sidebarGroupToRecord,
+  sidebarThreadGroupNameOf,
   deleteSidebarThreadGroup,
   discardNewSidebarThreadGroup,
   isUnnamedSidebarThreadGroup,
@@ -441,6 +442,21 @@ describe("server-recorded groups", () => {
     expect(sidebarGroupToRecord({ from: null, to: "New group" }, "A")).toBeUndefined();
     expect(sidebarGroupToRecord({ from: "New group", to: null }, undefined)).toBeUndefined();
     expect(sidebarGroupToRecord({ from: "A", to: "B" }, "A")).toBe("B");
+  });
+
+  it("names the group a placed thread ends in, so a stale Ungrouped entry can't hide a change", () => {
+    const stale = { ...view, ungroupedOrder: ["settled"] };
+    const placed = placeSidebarThread(
+      stale,
+      arrangeSidebarThreadGroups(stale, families("settled"), { hideEmptyGroups: false }),
+      "settled",
+      { groupId: null, beforeKey: null },
+    );
+    // The before and after locations match, so the diff alone reports nothing for it.
+    expect(changedSidebarThreadGroupNames(stale, placed).has("settled")).toBe(false);
+    const to = sidebarThreadGroupNameOf(placed, "settled");
+    expect(sidebarGroupToRecord({ from: null, to }, "Hidden")).toBeNull();
+    expect(sidebarThreadGroupNameOf(view, "moved")).toBe("B");
   });
 
   it("refuses a name another group has, or one too long for the server", () => {

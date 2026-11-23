@@ -410,6 +410,11 @@ export function sidebarGroupToRecord(
   return to;
 }
 
+/** The name of the group holding a thread, or null when it is in no group. */
+export function sidebarThreadGroupNameOf(state: SidebarThreadGroups, key: string): string | null {
+  return state.groups.find((group) => group.threadKeys.includes(key))?.name ?? null;
+}
+
 /** The group a thread belongs to, or null for Ungrouped. */
 export function sidebarThreadGroupOf(state: SidebarThreadGroups, key: string): string | null {
   return state.groups.find((group) => group.threadKeys.includes(key))?.id ?? null;

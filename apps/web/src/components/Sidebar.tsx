@@ -297,6 +297,7 @@ import {
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
   sidebarGroupToRecord,
+  sidebarThreadGroupNameOf,
   localSidebarThreadGroups,
   withServerSidebarGroups,
   deleteSidebarThreadGroup,
@@ -1718,10 +1719,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   // back to each thread's server so other machines group it the same way. Stable so a menu
   // that resolves later edits the latest groups.
   const setThreadGroups = useStableCallback(
-    (update: (current: SidebarThreadGroups) => SidebarThreadGroups) => {
+    (
+      update: (current: SidebarThreadGroups) => SidebarThreadGroups,
+      // A thread the user just placed is checked against its server record directly, since a
+      // hidden thread's stale local entry can make its placement look unchanged.
+      placedKey?: string,
+    ) => {
       const view = threadGroupsView ?? threadGroups;
       const next = update(view);
       const changed = changedSidebarThreadGroupNames(view, next);
+      if (placedKey !== undefined && !changed.has(placedKey)) {
+        changed.set(placedKey, { from: null, to: sidebarThreadGroupNameOf(next, placedKey) });
+      }
       const changedThreads = new Map(
         changed.size === 0
           ? []
@@ -1796,7 +1805,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (arrangement === null) return;
     const target = resolveSidebarGroupDrop(arrangement, threadKey, { kind: "header", groupId });
     if (target === null) return;
-    setThreadGroups((current) => placeSidebarThread(current, arrangement, threadKey, target));
+    setThreadGroups(
+      (current) => placeSidebarThread(current, arrangement, threadKey, target),
+      threadKey,
+    );
   };
   const stepThread = (threadKey: string, delta: -1 | 1) => {
     const arrangement = readThreadGroupArrangement();
@@ -2772,7 +2784,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       const arrangement = threadGroupArrangement;
       if (drop !== null && arrangement !== null) {
         const key = String(event.active.id);
-        setThreadGroups((current) => placeSidebarThread(current, arrangement, key, drop.target));
+        setThreadGroups(
+          (current) => placeSidebarThread(current, arrangement, key, drop.target),
+          key,
+        );
         if (sectionByThreadKey.get(key) === "active") return;
         placedInGroups = true;
       }
