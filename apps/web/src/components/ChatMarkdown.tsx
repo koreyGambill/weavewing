@@ -1,7 +1,6 @@
 import { clientHostEnvironmentAtom } from "../state/clientHostEnvironment";
 import { buildFileLinkParentSuffixByPath, fileLinkLabel } from "@t3tools/shared/fileLinks";
 import {
-  isWindowsDrivePathHref,
   normalizeMarkdownLinkDestination,
   inlineCodeFilePathCandidate,
 } from "@t3tools/shared/markdownLinks";
@@ -91,7 +90,6 @@ import type {
 } from "react-markdown";
 import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import type { Pluggable, PluggableList } from "unified";
-import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
@@ -135,12 +133,10 @@ import { useRenderedAppearance } from "../hooks/useTheme";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
 import {
-  isLocalEditorFileHref,
   markdownFileLinkSources,
   normalizeMarkdownLinkHrefKey,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
-  rewriteMarkdownFileUriHref,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import {
@@ -198,7 +194,7 @@ import {
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
-import { createMarkdownRenderer } from "./chat/markdownRenderer";
+import { chatMarkdownUrlTransform, createMarkdownRenderer } from "./chat/markdownRenderer";
 import { splitMarkdownBlocks } from "./chat/markdownStreamBlocks";
 import { MarkdownMermaidCodeBlock } from "./chat/MarkdownMermaidCodeBlock";
 import { MarkdownTable } from "./chat/MarkdownTable";
@@ -409,15 +405,6 @@ const CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS = [
   rehypeTextDirection,
   rehypeChipPunctuation,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
-
-function markdownUrlTransform(href: string) {
-  if (parseAssistantCitationHref(href)) return href;
-  if (parseComposerContextHref(href)) return href;
-  if (parseThreadLinkHref(href)) return href;
-  if (isWindowsDrivePathHref(href)) return href;
-  if (isLocalEditorFileHref(href)) return href;
-  return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
-}
 
 const NO_MARKDOWN_EDITORS: ReadonlyArray<EditorId> = [];
 
@@ -1846,7 +1833,7 @@ function markdownRenderer(remarkPlugins: PluggableList, rehypePlugins: Pluggable
       remarkPlugins,
       rehypePlugins,
       components: CHAT_MARKDOWN_COMPONENTS,
-      urlTransform: markdownUrlTransform,
+      urlTransform: chatMarkdownUrlTransform,
     });
     byRehype.set(rehypePlugins, renderer);
   }
@@ -1875,7 +1862,7 @@ const MarkdownSource = memo(function MarkdownSource({
         remarkPlugins,
         rehypePlugins,
         components: CHAT_MARKDOWN_COMPONENTS,
-        urlTransform: markdownUrlTransform,
+        urlTransform: chatMarkdownUrlTransform,
       });
   const element = render(text);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Caching during render would make React Compiler rebuild the element when `cache` flips.

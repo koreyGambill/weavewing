@@ -700,21 +700,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   initial-value: 0;
 }
 
-/* Large-file rows; playFileLinkFlash animates the strength on their container. */
-[data-file-link-reveal][data-preview-row] {
-  background-color: color-mix(
-    in oklab,
-    var(--primary) calc(var(--file-link-reveal-strength) * 14%),
-    transparent
-  );
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-file-link-reveal][data-preview-row] {
-    --file-link-reveal-strength: 1;
-  }
-}
-
 @property --assistant-citation-highlight-opacity {
   syntax: "<number>";
   inherits: true;

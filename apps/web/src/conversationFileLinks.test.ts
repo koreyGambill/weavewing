@@ -5,6 +5,7 @@ import {
   formatFileLinkRange,
   selectLinkableMessages,
   type LinkableMessage,
+  type LinkableSelection,
 } from "./conversationFileLinks";
 
 const cwd = "/repo";
@@ -72,27 +73,56 @@ describe("conversationFileLinks", () => {
 });
 
 describe("selectLinkableMessages", () => {
+  type Items = Parameters<typeof selectLinkableMessages>[0];
   const user = { item: { type: "user_message", text: "[a](src/a.ts)" } };
   const done = { item: { type: "assistant_message", text: "[b](src/b.ts)", streaming: false } };
   const reasoning = (text: string) => ({ item: { type: "reasoning", text, streaming: true } });
   const select = (
     items: ReadonlyArray<{ item: unknown }>,
-    previous: ReadonlyArray<LinkableMessage>,
-  ) => selectLinkableMessages(items as Parameters<typeof selectLinkableMessages>[0], previous);
+    previous: LinkableSelection | null,
+    replacedIndex?: number,
+  ) => selectLinkableMessages(items as Items, previous, replacedIndex);
 
   it("keeps the same list, and so the same files, while only reasoning streams", () => {
-    const first = select([user, done, reasoning("Thinking")], []);
+    const first = select([user, done, reasoning("Thinking")], null);
     const second = select([user, done, reasoning("Thinking harder")], first);
-    expect(second).toBe(first);
-    expect(conversationFileLinks(second, cwd)).toBe(conversationFileLinks(first, cwd));
+    expect(second.messages).toBe(first.messages);
+    expect(conversationFileLinks(second.messages, cwd)).toBe(
+      conversationFileLinks(first.messages, cwd),
+    );
   });
 
   it("leaves a streaming reply out until it finishes", () => {
     const streaming = { item: { ...done.item, text: "[c](src/c.ts)", streaming: true } };
-    const first = select([user, streaming], []);
-    expect(first).toEqual([user.item]);
-    const finished = select([user, { item: { ...streaming.item, streaming: false } }], first);
-    expect(finished).not.toBe(first);
-    expect(finished.map((message) => message.text)).toEqual(["[a](src/a.ts)", "[c](src/c.ts)"]);
+    const first = select([user, streaming], null);
+    expect(first.messages).toEqual([user.item]);
+    const finished = select([user, { item: { ...streaming.item, streaming: false } }], first, 1);
+    expect(finished.messages).not.toBe(first.messages);
+    expect(finished.messages.map((message) => message.text)).toEqual([
+      "[a](src/a.ts)",
+      "[c](src/c.ts)",
+    ]);
+  });
+
+  it("reads only the replaced row when the projection replaced one non-message row", () => {
+    let reads = 0;
+    const counted = (row: { item: unknown }) =>
+      Object.defineProperty({ ...row }, "item", {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return row.item;
+        },
+      });
+    const rows = Array.from({ length: 10_000 }, (_, index) =>
+      counted(index % 2 ? done : reasoning(`step ${index}`)),
+    );
+    const first = select(rows, null);
+    const last = rows.length - 1 - (rows.length % 2);
+    const next = rows.with(last - 1, counted(reasoning("more")));
+    reads = 0;
+    const second = select(next, first, last - 1);
+    expect(reads).toBe(2);
+    expect(second.messages).toBe(first.messages);
   });
 });

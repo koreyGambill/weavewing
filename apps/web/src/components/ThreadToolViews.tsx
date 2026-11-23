@@ -294,6 +294,7 @@ function ThreadLinks({
   const history = useThreadHistory(threadRef);
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
+    reportFailure: false,
   });
   const theme = useRenderedAppearance();
   const preferences = useLinkPreferences();
@@ -309,7 +310,7 @@ function ThreadLinks({
       showsFiles &&
       matchesToolFilter([file.displayPath, ...file.ranges.map(formatFileLinkRange)], filter),
   );
-  const filesFromPartialHistory = showsFiles && history.hasMoreHistory;
+  const filesFromPartialHistory = showsFiles && (history.hasMoreHistory || history.error !== null);
   const openFileLink = (file: ConversationFileLink, range?: FileLinkRange) =>
     useRightPanelStore
       .getState()
@@ -729,19 +730,26 @@ function ThreadLinks({
           {filesFromPartialHistory ? (
             <div className="flex items-center gap-1 px-1.5 text-3xs text-muted-foreground">
               <span>From loaded messages</span>
-              <Button
-                variant="ghost-muted"
-                size="micro"
-                disabled={history.loading}
-                onClick={() =>
-                  void loadEarlierHistory({
-                    environmentId: threadRef.environmentId,
-                    input: { threadId: threadRef.threadId },
-                  })
-                }
-              >
-                {history.loading ? "Loading…" : "Load earlier"}
-              </Button>
+              {history.hasMoreHistory ? (
+                <Button
+                  variant="ghost-muted"
+                  size="micro"
+                  disabled={history.loading}
+                  onClick={() =>
+                    void loadEarlierHistory({
+                      environmentId: threadRef.environmentId,
+                      input: { threadId: threadRef.threadId },
+                    })
+                  }
+                >
+                  {history.loading ? "Loading…" : "Load earlier"}
+                </Button>
+              ) : null}
+              {history.error !== null ? (
+                <p role="status" className="min-w-0 text-muted-foreground">
+                  {history.error}
+                </p>
+              ) : null}
             </div>
           ) : null}
           {files.map((file) => (

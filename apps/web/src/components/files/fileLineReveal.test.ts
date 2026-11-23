@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  centeredRangeFirstLine,
   clampFileLineRange,
   resolveCenteredFileLineScrollTop,
   resolveFileLineRange,
@@ -67,12 +66,5 @@ describe("large-file ranges", () => {
     expect(clampFileLineRange(100, 95, 400)).toEqual({ start: 95, end: 100 });
     expect(clampFileLineRange(100, 57, null)).toEqual({ start: 57, end: 57 });
     expect(clampFileLineRange(0, 3, 4)).toEqual({ start: 1, end: 1 });
-  });
-
-  it("centers a range that fits and starts the view at one that does not", () => {
-    expect(centeredRangeFirstLine({ start: 57, end: 64 }, 20)).toBe(51);
-    expect(centeredRangeFirstLine({ start: 57, end: 57 }, 21)).toBe(47);
-    expect(centeredRangeFirstLine({ start: 57, end: 120 }, 20)).toBe(57);
-    expect(centeredRangeFirstLine({ start: 2, end: 3 }, 20)).toBe(1);
   });
 });

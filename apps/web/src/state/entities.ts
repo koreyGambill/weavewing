@@ -31,7 +31,11 @@ import type {
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { Atom } from "effect/reactivity";
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { selectLinkableMessages, type LinkableMessage } from "../conversationFileLinks";
+import {
+  selectLinkableMessages,
+  type LinkableMessage,
+  type LinkableSelection,
+} from "../conversationFileLinks";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
 import { environmentPresentations } from "./presentation";
@@ -300,14 +304,14 @@ const EMPTY_LINKABLE_MESSAGES_ATOM = Atom.make(EMPTY_LINKABLE_MESSAGES).pipe(
 );
 const linkableMessagesAtomFamily = Atom.family((key: string) => {
   const ref = parseScopedThreadKey(key);
-  let previous = EMPTY_LINKABLE_MESSAGES;
+  let previous: LinkableSelection | null = null;
   return Atom.make((get) => {
     if (ref === null) return EMPTY_LINKABLE_MESSAGES;
     previous = selectLinkableMessages(
       get(environmentThreadDetails.visibleTurnItemsAtom(ref)),
       previous,
     );
-    return previous;
+    return previous.messages;
   }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`web-thread-linkable-messages:${key}`));
 });
 

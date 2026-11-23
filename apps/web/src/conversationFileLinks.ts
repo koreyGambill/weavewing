@@ -1,4 +1,7 @@
 import type { OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
+import { chatMarkdownLinkSources } from "@t3tools/shared/markdownPipeline";
+import { getProjectionArrayReplacementIndex } from "@t3tools/client-runtime/state/orchestration-v2-projection";
 import {
   isHostPath,
   normalizeProjectPathForComparison,
@@ -6,7 +9,13 @@ import {
 } from "@t3tools/shared/path";
 
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
-import { renderedMarkdownFileLinks } from "./markdown-links";
+import { chatMarkdownUrlTransform } from "./components/chat/markdownRenderer";
+import {
+  normalizeMarkdownLinkHrefKey,
+  resolveInlineCodeFileLinkMeta,
+  resolveMarkdownFileLinkMeta,
+  type MarkdownFileLinkMeta,
+} from "./markdown-links";
 
 export interface FileLinkRange {
   readonly line: number;
@@ -37,23 +46,65 @@ function isLinkableMessage(item: TurnItem): item is Extract<TurnItem, LinkableMe
   return item.type === "user_message" || (item.type === "assistant_message" && !item.streaming);
 }
 
+export interface LinkableSelection {
+  readonly items: ReadonlyArray<{ readonly item: TurnItem }>;
+  readonly messages: ReadonlyArray<LinkableMessage>;
+}
+
 /**
- * User messages and finished replies, oldest first. Returns `previous` while they are unchanged,
- * so streamed text and other turn items do not produce a new list.
+ * User messages and finished replies, oldest first. Keeps the previous `messages` while they
+ * are unchanged, so streamed text and other turn items do not produce a new list. When the
+ * projection says only one row was replaced, and it is not a message either side, the rows are
+ * not scanned at all.
  */
 export function selectLinkableMessages(
   items: ReadonlyArray<{ readonly item: TurnItem }>,
-  previous: ReadonlyArray<LinkableMessage>,
-): ReadonlyArray<LinkableMessage> {
+  previous: LinkableSelection | null,
+  replacedIndex = previous ? getProjectionArrayReplacementIndex(previous.items, items) : undefined,
+): LinkableSelection {
+  if (previous !== null && replacedIndex !== undefined) {
+    const before = previous.items[replacedIndex]!.item;
+    const after = items[replacedIndex]!.item;
+    if (!isLinkableMessage(before) && !isLinkableMessage(after)) {
+      return { items, messages: previous.messages };
+    }
+  }
   const next: LinkableMessage[] = [];
   for (const { item } of items) if (isLinkableMessage(item)) next.push(item);
-  return next.length === previous.length && next.every((message, i) => message === previous[i])
-    ? previous
-    : next;
+  const messages =
+    previous !== null &&
+    next.length === previous.messages.length &&
+    next.every((message, i) => message === previous.messages[i])
+      ? previous.messages
+      : next;
+  return { items, messages };
 }
 
 function fileLinkKey(filePath: string): string {
   return normalizeProjectPathForComparison(stripSlashPrefixedWindowsDrive(filePath));
+}
+
+/** The file links a message renders, read from the chat renderer's own markdown parse. */
+function renderedMarkdownFileLinks(
+  text: string,
+  cwd: string | undefined,
+  options: { readonly userMessage?: boolean },
+): MarkdownFileLinkMeta[] {
+  const { hrefs, inlineCode } = chatMarkdownLinkSources(text, options);
+  return [
+    ...hrefs.flatMap((href) => {
+      // The renderer empties hrefs it will not show as links.
+      const rendered = parseComposerContextHref(href) ? "" : chatMarkdownUrlTransform(href);
+      const meta = rendered
+        ? resolveMarkdownFileLinkMeta(normalizeMarkdownLinkHrefKey(rendered), cwd)
+        : null;
+      return meta ? [meta] : [];
+    }),
+    ...inlineCode.flatMap((span) => {
+      const meta = resolveInlineCodeFileLinkMeta(span, cwd);
+      return meta ? [meta] : [];
+    }),
+  ];
 }
 
 interface MessageFileLink {

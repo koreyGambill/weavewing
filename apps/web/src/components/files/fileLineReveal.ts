@@ -61,12 +61,6 @@ export function resolveFileLineRange(
   return clampFileLineRange(countFileLines(contents), line, endLine);
 }
 
-/** The first line to show so `range` sits centered in `visibleLines`, or starts the view. */
-export function centeredRangeFirstLine(range: FileLineRange, visibleLines: number): number {
-  const spare = Math.max(0, visibleLines - (range.end - range.start + 1));
-  return Math.max(1, range.start - Math.floor(spare / 2));
-}
-
 /** One box spanning the first and last line, so a range centers as a block. */
 export function spanLineGeometry(first: LineGeometry, last: LineGeometry): LineGeometry {
   return { top: first.top, height: Math.max(first.height, last.top + last.height - first.top) };
