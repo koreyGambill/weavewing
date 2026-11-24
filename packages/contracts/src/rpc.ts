@@ -47,6 +47,15 @@ import {
   DefaultContextItemText,
 } from "./threadInsights.ts";
 import {
+  AgentContextError,
+  AgentContextGetInput,
+  AgentContextOverview,
+  AgentContextReadInput,
+  AgentContextSaveInput,
+  AgentContextSaveResult,
+  AgentContextSourceText,
+} from "./agentContext.ts";
+import {
   ThreadNote,
   ThreadNotesSettings,
   ThreadNotesGetInput,
@@ -525,6 +534,8 @@ import {
   SourceControlAppAccess,
   SourceControlAppAccessInput,
   SourceControlStarredInput,
+  SourceControlFileLinkInput,
+  SourceControlFileLink,
   SourceControlSignInError,
   SourceControlSignInInput,
   SourceControlSignInPrompt,
@@ -598,6 +609,9 @@ export const WS_METHODS = {
   threadDefaultContextItem: "threadInsights.defaultContextItem",
   threadTimelineGet: "threadInsights.timeline",
   threadUserTurnsGet: "threadInsights.userTurns",
+  agentContextGet: "agentContext.get",
+  agentContextRead: "agentContext.read",
+  agentContextSave: "agentContext.save",
   threadNotesGet: "threadNotes.get",
   threadNotesSave: "threadNotes.save",
   threadNotesSettings: "threadNotes.settings",
@@ -840,6 +854,7 @@ export const WS_METHODS = {
   sourceControlAppAccess: "sourceControl.appAccess",
   sourceControlStarred: "sourceControl.starred",
   sourceControlStar: "sourceControl.star",
+  sourceControlFileLink: "sourceControl.fileLink",
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
@@ -1577,6 +1592,13 @@ const WsSourceControlStarRpc = Rpc.make(WS_METHODS.sourceControlStar, {
   error: EnvironmentAuthorizationError,
 });
 
+// The forge's web view of a host file, read from local git refs without fetching.
+const WsSourceControlFileLinkRpc = Rpc.make(WS_METHODS.sourceControlFileLink, {
+  payload: SourceControlFileLinkInput,
+  success: SourceControlFileLink,
+  error: EnvironmentAuthorizationError,
+});
+
 // Returns when the project exists and cloning starts; progress uses the subscription.
 const WsProjectCloneStartRpc = Rpc.make(WS_METHODS.projectCloneStart, {
   payload: ProjectCloneStartInput,
@@ -1735,6 +1757,23 @@ const WsThreadDefaultContextItemRpc = Rpc.make(WS_METHODS.threadDefaultContextIt
   payload: DefaultContextItemInput,
   success: DefaultContextItemText,
   error: Schema.Union([ThreadInsightsError, EnvironmentAuthorizationError]),
+});
+
+const agentContextErrors = Schema.Union([AgentContextError, EnvironmentAuthorizationError]);
+const WsAgentContextGetRpc = Rpc.make(WS_METHODS.agentContextGet, {
+  payload: AgentContextGetInput,
+  success: AgentContextOverview,
+  error: agentContextErrors,
+});
+const WsAgentContextReadRpc = Rpc.make(WS_METHODS.agentContextRead, {
+  payload: AgentContextReadInput,
+  success: AgentContextSourceText,
+  error: agentContextErrors,
+});
+const WsAgentContextSaveRpc = Rpc.make(WS_METHODS.agentContextSave, {
+  payload: AgentContextSaveInput,
+  success: AgentContextSaveResult,
+  error: agentContextErrors,
 });
 
 const WsThreadInsightsGetRpc = Rpc.make(WS_METHODS.threadInsightsGet, {
@@ -2898,6 +2937,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlAppAccessRpc,
   WsSourceControlStarredRpc,
   WsSourceControlStarRpc,
+  WsSourceControlFileLinkRpc,
   WsProjectCloneStartRpc,
   WsProjectCloneCancelRpc,
   WsProjectCloneRetryRpc,
@@ -2923,6 +2963,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadInsightsGetRpc,
   WsThreadDefaultContextGetRpc,
   WsThreadDefaultContextItemRpc,
+  WsAgentContextGetRpc,
+  WsAgentContextReadRpc,
+  WsAgentContextSaveRpc,
   WsThreadContextGetRpc,
   WsThreadTimelineGetRpc,
   WsThreadUserTurnsGetRpc,

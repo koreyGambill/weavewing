@@ -4,12 +4,15 @@ import {
   AuthOrchestrationReadScope,
   type DefaultContextGetInput,
   type DefaultContextItem,
+  type DefaultContextPreview,
+  type EnvironmentId,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { CheckIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
-import { useState } from "react";
+import { CheckIcon, ChevronRightIcon, CopyIcon, SlidersHorizontalIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { useState, type ReactNode } from "react";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
@@ -36,6 +39,7 @@ import {
 const CATEGORY_COLORS: Record<DefaultContextItem["category"], string> = {
   t3: "bg-primary",
   files: "bg-success",
+  skills: "bg-success/60",
   tools: "bg-info",
   "app-context": "bg-warning",
   custom: "bg-muted-foreground",
@@ -161,13 +165,25 @@ export function DefaultContextPanel({
                   : group.items;
               return (
                 <section key={group.category} aria-label={group.label} className="space-y-0.5">
-                  <h3 className="text-3xs font-semibold tracking-wide text-muted-foreground uppercase">
-                    {group.label}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-3xs font-semibold tracking-wide text-muted-foreground uppercase">
+                      {group.label}
+                    </h3>
+                    {(group.category === "files" || group.category === "skills") && (
+                      <AgentContextLink
+                        environmentId={threadRef.environmentId}
+                        preview={preview}
+                        label={`Edit ${group.label.toLowerCase()} in Settings`}
+                      >
+                        Edit in Settings
+                      </AgentContextLink>
+                    )}
+                  </div>
                   {group.category === "files" ? (
                     <FileRows
                       items={items}
                       threadRef={threadRef}
+                      preview={preview}
                       home={home}
                       canOpen={canReadFiles}
                     />
@@ -180,6 +196,7 @@ export function DefaultContextPanel({
                         item={item}
                         expandable={item.readable && canReadFiles}
                         label={item.label}
+                        preview={preview}
                       />
                     ))
                   )}
@@ -219,9 +236,11 @@ function ContextRow({
   item,
   expandable,
   label,
+  preview,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly request: DefaultContextGetInput;
+  readonly preview?: DefaultContextPreview;
   readonly item: DefaultContextItem;
   readonly expandable: boolean;
   readonly label: string;
@@ -256,6 +275,18 @@ function ContextRow({
         <p className="ml-4 text-muted-foreground">{status}</p>
       )}
       {open && <ItemText threadRef={threadRef} request={request} item={item} status={status} />}
+      {open && item.category === "skills" && preview !== undefined && (
+        <div className="ml-4">
+          <AgentContextLink
+            environmentId={threadRef.environmentId}
+            preview={preview}
+            source={item.id.slice(`skill:${item.label}:`.length)}
+            label={`Edit ${item.label} in Settings`}
+          >
+            Edit in Settings
+          </AgentContextLink>
+        </div>
+      )}
     </div>
   );
 }
@@ -280,11 +311,13 @@ function StatusMark({ item }: { readonly item: DefaultContextItem }) {
 function FileRows({
   items,
   threadRef,
+  preview,
   home,
   canOpen,
 }: {
   readonly items: ReadonlyArray<DefaultContextItem>;
   readonly threadRef: ScopedThreadRef;
+  readonly preview: DefaultContextPreview;
   readonly home: string | null;
   readonly canOpen: boolean;
 }) {
@@ -295,6 +328,7 @@ function FileRows({
       item={item}
       childrenOf={childrenOf}
       threadRef={threadRef}
+      preview={preview}
       home={home}
       canOpen={canOpen}
       indent={item.depth ?? 0}
@@ -307,6 +341,7 @@ function FileRow({
   item,
   childrenOf,
   threadRef,
+  preview,
   home,
   canOpen,
   indent,
@@ -314,6 +349,7 @@ function FileRow({
   readonly item: DefaultContextItem;
   readonly childrenOf: ReadonlyMap<string, ReadonlyArray<DefaultContextItem>>;
   readonly threadRef: ScopedThreadRef;
+  readonly preview: DefaultContextPreview;
   readonly home: string | null;
   readonly canOpen: boolean;
   readonly indent: number;
@@ -349,27 +385,38 @@ function FileRow({
   );
   return (
     <div style={indent ? { paddingLeft: `${indent * 8}px` } : undefined}>
-      {linkable ? (
-        <button
-          type="button"
-          onClick={() => {
-            useRightPanelStore.getState().openFile(threadRef, item.label);
-            // A read-only file has no editor; the request then lapses and focus stays here.
-            requestWorkspaceFocus({
-              area: "document",
-              selector: `[data-file-content-focus][data-file-path="${CSS.escape(item.label)}"]`,
-            });
-          }}
-          className={cn(
-            rowClass,
-            "group/file cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring",
-          )}
+      <div className="flex min-w-0 items-center">
+        {linkable ? (
+          <button
+            type="button"
+            onClick={() => {
+              useRightPanelStore.getState().openFile(threadRef, item.label);
+              // A read-only file has no editor; the request then lapses and focus stays here.
+              requestWorkspaceFocus({
+                area: "document",
+                selector: `[data-file-content-focus][data-file-path="${CSS.escape(item.label)}"]`,
+              });
+            }}
+            className={cn(
+              rowClass,
+              "group/file cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring",
+            )}
+          >
+            {content}
+          </button>
+        ) : (
+          <div className={rowClass}>{content}</div>
+        )}
+        <AgentContextLink
+          environmentId={threadRef.environmentId}
+          preview={preview}
+          source={item.label}
+          label={`Open ${item.label} in Settings › Agent context`}
+          icon
         >
-          {content}
-        </button>
-      ) : (
-        <div className={rowClass}>{content}</div>
-      )}
+          <SlidersHorizontalIcon aria-hidden="true" />
+        </AgentContextLink>
+      </div>
       {!item.readable && status !== undefined && (
         <p className="ml-4 text-muted-foreground">{status}</p>
       )}
@@ -395,6 +442,7 @@ function FileRow({
                 item={child}
                 childrenOf={childrenOf}
                 threadRef={threadRef}
+                preview={preview}
                 home={home}
                 canOpen={canOpen}
                 indent={0}
@@ -453,5 +501,46 @@ function ItemText({
         </pre>
       )}
     </div>
+  );
+}
+
+/** Opens Settings › Agent context on this thread's environment, provider and project. */
+function AgentContextLink({
+  environmentId,
+  preview,
+  source,
+  label,
+  icon = false,
+  children,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly preview: DefaultContextPreview;
+  readonly source?: string;
+  readonly label: string;
+  /** A compact icon button beside a row, rather than a text link. */
+  readonly icon?: boolean;
+  readonly children: ReactNode;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size={icon ? "icon-xs" : "xs"}
+      aria-label={label}
+      render={
+        <Link
+          to="/settings/agent-context"
+          search={{
+            machine: environmentId,
+            provider: preview.providerInstanceId,
+            ...(preview.projectId === undefined ? {} : { projectId: preview.projectId }),
+            // Settings discovers from the same checkout the thread runs in.
+            ...(preview.cwd === null ? {} : { worktree: preview.cwd }),
+            ...(source === undefined ? {} : { source }),
+          }}
+        />
+      }
+    >
+      {children}
+    </Button>
   );
 }

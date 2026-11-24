@@ -1,9 +1,40 @@
 import type {
+  LoadWatcher,
   OrchestrationV2TurnItem,
   OrchestrationV2TurnItemJson,
   ThreadLoadEvent,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+const commandWords = (command: string) => command.split(/[\s;&|()]+/).filter(Boolean);
+
+/** The watcher's words as consecutive words of the command; the first may carry a path. */
+function commandMatches(words: ReadonlyArray<string>, match: string) {
+  const wanted = match.trim().split(/\s+/);
+  for (let start = 0; start + wanted.length <= words.length; start++) {
+    const first = words[start]!.slice(words[start]!.lastIndexOf("/") + 1);
+    if (first === wanted[0] && wanted.every((word, at) => at === 0 || words[start + at] === word))
+      return true;
+  }
+  return false;
+}
+
+/** `*` matches any run of characters; each literal part is found once, left to right. */
+function toolMatches(name: string, glob: string) {
+  const parts = glob.split("*");
+  const first = parts[0]!;
+  const last = parts.at(-1)!;
+  if (parts.length === 1) return name === glob;
+  if (!name.startsWith(first) || !name.endsWith(last)) return false;
+  let at = first.length;
+  const end = name.length - last.length;
+  for (const part of parts.slice(1, -1)) {
+    const found = name.indexOf(part, at);
+    if (found === -1 || found + part.length > end) return false;
+    at = found + part.length;
+  }
+  return at <= end;
+}
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const instructionPath =
@@ -112,6 +143,7 @@ function shellReads(command: string): { paths: string[]; search: boolean } {
 
 export function projectLoadEvent(
   item: OrchestrationV2TurnItem | OrchestrationV2TurnItemJson,
+  watchers: ReadonlyArray<LoadWatcher>,
 ): ThreadLoadEvent | null {
   let paths: string[] = [];
   let toolName: string;
@@ -125,7 +157,16 @@ export function projectLoadEvent(
     paths = item.results?.map((entry) => entry.fileName) ?? [];
   } else if (item.type === "dynamic_tool") {
     toolName = item.toolName ?? "tool";
-    if (/^Skill$/i.test(toolName) || /skill.*(?:read|load)|(?:read|load).*skill/i.test(toolName)) {
+    const watcher = watchers.find(
+      (entry) => entry.kind === "tool" && toolMatches(toolName, entry.match),
+    );
+    if (watcher) {
+      kind = "knowledge";
+      label = `${watcher.label}: ${toolName}`;
+    } else if (
+      /^Skill$/i.test(toolName) ||
+      /skill.*(?:read|load)|(?:read|load).*skill/i.test(toolName)
+    ) {
       kind = "skill";
       if (
         typeof item.input === "object" &&
@@ -162,18 +203,21 @@ export function projectLoadEvent(
     output = item.outputOmitted ? null : outputText(item.output);
   } else if (item.type === "command_execution") {
     const command = shellCommand(item.input);
-    const knowledge = /(?:^|[\s;&|/])overwing\s+(?:search|context|standards)(?:\s|$)/.test(command);
+    const words = commandWords(command);
+    const watcher = watchers.find(
+      (entry) => entry.kind === "command" && commandMatches(words, entry.match),
+    );
     const reads = shellReads(command);
-    if (!knowledge && !reads.paths.length) return null;
+    if (!watcher && !reads.paths.length) return null;
     evidence = "inferred";
     toolName = "shell";
-    kind = knowledge ? "knowledge" : reads.search ? "search" : "file";
-    if (knowledge) label = command.slice(0, 512);
-    paths = knowledge ? [] : reads.paths;
+    kind = watcher ? "knowledge" : reads.search ? "search" : "file";
+    if (watcher) label = `${watcher.label}: ${command}`.slice(0, 512);
+    paths = watcher ? [] : reads.paths;
     output = item.outputOmitted ? null : (item.output ?? null);
   } else return null;
   paths = [...new Set(paths)].slice(0, 64).map((path) => path.slice(0, 512));
-  if (kind !== "search") {
+  if (kind !== "search" && kind !== "knowledge") {
     if (paths.some((path) => skillPath.test(path))) kind = "skill";
     else if (paths.some((path) => instructionPath.test(path))) kind = "instructions";
   }

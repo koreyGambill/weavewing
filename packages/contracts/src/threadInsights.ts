@@ -150,7 +150,7 @@ export type ThreadContextResult = typeof ThreadContextResult.Type;
 
 export const DefaultContextItem = Schema.Struct({
   id: Schema.String,
-  category: Schema.Literals(["t3", "app-context", "custom", "files", "tools"]),
+  category: Schema.Literals(["t3", "app-context", "custom", "files", "skills", "tools"]),
   label: Schema.String,
   source: Schema.String,
   delivery: Schema.Literals(["every-turn", "first-prompt", "session-start", "on-demand"]),
@@ -170,6 +170,8 @@ export type DefaultContextItem = typeof DefaultContextItem.Type;
 export const DefaultContextPreview = Schema.Struct({
   threadId: ThreadId,
   providerInstanceId: ProviderInstanceId,
+  /** Opens Settings › Agent context for the same project. */
+  projectId: Schema.optional(ProjectId),
   driver: Schema.String,
   model: Schema.String,
   cwd: Schema.NullOr(Schema.String),

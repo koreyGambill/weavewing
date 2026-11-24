@@ -167,6 +167,8 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { textDirection } from "~/textDirection";
 import { useOpenLink } from "../browser/useOpenLink";
+import { sourceControlEnvironment } from "../state/sourceControl";
+import { fileLinkPreflight } from "@t3tools/client-runtime/file-remote-actions";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import {
@@ -532,6 +534,11 @@ function useChatMarkdownState({
     reportFailure: false,
     refresh: true,
   });
+  const loadFileLink = useAtomQueryRunner(sourceControlEnvironment.fileLink, {
+    reportFailure: false,
+    reportDefect: false,
+    refresh: true,
+  });
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
@@ -628,6 +635,9 @@ function useChatMarkdownState({
     isMacOS,
   } = useAtomValue(markdownServerConfigFieldsAtom(environmentId));
   const projects = useProjects();
+  const canReadFiles = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
+  // A linked file can sit in any repository, so its forge is known only once a row is chosen.
+  const forgePreflight = fileLinkPreflight({ canReadFiles, identity: undefined });
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
   const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors, cwd);
@@ -843,6 +853,29 @@ function useChatMarkdownState({
               : undefined
         }
         resolveCopyPaths={async () => markdownFileCopyPaths(fileLinkMeta)}
+        fileLink={
+          environmentId === null || panelPath === null || isAppBundle
+            ? undefined
+            : {
+                ...forgePreflight,
+                load: async () => {
+                  // The path the preview opens, so a relative one stays inside `cwd` as there.
+                  const result = await loadFileLink({
+                    environmentId,
+                    input: {
+                      path: panelPath,
+                      ...(cwd ? { cwd } : {}),
+                      ...(fileLinkMeta.line === undefined ? {} : { line: fileLinkMeta.line }),
+                      ...(fileLinkMeta.endLine === undefined
+                        ? {}
+                        : { endLine: fileLinkMeta.endLine }),
+                    },
+                  });
+                  if (result._tag === "Success") return result.value;
+                  throw new Error("Could not read the file's repository");
+                },
+              }
+        }
         onOpenInPanel={(path) => openFileInPanel(fileLinkMeta, path)}
         onOpenMedia={
           threadRef && canPreviewMedia

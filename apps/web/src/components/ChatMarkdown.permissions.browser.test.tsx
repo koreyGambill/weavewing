@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   link: vi.fn(),
   unlink: vi.fn(),
   search: vi.fn(),
+  fileLink: vi.fn(),
   choose: vi.fn(),
   openFile: vi.fn(),
   openExternal: vi.fn(),
@@ -29,10 +30,14 @@ const state = vi.hoisted(() => ({
   pullRequests: [] as ThreadPullRequestLink[],
 }));
 
-vi.mock(import("../state/use-atom-query-runner"), async (original) => ({
-  ...(await original()),
-  useAtomQueryRunner: (() => state.search) as never,
-}));
+vi.mock(import("../state/use-atom-query-runner"), async (original) => {
+  const { sourceControlEnvironment } = await import("../state/sourceControl");
+  return {
+    ...(await original()),
+    useAtomQueryRunner: ((family: unknown) =>
+      family === sourceControlEnvironment.fileLink ? state.fileLink : state.search) as never,
+  };
+});
 vi.mock(import("../state/use-atom-command"), async (original) => {
   const { threadEnvironment } = await import("../state/threads");
   return {
@@ -138,6 +143,7 @@ function setup() {
   state.link.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   state.unlink.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   state.search.mockReset().mockResolvedValue(AsyncResult.success({ entries: [] }));
+  state.fileLink.mockReset().mockReturnValue(new Promise(() => {}));
   state.choose.mockReset().mockResolvedValue(null);
   state.openFile.mockReset();
   state.openExternal.mockReset().mockResolvedValue(undefined);
@@ -174,8 +180,11 @@ async function renderMarkdown(text: string) {
   });
 }
 
+// Forge rows depend on reading files, not on host actions, so these cases leave them out.
 function offeredActions() {
-  return state.choose.mock.lastCall![0].map((item: { id: string }) => item.id);
+  return state.choose.mock
+    .lastCall![0].map((item: { id: string }) => item.id)
+    .filter((id: string) => !id.startsWith("remote:"));
 }
 
 async function setAllowed(allowed: boolean) {

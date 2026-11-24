@@ -99,6 +99,11 @@ export function RightPanelSurfaceContent(props: {
               key={scopedThreadKey(threadRef)}
               environmentId={threadRef.environmentId}
               threadId={threadRef.threadId}
+              fileActions={{
+                projectName: props.files.projectName,
+                keybindings: props.keybindings,
+                availableEditors: props.files.availableEditors,
+              }}
             />
           ) : null}
         </Suspense>

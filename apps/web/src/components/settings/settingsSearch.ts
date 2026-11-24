@@ -27,6 +27,7 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/snap-shot"
   | "/settings/providers"
+  | "/settings/agent-context"
   | "/settings/threads"
   | "/settings/browser"
   | "/settings/devices"
@@ -103,6 +104,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": msg("Keybindings"),
   "/settings/snap-shot": msg("SnapShots"),
   "/settings/providers": msg("Providers"),
+  "/settings/agent-context": msg("Agent context"),
   "/settings/threads": msg("Threads"),
   "/settings/browser": msg("Browser"),
   "/settings/devices": msg("Devices"),
@@ -143,6 +145,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     heading: msg("Agents"),
     paths: [
       "/settings/providers",
+      "/settings/agent-context",
       "/settings/threads",
       "/settings/browser",
       "/settings/devices",
@@ -231,6 +234,15 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
   .join(" ");
 
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "agent-context",
+    title: "Agent context",
+    to: "/settings/agent-context",
+    scope: "environment",
+    searchTerms: [
+      "instructions AGENTS.md CLAUDE.md skills plugins duplicates tokens load watchers overwing standards compiled context",
+    ],
+  },
   {
     id: "status-sources",
     title: "Status sources",
@@ -1456,6 +1468,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/snap-shot": null,
   "/settings/keybindings": null,
   "/settings/providers": null,
+  "/settings/agent-context": "environment",
   "/settings/threads": null,
   "/settings/browser": null,
   "/settings/devices": null,

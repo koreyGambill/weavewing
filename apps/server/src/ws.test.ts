@@ -6,6 +6,7 @@ import * as MonitoringDialogue from "./monitoring/MonitoringDialogue.ts";
 import * as ThreadMarks from "./threadWorkspace/ThreadMarks.ts";
 import * as ThreadInsights from "./threadInsights/ThreadInsights.ts";
 import * as DefaultContext from "./threadInsights/DefaultContext.ts";
+import * as AgentContext from "./agentContext/AgentContext.ts";
 import * as ThreadTimeline from "./threadInsights/ThreadTimeline.ts";
 import * as ThreadNotes from "./threadNotes/ThreadNotes.ts";
 import * as ThreadWorkspace from "./threadWorkspace/ThreadWorkspace.ts";
@@ -157,6 +158,7 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
+import * as SourceControlFileLinks from "./sourceControl/SourceControlFileLinks.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -878,6 +880,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ThreadMarks.ThreadMarks)({}),
   Layer.mock(ThreadInsights.ThreadInsights)({}),
   Layer.mock(DefaultContext.DefaultContext)({}),
+  Layer.mock(AgentContext.AgentContext)({}),
   Layer.mock(ContextRecords.ContextRecords)({}),
   Layer.mock(ThreadTimeline.ThreadTimeline)({}),
   Layer.mock(ThreadNotes.ThreadNotes)({}),
@@ -937,6 +940,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(SourceControlDiscovery.SourceControlDiscovery)({}),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(SourceControlSignIn.SourceControlSignIn)({}),
+  Layer.mock(SourceControlFileLinks.SourceControlFileLinks)({}),
   Layer.mock(StorageCleanup.StorageCleanup)({}),
   Layer.mock(DatabaseStorage.DatabaseStorage)({}),
   Layer.mock(TerminalManager.TerminalManager)({}),

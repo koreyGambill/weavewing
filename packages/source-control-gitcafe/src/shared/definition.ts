@@ -7,8 +7,10 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   buildCommitUrl,
+  buildFileUrl,
   changeRequestUrlBelow,
   defineSourceControl,
+  gitHubStyleLines,
   isChangeRequestInProjectRepository,
   isChangeRequestOnProjectHost,
   parseChangeRequestPath,
@@ -72,6 +74,7 @@ export const definition = defineSourceControl({
   // claim them.
   parseChangeRequestUrl,
   commitUrl: (input) => buildCommitUrl(input, "commit"),
+  fileUrl: (input) => buildFileUrl(input, "blob", gitHubStyleLines),
   parseCommitUrl: (url) =>
     GITCAFE_HOSTS.has(url.hostname.toLowerCase()) ? parseCommitPath(url, COMMIT_PATH) : null,
   repositoryUrlFromPage: (url) =>

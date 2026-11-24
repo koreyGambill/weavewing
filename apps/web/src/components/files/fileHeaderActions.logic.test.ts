@@ -9,6 +9,7 @@ const workspaceFile = {
   openInSupported: true,
   searchableText: true,
   truncated: false,
+  fileLink: null,
 };
 
 const enabled = { disabledReason: null };
@@ -60,6 +61,37 @@ describe("resolveFileHeaderActions", () => {
       copyPath: null,
       explorer: null,
       find: null,
+      remote: [],
     });
+  });
+
+  it("drops the explorer toggle for a pinned file such as Notes, keeping the rest", () => {
+    const actions = resolveFileHeaderActions({
+      ...workspaceFile,
+      absolutePath: "/home/me/notes/thread.md",
+      isHostFile: true,
+      pinned: true,
+      searchableText: false,
+      fileLink: { status: "ready", link: { _tag: "Unavailable", reason: "not-repository" } },
+    });
+    expect(actions.explorer).toBeNull();
+    expect(actions.find).toBeNull();
+    expect(actions.openIn).toEqual(enabled);
+    expect(actions.copyPath).toEqual(enabled);
+    expect(actions.remote.map((action) => [action.id, action.placement])).toEqual([
+      ["open-on-forge", "header"],
+      ["copy-forge-link", "overflow"],
+      ["open-default-branch", "overflow"],
+      ["open-current-branch", "overflow"],
+    ]);
+  });
+
+  it("offers no forge actions for a folder", () => {
+    const actions = resolveFileHeaderActions({
+      ...workspaceFile,
+      isFolder: true,
+      fileLink: { status: "loading" },
+    });
+    expect(actions.remote).toEqual([]);
   });
 });

@@ -173,6 +173,27 @@ function buildRepositoryIdentity(input: {
   };
 }
 
+/**
+ * The identity a checkout's own `git config` gives, before any forge refines it, for callers that
+ * must not run a forge CLI. `config` is `git config --get-regexp` output for `remote.*.url` and
+ * `remote.*.gh-resolved`, as written, so `insteadOf` rewrites do not change the forge.
+ */
+export function localRepositoryIdentity(
+  config: string,
+  rootPath: string,
+): RepositoryIdentity | null {
+  const remotes = new Map<string, string>();
+  for (const line of config.split(/\r?\n/u)) {
+    const match = /^remote\.(.+)\.url (.+)$/u.exec(line);
+    if (match?.[1] && match[2] && !isLocalRemoteUrl(match[2]) && !remotes.has(match[1]))
+      remotes.set(match[1], match[2]);
+  }
+  const remote = pickPrimaryRemote(remotes, config);
+  return remote
+    ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get("origin"), rootPath })
+    : null;
+}
+
 class RepositoryIdentityCacheKey extends Data.Class<{
   readonly rootPath: string;
   readonly isBare: boolean;

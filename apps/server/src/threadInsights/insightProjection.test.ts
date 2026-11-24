@@ -1,6 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ThreadId, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
+import {
+  DEFAULT_LOAD_WATCHERS,
+  LoadWatchers,
+  ServerSettings,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Schema from "effect/Schema";
 import { projectLoadEvent } from "./insightProjection.ts";
 
 const base = {
@@ -20,6 +28,10 @@ const base = {
   updatedAt: DateTime.makeUnsafe("2026-11-06T00:00:00Z"),
 } as const;
 
+const defaults = DEFAULT_LOAD_WATCHERS;
+const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
+const project = (item: OrchestrationV2TurnItem) => projectLoadEvent(item, defaults);
+
 describe("load event projection", () => {
   it("distinguishes skill and instruction reads, search results, and inferred shell activity", () => {
     const read: OrchestrationV2TurnItem = {
@@ -29,24 +41,24 @@ describe("load event projection", () => {
       input: { path: "/repo/SKILL.md" },
       output: "abcé",
     };
-    expect(projectLoadEvent(read)).toMatchObject({
+    expect(project(read)).toMatchObject({
       kind: "skill",
       evidence: "reported",
       outputBytes: 5,
       estimatedOutputTokens: 2,
     });
     expect(
-      projectLoadEvent({ ...read, input: { file_path: "/repo/AGENTS.md" }, outputOmitted: true }),
+      project({ ...read, input: { file_path: "/repo/AGENTS.md" }, outputOmitted: true }),
     ).toMatchObject({ kind: "instructions", outputBytes: null });
     expect(
-      projectLoadEvent({
+      project({
         ...base,
         type: "file_search",
         results: [{ fileName: "/repo/SKILL.md", line: 1, preview: "match" }],
       }),
     ).toMatchObject({ kind: "search", outputBytes: null });
     expect(
-      projectLoadEvent({
+      project({
         ...base,
         type: "command_execution",
         input: "sed -n '1,20p' /repo/AGENTS.md",
@@ -59,19 +71,19 @@ describe("load event projection", () => {
       "overwing standards show standard-comments",
     ]) {
       expect(
-        projectLoadEvent({ ...base, type: "command_execution", input: command, output: "notes" }),
-      ).toMatchObject({ kind: "knowledge", evidence: "inferred", label: command });
+        project({ ...base, type: "command_execution", input: command, output: "notes" }),
+      ).toMatchObject({ kind: "knowledge", evidence: "inferred", label: `overwing: ${command}` });
     }
     for (const toolName of ["mcp__t3_code__list_read", "mcp__t3_code__artifact_read"]) {
       expect(
-        projectLoadEvent({
+        project({
           ...read,
           toolName,
           input: { threadId: "other" },
         }),
       ).toMatchObject({ kind: "resource", label: `${toolName} other` });
     }
-    expect(projectLoadEvent({ ...read, toolName: "write_file" })).toBeNull();
+    expect(project({ ...read, toolName: "write_file" })).toBeNull();
     for (const [input, path] of [
       ["/usr/bin/zsh -lc 'cat /repo/AGENTS.md'", "/repo/AGENTS.md"],
       ['/bin/bash -lc "cat /repo/AGENTS.md"', "/repo/AGENTS.md"],
@@ -80,7 +92,7 @@ describe("load event projection", () => {
       ["cat AGENTS.md", "AGENTS.md"],
     ] as const) {
       expect(
-        projectLoadEvent({ ...base, type: "command_execution", input, output: "instructions" }),
+        project({ ...base, type: "command_execution", input, output: "instructions" }),
       ).toMatchObject({
         kind: "instructions",
         evidence: "inferred",
@@ -103,12 +115,12 @@ describe("load event projection", () => {
       ["rg 'release.md' README.md", ["README.md"]],
       ["cat README.md | head -5", ["README.md"]],
     ] as const) {
-      const event = projectLoadEvent({ ...base, type: "command_execution", input, output: "text" });
+      const event = project({ ...base, type: "command_execution", input, output: "text" });
       if (paths.length) expect(event?.paths, input).toEqual(paths);
       else expect(event, input).toBeNull();
     }
     expect(
-      projectLoadEvent({
+      project({
         ...base,
         type: "command_execution",
         input: "/usr/bin/zsh -lc 'cat /skills/review/SKILL.md /repo/MEMORY.md'",
@@ -120,8 +132,68 @@ describe("load event projection", () => {
       paths: ["/skills/review/SKILL.md", "/repo/MEMORY.md"],
       status: "failed",
     });
-    expect(
-      projectLoadEvent({ ...read, toolName: "Skill", input: { skill: "code-review" } }),
-    ).toMatchObject({ kind: "skill", label: "code-review", paths: [] });
+    expect(project({ ...read, toolName: "Skill", input: { skill: "code-review" } })).toMatchObject({
+      kind: "skill",
+      label: "code-review",
+      paths: [],
+    });
+  });
+
+  it("labels loads by the configured watcher, matching command words and tool name globs", () => {
+    const watchers = [
+      { label: "notes", kind: "command", match: "nb show" },
+      { label: "vault", kind: "tool", match: "mcp__vault__*" },
+      { label: "any read", kind: "tool", match: "mcp__*__read*" },
+    ] as const;
+    const command = { ...base, type: "command_execution", output: "text" } as const;
+    const tool = (toolName: string) =>
+      projectLoadEvent(
+        {
+          ...base,
+          type: "dynamic_tool",
+          toolName,
+          input: { path: "/vault/AGENTS.md" },
+          output: "card",
+        },
+        watchers,
+      );
+    for (const input of [
+      "nb show standards",
+      "/usr/local/bin/nb show x",
+      "cd /repo && nb show x",
+    ]) {
+      expect(projectLoadEvent({ ...command, input }, watchers), input).toMatchObject({
+        kind: "knowledge",
+        label: `notes: ${input}`,
+        paths: [],
+      });
+    }
+    for (const input of ["nb shows x", "nb x show", "overwing search x"])
+      expect(projectLoadEvent({ ...command, input }, watchers), input).toBeNull();
+    expect(tool("mcp__vault__lookup")).toMatchObject({
+      kind: "knowledge",
+      label: "vault: mcp__vault__lookup",
+      evidence: "reported",
+    });
+    expect(tool("mcp__files__read_file")).toMatchObject({
+      label: "any read: mcp__files__read_file",
+    });
+    expect(tool("mcp__vault")).toBeNull();
+    expect(projectLoadEvent({ ...command, input: "nb show x" }, [])).toBeNull();
+  });
+
+  it("refuses unusable watchers and falls back to defaults for an older stored format", () => {
+    const decode = Schema.decodeUnknownExit(LoadWatchers);
+    for (const watcher of [
+      { label: "regex", kind: "command", pattern: "overwing\\s+search" },
+      { label: "glob", kind: "tool", match: "mcp__(a|b)+$" },
+      { label: "long", kind: "command", match: "a b c d e f g h i" },
+    ])
+      expect(decode([watcher])._tag, watcher.label).toBe("Failure");
+    expect(decode(DEFAULT_LOAD_WATCHERS)._tag).toBe("Success");
+    const stored = decodeServerSettings({
+      loadWatchers: [{ label: "overwing", kind: "command", pattern: "overwing\\s+search" }],
+    });
+    expect(stored.loadWatchers).toEqual(DEFAULT_LOAD_WATCHERS);
   });
 });

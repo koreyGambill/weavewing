@@ -20,6 +20,8 @@ type ClaudeSkillRoot = {
   readonly directory: string;
   readonly scope: ClaudeSkillScope;
   readonly prefix?: string;
+  /** Install version from the plugin registry; inline and synced plugins name their kind. */
+  readonly pluginVersion?: string;
 };
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -338,6 +340,7 @@ const decodeInstalledPlugin = Schema.decodeUnknownOption(
     scope: Schema.Literals(["user", "project", "local", "managed"]),
     installPath: Schema.NonEmptyString,
     projectPath: Schema.optional(Schema.NonEmptyString),
+    version: Schema.optional(Schema.String),
   }),
 );
 const PluginManifest = Schema.fromJsonString(
@@ -394,6 +397,7 @@ const pluginSkillRoots = Effect.fn("pluginSkillRoots")(function* (
   scope: ClaudeSkillScope,
   prefix: string,
   manifest: typeof PluginManifest.Type | undefined,
+  pluginVersion: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -402,13 +406,14 @@ const pluginSkillRoots = Effect.fn("pluginSkillRoots")(function* (
   const hasDefaultDirectory = yield* fileSystem
     .exists(defaultDirectory)
     .pipe(Effect.orElseSucceed(() => false));
-  if (hasDefaultDirectory) roots.push({ directory: defaultDirectory, scope, prefix });
+  if (hasDefaultDirectory)
+    roots.push({ directory: defaultDirectory, scope, prefix, pluginVersion });
   const declared = manifest?.skills;
   if (declared === undefined && !hasDefaultDirectory) {
     const hasRootSkill = yield* fileSystem
       .exists(path.join(installPath, "SKILL.md"))
       .pipe(Effect.orElseSucceed(() => false));
-    if (hasRootSkill) roots.push({ directory: installPath, scope, prefix });
+    if (hasRootSkill) roots.push({ directory: installPath, scope, prefix, pluginVersion });
   }
 
   const canonicalInstallPath = yield* fileSystem
@@ -427,7 +432,7 @@ const pluginSkillRoots = Effect.fn("pluginSkillRoots")(function* (
       canonicalDirectory !== undefined &&
       isInsideDirectory(path, canonicalInstallPath, canonicalDirectory)
     ) {
-      roots.push({ directory, scope, prefix });
+      roots.push({ directory, scope, prefix, pluginVersion });
     }
   }
   return roots;
@@ -514,7 +519,7 @@ const discoverInlinePluginSkillRoots = Effect.fn("discoverInlinePluginSkillRoots
       // Managed enabledPlugins entries, true or false, lock the name against inline copies.
       if (managedPluginNames.has(pluginNameKey(prefix))) continue;
       names.add(pluginNameKey(prefix));
-      roots.push(...(yield* pluginSkillRoots(installPath, "user", prefix, manifest)));
+      roots.push(...(yield* pluginSkillRoots(installPath, "user", prefix, manifest, "inline")));
     }
   }
   return { roots, names };
@@ -586,7 +591,9 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
     if (!prefix || inlinePluginNames.has(pluginNameKey(prefix))) continue;
     // A registry record whose install is gone loads nothing and claims no namespace.
     if (Option.isSome(existing)) claimedPluginNames.add(pluginNameKey(prefix));
-    roots.push(...(yield* pluginSkillRoots(installPath, scope, prefix, manifest)));
+    roots.push(
+      ...(yield* pluginSkillRoots(installPath, scope, prefix, manifest, install.version ?? "")),
+    );
   }
   if (syncedBucket === undefined) return roots;
 
@@ -622,7 +629,7 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
     const key = pluginNameKey(prefix);
     if (claimedPluginNames.has(key) || disabledSyncedPlugins.has(key)) continue;
     claimedPluginNames.add(key);
-    roots.push(...(yield* pluginSkillRoots(pluginPath, "user", prefix, manifest)));
+    roots.push(...(yield* pluginSkillRoots(pluginPath, "user", prefix, manifest, "synced")));
   }
   return roots;
 });
@@ -717,12 +724,30 @@ export function claudeLaunchArgDirectories(launchArgs?: string): ReadonlyArray<s
   return directories;
 }
 
+export interface ClaudeSkillCandidate {
+  readonly skill: ServerProviderSkill;
+  /** Set when an earlier root already claimed this name, so Claude never loads this copy. */
+  readonly shadowed: boolean;
+  readonly plugin?: { readonly name: string; readonly version: string };
+}
+
 /** First name wins: managed skills, then user skills, then project skills. */
 export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* (
   config: Pick<ClaudeSettings, "homePath"> & Partial<Pick<ClaudeSettings, "launchArgs">>,
   cwd?: string,
   environment?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<ReadonlyArray<ServerProviderSkill>, never, FileSystem.FileSystem | Path.Path> {
+  return (yield* discoverClaudeSkillCandidates(config, cwd, environment))
+    .filter((candidate) => !candidate.shadowed)
+    .map((candidate) => candidate.skill);
+});
+
+/** Every skill Claude would find, in load order, including copies a same-name skill shadows. */
+export const discoverClaudeSkillCandidates = Effect.fn("discoverClaudeSkillCandidates")(function* (
+  config: Pick<ClaudeSettings, "homePath"> & Partial<Pick<ClaudeSettings, "launchArgs">>,
+  cwd?: string,
+  environment?: NodeJS.ProcessEnv,
+): Effect.fn.Return<ReadonlyArray<ClaudeSkillCandidate>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const env = environment ?? process.env;
@@ -772,7 +797,8 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
     )),
   ];
 
-  const skillsByName = new Map<string, ServerProviderSkill>();
+  const claimedNames = new Set<string>();
+  const candidates: ClaudeSkillCandidate[] = [];
   for (const root of roots) {
     const singleSkill =
       root.prefix !== undefined &&
@@ -816,15 +842,14 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         if (mention?.[2] !== name) continue;
       }
 
-      if (skillsByName.has(name)) {
-        continue;
-      }
+      const shadowed = claimedNames.has(name);
+      claimedNames.add(name);
 
       const override = root.prefix ? undefined : skillOverrides.get(name);
       const userInvocationOnly =
         (frontmatter.kind === "parsed" && frontmatter.userInvocationOnly === true) ||
         override?.userInvocationOnly === true;
-      skillsByName.set(name, {
+      const skill: ServerProviderSkill = {
         name,
         path: skillPath,
         enabled: override?.enabled ?? true,
@@ -836,9 +861,20 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         ...(frontmatter.kind === "parsed" && frontmatter.userInvocable === false
           ? { userInvocable: false }
           : {}),
+      };
+      candidates.push({
+        skill,
+        shadowed,
+        ...(root.prefix !== undefined && root.pluginVersion !== undefined
+          ? { plugin: { name: root.prefix, version: root.pluginVersion } }
+          : {}),
       });
     }
   }
 
-  return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return candidates.sort(
+    (left, right) =>
+      left.skill.name.localeCompare(right.skill.name) ||
+      Number(left.shadowed) - Number(right.shadowed),
+  );
 });

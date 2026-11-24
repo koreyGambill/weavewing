@@ -80,6 +80,7 @@ export * from "./artifactQuestions.ts";
 
 export * from "./threadNotes.ts";
 export * from "./threadInsights.ts";
+export * from "./agentContext.ts";
 export * from "./threadMarks.ts";
 export * from "./xwingEnvironments.ts";
 export * from "./xwingOperations.ts";

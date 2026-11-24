@@ -96,3 +96,18 @@ describe("GitCafe remotes", () => {
     expect(recognizeRemoteWith(definition, "https://cafe.example/a/b")).toBeNull();
   });
 });
+
+describe("GitCafe file URLs", () => {
+  it("links a branch file the way GitHub does", () => {
+    expect(
+      definition.fileUrl({
+        host: "git.cafe",
+        repository: "team/app",
+        ref: "main",
+        path: "src/a.ts",
+        line: 57,
+        endLine: 64,
+      }),
+    ).toBe("https://git.cafe/team/app/blob/main/src/a.ts#L57-L64");
+  });
+});

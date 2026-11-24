@@ -96,6 +96,7 @@ import {
   UserPlusIcon,
   CalendarClockIcon,
   ClipboardCheckIcon,
+  ExternalLinkIcon,
 } from "lucide-react";
 import { openThreadFind } from "./chat/threadFindStore";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
@@ -142,6 +143,11 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
+import { useOpenLink } from "../browser/useOpenLink";
+import {
+  fileLinkPreflight,
+  resolveFileRemoteActions,
+} from "@t3tools/client-runtime/file-remote-actions";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useStartTriage } from "../hooks/useStartTriage";
 import { pickTriageEnvironment } from "../lib/triageTarget";
@@ -191,6 +197,7 @@ import {
 import {
   PULL_REQUESTS_PANEL_REF,
   selectActiveRightPanel,
+  selectActiveRightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
 import { getLatestThreadForProject } from "@t3tools/client-runtime/state/thread-sort";
@@ -519,6 +526,11 @@ function OpenCommandPaletteDialog(props: {
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
+  const loadFileLink = useAtomQueryRunner(sourceControlEnvironment.fileLink, {
+    reportFailure: false,
+    reportDefect: false,
+    refresh: true,
+  });
   const loadBrowsePath = useAtomQueryRunner(filesystemEnvironment.browse, {
     reportFailure: false,
     reportDefect: false,
@@ -737,6 +749,15 @@ function OpenCommandPaletteDialog(props: {
       : null;
   const activeThreadPreviewOpen = useRightPanelStore(
     (state) => selectActiveRightPanel(state.byThreadKey, previewPanelThreadRef) === "preview",
+  );
+  const activeFileSurface = useRightPanelStore((state) => {
+    const surface = selectActiveRightPanelSurface(state.byThreadKey, previewPanelThreadRef);
+    return surface?.kind === "file" && surface.attachment === undefined ? surface : null;
+  });
+  const openForgeLink = useOpenLink(previewPanelThreadRef);
+  const canReadActiveFiles = useEnvironmentScope(
+    activeThread?.environmentId ?? null,
+    AuthFilesystemReadScope,
   );
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
@@ -1462,6 +1483,50 @@ function OpenCommandPaletteDialog(props: {
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().open(threadRef, "pull-requests");
+      },
+    });
+  }
+
+  const activeFileRoot = activeThread
+    ? (activeThread.worktreePath ??
+      projectByKey.get(`${activeThread.environmentId}:${activeThread.projectId}`)?.workspaceRoot)
+    : undefined;
+  if (activeThread !== null && activeFileSurface !== null && activeFileRoot) {
+    const environmentId = activeThread.environmentId;
+    const project = projectByKey.get(`${environmentId}:${activeThread.projectId}`);
+    const preflight = fileLinkPreflight({
+      canReadFiles: canReadActiveFiles,
+      identity: project?.repositoryIdentity,
+    });
+    const forge = preflight.forge;
+    const path = activeFileSurface.relativePath;
+    const line = activeFileSurface.revealLine ?? undefined;
+    const endLine = activeFileSurface.revealEndLine;
+    actionItems.push({
+      kind: "action",
+      value: "action:open-file-on-forge",
+      searchTerms: ["open", "file", "source", "remote", "browser", forge],
+      title: `Open current file on ${forge}`,
+      description: preflight.disabledReason ?? activeFileSurface.relativePath,
+      disabled: preflight.disabledReason !== null,
+      icon: <ExternalLinkIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const result = await loadFileLink({
+          environmentId,
+          input: {
+            cwd: activeFileRoot,
+            path,
+            ...(line === undefined ? {} : { line }),
+            ...(endLine === undefined ? {} : { endLine }),
+          },
+        });
+        const [action] = resolveFileRemoteActions(
+          result._tag === "Success"
+            ? { status: "ready", link: result.value }
+            : { status: "failed" },
+        );
+        if (action?.url == null) throw new Error(action?.disabledReason ?? "No link for this file");
+        await openForgeLink(action.url);
       },
     });
   }

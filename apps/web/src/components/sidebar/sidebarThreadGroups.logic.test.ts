@@ -3,11 +3,14 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
+  sidebarGroupToRecord,
+  sidebarThreadGroupNameOf,
   deleteSidebarThreadGroup,
   discardNewSidebarThreadGroup,
   isUnnamedSidebarThreadGroup,
   localSidebarThreadGroups,
   EMPTY_SIDEBAR_THREAD_GROUPS,
+  hasSidebarManualThreadOrder,
   moveSidebarThreadGroup,
   placeSidebarThread,
   sidebarThreadGroupsForOrder,
@@ -147,9 +150,30 @@ describe("resolveSidebarGroupDrop", () => {
     expect(
       resolveSidebarGroupDrop(arranged, "x", { kind: "thread", key: "pinned", after: false }),
     ).toBe(null);
+  });
+
+  it("places a thread dragged in from Pinned or Settled where it drops", () => {
     expect(
       resolveSidebarGroupDrop(arranged, "pinned", { kind: "thread", key: "a", after: false }),
-    ).toBe(null);
+    ).toEqual({ groupId: "demo", beforeKey: "a" });
+    expect(resolveSidebarGroupDrop(arranged, "settled", { kind: "header", groupId: null })).toEqual(
+      { groupId: null, beforeKey: "x" },
+    );
+
+    const fixed = arrangeSidebarThreadGroups(state([]), families("x", "y"), {
+      hideEmptyGroups: false,
+      threadOrder: "fixed",
+    });
+    const target = resolveSidebarGroupDrop(fixed, "pinned", {
+      kind: "thread",
+      key: "y",
+      after: false,
+    })!;
+    expect(placeSidebarThread(state([]), fixed, "pinned", target).ungroupedOrder).toEqual([
+      "x",
+      "pinned",
+      "y",
+    ]);
   });
 });
 
@@ -194,6 +218,24 @@ describe("placeSidebarThread", () => {
     const fixed = sidebarThreadGroupsForOrder(next, "fixed");
     expect(fixed.ungroupedOrder).toEqual(["a", "b", "c"]);
     expect(sidebarThreadGroupsForOrder(fixed, "fixed")).toEqual(next);
+  });
+
+  it("reorders fixed order without any groups, and leaves a group-free recency list alone", () => {
+    expect(hasSidebarManualThreadOrder(EMPTY_SIDEBAR_THREAD_GROUPS, "recency")).toBe(false);
+    expect(hasSidebarManualThreadOrder(state([["demo", []]]), "recency")).toBe(true);
+    expect(hasSidebarManualThreadOrder(EMPTY_SIDEBAR_THREAD_GROUPS, "fixed")).toBe(true);
+
+    const view = sidebarThreadGroupsForOrder(EMPTY_SIDEBAR_THREAD_GROUPS, "fixed");
+    const arranged = arrangeSidebarThreadGroups(view, families("a", "b", "c"), {
+      hideEmptyGroups: false,
+      threadOrder: "fixed",
+    });
+    const stored = sidebarThreadGroupsForOrder(
+      stepSidebarThread(view, arranged, "c", -1)!,
+      "fixed",
+    );
+    expect(stored.fixedUngroupedOrder).toEqual(["a", "c", "b"]);
+    expect(stored.ungroupedOrder).toEqual([]);
   });
 
   it("reorders under a filter without moving the threads it hides", () => {
@@ -388,6 +430,33 @@ describe("server-recorded groups", () => {
         ["r2", { from: "Remote", to: null }],
       ]),
     );
+  });
+
+  it("reports a thread placed into Ungrouped from nowhere, and records only real changes", () => {
+    // A settled thread's synced group is hidden, so the thread starts outside every container.
+    const placed = { ...view, ungroupedOrder: ["settled"] };
+    const change = changedSidebarThreadGroupNames(view, placed).get("settled");
+    expect(change).toEqual({ from: null, to: null });
+    expect(sidebarGroupToRecord(change!, "Hidden")).toBeNull();
+    expect(sidebarGroupToRecord(change!, undefined)).toBeUndefined();
+    expect(sidebarGroupToRecord({ from: null, to: "New group" }, "A")).toBeUndefined();
+    expect(sidebarGroupToRecord({ from: "New group", to: null }, undefined)).toBeUndefined();
+    expect(sidebarGroupToRecord({ from: "A", to: "B" }, "A")).toBe("B");
+  });
+
+  it("names the group a placed thread ends in, so a stale Ungrouped entry can't hide a change", () => {
+    const stale = { ...view, ungroupedOrder: ["settled"] };
+    const placed = placeSidebarThread(
+      stale,
+      arrangeSidebarThreadGroups(stale, families("settled"), { hideEmptyGroups: false }),
+      "settled",
+      { groupId: null, beforeKey: null },
+    );
+    // The before and after locations match, so the diff alone reports nothing for it.
+    expect(changedSidebarThreadGroupNames(stale, placed).has("settled")).toBe(false);
+    const to = sidebarThreadGroupNameOf(placed, "settled");
+    expect(sidebarGroupToRecord({ from: null, to }, "Hidden")).toBeNull();
+    expect(sidebarThreadGroupNameOf(view, "moved")).toBe("B");
   });
 
   it("refuses a name another group has, or one too long for the server", () => {

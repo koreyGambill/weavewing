@@ -436,6 +436,8 @@ export function applyServerSettingsPatch(
     projectAutoPullOverrides: _legacyAutoPull,
     projectScriptOverrides: _legacyScripts,
     outsideWorkspaceEditGrants,
+    // An ordered list: deepMerge would merge it by index.
+    loadWatchers,
     ...patchForMerge
   } = patch;
   const currentBackgroundActivity = normalizeServerBackgroundActivitySettings(current);
@@ -569,6 +571,7 @@ export function applyServerSettingsPatch(
       ? { providerInstances: patch.providerInstances }
       : {}),
     ...(outsideWorkspaceEditGrants !== undefined ? { outsideWorkspaceEditGrants } : {}),
+    ...(loadWatchers !== undefined ? { loadWatchers } : {}),
     ...(patch.worktreesDirectory !== undefined &&
     patch.worktreesDirectory !== current.worktreesDirectory
       ? {

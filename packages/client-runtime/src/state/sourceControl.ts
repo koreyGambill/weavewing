@@ -38,6 +38,12 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       label: "environment-data:source-control:star",
       tag: WS_METHODS.sourceControlStar,
     }),
+    // Mirrors local branches, which change outside the app, so each mount reads git again.
+    fileLink: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:source-control:file-link",
+      tag: WS_METHODS.sourceControlFileLink,
+      staleTimeMs: 0,
+    }),
     repository: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:source-control:repository",
       tag: WS_METHODS.sourceControlLookupRepository,

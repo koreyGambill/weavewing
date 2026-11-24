@@ -10,6 +10,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
+import * as ServerConfig from "../config.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import {
   resolveCodexHomeLayout,
@@ -114,6 +115,7 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettingsService;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig.ServerConfig;
   const isServerInternal = yield* makeIsServerInternalPath;
 
   return InstructionFileAllowlist.of({
@@ -179,7 +181,7 @@ const make = Effect.gen(function* () {
         const { files } = yield* resolveInstructionFiles(
           convention,
           cwd,
-          { home, platform, configDir },
+          { home, platform, configDir, worktreesDir: serverConfig.worktreesDir },
           (candidate) => isServerInternal(candidate).pipe(Effect.orElseSucceed(() => true)),
         ).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),

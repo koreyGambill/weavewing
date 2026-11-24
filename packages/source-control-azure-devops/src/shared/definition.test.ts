@@ -252,3 +252,19 @@ describe("Azure DevOps repository selector", () => {
     ).toBe("checkout (eu)");
   });
 });
+
+describe("Azure DevOps file URLs", () => {
+  it("addresses a branch file by query, in the web spelling of an SSH remote", () => {
+    const url = definition.fileUrl({
+      host: "ssh.dev.azure.com",
+      repository: "v3/org/project/app",
+      ref: "main",
+      path: "src/a.ts",
+      line: 57,
+      endLine: 64,
+    });
+    expect(url).toBe(
+      "https://dev.azure.com/org/project/_git/app?path=%2Fsrc%2Fa.ts&version=GBmain&line=57&lineEnd=65&lineStartColumn=1&lineEndColumn=1&lineStyle=plain&_a=contents",
+    );
+  });
+});
