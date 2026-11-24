@@ -631,7 +631,8 @@ export class GhosttyTerminalCore {
 
   encodePaste(data: string): string {
     this.ensureActive();
-    const input = encoder.encode(data);
+    // Windows clipboards hold CRLF; Ghostty keeps both bytes, which shells read as two line breaks.
+    const input = encoder.encode(data.replaceAll("\r\n", "\n"));
     if (input.length === 0) return "";
     const inputPointer = this.runtime.alloc(input.length);
     this.runtime.bytes(inputPointer, input.length).set(input);

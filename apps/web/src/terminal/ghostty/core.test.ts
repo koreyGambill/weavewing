@@ -132,6 +132,16 @@ describe("GhosttyTerminalCore snapshots", () => {
   });
 
   it.each([
+    { mode: "\x1b[?2004h", expected: "\x1b[200~a \\\nb\nc\x1b[201~" },
+    { mode: "\x1b[?2004l", expected: "a \\\rb\rc" },
+  ])("sends each clipboard line break once ($mode)", async ({ mode, expected }) => {
+    const core = await createCore();
+    core.write(mode);
+
+    expect(core.encodePaste("a \\\r\nb\nc")).toBe(expected);
+  });
+
+  it.each([
     { code: "Numpad1", key: "End", expected: "\x1b[F" },
     { code: "Numpad5", key: "Clear", expected: "\x1b[E" },
     { code: "Numpad8", key: "ArrowUp", expected: "\x1b[A" },
