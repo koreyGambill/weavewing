@@ -17,6 +17,7 @@ import type {
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -785,7 +786,12 @@ export const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositor
         capturedBytes += kept.byteLength;
       },
     })
-    .pipe(Effect.orElseSucceed(() => undefined));
+    .pipe(
+      // Waiting for a process slot counts against the deadline too.
+      Effect.timeoutOption(timeoutMs),
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
+    );
   const complete = result !== undefined && result.exitCode === 0 && !result.stdoutTruncated;
   // A cut-off, failed or timed-out read keeps only its complete records.
   const stdout = complete
@@ -806,6 +812,7 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
 ) {
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const hostIsWindows = yield* HostProcess.isWindows;
+  const scope = yield* Effect.scope;
   // A parent that is itself inside a repository keeps listing only its own top level.
   const insideRepository = yield* vcsProcess
     .run({
@@ -862,10 +869,13 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
     }
     return { entries, truncated } satisfies ChildFiles;
   });
-  // One rebuild at a time: a search waits for the running one, then reuses its result if it is
-  // still fresh, for the same repositories, and no refresh has come since it began.
-  const rebuildPermit = yield* Semaphore.make(1);
+  // A search reuses a fresh result or joins the rebuild under way; a new rebuild waits for the
+  // previous one, so one listing runs at a time. Rebuilds belong to the index, so a cancelled
+  // search never cancels one that other searches are waiting on.
+  const decide = yield* Semaphore.make(1);
+  const listingSlot = yield* Semaphore.make(1);
   let generation = 0;
+  let requested = 0;
   let built:
     | {
         readonly key: string;
@@ -874,11 +884,19 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
         readonly result: ChildFiles;
       }
     | undefined;
+  let rebuilding:
+    | {
+        readonly id: number;
+        readonly key: string;
+        readonly generation: number;
+        readonly fiber: Fiber.Fiber<ChildFiles>;
+      }
+    | undefined;
   const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
     function* () {
       if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
       const key = (yield* listRepositoryCandidates(cwd)).join("\0");
-      return yield* rebuildPermit.withPermits(1)(
+      const decision = yield* decide.withPermits(1)(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           if (
@@ -887,14 +905,49 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
             built.generation === generation &&
             now - built.at < CHILD_REPOSITORY_FILES_TTL_MS
           ) {
-            return built.result;
+            return { result: built.result };
           }
+          if (rebuilding && rebuilding.key === key && rebuilding.generation === generation) {
+            return { fiber: rebuilding.fiber };
+          }
+          const id = ++requested;
           const startedGeneration = generation;
-          const result = yield* buildChildFiles();
-          built = { key, generation: startedGeneration, at: now, result };
-          return result;
+          // Waits for the listing slot; a newer rebuild queued meanwhile then answers instead.
+          const attempt = (): Effect.Effect<ChildFiles> =>
+            listingSlot
+              .withPermits(1)(
+                Effect.gen(function* () {
+                  if (rebuilding && rebuilding.id !== id) return undefined;
+                  const at = yield* Clock.currentTimeMillis;
+                  const result = yield* buildChildFiles();
+                  built = { key, generation: startedGeneration, at, result };
+                  return result;
+                }),
+              )
+              .pipe(
+                Effect.flatMap((result) => {
+                  if (result !== undefined) return Effect.succeed(result);
+                  if (rebuilding && rebuilding.id !== id) return Fiber.join(rebuilding.fiber);
+                  return built ? Effect.succeed(built.result) : attempt();
+                }),
+              );
+          // Starts once this decision is recorded, so the checks above see it.
+          const run = decide
+            .withPermits(1)(Effect.void)
+            .pipe(
+              Effect.andThen(attempt),
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (rebuilding?.id === id) rebuilding = undefined;
+                }),
+              ),
+            );
+          const forked = yield* Effect.forkIn(run, scope);
+          rebuilding = { id, key, generation: startedGeneration, fiber: forked };
+          return { fiber: forked };
         }),
       );
+      return "result" in decision ? decision.result : yield* Fiber.join(decision.fiber);
     },
   );
 

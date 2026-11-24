@@ -8,7 +8,6 @@ import {
 } from "@ff-labs/fff-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, expect, it } from "@effect/vitest";
-import { VcsProcessTimeoutError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { PROJECT_FAVICON_EXTENSIONS, isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
 import * as Deferred from "effect/Deferred";
@@ -1041,28 +1040,15 @@ const slowListingFixture = Effect.fn(function* (prefix: string) {
   yield* addRepository("first");
   const started = yield* Deferred.make<void>();
   const gate = yield* Deferred.make<void>();
+  let listings = 0;
   const slow = VcsProcess.VcsProcess.of({
     ...vcsProcess,
     run: (input) =>
       input.operation === "WorkspaceSearchIndex.listRepositoryFiles"
-        ? Deferred.succeed(started, undefined).pipe(
-            // A held listing still ends at its timeout, as the real runner's does.
-            Effect.andThen(
-              Deferred.await(gate).pipe(
-                Effect.timeoutOrElse({
-                  duration: input.timeoutMs ?? 10_000,
-                  orElse: () =>
-                    Effect.fail(
-                      new VcsProcessTimeoutError({
-                        operation: input.operation,
-                        command: input.command,
-                        cwd: input.cwd,
-                        timeoutMs: input.timeoutMs ?? 10_000,
-                      }),
-                    ),
-                }),
-              ),
-            ),
+        ? Effect.sync(() => (listings += 1)).pipe(
+            Effect.andThen(Deferred.succeed(started, undefined)),
+            // Held as if every process slot were taken: no timeout of its own applies here.
+            Effect.andThen(Deferred.await(gate)),
             Effect.andThen(vcsProcess.run(input)),
           )
         : vcsProcess.run(input),
@@ -1071,8 +1057,25 @@ const slowListingFixture = Effect.fn(function* (prefix: string) {
     Effect.provideService(HostProcess.HomeDirectory, home),
     Effect.provideService(VcsProcess.VcsProcess, slow),
   );
-  return { index, started };
+  return { index, started, gate, listings: () => listings };
 });
+
+it.effect("finishes a rebuild for the other searches when the first one is cancelled", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixture = yield* slowListingFixture("t3-scratch-cancel-");
+      const first = yield* Effect.forkChild(fixture.index.search("readme", 20, "file"));
+      yield* Deferred.await(fixture.started);
+      const second = yield* Effect.forkChild(fixture.index.search("readme", 20, "file"));
+      yield* Fiber.interrupt(first);
+      yield* Deferred.succeed(fixture.gate, undefined);
+      expect((yield* Fiber.join(second)).entries.map((entry) => entry.path)).toEqual([
+        "first/README.md",
+      ]);
+      expect(fixture.listings()).toBe(1);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
 
 it.effect("keeps the paths a listing read before its output cap", () =>
   Effect.scoped(
