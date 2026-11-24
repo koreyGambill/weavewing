@@ -8,6 +8,7 @@ import {
 } from "@ff-labs/fff-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, expect, it } from "@effect/vitest";
+import { VcsProcessTimeoutError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { PROJECT_FAVICON_EXTENSIONS, isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
 import * as Deferred from "effect/Deferred";
@@ -1045,7 +1046,23 @@ const slowListingFixture = Effect.fn(function* (prefix: string) {
     run: (input) =>
       input.operation === "WorkspaceSearchIndex.listRepositoryFiles"
         ? Deferred.succeed(started, undefined).pipe(
-            Effect.andThen(Deferred.await(gate)),
+            // A held listing still ends at its timeout, as the real runner's does.
+            Effect.andThen(
+              Deferred.await(gate).pipe(
+                Effect.timeoutOrElse({
+                  duration: input.timeoutMs ?? 10_000,
+                  orElse: () =>
+                    Effect.fail(
+                      new VcsProcessTimeoutError({
+                        operation: input.operation,
+                        command: input.command,
+                        cwd: input.cwd,
+                        timeoutMs: input.timeoutMs ?? 10_000,
+                      }),
+                    ),
+                }),
+              ),
+            ),
             Effect.andThen(vcsProcess.run(input)),
           )
         : vcsProcess.run(input),
@@ -1083,12 +1100,105 @@ it.effect("keeps the paths a listing read before its output cap", () =>
         "repo",
         false,
         3,
+        10_000,
       );
       expect(listed.truncated).toBe(true);
       expect(listed.paths.length).toBeGreaterThan(0);
       for (const listedPath of listed.paths) {
         expect(listedPath).toMatch(new RegExp(`^repo/${folder}/\\d\\.md$`));
       }
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.live("keeps the records a listing printed before it timed out", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-timed-out-listing-" });
+      yield* fs.makeDirectory(path.join(cwd, "repo"));
+      // Prints past the output cap, then stays open past the timeout.
+      const records = Array.from({ length: 300 }, (_, index) => `? file${index}.md`).join("\\0");
+      const stalling = VcsProcess.VcsProcess.of({
+        ...vcsProcess,
+        run: (input) =>
+          vcsProcess.run({
+            ...input,
+            command: "sh",
+            args: ["-c", `printf '${records}\\0'; sleep 30`],
+          }),
+      });
+      const listed = yield* WorkspaceSearchIndex.listRepositoryFiles(
+        stalling,
+        cwd,
+        "repo",
+        false,
+        4,
+        500,
+      );
+      expect(listed).toEqual({
+        paths: ["repo/file0.md", "repo/file1.md", "repo/file2.md", "repo/file3.md"],
+        truncated: true,
+      });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.live("runs one repository listing at a time across refreshes and searches", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const vcsProcess = yield* VcsProcess.VcsProcess;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-scratch-one-listing-" });
+      const repo = path.join(home, "code", "repo");
+      yield* fs.makeDirectory(repo, { recursive: true });
+      yield* fs.writeFileString(path.join(repo, "README.md"), "");
+      yield* vcsProcess.run({
+        operation: "test.gitInit",
+        command: "git",
+        args: ["init"],
+        cwd: repo,
+      });
+      const started = yield* Deferred.make<void>();
+      const gate = yield* Deferred.make<void>();
+      let running = 0;
+      let mostRunning = 0;
+      const blocking = VcsProcess.VcsProcess.of({
+        ...vcsProcess,
+        run: (input) =>
+          input.operation === "WorkspaceSearchIndex.listRepositoryFiles"
+            ? Effect.sync(() => {
+                running += 1;
+                mostRunning = Math.max(mostRunning, running);
+              }).pipe(
+                Effect.andThen(Deferred.succeed(started, undefined)),
+                Effect.andThen(Deferred.await(gate)),
+                Effect.andThen(vcsProcess.run(input)),
+                Effect.ensuring(Effect.sync(() => (running -= 1))),
+              )
+            : vcsProcess.run(input),
+      });
+      const index = yield* WorkspaceSearchIndex.make(path.join(home, "code")).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+        Effect.provideService(VcsProcess.VcsProcess, blocking),
+      );
+      const search = Effect.forkChild(index.search("readme", 20, "file"));
+      const searches = [yield* search];
+      yield* Deferred.await(started);
+      for (let round = 0; round < 3; round++) {
+        yield* index.refresh();
+        searches.push(yield* search);
+      }
+      yield* Deferred.succeed(gate, undefined);
+      for (const fiber of searches) {
+        expect((yield* Fiber.join(fiber)).entries.map((entry) => entry.path)).toEqual([
+          "repo/README.md",
+        ]);
+      }
+      expect(mostRunning).toBe(1);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

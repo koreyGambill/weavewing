@@ -24,6 +24,7 @@ import * as LayerMap from "effect/LayerMap";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import type {
   ProjectEntry,
@@ -746,7 +747,12 @@ export const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositor
   repository: string,
   hostIsWindows: boolean,
   limit: number,
+  timeoutMs: number,
 ) {
+  const maxOutputBytes = Math.min(16 * 1024 * 1024, limit * CHILD_REPOSITORY_RECORD_BYTES);
+  // Kept here too, so a listing that times out after its cap still has the records it read.
+  const captured: Uint8Array[] = [];
+  let capturedBytes = 0;
   const result = yield* vcsProcess
     .run({
       operation: "WorkspaceSearchIndex.listRepositoryFiles",
@@ -769,23 +775,29 @@ export const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositor
       ],
       cwd: NodePath.join(cwd, repository),
       allowNonZeroExit: true,
-      timeoutMs: 10_000,
-      maxOutputBytes: Math.min(16 * 1024 * 1024, limit * CHILD_REPOSITORY_RECORD_BYTES),
+      timeoutMs,
+      maxOutputBytes,
       outputMode: "truncate",
+      onStdoutChunk: (chunk) => {
+        if (capturedBytes >= maxOutputBytes) return;
+        const kept = chunk.subarray(0, maxOutputBytes - capturedBytes);
+        captured.push(kept);
+        capturedBytes += kept.byteLength;
+      },
     })
     .pipe(Effect.orElseSucceed(() => undefined));
-  // Output past the cap is drained, not read, so a capped listing keeps the paths it got.
-  if (!result || (result.exitCode !== 0 && !result.stdoutTruncated)) {
-    return { paths: [] as string[], truncated: true };
-  }
-  // A cut-off read ends mid-record, so its last record is dropped.
-  const stdout = result.stdoutTruncated
-    ? result.stdout.slice(0, result.stdout.lastIndexOf("\0") + 1)
-    : result.stdout;
+  const complete = result !== undefined && result.exitCode === 0 && !result.stdoutTruncated;
+  // A cut-off, failed or timed-out read keeps only its complete records.
+  const stdout = complete
+    ? result.stdout
+    : (() => {
+        const text = Buffer.concat(captured, capturedBytes).toString("utf8");
+        return text.slice(0, text.lastIndexOf("\0") + 1);
+      })();
   const parsed = parseRepositoryFileRecords(stdout, limit);
   return {
     paths: parsed.paths.map((entry) => `${repository}/${toPosixPath(entry, hostIsWindows)}`),
-    truncated: result.stdoutTruncated || parsed.truncated,
+    truncated: !complete || parsed.truncated,
   };
 });
 
@@ -829,21 +841,17 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
         truncated = true;
         break;
       }
+      const remainingMs = deadline - (yield* Clock.currentTimeMillis);
       const listed = yield* Effect.forEach(
         wave,
         (repository) =>
-          beforeDeadline(
-            listRepositoryFiles(
-              vcsProcess,
-              cwd,
-              repository,
-              hostIsWindows,
-              Math.min(WORKSPACE_INDEX_MAX_ENTRIES, share),
-            ),
-          ).pipe(
-            Effect.map((result) =>
-              Option.getOrElse(result, () => ({ paths: [] as string[], truncated: true })),
-            ),
+          listRepositoryFiles(
+            vcsProcess,
+            cwd,
+            repository,
+            hostIsWindows,
+            Math.min(WORKSPACE_INDEX_MAX_ENTRIES, share),
+            Math.min(10_000, remainingMs),
           ),
         { concurrency: "unbounded" },
       );
@@ -854,21 +862,39 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
     }
     return { entries, truncated } satisfies ChildFiles;
   });
-  // Concurrent searches share one rebuild, and its result is reused while fresh.
-  const [cachedChildFiles, invalidateChildFiles] = yield* Effect.cachedInvalidateWithTTL(
-    buildChildFiles(),
-    CHILD_REPOSITORY_FILES_TTL_MS,
-  );
-  let listedRepositories: string | undefined;
+  // One rebuild at a time: a search waits for the running one, then reuses its result if it is
+  // still fresh, for the same repositories, and no refresh has come since it began.
+  const rebuildPermit = yield* Semaphore.make(1);
+  let generation = 0;
+  let built:
+    | {
+        readonly key: string;
+        readonly generation: number;
+        readonly at: number;
+        readonly result: ChildFiles;
+      }
+    | undefined;
   const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
     function* () {
       if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
       const key = (yield* listRepositoryCandidates(cwd)).join("\0");
-      if (key !== listedRepositories) {
-        listedRepositories = key;
-        yield* invalidateChildFiles;
-      }
-      return yield* cachedChildFiles;
+      return yield* rebuildPermit.withPermits(1)(
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          if (
+            built &&
+            built.key === key &&
+            built.generation === generation &&
+            now - built.at < CHILD_REPOSITORY_FILES_TTL_MS
+          ) {
+            return built.result;
+          }
+          const startedGeneration = generation;
+          const result = yield* buildChildFiles();
+          built = { key, generation: startedGeneration, at: now, result };
+          return result;
+        }),
+      );
     },
   );
 
@@ -933,9 +959,11 @@ const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratch
         }),
       ),
     ),
-    refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(function* () {
-      yield* invalidateChildFiles;
-    }),
+    refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(() =>
+      Effect.sync(() => {
+        generation += 1;
+      }),
+    ),
   });
 });
 
