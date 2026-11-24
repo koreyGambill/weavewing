@@ -208,12 +208,12 @@ export const make = Effect.gen(function* () {
       .pipe(Effect.orElseSucceed(() => ""));
     const manager = `/user@${userId}.service/`;
     // systemd tracks units in the unified row, or the named row on legacy hosts.
-    const underManager = ownCgroup
-      .split("\n")
-      .some(
-        (line) =>
-          (line.startsWith("0::") || line.includes(":name=systemd:")) && line.includes(manager),
-      );
+    const underManager = ownCgroup.split("\n").some((line) => {
+      const [hierarchy, controllers, ...cgroupPath] = line.split(":");
+      const systemdRow =
+        (hierarchy === "0" && controllers === "") || controllers === "name=systemd";
+      return systemdRow && cgroupPath.join(":").includes(manager);
+    });
     if (underManager) return true;
     if (username === null) return false;
     return yield* fileSystem
@@ -503,8 +503,6 @@ export const make = Effect.gen(function* () {
       yield* awaitCleanup;
       const resolved = yield* resolve(command, env ?? hostEnvironment);
       if (resolved === null) return { command, args };
-      const scope = yield* systemd;
-      if (scope === undefined) return agentScopeCommand({ command: resolved, args });
       if (!(yield* userManagerOutlivesServer)) {
         if (!loggedLoginBound) {
           loggedLoginBound = true;
@@ -512,8 +510,12 @@ export const make = Effect.gen(function* () {
             "Agents launch without scopes: the systemd user manager stops at logout without lingering",
           );
         }
+        // An earlier scoped launch must not answer for this process's exit.
+        if (threadId !== undefined) yield* clear(threadId);
         return agentScopeCommand({ command: resolved, args });
       }
+      const scope = yield* systemd;
+      if (scope === undefined) return agentScopeCommand({ command: resolved, args });
       yield* scope.applyMemoryLimits;
       const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       // A continuing shared scope cannot attribute a tool's OOM to one thread.

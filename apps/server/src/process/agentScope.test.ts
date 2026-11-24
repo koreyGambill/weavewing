@@ -84,7 +84,13 @@ const withFakeSystemd = <A, E>(
     readonly slowCleanup?: boolean;
     readonly probeTimesOut?: boolean;
     /** Whether the user manager outlives the server: it runs the server, or lingering keeps it. */
-    readonly userManager?: "parent" | "other-user-parent" | "lingering" | "login-bound";
+    readonly userManager?:
+      | "parent"
+      | "legacy-parent"
+      | "other-user-parent"
+      | "other-controller-parent"
+      | "lingering"
+      | "login-bound";
     readonly username?: string | null;
   } = {},
 ) =>
@@ -95,13 +101,18 @@ const withFakeSystemd = <A, E>(
     }
     const cgroupRoot = NodePath.join(bin, "cgroup");
     const ownCgroup = NodePath.join(bin, "self-cgroup");
-    const parentUid =
-      userManager === "parent" ? 1000 : userManager === "other-user-parent" ? 1001 : undefined;
+    const underManager = (uid: number) =>
+      `/user.slice/user-${uid}.slice/user@${uid}.service/app.slice/t3.scope`;
     NodeFS.writeFileSync(
       ownCgroup,
-      parentUid === undefined
-        ? "0::/non-systemd\n"
-        : `0::/user.slice/user-${parentUid}.slice/user@${parentUid}.service/app.slice/t3.scope\n`,
+      {
+        parent: `0::${underManager(1000)}\n`,
+        "legacy-parent": `2:cpu,cpuacct:/\n1:name=systemd:${underManager(1000)}\n`,
+        "other-user-parent": `0::${underManager(1001)}\n`,
+        "other-controller-parent": `2:cpu,cpuacct:${underManager(1000)}\n0::/non-systemd\n`,
+        lingering: "0::/non-systemd\n",
+        "login-bound": "0::/non-systemd\n",
+      }[userManager],
     );
     const lingerDir = NodePath.join(bin, "linger");
     NodeFS.mkdirSync(lingerDir);
@@ -483,18 +494,21 @@ describe("AgentScope service", () => {
 
   it.effect.each([
     { userManager: "parent", username: "tester", scoped: true },
+    { userManager: "legacy-parent", username: "tester", scoped: true },
     { userManager: "lingering", username: "tester", scoped: true },
     { userManager: "login-bound", username: "tester", scoped: false },
     { userManager: "other-user-parent", username: "tester", scoped: false },
+    { userManager: "other-controller-parent", username: "tester", scoped: false },
     { userManager: "login-bound", username: null, scoped: false },
   ] as const)(
     "scopes agents only when the user manager outlives the server ($userManager, user $username)",
     ({ userManager, username, scoped }) =>
       withFakeSystemd(
-        ({ scope }) =>
+        ({ scope, calls }) =>
           Effect.gen(function* () {
             const command = yield* scope.wrap({ command: "agent", args: [], name: "t" });
             expect(command.unit !== undefined).toBe(scoped);
+            expect(calls.some(([, verb]) => verb === "--scope")).toBe(scoped);
           }),
         { userManager, username },
       ),
@@ -502,14 +516,18 @@ describe("AgentScope service", () => {
 
   it.effect("follows a lingering change at the next launch", () =>
     withFakeSystemd(
-      ({ scope, setLingering }) =>
+      ({ scope, units, setLingering }) =>
         Effect.gen(function* () {
-          const launch = () => scope.wrap({ command: "agent", args: [], name: "t" });
+          const launch = () =>
+            scope.wrap({ command: "agent", args: [], name: "t", threadId: "thread-1" });
           expect((yield* launch()).unit).toBeUndefined();
           setLingering(true);
-          expect((yield* launch()).unit).toBeDefined();
+          const scoped = (yield* launch()).unit;
+          assert(scoped !== undefined);
+          units.set(scoped, { activeState: "failed", result: "oom-kill" });
           setLingering(false);
           expect((yield* launch()).unit).toBeUndefined();
+          expect(yield* scope.oomKilled("thread-1")).toBe(false);
         }),
       { userManager: "login-bound" },
     ),
