@@ -162,12 +162,16 @@ function pullRequestSettles(
 export function isAutoSettlementCandidate(
   thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">,
   nowMs: number,
+  options: { readonly agentQuestionsEnabled?: boolean } = {},
 ): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
   if (thread.pinnedAt != null || thread.autoSettleDisabledAt != null) return false;
   if (thread.pendingRuntimeRequest !== null) return false;
   // A guest is waiting on the owner; settling would hide the Request.
   if ((thread.pendingGuestMessageCount ?? 0) > 0) return false;
+  // Open questions wait on the user, but only while the Labs setting shows them; deferred ones
+  // do not count. A manual settle still goes through.
+  if (options.agentQuestionsEnabled === true && (thread.openQuestionCount ?? 0) > 0) return false;
   if (thread.activityRunStatus != null) return false;
   if (threadBackgroundWorkHoldsCompletion(thread)) return false;
   // Settling ends a watch, which would silently drop a reviewer's later comments.
@@ -363,7 +367,9 @@ export const make = Effect.gen(function* () {
     const candidates = threads.filter(
       (thread) =>
         (automaticSettlementEnabled || thread.lineage.relationshipToParent === "subagent") &&
-        isAutoSettlementCandidate(thread, nowMs),
+        isAutoSettlementCandidate(thread, nowMs, {
+          agentQuestionsEnabled: settings.agentQuestionsEnabled,
+        }),
     );
 
     // Runs per candidate thread, thousands per sweep on busy servers; the sweep owns the span.

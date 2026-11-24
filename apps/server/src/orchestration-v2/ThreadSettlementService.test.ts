@@ -186,6 +186,21 @@ describe("isAutoSettlementCandidate", () => {
     expect(ThreadSettlementService.isSnoozed(snoozed, NOW_MS)).toBe(false);
   });
 
+  it.each([
+    { openQuestionCount: 2, agentQuestionsEnabled: true, expected: false },
+    { openQuestionCount: 2, agentQuestionsEnabled: false, expected: true },
+    { openQuestionCount: 0, agentQuestionsEnabled: true, expected: true },
+  ])(
+    "holds a thread with open questions only while agent questions are on: %j",
+    ({ openQuestionCount, agentQuestionsEnabled, expected }) => {
+      expect(
+        ThreadSettlementService.isAutoSettlementCandidate(shell({ openQuestionCount }), NOW_MS, {
+          agentQuestionsEnabled,
+        }),
+      ).toBe(expected);
+    },
+  );
+
   it("keeps snoozed threads parked until a fresh failure or timer wake", () => {
     const snoozed = shell({
       snoozedUntil: at(60 * 60 * 1_000),
