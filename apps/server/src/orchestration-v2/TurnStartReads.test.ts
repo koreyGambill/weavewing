@@ -605,3 +605,113 @@ it.effect(
       assert.isTrue((yield* store.getTurnStartContext(forkId, forkRunId)).hasConversation);
     }).pipe(Effect.provide(layerDatabase)),
 );
+
+it.effect("dates the user's previous own message only while a question has a user change", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:question-changes");
+    const runId = RunId.make("run:question-changes");
+    const instanceId = ProviderInstanceId.make("codex");
+    const at = (minute: number) =>
+      DateTime.makeUnsafe(`2026-09-04T12:${String(minute).padStart(2, "0")}:00.000Z`);
+    const thread: OrchestrationV2AppThread = {
+      id: threadId,
+      projectId: ProjectId.make("project:question-changes"),
+      title: "Questions",
+      providerInstanceId: instanceId,
+      modelSelection: { instanceId, model: "test" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+      forkedFrom: null,
+      createdBy: "user",
+      creationSource: "web",
+      createdAt: at(0),
+      updatedAt: at(0),
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      lastVisitedAt: null,
+      deletedAt: null,
+      questions: [{ id: "Q1", title: "Ship?", state: "open" }],
+    };
+    const putThread = (value: OrchestrationV2AppThread, key: string) =>
+      store.apply({
+        id: EventId.make(`event:thread:${key}`),
+        type: "thread.created",
+        threadId,
+        occurredAt: at(0),
+        payload: value,
+      });
+    yield* putThread(thread, "plain");
+    yield* store.apply({
+      id: EventId.make("event:run:question-changes"),
+      type: "run.updated",
+      threadId,
+      runId,
+      occurredAt: at(0),
+      payload: {
+        id: runId,
+        threadId,
+        ordinal: 3,
+        providerInstanceId: instanceId,
+        modelSelection: thread.modelSelection,
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:now"),
+        rootNodeId: null,
+        activeAttemptId: null,
+        status: "queued",
+        requestedAt: at(30),
+        startedAt: null,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      },
+    });
+    for (const [id, minute, extra] of [
+      ["message:typed", 10, {}],
+      ["message:agent", 15, { createdBy: "agent" }],
+      ["message:scheduled", 20, { origin: { kind: "scheduled-task", title: "Nightly" } }],
+      ["message:now", 30, {}],
+      ["message:later", 40, {}],
+    ] as const) {
+      yield* store.apply({
+        id: EventId.make(`event:${id}`),
+        type: "message.updated",
+        threadId,
+        runId,
+        occurredAt: at(minute),
+        payload: {
+          id: MessageId.make(id),
+          threadId,
+          runId,
+          nodeId: null,
+          role: "user",
+          text: id,
+          attachments: [],
+          streaming: false,
+          createdBy: "user",
+          creationSource: "web",
+          createdAt: at(minute),
+          updatedAt: at(minute),
+          ...extra,
+        },
+      });
+    }
+    assert.isNull((yield* store.getTurnStartContext(threadId, runId)).previousUserMessageAt);
+    yield* putThread(
+      {
+        ...thread,
+        questions: [{ ...thread.questions![0]!, userChangedAt: "2026-09-04T12:25:00Z" }],
+      },
+      "changed",
+    );
+    assert.deepEqual(
+      (yield* store.getTurnStartContext(threadId, runId)).previousUserMessageAt,
+      at(10),
+    );
+  }).pipe(Effect.provide(layerDatabase)),
+);

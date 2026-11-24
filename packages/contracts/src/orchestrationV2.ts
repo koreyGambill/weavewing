@@ -586,11 +586,16 @@ const OrchestrationV2LastTitleRegeneration = Schema.Struct({
   completedAt: Schema.DateTimeUtc,
 });
 
-/** A thread question still waiting on the user, mirrored from the thread workspace. */
+/**
+ * A thread question mirrored from the thread workspace: every open or deferred one, plus a
+ * withdrawn one the user dismissed, so the agent's next user-message turn can hear about it.
+ */
 export const OrchestrationV2ThreadQuestionSummary = Schema.Struct({
   id: TrimmedNonEmptyString,
   title: Schema.String,
-  state: Schema.Literals(["open", "deferred"]),
+  state: Schema.Literals(["open", "deferred", "withdrawn"]),
+  /** When the user last deferred, withdrew or reopened it. */
+  userChangedAt: Schema.optional(IsoDateTime),
 });
 export type OrchestrationV2ThreadQuestionSummary = typeof OrchestrationV2ThreadQuestionSummary.Type;
 
@@ -659,7 +664,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lastSnoozeWakeAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
-  /** Open and deferred thread questions. Absent until the thread's first question. */
+  /** Open, deferred and user-withdrawn thread questions. Absent until the thread's first question. */
   questions: Schema.optional(Schema.Array(OrchestrationV2ThreadQuestionSummary)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),

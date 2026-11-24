@@ -66,15 +66,10 @@ export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
 - The user's messages list your open questions. When one answers a question, call \`question_update\` with \`answered\` and the answer as you understood it; when one makes a question moot, \`withdrawn\`. A message that does neither leaves every question as it is.`;
 
 /** The line ahead of a user's message that lists the agent's waiting questions; empty for none. */
-export function t3OpenQuestionsContext(
-  questions: ReadonlyArray<{
-    readonly id: string;
-    readonly title: string;
-    readonly state: "open" | "deferred";
-  }>,
-): string {
-  if (questions.length === 0) return "";
-  const list = questions
+export function t3OpenQuestionsContext(questions: ReadonlyArray<ThreadQuestionLine>): string {
+  const waiting = questions.filter((question) => question.state !== "withdrawn");
+  if (waiting.length === 0) return "";
+  const list = waiting
     .map((question) =>
       question.state === "deferred"
         ? `${question.id} ${question.title} (deferred)`
@@ -82,6 +77,42 @@ export function t3OpenQuestionsContext(
     )
     .join("; ");
   return `Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: ${list}`;
+}
+
+type ThreadQuestionLine = {
+  readonly id: string;
+  readonly title: string;
+  readonly state: "open" | "deferred" | "withdrawn";
+  readonly userChangedAt?: string | undefined;
+};
+
+/**
+ * The line naming questions the user withdrew, deferred or reopened after `sinceMs`, so a
+ * dismissal reaches the agent with the next message; empty for none. Null `sinceMs` takes all.
+ */
+export function t3QuestionChangesContext(
+  questions: ReadonlyArray<ThreadQuestionLine>,
+  sinceMs: number | null,
+): string {
+  const changed = questions.filter((question) => {
+    const at =
+      question.userChangedAt === undefined ? Number.NaN : Date.parse(question.userChangedAt);
+    return !Number.isNaN(at) && (sinceMs === null || at > sinceMs);
+  });
+  const named = (state: ThreadQuestionLine["state"], verb: string) => {
+    const ids = changed
+      .filter((question) => question.state === state)
+      .map((question) =>
+        state === "withdrawn" ? `${question.id} (${question.title})` : question.id,
+      );
+    return ids.length === 0 ? [] : [`${verb} ${ids.join(", ")}`];
+  };
+  const parts = [
+    ...named("withdrawn", "withdrew"),
+    ...named("deferred", "deferred"),
+    ...named("open", "reopened"),
+  ];
+  return parts.length === 0 ? "" : `Since your last turn the user ${parts.join("; ")}.`;
 }
 
 // ACP only: some ACP agents accept the injected MCP server but never expose

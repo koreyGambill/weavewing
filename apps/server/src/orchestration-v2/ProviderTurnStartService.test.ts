@@ -224,6 +224,7 @@ function startWithMissingWorktree(
             projectionReadCount += 1;
             return Effect.succeed({
               ...projection,
+              previousUserMessageAt: null,
               hasConversation: projection.messages.some(
                 (m) =>
                   m.role === "user" &&
@@ -470,6 +471,8 @@ function makeLocalCommandHarness(input: {
   readonly fileSystem?: FileSystem.FileSystem;
   readonly previousNativeSession?: boolean;
   readonly previousMessages?: ReadonlyArray<string>;
+  /** When the user last wrote before this run's 12:00 message. */
+  readonly previousUserMessageAt?: string;
   readonly logoutFailure?: string;
   readonly openFailure?: unknown;
   readonly ensureThreadFailure?: unknown;
@@ -1272,6 +1275,10 @@ function makeLocalCommandHarness(input: {
   const getTurnStartContext = vi.fn(() =>
     Effect.succeed({
       ...projection,
+      previousUserMessageAt:
+        input.previousUserMessageAt === undefined
+          ? null
+          : DateTime.makeUnsafe(input.previousUserMessageAt),
       hasConversation: projection.messages.some(
         (m) =>
           m.role === "user" &&
@@ -2368,6 +2375,47 @@ effectIt.effect.each([
       );
     else expect(text).not.toContain("open questions");
   }),
+);
+
+effectIt.effect(
+  "tells the agent which questions the user changed since the previous user message",
+  () =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "My own prompt",
+        sideChat: { contextRun: "delivered" },
+        questionTools: true,
+        previousUserMessageAt: "2026-09-04T11:00:00Z",
+        questions: [
+          { id: "Q1", title: "Which database?", state: "open" },
+          {
+            id: "Q2",
+            title: "Old news?",
+            state: "withdrawn",
+            userChangedAt: "2026-09-04T10:30:00.000Z",
+          },
+          {
+            id: "Q3",
+            title: "Flag name?",
+            state: "withdrawn",
+            userChangedAt: "2026-09-04T11:30:00.000Z",
+          },
+          {
+            id: "Q4",
+            title: "Ship?",
+            state: "deferred",
+            userChangedAt: "2026-09-04T11:40:00.000Z",
+          },
+        ],
+      });
+      yield* harness.start;
+      expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
+        withInlineContext(
+          "Since your last turn the user withdrew Q3 (Flag name?); deferred Q4.\nYour open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q4 Ship? (deferred)",
+          "My own prompt",
+        ),
+      );
+    }),
 );
 
 effectIt.effect.each([

@@ -674,7 +674,9 @@ it.effect("moves questions through their states with ids that are never reused",
     ]);
     yield* update("Q1", "deferred", "user");
     expect(h.mirror.questions.map((question) => question.state)).toEqual(["deferred", "open"]);
+    expect(h.mirror.questions[0]?.userChangedAt).toBeDefined();
     yield* update("Q1", "open", "agent");
+    expect(h.mirror.questions[0]).not.toHaveProperty("userChangedAt");
     const answered = yield* update("Q2", "answered", "agent", { notes: "Yes, default off" });
     expect(answered.questions[1]).toMatchObject({
       state: "answered",
@@ -683,7 +685,15 @@ it.effect("moves questions through their states with ids that are never reused",
     });
     expect(answered.questions[1]?.closedAt).not.toBeNull();
     yield* update("Q1", "withdrawn", "user");
-    expect(h.mirror.questions).toEqual([]);
+    // Kept so the agent's next user-message turn hears the user dismissed it.
+    expect(h.mirror.questions).toEqual([
+      {
+        id: "Q1",
+        title: expect.any(String),
+        state: "withdrawn",
+        userChangedAt: expect.any(String),
+      },
+    ]);
     const reopened = yield* update("Q2", "open", "user");
     expect(reopened.questions[1]).toMatchObject({
       state: "open",
@@ -700,7 +710,7 @@ it.effect("moves questions through their states with ids that are never reused",
       ["Q4", "open"],
     ]);
     expect(replaced.questions[2]?.replacedBy).toBe("Q4");
-    expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q2", "Q4"]);
+    expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q1", "Q2", "Q4"]);
 
     for (const [attempt, code] of [
       [update("Q1", "withdrawn"), "invalid"],
@@ -815,7 +825,9 @@ it.effect("repairs a mirror a failed sync left stale, on the next read or at sta
       "not a workspace",
     );
     expect(yield* restarted.reconcileQuestions).toBe(1);
-    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "deferred" }]);
+    expect(h.mirror.questions).toEqual([
+      { id: "Q1", title: "Ship it?", state: "deferred", userChangedAt: expect.any(String) },
+    ]);
     expect(yield* restarted.reconcileQuestions).toBe(1);
     expect(h.syncs).toHaveLength(2);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

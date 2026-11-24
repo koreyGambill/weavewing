@@ -140,14 +140,23 @@ const isWaiting = (
   question: ThreadQuestion,
 ): question is ThreadQuestion & { readonly state: "open" | "deferred" } =>
   question.state === "open" || question.state === "deferred";
-const waitingQuestions = (
+// A withdrawn question stays mirrored while the user's dismissal is unreported history, so the
+// agent's next user-message turn can name it; the turn filters by time.
+const mirroredQuestions = (
   workspace: Pick<Workspace, "questions">,
 ): ReadonlyArray<OrchestrationV2ThreadQuestionSummary> =>
-  workspace.questions.filter(isWaiting).map((question) => ({
-    id: question.id,
-    title: questionTitle(question.prompt),
-    state: question.state,
-  }));
+  workspace.questions.flatMap((question) =>
+    isWaiting(question) || (question.state === "withdrawn" && question.userChangedAt)
+      ? [
+          {
+            id: question.id,
+            title: questionTitle(question.prompt),
+            state: question.state as "open" | "deferred" | "withdrawn",
+            ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
+          },
+        ]
+      : [],
+  );
 const choiceLabels = (question: ThreadQuestion, chosenOptionIds: ReadonlyArray<string>) =>
   question.options
     .filter((option) => chosenOptionIds.includes(option.id))
@@ -269,7 +278,7 @@ const make = Effect.gen(function* () {
     mirrored: ReadonlyArray<OrchestrationV2ThreadQuestionSummary>,
     workspace: Workspace,
   ) {
-    const questions = waitingQuestions(workspace);
+    const questions = mirroredQuestions(workspace);
     if (NodeUtil.isDeepStrictEqual(mirrored, questions)) return;
     yield* orchestrator
       .dispatch({
@@ -539,7 +548,7 @@ const make = Effect.gen(function* () {
     questions: ReadonlyArray<ThreadQuestion>,
   ) {
     const next = yield* commit(current, { ...current, questions }, current.revision);
-    yield* syncQuestions(waitingQuestions(current), next);
+    yield* syncQuestions(mirroredQuestions(current), next);
     return next;
   });
   const findQuestion = (workspace: Workspace, id: string) => {
@@ -929,8 +938,9 @@ const make = Effect.gen(function* () {
           break;
         }
       }
+      const { userChangedAt: _reported, ...changed } = next;
       const questions = [...current.questions];
-      questions[index] = next;
+      questions[index] = by === "user" ? { ...changed, userChangedAt: now } : changed;
       return yield* commitQuestions(current, questions);
     }, lock.withPermit),
     questionDraft: Effect.fn("ThreadWorkspace.questionDraft")(function* (input) {

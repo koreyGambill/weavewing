@@ -93,6 +93,8 @@ export const ThreadQuestion = Schema.Struct({
   answer: Schema.NullOr(ArtifactAnswer),
   answeredBy: Schema.NullOr(Schema.Literals(["user", "agent"])),
   replacedBy: Schema.NullOr(TrimmedNonEmptyString),
+  /** When the user last deferred, withdrew or reopened it; cleared once the agent changes it. */
+  userChangedAt: Schema.optional(IsoDateTime),
 });
 export type ThreadQuestion = typeof ThreadQuestion.Type;
 export const ThreadWorkspace = Schema.Struct({

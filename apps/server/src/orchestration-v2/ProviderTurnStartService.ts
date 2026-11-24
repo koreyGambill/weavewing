@@ -1,6 +1,9 @@
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { renderTurnOriginText } from "@t3tools/provider-core/server/turnOriginText";
-import { t3OpenQuestionsContext } from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  t3OpenQuestionsContext,
+  t3QuestionChangesContext,
+} from "@t3tools/provider-core/server/orchestrationInstructions";
 import { numberedTurnOrigins } from "@t3tools/shared/messageReactions";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
@@ -995,12 +998,27 @@ export const layer: Layer.Layer<
           : restartCancelledBackgroundWorkNote(restartCancelledWork);
       // Only the user's own words can answer a question, so other turns carry no list. The
       // session's capability gates it, as it gates the tools and instructions the line refers to.
+      const fromUser = (message: (typeof projection.messages)[number]) =>
+        message.role === "user" &&
+        message.createdBy === "user" &&
+        (message.origin?.kind ?? "user") === "user";
+      const questionsAsked = projection.thread.questions ?? [];
       const openQuestions =
-        inputMessages.some(
-          (input) => input.createdBy === "user" && (input.origin?.kind ?? "user") === "user",
-        ) &&
+        inputMessages.some(fromUser) &&
+        questionsAsked.length > 0 &&
         (yield* mcpSessions.read(projection.thread.id))?.capabilities?.has("questions") === true
-          ? t3OpenQuestionsContext(projection.thread.questions ?? [])
+          ? [
+              // Changes after the user's previous message are news; earlier ones went with it.
+              t3QuestionChangesContext(
+                questionsAsked,
+                projection.previousUserMessageAt === null
+                  ? null
+                  : DateTime.toEpochMillis(projection.previousUserMessageAt),
+              ),
+              t3OpenQuestionsContext(questionsAsked),
+            ]
+              .filter((line) => line !== "")
+              .join("\n")
           : "";
       const tokenCap = yield* handoffTokenCapConfig.pipe(
         Effect.orElseSucceed(() => DEFAULT_HANDOFF_TOKEN_CAP),

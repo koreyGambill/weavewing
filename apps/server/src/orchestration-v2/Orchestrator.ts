@@ -4665,7 +4665,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return (
             question.id === next.id &&
             question.title === next.title &&
-            question.state === next.state
+            question.state === next.state &&
+            question.userChangedAt === next.userChangedAt
           );
         }))
     )

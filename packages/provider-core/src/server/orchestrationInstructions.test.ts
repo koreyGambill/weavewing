@@ -10,6 +10,7 @@ import {
   T3_CODE_QUESTION_TOOL_INSTRUCTIONS,
   t3AcpPromptWithInstructions,
   t3OpenQuestionsContext,
+  t3QuestionChangesContext,
   t3OrchestrationPrompt,
   t3OrchestrationSystemPrompt,
 } from "./orchestrationInstructions.ts";
@@ -87,6 +88,26 @@ describe("T3 question instructions", () => {
       ]),
       "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q3 Flag name? (deferred)",
     );
+    assert.equal(t3OpenQuestionsContext([{ id: "Q2", title: "Gone?", state: "withdrawn" }]), "");
+  });
+
+  it("names the questions the user withdrew, deferred or reopened after the last user turn", () => {
+    const questions = [
+      { id: "Q1", title: "Which database?", state: "open", userChangedAt: "2026-01-01T00:00:05Z" },
+      { id: "Q2", title: "Old?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:01Z" },
+      { id: "Q3", title: "Flag name?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:06Z" },
+      { id: "Q4", title: "Ship?", state: "deferred", userChangedAt: "2026-01-01T00:00:07Z" },
+      { id: "Q5", title: "Agent only", state: "open" },
+    ] as const;
+    assert.equal(
+      t3QuestionChangesContext(questions, Date.parse("2026-01-01T00:00:02Z")),
+      "Since your last turn the user withdrew Q3 (Flag name?); deferred Q4; reopened Q1.",
+    );
+    assert.equal(
+      t3QuestionChangesContext(questions, null),
+      "Since your last turn the user withdrew Q2 (Old?), Q3 (Flag name?); deferred Q4; reopened Q1.",
+    );
+    assert.equal(t3QuestionChangesContext(questions, Date.parse("2026-01-01T00:00:07Z")), "");
   });
 });
 

@@ -731,7 +731,14 @@ export interface ProjectionStoreV2Shape {
       | "contextHandoffs"
       | "contextTransfers"
       | "turnItems"
-    > & { readonly hasConversation: boolean },
+    > & {
+      readonly hasConversation: boolean;
+      /**
+       * The latest user-typed message before this run's input, read only while a thread
+       * question carries a user change for it to date; null otherwise.
+       */
+      readonly previousUserMessageAt: DateTime.Utc | null;
+    },
     ProjectionStoreV2Error
   >;
   readonly getTurnStartHistory: (
@@ -5510,7 +5517,25 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       OR json_array_length(payload_json, '$.attachments') > 0)
               ) AS present
             `;
+            const previousUserMessage =
+              messageIds.length > 0 &&
+              (thread.questions ?? []).some((question) => question.userChangedAt !== undefined)
+                ? yield* sql<{ at: string | null }>`
+                    SELECT MAX(created_at) AS at FROM orchestration_v2_projection_messages
+                    WHERE thread_id = ${threadId} AND role = 'user'
+                      AND json_extract(payload_json, '$.createdBy') = 'user'
+                      AND COALESCE(json_extract(payload_json, '$.origin.kind'), 'user') = 'user'
+                      AND message_id NOT IN ${sql.in(messageIds)}
+                      AND created_at < (
+                        SELECT MIN(created_at) FROM orchestration_v2_projection_messages
+                        WHERE thread_id = ${threadId} AND message_id IN ${sql.in(messageIds)}
+                      )
+                  `
+                : [];
+            const previousUserMessageAt = previousUserMessage[0]?.at ?? null;
             return {
+              previousUserMessageAt:
+                previousUserMessageAt === null ? null : DateTime.makeUnsafe(previousUserMessageAt),
               hasConversation:
                 conversation[0]?.present === 1 ||
                 inheritsForkConversation({ thread, contextTransfers, contextHandoffs }),
