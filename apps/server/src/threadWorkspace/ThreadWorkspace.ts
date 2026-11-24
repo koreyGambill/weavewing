@@ -554,7 +554,9 @@ const make = Effect.gen(function* () {
       questions: Schema.optional(Schema.Array(Schema.Unknown)),
     }),
   });
-  const storedWorkspaces = Effect.fn("ThreadWorkspace.storedWorkspaces")(function* () {
+  const storedWorkspaces = Effect.fn("ThreadWorkspace.storedWorkspaces")(function* (
+    unreadable: "fail" | "skip" = "fail",
+  ) {
     const files = yield* fs.readDirectory(directory).pipe(
       Effect.catchIf(
         (e) => e.reason._tag === "NotFound",
@@ -564,14 +566,22 @@ const make = Effect.gen(function* () {
     );
     const stored: Array<{ readonly threadId: ThreadId; readonly hasQuestions: boolean }> = [];
     for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
-      const value = yield* fs
-        .readFileString(path.join(directory, file))
-        .pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(StoredWorkspace))),
-          Effect.mapError(storage),
-        );
-      if (filePath(value.workspace.threadId) !== path.join(directory, file))
-        return yield* storage("Thread identity mismatch.");
+      const value = yield* fs.readFileString(path.join(directory, file)).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(StoredWorkspace))),
+        Effect.filterOrFail(
+          (decoded) => filePath(decoded.workspace.threadId) === path.join(directory, file),
+          () => "Thread identity mismatch.",
+        ),
+        Effect.mapError(storage),
+        Effect.catchIf(
+          () => unreadable === "skip",
+          (cause) =>
+            Effect.logWarning("Skipped an unreadable thread workspace.", { file, cause }).pipe(
+              Effect.as(undefined),
+            ),
+        ),
+      );
+      if (value === undefined) continue;
       stored.push({
         threadId: value.workspace.threadId,
         hasQuestions: (value.workspace.questions?.length ?? 0) > 0,
@@ -879,7 +889,12 @@ const make = Effect.gen(function* () {
             closedAt: null,
             answeredBy: null,
             replacedBy: null,
-            answer: question.answer && { ...question.answer, submittedAt: null },
+            // A new revision, so resubmitting the same answer sends a new message.
+            answer: question.answer && {
+              ...question.answer,
+              submittedAt: null,
+              draftRevision: current.revision + 1,
+            },
           };
           break;
         case "deferred":
@@ -1011,9 +1026,11 @@ const make = Effect.gen(function* () {
     }, lock.withPermit),
     reconcileQuestions: Effect.gen(function* () {
       // Questions are never deleted, so a file without any has nothing to mirror.
-      const stored = (yield* storedWorkspaces()).filter((entry) => entry.hasQuestions);
+      const stored = (yield* storedWorkspaces("skip")).filter((entry) => entry.hasQuestions);
+      // One permit per thread, so requests arriving during startup wait for one repair at most.
       for (const { threadId } of stored)
         yield* read(threadId).pipe(
+          lock.withPermit,
           Effect.catch((cause) =>
             cause.code === "not_found"
               ? Effect.void
@@ -1021,7 +1038,7 @@ const make = Effect.gen(function* () {
           ),
         );
       return stored.length;
-    }).pipe(lock.withPermit, Effect.withSpan("ThreadWorkspace.reconcileQuestions")),
+    }).pipe(Effect.withSpan("ThreadWorkspace.reconcileQuestions")),
     artifactList: Effect.fn("ThreadWorkspace.artifactList")(function* (input) {
       const workspace = yield* read(input.threadId);
       return workspace.artifacts.flatMap((artifact) => {

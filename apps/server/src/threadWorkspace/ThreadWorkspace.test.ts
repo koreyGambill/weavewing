@@ -810,6 +810,10 @@ it.effect("repairs a mirror a failed sync left stale, on the next read or at sta
       yield* Layer.build(Layer.fresh(Workspaces.layer).pipe(Layer.provide(h.dependencies))),
       Workspaces.ThreadWorkspace,
     );
+    yield* h.fs.writeFileString(
+      h.path.join(h.config.stateDir, "thread-workspaces", `${"a".repeat(64)}.json`),
+      "not a workspace",
+    );
     expect(yield* restarted.reconcileQuestions).toBe(1);
     expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Ship it?", state: "deferred" }]);
     expect(yield* restarted.reconcileQuestions).toBe(1);
@@ -857,6 +861,10 @@ it.effect("finishes a submit whose save failed after the send without sending ag
       ["answered", "user"],
       ["answered", "user"],
     ]);
+
+    yield* h.service.questionUpdate({ threadId, id: "Q2", state: "open" }, "user");
+    yield* h.service.questionSubmit({ threadId, ids: ["Q2"] });
+    expect(h.delivered).toHaveLength(2);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
