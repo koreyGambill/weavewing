@@ -25,6 +25,7 @@ const MAX_PARSED_BYTES = 16_384;
 const MAX_METADATA_BYTES = 8_192;
 const MAX_ID_LENGTH = 256;
 const MAX_THREADS = 100;
+const QUESTION_ASK_TOOL_NAME = "question_ask";
 const MAX_CONTENT_BLOCKS = 32;
 const MAX_ENVELOPE_DEPTH = 4;
 const MAX_ENVELOPE_NODES = 128;
@@ -62,6 +63,8 @@ interface CompactToolOutput {
   reply?: boolean;
   error?: string;
   sentMessage?: string;
+  /** The ids `question_ask` assigned, so clients place each question's card at the call. */
+  questionIds?: string[];
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -263,6 +266,17 @@ export function compactDynamicToolOutput(
     ) {
       output.sentMessage = data.sentMessage;
     }
+    const questionIds =
+      data.questionIds ??
+      (resolveT3McpToolId(toolName) === QUESTION_ASK_TOOL_NAME ? data.ids : undefined);
+    if (
+      Array.isArray(questionIds) &&
+      questionIds.length > 0 &&
+      questionIds.length <= MAX_THREADS &&
+      questionIds.every((id) => typeof id === "string" && /^Q\d{1,9}$/.test(id))
+    ) {
+      output.questionIds = questionIds;
+    }
     const htmlRender = readHtmlRenderReference(data.htmlRender);
     if (htmlRender !== undefined) output.htmlRender = htmlRender;
     const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
@@ -350,6 +364,16 @@ export function sentMessageFromToolItem(item: {
   }
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? undefined : output?.sentMessage;
+}
+
+/** The question ids a `question_ask` call created; empty when it failed or is another tool. */
+export function questionIdsFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): ReadonlyArray<string> {
+  if (resolveT3McpToolId(item.toolName) !== QUESTION_ASK_TOOL_NAME) return [];
+  const output = compactDynamicToolOutput(item.output);
+  return output?.isError ? [] : (output?.questionIds ?? []);
 }
 
 /** The thread-owned file `preview_recording_stop` stored for the agent. */

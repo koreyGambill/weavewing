@@ -278,6 +278,15 @@ describe("summarizeT3ToolCalls", () => {
     ).toBe("Sent 2 messages to 1 thread");
   });
 
+  it("counts the questions an ask created from the raw or compact result", () => {
+    const raw = [{ type: "text", text: '{"ids":["Q1","Q2"]}' }];
+    for (const output of [raw, compactDynamicToolOutput(raw, "question_ask")]) {
+      expect(summarizeT3ToolCalls("thread-question-ask", [completed({}, output)]).label).toBe(
+        "Asked 2 questions",
+      );
+    }
+  });
+
   it("counts the pull requests batch link and unlink calls changed", () => {
     const urls = ["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/1", "not-a-pr"];
     const links = completed({ urls }, { linkedCount: 1 });

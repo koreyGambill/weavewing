@@ -392,6 +392,21 @@ export function summarizeT3ToolCalls(
         quantity(countEntities(entityIds("requestId")), "pending question request"),
       );
       break;
+    case "thread-question-ask": {
+      const asked = selected.reduce((total, call) => {
+        const ids = call.output?.questionIds ?? call.output?.ids;
+        return total + (Array.isArray(ids) ? ids.length : 0);
+      }, 0);
+      label = phrase(
+        "Asked",
+        "ask",
+        asked > 0 ? quantity(asked, "question") : `questions ${times}`,
+      );
+      break;
+    }
+    case "thread-question-update":
+      label = phrase("Updated", "update", quantity(countEntities(entityIds("id")), "question"));
+      break;
     case "secret-request":
       label = phrase("Asked for", "ask for", quantity(selected.length, "secret"));
       break;

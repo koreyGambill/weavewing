@@ -4,6 +4,7 @@ import {
   compactDynamicToolOutput,
   MAX_TOOL_OUTPUT_IMAGES,
   mcpToolResultOutput,
+  questionIdsFromToolItem,
   SEND_TO_USER_MAX_LENGTH,
   sentMessageFromToolItem,
   toolOutputImages,
@@ -35,6 +36,21 @@ describe("compactDynamicToolOutput", () => {
     // OpenCode 2 Code Mode reports a script's nested send_to_user call as one `execute` item.
     const output = JSON.stringify({ sentMessage: "Draft", message: "Shown to the user." });
     expect(sentMessageFromToolItem({ toolName: "execute", output })).toBe("Draft");
+  });
+
+  it("keeps the ids question_ask assigned so the card can sit at the call", () => {
+    const output = [{ type: "text", text: JSON.stringify({ ids: ["Q3", "Q4"] }) }];
+    const compact = compactDynamicToolOutput(output, "mcp__t3-code__question_ask");
+    expect(compact).toEqual({ questionIds: ["Q3", "Q4"] });
+    // Clients read the wire's compact form again without the tool name.
+    expect(
+      questionIdsFromToolItem({ toolName: "mcp__t3-code__question_ask", output: compact }),
+    ).toEqual(["Q3", "Q4"]);
+    expect(compactDynamicToolOutput(output, "some_other_tool")).toBeUndefined();
+    expect(questionIdsFromToolItem({ toolName: "send_to_user", output: compact })).toEqual([]);
+    expect(
+      compactDynamicToolOutput({ ids: ["Q1", "not a question"] }, "question_ask"),
+    ).toBeUndefined();
   });
 
   it("keeps nested thread identity and scalar task IDs without result bodies", () => {

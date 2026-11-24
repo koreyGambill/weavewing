@@ -40,6 +40,8 @@ export type T3McpToolSummaryAction =
   | "question-list"
   | "question-read"
   | "question-respond"
+  | "thread-question-ask"
+  | "thread-question-update"
   | "secret-request"
   | "worktree-handoff"
   | "worktree-list"
@@ -394,6 +396,8 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   send_to_user: tool(["Send", "Sending", "Sent", "a message"], "send-to-user"),
+  question_ask: tool(["Ask", "Asking", "Asked", "questions"], "thread-question-ask"),
+  question_update: tool(["Update", "Updating", "Updated", "a question"], "thread-question-update"),
 };
 
 export const T3_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(T3_MCP_TOOLS));
