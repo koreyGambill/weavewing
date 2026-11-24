@@ -73,6 +73,7 @@ const withFakeSystemd = <A, E>(
     liveOwner = false,
     slowCleanup = false,
     probeTimesOut = false,
+    userManager = "parent",
   }: {
     readonly oomPolicy?: boolean;
     readonly stopFails?: boolean;
@@ -80,6 +81,8 @@ const withFakeSystemd = <A, E>(
     readonly liveOwner?: boolean;
     readonly slowCleanup?: boolean;
     readonly probeTimesOut?: boolean;
+    /** Whether the user manager outlives the server: it runs the server, or lingering keeps it. */
+    readonly userManager?: "parent" | "lingering" | "login-bound";
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -88,6 +91,18 @@ const withFakeSystemd = <A, E>(
       NodeFS.writeFileSync(NodePath.join(bin, name), "", { mode: 0o755 });
     }
     const cgroupRoot = NodePath.join(bin, "cgroup");
+    const ownCgroup = NodePath.join(bin, "self-cgroup");
+    NodeFS.writeFileSync(
+      ownCgroup,
+      userManager === "parent"
+        ? "0::/user.slice/user-1000.slice/user@1000.service/app.slice/t3.scope\n"
+        : "0::/non-systemd\n",
+    );
+    const lingerDir = NodePath.join(bin, "linger");
+    NodeFS.mkdirSync(lingerDir);
+    if (userManager === "lingering") {
+      NodeFS.writeFileSync(NodePath.join(lingerDir, NodeOS.userInfo().username), "");
+    }
     const units = new Map<string, FakeUnit>();
     const calls: Array<ReadonlyArray<string>> = [];
     const failingVerbs = new Set<string>();
@@ -172,7 +187,11 @@ const withFakeSystemd = <A, E>(
       Effect.provideService(FileSystem.FileSystem, {
         ...fileSystem,
         readFileString: (path, encoding) =>
-          fileSystem.readFileString(path.replace("/sys/fs/cgroup", cgroupRoot), encoding),
+          fileSystem.readFileString(
+            path === "/proc/self/cgroup" ? ownCgroup : path.replace("/sys/fs/cgroup", cgroupRoot),
+            encoding,
+          ),
+        exists: (path) => fileSystem.exists(path.replace("/var/lib/systemd/linger", lingerDir)),
         writeFileString: (path, data, options) =>
           fileSystem.writeFileString(path.replace("/sys/fs/cgroup", cgroupRoot), data, options),
       }),
@@ -442,6 +461,21 @@ describe("AgentScope service", () => {
         }),
       { leftovers: true, slowCleanup: true },
     ),
+  );
+
+  it.effect.each(["parent", "lingering", "login-bound"] as const)(
+    "scopes agents only when the user manager outlives the server (%s)",
+    (userManager) =>
+      withFakeSystemd(
+        ({ scope, calls }) =>
+          Effect.gen(function* () {
+            const command = yield* scope.wrap({ command: "agent", args: [], name: "t" });
+            const scoped = userManager !== "login-bound";
+            expect(command.unit !== undefined).toBe(scoped);
+            expect(calls.some(([, verb]) => verb === "--scope")).toBe(scoped);
+          }),
+        { userManager },
+      ),
   );
 
   it.effect("does not retry a timed-out capability probe until the server restarts", () =>

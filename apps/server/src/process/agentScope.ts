@@ -196,6 +196,18 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  // Without lingering, logind stops the user manager and every scope in it when the user's
+  // last login session ends, even while a server outside that manager keeps running.
+  const userManagerOutlivesServer = Effect.gen(function* () {
+    const ownCgroup = yield* fileSystem
+      .readFileString("/proc/self/cgroup")
+      .pipe(Effect.orElseSucceed(() => ""));
+    if (/\/user@\d+\.service\//.test(ownCgroup)) return true;
+    return yield* fileSystem
+      .exists(path.join("/var/lib/systemd/linger", NodeOS.userInfo().username))
+      .pipe(Effect.orElseSucceed(() => false));
+  });
+
   const runtimeDir = hostEnvironment.XDG_RUNTIME_DIR;
   const systemctl = runtimeDir ? yield* resolve("systemctl", hostEnvironment) : null;
   const cleanup = yield* (systemctl === null ? Effect.void : stopLeftoverAgents(systemctl)).pipe(
@@ -209,6 +221,12 @@ export const make = Effect.gen(function* () {
       yield* awaitCleanup;
       if (!runtimeDir || systemctl === null) return undefined;
       recordStartupTiming("agent-scope.setup.start");
+      if (!(yield* userManagerOutlivesServer)) {
+        yield* Effect.logInfo(
+          "Agent scopes are off: the systemd user manager stops at logout without lingering",
+        );
+        return undefined;
+      }
       const systemdRun = yield* resolve("systemd-run", hostEnvironment);
       if (systemdRun === null) return undefined;
       const probe = (options: ReadonlyArray<string>) =>
