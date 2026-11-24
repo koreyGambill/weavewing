@@ -196,15 +196,28 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  const userId = yield* HostProcess.UserId;
+  const username = yield* HostProcess.Username;
   // Without lingering, logind stops the user manager and every scope in it when the user's
   // last login session ends, even while a server outside that manager keeps running.
+  // Checked per launch because an administrator can change lingering at any time.
   const userManagerOutlivesServer = Effect.gen(function* () {
+    if (userId === undefined) return false;
     const ownCgroup = yield* fileSystem
       .readFileString("/proc/self/cgroup")
       .pipe(Effect.orElseSucceed(() => ""));
-    if (/\/user@\d+\.service\//.test(ownCgroup)) return true;
+    const manager = `/user@${userId}.service/`;
+    // systemd tracks units in the unified row, or the named row on legacy hosts.
+    const underManager = ownCgroup
+      .split("\n")
+      .some(
+        (line) =>
+          (line.startsWith("0::") || line.includes(":name=systemd:")) && line.includes(manager),
+      );
+    if (underManager) return true;
+    if (username === null) return false;
     return yield* fileSystem
-      .exists(path.join("/var/lib/systemd/linger", NodeOS.userInfo().username))
+      .exists(path.join("/var/lib/systemd/linger", username))
       .pipe(Effect.orElseSucceed(() => false));
   });
 
@@ -221,12 +234,6 @@ export const make = Effect.gen(function* () {
       yield* awaitCleanup;
       if (!runtimeDir || systemctl === null) return undefined;
       recordStartupTiming("agent-scope.setup.start");
-      if (!(yield* userManagerOutlivesServer)) {
-        yield* Effect.logInfo(
-          "Agent scopes are off: the systemd user manager stops at logout without lingering",
-        );
-        return undefined;
-      }
       const systemdRun = yield* resolve("systemd-run", hostEnvironment);
       if (systemdRun === null) return undefined;
       const probe = (options: ReadonlyArray<string>) =>
@@ -313,6 +320,7 @@ export const make = Effect.gen(function* () {
     }),
   );
 
+  let loggedLoginBound = false;
   // `shared` scopes serve other threads too: tracked only for OOM diagnosis on old systemd.
   const scopeByThread = new Map<string, { unit: string; oomKilled: boolean; shared: boolean }>();
 
@@ -497,6 +505,15 @@ export const make = Effect.gen(function* () {
       if (resolved === null) return { command, args };
       const scope = yield* systemd;
       if (scope === undefined) return agentScopeCommand({ command: resolved, args });
+      if (!(yield* userManagerOutlivesServer)) {
+        if (!loggedLoginBound) {
+          loggedLoginBound = true;
+          yield* Effect.logInfo(
+            "Agents launch without scopes: the systemd user manager stops at logout without lingering",
+          );
+        }
+        return agentScopeCommand({ command: resolved, args });
+      }
       yield* scope.applyMemoryLimits;
       const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       // A continuing shared scope cannot attribute a tool's OOM to one thread.
