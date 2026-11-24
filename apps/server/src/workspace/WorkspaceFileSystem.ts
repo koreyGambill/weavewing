@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
@@ -39,6 +38,7 @@ import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
+import { replaceHostFile } from "./replaceHostFile.ts";
 import { toWslDrivePath } from "./wslDrivePath.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
@@ -315,128 +315,13 @@ export const make = Effect.gen(function* () {
           ),
         );
 
-  /**
-   * Replaces a host file via a temp file in its folder (in place when the folder is read-only).
-   * The file must stay the single-link regular file at `realPath`, in the same folder, until the
-   * write. Node lacks `renameat`, so a swap between the last check and the rename stays possible.
-   */
+  /** Replaces an allowlisted or granted host file; see replaceHostFile. */
   const writeHostFile = Effect.fn("WorkspaceFileSystem.writeHostFile")(function* (
     input: ProjectWriteFileInput,
     realPath: string,
   ) {
     yield* Effect.tryPromise({
-      try: async () => {
-        const handle = await NodeFSP.open(
-          realPath,
-          NodeFS.constants.O_RDONLY |
-            (NodeFS.constants.O_NONBLOCK ?? 0) |
-            (NodeFS.constants.O_NOFOLLOW ?? 0),
-        );
-        let temp: string | null = null;
-        try {
-          const opened = await handle.stat();
-          const unchanged = async () => {
-            const [current, resolved] = await Promise.all([
-              NodeFSP.stat(realPath),
-              NodeFSP.realpath(realPath),
-            ]);
-            if (
-              !opened.isFile() ||
-              opened.nlink !== 1 ||
-              current.nlink !== 1 ||
-              resolved !== realPath ||
-              current.dev !== opened.dev ||
-              current.ino !== opened.ino
-            ) {
-              throw new Error("The file changed or is not a single regular file.");
-            }
-          };
-          await unchanged();
-          const mode = opened.mode & 0o7777;
-          const folder = path.dirname(realPath);
-          const folderBefore = await NodeFSP.stat(folder);
-          const name = path.join(
-            folder,
-            `.${path.basename(realPath)}.${NodeCrypto.randomUUID()}.t3-save`,
-          );
-          const output = await NodeFSP.open(
-            name,
-            NodeFS.constants.O_WRONLY |
-              NodeFS.constants.O_CREAT |
-              NodeFS.constants.O_EXCL |
-              (NodeFS.constants.O_NOFOLLOW ?? 0),
-            mode,
-          ).catch((error: NodeJS.ErrnoException) => {
-            if (error.code === "EACCES" || error.code === "EPERM") return null;
-            throw error;
-          });
-          if (output === null) {
-            // The folder takes no new entries, so rewrite the checked file in place.
-            const inPlace = await NodeFSP.open(
-              realPath,
-              NodeFS.constants.O_WRONLY |
-                (NodeFS.constants.O_NONBLOCK ?? 0) |
-                (NodeFS.constants.O_NOFOLLOW ?? 0),
-            );
-            try {
-              await unchanged();
-              // The opened file itself, last: a hard link made after the open aliases it.
-              const target = await inPlace.stat();
-              if (
-                !target.isFile() ||
-                target.nlink !== 1 ||
-                target.dev !== opened.dev ||
-                target.ino !== opened.ino
-              ) {
-                throw new Error("The file changed or is not a single regular file.");
-              }
-              await inPlace.truncate(0);
-              await inPlace.writeFile(input.contents);
-              await inPlace.sync();
-            } finally {
-              await inPlace.close();
-            }
-            return;
-          }
-          temp = name;
-          let written: NodeFS.Stats;
-          try {
-            await output.writeFile(input.contents);
-            // The umask may have narrowed the mode the open asked for.
-            await output.chmod(mode);
-            await output.sync();
-            written = await output.stat();
-          } finally {
-            await output.close();
-          }
-          await unchanged();
-          // Node has no renameat, so the rename resolves the folder path again: check that it is
-          // still the folder the temp file was written in, as late as possible.
-          const [folderNow, realFolder, tempNow] = await Promise.all([
-            NodeFSP.stat(folder),
-            NodeFSP.realpath(folder),
-            NodeFSP.lstat(temp),
-          ]);
-          if (
-            realFolder !== folder ||
-            folderNow.dev !== folderBefore.dev ||
-            folderNow.ino !== folderBefore.ino ||
-            tempNow.dev !== written.dev ||
-            tempNow.ino !== written.ino
-          ) {
-            throw new Error("The folder changed while saving.");
-          }
-          await NodeFSP.rename(temp, realPath);
-          temp = null;
-          // Best effort: the rename already replaced the file; this only makes it durable sooner.
-          await NodeFSP.open(folder, NodeFS.constants.O_RDONLY)
-            .then((directory) => directory.sync().finally(() => directory.close()))
-            .catch(() => undefined);
-        } finally {
-          await handle.close();
-          if (temp !== null) await NodeFSP.rm(temp, { force: true });
-        }
-      },
+      try: () => replaceHostFile(realPath, input.contents),
       catch: (cause) =>
         new WorkspaceFileSystemOperationError({
           workspaceRoot: input.cwd,

@@ -296,6 +296,8 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
+  sidebarGroupToRecord,
+  sidebarThreadGroupNameOf,
   localSidebarThreadGroups,
   withServerSidebarGroups,
   deleteSidebarThreadGroup,
@@ -306,6 +308,7 @@ import {
   moveSidebarThreadGroup,
   canMoveSidebarThreadGroup,
   DEFAULT_UNGROUPED_NAME,
+  hasSidebarManualThreadOrder,
   placeSidebarThread,
   sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
@@ -677,7 +680,7 @@ function useSidebarThreads(input: {
           },
         );
   const threadGroupArrangement: SidebarThreadGroupArrangement | null =
-    threadGroups === null || threadGroups.groups.length === 0
+    threadGroups === null || !hasSidebarManualThreadOrder(threadGroups, threadOrder)
       ? null
       : arrangeSidebarThreadGroups(
           threadGroups,
@@ -727,7 +730,8 @@ function useSidebarThreads(input: {
             ...section(group.id, group.name, group.collapsed, families),
             headerless: false,
           }));
-          const headerless = threadGroups.ungroupedName === null;
+          const headerless =
+            threadGroups.ungroupedName === null || threadGroups.groups.length === 0;
           sections.splice(threadGroupArrangement.ungroupedAt, 0, {
             ...section(
               null,
@@ -1715,10 +1719,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   // back to each thread's server so other machines group it the same way. Stable so a menu
   // that resolves later edits the latest groups.
   const setThreadGroups = useStableCallback(
-    (update: (current: SidebarThreadGroups) => SidebarThreadGroups) => {
+    (
+      update: (current: SidebarThreadGroups) => SidebarThreadGroups,
+      // A thread the user just placed is checked against its server record directly, since a
+      // hidden thread's stale local entry can make its placement look unchanged.
+      placedKey?: string,
+    ) => {
       const view = threadGroupsView ?? threadGroups;
       const next = update(view);
       const changed = changedSidebarThreadGroupNames(view, next);
+      if (placedKey !== undefined && !changed.has(placedKey)) {
+        changed.set(placedKey, { from: null, to: sidebarThreadGroupNameOf(next, placedKey) });
+      }
       const changedThreads = new Map(
         changed.size === 0
           ? []
@@ -1728,23 +1740,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             }),
       );
       for (const [key, change] of changed) {
-        const { from, to } = change;
         const thread = changedThreads.get(key);
         if (
           thread === undefined ||
-          (to !== null && isUnnamedSidebarThreadGroup(to)) ||
-          to === thread.sidebarGroup ||
-          // A thread leaving an unnamed group it never synced returns to its local place.
-          (thread.sidebarGroup === undefined &&
-            from !== null &&
-            isUnnamedSidebarThreadGroup(from)) ||
           serverConfigs.get(thread.environmentId)?.environment.capabilities.sidebarGroups !== true
         ) {
           continue;
         }
+        const group = sidebarGroupToRecord(change, thread.sidebarGroup);
+        if (group === undefined) continue;
         void setThreadSidebarGroup({
           environmentId: thread.environmentId,
-          input: { threadId: thread.id, group: to },
+          input: { threadId: thread.id, group },
         });
       }
       setStoredThreadGroups(
@@ -1798,7 +1805,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (arrangement === null) return;
     const target = resolveSidebarGroupDrop(arrangement, threadKey, { kind: "header", groupId });
     if (target === null) return;
-    setThreadGroups((current) => placeSidebarThread(current, arrangement, threadKey, target));
+    setThreadGroups(
+      (current) => placeSidebarThread(current, arrangement, threadKey, target),
+      threadKey,
+    );
   };
   const stepThread = (threadKey: string, delta: -1 | 1) => {
     const arrangement = readThreadGroupArrangement();
@@ -2765,6 +2775,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   })();
   const handleThreadDragEnd = (event: DragEndEvent) => {
     let overId = event.over === null ? null : String(event.over.id);
+    let placedInGroups = false;
     if (isGroupDrag) {
       const drop = groupDropStore.get();
       overId = groupDropStore.shelf()?.overId ?? null;
@@ -2773,15 +2784,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       const arrangement = threadGroupArrangement;
       if (drop !== null && arrangement !== null) {
         const key = String(event.active.id);
-        setThreadGroups((current) => placeSidebarThread(current, arrangement, key, drop.target));
-        return;
+        setThreadGroups(
+          (current) => placeSidebarThread(current, arrangement, key, drop.target),
+          key,
+        );
+        if (sectionByThreadKey.get(key) === "active") return;
+        placedInGroups = true;
       }
     }
     if (projectFolders !== null || derivedSections !== null) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
-    const target =
-      overId === null ? null : resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
+    // A thread placed into the groups from another section still has to join Active.
+    const target = placedInGroups
+      ? { section: "active" as const, pinnedOrder: pinnedKeys, activeOrder: activeKeys }
+      : overId === null
+        ? null
+        : resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
     const activeThread = threadByKey.get(activeKey);
     if (activeSection === undefined || target === null || activeThread === undefined) return;
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -3343,6 +3362,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       options: (threadGroupsView ?? threadGroups).groups,
                       current: sidebarThreadGroupOf(threadGroupsView ?? threadGroups, threadKey),
                       ungroupedName: threadGroups.ungroupedName ?? DEFAULT_UNGROUPED_NAME,
+                      reorderable: threadGroupArrangement !== null,
                       canMoveUp:
                         threadGroupArrangement !== null &&
                         stepSidebarThread(

@@ -11,6 +11,7 @@ import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSe
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -19,6 +20,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
+import * as ServerConfig from "../config.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as McpToolCatalog from "../mcp/McpToolCatalog.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -29,6 +31,8 @@ import { ProjectService } from "../project/ProjectService.ts";
 import { codexDefaultReasoningEffortOverride } from "../provider/CodexProvider.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { SkillSources } from "../agentContext/SkillSources.ts";
+import { skillListingText } from "../agentContext/skillProvenance.ts";
 import { providerConfigDir } from "./InstructionFileAllowlist.ts";
 import { notVisibleFor, t3ContextParts, toolExposure } from "./defaultContextParts.ts";
 import {
@@ -108,9 +112,11 @@ const make = Effect.gen(function* () {
   const mcpSessions = yield* McpProviderSessions;
   const catalog = yield* McpToolCatalog.McpToolCatalog;
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
+  const skillSources = yield* SkillSources;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
+  const serverConfig = yield* ServerConfig.ServerConfig;
   const isServerInternal = yield* makeIsServerInternalPath;
 
   const resolve = Effect.fn("DefaultContext.resolve")(function* (input: DefaultContextGetInput) {
@@ -244,22 +250,23 @@ const make = Effect.gen(function* () {
     );
 
     const convention = FILE_CONVENTIONS[driver];
+    const home = yield* HostProcess.HomeDirectory;
+    const entry = (yield* settings.getSettings.pipe(Effect.option)).pipe(
+      Option.flatMap((value) => Option.fromNullishOr(value.providerInstances[instanceId])),
+      Option.getOrUndefined,
+    );
+    const configDir = yield* providerConfigDir(driver, entry, home).pipe(
+      Effect.provideService(Path.Path, path),
+    );
     if (convention !== undefined && cwd !== null) {
-      const home = yield* HostProcess.HomeDirectory;
       const resolved = yield* resolveInstructionFiles(
         convention,
         cwd,
         {
           home,
           platform: yield* HostProcess.Platform,
-          configDir: yield* providerConfigDir(
-            driver,
-            (yield* settings.getSettings.pipe(Effect.option)).pipe(
-              Option.flatMap((value) => Option.fromNullishOr(value.providerInstances[instanceId])),
-              Option.getOrUndefined,
-            ),
-            home,
-          ).pipe(Effect.provideService(Path.Path, path)),
+          configDir,
+          worktreesDir: serverConfig.worktreesDir,
         },
         (file) => isServerInternal(file).pipe(Effect.orElseSucceed(() => true)),
       ).pipe(
@@ -291,7 +298,9 @@ const make = Effect.gen(function* () {
             // A file read on demand is never expected to load with the session.
             ...(linked && (status === "expected" || status === "not-loaded") ? {} : { status }),
           },
-          readable ? readBounded(file.realPath).pipe(Effect.orElseSucceed(() => "")) : undefined,
+          readable
+            ? readBounded(file.realPath, { singleLink: true }).pipe(Effect.orElseSucceed(() => ""))
+            : undefined,
         );
       }
       const projectBytes = resolved.files
@@ -304,6 +313,36 @@ const make = Effect.gen(function* () {
       if (driver === "claudeAgent" && resolved.insideHome)
         notes.push("Claude Code also reads CLAUDE.md files above $HOME; this preview stops there.");
     }
+
+    const skills = yield* skillSources.list({ instanceId, driver, entry, cwd, configDir });
+    for (const skill of skills.skills) {
+      const also = skill.duplicates.length > 0 ? ` · also ${skill.duplicates.join(", ")}` : "";
+      push(
+        {
+          id: `skill:${skill.name}:${skill.path}`,
+          category: "skills",
+          label: skill.name,
+          source: `${skill.origin.label}${skill.origin.detail ? ` (${skill.origin.detail})` : ""}${skill.shadowed ? " · shadowed, never loads" : skill.listed ? "" : " · hidden from the model"}${also}`,
+          delivery: skill.listed ? "every-turn" : "on-demand",
+          bytes: skill.listingBytes,
+          estimatedTokens: skill.listingTokens,
+          counted: skill.listed,
+          readable: true,
+        },
+        Effect.succeed(
+          skillListingText(driver, {
+            name: skill.name,
+            path: skill.path,
+            enabled: true,
+            ...(skill.description ? { description: skill.description } : {}),
+          }),
+        ),
+      );
+    }
+    if (skills.support === "estimate")
+      notes.push(
+        "Skill listing sizes assume the provider lists each skill as name and description.",
+      );
 
     const exposure = toolExposure(driver);
     const tools = t3.support === "unsupported" ? [] : yield* catalog.list;
@@ -353,6 +392,7 @@ const make = Effect.gen(function* () {
       preview: {
         threadId: input.threadId,
         providerInstanceId: instanceId,
+        projectId,
         driver,
         model,
         cwd,
@@ -360,7 +400,7 @@ const make = Effect.gen(function* () {
         filesSupported: convention !== undefined,
         notes,
         items,
-        notVisible: notVisibleFor(driver),
+        notVisible: notVisibleFor(driver, skills.support !== "unsupported"),
         lastTurn:
           lastFootprint === undefined
             ? null
@@ -377,12 +417,30 @@ const make = Effect.gen(function* () {
     };
   });
 
+  type Resolved = Effect.Success<ReturnType<typeof resolve>>;
+  // Expanding an item reuses the preview it came from for a short while; previews always resolve.
+  const recent = new Map<string, { readonly at: number; readonly resolved: Resolved }>();
+  const resolveKey = ({ itemId: _itemId, ...input }: DefaultContextItemInput) =>
+    JSON.stringify(input);
+  const remember = (input: DefaultContextGetInput, resolved: Resolved) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.map((at) => {
+        if (recent.size > 32) recent.clear();
+        recent.set(resolveKey({ ...input, itemId: "" }), { at, resolved });
+        return resolved;
+      }),
+    );
+
   return DefaultContext.of({
     preview: Effect.fn("DefaultContext.preview")(function* (input) {
-      return (yield* resolve(input)).preview;
+      return (yield* remember(input, yield* resolve(input))).preview;
     }),
     itemText: Effect.fn("DefaultContext.itemText")(function* (input) {
-      const { preview, loaders } = yield* resolve(input);
+      const cached = recent.get(resolveKey(input));
+      const { preview, loaders } =
+        cached !== undefined && (yield* Clock.currentTimeMillis) - cached.at < 30_000
+          ? cached.resolved
+          : yield* remember(input, yield* resolve(input));
       const load = loaders.get(input.itemId);
       if (load === undefined)
         return yield* new ThreadInsightsError({ message: "This item has no readable text." });

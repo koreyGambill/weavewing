@@ -27,6 +27,8 @@ export interface ProviderDirs {
   readonly platform: NodeJS.Platform;
   /** The provider's resolved config folder: Claude's config dir or Codex's home. */
   readonly configDir: string;
+  /** Where T3 keeps thread checkouts, which sit under `~/.t3` yet are ordinary repositories. */
+  readonly worktreesDir?: string;
 }
 
 export const FILE_CONVENTIONS: Readonly<Record<string, FileConvention>> = {
@@ -54,6 +56,8 @@ export const FILE_CONVENTIONS: Readonly<Record<string, FileConvention>> = {
 
 const SECRET_NAME =
   /^\.?env(\..*|rc)?$|\.(pem|key|p12|pfx|keystore|kdbx)$|^id_|^\.?netrc$|^\.npmrc$|^\.pgpass$|^\.?credentials|^\.git-credentials$|^secrets?(\.|$)|^auth\.json$|^hosts\.ya?ml$|_history$/i;
+/** Whether a file name looks like a credential, such as `.env`, `id_rsa` or `server.pem`. */
+export const looksLikeSecretName = (name: string) => SECRET_NAME.test(name);
 const SECRET_PATH = /\/\.(ssh|gnupg|aws|docker|kube|t3|git)\//;
 const MAX_FILES = 64;
 const MAX_IMPORT_DEPTH = 5;
@@ -104,7 +108,16 @@ export function markdownLinks(text: string): ReadonlyArray<string> {
 }
 
 /** Reads at most MAX_READ_BYTES of a regular file, opened without following a symlink or blocking on a FIFO. */
-export const readBounded = Effect.fn("DefaultContext.readBounded")(function* (realPath: string) {
+export const HARD_LINKED_MESSAGE = "The file has other hard links, which may name a secret.";
+
+/**
+ * `singleLink` refuses a file with other hard links: one could name a credential from inside
+ * the repository, where no symlink check sees it.
+ */
+export const readBounded = Effect.fn("DefaultContext.readBounded")(function* (
+  realPath: string,
+  options?: { readonly singleLink?: boolean },
+) {
   return yield* Effect.acquireUseRelease(
     Effect.tryPromise({
       // Windows lacks both flags.
@@ -122,6 +135,7 @@ export const readBounded = Effect.fn("DefaultContext.readBounded")(function* (re
         try: async () => {
           const stat = await handle.stat();
           if (!stat.isFile()) throw new Error("Not a regular file.");
+          if (options?.singleLink && stat.nlink !== 1) throw new Error(HARD_LINKED_MESSAGE);
           const buffer = Buffer.alloc(Math.min(stat.size, MAX_READ_BYTES));
           let offset = 0;
           while (offset < buffer.length) {
@@ -131,7 +145,14 @@ export const readBounded = Effect.fn("DefaultContext.readBounded")(function* (re
           }
           return buffer.subarray(0, offset).toString("utf8");
         },
-        catch: (cause) => new ThreadInsightsError({ message: "Could not read the file.", cause }),
+        catch: (cause) =>
+          new ThreadInsightsError({
+            message:
+              cause instanceof Error && cause.message === HARD_LINKED_MESSAGE
+                ? HARD_LINKED_MESSAGE
+                : "Could not read the file.",
+            cause,
+          }),
       }),
     (handle) => Effect.promise(() => handle.close()),
   );
@@ -174,8 +195,13 @@ export const resolveInstructionFiles = Effect.fn("DefaultContext.resolveInstruct
     // $HOME or a folder above it is never the repository, even with a dotfiles ~/.git.
     const repo = [gitRoot, workspace].find((dir) => dir !== null && !within(dir, home)) ?? null;
     const inRepo = (file: string) => repo !== null && within(repo, file);
+    // In a checkout T3 keeps under its worktrees folder only the checkout's own folders count,
+    // since the path to it runs through `~/.t3`. Anywhere else the whole path counts.
+    const t3Checkout =
+      repo !== null && dirs.worktreesDir !== undefined && within(dirs.worktreesDir, repo);
     const blocked = (file: string) =>
-      SECRET_NAME.test(path.basename(file)) || SECRET_PATH.test(`${file}/`);
+      SECRET_NAME.test(path.basename(file)) ||
+      SECRET_PATH.test(`${t3Checkout && inRepo(file) ? `/${path.relative(repo!, file)}` : file}/`);
     const readText = (file: string) => readBounded(file).pipe(Effect.orElseSucceed(() => ""));
 
     const files: ResolvedFile[] = [];

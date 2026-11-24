@@ -153,7 +153,8 @@ function SettingsRouteLayout() {
       singleEnvironment={
         pathname === "/settings/providers" ||
         pathname === "/settings/secrets" ||
-        pathname === "/settings/status-sources"
+        pathname === "/settings/status-sources" ||
+        pathname === "/settings/agent-context"
       }
       deviceOnly={SETTINGS_DEVICE_ONLY_PATHS.has(pathname)}
       onChange={(next) => {

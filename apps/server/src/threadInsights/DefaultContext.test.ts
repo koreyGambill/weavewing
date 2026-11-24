@@ -32,6 +32,7 @@ import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.t
 import * as ServerConfig from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
+import { SkillSources } from "../agentContext/SkillSources.ts";
 import { DefaultContext, layer as defaultContextLayer } from "./DefaultContext.ts";
 import { t3ContextParts } from "./defaultContextParts.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
@@ -104,6 +105,53 @@ it("marks drivers without a known injection path unsupported", () => {
   expect(parts("ollama", false)).toEqual({ support: "unsupported", groups: [] });
   expect(parts("kiro", false).groups[0]?.delivery).toBe("first-prompt");
 });
+
+it.effect(
+  "reads a checkout T3 keeps under its home, while secret folders inside it stay blocked",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const base = yield* fs.realPath(
+        yield* fs.makeTempDirectoryScoped({ prefix: "default-ctx-" }),
+      );
+      const home = path.join(base, "home");
+      const checkout = path.join(home, ".t3", "worktrees", "project", "feature");
+      yield* write(fs, path.join(checkout, ".git"), "gitdir: elsewhere");
+      yield* write(fs, path.join(checkout, "CLAUDE.md"), "@.ssh/keys.md");
+      yield* write(fs, path.join(checkout, ".ssh", "keys.md"), "secret");
+      const dirs = {
+        home,
+        platform: "linux" as const,
+        configDir: path.join(home, ".claude"),
+        worktreesDir: path.join(home, ".t3", "worktrees"),
+      };
+      const { files } = yield* resolveInstructionFiles(
+        FILE_CONVENTIONS.claudeAgent!,
+        checkout,
+        dirs,
+        notInternal,
+      );
+      expect(files.map((file) => [path.relative(checkout, file.path), file.status])).toEqual([
+        ["CLAUDE.md", "expected"],
+        [".ssh/keys.md", "secret"],
+      ]);
+
+      // Any other project inside a credential folder keeps that folder's protection.
+      const kube = path.join(home, ".kube");
+      yield* write(fs, path.join(kube, "CLAUDE.md"), "@config");
+      yield* write(fs, path.join(kube, "config"), "token");
+      const kubeFiles = yield* resolveInstructionFiles(
+        FILE_CONVENTIONS.claudeAgent!,
+        kube,
+        dirs,
+        notInternal,
+      );
+      expect(kubeFiles.files.map((file) => [path.relative(kube, file.path), file.status])).toEqual([
+        ["CLAUDE.md", "secret"],
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it("finds @ imports outside code and ignores fenced or inline ones", () => {
   expect(
@@ -446,6 +494,8 @@ const serviceLayer = (input: {
   readonly footprint?: InstructionFootprint;
   readonly codexHomePath?: string;
   readonly projectRoot?: string;
+  /** Counts full context resolutions, which every preview and uncached item read performs. */
+  readonly resolutions?: { count: number };
 }) =>
   defaultContextLayer.pipe(
     Layer.provide(
@@ -493,6 +543,13 @@ const serviceLayer = (input: {
           } as never),
         }),
         Layer.mock(McpProviderSessions)({ read: () => Effect.undefined }),
+        Layer.mock(SkillSources)({
+          list: () =>
+            Effect.sync(() => {
+              if (input.resolutions) input.resolutions.count += 1;
+              return { support: "unsupported" as const, skills: [] };
+            }),
+        }),
         Layer.succeed(
           McpToolCatalog.McpToolCatalog,
           McpToolCatalog.McpToolCatalog.of({
@@ -530,8 +587,9 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
       parts: [{ key: "t3:x", label: "x", category: "t3", bytes: 40, estimatedTokens: 10 }],
       instructionSources: [{ path: path.join(home, "AGENTS.md"), bytes: 40 * 1024 }],
     };
+    const resolutions = { count: 0 };
     const context = yield* Layer.build(
-      serviceLayer({ home, footprint, codexHomePath: path.join(home, "work-codex") }),
+      serviceLayer({ home, footprint, codexHomePath: path.join(home, "work-codex"), resolutions }),
     ).pipe(
       Effect.provideService(HostProcess.HomeDirectory, home),
       Effect.provideService(HostProcess.Environment, {}),
@@ -554,6 +612,8 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
       service.itemText({ threadId, itemId: `file:${path.join(home, "work-codex", "AGENTS.md")}` }),
     );
     expect(file.text).toBe("work rules [more](more.md)");
+    // Expanding an item reuses the preview's resolution instead of resolving everything again.
+    expect(resolutions.count).toBe(1);
     const linked = byId.get(`file:${path.join(home, "work-codex", "more.md")}`);
     expect(linked).toMatchObject({
       parentId: `file:${path.join(home, "work-codex", "AGENTS.md")}`,

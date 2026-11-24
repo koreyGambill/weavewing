@@ -8,6 +8,7 @@ import {
   AuthSettingsWriteScope,
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
+  ProjectId,
   ProviderInstanceId,
   SecretProviderId,
   ThreadId,
@@ -734,5 +735,58 @@ it.effect("lets only connections that can run host commands grant outside edits"
     expect(yield* writer[WS_METHODS.projectsAllowOutsideEdits](allow)).toEqual(grant);
     yield* writer[WS_METHODS.projectsRevokeOutsideEdits]({ grant });
     expect(handled).toBe(2);
+  }),
+);
+
+it.effect("lets only host-command connections edit agent context", () =>
+  Effect.gen(function* () {
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (
+          tag,
+        ): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof WS_METHODS.agentContextSave> =>
+          tag !== WS_METHODS.agentContextSave,
+      ),
+    );
+    let handled = 0;
+    const clientWith = (scopes: Parameters<typeof RpcAuthorization.layer>[0]) =>
+      RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.agentContextSave, () =>
+              Effect.sync(() => {
+                handled++;
+                return { sha256: "new" };
+              }),
+            ),
+            RpcAuthorization.layer(scopes),
+          ),
+        ),
+      );
+    const target = {
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      projectId: ProjectId.make("project"),
+    };
+    const save = {
+      ...target,
+      realPath: "/home/user/AGENTS.md",
+      contents: "x",
+      expectedSha256: "old",
+    };
+
+    // An instruction file steers agents that run commands, so file access alone is not enough.
+    const fileWriter = yield* clientWith([AuthOrchestrationOperateScope, AuthFilesystemWriteScope]);
+    expect(yield* fileWriter[WS_METHODS.agentContextSave](save).pipe(Effect.flip)).toMatchObject({
+      requiredPermission: AuthTerminalOperateScope,
+    });
+    const terminalOnly = yield* clientWith([AuthTerminalOperateScope]);
+    expect(yield* terminalOnly[WS_METHODS.agentContextSave](save).pipe(Effect.flip)).toMatchObject({
+      requiredPermission: AuthFilesystemWriteScope,
+    });
+    expect(handled).toBe(0);
+
+    const editor = yield* clientWith([AuthFilesystemWriteScope, AuthTerminalOperateScope]);
+    expect(yield* editor[WS_METHODS.agentContextSave](save)).toEqual({ sha256: "new" });
+    expect(handled).toBe(1);
   }),
 );

@@ -56,6 +56,14 @@ export function sidebarThreadGroupsForOrder(
     : state;
 }
 
+/** Whether Active follows the user's arrangement; without groups, only fixed order has one. */
+export function hasSidebarManualThreadOrder(
+  state: SidebarThreadGroups,
+  order: "recency" | "fixed",
+): boolean {
+  return order === "fixed" || state.groups.length > 0;
+}
+
 export const DEFAULT_UNGROUPED_NAME = "Ungrouped";
 
 /** A thread with its visible forks; the head key places the whole family. */
@@ -154,14 +162,17 @@ function locate(arrangement: SidebarThreadGroupArrangement, key: string) {
   return null;
 }
 
-/** Where a dragged thread lands for a pointer hit, or null when nothing would change. */
+/**
+ * Where a dragged thread lands for a pointer hit, or null when nothing would change. A thread
+ * not yet arranged, such as one dragged from Pinned or Settled, lands wherever it drops.
+ */
 export function resolveSidebarGroupDrop(
   arrangement: SidebarThreadGroupArrangement,
   draggedKey: string,
   hit: SidebarGroupHit,
 ): SidebarGroupDropTarget | null {
   const source = locate(arrangement, draggedKey);
-  if (source === null || !source.isHead) return null;
+  if (source !== null && !source.isHead) return null;
   const headsWithout = (families: readonly Family[]) =>
     families.map((family) => family[0]!).filter((key) => key !== draggedKey);
   let target: SidebarGroupDropTarget;
@@ -180,6 +191,7 @@ export function resolveSidebarGroupDrop(
     const beforeKey = after ? (heads[heads.indexOf(head) + 1] ?? null) : head;
     target = { groupId: over.groupId, beforeKey };
   }
+  if (source === null) return target;
   const currentNext = source.families[source.index + 1]?.[0] ?? null;
   return target.groupId === source.groupId && target.beforeKey === currentNext ? null : target;
 }
@@ -351,27 +363,56 @@ export function localSidebarThreadGroups(
 /** The longest group name a thread's server accepts. */
 export const MAX_SIDEBAR_THREAD_GROUP_NAME_LENGTH = 64;
 
-/** Threads whose group name differs between two states, with the name before and after. */
+/**
+ * Threads an edit placed somewhere new: a different group, or into Ungrouped from nowhere, as
+ * when a settled thread whose group is hidden drops into Ungrouped.
+ */
 export function changedSidebarThreadGroupNames(
   before: SidebarThreadGroups,
   after: SidebarThreadGroups,
 ): Map<string, { readonly from: string | null; readonly to: string | null }> {
-  const nameByKey = (state: SidebarThreadGroups) => {
-    const names = new Map<string, string>();
+  const locationByKey = (state: SidebarThreadGroups) => {
+    const locations = new Map<string, string | null>();
     for (const group of state.groups) {
-      for (const key of group.threadKeys) if (!names.has(key)) names.set(key, group.name);
+      for (const key of group.threadKeys) if (!locations.has(key)) locations.set(key, group.name);
     }
-    return names;
+    for (const key of state.ungroupedOrder) if (!locations.has(key)) locations.set(key, null);
+    return locations;
   };
-  const previous = nameByKey(before);
-  const next = nameByKey(after);
+  const previous = locationByKey(before);
+  const next = locationByKey(after);
   const changed = new Map<string, { readonly from: string | null; readonly to: string | null }>();
-  for (const key of new Set([...previous.keys(), ...next.keys()])) {
-    const from = previous.get(key) ?? null;
-    const to = next.get(key) ?? null;
-    if (from !== to) changed.set(key, { from, to });
+  for (const [key, to] of next) {
+    const from = previous.get(key);
+    if (from !== to) changed.set(key, { from: from ?? null, to });
+  }
+  for (const [key, from] of previous) {
+    if (from !== null && !next.has(key)) changed.set(key, { from, to: null });
   }
   return changed;
+}
+
+/**
+ * The group to record on a thread's server for a placement change, or undefined to record
+ * nothing: unnamed placeholder groups stay local, and an unchanged record is not resent.
+ */
+export function sidebarGroupToRecord(
+  change: { readonly from: string | null; readonly to: string | null },
+  recorded: string | null | undefined,
+): string | null | undefined {
+  const { from, to } = change;
+  if (to !== null && isUnnamedSidebarThreadGroup(to)) return undefined;
+  if (to === (recorded ?? null)) return undefined;
+  // A thread leaving an unnamed group it never synced returns to its local place.
+  if (recorded === undefined && from !== null && isUnnamedSidebarThreadGroup(from)) {
+    return undefined;
+  }
+  return to;
+}
+
+/** The name of the group holding a thread, or null when it is in no group. */
+export function sidebarThreadGroupNameOf(state: SidebarThreadGroups, key: string): string | null {
+  return state.groups.find((group) => group.threadKeys.includes(key))?.name ?? null;
 }
 
 /** The group a thread belongs to, or null for Ungrouped. */

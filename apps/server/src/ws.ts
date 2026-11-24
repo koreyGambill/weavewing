@@ -2,6 +2,7 @@ import * as ContextRecords from "./threadInsights/ContextRecords.ts";
 import * as ThreadMarks from "./threadWorkspace/ThreadMarks.ts";
 import * as ThreadInsights from "./threadInsights/ThreadInsights.ts";
 import * as DefaultContext from "./threadInsights/DefaultContext.ts";
+import * as AgentContext from "./agentContext/AgentContext.ts";
 import * as ThreadTimeline from "./threadInsights/ThreadTimeline.ts";
 import * as ThreadNotes from "./threadNotes/ThreadNotes.ts";
 import * as ThreadWorkspace from "./threadWorkspace/ThreadWorkspace.ts";
@@ -1552,6 +1553,7 @@ export const layerWsRpc = (
       const contextRecords = yield* ContextRecords.ContextRecords;
       const threadInsights = yield* ThreadInsights.ThreadInsights;
       const defaultContext = yield* DefaultContext.DefaultContext;
+      const agentContext = yield* AgentContext.AgentContext;
       const threadTimeline = yield* ThreadTimeline.ThreadTimeline;
       const threadNotes = yield* ThreadNotes.ThreadNotes;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
@@ -3203,6 +3205,9 @@ export const layerWsRpc = (
         [WS_METHODS.threadContextGet]: (input) => contextRecords.get(input),
         [WS_METHODS.threadDefaultContextGet]: (input) => defaultContext.preview(input),
         [WS_METHODS.threadDefaultContextItem]: (input) => defaultContext.itemText(input),
+        [WS_METHODS.agentContextGet]: (input) => agentContext.get(input),
+        [WS_METHODS.agentContextRead]: (input) => agentContext.read(input),
+        [WS_METHODS.agentContextSave]: (input) => agentContext.save(input),
         [WS_METHODS.threadTimelineGet]: (input) => threadTimeline.get(input),
         [WS_METHODS.threadUserTurnsGet]: (input) => threadTimeline.userTurns(input),
         [WS_METHODS.threadNotesGet]: (input) => threadNotes.get(input),

@@ -3,6 +3,7 @@ import type { DefaultContextItem, DefaultContextPreview } from "@t3tools/contrac
 const CATEGORY_LABELS: Record<DefaultContextItem["category"], string> = {
   t3: "T3 instructions",
   files: "Instruction files",
+  skills: "Skill listing",
   tools: "T3 tools",
   "app-context": "App context",
   custom: "Custom append",
@@ -65,7 +66,10 @@ export function defaultContextSummary(preview: DefaultContextPreview) {
   ).length;
   // The same categories a footprint records, compared as one total so relabelled parts never show as changes.
   const injectedBytes = preview.items
-    .filter((item) => item.category !== "files" && item.category !== "tools")
+    .filter(
+      (item) =>
+        item.category !== "files" && item.category !== "skills" && item.category !== "tools",
+    )
     .reduce((sum, item) => sum + item.bytes, 0);
   const injectedDiff =
     preview.lastTurn === null ? null : injectedBytes - preview.lastTurn.injectedBytes;

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import * as Footprints from "./InstructionFootprints.ts";
 import * as Records from "./ContextRecords.ts";
 
@@ -116,7 +117,7 @@ it.effect(
             evidence: "inferred",
           }),
           expect.objectContaining({
-            label: "overwing search context engines",
+            label: "overwing: overwing search context engines",
             kind: "knowledge",
             count: 1,
           }),
@@ -179,6 +180,7 @@ it.effect(
           Layer.provide(
             Layer.mock(Footprints.InstructionFootprints)({ list: () => Effect.succeed([]) }),
           ),
+          Layer.provide(ServerSettingsService.layerTest()),
           Layer.provideMerge(Sqlite.layerMemory),
         ),
       ),
@@ -240,6 +242,7 @@ it.effect(
                 ]),
             }),
           ),
+          Layer.provide(ServerSettingsService.layerTest()),
           Layer.provideMerge(Sqlite.layerMemory),
         ),
       ),

@@ -16,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { emptyProjection } from "../orchestration-v2/ProjectionStore.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
 import { ThreadInsights, layer } from "./ThreadInsights.ts";
 
@@ -123,6 +124,7 @@ it.effect(
           },
         }),
         Layer.mock(InstructionFootprints)({ list: () => Effect.succeed([]) }),
+        ServerSettingsService.layerTest(),
       );
       const insights = yield* ThreadInsights.pipe(
         Effect.provide(layer.pipe(Layer.provide(dependencies))),

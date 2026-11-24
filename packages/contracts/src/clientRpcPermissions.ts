@@ -41,6 +41,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Callers also need filesystem:write; see clientRpcRequiredScopes.
   [WS_METHODS.projectsAllowOutsideEdits]: AuthTerminalOperateScope,
   [WS_METHODS.projectsRevokeOutsideEdits]: AuthTerminalOperateScope,
+  // Instruction files and skills steer every agent here, which then runs commands.
+  // Callers also need filesystem:write; see clientRpcRequiredScopes.
+  [WS_METHODS.agentContextSave]: AuthTerminalOperateScope,
   // Creating and repairing make worktrees and branches and run the repository's installs.
   [WS_METHODS.developmentEnvironmentsCreate]: AuthSourceControlWriteScope,
   [WS_METHODS.developmentEnvironmentsAttach]: AuthSourceControlWriteScope,
@@ -150,7 +153,8 @@ export function clientRpcRequiredScopes(
   }
   if (
     method === WS_METHODS.projectsAllowOutsideEdits ||
-    method === WS_METHODS.projectsRevokeOutsideEdits
+    method === WS_METHODS.projectsRevokeOutsideEdits ||
+    method === WS_METHODS.agentContextSave
   )
     return [AuthFilesystemWriteScope, AuthTerminalOperateScope];
   // A command source runs a shell command on the server, like a terminal.

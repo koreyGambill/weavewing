@@ -5,7 +5,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
-import { discoverClaudeSkills as discoverSkills } from "./ClaudeSkills.ts";
+import {
+  discoverClaudeSkillCandidates,
+  discoverClaudeSkills as discoverSkills,
+} from "./ClaudeSkills.ts";
 import { planClaudeSkillDispatch } from "./ClaudeSkillDispatch.ts";
 
 // Windows makes the managed directory fixture-controlled without reading host policy or skills.
@@ -53,7 +56,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
         path.join(configDir, "plugins", "installed_plugins.json"),
         JSON.stringify({
           plugins: {
-            "plugin@shop": [{ scope: "user", installPath: plugin }],
+            "plugin@shop": [{ scope: "user", installPath: plugin, version: "1.0.0" }],
             "disabled@shop": [{ scope: "user", installPath: disabled }],
             "unconfigured@shop": [{ scope: "user", installPath: disabled }],
           },
@@ -82,6 +85,18 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
           userInvocable: false,
         },
       ]);
+      const candidates = yield* discoverClaudeSkillCandidates(
+        { homePath: configDir },
+        undefined,
+        {},
+      ).pipe(Effect.provideService(HostProcess.Platform, "win32"));
+      assert.deepEqual(
+        candidates.map((candidate) => candidate.plugin),
+        [
+          { name: "manifest-plugin", version: "1.0.0" },
+          { name: "manifest-plugin", version: "1.0.0" },
+        ],
+      );
     }),
   );
 
@@ -822,6 +837,18 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
           description: "User deploy.",
         },
       ]);
+      const candidates = yield* discoverClaudeSkillCandidates(
+        { homePath: configDir },
+        workspace,
+        {},
+      ).pipe(Effect.provideService(HostProcess.Platform, "win32"));
+      assert.deepEqual(
+        candidates.map((candidate) => [candidate.skill.description, candidate.shadowed]),
+        [
+          ["User deploy.", false],
+          ["Claude deploy.", true],
+        ],
+      );
 
       const programFiles = path.join(tempDir, "Program Files");
       const programData = path.join(tempDir, "ProgramData");

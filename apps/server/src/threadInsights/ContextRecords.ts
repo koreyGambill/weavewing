@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 import {
+  DEFAULT_LOAD_WATCHERS,
   OrchestrationV2TurnItemJson,
   TurnTokenUsage,
   TurnContextRecord,
@@ -19,6 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Footprints from "./InstructionFootprints.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import { projectLoadEvent } from "./insightProjection.ts";
 
 const decodeItem = Schema.decodeEffect(Schema.fromJsonString(OrchestrationV2TurnItemJson));
@@ -38,6 +40,7 @@ export class ContextRecords extends Context.Service<
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const footprints = yield* Footprints.InstructionFootprints;
+  const settings = yield* ServerSettingsService;
   return ContextRecords.of({
     get: Effect.fn("ContextRecords.get")(
       function* (input) {
@@ -51,6 +54,10 @@ const make = Effect.gen(function* () {
           yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id=${input.threadId} AND deleted_at IS NULL`;
         if (!threads.length)
           return yield* new ThreadInsightsError({ message: "Thread context is unavailable." });
+        const watchers = yield* settings.getSettings.pipe(
+          Effect.map((value) => value.loadWatchers),
+          Effect.orElseSucceed(() => DEFAULT_LOAD_WATCHERS),
+        );
         const limit = input.limit ?? 10;
         const rows = yield* sql<{
           run_id: string;
@@ -97,7 +104,7 @@ const make = Effect.gen(function* () {
           let truncated = items.length > 500 || items.some((item) => item.payload_json === null);
           for (const item of items.slice(0, 500)) {
             if (item.payload_json === null) continue;
-            const event = projectLoadEvent(yield* decodeItem(item.payload_json));
+            const event = projectLoadEvent(yield* decodeItem(item.payload_json), watchers);
             if (!event || event.status !== "completed") continue;
             const filePaths =
               event.kind === "file" || event.kind === "skill" || event.kind === "instructions"
