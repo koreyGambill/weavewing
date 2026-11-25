@@ -99,6 +99,10 @@ function New-LocalUpdateError([string]$Message, [switch]$Transient, $ExitCode = 
 }
 
 function Test-LocalUpdateTransient($exception) { return [bool]$exception.Data['Transient'] }
+# wsl.exe reports service failures on stdout in UTF-16; an empty file reads back as no value at all.
+function Get-LocalUpdateHelperFailure($stdout, $stderr) {
+  return ((@($stderr, $stdout) | ForEach-Object { Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue }) -join "`n") -replace "`0", ''
+}
 
 # A fragmented WSL kernel fails some hvsock channel setups, so wsl.exe launches hang 30s each for minutes
 # (over 3 minutes observed) while a few pass. Only a distro that answers no probe in the whole window counts as hung.
@@ -271,8 +275,7 @@ function Invoke-LocalDesktopUpdate($ConfigPath, $Mode) {
       Record-UpdateHelper $process.Id $label
       if (-not $process.WaitForExit([Math]::Max(1, $seconds * 1000))) { $process.Kill(); throw (New-LocalUpdateError "$label exceeded ${seconds}s; captured helper stopped. Inspect $stdout and $stderr." -Transient) }
       if ($process.ExitCode -ne 0) {
-        # wsl.exe writes UTF-16 errors, which read back with NULs between characters.
-        $text = (Get-Content -LiteralPath $stderr -Raw) -replace "`0", ''
+        $text = Get-LocalUpdateHelperFailure $stdout $stderr
         throw (New-LocalUpdateError "$label failed ($($process.ExitCode)). $text" -Transient:($text -match 'WSAETIMEDOUT') -ExitCode $process.ExitCode)
       }
       $details.timings += @{ operation = $label; milliseconds = ([DateTime]::UtcNow - $started).TotalMilliseconds }
