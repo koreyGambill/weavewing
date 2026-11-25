@@ -1,8 +1,10 @@
 import { assert, it, describe } from "@effect/vitest";
 import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
 import {
+  ComposerContextId,
   EventId,
   MessageId,
+  THREAD_QUESTIONS_ARTIFACT_ID,
   PlanId,
   RunId,
   RuntimeRequestId,
@@ -410,6 +412,63 @@ describe("V2 thread find", () => {
       assert.equal(
         (yield* projection.searchThread({ threadId, query: "check", index: 99 })).activeIndex,
         3,
+      );
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("searches what a user message's references sent, after its text", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const sent = item(
+        "sent",
+        1,
+        "Rollout plan [Q1](t3-context://v1/artifact-answer/answer_q1) [Logs](t3-context://v1/terminal/terminal_logs)",
+        "user_message",
+      ) as Extract<OrchestrationV2TurnItem, { type: "user_message" }>;
+      yield* putItems([
+        {
+          ...sent,
+          context: {
+            version: 1,
+            records: [
+              {
+                version: 1,
+                kind: "artifact-answer",
+                contextId: ComposerContextId.make("answer_q1"),
+                label: "Q1",
+                artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+                questionId: "Q1",
+                answerRevision: 0,
+                title: "Q1: Rollout",
+                artifactVersion: 1,
+                question: "Which rollout should ship?",
+                choice: "Staged rollout",
+                note: "Start the rollout on Monday",
+              },
+              {
+                version: 1,
+                kind: "terminal",
+                contextId: ComposerContextId.make("terminal_logs"),
+                label: "Logs",
+                terminalId: "term-1",
+                terminalLabel: "Terminal 1",
+                lineStart: 1,
+                lineEnd: 2,
+                text: "rollout started\nrollout done",
+              },
+            ],
+          },
+        },
+      ]);
+      assert.equal(
+        (yield* projection.searchThread({ threadId, query: "rollout" })).totalMatches,
+        6,
+      );
+      // Section labels such as "Note" and the terminal heading are not part of what was sent.
+      assert.equal((yield* projection.searchThread({ threadId, query: "note" })).totalMatches, 0);
+      assert.equal(
+        (yield* projection.searchThread({ threadId, query: "terminal 1" })).totalMatches,
+        0,
       );
     }).pipe(Effect.provide(layerTest)),
   );

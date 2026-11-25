@@ -119,6 +119,7 @@ import { BookmarkRail } from "./BookmarkRail";
 import { QuestionDismissedTimelineRow } from "../questions/QuestionDismissedTimelineRow";
 import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
+import { useQuestionReferenceReveal } from "./questionReferenceReveal";
 import { orderBookmarks } from "../reviews/bookmarks.logic";
 import { useMessageBookmarksSupported, useThreadFollowUpList } from "../reviews/FollowUps";
 import {
@@ -930,10 +931,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
-  useQuestionReveal(routeThreadKey, rows.length, (questionId) => {
-    const index = rows.findIndex(
-      (row) => row.kind === "thread-questions" && row.questionIds.includes(questionId),
-    );
+  const revealRow = (index: number) => {
     if (index < 0) return false;
     navigateTimeline();
     void listRef.current?.scrollToIndex({
@@ -942,7 +940,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
       viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
     });
     return true;
-  });
+  };
+  useQuestionReveal(routeThreadKey, rows.length, (questionId) =>
+    revealRow(
+      rows.findIndex(
+        (row) => row.kind === "thread-questions" && row.questionIds.includes(questionId),
+      ),
+    ),
+  );
+  useQuestionReferenceReveal(routeThreadKey, rows.length, ({ messageId }) =>
+    revealRow(rows.findIndex((row) => row.kind === "message" && row.message.id === messageId)),
+  );
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
   // is not keyed per thread and reports no "new data" event, and the restore
