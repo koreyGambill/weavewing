@@ -314,6 +314,24 @@ function selectProjectIdentitySource<TProject extends EnvironmentProject>(
 /** The server's name for a default-folder project the user has not renamed. */
 export const SCRATCH_PROJECT_DEFAULT_TITLE = "No project";
 
+// Each machine's default folder has its own path, so a group spanning machines
+// shows only what they share: the same label, then the same folder name.
+function deriveScratchGroupLabel(folderLabels: ReadonlyArray<string>): string {
+  const labels = new Set(folderLabels);
+  if (labels.size === 1) return folderLabels[0]!;
+  const names = new Set(
+    folderLabels.map(
+      (label) =>
+        label
+          .replace(/[\\/]+$/, "")
+          .split(/[\\/]/)
+          .pop() ?? label,
+    ),
+  );
+  const [name] = names;
+  return names.size === 1 && name ? name : SCRATCH_PROJECT_DEFAULT_TITLE;
+}
+
 export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
   readonly projects: ReadonlyArray<TProject>;
   readonly settings: ProjectGroupingSettings;
@@ -385,7 +403,9 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
       key,
       label:
         representative.isScratch && representative.title === SCRATCH_PROJECT_DEFAULT_TITLE
-          ? (input.scratchLabel?.(representative) ?? representative.workspaceRoot)
+          ? deriveScratchGroupLabel(
+              members.map(({ project }) => input.scratchLabel?.(project) ?? project.workspaceRoot),
+            )
           : input.groupScratchProjects && representative.isScratch
             ? representative.title
             : members.length > 1

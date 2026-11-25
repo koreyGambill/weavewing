@@ -228,7 +228,8 @@ describe("buildProjectGroups", () => {
       });
       expect(groups).toHaveLength(3);
       const scratch = groups.find((group) => group.representative.isScratch)!;
-      expect(scratch.label).toBe("/remote/scratch/");
+      // Folders on different machines share only their name.
+      expect(scratch.label).toBe("scratch");
       const config = {
         scratchWorkspaceRoot: "/remote/scratch/",
         legacyScratchWorkspaceRoot: "/remote/.t3/scratch",
@@ -241,7 +242,32 @@ describe("buildProjectGroups", () => {
         preferredEnvironmentId: remoteEnvironmentId,
         scratchLabel: (project) => scratchProjectFolderLabel(project, config),
       });
-      expect(labelled.find((group) => group.representative.isScratch)?.label).toBe("~/scratch");
+      expect(labelled.find((group) => group.representative.isScratch)?.label).toBe("scratch");
+      const sameLabel = buildProjectGroups({
+        projects: projects.slice(0, 3),
+        groupScratchProjects: true,
+        settings: settings(mode),
+        scratchLabel: () => "~/code",
+      });
+      expect(sameLabel[0]?.label).toBe("~/code");
+      const differentNames = buildProjectGroups({
+        projects: [
+          { ...projects[0]!, workspaceRoot: "C:\\Users\\me\\.t3\\scratch" },
+          { ...projects[1]!, workspaceRoot: "/Users/me/code" },
+        ],
+        groupScratchProjects: true,
+        settings: settings(mode),
+      });
+      expect(differentNames[0]?.label).toBe("No project");
+      const sameName = buildProjectGroups({
+        projects: [
+          { ...projects[0]!, workspaceRoot: "C:\\Users\\me\\code" },
+          { ...projects[1]!, workspaceRoot: "/Users/me/code/" },
+        ],
+        groupScratchProjects: true,
+        settings: settings(mode),
+      });
+      expect(sameName[0]?.label).toBe("code");
       const ungrouped = buildProjectGroups({
         projects: [projects[0]!, { ...projects[1]!, title: "Notes" }],
         settings: settings("separate"),
