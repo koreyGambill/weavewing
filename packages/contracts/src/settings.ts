@@ -721,11 +721,25 @@ export const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
-export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch" | "select";
+export type ProviderSettingsFormControl =
+  | "text"
+  | "password"
+  | "textarea"
+  | "switch"
+  | "select"
+  | "checklist";
 
 export interface ProviderSettingsFormOption {
   readonly value: string;
   readonly label: string;
+  /** Shown under the option in a checklist. */
+  readonly description?: string | undefined;
+}
+
+/** A checklist button that replaces the selection with `values`. */
+export interface ProviderSettingsFormPreset {
+  readonly label: string;
+  readonly values: ReadonlyArray<string>;
 }
 
 export interface ProviderSettingsFormAnnotation {
@@ -735,6 +749,7 @@ export interface ProviderSettingsFormAnnotation {
   readonly clearWhenEmpty?: "omit" | "persist" | undefined;
 
   readonly options?: ReadonlyArray<ProviderSettingsFormOption> | undefined;
+  readonly presets?: ReadonlyArray<ProviderSettingsFormPreset> | undefined;
 }
 
 export function secretSettingsFields(schema: {
@@ -873,6 +888,72 @@ const InstanceIdleCompaction = Schema.Literals(
   INSTANCE_IDLE_COMPACTION_MODES.map((mode) => mode.value),
 );
 
+/**
+ * Claude Code built-in tools a user may leave out of the sessions T3 starts. ToolSearch and Skill
+ * are never offered: removing either loads more context than it saves.
+ */
+export const CLAUDE_REMOVABLE_BUILTIN_TOOLS = [
+  {
+    value: "Artifact",
+    label: "Artifact",
+    description: "Claude cannot publish claude.ai artifact pages; T3's artifact_write still works.",
+  },
+  {
+    value: "ArtifactData",
+    label: "ArtifactData",
+    description: "Claude cannot read or write a published artifact's shared database.",
+  },
+  {
+    value: "ArtifactComments",
+    label: "ArtifactComments",
+    description: "Claude cannot read or answer comments on published artifacts.",
+  },
+  {
+    value: "Task",
+    label: "Task (Agent)",
+    description:
+      "No native subagents; skills that fan out through them must use delegate_task instead.",
+  },
+  {
+    value: "Workflow",
+    label: "Workflow",
+    description:
+      "Claude cannot run multi-agent workflow scripts; skills that use them must delegate instead.",
+  },
+  {
+    value: "ScheduleWakeup",
+    label: "ScheduleWakeup",
+    description: "/loop without an interval cannot pace itself; /loop with an interval still runs.",
+  },
+  {
+    value: "ReportFindings",
+    label: "ReportFindings",
+    description: "/code-review reports its findings as text instead of a typed list.",
+  },
+] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
+
+export const ClaudeRemovableBuiltinTool = Schema.Literals(
+  CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value),
+);
+export type ClaudeRemovableBuiltinTool = typeof ClaudeRemovableBuiltinTool.Type;
+
+const isClaudeRemovableBuiltinTool = Schema.is(ClaudeRemovableBuiltinTool);
+
+// Unknown names are dropped rather than rejected, so a hand-edited or outdated entry never
+// disables the whole Claude instance.
+const OmittedBuiltinTools = Schema.Array(Schema.String).pipe(
+  Schema.decodeTo(
+    Schema.Array(ClaudeRemovableBuiltinTool),
+    SchemaTransformation.transform<
+      ReadonlyArray<ClaudeRemovableBuiltinTool>,
+      ReadonlyArray<string>
+    >({
+      decode: (tools) => [...new Set(tools.filter(isClaudeRemovableBuiltinTool))],
+      encode: (tools) => tools,
+    }),
+  ),
+);
+
 export const ClaudeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -928,9 +1009,27 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("default" as const)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    omittedBuiltinTools: OmittedBuiltinTools.pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({
+        title: "Built-in tools to leave out",
+        description:
+          "Removes these Claude Code tools from the model's context to save tokens. Applies to sessions started after you change it; Claude Code in a terminal is unaffected.",
+        providerSettingsForm: {
+          control: "checklist",
+          options: CLAUDE_REMOVABLE_BUILTIN_TOOLS,
+          presets: [
+            {
+              label: "Leave out all seven",
+              values: CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value),
+            },
+          ],
+        },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "launchArgs"],
+    order: ["binaryPath", "homePath", "autoCompactWindow", "launchArgs", "omittedBuiltinTools"],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;

@@ -11,6 +11,7 @@ import {
   ClientSettingsSchema,
   ClientSettingsPatch,
   ClientServerSettingsPatch,
+  CLAUDE_REMOVABLE_BUILTIN_TOOLS,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
@@ -604,4 +605,30 @@ it("ignores a stored client setting this build removed and keeps the rest", () =
   const settings = decodeClientSettings({ persistComposerContextStrip: true, wordWrap: false });
   expect("persistComposerContextStrip" in settings).toBe(false);
   expect(settings.wordWrap).toBe(false);
+});
+
+describe("Claude omitted built-in tools", () => {
+  it("leaves every built-in tool in place by default", () => {
+    expect(decodeClaudeSettings({}).omittedBuiltinTools).toEqual([]);
+  });
+
+  it("never lets ToolSearch, Skill or an unknown name through, and keeps the rest", () => {
+    expect(
+      decodeClaudeSettings({
+        omittedBuiltinTools: ["ToolSearch", "Artifact", "Skill", "Bash", "Task", "Artifact"],
+      }).omittedBuiltinTools,
+    ).toEqual(["Artifact", "Task"]);
+  });
+
+  it("offers the seven measured tools and neither ToolSearch nor Skill", () => {
+    expect(CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value)).toEqual([
+      "Artifact",
+      "ArtifactData",
+      "ArtifactComments",
+      "Task",
+      "Workflow",
+      "ScheduleWakeup",
+      "ReportFindings",
+    ]);
+  });
 });

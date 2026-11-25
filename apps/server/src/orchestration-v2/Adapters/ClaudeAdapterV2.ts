@@ -2333,6 +2333,15 @@ export function makeClaudeQueryOptions(input: {
           },
         } as ClaudeSdkSettings);
   const deviceInstructions = input.mcpServers !== undefined && input.deviceToolsAvailable === true;
+  // The SDK removes disallowed tools from the model's context, not only their calls.
+  const disallowedTools = [
+    ...new Set([
+      ...(input.disallowedTools ?? []),
+      ...(input.settings?.omittedBuiltinTools ?? []).flatMap((tool) =>
+        tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool],
+      ),
+    ]),
+  ];
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     // T3 names threads; a supplied title skips Claude's redundant naming request.
@@ -2353,7 +2362,7 @@ export function makeClaudeQueryOptions(input: {
     ...threadIdentity,
     ...(input.resumeSessionAt === undefined ? {} : { resumeSessionAt: input.resumeSessionAt }),
     ...(input.allowedTools === undefined ? {} : { allowedTools: [...input.allowedTools] }),
-    ...(input.disallowedTools === undefined ? {} : { disallowedTools: [...input.disallowedTools] }),
+    ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
     ...(input.canUseTool === undefined ? {} : { canUseTool: input.canUseTool }),
     ...(input.allowDangerouslySkipPermissions === true
       ? { allowDangerouslySkipPermissions: true }
