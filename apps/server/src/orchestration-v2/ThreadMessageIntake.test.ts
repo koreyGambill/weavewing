@@ -14,7 +14,9 @@ import {
   RuntimeRequestId,
   ThreadId,
   TurnItemId,
+  ComposerContextId,
   type OrchestrationV2Command,
+  type WaitingItemContextRecord,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
   type UserInputAttachments,
@@ -488,12 +490,12 @@ it.effect("marks the QA changes a user's Discuss message is about once it is acc
   Effect.gen(function* () {
     discussed.length = 0;
     const accepted = Layer.mock(ThreadManagementService.ThreadManagementService)({
-      dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [], replayed: false }),
+      dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
     });
-    const reference = {
-      version: 1 as const,
+    const reference: WaitingItemContextRecord = {
+      version: 1,
       kind: "waiting-item",
-      contextId: "waiting-item_first-a",
+      contextId: ComposerContextId.make("waiting-item_first-a"),
       label: "QA1 · discuss · Toast shows the retry count",
       itemKind: "qa",
       key: "first/a",
@@ -501,8 +503,8 @@ it.effect("marks the QA changes a user's Discuss message is about once it is acc
       title: "Toast shows the retry count",
       sha: "abc1234",
     };
-    const send = (id: string, createdBy: "user" | "agent") =>
-      dispatchCommand({
+    const send = (id: string, createdBy: "user" | "agent") => {
+      const command: Extract<OrchestrationV2Command, { type: "message.dispatch" }> = {
         type: "message.dispatch",
         commandId: CommandId.make(`command-${id}`),
         threadId: ThreadId.make("thread-discuss"),
@@ -513,7 +515,10 @@ it.effect("marks the QA changes a user's Discuss message is about once it is acc
         creationSource: "web",
         origin: { kind: "user" },
         context: { version: 1, records: [reference] },
-      } as OrchestrationV2Command).pipe(Effect.provide(accepted));
+        dispatchMode: { type: "queue_after_active" },
+      };
+      return dispatchCommand(command).pipe(Effect.provide(accepted));
+    };
     yield* send("message-user", "user");
     yield* send("message-agent", "agent");
     expect(discussed).toEqual([

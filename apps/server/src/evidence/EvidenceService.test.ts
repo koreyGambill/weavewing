@@ -1232,12 +1232,10 @@ it.effect("lets an agent settle QA only from a user's own message in its current
         state: "problem",
         note: "The count overlaps the close button.",
       });
-      assert.deepInclude(recorded, {
-        state: "problem",
-        by: "agent",
-        messageId: "message-user",
-        note: "The count overlaps the close button.",
-      });
+      assert.deepStrictEqual(
+        [recorded.state, recorded.by, recorded.messageId, recorded.note],
+        ["problem", "agent", "message-user", "The count overlaps the close button."],
+      );
       assert.deepStrictEqual(yield* evidence.counts(), { pending: 5, problem: 1 });
       // Another thread's QA is settled in that thread.
       assert.strictEqual(
