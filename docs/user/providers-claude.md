@@ -59,17 +59,17 @@ You can also send `/compact` in an existing conversation. Claude Code also
 compacts automatically. To see context usage, see
 [commands and skills](./composer.md#commands-and-skills).
 
-## Leave out built-in tools
-
-**Built-in tools to leave out** removes Claude Code tools from the model's context to save
-tokens. By default it leaves out the recommended set: Task (native subagents), Workflow,
-ScheduleWakeup and ReportFindings. **Clear** keeps every tool, and **Leave out all seven** also
-removes the artifact tools, so Claude can no longer publish claude.ai artifact pages from
-threads. Changes apply to sessions started afterwards.
-
 T3 Code sends `/compact` only when you request it. Returning to an idle thread or
 sending a message keeps the conversation history. Claude Code still compacts at
 its configured context threshold.
+
+## Leave out built-in tools
+
+**Built-in tools to leave out** removes Claude Code tools from the model's context to save
+tokens. By default it leaves out all seven it lists, including the artifact tools, so Claude
+cannot publish claude.ai artifact pages from threads. **Keep artifact tools** leaves out only
+Task (native subagents), Workflow, ScheduleWakeup and ReportFindings; **Clear** keeps every tool;
+**Recommended** returns to the default. Changes apply to sessions started afterwards.
 
 ## Usage limits
 

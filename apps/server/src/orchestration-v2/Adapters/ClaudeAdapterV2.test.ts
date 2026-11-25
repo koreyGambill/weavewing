@@ -525,7 +525,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     ]);
   });
 
-  it("leaves out the recommended tools and keeps Artifact when nothing is saved", () => {
+  it("leaves out all seven tools when nothing is saved", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
       nativeThreadId: "native-default-omitted-tools",
@@ -534,6 +534,9 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       settings: DEFAULT_CLAUDE_SETTINGS,
     });
     assert.deepEqual(options.disallowedTools, [
+      "Artifact",
+      "ArtifactData",
+      "ArtifactComments",
       "Agent",
       "Task",
       "Workflow",
@@ -11711,7 +11714,16 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 model: "claude-sonnet-4-6",
                 tools: { type: "preset", preset: "claude_code" },
                 permissionMode: "bypassPermissions",
-                disallowedTools: ["Agent", "Task", "Workflow", "ScheduleWakeup", "ReportFindings"],
+                disallowedTools: [
+                  "Artifact",
+                  "ArtifactData",
+                  "ArtifactComments",
+                  "Agent",
+                  "Task",
+                  "Workflow",
+                  "ScheduleWakeup",
+                  "ReportFindings",
+                ],
                 allowDangerouslySkipPermissions: true,
                 settings: { showThinkingSummaries: true },
                 sessionId: WAKE_NATIVE_SESSION,

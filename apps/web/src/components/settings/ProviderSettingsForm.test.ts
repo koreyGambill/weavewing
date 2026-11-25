@@ -9,9 +9,11 @@ import * as Schema from "effect/Schema";
 
 import { providerClients } from "./providerDriverMeta";
 import {
+  checklistPresetApplied,
   deriveProviderSettingsFields,
   nextProviderConfigWithChecklist,
   nextProviderConfigWithFieldValue,
+  nextProviderConfigWithPreset,
   readChecklistSelection,
   reconcileRowsDraft,
   seedRowsDraft,
@@ -82,9 +84,8 @@ describe("ProviderSettingsForm helpers", () => {
     expect(field?.options?.map((option) => option.value)).not.toContain("Skill");
     expect(field?.presets?.map((preset) => preset.label)).toEqual([
       "Recommended",
-      "Leave out all seven",
+      "Keep artifact tools",
     ]);
-    expect(field?.presets?.[1]?.values).toHaveLength(7);
 
     const next = nextProviderConfigWithChecklist({ launchArgs: "--x" }, field!, [
       "Workflow",
@@ -97,15 +98,40 @@ describe("ProviderSettingsForm helpers", () => {
     expect(readChecklistSelection(cleared, field!)).toEqual([]);
   });
 
-  it("shows the recommended built-in tools as selected when nothing is saved", () => {
+  it("shows all seven built-in tools as selected when nothing is saved", () => {
     const claude = providerClients.get(ProviderDriverKind.make("claudeAgent"));
     const field = deriveProviderSettingsFields(claude!).find(
       (candidate) => candidate.key === "omittedBuiltinTools",
     );
-    const recommended = ["Task", "Workflow", "ScheduleWakeup", "ReportFindings"];
-    expect(field?.presets?.[0]?.values).toEqual(recommended);
-    expect(readChecklistSelection(undefined, field!)).toEqual(recommended);
-    expect(readChecklistSelection({ launchArgs: "--x" }, field!)).toEqual(recommended);
+    expect(readChecklistSelection(undefined, field!)).toHaveLength(7);
+    expect(readChecklistSelection({ launchArgs: "--x" }, field!)).toEqual(
+      field?.options?.map((option) => option.value),
+    );
+  });
+
+  it("returns the built-in tools to the default by removing the saved list", () => {
+    const claude = providerClients.get(ProviderDriverKind.make("claudeAgent"));
+    const field = deriveProviderSettingsFields(claude!).find(
+      (candidate) => candidate.key === "omittedBuiltinTools",
+    )!;
+    const [recommended, keepArtifacts] = field.presets!;
+    const saved = { launchArgs: "--x", omittedBuiltinTools: ["Artifact", "Workflow"] };
+
+    expect(checklistPresetApplied(saved, field, recommended!)).toBe(false);
+    const reset = nextProviderConfigWithPreset(saved, field, recommended!);
+    expect(reset).toEqual({ launchArgs: "--x" });
+    expect(checklistPresetApplied(reset, field, recommended!)).toBe(true);
+    expect(nextProviderConfigWithPreset({ omittedBuiltinTools: [] }, field, recommended!)).toBe(
+      undefined,
+    );
+    // An explicit list of all seven still differs from following the default.
+    const allSeven = { omittedBuiltinTools: field.options!.map((option) => option.value) };
+    expect(checklistPresetApplied(allSeven, field, recommended!)).toBe(false);
+
+    expect(nextProviderConfigWithPreset(reset, field, keepArtifacts!)).toEqual({
+      launchArgs: "--x",
+      omittedBuiltinTools: ["Task", "Workflow", "ScheduleWakeup", "ReportFindings"],
+    });
   });
 
   it("stores false boolean fields when true is the default", () => {

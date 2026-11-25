@@ -736,11 +736,13 @@ export interface ProviderSettingsFormOption {
   readonly description?: string | undefined;
 }
 
-/** A checklist button that replaces the selection with `values`. */
-export interface ProviderSettingsFormPreset {
-  readonly label: string;
-  readonly values: ReadonlyArray<string>;
-}
+/**
+ * A checklist button that replaces the selection with `values`, or removes the saved value so the
+ * field follows its schema default.
+ */
+export type ProviderSettingsFormPreset =
+  | { readonly label: string; readonly values: ReadonlyArray<string> }
+  | { readonly label: string; readonly resetToDefault: true };
 
 export interface ProviderSettingsFormAnnotation {
   readonly control?: ProviderSettingsFormControl | undefined;
@@ -939,15 +941,15 @@ export type ClaudeRemovableBuiltinTool = typeof ClaudeRemovableBuiltinTool.Type;
 
 const isClaudeRemovableBuiltinTool = Schema.is(ClaudeRemovableBuiltinTool);
 
-/**
- * Left out when the setting was never saved. The artifact tools stay, so threads can still
- * publish claude.ai artifact pages.
- */
-const CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS: ReadonlyArray<ClaudeRemovableBuiltinTool> = [
-  "Task",
-  "Workflow",
-  "ScheduleWakeup",
-  "ReportFindings",
+/** Left out when the setting was never saved: every removable tool. */
+const CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS = CLAUDE_REMOVABLE_BUILTIN_TOOLS.map(
+  (tool) => tool.value,
+);
+
+const CLAUDE_ARTIFACT_BUILTIN_TOOLS: ReadonlyArray<ClaudeRemovableBuiltinTool> = [
+  "Artifact",
+  "ArtifactData",
+  "ArtifactComments",
 ];
 
 // An absent key means the recommended set and a saved empty array means none. Unknown names are
@@ -1026,17 +1028,20 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Built-in tools to leave out",
         description:
-          "Removes these Claude Code tools from the model's context to save tokens. The recommended set is the default; leaving out Artifact stops Claude publishing claude.ai artifact pages from threads. Applies to sessions started after you change it; Claude Code in a terminal is unaffected.",
+          "Removes these tools from Claude's context to save tokens. The recommended default leaves out all seven, including the artifact tools; tick fewer or choose Keep artifact tools to let Claude publish claude.ai artifact pages. Applies to new sessions.",
         providerSettingsForm: {
           control: "checklist",
           options: CLAUDE_REMOVABLE_BUILTIN_TOOLS,
           // Clear saves an empty list, which keeps every tool instead of restoring the default.
           clearWhenEmpty: "persist",
           presets: [
-            { label: "Recommended", values: CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS },
+            // Removing the saved list keeps the install on future changes to the default.
+            { label: "Recommended", resetToDefault: true },
             {
-              label: "Leave out all seven",
-              values: CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value),
+              label: "Keep artifact tools",
+              values: CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS.filter(
+                (tool) => !CLAUDE_ARTIFACT_BUILTIN_TOOLS.includes(tool),
+              ),
             },
           ],
         },

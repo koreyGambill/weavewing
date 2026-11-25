@@ -354,6 +354,43 @@ export function nextProviderConfigWithChecklist(
   return Object.keys(base).length > 0 ? base : undefined;
 }
 
+function hasSavedValue(config: unknown, key: string): boolean {
+  return (
+    config !== null &&
+    typeof config === "object" &&
+    (config as Record<string, unknown>)[key] !== undefined
+  );
+}
+
+/** Whether a checklist preset already describes the saved state. */
+export function checklistPresetApplied(
+  config: unknown,
+  field: ProviderSettingsFieldModel,
+  preset: ProviderSettingsFormPreset,
+): boolean {
+  if ("resetToDefault" in preset) return !hasSavedValue(config, field.key);
+  const selected = readChecklistSelection(config, field);
+  return (
+    preset.values.length === selected.length &&
+    preset.values.every((item) => selected.includes(item))
+  );
+}
+
+/** A reset preset removes the saved value; any other preset saves its list. */
+export function nextProviderConfigWithPreset(
+  config: unknown,
+  field: ProviderSettingsFieldModel,
+  preset: ProviderSettingsFormPreset,
+): Record<string, unknown> | undefined {
+  if (!("resetToDefault" in preset)) {
+    return nextProviderConfigWithChecklist(config, field, preset.values);
+  }
+  const base: Record<string, unknown> =
+    config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
+  delete base[field.key];
+  return Object.keys(base).length > 0 ? base : undefined;
+}
+
 function ProviderSettingsChecklist({
   field,
   value,
@@ -428,9 +465,7 @@ function ProviderSettingsChecklistActions({
   return (
     <div className="flex flex-wrap gap-2">
       {(field.presets ?? []).map((preset) => {
-        const applied =
-          preset.values.length === selected.length &&
-          preset.values.every((item) => selected.includes(item));
+        const applied = checklistPresetApplied(value, field, preset);
         return (
           <Button
             key={preset.label}
@@ -440,7 +475,7 @@ function ProviderSettingsChecklistActions({
             disabled={disabled}
             aria-disabled={applied || undefined}
             onClick={() => {
-              if (!applied) onChange(nextProviderConfigWithChecklist(value, field, preset.values));
+              if (!applied) onChange(nextProviderConfigWithPreset(value, field, preset));
             }}
           >
             {preset.label}

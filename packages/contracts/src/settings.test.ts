@@ -608,8 +608,11 @@ it("ignores a stored client setting this build removed and keeps the rest", () =
 });
 
 describe("Claude omitted built-in tools", () => {
-  it("leaves out the recommended tools and keeps the artifact tools when nothing is saved", () => {
+  it("leaves out all seven tools, including the artifact tools, when nothing is saved", () => {
     expect(decodeClaudeSettings({}).omittedBuiltinTools).toEqual([
+      "Artifact",
+      "ArtifactData",
+      "ArtifactComments",
       "Task",
       "Workflow",
       "ScheduleWakeup",
