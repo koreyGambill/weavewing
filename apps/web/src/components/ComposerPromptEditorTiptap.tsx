@@ -13,6 +13,7 @@ import {
   type TiptapEditorHTMLElement,
 } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
+import { XIcon } from "lucide-react";
 import StarterKit from "@tiptap/starter-kit";
 import { newlineInCode, splitBlockKeepMarks } from "@tiptap/pm/commands";
 import { isHistoryTransaction } from "@tiptap/pm/history";
@@ -135,6 +136,7 @@ import {
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerCodeBlockNodeView } from "./chat/ComposerCodeBlockNodeView";
+import { Button } from "./ui/button";
 import { resolveAssistantCitationCommentDismissal } from "./chat/assistantCitationCommentDismissal";
 import { composerCodeBlockHighlight } from "./composerCodeBlockHighlight";
 import { importPastedComposerText, readPastedPlainText } from "./composerInlineTokenPaste";
@@ -583,14 +585,29 @@ const ComposerContextReferenceExtension = Node.create({
   },
 });
 
-function ComposerContextReferenceNodeView({ node }: NodeViewProps) {
+function ComposerContextReferenceNodeView({ node, deleteNode }: NodeViewProps) {
+  const kind = (node.attrs.kind as string) ?? "";
+  const label = (node.attrs.label as string) ?? "";
   return (
     <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
       <ComposerContextReferenceChip
-        kind={(node.attrs.kind as string) ?? ""}
+        kind={kind}
         contextId={(node.attrs.contextId as string) ?? ""}
-        label={(node.attrs.label as string) ?? ""}
+        label={label}
       />
+      {/* An answer chip is easy to miss as text, so it carries its own way out. */}
+      {kind === "artifact-answer" ? (
+        <Button
+          size="icon-micro"
+          variant="ghost-muted"
+          contentEditable={false}
+          aria-label={`Remove ${label} from the message`}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => deleteNode()}
+        >
+          <XIcon />
+        </Button>
+      ) : null}
     </NodeViewWrapper>
   );
 }

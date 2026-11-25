@@ -1,13 +1,17 @@
 import type { ComposerFileAttachment } from "../composerDraftStore";
 import { formatInlineContextReference } from "../lib/composerContextReferences";
-import { fileContextReference } from "../lib/composerContextRecords";
+import { artifactAnswerReference, fileContextReference } from "../lib/composerContextRecords";
 import {
   reconcileAttachmentContextReferences,
   type RetainedContextPayloads,
   useRetainedContextPayloads,
 } from "./chat/composerContextUndo";
 
-import type { ServerProviderSkill } from "@t3tools/contracts";
+import {
+  ComposerContextId,
+  THREAD_QUESTIONS_ARTIFACT_ID,
+  type ServerProviderSkill,
+} from "@t3tools/contracts";
 import type { Editor } from "@tiptap/core";
 import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { NodeSelection } from "@tiptap/pm/state";
@@ -821,6 +825,36 @@ const file = {
   sizeBytes: 5,
   file: new File(["notes"], "notes.txt", { type: "text/plain" }),
 } satisfies ComposerFileAttachment;
+
+it("takes a question's answer chip out of the message with its remove button", async () => {
+  const reference = artifactAnswerReference({
+    version: 1,
+    kind: "artifact-answer",
+    contextId: ComposerContextId.make("answer_thread-1-Q1"),
+    label: "Q1: Which database?",
+    artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+    questionId: "Q1",
+    answerRevision: 2,
+    title: "Q1: Which database?",
+    artifactVersion: 1,
+    question: "Which database?",
+    choice: "Postgres",
+    note: "",
+  });
+  const onChange = vi.fn<NonNullable<ComposerPromptEditorProps["onChange"]>>();
+  await using screen = await mountEditor(
+    `Go ahead ${formatInlineContextReference(reference)}`,
+    true,
+    [],
+    onChange,
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Remove Q1: Which database? from the message" }),
+  );
+  const [value, , , , contextIds] = onChange.mock.lastCall!;
+  expect(value.trim()).toBe("Go ahead");
+  expect([...contextIds]).toEqual([]);
+});
 
 describe("composer context undo lifetime", () => {
   async function mountComposer(destinationValue = "") {
