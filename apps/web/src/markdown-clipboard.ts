@@ -451,17 +451,73 @@ function csvCell(value: string): string {
   return /[",\n]/.test(normalized) ? `"${normalized.replaceAll('"', '""')}"` : normalized;
 }
 
-export function serializeTableElementToCsv(table: Element): string {
+function tableCellRows(table: Element): Element[][] {
   const rows = [...table.querySelectorAll(":scope > thead > tr, :scope > tbody > tr, :scope > tr")];
-  const lines: string[] = [];
-  for (const row of rows) {
-    const cells = [...row.children].filter(
-      (cell) => cell.tagName === "TH" || cell.tagName === "TD",
-    );
-    if (cells.length === 0) continue;
-    lines.push(cells.map((cell) => csvCell(csvCellText(cell))).join(","));
+  return rows
+    .map((row) =>
+      [...row.children].filter((cell) => cell.tagName === "TH" || cell.tagName === "TD"),
+    )
+    .filter((cells) => cells.length > 0);
+}
+
+export function serializeTableElementToCsv(table: Element): string {
+  return tableCellRows(table)
+    .map((cells) => cells.map((cell) => csvCell(csvCellText(cell))).join(","))
+    .join("\n");
+}
+
+const graphemes = new Intl.Segmenter();
+// East Asian wide and emoji graphemes take two columns in a monospace font.
+const WIDE_GRAPHEME =
+  /\p{Emoji_Presentation}|\uFE0F|[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}]/u;
+
+function monospaceWidth(text: string): number {
+  let width = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    width += WIDE_GRAPHEME.test(segment) ? 2 : 1;
   }
-  return lines.join("\n");
+  return width;
+}
+
+function cellAlignment(cell: Element | undefined): string {
+  if (!cell) return "";
+  return (cell as HTMLElement).style?.textAlign || cell.getAttribute("align") || "";
+}
+
+function padCell(text: string, width: number, align: string): string {
+  const gap = width - monospaceWidth(text);
+  if (align === "right") return `${" ".repeat(gap)}${text}`;
+  if (align === "center") {
+    const left = Math.floor(gap / 2);
+    return `${" ".repeat(left)}${text}${" ".repeat(gap - left)}`;
+  }
+  return `${text}${" ".repeat(gap)}`;
+}
+
+/**
+ * A space-padded table in a code fence, which Slack and other chat apps show
+ * in a monospace font so the columns line up.
+ */
+export function serializeTableElementToFixedWidth(table: Element): string {
+  const cellRows = tableCellRows(table);
+  if (cellRows.length === 0) return "";
+  const rows = cellRows.map((cells) =>
+    cells.map((cell) => csvCellText(cell).replace(/\s+/g, " ").trim()),
+  );
+  const columnCount = Math.max(...rows.map((row) => row.length));
+  const widths = Array.from({ length: columnCount }, (_, column) =>
+    Math.max(1, ...rows.map((row) => monospaceWidth(row[column] ?? ""))),
+  );
+  const alignments = widths.map((_, column) => cellAlignment(cellRows[0]?.[column]));
+  const line = (row: string[]) =>
+    widths
+      .map((width, column) => padCell(row[column] ?? "", width, alignments[column] ?? ""))
+      .join(" | ")
+      .trimEnd();
+  const [header = [], ...body] = rows;
+  const separator = widths.map((width) => "-".repeat(width)).join("-+-");
+  const lines = [line(header), separator, ...body.map(line)];
+  return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
 }
 
 function mermaidSourceHtml(source: string) {

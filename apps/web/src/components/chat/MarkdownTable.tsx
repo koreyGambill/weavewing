@@ -4,6 +4,7 @@ import { useRef, type ComponentProps } from "react";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
   serializeTableElementToCsv,
+  serializeTableElementToFixedWidth,
   serializeTableElementToMarkdown,
 } from "../../markdown-clipboard";
 import { Button } from "../ui/button";
@@ -12,24 +13,27 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { reportMarkdownActionFailure } from "./markdownActionFailure";
 
+type TableCopyFormat = "markdown" | "csv" | "fixed-width";
+
+const SERIALIZERS: Record<TableCopyFormat, (table: Element) => string> = {
+  markdown: serializeTableElementToMarkdown,
+  csv: serializeTableElementToCsv,
+  "fixed-width": serializeTableElementToFixedWidth,
+};
+
 export function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const { copyToClipboard, isCopied: copied } = useCopyToClipboard<"markdown" | "csv">({
+  const { copyToClipboard, isCopied: copied } = useCopyToClipboard<TableCopyFormat>({
     timeout: 1200,
     onError: (cause, format) =>
       reportMarkdownActionFailure({ operation: "copy-table", format }, cause),
   });
   const copyLabel = copied ? "Copied" : "Copy table";
 
-  const handleCopy = (format: "markdown" | "csv") => {
+  const handleCopy = (format: TableCopyFormat) => {
     const table = containerRef.current?.querySelector("table");
     if (!table) return;
-    copyToClipboard(
-      format === "markdown"
-        ? serializeTableElementToMarkdown(table)
-        : serializeTableElementToCsv(table),
-      format,
-    );
+    copyToClipboard(SERIALIZERS[format](table), format);
   };
 
   return (
@@ -62,6 +66,7 @@ export function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
           <MenuPopup align="end">
             <MenuItem onClick={() => handleCopy("markdown")}>Copy as Markdown</MenuItem>
             <MenuItem onClick={() => handleCopy("csv")}>Copy as CSV</MenuItem>
+            <MenuItem onClick={() => handleCopy("fixed-width")}>Copy as fixed width</MenuItem>
           </MenuPopup>
         </Menu>
       </div>

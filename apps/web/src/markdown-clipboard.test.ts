@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   serializeCodeBlockToMarkdown,
   serializeRenderedMarkdownFragment,
+  serializeTableElementToFixedWidth,
   serializeTableElementToMarkdown,
 } from "./markdown-clipboard";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
@@ -460,6 +461,46 @@ describe("copying rendered Markdown tables", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("copies a fenced fixed-width table with padded, aligned columns", () => {
+    const text = (value: string) => new FakeText(value);
+    const table = renderedTable(
+      [text("Name"), text("Score"), text("Note")],
+      [text("Alice"), text("7"), text("first   place")],
+      [text("Bob"), text("1234"), text("")],
+    );
+    const score = table.children[0]!.children[0]!.children[1]!;
+    Object.assign(score, { style: { textAlign: "right" } });
+
+    expect(serializeTableElementToFixedWidth(table as unknown as Element)).toBe(
+      [
+        "```",
+        "Name  | Score | Note",
+        "------+-------+------------",
+        "Alice |     7 | first place",
+        "Bob   |  1234 |",
+        "```",
+      ].join("\n"),
+    );
+  });
+
+  it("counts wide characters as two columns and pads short rows", () => {
+    const text = (value: string) => new FakeText(value);
+    const table = renderedTable(
+      [text("Word"), text("Mark")],
+      [text("日本"), text("✅")],
+      [text("abc")],
+    );
+
+    expect(serializeTableElementToFixedWidth(table as unknown as Element)).toBe(
+      ["```", "Word | Mark", "-----+-----", "日本 | ✅", "abc  |", "```"].join("\n"),
+    );
+  });
+
+  it("copies an empty table as nothing", () => {
+    const table = new FakeElement("TABLE");
+    expect(serializeTableElementToFixedWidth(table as unknown as Element)).toBe("");
   });
 
   it("keeps formula pipes as authored while escaping prose pipes", () => {
