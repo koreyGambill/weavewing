@@ -5774,6 +5774,48 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         ),
     );
 
+    it.effect("opens a turn with the thread's switched-on tools and connectors", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarnessWithOptions({ settings: DEFAULT_CLAUDE_SETTINGS });
+        const turnInput = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-thread-tools"),
+          text: "Run git status.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn({
+          ...turnInput,
+          appThread: {
+            ...turnInput.appThread,
+            toolOverrides: {
+              enabledBuiltinTools: ["ScheduleWakeup"],
+              claudeAiConnectors: true,
+              omittedMcpServers: [],
+            },
+          },
+        });
+        const options = harness.getOpenedOptions()!;
+        assert.notInclude(options.disallowedTools ?? [], "ScheduleWakeup");
+        assert.include(options.disallowedTools ?? [], "Workflow");
+        const settings = options.settings;
+        assert.equal(
+          typeof settings === "object" ? settings.env?.ENABLE_CLAUDEAI_MCP_SERVERS : undefined,
+          "true",
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
     it.effect("pins tool search on when the user's Claude settings choose auto", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
