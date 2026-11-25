@@ -200,8 +200,14 @@ it("reads all on when the thread switched everything on", async () => {
   await expect.element(screen.getByRole("button", { name: /Tools all on/ })).toBeVisible();
 });
 
-it("gives no token sum while a left-out server might be a connector", async () => {
-  setup(true, AsyncResult.initial(true));
+it.each([
+  ["while the inventory loads", AsyncResult.initial(true)],
+  [
+    "when the inventory lacks the left-out name",
+    AsyncResult.success({ servers: [fixtureInventory.servers[0]] }),
+  ],
+] as const)("gives no token sum %s", async (_name, inventory) => {
+  setup(true, inventory);
   await using screen = await renderControl({
     ...idleThread,
     toolOverrides: {

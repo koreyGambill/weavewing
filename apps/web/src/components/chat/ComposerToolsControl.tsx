@@ -203,13 +203,12 @@ function ToolsPopoverContent({
   const inventory = useAtomValue(inventoryAtom);
   const retryInventory = useAtomRefresh(inventoryAtom);
   const servers = AsyncResult.isSuccess(inventory) ? inventory.value.servers : [];
-  const connectorNames = servers.filter((server) => server.connector).map((server) => server.name);
   const rows = toolRows(provider);
   const footer = toolsFooterState({
     rows,
     saved,
     staged,
-    connectorNames: canList && AsyncResult.isSuccess(inventory) ? connectorNames : undefined,
+    ordinaryServerNames: servers.filter((server) => !server.connector).map((server) => server.name),
     turnRunning: threadTurnRunning(thread.runtime?.status),
     backgroundWork: thread.pendingBackgroundTasks.length > 0,
   });

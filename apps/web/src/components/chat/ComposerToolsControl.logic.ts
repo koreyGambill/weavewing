@@ -153,8 +153,8 @@ export function toolsFooterState(input: {
   readonly rows: ReadonlyArray<ToolRow>;
   readonly saved: ThreadToolOverrides;
   readonly staged: ThreadToolOverrides;
-  /** Connector names from the inventory; undefined while it is loading, failed or not allowed. */
-  readonly connectorNames: ReadonlyArray<string> | undefined;
+  /** Servers the inventory in hand shows are not connectors; empty until one loads. */
+  readonly ordinaryServerNames: ReadonlyArray<string>;
   readonly turnRunning: boolean;
   readonly backgroundWork: boolean;
 }): ToolsFooterState {
@@ -163,13 +163,11 @@ export function toolsFooterState(input: {
   if (sameToolOverrides(input.saved, input.staged)) return { kind: "unchanged" };
   const on = input.rows.filter((row) => isRowOn(row, input.staged));
   const connectorsOn = input.staged.claudeAiConnectors;
-  // The connectors' estimate covers all of them; a partial selection has no honest sum, and
-  // without the names any left-out server might be a connector.
+  // The connectors' estimate covers all of them, so a sum is honest only when every left-out
+  // server is known to be an ordinary one.
   const partialConnectors =
     connectorsOn &&
-    input.staged.omittedMcpServers.some(
-      (name) => input.connectorNames === undefined || input.connectorNames.includes(name),
-    );
+    input.staged.omittedMcpServers.some((name) => !input.ordinaryServerNames.includes(name));
   return {
     kind: "changed",
     onCount: on.length + (connectorsOn ? 1 : 0),

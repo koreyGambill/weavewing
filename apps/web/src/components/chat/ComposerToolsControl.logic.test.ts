@@ -91,7 +91,7 @@ describe("toolsFooterState", () => {
   const base = {
     rows,
     saved: EMPTY_TOOL_OVERRIDES,
-    connectorNames: ["claude.ai Fixture Board", "claude.ai Fixture Mail"],
+    ordinaryServerNames: ["fixture-notes"],
     turnRunning: false,
     backgroundWork: false,
   };
@@ -105,7 +105,7 @@ describe("toolsFooterState", () => {
     });
   });
 
-  it("gives no sum for a partial connector selection, or when the names are unknown", () => {
+  it("gives no sum unless every left-out server is known to be an ordinary one", () => {
     const partial = { ...wakeupAndConnectors, omittedMcpServers: ["claude.ai Fixture Mail"] };
     expect(toolsFooterState({ ...base, staged: partial })).toEqual({
       kind: "changed",
@@ -113,18 +113,22 @@ describe("toolsFooterState", () => {
       estimatedTokens: undefined,
       serversLeftOut: 1,
     });
+    // An inventory still loading, or one that loaded without the left-out name, proves nothing.
     expect(
-      toolsFooterState({ ...base, saved: partial, staged: partial, connectorNames: undefined })
-        .kind,
+      toolsFooterState({ ...base, saved: partial, staged: partial, ordinaryServerNames: [] }).kind,
     ).toBe("unchanged");
     expect(
       toolsFooterState({
         ...base,
         saved: partial,
-        staged: { ...partial, enabledBuiltinTools: [] },
-        connectorNames: undefined,
+        staged: { ...partial, enabledBuiltinTools: ["Artifact"] },
       }),
     ).toMatchObject({ estimatedTokens: undefined });
+    const ordinaryLeftOut = { ...wakeupAndConnectors, omittedMcpServers: ["fixture-notes"] };
+    expect(toolsFooterState({ ...base, staged: ordinaryLeftOut })).toMatchObject({
+      estimatedTokens: 4_900,
+      serversLeftOut: 1,
+    });
   });
 
   it("offers a reload anyway when nothing changed", () => {
