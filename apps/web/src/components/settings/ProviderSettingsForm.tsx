@@ -99,7 +99,7 @@ function readFieldBooleanDefault(
 function readFieldStringsDefault(
   fieldSchema: ProviderClientDefinition["settingsSchema"]["fields"][string],
 ): ReadonlyArray<string> {
-  const decoded = Schema.decodeUnknownOption(fieldSchema as Schema.Decoder<unknown>)(undefined);
+  const decoded = Schema.decodeOption(fieldSchema as Schema.Decoder<unknown>)(undefined);
   return Option.isSome(decoded) && Array.isArray(decoded.value)
     ? decoded.value.filter((item): item is string => typeof item === "string")
     : [];
