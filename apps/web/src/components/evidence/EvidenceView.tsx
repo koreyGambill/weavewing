@@ -514,12 +514,7 @@ function ChangeRow({
   });
   const long = change.ask.length > 90 || change.ask.includes("\n") || change.summary.length > 0;
   const key = change.ticket?.key ?? change.id;
-  const reviewTarget = useThreadShell(
-    change.review.threadId === undefined
-      ? null
-      : scopeThreadRef(environmentId, change.review.threadId),
-  );
-  const review = reviewDisplay(change.review, reviewTarget);
+  const review = reviewDisplay(change.review);
   const link = review.link;
   return (
     <div className="min-w-0 space-y-1.5 border-t border-border p-2">

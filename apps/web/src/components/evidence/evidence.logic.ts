@@ -1,4 +1,9 @@
-import type { EvidenceChange, EvidenceProjectCoverage, EvidenceQaState } from "@t3tools/contracts";
+import type {
+  EvidenceChange,
+  EvidenceLanding,
+  EvidenceProjectCoverage,
+  EvidenceQaState,
+} from "@t3tools/contracts";
 import { CheckIcon, CircleDashedIcon, MinusIcon, XIcon } from "lucide-react";
 
 export const QA_STATES = [
@@ -26,37 +31,22 @@ export function checkLabel(check: {
   return check.result === "skipped" && check.reason ? `${base}: ${check.reason}` : base;
 }
 
-/** The linked thread as this client knows it, or null when it is not in the client's thread list. */
-export interface ReviewLinkTarget {
-  readonly delegateRole?: string | undefined;
-  readonly archivedAt: string | null;
-  readonly deletedAt: string | null;
-}
+type LandingReview = EvidenceLanding["changes"][number]["review"];
 
 export type ReviewLink =
   | {
       readonly kind: "reviewer" | "linked";
       readonly label: string;
-      readonly threadId: NonNullable<EvidenceChange["review"]["threadId"]>;
+      readonly threadId: NonNullable<LandingReview["threadId"]>;
     }
   | { readonly kind: "unavailable"; readonly label: string; readonly description: string };
 
-const UNAVAILABLE_LINK: ReviewLink = {
-  kind: "unavailable",
-  label: "Linked thread unavailable",
-  description:
-    "This thread can't be opened from here: it is deleted, archived, in another environment, or an idle delegate this window has not loaded.",
-};
-
 /**
  * How a change's review reads. Nothing checks a reviewer's verdict yet, so every claim reads as
- * the agent's unverified word. A linked thread is called the reviewer only when this client knows
- * it as a review delegate, since older records could link any thread.
+ * the agent's unverified word. The server says what a linked thread is now; a server that predates
+ * that says nothing, and the link stays a neutral one that still opens the thread.
  */
-export function reviewDisplay(
-  review: EvidenceChange["review"],
-  target: ReviewLinkTarget | null,
-): {
+export function reviewDisplay(review: LandingReview): {
   readonly label: string;
   readonly hint: string | null;
   readonly link: ReviewLink | null;
@@ -68,19 +58,35 @@ export function reviewDisplay(
       link: null,
     };
   const claim = CLAIMS[review.verdict];
-  const threadId = review.threadId;
   return {
     label: `Unverified review · agent reported ${claim}`,
     hint: `Reported ${claim}${review.by ? ` by ${review.by}` : ""}. Reviewer verdicts are not checked yet.`,
-    link:
-      threadId === undefined
-        ? null
-        : target === null || target.archivedAt !== null || target.deletedAt !== null
-          ? UNAVAILABLE_LINK
-          : target.delegateRole === "review"
-            ? { kind: "reviewer", label: "Reviewer", threadId }
-            : { kind: "linked", label: "Linked thread", threadId },
+    link: review.threadId === undefined ? null : reviewLink(review.threadId, review.thread),
   };
+}
+
+function reviewLink(
+  threadId: NonNullable<LandingReview["threadId"]>,
+  thread: LandingReview["thread"],
+): ReviewLink {
+  switch (thread) {
+    case "reviewer":
+      return { kind: "reviewer", label: "Reviewer", threadId };
+    case "archived":
+      return {
+        kind: "unavailable",
+        label: "Linked thread archived",
+        description: "The linked thread is archived. Find it under Settings, Archived.",
+      };
+    case "missing":
+      return {
+        kind: "unavailable",
+        label: "Linked thread unavailable",
+        description: "The linked thread was deleted or is not in this environment.",
+      };
+    default:
+      return { kind: "linked", label: "Linked thread", threadId };
+  }
 }
 
 export function captureKind(path: string): "image" | "video" | "file" {
