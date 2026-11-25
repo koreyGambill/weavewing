@@ -1885,6 +1885,152 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  it.effect(
+    "expires a computer-use prompt when Codex fails its tool call without resolving it",
+    () =>
+      Effect.gen(function* () {
+        const nativeThreadId = "abandoned-elicitation-thread";
+        const nativeTurnId = "abandoned-elicitation-turn";
+        const prompt = "Read the Calculator window.";
+        const toolCall = (id: string, status: "inProgress" | "failed") => ({
+          type: "mcpToolCall",
+          id,
+          server: "cua_repl",
+          tool: "js",
+          status,
+          arguments: { code: "await cua.getApp({windowId: 1})", title: "Reading Calculator" },
+          ...(status === "failed"
+            ? {
+                result: {
+                  content: [{ type: "text", text: "Computer Use app approval timed out" }],
+                },
+              }
+            : {}),
+        });
+        const toolCallEvent = (
+          method: "item/started" | "item/completed",
+          id: string,
+          status: "inProgress" | "failed",
+        ) => ({
+          type: "emit_inbound" as const,
+          label: `${method}/${id}`,
+          frame: {
+            method,
+            params: { item: toolCall(id, status), threadId: nativeThreadId, turnId: nativeTurnId },
+          },
+        });
+        const elicitation = (id: number, callId: string) => ({
+          type: "emit_inbound" as const,
+          frame: {
+            id,
+            method: "mcpServer/elicitation/request",
+            params: {
+              threadId: nativeThreadId,
+              turnId: nativeTurnId,
+              serverName: "cua_repl",
+              mode: "form",
+              _meta: {
+                callId,
+                codex_approval_kind: "mcp_tool_call",
+                connector_id: "computer-use",
+                persist: ["session", "always"],
+              },
+              message: "Allow Codex to use Calculator?",
+              requestedSchema: { type: "object", properties: {} },
+            },
+          },
+        });
+        const pending = yield* Queue.unbounded<OrchestrationV2RuntimeRequest>();
+        const firstPending = yield* Deferred.make<void>();
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "abandoned-computer-use-elicitation",
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+              toolCallEvent("item/started", "call_first", "inProgress"),
+              elicitation(0, "call_first"),
+              // Codex's approval timeout: the tool call fails and request 0 is never resolved.
+              toolCallEvent("item/completed", "call_first", "failed"),
+              toolCallEvent("item/started", "call_retry", "inProgress"),
+              elicitation(1, "call_retry"),
+              {
+                type: "expect_outbound",
+                frame: {
+                  id: 1,
+                  result: { action: "accept", _meta: { persist: "session" }, content: {} },
+                },
+              },
+              toolCallEvent("item/completed", "call_retry", "failed"),
+              {
+                type: "emit_inbound",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                  },
+                },
+              },
+            ],
+          }),
+          (event) =>
+            event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+              ? Queue.offer(pending, event.runtimeRequest).pipe(
+                  Effect.andThen(Deferred.succeed(firstPending, undefined)),
+                )
+              : Effect.void,
+          undefined,
+          undefined,
+          (entry) =>
+            entry.label === "item/completed/call_first"
+              ? Deferred.await(firstPending)
+              : Effect.void,
+        );
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("abandoned-computer-use-elicitation-attempt"),
+            text: prompt,
+          }),
+        );
+        const abandoned = yield* Queue.take(pending);
+        const retry = yield* Queue.take(pending);
+
+        const abandonedUpdates = harness.events.flatMap((event) =>
+          event.type === "runtime_request.updated" && event.runtimeRequest.id === abandoned.id
+            ? [event.runtimeRequest.status]
+            : [],
+        );
+        assert.deepEqual(abandonedUpdates, ["pending", "expired"]);
+        const late = yield* harness.runtime
+          .respondToRuntimeRequest({ requestId: abandoned.id, decision: "acceptForSession" })
+          .pipe(Effect.flip);
+        assert.equal(late._tag, "ProviderAdapterRuntimeRequestResponseError");
+
+        yield* harness.runtime.respondToRuntimeRequest({
+          requestId: retry.id,
+          decision: "acceptForSession",
+        });
+        yield* harness.firstTerminal;
+        assert.deepEqual(
+          harness.terminalEvents().map((event) => event.status),
+          ["completed"],
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
+
   it.effect("expires approvals and questions that Codex resolves without an answer", () =>
     Effect.gen(function* () {
       const nativeThreadId = "provider-resolved-thread";
