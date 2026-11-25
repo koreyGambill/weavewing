@@ -16,10 +16,10 @@ const RELEVANT: Readonly<Record<number, { readonly owner: string; readonly body:
 const AREAS = ["invoice PDF", "password reset", "email digest", "CSV export", "avatar upload"];
 const OWNERS = ["A. Brandt", "C. Mwangi", "D. Petrov", "E. Nakamura", "F. Alvarez"];
 
-/** A deterministic support export of `count` tickets, SUP-1001 onward, about 270 bytes each. */
-export function ticketExport(count: number): string {
+/** A deterministic support export of `count` tickets from SUP-(1000 + `from`), about 270 bytes each. */
+export function ticketExport(count: number, from = 1): string {
   return Array.from({ length: count }, (_, index) => {
-    const n = index + 1;
+    const n = from + index;
     const area = AREAS[n % AREAS.length]!;
     const relevant = RELEVANT[n];
     return `KEY: SUP-${1000 + n}

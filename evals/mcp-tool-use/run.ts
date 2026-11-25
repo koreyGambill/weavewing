@@ -380,7 +380,7 @@ export const McpToolUseCase = Schema.Struct({
      * Canned tool results by bare name, T3 or native. `"default"` uses the runner's result. For a
      * device tool, a T3 `DeviceError` (`{"_tag": ..., "cause": null}`) fails it inside T3; for a
      * preview tool, a `PreviewAutomationError` fails it with that error's message. See the README
-     * for `{"$sequence": [...]}` and `{"$ticketExport": <count>}` mocks.
+     * for `{"$sequence": [...]}` and `{"$ticketExport": {...}}` mocks.
      */
     mocks: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
     /** Regexes on one part of a shell command. A match wins over the shell simulator. */
@@ -1043,6 +1043,16 @@ export const makeSample = (testCase: McpToolUseCase, templateBase: Base): Sample
     priorErrors: new Set(),
     mockCalls: new Map(),
   };
+};
+
+/** `{"$ticketExport": {"count": n, "from": k}}` becomes that export, also inside `$sequence`. */
+const generatedMock = (mock: unknown): unknown => {
+  if (!isRecord(mock)) return mock;
+  if (Array.isArray(mock.$sequence)) return { $sequence: mock.$sequence.map(generatedMock) };
+  const spec = mock.$ticketExport;
+  return isRecord(spec) && typeof spec.count === "number"
+    ? ticketExport(spec.count, typeof spec.from === "number" ? spec.from : 1)
+    : mock;
 };
 
 /** A `{"$sequence": [...]}` mock answers its nth call with the nth result, then repeats the last. */
@@ -3002,12 +3012,7 @@ const main = Effect.gen(function* () {
         mocks === undefined
           ? undefined
           : Object.fromEntries(
-              Object.entries(mocks).map(([tool, mock]) => [
-                tool,
-                isRecord(mock) && typeof mock.$ticketExport === "number"
-                  ? ticketExport(mock.$ticketExport)
-                  : mock,
-              ]),
+              Object.entries(mocks).map(([tool, mock]) => [tool, generatedMock(mock)]),
             );
       return {
         ...testCase,
