@@ -2579,6 +2579,54 @@ it.effect(
     }),
 );
 
+it.effect(
+  "ProviderSessionManagerV2 gives the session reopened after a tool reload a working MCP credential",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const mcpConfigs = yield* Ref.make<
+        ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+      >([]);
+      const effect = Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const registry = yield* McpSessionRegistry.McpSessionRegistry;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-provider-session-manager-tool-reload");
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        const open = Effect.gen(function* () {
+          const providerSessionId = yield* idAllocator.allocate.providerSession({
+            providerInstanceId: modelSelection.instanceId,
+            threadId,
+          });
+          yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+          const config = (yield* Ref.get(mcpConfigs)).at(-1);
+          return {
+            providerSessionId,
+            token: config?.authorizationHeader.replace(/^Bearer\s+/, "") ?? "",
+          };
+        });
+
+        const before = yield* open;
+        const detached = yield* manager.detach({
+          providerSessionId: before.providerSessionId,
+          threadId,
+          detail: "Tools changed.",
+        });
+        assert.deepEqual(detached, { processEnded: true });
+
+        const after = yield* open;
+        assert.notEqual(after.providerSessionId, before.providerSessionId);
+        assert.equal((yield* registry.resolve(after.token))?.thread.threadId, threadId);
+      });
+
+      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
+    }),
+);
+
 it.effect.each([
   { relationshipToParent: null, subagent: false },
   { relationshipToParent: "subagent", subagent: true },
