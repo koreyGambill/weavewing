@@ -6,7 +6,6 @@ import {
   EvidenceLanding,
   EvidenceLandingSummary,
   EvidenceRecord,
-  OrchestrationV2DelegateRole,
   type EvidenceChange,
   type EvidenceCounts,
   type EvidenceCoverageInput,
@@ -40,12 +39,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
-import {
-  type DelegatedTask,
-  matchReviewTask,
-  reviewVerdictFromText,
-  selectThreadReview,
-} from "./reviewLink.ts";
 
 /** Captures must resolve under ~/evidence. This catches wrong paths; minting a URL needs `filesystem:read`, which is the real boundary. */
 const EVIDENCE_ROOT_NAME = "evidence";
@@ -81,15 +74,6 @@ interface LandingRow {
   readonly updated_at: string;
   readonly record_json: string;
 }
-interface DelegatedTaskRow {
-  readonly child_thread_id: string;
-  readonly started_at: string;
-  readonly completed_at: string | null;
-  readonly prompt: string | null;
-  readonly result: string | null;
-  readonly role: string | null;
-  readonly branch: string | null;
-}
 interface QaRow {
   readonly change_id: string;
   readonly state: EvidenceQaState;
@@ -111,7 +95,6 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
   }),
 );
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
-const isDelegateRole = Schema.is(OrchestrationV2DelegateRole);
 
 const invalid = (message: string) => new EvidenceError({ code: "invalid", message });
 const storage = (cause: unknown) =>
@@ -208,102 +191,61 @@ const make = Effect.gen(function* () {
     return canonical.value;
   });
 
-  // Every task the lead delegated, so a change's reviewer can be found and checked among them. A
-  // child in a linked environment has no local thread row, so its tasks never back a review.
-  const readDelegation = Effect.fnUntraced(function* (threadId: ThreadId) {
+  // The role each of the lead's local children was delegated with. A child in a linked
+  // environment has no local thread row, so it never appears here.
+  const readChildRoles = Effect.fnUntraced(function* (threadId: ThreadId) {
     const [landing] = yield* sql<{
       readonly relationship: string | null;
       readonly parent_thread_id: string | null;
     }>`SELECT json_extract(payload_json, '$.lineage.relationshipToParent') AS relationship,
           json_extract(payload_json, '$.lineage.parentThreadId') AS parent_thread_id
         FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
-    const recordedByChild =
-      landing?.relationship === "subagent" && landing.parent_thread_id !== null;
-    const leadThreadId = recordedByChild ? landing.parent_thread_id! : threadId;
-    const rows =
-      yield* sql<DelegatedTaskRow>`SELECT s.child_thread_id, s.started_at, s.completed_at,
-          json_extract(s.payload_json, '$.prompt') AS prompt,
-          json_extract(s.payload_json, '$.result') AS result,
-          coalesce(json_extract(t.payload_json, '$.delegateRole'),
-            json_extract(s.payload_json, '$.delegateRole')) AS role,
-          json_extract(t.payload_json, '$.branch') AS branch
+    const leadThreadId =
+      landing?.relationship === "subagent" && landing.parent_thread_id !== null
+        ? landing.parent_thread_id
+        : threadId;
+    const rows = yield* sql<{
+      readonly child_thread_id: string;
+      readonly role: string | null;
+    }>`SELECT s.child_thread_id, coalesce(json_extract(t.payload_json, '$.delegateRole'),
+            json_extract(s.payload_json, '$.delegateRole')) AS role
         FROM orchestration_v2_projection_subagents s
         JOIN orchestration_v2_projection_threads t ON t.thread_id = s.child_thread_id
-        WHERE s.thread_id = ${leadThreadId} AND s.origin = 'app_owned' AND s.started_at IS NOT NULL`;
-    return {
-      knownBranches: rows.flatMap((row) => (row.branch === null ? [] : [row.branch])),
-      tasks: rows.map((row): DelegatedTask => ({
-        childThreadId: row.child_thread_id,
-        role: isDelegateRole(row.role) ? row.role : null,
-        startedAt: row.started_at,
-        completedAt: row.completed_at,
-        prompt: row.prompt ?? "",
-        result: row.result,
-      })),
-    };
+        WHERE s.thread_id = ${leadThreadId} AND s.origin = 'app_owned'`;
+    const roles = new Map<string, Set<string>>();
+    for (const row of rows) {
+      const known = roles.get(row.child_thread_id) ?? new Set<string>();
+      if (row.role !== null) known.add(row.role);
+      roles.set(row.child_thread_id, known);
+    }
+    return roles;
   });
 
   /**
-   * The review as stored: the agent's claim, plus the reviewer task that backs it when one does.
-   * Only a finished review-role task of the same lead whose brief is about this change counts, and
-   * its verdict replaces the claim only when its last line states one exactly.
+   * The review as stored: always the agent's claim, unverified. A cited reviewer thread is kept as a
+   * link only when it is a review-role child of the same lead; any other is dropped with a warning.
    */
-  const linkReview = (
+  const storedReview = (
     change: RecordInput["changes"][number],
-    landing: ReadonlyArray<RecordInput["changes"][number]>,
-    targetBranch: string,
-    landedAt: string,
-    delegation: {
-      readonly knownBranches: ReadonlyArray<string>;
-      readonly tasks: ReadonlyArray<DelegatedTask>;
-    },
+    childRoles: ReadonlyMap<string, ReadonlySet<string>>,
     warnings: string[],
   ): EvidenceChange["review"] => {
-    const { review } = change;
-    if (review.verdict === "waived") return review;
-    const scope = { change, landing, targetBranch, landedAt };
-    const explicit = review.threadId;
-    let reviewer: DelegatedTask | null;
-    if (explicit !== undefined) {
-      const threadTasks = delegation.tasks.filter((task) => task.childThreadId === explicit);
-      reviewer = selectThreadReview({
-        ...scope,
-        threadTasks,
-        knownBranches: delegation.knownBranches,
-      });
-      if (reviewer === null) {
+    const { threadId, ...claim } = change.review;
+    let review: EvidenceChange["review"] = change.review;
+    if (threadId !== undefined) {
+      const roles = childRoles.get(threadId);
+      if (roles === undefined || !roles.has("review")) {
         warnings.push(
-          `change ${change.id}: review shown as unverified because thread ${explicit} ${
-            threadTasks.length === 0
-              ? "is not a task this lead delegated"
-              : threadTasks.every((task) => task.role !== "review")
-                ? "was not delegated with role review"
-                : "has no finished review task before the landing whose brief is this change alone"
+          `change ${change.id}: dropped review.threadId ${threadId} because it ${
+            roles === undefined
+              ? "is not a thread this lead delegated"
+              : "was not delegated with role review"
           }`,
         );
-        return { ...review, check: "unverified" };
+        review = claim;
       }
-    } else {
-      reviewer = matchReviewTask({ ...scope, tasks: delegation.tasks });
-      if (reviewer === null) return { ...review, check: "unverified" };
     }
-    const linked = {
-      ...review,
-      threadId: ThreadId.make(reviewer.childThreadId),
-      ...(explicit === undefined ? { linked: "derived" as const } : {}),
-    };
-    const threadVerdict = reviewVerdictFromText(reviewer.result ?? "");
-    if (threadVerdict === null) {
-      warnings.push(
-        `change ${change.id}: reviewer thread ${reviewer.childThreadId} does not end with one exact verdict line, so ${review.verdict} is not confirmed`,
-      );
-      return { ...linked, check: "verdict_unconfirmed" };
-    }
-    if (threadVerdict !== review.verdict)
-      warnings.push(
-        `change ${change.id}: review verdict taken from thread ${reviewer.childThreadId} (${threadVerdict}), not ${review.verdict}`,
-      );
-    return { ...linked, verdict: threadVerdict, check: "verified" };
+    return review.verdict === "waived" ? review : { ...review, check: "unverified" };
   };
 
   const readQa = (landingId: string) =>
@@ -321,55 +263,41 @@ const make = Effect.gen(function* () {
     }
     const root = path.join(yield* HostProcess.HomeDirectory, EVIDENCE_ROOT_NAME);
     const warnings: string[] = [];
-    const captured: Array<RecordInput["changes"][number]> = [];
+    const childRoles = yield* readChildRoles(input.threadId);
+    const changes = [];
     for (const change of input.changes) {
       const captures = [];
       for (const capture of change.captures)
         captures.push({ ...capture, path: yield* checkCapture(capture.path, root, warnings) });
-      captured.push({ ...change, captures });
+      changes.push({ ...change, captures, review: storedReview(change, childRoles, warnings) });
     }
+    const recordJson = yield* encodeRecord({
+      id: input.id,
+      title: input.title,
+      target: input.target,
+      verifications: input.verifications,
+      changes,
+    }).pipe(Effect.mapError((cause) => invalid(cause.message)));
+    const bytes = new TextEncoder().encode(recordJson).byteLength;
+    if (bytes > EVIDENCE_RECORD_MAX_BYTES)
+      return yield* invalid(
+        `Record is ${bytes} bytes; the limit is ${EVIDENCE_RECORD_MAX_BYTES}. Shorten summaries or gaps.`,
+      );
     const now = DateTime.formatIso(yield* DateTime.now);
     const qa = yield* sql
       .withTransaction(
         Effect.gen(function* () {
-          const [existing] = yield* sql<{
+          const [owner] = yield* sql<{
             readonly thread_id: string;
-            readonly landed_at: string;
-          }>`SELECT thread_id, landed_at FROM evidence_landings WHERE landing_id = ${input.id}`;
-          if (existing !== undefined && existing.thread_id !== input.threadId)
+          }>`SELECT thread_id FROM evidence_landings WHERE landing_id = ${input.id}`;
+          if (owner !== undefined && owner.thread_id !== input.threadId)
             return yield* invalid(
-              `Landing id ${input.id} is already used by thread ${existing.thread_id}; pick another id.`,
-            );
-          // A re-record without landedAt keeps the stored time, so reviews are cut off at it too.
-          const effectiveLandedAt = landedAt ?? existing?.landed_at ?? now;
-          const delegation = yield* readDelegation(input.threadId);
-          const changes = captured.map((change) => ({
-            ...change,
-            review: linkReview(
-              change,
-              captured,
-              input.target.branch,
-              effectiveLandedAt,
-              delegation,
-              warnings,
-            ),
-          }));
-          const recordJson = yield* encodeRecord({
-            id: input.id,
-            title: input.title,
-            target: input.target,
-            verifications: input.verifications,
-            changes,
-          }).pipe(Effect.mapError((cause) => invalid(cause.message)));
-          const bytes = new TextEncoder().encode(recordJson).byteLength;
-          if (bytes > EVIDENCE_RECORD_MAX_BYTES)
-            return yield* invalid(
-              `Record is ${bytes} bytes; the limit is ${EVIDENCE_RECORD_MAX_BYTES}. Shorten summaries or gaps.`,
+              `Landing id ${input.id} is already used by thread ${owner.thread_id}; pick another id.`,
             );
           yield* sql`INSERT INTO evidence_landings (landing_id, thread_id, project_id, landed_at, record_json, updated_at)
-              VALUES (${input.id}, ${input.threadId}, ${input.projectId}, ${effectiveLandedAt}, ${recordJson}, ${now})
+              VALUES (${input.id}, ${input.threadId}, ${input.projectId}, ${landedAt ?? now}, ${recordJson}, ${now})
               ON CONFLICT (landing_id) DO UPDATE SET project_id = excluded.project_id,
-              landed_at = excluded.landed_at, record_json = excluded.record_json, updated_at = excluded.updated_at`;
+              landed_at = coalesce(${landedAt ?? null}, landed_at), record_json = excluded.record_json, updated_at = excluded.updated_at`;
           yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
           for (const id of ids) {
             yield* sql`INSERT INTO evidence_qa (landing_id, change_id, state, note, updated_at)

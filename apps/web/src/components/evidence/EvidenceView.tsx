@@ -577,16 +577,14 @@ function ChangeRow({
           </Button>
         ) : null}
         {review.hint === null ? (
-          <Badge variant={review.variant} className="max-w-full" title={review.label}>
-            {review.variant === "success" ? <CheckIcon /> : null}
+          <Badge variant="outline" className="max-w-full" title={review.label}>
             <span className="truncate">{review.label}</span>
           </Badge>
         ) : (
           <Tooltip>
             <TooltipTrigger
-              render={<Badge variant={review.variant} className="max-w-full" tabIndex={0} />}
+              render={<Badge variant="outline" className="max-w-full" tabIndex={0} />}
             >
-              {review.variant === "success" ? <CheckIcon /> : null}
               <span className="truncate">{review.label}</span>
             </TooltipTrigger>
             <TooltipPopup side="top">{review.hint}</TooltipPopup>

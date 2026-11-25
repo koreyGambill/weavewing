@@ -32,15 +32,14 @@ export const EvidenceVerification = Schema.Struct({
 });
 export type EvidenceVerification = typeof EvidenceVerification.Type;
 
-/** The review as an agent reports it; the server decides whether a reviewer thread backs it. */
+/** The review as an agent reports it. */
 const EvidenceReviewInput = Schema.Struct({
   verdict: Schema.Literals(["approved", "changes_requested", "waived"]),
   by: Schema.optional(Text(120)),
   summary: Schema.optional(Text(2000)),
   threadId: Schema.optional(
     ThreadId.annotate({
-      description:
-        "The reviewer thread: a review-role delegate of the lead that finished before the landing. Omitted, the server links the reviewer whose brief named this change's branch or a commit.",
+      description: "Links the reviewer thread: a review-role delegate of the lead.",
     }),
   ),
   reason: Schema.optional(
@@ -60,12 +59,10 @@ export const EvidenceChange = Schema.Struct({
   summary: Text(2000),
   review: Schema.Struct({
     ...EvidenceReviewInput.fields,
-    /** Set when the server, not the agent, chose `threadId`. */
-    linked: Schema.optional(Schema.Literal("derived")),
     /**
-     * Set by the server from the reviewer thread: `verified` when a completed review-role child
-     * stated this verdict, `verdict_unconfirmed` when it finished without one plain verdict line,
-     * and `unverified` (or absent, on older records) otherwise.
+     * Whether a reviewer is known to have stated this verdict. The server writes only `unverified`;
+     * the other values only let older development records decode, and clients show them as
+     * unverified too.
      */
     check: Schema.optional(Schema.Literals(["verified", "verdict_unconfirmed", "unverified"])),
   }),

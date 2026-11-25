@@ -8,11 +8,7 @@ export const QA_STATES = [
   { state: "waived", label: "Waived", icon: MinusIcon, tone: "text-muted-foreground" },
 ] as const;
 
-const VERDICTS = {
-  approved: { label: "approved", variant: "success" },
-  changes_requested: { label: "changes requested", variant: "warning" },
-  waived: { label: "review waived", variant: "outline" },
-} as const;
+const CLAIMS = { approved: "approved", changes_requested: "changes requested" } as const;
 
 export const CHECKS = {
   pass: { suffix: "", variant: "success" },
@@ -31,45 +27,25 @@ export function checkLabel(check: {
 }
 
 /**
- * How a change's review reads. Only a review the server checked against a finished reviewer
- * thread shows as reviewed; any other verdict is the agent's word and shows as unverified.
+ * How a change's review reads. Nothing checks a reviewer's verdict yet, so every claim reads as
+ * the agent's unverified word, with a link to the reviewer thread it named.
  */
 export function reviewDisplay(review: EvidenceChange["review"]): {
   readonly label: string;
-  readonly variant: "success" | "warning" | "outline";
   readonly hint: string | null;
   readonly threadId: EvidenceChange["review"]["threadId"] | null;
 } {
-  const by = review.by ? ` by ${review.by}` : "";
   if (review.verdict === "waived")
     return {
       label: review.reason ? `review waived: ${review.reason}` : "review waived",
-      variant: "outline",
       hint: null,
       threadId: null,
     };
-  const verdict = VERDICTS[review.verdict];
-  const linked =
-    review.linked === "derived" ? " The reviewer thread was linked automatically." : "";
-  if (review.check === "verdict_unconfirmed" && review.threadId !== undefined)
-    return {
-      label: "verdict not confirmed",
-      variant: "outline",
-      hint: `Reported ${verdict.label}${by}; the reviewer thread does not state one plain verdict.${linked}`,
-      threadId: review.threadId,
-    };
-  if (review.check !== "verified" || review.threadId === undefined)
-    return {
-      label: "unverified review",
-      variant: "outline",
-      hint: `Reported ${verdict.label}${by}, with no finished reviewer thread behind it.`,
-      threadId: null,
-    };
+  const claim = CLAIMS[review.verdict];
   return {
-    label: `${verdict.label}${review.by ? ` · ${review.by}` : ""}`,
-    variant: verdict.variant,
-    hint: linked === "" ? null : linked.trim(),
-    threadId: review.threadId,
+    label: `Unverified review · agent reported ${claim}`,
+    hint: `Reported ${claim}${review.by ? ` by ${review.by}` : ""}. Reviewer verdicts are not checked yet.`,
+    threadId: review.threadId ?? null,
   };
 }
 
