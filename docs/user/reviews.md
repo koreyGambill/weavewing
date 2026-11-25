@@ -40,20 +40,28 @@ your choice on the card as a draft.
 **Discuss** puts your note in the message box as a comment on the question
 instead of an answer, for when you want to ask the agent something first. The
 question stays open and keeps counting as waiting on you. A question has an
-answer or a comment in the message box, not both.
+answer or a comment in the message box, not both. Once the agent's turn picks
+up your comment, the note clears from the card and the question reads
+**Discussing**; an option you chose stays as a draft. The agent replies in chat
+and, when the decision is still open, asks it again as a newer question that
+reflects the discussion.
 
 Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
-starts. A sent answer stops counting as waiting on you. Editing or cancelling
+starts; or, for a comment, in the composer or discussing. A sent answer stops counting as waiting on you. Editing or cancelling
 the queued message returns it with its draft. A closed question shrinks to one
 line; click it to see the whole card again, with your choice and note, read-only.
+A replaced question links to its replacement with **Replaced by Qn**, and the
+newer question links back with **Replaces Qn**.
 
 Clicking the line above the composer lists the waiting questions; picking one
 scrolls the chat to it, and **Answer all drafted** queues every draft.
 **Open panel** shows every question beside the chat in one scrolling column,
 where J and K move, 1 to 9 choose an option, and N defers. Its filters show
 waiting, deferred, answered, or dismissed questions, and this device remembers
-your choice.
+your choice. **Refresh questions** adds a request to your message box asking the
+agent to withdraw questions that no longer matter and replace outdated ones;
+it is sent only when you send your message.
 
 A thread with questions waiting shows a count in the thread list, and an idle
 one reads **Needs Decision**. It stays out of automatic settling until you answer
