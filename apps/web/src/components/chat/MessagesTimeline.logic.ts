@@ -90,7 +90,8 @@ export function timelineEntryRunId(entry: TimelineEntry): RunId | null {
     entry.kind === "html-render" ||
     entry.kind === "mcp-app" ||
     entry.kind === "sent-message" ||
-    entry.kind === "thread-questions"
+    entry.kind === "thread-questions" ||
+    entry.kind === "question-dismissed"
   ) {
     return entry.runId;
   }
@@ -672,6 +673,13 @@ type MessagesTimelineRowContent =
       questionIds: ReadonlyArray<string>;
     }
   | {
+      kind: "question-dismissed";
+      id: string;
+      createdAt: string;
+      questionId: string;
+      title: string;
+    }
+  | {
       kind: "mcp-app";
       id: string;
       createdAt: string;
@@ -871,6 +879,7 @@ function deriveSupersededAttemptFolds(
       entry.kind === "mcp-app" ||
       entry.kind === "sent-message" ||
       entry.kind === "thread-questions" ||
+      entry.kind === "question-dismissed" ||
       timelineEntryIsPersistentResourceCard(entry) ||
       liveSubagentEntryIds.has(entry.id) ||
       (entry.kind === "work" && entry.entry.itemType === "system_notice")
@@ -2273,6 +2282,17 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "question-dismissed") {
+      nextRows.push({
+        kind: "question-dismissed",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        questionId: timelineEntry.questionId,
+        title: timelineEntry.title,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "mcp-app") {
       nextRows.push({
         kind: "mcp-app",
@@ -2902,6 +2922,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "thread-questions": {
       const bq = b as typeof a;
       return a.createdAt === bq.createdAt && a.questionIds.join() === bq.questionIds.join();
+    }
+
+    case "question-dismissed": {
+      const bd = b as typeof a;
+      return a.createdAt === bd.createdAt && a.title === bd.title;
     }
 
     case "mcp-app": {

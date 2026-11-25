@@ -369,6 +369,7 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { useThreadQuestionsBanner } from "./questions/useThreadQuestionsBanner";
+import { questionDismissalEntries } from "./questions/questionDismissals.logic";
 import { questionSurfaceIdsToClose } from "./questions/questionsSurface.logic";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
@@ -443,6 +444,7 @@ const EMPTY_TURN_ITEMS: ThreadStructure["turnItems"] = [];
 const EMPTY_RUNS: ThreadStructure["runs"] = [];
 const EMPTY_AUTO_UPDATE_ENVIRONMENTS: ReadonlyArray<EnvironmentPresentation> = [];
 const EMPTY_COMPOSER_BANNER_ITEMS: ReadonlyArray<ComposerBannerStackItem> = [];
+const EMPTY_QUESTION_DISMISSALS: ReturnType<typeof questionDismissalEntries> = [];
 
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 
@@ -1659,6 +1661,9 @@ export default function ChatView(props: ChatViewProps) {
           { ...codexFeedbackMessage(submission, "assistant"), runId: null },
         ],
   );
+  const questionDismissals = settings.agentQuestionsEnabled
+    ? questionDismissalEntries(serverProjection?.thread.questions)
+    : EMPTY_QUESTION_DISMISSALS;
   const timelineEntriesInput = {
     environmentId,
     threadQuestions: settings.agentQuestionsEnabled,
@@ -3761,6 +3766,7 @@ export default function ChatView(props: ChatViewProps) {
                       )
                 }
                 draftEntries={isServerThread ? null : draftTimelineEntries}
+                questionDismissals={questionDismissals}
                 activeThreadKey={activeThreadKey}
                 syncing={threadSyncPhase !== null}
                 detailLoading={threadDetailLoading}

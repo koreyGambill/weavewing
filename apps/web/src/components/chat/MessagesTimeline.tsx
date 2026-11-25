@@ -116,6 +116,7 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import { TimelineMinimap } from "./TimelineMinimap";
 import { BookmarkRail } from "./BookmarkRail";
+import { QuestionDismissedTimelineRow } from "../questions/QuestionDismissedTimelineRow";
 import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
 import { orderBookmarks } from "../reviews/bookmarks.logic";
@@ -1786,6 +1787,13 @@ function timelineRowSpanIndices(
   return Array.from({ length: last - first + 1 }, (_, i) => first + i);
 }
 
+function QuestionDismissedRow({ questionId, title }: { questionId: string; title: string }) {
+  const ctx = use(TimelineRowCtx);
+  return ctx.threadRef ? (
+    <QuestionDismissedTimelineRow threadRef={ctx.threadRef} questionId={questionId} title={title} />
+  ) : null;
+}
+
 function ThreadQuestionsRow({ questionIds }: { questionIds: ReadonlyArray<string> }) {
   const ctx = use(TimelineRowCtx);
   return ctx.threadRef ? (
@@ -1837,6 +1845,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "html-render" ||
                   row.kind === "sent-message" ||
                   row.kind === "thread-questions" ||
+                  row.kind === "question-dismissed" ||
                   row.kind === "mcp-app" ||
                   row.kind === "viewed-images"
                 ? "pb-2"
@@ -1890,6 +1899,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "sent-message" ? <SentMessageTimelineRow row={row} /> : null}
       {row.kind === "thread-questions" ? (
         <ThreadQuestionsRow questionIds={row.questionIds} />
+      ) : null}
+      {row.kind === "question-dismissed" ? (
+        <QuestionDismissedRow questionId={row.questionId} title={row.title} />
       ) : null}
       {row.kind === "viewed-images" ? <ViewedImagesTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}

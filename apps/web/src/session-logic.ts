@@ -161,6 +161,14 @@ export type TimelineEntry = (
     }
   | {
       readonly id: string;
+      readonly kind: "question-dismissed";
+      readonly createdAt: string;
+      readonly runId: null;
+      readonly questionId: string;
+      readonly title: string;
+    }
+  | {
+      readonly id: string;
       readonly kind: "mcp-app";
       readonly createdAt: string;
       readonly runId: RunId | null;

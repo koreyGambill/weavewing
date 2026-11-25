@@ -1,0 +1,46 @@
+import { describe, expect, it } from "vite-plus/test";
+
+import type { TimelineEntry } from "../../session-logic";
+import { questionDismissalEntries, withQuestionDismissals } from "./questionDismissals.logic";
+
+const entry = (id: string, createdAt: string) =>
+  ({ id, kind: "sent-message", createdAt, runId: null, text: id }) as TimelineEntry;
+
+describe("question dismissals in the timeline", () => {
+  const dismissals = questionDismissalEntries([
+    { id: "Q1", title: "Ship it?", state: "open", userChangedAt: "2026-01-01T00:00:03.000Z" },
+    { id: "Q2", title: "Old?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:00.500Z" },
+    { id: "Q3", title: "Flag?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:02.500Z" },
+    { id: "Q4", title: "Late?", state: "withdrawn", userChangedAt: "2026-01-01T00:00:09.000Z" },
+    { id: "Q5", title: "Agent's own", state: "withdrawn" },
+  ]);
+
+  it("lists only questions the user dismissed", () => {
+    expect(dismissals.map((dismissal) => [dismissal.questionId, dismissal.title])).toEqual([
+      ["Q2", "Old?"],
+      ["Q3", "Flag?"],
+      ["Q4", "Late?"],
+    ]);
+  });
+
+  it("places each dismissal where it happened and leaves out one older than the loaded history", () => {
+    const entries = [
+      entry("a", "2026-01-01T00:00:01.000Z"),
+      entry("b", "2026-01-01T00:00:02.000Z"),
+      entry("c", "2026-01-01T00:00:03.000Z"),
+    ];
+    expect(withQuestionDismissals(entries, dismissals).map((row) => row.id)).toEqual([
+      "a",
+      "b",
+      "question-dismissed:Q3",
+      "c",
+      "question-dismissed:Q4",
+    ]);
+    expect(withQuestionDismissals(entries, [])).toBe(entries);
+    expect(withQuestionDismissals([], dismissals).map((row) => row.id)).toEqual([
+      "question-dismissed:Q2",
+      "question-dismissed:Q3",
+      "question-dismissed:Q4",
+    ]);
+  });
+});

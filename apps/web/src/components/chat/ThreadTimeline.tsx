@@ -9,6 +9,7 @@ import {
   resolveThreadSwitchTimeline,
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
+import { withQuestionDismissals } from "../questions/questionDismissals.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
 /**
@@ -22,6 +23,7 @@ export function ThreadTimeline({
   entriesInput,
   inlineArchiveRunIds,
   draftEntries,
+  questionDismissals,
   activeThreadKey,
   syncing,
   detailLoading,
@@ -34,6 +36,8 @@ export function ThreadTimeline({
   inlineArchiveRunIds?: ReadonlySet<RunId> | undefined;
   /** A local draft's optimistic rows; null for a server thread. */
   draftEntries: ReadonlyArray<TimelineEntry> | null;
+  /** The user's question dismissals, placed in the timeline where they happened. */
+  questionDismissals: Parameters<typeof withQuestionDismissals>[1];
   activeThreadKey: string | null;
   syncing: boolean;
   detailLoading: boolean;
@@ -50,7 +54,7 @@ export function ThreadTimeline({
               (row.item.runId !== null && inlineArchiveRunIds.has(row.item.runId)),
           ),
   });
-  const entries = draftEntries ?? serverEntries;
+  const entries = draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({
