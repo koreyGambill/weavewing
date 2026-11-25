@@ -210,6 +210,8 @@ export interface EnvironmentThreadShell {
   readonly sidebarGroup?: string | null;
   /** Claude only: tools switched on, and MCP servers left out, for this thread. */
   readonly toolOverrides?: import("@t3tools/contracts").ThreadToolOverrides;
+  /** The latest tool change's session reload; `pending` until the old process has ended. */
+  readonly toolOverridesReload?: import("@t3tools/contracts").ThreadToolOverridesReload;
   readonly pullRequests: ReadonlyArray<import("@t3tools/contracts").ThreadPullRequestLink>;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly branchPullRequest?: ThreadLinkedPullRequest | null;
@@ -384,6 +386,9 @@ export function presentThreadShell(
     activeOrderKey: thread.activeOrderKey ?? null,
     ...(thread.sidebarGroup === undefined ? {} : { sidebarGroup: thread.sidebarGroup }),
     ...(thread.toolOverrides === undefined ? {} : { toolOverrides: thread.toolOverrides }),
+    ...(thread.toolOverridesReload === undefined
+      ? {}
+      : { toolOverridesReload: thread.toolOverridesReload }),
     ...(thread.lastVisitedAt === undefined
       ? {}
       : { lastVisitedAt: nullableIso(thread.lastVisitedAt) }),

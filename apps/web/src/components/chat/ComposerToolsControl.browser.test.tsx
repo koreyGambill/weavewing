@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   permitted: true,
   run: vi.fn(),
   inventory: vi.fn(),
+  inventoryPermitted: true,
 }));
 
 vi.mock(import("../../state/orchestration"), async (original) => {
@@ -31,10 +32,9 @@ vi.mock(import("../../state/orchestration"), async (original) => {
         ...actual.orchestrationEnvironment.setThreadToolOverrides,
         permissionAtom: () => Atom.make(state.permitted),
       },
-      threadMcpServers: ((target: unknown) =>
-        Atom.make(
-          state.inventory(target),
-        )) as typeof actual.orchestrationEnvironment.threadMcpServers,
+      threadMcpServers: Object.assign((target: unknown) => Atom.make(state.inventory(target)), {
+        permissionAtom: () => Atom.make(state.inventoryPermitted),
+      }) as never,
     },
   };
 });
@@ -56,7 +56,8 @@ function setup(
   inventory: AsyncResult.AsyncResult<unknown, unknown> = AsyncResult.success(fixtureInventory),
 ) {
   state.permitted = permitted;
-  state.run.mockReset().mockResolvedValue({ _tag: "Success", value: { reloaded: true } });
+  state.inventoryPermitted = true;
+  state.run.mockReset().mockResolvedValue({ _tag: "Success", value: { outcome: "reloaded" } });
   state.inventory.mockReset().mockReturnValue(inventory);
 }
 

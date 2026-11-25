@@ -63,6 +63,7 @@ import * as ProjectionReplay from "./ProjectionReplay.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import { ProviderSessionManagerV2 } from "../ProviderSessionManager.ts";
+import * as ThreadManagementService from "../ThreadManagementService.ts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   CLAUDE_MODEL_SELECTION,
@@ -138,6 +139,11 @@ function makeTestAdapter(input: {
   readonly backgroundTasksEndWithProcess?: true;
   readonly backgroundWork?: Ref.Ref<boolean>;
   readonly closedSessions?: Ref.Ref<ReadonlyArray<string>>;
+  /** Holds the session's close until `release`, then fails it. */
+  readonly failingClose?: {
+    readonly started: Deferred.Deferred<void>;
+    readonly release: Deferred.Deferred<void>;
+  };
   readonly failSessionOpen?: Ref.Ref<boolean>;
   readonly forkThread?: ProviderAdapter.ProviderAdapterV2SessionRuntime["forkThread"];
 }): ProviderAdapter.ProviderAdapterV2["Service"] {
@@ -156,6 +162,15 @@ function makeTestAdapter(input: {
           });
         }
         const events = yield* PubSub.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
+        if (input.failingClose !== undefined) {
+          const { started, release } = input.failingClose;
+          yield* Effect.addFinalizer(() =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.andThen(Effect.die(new Error("The provider process did not close."))),
+            ),
+          );
+        }
         if (input.closedSessions !== undefined) {
           const closedSessions = input.closedSessions;
           yield* Effect.addFinalizer(() =>
@@ -6125,7 +6140,6 @@ describe("orchestration v2 provider switching", () => {
         yield* Effect.gen(function* () {
           const orchestrator = yield* Orchestrator.OrchestratorV2;
           const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
-          const outbox = yield* EffectOutbox.EffectOutboxV2;
           yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
           yield* sendTo(toolsThreadId, "first");
           yield* worker.drain();
@@ -6134,20 +6148,24 @@ describe("orchestration v2 provider switching", () => {
           assert.equal(session.status, "ready");
 
           const reload = Effect.fn("ToolOverridesTest.reload")(function* (key: string) {
-            yield* setTools(toolsThreadId, key, wakeupAndConnectors);
-            const detach = (yield* outbox.listByCommandId(
-              CommandId.make(`command:${toolsThreadId}:tools:${key}`),
-            )).find((effect) => effect.request.type === "provider-session.detach");
-            if (detach !== undefined) yield* outbox.awaitSettled(detach.id);
-            return detach;
+            const commandId = CommandId.make(`command:${toolsThreadId}:tools:${key}`);
+            const result = yield* setTools(toolsThreadId, key, wakeupAndConnectors);
+            // Until the old process has ended, the change reports a pending reload.
+            assert.deepEqual(
+              (yield* orchestrator.getThreadProjection(toolsThreadId)).thread.toolOverridesReload,
+              { commandId, status: "pending" },
+            );
+            return yield* ThreadManagementService.awaitToolOverridesReload(orchestrator, {
+              threadId: toolsThreadId,
+              commandId,
+              afterSequence: result.sequence,
+            });
           });
-          const detach = yield* reload("on");
+          assert.equal(yield* reload("on"), "reloaded");
           const reloaded = yield* orchestrator.getThreadProjection(toolsThreadId);
           assert.deepEqual(reloaded.thread.toolOverrides, wakeupAndConnectors);
+          assert.equal(reloaded.thread.toolOverridesReload?.status, "succeeded");
           assert.deepEqual(yield* Ref.get(closedSessions), [session.id]);
-          // A reload keeps the thread's MCP credential; only terminal detaches revoke it.
-          assert.deepInclude(detach?.request, { detail: "Tools changed." });
-          assert.notProperty(detach?.request, "revokeMcpCredential");
           const notice = reloaded.turnItems.find((item) => item.type === "system_notice");
           assert.deepInclude(notice, {
             runId: afterFirst.runs[0]!.id,
@@ -6159,7 +6177,7 @@ describe("orchestration v2 provider switching", () => {
           yield* sendTo(toolsThreadId, "second");
           yield* worker.drain();
           const afterSecond = yield* waitForIdle(toolsThreadId);
-          assert.isDefined(yield* reload("again"));
+          assert.equal(yield* reload("again"), "reloaded");
           assert.lengthOf(yield* Ref.get(closedSessions), 2);
 
           yield* sendTo(toolsThreadId, "third");
@@ -6177,6 +6195,57 @@ describe("orchestration v2 provider switching", () => {
           // Every turn resumes the same native conversation.
           assert.lengthOf(new Set(turns.map((turn) => turn.nativeThreadId)), 1);
           assert.isAbove(afterSecond.runs.length, 1);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    it.live("keeps a reload pending until the old session closes, then reports its failure", () =>
+      Effect.gen(function* () {
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const failingClose = {
+          started: yield* Deferred.make<void>(),
+          release: yield* Deferred.make<void>(),
+        };
+        const layer = yield* harness("tool-overrides-failed-close", {
+          capturedTurns,
+          failingClose,
+        });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+          yield* sendTo(toolsThreadId, "first");
+          yield* worker.drain();
+          yield* waitForIdle(toolsThreadId);
+
+          const commandId = CommandId.make(`command:${toolsThreadId}:tools:on`);
+          const result = yield* setTools(toolsThreadId, "on", wakeupAndConnectors);
+          const outcome = yield* ThreadManagementService.awaitToolOverridesReload(orchestrator, {
+            threadId: toolsThreadId,
+            commandId,
+            afterSequence: result.sequence,
+          }).pipe(Effect.forkChild);
+          yield* Deferred.await(failingClose.started);
+          assert.isUndefined(outcome.pollUnsafe());
+          assert.deepEqual(
+            (yield* orchestrator.getThreadProjection(toolsThreadId)).thread.toolOverridesReload,
+            { commandId, status: "pending" },
+          );
+          const refused = yield* setTools(toolsThreadId, "again", wakeupAndConnectors).pipe(
+            Effect.flip,
+          );
+          assert.deepInclude(refused, { reason: "reload-pending" });
+
+          yield* Deferred.succeed(failingClose.release, undefined);
+          assert.equal(yield* Fiber.join(outcome), "reload-failed");
+          const settled = yield* orchestrator.getThreadProjection(toolsThreadId);
+          assert.deepEqual(settled.thread.toolOverridesReload, { commandId, status: "failed" });
+          const notice = settled.turnItems.find((item) => item.type === "system_notice");
+          assert.deepInclude(notice, { level: "warning" });
+          assert.include(
+            notice?.type === "system_notice" ? notice.message : "",
+            "may still be running",
+          );
         }).pipe(Effect.provide(layer));
       }),
     );

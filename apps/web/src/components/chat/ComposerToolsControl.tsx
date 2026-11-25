@@ -213,13 +213,7 @@ function ToolsPopoverContent({
       setFailure(error instanceof Error ? error.message : "Could not reload the session.");
       return;
     }
-    toastManager.add({
-      type: "success",
-      title: result.value.reloaded ? "Session reloaded" : "Tools saved",
-      ...(result.value.reloaded
-        ? {}
-        : { description: "They apply when this thread's session next starts." }),
-    });
+    toastManager.add(reloadToast(result.value.outcome));
     onApplied();
   };
   return (
@@ -473,4 +467,23 @@ function changedSummary(state: Extract<ToolsFooterState, { readonly kind: "chang
   return state.estimatedTokens === 0
     ? parts.join(", ")
     : `${parts.join(", ")}, about +${formatTokenEstimate(state.estimatedTokens)} tokens`;
+}
+
+function reloadToast(outcome: "stored" | "reloaded" | "reload-failed") {
+  switch (outcome) {
+    case "stored":
+      return {
+        type: "success" as const,
+        title: "Tools saved",
+        description: "They apply when this thread's session next starts.",
+      };
+    case "reloaded":
+      return { type: "success" as const, title: "Session reloaded" };
+    case "reload-failed":
+      return {
+        type: "error" as const,
+        title: "The old session may still be running",
+        description: "Tools are saved. Reload the session again, or press Stop.",
+      };
+  }
 }

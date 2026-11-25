@@ -1137,7 +1137,7 @@ it.effect.each([
           detach: () =>
             Effect.sync(() => teardowns.push("detach")).pipe(
               Effect.andThen(Deferred.succeed(tornDown, undefined)),
-              Effect.asVoid,
+              Effect.as({ processEnded: true }),
             ),
         }),
       ),

@@ -122,7 +122,7 @@ function layerExecutorFor(input: {
         close: () => Effect.void,
         closeInstance: () => Effect.void,
         release: () => record("release"),
-        detach: () => record("detach"),
+        detach: () => record("detach").pipe(Effect.as({ processEnded: true })),
         otherWorkingThreads: () => Effect.succeed([]),
         releaseUnlessBusy: () => Effect.succeed(true),
         subscribePromptSuggestion: () => Stream.empty,
