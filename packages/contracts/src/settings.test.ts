@@ -607,9 +607,9 @@ it("ignores a stored client setting this build removed and keeps the rest", () =
   expect(settings.wordWrap).toBe(false);
 });
 
-it("keeps Claude's context rewind off until a user turns it on", () => {
-  expect(decodeClaudeSettings({}).contextRewind).toBe(false);
-  expect(decodeClaudeSettings({ contextRewind: true }).contextRewind).toBe(true);
+it("turns Claude's context rewind on unless a user turns it off", () => {
+  expect(decodeClaudeSettings({}).contextRewind).toBe(true);
+  expect(decodeClaudeSettings({ contextRewind: false }).contextRewind).toBe(false);
 });
 
 describe("Claude omitted built-in tools", () => {

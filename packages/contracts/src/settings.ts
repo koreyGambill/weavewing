@@ -1048,7 +1048,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       }),
     ),
     contextRewind: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({
         title: "Let Claude rewind its context",
         description:
