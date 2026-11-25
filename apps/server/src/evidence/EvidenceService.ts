@@ -321,7 +321,7 @@ const make = Effect.gen(function* () {
     }
     const root = path.join(yield* HostProcess.HomeDirectory, EVIDENCE_ROOT_NAME);
     const warnings: string[] = [];
-    const captured = [];
+    const captured: Array<RecordInput["changes"][number]> = [];
     for (const change of input.changes) {
       const captures = [];
       for (const capture of change.captures)
