@@ -40,7 +40,7 @@ const EvidenceReviewInput = Schema.Struct({
   threadId: Schema.optional(
     ThreadId.annotate({
       description:
-        "The reviewer thread: a review-role delegate of the lead that finished before the landing. Omitted, the server links one when it can tell which.",
+        "The reviewer thread: a review-role delegate of the lead that finished before the landing. Omitted, the server links the reviewer whose brief named this change's branch or a commit.",
     }),
   ),
   reason: Schema.optional(

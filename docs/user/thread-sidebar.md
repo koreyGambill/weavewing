@@ -139,12 +139,16 @@ thread** drafts that note into the landing's thread for you to read and send.
 to. The strip badge counts changes waiting for QA and turns red when any failed.
 
 A change shows as reviewed only when a finished `review` delegate of the lead
-backs it. The agent can name that thread, or Weavewing links one that clearly
-reviewed the change: its brief names the change's branch or a commit, or it ran
-after the change's implementation child while no other implementation was waiting
-for review. The reviewer's own `Verdict:` line replaces the one the agent typed
-when it states exactly one plain verdict; otherwise the change links the reviewer
-but shows **verdict not confirmed**. Anything else shows as **unverified review**.
+backs it, and the review finished before the landing. Weavewing links a reviewer
+whose brief names the change's branch or one of its commits, and no other change in
+the same landing. The agent can also name the reviewer thread; Weavewing then uses
+that thread's review whose brief names the change, or its only review when that
+brief names no branch or commit. The reviewer's verdict replaces the one the agent
+typed only when the reviewer's last line is exactly `Verdict: approved` or
+`Verdict: changes requested` and no other line states a verdict; otherwise the
+change links the reviewer but shows **verdict not confirmed**. Anything else,
+including a reviewer that ran in a linked environment, shows as **unverified
+review**.
 Agents must give a one-line reason to waive review or skip a check, and opening the
 landing shows each reason in full.
 

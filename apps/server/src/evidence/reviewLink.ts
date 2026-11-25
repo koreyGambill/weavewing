@@ -10,84 +10,60 @@ export interface DelegatedTask {
   /** This task's own brief and final message. */
   readonly prompt: string;
   readonly result: string | null;
-  readonly branch: string | null;
 }
 
 export type ThreadReviewVerdict = "approved" | "changes_requested";
 
-const VERDICTS: ReadonlyMap<string, ThreadReviewVerdict> = new Map([
-  ["approve", "approved"],
-  ["approved", "approved"],
-  ["lgtm", "approved"],
-  ["request changes", "changes_requested"],
-  ["requested changes", "changes_requested"],
-  ["changes requested", "changes_requested"],
-  ["changes_requested", "changes_requested"],
-  ["request-changes", "changes_requested"],
-]);
-
-const VERDICT_LINE = /^verdict\s*[:–—-]\s*(.+?)\.?$/i;
-
-/** The line's verdict value, from a plain `Verdict: x` line or one wholly in bold. */
-function verdictValue(line: string): string | null {
-  const trimmed = line.trim().replace(/^[-*+]\s+/, "");
-  const bold = /^(\*\*|__)(.+?)\1(.*)$/.exec(trimmed);
-  const candidate = bold === null ? trimmed : bold[2]!;
-  const match = VERDICT_LINE.exec(candidate.trim());
-  return match === null ? null : match[1]!.trim().replace(/\.$/, "").toLowerCase();
-}
+const FINAL_VERDICT = /^verdict: (approved|changes requested)$/i;
+// Leading whitespace, quote and list marks, then heading and emphasis marks as well.
+const CONTAINER_MARKS = /^(?:\s|>|[-*+]\s|\d+[.)]\s)+/;
+const LOOKS_LIKE_VERDICT = /^(?:\s|>|[-*+#_`]|\d+[.)])*verdict\s*[:–—-]/i;
+const FENCE = /^(```|~~~)/;
 
 /**
- * The verdict a reviewer's final message states, only when it has exactly one verdict line
- * outside quotes and code blocks and that line's whole value is a known verdict. Anything else,
- * including a conditional ("approve after tests pass"), is not a confirmed verdict.
+ * The verdict a reviewer's final message states. Only an exact last line, `Verdict: approved` or
+ * `Verdict: changes requested`, counts, and only when no other line looks like a verdict and every
+ * code fence before it is closed. Anything else is not a confirmed verdict.
  */
 export function reviewVerdictFromText(text: string): ThreadReviewVerdict | null {
-  let fenced = false;
-  const values: Array<string> = [];
-  for (const line of text.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fenced = !fenced;
-      continue;
-    }
-    if (fenced || /^\s*>/.test(line)) continue;
-    const value = verdictValue(line);
-    if (value !== null) values.push(value);
-  }
-  return values.length === 1 ? (VERDICTS.get(values[0]!) ?? null) : null;
+  const lines = text.split("\n").map((line) => line.trimEnd());
+  const lastIndex = lines.findLastIndex((line) => line.trim() !== "");
+  if (lastIndex < 0) return null;
+  const final = FINAL_VERDICT.exec(lines[lastIndex]!);
+  if (final === null) return null;
+  const earlier = lines.slice(0, lastIndex);
+  if (earlier.some((line) => LOOKS_LIKE_VERDICT.test(line))) return null;
+  const fences = earlier.filter((line) => FENCE.test(line.replace(CONTAINER_MARKS, "")));
+  if (fences.length % 2 !== 0) return null;
+  return final[1]!.toLowerCase() === "approved" ? "approved" : "changes_requested";
 }
+
+// Characters Git forbids in a ref name, plus prose punctuation around a name; anything else continues it.
+const BOUNDARY = String.raw`\s\x00-\x1f\x7f~^:?*[\\"'\x60(),`;
+const BEFORE = `(?<=^|[${BOUNDARY}])`;
+const AFTER = `(?=$|[${BOUNDARY}]|\\.(?:\\s|$))`;
+const HEX_TOKEN = new RegExp(`${BEFORE}[0-9a-fA-F]{7,64}${AFTER}`, "g");
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Whether `text` contains `name` as a whole branch name, not as part of a longer one. */
-function namesBranch(text: string, name: string): boolean {
-  return new RegExp(
-    `(?<![A-Za-z0-9._/-])${escapeRegExp(name)}(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9_/-])`,
-  ).test(text);
+/** Whether `text` names `ref` as a whole token, not as part of a longer ref name. */
+function namesRef(text: string, ref: string): boolean {
+  return new RegExp(`${BEFORE}${escapeRegExp(ref)}${AFTER}`).test(text);
 }
 
-const HEX_TOKEN = /(?<![0-9a-z])[0-9a-f]{7,64}(?![0-9a-z])/gi;
+type ChangeScope = Pick<EvidenceChange, "branch" | "commits">;
 
-function namesChange(
-  prompt: string,
-  change: Pick<EvidenceChange, "branch" | "commits">,
-  targetBranch: string,
-): boolean {
+function namesChange(prompt: string, change: ChangeScope, targetBranch: string): boolean {
   const branch = change.branch;
-  if (branch !== undefined && branch !== targetBranch && namesBranch(prompt, branch)) return true;
+  if (branch !== undefined && branch !== targetBranch && namesRef(prompt, branch)) return true;
   const tokens = (prompt.match(HEX_TOKEN) ?? []).map((token) => token.toLowerCase());
-  return change.commits.some(
-    (commit) =>
-      commit.length >= 7 &&
-      tokens.some((token) => commit.startsWith(token) || token.startsWith(commit)),
+  return change.commits.some((commit) =>
+    tokens.some((token) => commit.toLowerCase().startsWith(token)),
   );
 }
 
-const byStart = (left: DelegatedTask, right: DelegatedTask) =>
-  left.startedAt.localeCompare(right.startedAt);
-
 /** A review task that finished with a result before the landing; only these can back a verdict. */
-export function isFinishedReview(task: DelegatedTask, landedAt: string): boolean {
+function isFinishedReview(task: DelegatedTask, landedAt: string): boolean {
   return (
     task.role === "review" &&
     task.completedAt !== null &&
@@ -97,59 +73,69 @@ export function isFinishedReview(task: DelegatedTask, landedAt: string): boolean
   );
 }
 
-/**
- * The lead's finished review task for a change, declining whenever there is doubt: the latest whose
- * own brief names the change's branch or a commit, else the latest started after the implementing
- * child and before the next one, while no other implementation lane is still awaiting review.
- */
-export function matchReviewTask(input: {
-  readonly change: Pick<EvidenceChange, "branch" | "commits">;
+export interface ReviewScope {
+  readonly change: ChangeScope;
+  /** Every change in the same landing, this one included. */
+  readonly landing: ReadonlyArray<ChangeScope>;
   readonly targetBranch: string;
-  readonly landedAt: string;
-  /** The landing's thread when it is itself one of the lead's children. */
-  readonly implementerThreadId: string | null;
-  readonly tasks: ReadonlyArray<DelegatedTask>;
-}): DelegatedTask | null {
-  const reviews = input.tasks
-    .filter((task) => isFinishedReview(task, input.landedAt))
-    .toSorted(byStart);
-  const named = reviews.filter((task) =>
-    namesChange(task.prompt, input.change, input.targetBranch),
-  );
-  if (named.length > 0) return named.at(-1)!;
+}
 
-  // Each implementation child counts once, from its first task.
-  const firstTasks = new Map<string, DelegatedTask>();
-  for (const task of input.tasks.filter((task) => task.role === "implementation").toSorted(byStart))
-    if (!firstTasks.has(task.childThreadId)) firstTasks.set(task.childThreadId, task);
-  const lanes = [...firstTasks.values()];
-  const onBranch =
-    input.change.branch === undefined || input.change.branch === input.targetBranch
-      ? []
-      : lanes.filter((lane) => lane.branch === input.change.branch);
-  const implementer =
-    lanes.find((lane) => lane.childThreadId === input.implementerThreadId) ??
-    (onBranch.length === 1 ? onBranch[0] : undefined);
-  if (implementer === undefined) return null;
-  const allReviews = input.tasks.filter((task) => task.role === "review");
-  // Another lane started earlier with no review since is still open, so a review could be its.
-  const otherOpenLane = lanes.some(
-    (lane) =>
-      lane !== implementer &&
-      lane.startedAt < implementer.startedAt &&
-      !allReviews.some(
-        (review) => review.startedAt > lane.startedAt && review.startedAt < implementer.startedAt,
-      ),
+/**
+ * Whether a brief is about this change alone: it names the change's branch or a commit, and no
+ * other change of the same landing. A brief covering two of them backs neither.
+ */
+function namesOnlyChange(prompt: string, scope: ReviewScope): boolean {
+  if (!namesChange(prompt, scope.change, scope.targetBranch)) return false;
+  return !scope.landing.some(
+    (other) => other !== scope.change && namesChange(prompt, other, scope.targetBranch),
   );
-  if (otherOpenLane) return null;
-  const next = lanes.find((lane) => lane.startedAt > implementer.startedAt);
+}
+
+const byStart = (left: DelegatedTask, right: DelegatedTask) =>
+  left.startedAt.localeCompare(right.startedAt);
+
+/**
+ * The lead's finished review task for a change: the latest whose own brief names this change and
+ * no other in the landing, so a re-check supersedes the first round. No such brief links nothing.
+ */
+export function matchReviewTask(
+  input: ReviewScope & {
+    readonly landedAt: string;
+    readonly tasks: ReadonlyArray<DelegatedTask>;
+  },
+): DelegatedTask | null {
   return (
-    reviews
-      .filter(
-        (task) =>
-          task.startedAt > implementer.startedAt &&
-          (next === undefined || task.startedAt < next.startedAt),
-      )
+    input.tasks
+      .filter((task) => isFinishedReview(task, input.landedAt))
+      .filter((task) => namesOnlyChange(task.prompt, input))
+      .toSorted(byStart)
       .at(-1) ?? null
   );
+}
+
+/**
+ * The task an agent-named reviewer thread backs this change with: the one finished review task
+ * whose brief names this change alone, or the thread's only finished review task when its brief
+ * names no change, no known branch and no commit. Any doubt links nothing.
+ */
+export function selectThreadReview(
+  input: ReviewScope & {
+    readonly landedAt: string;
+    readonly threadTasks: ReadonlyArray<DelegatedTask>;
+    /** Branches the server knows of besides the landing's changes, such as delegated children's. */
+    readonly knownBranches: ReadonlyArray<string>;
+  },
+): DelegatedTask | null {
+  const finished = input.threadTasks.filter((task) => isFinishedReview(task, input.landedAt));
+  const named = finished.filter((task) => namesOnlyChange(task.prompt, input));
+  if (named.length === 1) return named[0]!;
+  if (named.length > 1 || finished.length !== 1) return null;
+  const only = finished[0]!;
+  const namesSomething =
+    only.prompt.match(HEX_TOKEN) !== null ||
+    input.landing.some((change) => namesChange(only.prompt, change, input.targetBranch)) ||
+    input.knownBranches.some(
+      (branch) => branch !== input.targetBranch && namesRef(only.prompt, branch),
+    );
+  return namesSomething ? null : only;
 }
