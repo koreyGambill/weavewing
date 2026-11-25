@@ -75,6 +75,11 @@ export function createQuestionDraftWriter<R>(
     return entry.chain;
   };
   return {
+    /** The values waiting or in flight for this question, newer than its saved draft; else null. */
+    pending(id: string): QuestionDraft | null {
+      const entry = entries.get(id);
+      return entry === undefined ? null : (entry.latest ?? entry.sent);
+    },
     /**
      * Applies `change` over the newest values (or `saved` when nothing is waiting) and sends
      * them now, or after `delayMs`. Resolves once the write carrying this change settled.

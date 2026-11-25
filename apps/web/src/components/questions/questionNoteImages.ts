@@ -1,13 +1,19 @@
 import {
+  isThreadQuestionRecord,
   nextThreadQuestionImageNumber,
   threadQuestionImageMarker,
   threadQuestionImageName,
+  threadQuestionImagesWithoutMarkers,
+  threadQuestionMarkersDroppedByChip,
+  withoutThreadQuestionImageMarkers,
 } from "@t3tools/client-runtime/state/thread-questions";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ArtifactAnswerContextRecord,
   type ScopedThreadRef,
   type ThreadQuestion,
+  type ThreadWorkspace,
 } from "@t3tools/contracts";
 
 import {
@@ -24,6 +30,7 @@ import {
   rememberComposerImageBytes,
 } from "../chat/composerAttachmentFiles";
 import { serializeComposerImages } from "../chat/composerImagePersistence";
+import type { questionDraftWriter, SaveQuestionDraft } from "./questionDraftWriter";
 
 const EXTENSIONS: Record<string, string> = {
   "image/png": "png",
@@ -49,7 +56,8 @@ export function transferHasImage(files: ReadonlyArray<File>): boolean {
 
 /**
  * Prepares pasted images the way the composer does and holds them for the question, each named
- * for its marker. Resolves with the markers to put in the note, and the last refusal, if any.
+ * for its marker. Calls `onHeld` with the markers for the note in the same step that holds the
+ * images, and resolves with the last refusal, if any.
  * `note` is read once the images are ready, so a marker the user typed meanwhile is not reused.
  */
 export async function holdQuestionNoteImages(input: {
@@ -57,7 +65,8 @@ export async function holdQuestionNoteImages(input: {
   readonly questionId: string;
   readonly files: ReadonlyArray<File>;
   readonly note: () => string;
-}): Promise<{ readonly markers: ReadonlyArray<string>; readonly error: string | null }> {
+  readonly onHeld: (markers: ReadonlyArray<string>) => void;
+}): Promise<{ readonly error: string | null }> {
   const { threadRef, questionId } = input;
   const draftId = threadQuestionNoteImageDraftId(threadRef, questionId);
   const store = useComposerDraftStore.getState();
@@ -101,7 +110,7 @@ export async function holdQuestionNoteImages(input: {
       .catch(() => null);
     prepared.push({ file: result.file, bytes });
   }
-  if (prepared.length === 0) return { markers: [], error };
+  if (prepared.length === 0) return { error };
 
   // Numbered in one synchronous step, so overlapping pastes never take the same number.
   let number = nextThreadQuestionImageNumber(
@@ -135,11 +144,12 @@ export async function holdQuestionNoteImages(input: {
       { allowDuplicates: true },
     ),
   );
+  const markers = entries
+    .filter(({ image }) => storedIds.has(image.id))
+    .map(({ marker }) => marker);
+  if (markers.length > 0) input.onHeld(markers);
   void persistHeldImages(draftId);
-  return {
-    markers: entries.filter(({ image }) => storedIds.has(image.id)).map(({ marker }) => marker),
-    error,
-  };
+  return { error };
 }
 
 async function persistHeldImages(draftId: ReturnType<typeof threadQuestionNoteImageDraftId>) {
@@ -176,28 +186,61 @@ export function dropQuestionNoteImages(
 }
 
 /**
- * Forgets the images held for questions that will not take an answer again: answered, replaced,
- * or withdrawn by the agent. A question the user dismissed keeps them, since Undo reopens it with
- * its markers. Run after the composer's chips follow the same snapshot, so a closed question's
- * chip takes its images out of the composer first.
+ * Keeps each question's note markers, held images and chip images in agreement: a marker whose
+ * image left the message leaves the note, an image whose marker left the note is dropped, and a
+ * question closed for good forgets its images (a dismissed one keeps them for Undo). Run after
+ * the chips follow the same snapshot, so a closed question's images leave with its chip first.
  */
-export function discardClosedQuestionNoteImages(
-  threadRef: ScopedThreadRef,
-  questions: ReadonlyArray<Pick<ThreadQuestion, "id" | "state" | "userChangedAt">>,
-) {
+export function reconcileQuestionNoteImages(input: {
+  readonly threadRef: ScopedThreadRef;
+  readonly questions: ReadonlyArray<ThreadQuestion>;
+  /** The thread composer's answer and comment chips. */
+  readonly chips: ReadonlyArray<ArtifactAnswerContextRecord>;
+  readonly writer: ReturnType<typeof questionDraftWriter>;
+  readonly saveDraft: SaveQuestionDraft<ThreadWorkspace>;
+}) {
+  const { threadRef, writer } = input;
   const store = useComposerDraftStore.getState();
-  for (const question of questions) {
+  const staged = new Map(
+    input.chips.filter(isThreadQuestionRecord).map((record) => [record.questionId, record.note]),
+  );
+  for (const question of input.questions) {
+    const draftId = threadQuestionNoteImageDraftId(threadRef, question.id);
+    const held = store.getComposerDraft(draftId)?.images ?? [];
+    const saved = {
+      chosenOptionIds: question.answer?.chosenOptionIds ?? [],
+      notes: question.answer?.notes ?? "",
+    };
+    // Edits waiting to save are newer than the snapshot, such as a marker just pasted.
+    let note = writer.pending(question.id)?.notes ?? saved.notes;
+    const chipNote = staged.get(question.id);
+    if (chipNote !== undefined) {
+      const dropped = threadQuestionMarkersDroppedByChip(
+        question.id,
+        note,
+        chipNote,
+        held.map((image) => image.name),
+      );
+      if (dropped.size > 0) {
+        note = withoutThreadQuestionImageMarkers(question.id, note, dropped);
+        void writer.edit(question.id, saved, { notes: note }, input.saveDraft);
+      }
+    }
     const closedForGood =
       question.state === "answered" ||
       question.state === "replaced" ||
       (question.state === "withdrawn" && question.userChangedAt === undefined);
-    if (!closedForGood) continue;
-    const draftId = threadQuestionNoteImageDraftId(threadRef, question.id);
-    const held = store.getComposerDraft(draftId)?.images ?? [];
-    if (held.length === 0) continue;
-    for (const image of held) {
-      if (image.previewUrl.startsWith("blob:")) URL.revokeObjectURL(image.previewUrl);
+    if (closedForGood && held.length > 0) {
+      for (const image of held) {
+        if (image.previewUrl.startsWith("blob:")) URL.revokeObjectURL(image.previewUrl);
+      }
+      store.clearComposerContent(draftId);
+      continue;
     }
-    store.clearComposerContent(draftId);
+    dropQuestionNoteImages(
+      threadRef,
+      question.id,
+      threadQuestionImagesWithoutMarkers(question.id, held, note),
+    );
   }
 }

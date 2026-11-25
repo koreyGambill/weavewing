@@ -6,6 +6,7 @@ import {
   threadQuestionImageNumber,
   threadQuestionImagesWithoutMarkers,
   threadQuestionStatus,
+  withoutThreadQuestionImageMarkers,
 } from "@t3tools/client-runtime/state/thread-questions";
 import type { ScopedThreadRef, ThreadQuestion } from "@t3tools/contracts";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
@@ -131,7 +132,7 @@ export function ThreadQuestionCard({
   const noteImages = heldImages.flatMap((image) => {
     const number = threadQuestionImageNumber(question.id, image.name);
     return number !== null && markedNumbers.has(number)
-      ? [{ image, marker: threadQuestionImageMarker(question.id, number) }]
+      ? [{ image, number, marker: threadQuestionImageMarker(question.id, number) }]
       : [];
   });
 
@@ -165,24 +166,26 @@ export function ThreadQuestionCard({
     const before = field.value;
     const start = field.selectionStart;
     const end = field.selectionEnd;
-    const { markers, error } = await holdQuestionNoteImages({
+    const { error } = await holdQuestionNoteImages({
       threadRef,
       questionId: question.id,
       files,
       note: () => field.value,
+      // In the same step that holds the images, so nothing sees an image without its marker.
+      onHeld: (markers) => {
+        const current = field.value;
+        // At the caret when the note did not change meanwhile; otherwise after it.
+        const [head, tail] =
+          current === before ? [current.slice(0, start), current.slice(end)] : [current, ""];
+        const lead = head === "" || /\s$/.test(head) ? "" : " ";
+        changeNotes(`${head}${lead}${markers.join(" ")}${tail}`);
+      },
     });
     if (error !== null) toastManager.add({ type: "error", title: error });
-    if (markers.length === 0) return;
-    const current = field.value;
-    // At the caret when the note did not change meanwhile; otherwise after it.
-    const [head, tail] =
-      current === before ? [current.slice(0, start), current.slice(end)] : [current, ""];
-    const lead = head === "" || /\s$/.test(head) ? "" : " ";
-    changeNotes(`${head}${lead}${markers.join(" ")}${tail}`);
   };
-  const removeImage = (imageId: string, marker: string) => {
+  const removeImage = (imageId: string, number: number) => {
     dropQuestionNoteImages(threadRef, question.id, [imageId]);
-    changeNotes(notes.replace(` ${marker}`, "").replace(marker, ""));
+    changeNotes(withoutThreadQuestionImageMarkers(question.id, notes, new Set([number])));
   };
   const changeState = async (state: "open" | "deferred" | "withdrawn") => {
     setBusy(true);
@@ -492,7 +495,7 @@ export function ThreadQuestionCard({
       )}
       {!closed && noteImages.length > 0 ? (
         <ul aria-label={`Images for ${question.id}`} className="flex flex-wrap gap-1.5">
-          {noteImages.map(({ image, marker }) => (
+          {noteImages.map(({ image, number, marker }) => (
             <li
               key={image.id}
               className="flex items-start gap-1 rounded-md border border-foreground/30 p-0.5"
@@ -518,7 +521,7 @@ export function ThreadQuestionCard({
                         variant="contrast-outline"
                         aria-label={`Remove ${marker}`}
                         disabled={!usable}
-                        onClick={() => removeImage(image.id, marker)}
+                        onClick={() => removeImage(image.id, number)}
                       />
                     }
                   >

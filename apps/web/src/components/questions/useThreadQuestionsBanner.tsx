@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
 import { useWorkspaceMutationRefresh } from "../../hooks/useWorkspaceMutationRefresh";
+import { useComposerArtifactAnswers } from "../../composerDraftStore";
 import { serverEnvironment } from "../../state/server";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useSaveQuestionDraft, useThreadQuestionsWorkspace } from "../../state/threadQuestions";
@@ -23,7 +24,7 @@ import {
   useQuestionsInComposer,
 } from "./questionComposer";
 import { questionDraftWriter } from "./questionDraftWriter";
-import { discardClosedQuestionNoteImages } from "./questionNoteImages";
+import { reconcileQuestionNoteImages } from "./questionNoteImages";
 import { ThreadQuestionsCompactList } from "./ThreadQuestionsCompactList";
 
 /**
@@ -46,6 +47,7 @@ export function useThreadQuestionsBanner(input: {
   const [adding, setAdding] = useState(false);
   const saveDraft = useSaveQuestionDraft(threadRef);
   const inComposer = useQuestionsInComposer(threadRef);
+  const composerAnswers = useComposerArtifactAnswers(threadRef);
   useWorkspaceMutationRefresh({
     enabled: enabled && threadRef !== null,
     mutationId: input.refreshKey,
@@ -53,12 +55,18 @@ export function useThreadQuestionsBanner(input: {
     resourceKey:
       threadRef === null ? "" : `${threadRef.environmentId}:${threadRef.threadId}:questions`,
   });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the composer's answer chips and the cards' pasted images live in the persisted draft store, so they follow server-side question changes: a closed, sent or cleared question drops its chip, a newer draft updates it, and a question closed for good forgets its images
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the composer's answer chips and the cards' pasted images live in the persisted draft store, so they follow server-side question changes and each other: a closed, sent or cleared question drops its chip, a newer draft updates it, and a question's notes, held images and chip images are kept in agreement
   useEffect(() => {
     if (threadRef === null || workspace == null) return;
     syncQuestionAnswersInComposer(threadRef, workspace);
-    discardClosedQuestionNoteImages(threadRef, workspace.questions);
-  }, [threadRef, workspace]);
+    reconcileQuestionNoteImages({
+      threadRef,
+      questions: workspace.questions,
+      chips: composerAnswers,
+      writer: questionDraftWriter(scopedThreadKey(threadRef)),
+      saveDraft,
+    });
+  }, [threadRef, workspace, composerAnswers, saveDraft]);
   // Null while settings load, so only a setting known to be off clears the chips.
   const questionsEnabled = useAtomValue(
     serverEnvironment.settingsValueAtom(input.environmentId),
