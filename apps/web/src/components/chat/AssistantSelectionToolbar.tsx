@@ -21,7 +21,13 @@ import {
 } from "~/lib/selectionActions";
 import { messageFollowUpsUpdate, useMessageFollowUpUpdate } from "../../state/messageFollowUps";
 import { findOverlappingBookmark, bookmarkUpdate } from "../reviews/bookmarks.logic";
-import { useMessageBookmarksSupported, useThreadFollowUpList } from "../reviews/FollowUps";
+import { BookmarkNoteEditor } from "../reviews/BookmarkNoteEditor";
+import {
+  useMessageBookmarkNotesSupported,
+  useMessageBookmarksSupported,
+  useThreadFollowUpList,
+} from "../reviews/FollowUps";
+import { Popover, PopoverPopup } from "../ui/popover";
 import { Button } from "../ui/button";
 import { setSelectionBookmarkToggle } from "./threadBookmarkActions";
 import { BackgroundThreadContext } from "./backgroundThread";
@@ -54,6 +60,13 @@ export function AssistantSelectionToolbar({
     bookmarksSupported;
   const bookmarks = useThreadFollowUpList(bookmarksSupported ? threadRef : null);
   const updateBookmark = useMessageFollowUpUpdate();
+  const notesSupported = useMessageBookmarkNotesSupported(threadRef.environmentId);
+  const [noteFor, setNoteFor] = useState<{
+    id: string;
+    range: Range;
+    viewport: HTMLElement;
+  } | null>(null);
+  const noteBookmark = noteFor && bookmarks.find((item) => item.id === noteFor.id);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
   const backgroundThread = use(BackgroundThreadContext);
 
@@ -220,10 +233,11 @@ export function AssistantSelectionToolbar({
       bookmarkSource.citation,
       readAssistantSourceText(bookmarkSource.sourceAnchor.source),
     );
-  const applyBookmark = (todo: boolean) => {
+  const applyBookmark = (todo: boolean, withNote: boolean) => {
     if (!bookmarkSource) return;
     const { messageId, text, start, end, prefix, suffix } = bookmarkSource.citation;
     if (!existingBookmark && text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH) return;
+    const { range, viewport: noteViewport } = bookmarkSource.sourceAnchor;
     void updateBookmark(
       threadRef.environmentId,
       existingBookmark
@@ -235,12 +249,17 @@ export function AssistantSelectionToolbar({
             todo,
             anchor: { messageId, text, start, end, prefix, suffix },
           },
-    );
+    ).then((result) => {
+      const created = result._tag === "Success" ? result.value : null;
+      if (withNote && notesSupported && created?.id !== undefined) {
+        setNoteFor({ id: created.id, range: range.cloneRange(), viewport: noteViewport });
+      }
+    });
     window.getSelection()?.removeAllRanges();
     actionsRef.current?.cancel();
     setSelection(null);
   };
-  const applyBookmarkFromShortcut = useEffectEvent(() => applyBookmark(false));
+  const applyBookmarkFromShortcut = useEffectEvent(() => applyBookmark(false, false));
   const shortcutAvailable = bookmarkSource !== null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- offers this selection's bookmark toggle to the keyboard shortcut while the toolbar shows
   useEffect(
@@ -249,7 +268,27 @@ export function AssistantSelectionToolbar({
     [shortcutAvailable],
   );
 
-  if (!selection) return null;
+  const notePopover =
+    noteFor && noteBookmark ? (
+      <Popover open onOpenChange={(open) => (open ? undefined : setNoteFor(null))}>
+        <PopoverPopup
+          aria-label="Bookmark note"
+          padding="none"
+          side="bottom"
+          anchor={{
+            getBoundingClientRect: () => noteFor.range.getBoundingClientRect(),
+            contextElement: noteFor.viewport,
+          }}
+        >
+          <BookmarkNoteEditor
+            environmentId={threadRef.environmentId}
+            bookmark={noteBookmark}
+            onClose={() => setNoteFor(null)}
+          />
+        </PopoverPopup>
+      </Popover>
+    ) : null;
+  if (!selection) return notePopover;
   const citable = selection.sourceAnchor.source.dataset.assistantCitationSource !== undefined;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
@@ -262,7 +301,7 @@ export function AssistantSelectionToolbar({
     dismiss();
     return true;
   };
-  if (!citable && !bookmarkSource) return null;
+  if (!citable && !bookmarkSource) return notePopover;
   const branch =
     !tooLong && onBranch && selection.sourceAnchor.source.hasAttribute("data-side-chat-source")
       ? onBranch
@@ -305,7 +344,7 @@ export function AssistantSelectionToolbar({
               size="xs"
               variant="ghost"
               aria-pressed
-              onClick={() => applyBookmark(false)}
+              onClick={() => applyBookmark(false, false)}
             >
               <BookmarkIcon aria-hidden="true" className="size-3.5 fill-current text-warning" />
               Remove bookmark
@@ -317,7 +356,7 @@ export function AssistantSelectionToolbar({
                 size="xs"
                 variant="ghost"
                 disabled={tooLong}
-                onClick={() => applyBookmark(false)}
+                onClick={() => applyBookmark(false, true)}
               >
                 <BookmarkIcon aria-hidden="true" className="size-3.5 text-warning" />
                 Bookmark
@@ -327,7 +366,7 @@ export function AssistantSelectionToolbar({
                 size="xs"
                 variant="ghost"
                 disabled={tooLong}
-                onClick={() => applyBookmark(true)}
+                onClick={() => applyBookmark(true, true)}
               >
                 <FlagIcon aria-hidden="true" className="size-3.5 text-warning" />
                 Flag

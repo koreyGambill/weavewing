@@ -3,7 +3,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { BookmarkIcon } from "lucide-react";
 import { useState } from "react";
 
-import { BookmarkToggles, useThreadFollowUpList } from "../reviews/FollowUps";
+import { BookmarkNoteText, BookmarkToggles, useThreadFollowUpList } from "../reviews/FollowUps";
 import {
   bookmarkKey,
   bookmarkText,
@@ -69,6 +69,9 @@ export function ChatFooterBookmarks({
                     {todo ? (bookmark.doneAt ? " · done" : " · to-do") : ""}
                   </span>
                   <span className="line-clamp-2 wrap-anywhere">{bookmarkText(bookmark)}</span>
+                  {bookmark.note === undefined ? null : (
+                    <BookmarkNoteText note={bookmark.note} className="mt-0.5" />
+                  )}
                 </button>
                 <span className="flex shrink-0 items-center gap-0.5 pt-1">
                   <BookmarkToggles

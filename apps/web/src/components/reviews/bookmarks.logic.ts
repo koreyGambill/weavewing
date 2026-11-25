@@ -202,3 +202,13 @@ export function bookmarkToggle(
   if (button === lit) return bookmarkUpdate(bookmark, "unflag");
   return bookmarkUpdate(bookmark, button === "todo" ? "todo" : "untodo");
 }
+
+/** The bookmark as a thread-notes block: its text quoted, then the note. */
+export function bookmarkNoteBlock(bookmark: MessageFollowUp, note: string): string {
+  const quote = bookmarkText(bookmark)
+    .split("\n")
+    .map((line) => `> ${line}`.trimEnd())
+    .join("\n");
+  const trimmed = note.trim();
+  return trimmed === "" ? quote : `${quote}\n\n${trimmed}`;
+}

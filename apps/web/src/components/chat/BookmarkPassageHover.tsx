@@ -41,13 +41,20 @@ export function BookmarkPassageHover({
     root: HTMLElement;
   } | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A click inside the card pins it, so its note editor can open without the pointer leaving it.
+  const pinned = useRef(false);
   const cancelClose = () => {
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
     closeTimer.current = null;
   };
+  const close = () => {
+    pinned.current = false;
+    setHovered(null);
+  };
   const scheduleClose = () => {
+    if (pinned.current) return;
     cancelClose();
-    closeTimer.current = setTimeout(() => setHovered(null), CLOSE_DELAY_MS);
+    closeTimer.current = setTimeout(close, CLOSE_DELAY_MS);
   };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- listens to pointer movement over the message's DOM, which has no element per passage
   useEffect(() => {
@@ -55,7 +62,7 @@ export function BookmarkPassageHover({
     if (!root) return;
     const move = (event: PointerEvent) => {
       // A pressed button is a selection in progress; touch has no hover.
-      if (event.pointerType !== "mouse" || event.buttons !== 0) return;
+      if (pinned.current || event.pointerType !== "mouse" || event.buttons !== 0) return;
       const hit = hitPassage(placedRef.current, event.clientX, event.clientY);
       if (!hit) {
         if (closeTimer.current === null) scheduleClose();
@@ -65,20 +72,27 @@ export function BookmarkPassageHover({
       const key = bookmarkKey(hit.bookmark);
       setHovered((current) => (current?.key === key ? current : { key, range: hit.range, root }));
     };
+    // The card's own pointer enter runs first, so a leave into the card must not restart the timer.
+    const leave = (event: PointerEvent) => {
+      const into = event.relatedTarget;
+      if (into instanceof Element && into.closest("[data-bookmark-passage-card]")) return;
+      scheduleClose();
+    };
     root.addEventListener("pointermove", move);
-    root.addEventListener("pointerleave", scheduleClose);
+    root.addEventListener("pointerleave", leave);
     return () => {
       root.removeEventListener("pointermove", move);
-      root.removeEventListener("pointerleave", scheduleClose);
+      root.removeEventListener("pointerleave", leave);
       cancelClose();
     };
   });
   const bookmark = hovered && bookmarks.find((item) => bookmarkKey(item) === hovered.key);
   if (!hovered || !bookmark) return null;
   return (
-    <Popover open onOpenChange={(open) => (open ? undefined : setHovered(null))}>
+    <Popover open onOpenChange={(open) => (open ? undefined : close())}>
       <PopoverPopup
         aria-label="Bookmarked passage"
+        data-bookmark-passage-card=""
         padding="none"
         side="top"
         anchor={{
@@ -89,6 +103,10 @@ export function BookmarkPassageHover({
         finalFocus={false}
         onPointerEnter={cancelClose}
         onPointerLeave={scheduleClose}
+        onPointerDown={() => {
+          cancelClose();
+          pinned.current = true;
+        }}
       >
         <BookmarkCardBody
           environmentId={environmentId}

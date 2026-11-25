@@ -10,6 +10,7 @@ import {
   bookmarkUpdate,
   findOverlappingBookmark,
   orderBookmarks,
+  bookmarkNoteBlock,
   bookmarkToggle,
 } from "./bookmarks.logic";
 
@@ -195,5 +196,15 @@ describe("bookmarkToggle", () => {
     expect(send({ ...prompt, todo: true }, "todo")).toBe("unflag");
     expect(send({ ...prompt, todo: true, doneAt: at(9) }, "todo")).toBe("unflag");
     expect(send({ ...prompt, todo: true }, "bookmark")).toBe("untodo");
+  });
+});
+
+describe("bookmarkNoteBlock", () => {
+  it("quotes the bookmarked text above the note", () => {
+    const item = { ...prompt, excerpt: "first\nsecond" };
+    expect(bookmarkNoteBlock(item, " check the expiry case ")).toBe(
+      "> first\n> second\n\ncheck the expiry case",
+    );
+    expect(bookmarkNoteBlock(item, "  ")).toBe("> first\n> second");
   });
 });

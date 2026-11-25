@@ -6,7 +6,7 @@ import {
 import type { ThreadNote } from "@t3tools/contracts";
 import { create } from "zustand";
 import { readFileAsDataUrl } from "../../lib/imageCompression";
-import { persistThreadNote, saveThreadNoteImage } from "../../state/threadNotes";
+import { fetchThreadNote, persistThreadNote, saveThreadNoteImage } from "../../state/threadNotes";
 
 interface Draft {
   note: ThreadNote;
@@ -125,6 +125,30 @@ export function insertNoteText(
   const trail = after.startsWith("\n") ? "" : "\n";
   editNote(environmentId, threadId, { text: `${before}${lead}${insertion}${trail}${after}` });
   return true;
+}
+
+/** Appends a block to the thread's note, through the open draft when one is loaded. */
+export async function appendToThreadNote(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  block: string,
+): Promise<void> {
+  const join = (text: string) =>
+    text.trim() === "" ? `${block}\n` : `${text.trimEnd()}\n\n${block}\n`;
+  const draft = useDrafts.getState().entries[keyFor(environmentId, threadId)];
+  if (draft) {
+    editNote(environmentId, threadId, { text: join(draft.text) });
+    await flushNote(environmentId, threadId);
+    return;
+  }
+  const note = await fetchThreadNote(environmentId, { threadId });
+  const saved = await persistThreadNote(environmentId, {
+    threadId,
+    expectedRevision: note.revision,
+    text: join(note.text),
+    includeThreadId: note.includeThreadId,
+  });
+  receiveNote(environmentId, saved, true);
 }
 
 /** Saves one image for the note at `notePath` and returns its Markdown image link. */

@@ -9,7 +9,13 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { BookmarkIcon, CircleCheckIcon, FlagIcon, MoreHorizontalIcon } from "lucide-react";
+import {
+  BookmarkIcon,
+  CircleCheckIcon,
+  FlagIcon,
+  MoreHorizontalIcon,
+  StickyNoteIcon,
+} from "lucide-react";
 import { AsyncResult } from "effect/reactivity";
 import { Fragment, useRef, useState, type ReactNode } from "react";
 
@@ -36,6 +42,7 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -47,6 +54,7 @@ import {
   isOpenBookmarkTodo,
   bookmarkToggle,
 } from "./bookmarks.logic";
+import { BookmarkNoteEditor } from "./BookmarkNoteEditor";
 
 /** Servers before bookmarks list only follow-ups, and reject the `bookmarks` mode. */
 function useFollowUpsAtom(environmentId: EnvironmentId | null, threadId?: ThreadId) {
@@ -95,6 +103,15 @@ export function useMessageBookmarksSupported(environmentId: EnvironmentId | null
   return (
     environmentId !== null &&
     configs.get(environmentId)?.environment.capabilities.messageBookmarks === true
+  );
+}
+
+/** Whether the server keeps a note on each bookmark. */
+export function useMessageBookmarkNotesSupported(environmentId: EnvironmentId | null) {
+  const configs = useServerConfigs();
+  return (
+    environmentId !== null &&
+    configs.get(environmentId)?.environment.capabilities.messageBookmarkNotes === true
   );
 }
 
@@ -154,6 +171,7 @@ export function BookmarkToggles({
 }) {
   const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
   const supported = useMessageBookmarksSupported(environmentId);
+  const notesSupported = useMessageBookmarkNotesSupported(environmentId);
   const update = useMessageFollowUpUpdate();
   const todo = bookmark !== null && isBookmarkTodo(bookmark);
   const bookmarked = bookmark !== null && !todo;
@@ -198,7 +216,70 @@ export function BookmarkToggles({
           <CircleCheckIcon className={cn("size-3", done && "text-success-foreground")} />
         </IconToggle>
       ) : null}
+      {bookmark && notesSupported && canWrite ? (
+        <BookmarkNoteButton environmentId={environmentId} bookmark={bookmark} />
+      ) : null}
     </>
+  );
+}
+
+function BookmarkNoteButton({
+  environmentId,
+  bookmark,
+}: {
+  environmentId: EnvironmentId;
+  bookmark: MessageFollowUp;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = bookmark.note === undefined ? "Add note" : "Edit note";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost-muted"
+                  aria-label={label}
+                  aria-pressed={bookmark.note !== undefined}
+                />
+              }
+            />
+          }
+        >
+          <StickyNoteIcon
+            className={cn("size-3", bookmark.note !== undefined && "fill-current text-warning")}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+      <PopoverPopup aria-label="Bookmark note" padding="none" side="top">
+        {open ? (
+          <BookmarkNoteEditor
+            environmentId={environmentId}
+            bookmark={bookmark}
+            onClose={() => setOpen(false)}
+          />
+        ) : null}
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+/** A bookmark's saved note, kept short where space is tight. */
+export function BookmarkNoteText({ note, className }: { note: string; className?: string }) {
+  return (
+    <p
+      className={cn(
+        "line-clamp-4 border-l-2 border-warning/60 pl-1.5 whitespace-pre-wrap wrap-anywhere text-foreground/90",
+        className,
+      )}
+    >
+      {note}
+    </p>
   );
 }
 
@@ -222,6 +303,9 @@ export function BookmarkCardBody({
         {todo ? (bookmark.doneAt ? " · done" : " · to-do") : ""}
       </p>
       {text === undefined ? null : <p className="mt-0.5 line-clamp-3 wrap-anywhere">{text}</p>}
+      {bookmark.note === undefined ? null : (
+        <BookmarkNoteText note={bookmark.note} className="mt-1" />
+      )}
       <div className="mt-1.5 flex justify-end gap-0.5">
         <BookmarkToggles
           environmentId={environmentId}
@@ -389,17 +473,22 @@ function FollowUpRow({
       ) : (
         <BookmarkIcon aria-hidden className="mt-1 size-3 shrink-0 fill-current text-warning" />
       )}
-      <button
-        type="button"
-        className={cn(
-          "line-clamp-2 min-w-0 flex-1 text-left leading-5 wrap-anywhere hover:underline",
-          done && "text-muted-foreground line-through",
+      <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          className={cn(
+            "line-clamp-2 text-left leading-5 wrap-anywhere hover:underline",
+            done && "text-muted-foreground line-through",
+          )}
+          aria-label={`Jump to bookmark: ${text}`}
+          onClick={jump}
+        >
+          {text}
+        </button>
+        {item.note === undefined ? null : (
+          <BookmarkNoteText note={item.note} className="mt-0.5 text-xs" />
         )}
-        aria-label={`Jump to bookmark: ${text}`}
-        onClick={jump}
-      >
-        {text}
-      </button>
+      </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5">
         <time dateTime={item.flaggedAt} className="text-3xs text-muted-foreground tabular-nums">
           {elapsed === "just now" ? "now" : elapsed}
