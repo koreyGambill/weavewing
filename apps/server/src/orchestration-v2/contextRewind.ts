@@ -10,10 +10,10 @@ import {
 export const CONTEXT_REWIND_ORIGIN = { kind: "system", event: "context rewind" } as const;
 
 /**
- * A rewind restarts the provider process, which writes about one turn start's worth of prompt
- * cache again (11,000 to 16,000 tokens measured), and bills the summary as output. It saves only
- * the removed tokens on each later step, so below this many characters of removed tool results
- * (about 15,000 tokens) it costs more than it saves.
+ * A rewind restarts the provider process and bills the summary as output, and one in a thread's
+ * first turn writes the startup context to the prompt cache again. It saves only the removed
+ * tokens on each later step, so below this many characters of removed tool results (about 15,000
+ * tokens) it can cost more than it saves.
  */
 export const CONTEXT_REWIND_MIN_REMOVED_CHARS = 60_000;
 
