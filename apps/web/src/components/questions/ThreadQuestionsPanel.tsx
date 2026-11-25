@@ -348,10 +348,11 @@ export function ThreadQuestionsPanel({
           )}
         </>
       )}
-      <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border p-3 pe-9">
-        <p className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+      <footer className="flex shrink-0 items-center gap-3 border-t border-border p-3 pe-9">
+        {/* One line that gives way to Answer N, so the button never moves. */}
+        <p className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs whitespace-nowrap text-muted-foreground">
           <Kbd>J</Kbd>
-          <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> not yet
+          <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> defer
         </p>
         <Tooltip>
           <TooltipTrigger render={<span className="inline-flex" />}>

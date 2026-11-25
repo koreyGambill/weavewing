@@ -172,13 +172,15 @@ export function ThreadQuestionCard({
               <span className={cn("min-w-0 flex-1", !expanded && "truncate")}>
                 {question.prompt}
               </span>
-              <span className={cn("max-w-[45%] shrink-0 font-semibold", !expanded && "truncate")}>
-                {outcome}
-              </span>
+              {outcome ? (
+                <span className={cn("max-w-[45%] shrink-0 font-semibold", !expanded && "truncate")}>
+                  {outcome}
+                </span>
+              ) : null}
             </TooltipTrigger>
             <TooltipPopup side="top" className="max-w-96">
               <p>{question.prompt}</p>
-              <p className="font-semibold">{outcome}</p>
+              {outcome ? <p className="font-semibold">{outcome}</p> : null}
             </TooltipPopup>
           </Tooltip>
           <QuestionStatusBadge status={status} />
@@ -329,7 +331,8 @@ export function ThreadQuestionCard({
                       ? HELP.answer
                       : HELP.answerDisabled
               }
-              variant={inComposer === "answer" ? "outline" : "default"}
+              // A disabled primary button still reads as live, so Answer is primary only when usable.
+              variant={inComposer !== "answer" && usable && hasDraft ? "default" : "outline"}
               disabled={!usable || (inComposer !== "answer" && !hasDraft)}
               onClick={() =>
                 inComposer === "answer"

@@ -27,7 +27,10 @@ export function QuestionNoteBox({
         </span>
         <div className="col-start-1 row-start-1 flex min-w-0">{note}</div>
       </div>
-      <span className="ms-auto flex shrink-0 items-center gap-1">{actions}</span>
+      {/* At a narrow width the buttons wrap among themselves rather than leave the box. */}
+      <span className="ms-auto flex max-w-full min-w-0 flex-wrap items-center justify-end gap-1">
+        {actions}
+      </span>
     </div>
   );
 }

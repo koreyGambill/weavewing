@@ -1,3 +1,4 @@
+import { threadQuestionChipText } from "@t3tools/client-runtime/state/thread-questions";
 import ChatMarkdown from "./ChatMarkdown";
 import { isSvgAttachment } from "@t3tools/shared/image";
 import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
@@ -391,7 +392,9 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
       render: (entry) =>
         entry.kind === "artifact-answer" ? (
           <Tooltip>
-            <TooltipTrigger render={<span />}>{entry.record.label}</TooltipTrigger>
+            <TooltipTrigger render={<span />}>
+              {threadQuestionChipText(entry.record) ?? entry.record.label}
+            </TooltipTrigger>
             <TooltipPopup>
               {[entry.record.question, entry.record.choice, entry.record.note]
                 .filter(Boolean)

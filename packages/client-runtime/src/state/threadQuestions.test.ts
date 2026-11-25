@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   sectionThreadQuestions,
   syncComposerQuestionAnswers,
+  threadQuestionChipText,
   threadQuestionAnswerRecord,
   threadQuestionCounts,
   threadQuestionDiscussRecord,
@@ -227,5 +228,23 @@ describe("thread questions", () => {
     ).toEqual([]);
     // Its status stays the question's own: a discussion is not an answer in the composer.
     expect(threadQuestionStatus(after, false)).toBe("drafted");
+  });
+
+  it("shows the answer or the start of the note on a question's chip", () => {
+    const drafted = question("Q5", "open", {
+      prompt: "Request timeout for src/client.ts?",
+      answer: draft(["b"], "keep it\n short"),
+    });
+    const answer = threadQuestionAnswerRecord("t1", drafted)!;
+    expect(threadQuestionChipText(answer)).toBe("Q5 · Request timeout for src/client.ts? · Beta");
+    expect(threadQuestionChipText({ ...answer, choice: "" })).toBe(
+      "Q5 · Request timeout for src/client.ts? · keep it short",
+    );
+    const discuss = threadQuestionDiscussRecord("t1", {
+      ...drafted,
+      answer: draft([], "x".repeat(70)),
+    })!;
+    expect(threadQuestionChipText(discuss)).toBe(`Q5 · discuss · ${"x".repeat(60)}…`);
+    expect(threadQuestionChipText({ ...answer, artifactId: "artifact-1" })).toBeNull();
   });
 });

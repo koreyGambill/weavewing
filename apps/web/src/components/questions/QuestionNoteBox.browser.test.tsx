@@ -7,8 +7,8 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { QuestionNoteBox } from "./QuestionNoteBox";
 
-const box = (note: string) => (
-  <div style={{ width: 640 }}>
+const box = (note: string, width = 640) => (
+  <div data-testid="frame" style={{ width }}>
     <QuestionNoteBox
       text={note}
       note={
@@ -27,7 +27,14 @@ const box = (note: string) => (
           <Button size="xs" variant="outline">
             Not yet
           </Button>
-          <Button size="xs">Answer</Button>
+          <Button size="xs" variant="outline">
+            Dismiss
+          </Button>
+          <Button size="xs" variant="outline">
+            Discuss
+          </Button>
+          {/* As wide as the card's Answer button, which reserves this label's width. */}
+          <Button size="xs">Remove from composer</Button>
         </>
       }
     />
@@ -38,7 +45,7 @@ it("keeps a short note beside the buttons and puts the buttons under a long one,
   // router: false because the box never navigates.
   await using screen = await render(box("Short"), { router: false });
   const note = () => screen.getByLabelText("Note").element().getBoundingClientRect();
-  const answer = () => screen.getByText("Answer").element().getBoundingClientRect();
+  const answer = () => screen.getByText("Remove from composer").element().getBoundingClientRect();
   expect(answer().top).toBeLessThan(note().bottom);
   expect(answer().left).toBeGreaterThan(note().right);
 
@@ -47,4 +54,15 @@ it("keeps a short note beside the buttons and puts the buttons under a long one,
   expect(note().height).toBeGreaterThan(30);
   const container = screen.container.querySelector("div > div")!.getBoundingClientRect();
   expect(container.right - answer().right).toBeLessThan(12);
+});
+
+it("keeps every button inside the box on a narrow card", async () => {
+  // router: false because the box never navigates.
+  await using screen = await render(box("", 260), { router: false });
+  const frame = screen.getByTestId("frame").element().getBoundingClientRect();
+  for (const button of screen.container.querySelectorAll("button")) {
+    const rect = button.getBoundingClientRect();
+    expect(rect.right).toBeLessThanOrEqual(frame.right);
+    expect(rect.left).toBeGreaterThanOrEqual(frame.left);
+  }
 });

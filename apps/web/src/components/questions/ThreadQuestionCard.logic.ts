@@ -14,7 +14,7 @@ function questionAnswerLine(question: Pick<ThreadQuestion, "options" | "answer">
 
 /**
  * What a closed question's one line shows after its prompt, or null while the question is still
- * open or deferred and keeps its full card.
+ * open or deferred and keeps its full card. Empty when the status badge already says it.
  */
 export function closedQuestionOutcome(
   question: Pick<ThreadQuestion, "state" | "options" | "answer" | "replacedBy">,
@@ -26,7 +26,8 @@ export function closedQuestionOutcome(
     case "answered":
       return questionAnswerLine(question) || "Answered";
     case "withdrawn":
-      return "Dismissed";
+      // The status badge already says Dismissed.
+      return "";
     case "replaced":
       return question.replacedBy === null ? "Replaced" : `Replaced by ${question.replacedBy}`;
   }

@@ -247,3 +247,22 @@ export function withoutComposerQuestionAnswer(
 ): ArtifactAnswerContextRecord[] {
   return records.filter((entry) => !(isQuestionRecord(entry) && entry.questionId === questionId));
 }
+
+const CHIP_ANSWER_MAX = 60;
+
+/**
+ * A question record's chip as one line: id, short title and the chosen answer or the start of the
+ * note, or, for a discussion, id and the start of the note. Null for any other record.
+ */
+export function threadQuestionChipText(record: ArtifactAnswerContextRecord): string | null {
+  if (!isQuestionRecord(record)) return null;
+  const cut = (text: string) =>
+    text.length > CHIP_ANSWER_MAX ? `${text.slice(0, CHIP_ANSWER_MAX)}…` : text;
+  const note = record.note.replace(/\s+/g, " ").trim();
+  if (isQuestionComment(record)) return `${record.questionId} · discuss · ${cut(note)}`;
+  const answer = record.choice || note;
+  const title = threadQuestionTitle(record.question);
+  return answer
+    ? `${record.questionId} · ${title} · ${cut(answer)}`
+    : `${record.questionId} · ${title}`;
+}
