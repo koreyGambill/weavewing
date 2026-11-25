@@ -43,7 +43,7 @@ const landing: EvidenceLanding = {
         updatedAt: "2026-11-25T10:00:00.000Z",
         by: "server",
         ref: 1,
-        raised: ["review_unverified", "gaps"],
+        raised: ["gaps"],
       },
     },
   ],

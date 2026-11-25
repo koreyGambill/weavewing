@@ -34,7 +34,6 @@ export type EvidenceQaState = typeof EvidenceQaState.Type;
 export const EvidenceQaRaiseReason = Schema.Literals([
   "captures",
   "review_waived",
-  "review_unverified",
   "review_changes_requested",
   "check_failed",
   "check_skipped",

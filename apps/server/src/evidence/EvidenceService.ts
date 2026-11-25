@@ -123,8 +123,8 @@ const QA_COLUMNS =
   "landing_id, change_id, state, note, updated_at, by, ref, raised_json, message_id, discussed_message_id";
 
 /**
- * Why a change asks for the user's QA; a change with none is recorded quietly. Nothing verifies a
- * reviewer's verdict yet, so every approved or changes-requested claim is unverified.
+ * Why a change asks for the user's QA; a change with none is recorded quietly. Every review claim
+ * is unverified, so that alone tells the user nothing and raises no card; the card still says so.
  *
  * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // [..., "gaps"]
  */
@@ -135,7 +135,6 @@ export function qaRaiseReasons(
   const reasons: EvidenceQaRaiseReason[] = [];
   if (change.captures.length > 0) reasons.push("captures");
   if (change.review.verdict === "waived") reasons.push("review_waived");
-  else if (change.review.check !== "verified") reasons.push("review_unverified");
   if (change.review.verdict === "changes_requested") reasons.push("review_changes_requested");
   if (verifications.some((check) => check.result === "fail")) reasons.push("check_failed");
   if (verifications.some((check) => check.result === "skipped")) reasons.push("check_skipped");
@@ -159,7 +158,13 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
 const RaisedJson = Schema.fromJsonString(Schema.Array(EvidenceQaRaiseReason));
 const encodeRaised = Schema.encodeEffect(RaisedJson);
-const decodeRaised = Schema.decodeUnknownOption(RaisedJson);
+// Rows can hold reasons this build no longer raises; those are dropped rather than failing the read.
+const isRaiseReason = Schema.is(EvidenceQaRaiseReason);
+const decodeStoredRaised = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
+);
+const decodeRaised = (json: string) =>
+  Option.map(decodeStoredRaised(json), (reasons) => reasons.filter(isRaiseReason));
 const qaOf = (row: QaRow) => ({
   state: row.state,
   note: row.note,

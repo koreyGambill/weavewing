@@ -130,9 +130,11 @@ and dropped items when you need them. These choices stay on this device.
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
 Agents record a landing with `evidence_record` after they merge work.
 
-A change that has something only you can judge, such as captures, an unverified
-or waived review, a failed or skipped check, or a gap, shows a **QA card** in the
-thread where the agent recorded it. A landing a delegated agent recorded shows in
+A change that has something only you can judge, such as captures, a waived review
+or one that asked for changes, a failed or skipped check, or a gap, shows a
+**QA card** in the thread where the agent recorded it. An approval alone raises no
+card, because no review verdict is checked yet; a card that is raised still shows it
+as an unverified review. A landing a delegated agent recorded shows in
 its lead's thread, where the delegated work reported back. A change with nothing
 to check leaves one quiet line instead. Each card has three buttons:
 

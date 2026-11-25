@@ -103,7 +103,7 @@ const change = (id: string, overrides: Partial<EvidenceChange> = {}): EvidenceCh
   summary: `Changed ${id}`,
   review: { verdict: "approved", by: "opus" },
   captures: [],
-  gaps: [],
+  gaps: ["Not tried on a slow network."],
   ...overrides,
 });
 const recordInput = (
@@ -142,7 +142,7 @@ it.effect(
       Effect.gen(function* () {
         const evidence = yield* Service.EvidenceService;
         const first = yield* evidence.record(recordInput("batch-1", [change("a"), change("b")]));
-        const unverified = ["review_unverified"] as const;
+        const unverified = ["gaps"] as const;
         assert.deepStrictEqual(first.changes, [
           { id: "a", qa: "pending", raised: [...unverified], ref: 1 },
           { id: "b", qa: "pending", raised: [...unverified], ref: 2 },
@@ -1052,11 +1052,8 @@ it("raises QA for each reason on its own and records a change with none quietly"
     [base, pass, []],
     [{ ...base, captures: [capture] }, pass, ["captures"]],
     [{ ...base, review: { verdict: "waived", reason: "Docs." } }, pass, ["review_waived"]],
-    [
-      { ...base, review: { verdict: "approved", check: "unverified" } },
-      pass,
-      ["review_unverified"],
-    ],
+    // Every claim is unverified, so an approval alone raises nothing.
+    [{ ...base, review: { verdict: "approved", check: "unverified" } }, pass, []],
     [
       { ...base, review: { verdict: "changes_requested", check: "verified" } },
       pass,
@@ -1070,37 +1067,57 @@ it("raises QA for each reason on its own and records a change with none quietly"
     assert.deepStrictEqual(Service.qaRaiseReasons(change, verifications), reasons);
 });
 
-it.effect("re-recording recomputes why a change raises QA and keeps the user's answer", () =>
+it.effect("records an approval alone quietly, recomputes reasons and keeps the user's answer", () =>
   withHome((_home, root) =>
     Effect.gen(function* () {
       const evidence = yield* Service.EvidenceService;
-      const captured = change("a", { captures: [{ path: `${root}/a.png`, caption: "After" }] });
-      const first = yield* evidence.record(recordInput("batch-1", [captured, change("b")]));
+      const approvedOnly = { gaps: [] };
+      const captured = change("a", {
+        ...approvedOnly,
+        captures: [{ path: `${root}/a.png`, caption: "After" }],
+      });
+      const first = yield* evidence.record(
+        recordInput("batch-1", [captured, change("b", approvedOnly)]),
+      );
       assert.deepStrictEqual(
-        first.changes.map((item) => [item.qa, item.raised]),
+        first.changes.map((item) => [item.qa, item.raised, item.ref]),
         [
-          ["pending", ["captures", "review_unverified"]],
-          ["pending", ["review_unverified"]],
+          ["pending", ["captures"], 1],
+          ["quiet", [], undefined],
         ],
       );
       yield* evidence.setQa({ landingId: "batch-1", changeId: "a", state: "confirmed" });
       const again = yield* evidence.record(
-        recordInput("batch-1", [change("a"), change("b", { gaps: ["Not on Safari."] })]),
+        recordInput("batch-1", [
+          change("a", approvedOnly),
+          change("b", { gaps: ["Not on Safari."] }),
+          change("c", { ...approvedOnly, review: { verdict: "changes_requested" } }),
+        ]),
       );
       assert.deepStrictEqual(
         again.changes.map((item) => [item.qa, item.raised, item.ref]),
         [
-          ["confirmed", ["review_unverified"], 1],
-          ["pending", ["review_unverified", "gaps"], 2],
+          ["confirmed", [], 1],
+          ["pending", ["gaps"], 2],
+          ["pending", ["review_changes_requested"], 3],
         ],
       );
       const landing = yield* evidence.get({ landingId: "batch-1" });
       assert.deepStrictEqual(
         landing.changes.map(({ qa }) => [qa.state, qa.by, qa.raised]),
         [
-          ["confirmed", "user", ["review_unverified"]],
-          ["pending", "server", ["review_unverified", "gaps"]],
+          ["confirmed", "user", []],
+          ["pending", "server", ["gaps"]],
+          ["pending", "server", ["review_changes_requested"]],
         ],
+      );
+      // A pending change with nothing left to check goes quiet when it is recorded again.
+      const quieter = yield* evidence.record(
+        recordInput("batch-1", [change("a", approvedOnly), change("b", approvedOnly)]),
+      );
+      assert.deepStrictEqual(
+        quieter.changes.map((item) => item.qa),
+        ["confirmed", "quiet"],
       );
     }),
   ).pipe(Effect.provide(testLayer)),
@@ -1276,7 +1293,7 @@ it.effect("closes an agent's problem when a later landing names it in fixes", ()
       assert.deepStrictEqual(fix.changes[0], {
         id: "toast-fix",
         qa: "pending",
-        raised: ["review_unverified"],
+        raised: ["gaps"],
         ref: 2,
       });
       assert.deepStrictEqual(fix.warnings, [
@@ -1322,6 +1339,19 @@ it.effect("marks pending changes discussed until the user or agent next acts on 
       assert.deepStrictEqual(yield* discussed(), ["message-discuss", undefined]);
       yield* evidence.setQa({ landingId: "first", changeId: "a", state: "pending" });
       assert.deepStrictEqual(yield* discussed(), [undefined, undefined]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("reads a stored reason this build no longer raises by dropping it", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* evidence.record(recordInput("older", [change("a")]));
+      yield* sql`UPDATE evidence_qa SET raised_json = '["review_unverified","gaps"]' WHERE landing_id = 'older'`;
+      const qa = (yield* evidence.get({ landingId: "older" })).changes[0]!.qa;
+      assert.deepStrictEqual([qa.state, qa.raised], ["pending", ["gaps"]]);
     }),
   ).pipe(Effect.provide(testLayer)),
 );
