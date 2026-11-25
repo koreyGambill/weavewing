@@ -9,6 +9,7 @@ import {
   type ProviderSettingsFormAnnotation,
   type ProviderSettingsFormControl,
   type ProviderSettingsFormOption,
+  type ProviderSettingsFormPreset,
   type ProviderSettingsFormSchemaAnnotation,
   type SecretReference,
 } from "@t3tools/contracts";
@@ -16,6 +17,7 @@ import { PlusIcon, XIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
@@ -46,6 +48,7 @@ export interface ProviderSettingsFieldModel {
   readonly accepts?: ((value: string) => boolean) | undefined;
 
   readonly options?: ReadonlyArray<ProviderSettingsFormOption> | undefined;
+  readonly presets?: ReadonlyArray<ProviderSettingsFormPreset> | undefined;
 }
 
 function titleizeFieldKey(key: string): string {
@@ -152,8 +155,12 @@ export function deriveProviderSettingsFields(
             ? { defaultBooleanValue: readFieldBooleanDefault(fieldSchema) }
             : {}),
           accepts: fieldAcceptsString(fieldSchema),
-          ...(formAnnotation.control === "select" && formAnnotation.options
+          ...((formAnnotation.control === "select" || formAnnotation.control === "checklist") &&
+          formAnnotation.options
             ? { options: formAnnotation.options }
+            : {}),
+          ...(formAnnotation.control === "checklist" && formAnnotation.presets
+            ? { presets: formAnnotation.presets }
             : {}),
         } satisfies ProviderSettingsFieldModel,
       ];
@@ -298,6 +305,142 @@ function readProviderConfigString(config: unknown, key: string): string {
   if (config === null || typeof config !== "object") return "";
   const value = (config as Record<string, unknown>)[key];
   return typeof value === "string" ? value : "";
+}
+
+function readProviderConfigStrings(config: unknown, key: string): ReadonlyArray<string> {
+  if (config === null || typeof config !== "object") return [];
+  const value = (config as Record<string, unknown>)[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+/** Keeps the field's option order, so a saved list does not depend on click order. */
+export function nextProviderConfigWithChecklist(
+  config: unknown,
+  field: ProviderSettingsFieldModel,
+  selected: ReadonlyArray<string>,
+): Record<string, unknown> | undefined {
+  const base: Record<string, unknown> =
+    config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
+  const next = (field.options ?? [])
+    .map((option) => option.value)
+    .filter((value) => selected.includes(value));
+  if (next.length === 0 && field.clearWhenEmpty === "omit") {
+    delete base[field.key];
+  } else {
+    base[field.key] = next;
+  }
+  return Object.keys(base).length > 0 ? base : undefined;
+}
+
+function ProviderSettingsChecklist({
+  field,
+  value,
+  inputId,
+  disabled,
+  onChange,
+}: {
+  readonly field: ProviderSettingsFieldModel;
+  readonly value: unknown;
+  readonly inputId: string;
+  readonly disabled: boolean;
+  readonly onChange: ProviderSettingsFormProps["onChange"];
+}) {
+  const selected = readProviderConfigStrings(value, field.key);
+  return (
+    <ul className="mt-3 grid gap-2 pb-2" aria-label={field.label}>
+      {(field.options ?? []).map((option) => {
+        const optionId = `${inputId}-${option.value}`;
+        const checked = selected.includes(option.value);
+        return (
+          <li key={option.value} className="flex min-w-0 items-start gap-2">
+            <Checkbox
+              id={optionId}
+              className="mt-0.5"
+              checked={checked}
+              disabled={disabled}
+              aria-labelledby={`${optionId}-label`}
+              aria-describedby={option.description ? `${optionId}-description` : undefined}
+              onCheckedChange={(next) =>
+                onChange(
+                  nextProviderConfigWithChecklist(
+                    value,
+                    field,
+                    next
+                      ? [...selected, option.value]
+                      : selected.filter((item) => item !== option.value),
+                  ),
+                )
+              }
+            />
+            <label htmlFor={optionId} className="min-w-0 text-xs">
+              <span id={`${optionId}-label`} className="font-medium text-foreground">
+                {option.label}
+              </span>
+              {option.description ? (
+                <span id={`${optionId}-description`} className="block text-muted-foreground">
+                  {option.description}
+                </span>
+              ) : null}
+            </label>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ProviderSettingsChecklistActions({
+  field,
+  value,
+  disabled,
+  onChange,
+}: {
+  readonly field: ProviderSettingsFieldModel;
+  readonly value: unknown;
+  readonly disabled: boolean;
+  readonly onChange: ProviderSettingsFormProps["onChange"];
+}) {
+  const selected = readProviderConfigStrings(value, field.key);
+  // An action that is already applied stays focusable: disabling the button the keyboard just
+  // used would drop focus out of the checklist.
+  return (
+    <div className="flex flex-wrap gap-2">
+      {(field.presets ?? []).map((preset) => {
+        const applied =
+          preset.values.length === selected.length &&
+          preset.values.every((item) => selected.includes(item));
+        return (
+          <Button
+            key={preset.label}
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            aria-disabled={applied || undefined}
+            onClick={() => {
+              if (!applied) onChange(nextProviderConfigWithChecklist(value, field, preset.values));
+            }}
+          >
+            {preset.label}
+          </Button>
+        );
+      })}
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        aria-disabled={selected.length === 0 || undefined}
+        onClick={() => {
+          if (selected.length > 0) onChange(nextProviderConfigWithChecklist(value, field, []));
+        }}
+      >
+        Clear
+      </Button>
+    </div>
+  );
 }
 
 function readProviderConfigBoolean(config: unknown, key: string, defaultValue = false): boolean {
@@ -527,6 +670,56 @@ function ProviderSettingsFieldRow({
   const description = field.description ? (
     <span className={descriptionClassName}>{field.description}</span>
   ) : null;
+
+  if (field.control === "checklist") {
+    const disabled = managedReason !== undefined;
+    if (variant === "settings") {
+      return (
+        <SettingsRow
+          title={field.label}
+          description={field.description}
+          control={
+            <ProviderSettingsChecklistActions
+              field={field}
+              value={value}
+              disabled={disabled}
+              onChange={onChange}
+            />
+          }
+          managed={managedReason}
+        >
+          <ProviderSettingsChecklist
+            field={field}
+            value={value}
+            inputId={inputId}
+            disabled={disabled}
+            onChange={onChange}
+          />
+        </SettingsRow>
+      );
+    }
+    return (
+      <FieldFrame variant={variant}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {label}
+          <ProviderSettingsChecklistActions
+            field={field}
+            value={value}
+            disabled={disabled}
+            onChange={onChange}
+          />
+        </div>
+        {description}
+        <ProviderSettingsChecklist
+          field={field}
+          value={value}
+          inputId={inputId}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      </FieldFrame>
+    );
+  }
 
   if (variant === "settings") {
     const descriptionId = field.description ? `${inputId}-description` : undefined;

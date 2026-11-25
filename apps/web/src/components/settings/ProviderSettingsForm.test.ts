@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import { providerClients } from "./providerDriverMeta";
 import {
   deriveProviderSettingsFields,
+  nextProviderConfigWithChecklist,
   nextProviderConfigWithFieldValue,
   reconcileRowsDraft,
   seedRowsDraft,
@@ -68,6 +69,25 @@ describe("ProviderSettingsForm helpers", () => {
     expect(
       nextProviderConfigWithFieldValue({ launchArgs: "--x" }, autoCompactWindow!, "300000"),
     ).toEqual({ launchArgs: "--x", autoCompactWindow: "300000" });
+  });
+
+  it("offers Claude's removable built-in tools as a checklist that clears back to the default", () => {
+    const claude = providerClients.get(ProviderDriverKind.make("claudeAgent"));
+    const field = deriveProviderSettingsFields(claude!).find(
+      (candidate) => candidate.key === "omittedBuiltinTools",
+    );
+    expect(field?.control).toBe("checklist");
+    expect(field?.options?.map((option) => option.value)).not.toContain("ToolSearch");
+    expect(field?.options?.map((option) => option.value)).not.toContain("Skill");
+    expect(field?.presets?.[0]?.values).toHaveLength(7);
+
+    const next = nextProviderConfigWithChecklist({ launchArgs: "--x" }, field!, [
+      "Workflow",
+      "Artifact",
+      "ToolSearch",
+    ]);
+    expect(next).toEqual({ launchArgs: "--x", omittedBuiltinTools: ["Artifact", "Workflow"] });
+    expect(nextProviderConfigWithChecklist(next, field!, [])).toEqual({ launchArgs: "--x" });
   });
 
   it("stores false boolean fields when true is the default", () => {

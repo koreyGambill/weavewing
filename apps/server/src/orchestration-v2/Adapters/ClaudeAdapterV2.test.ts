@@ -152,6 +152,9 @@ beforeEach(() => {
 });
 
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+const OMITTED_TOOLS_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
+  omittedBuiltinTools: ["Artifact", "Task", "Workflow", "ToolSearch", "Skill"],
+});
 const AUTO_COMPACT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
   autoCompactWindow: "300000",
 });
@@ -499,6 +502,35 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       OTHER: "kept",
       ENABLE_TOOL_SEARCH: "true",
     });
+  });
+
+  it("removes omitted built-in tools from the session, naming both subagent tools for Task", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-omitted-tools",
+      resume: false,
+      cwd: "/workspace",
+      settings: OMITTED_TOOLS_CLAUDE_SETTINGS,
+      disallowedTools: ["WebFetch"],
+    });
+    assert.deepEqual(options.disallowedTools, [
+      "WebFetch",
+      "Artifact",
+      "Agent",
+      "Task",
+      "Workflow",
+    ]);
+  });
+
+  it("sends no disallowed tools when nothing is omitted", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-no-omitted-tools",
+      resume: false,
+      cwd: "/workspace",
+      settings: DEFAULT_CLAUDE_SETTINGS,
+    });
+    assert.notProperty(options, "disallowedTools");
   });
 
   it("sends the auto-compact window as the env var Claude Code prefers", () => {

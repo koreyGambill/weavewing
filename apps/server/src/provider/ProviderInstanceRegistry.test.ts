@@ -113,6 +113,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   customModels: [],
   launchArgs: "",
   autoCompactWindow: "",
+  omittedBuiltinTools: [],
   idleCompaction: "default",
   ...overrides,
 });
