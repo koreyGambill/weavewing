@@ -32,19 +32,27 @@ Turn on **Agent questions** in **Settings → Labs** to let agents ask for the
 decisions they need without stopping their work. Each question appears in the
 chat where the agent asked it, with its options and a note field. Choosing an
 option or typing a note saves a draft; choosing the chosen option again clears
-it. Nothing reaches the agent by itself: **Add to composer** puts the answer in
-your message box, and it goes out with your next message, together with
-anything you type. Remove it from the card or the chip to keep it as a draft.
+it. Nothing reaches the agent by itself: **Answer** puts the answer in your
+message box, and it goes out with your next message, together with anything you
+type. Remove it from the card or the chip to keep it as a draft.
+
+**Discuss** puts your note in the message box as a comment on the question
+instead of an answer, for when you want to ask the agent something first. The
+question stays open and keeps counting as waiting on you. A question has an
+answer or a comment in the message box, not both.
 
 Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
 starts. A sent answer stops counting as waiting on you. Editing or cancelling
-the queued message returns it with its draft.
+the queued message returns it with its draft. A closed question shrinks to one
+line; click it to see the whole question.
 
 Clicking the line above the composer lists the waiting questions; picking one
-scrolls the chat to it, and **Add all drafted to composer** queues every draft.
+scrolls the chat to it, and **Answer all drafted** queues every draft.
 **Open panel** shows every question beside the chat in one scrolling column,
-where J and K move, 1 to 9 choose an option, and N defers.
+where J and K move, 1 to 9 choose an option, and N defers. Its filters show
+waiting, deferred, answered, or dismissed questions, and this device remembers
+your choice.
 
 A thread with questions waiting shows a count in the thread list, and an idle
 one reads **Needs Decision**. It stays out of automatic settling until you answer
