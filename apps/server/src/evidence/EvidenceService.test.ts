@@ -848,6 +848,32 @@ it.effect("keeps a reviewer link when the lead's own child records the landing",
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("drops a cited reviewer whose thread was deleted", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({ id: "reviewer", parent: "lead", role: "review" });
+      yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${landedAt}
+        WHERE thread_id = 'reviewer'`;
+      const result = yield* evidence.record(
+        recordInput(
+          "deleted",
+          [change("a", { review: { verdict: "approved", threadId: ThreadId.make("reviewer") } })],
+          { landedAt },
+        ),
+      );
+      assert.deepStrictEqual(result.warnings, [
+        "change a: dropped review.threadId reviewer because it is not a thread this lead delegated",
+      ]);
+      assert.deepStrictEqual(yield* reviewsOf("deleted"), [
+        { verdict: "approved", check: "unverified" },
+      ]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("drops a cited reviewer that runs in a linked environment", () =>
   withHome(() =>
     Effect.gen(function* () {

@@ -191,8 +191,8 @@ const make = Effect.gen(function* () {
     return canonical.value;
   });
 
-  // The role each of the lead's local children was delegated with. A child in a linked
-  // environment has no local thread row, so it never appears here.
+  // The role each of the lead's live local children was delegated with. A deleted child, or one in
+  // a linked environment, has no live local thread row, so it never appears here.
   const readChildRoles = Effect.fnUntraced(function* (threadId: ThreadId) {
     const [landing] = yield* sql<{
       readonly relationship: string | null;
@@ -210,7 +210,7 @@ const make = Effect.gen(function* () {
     }>`SELECT s.child_thread_id, coalesce(json_extract(t.payload_json, '$.delegateRole'),
             json_extract(s.payload_json, '$.delegateRole')) AS role
         FROM orchestration_v2_projection_subagents s
-        JOIN orchestration_v2_projection_threads t ON t.thread_id = s.child_thread_id
+        JOIN orchestration_v2_projection_threads t ON t.thread_id = s.child_thread_id AND t.deleted_at IS NULL
         WHERE s.thread_id = ${leadThreadId} AND s.origin = 'app_owned'`;
     const roles = new Map<string, Set<string>>();
     for (const row of rows) {
