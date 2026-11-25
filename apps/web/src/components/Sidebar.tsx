@@ -81,6 +81,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -116,6 +117,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { resolveProjectExpanded, useUiStateStore } from "../uiStateStore";
+import { PROJECT_FOLDER_DRAG_TYPE } from "./sidebar/sidebarFolderDrag";
 import {
   getThreadKeysToDeselectAfterDelete,
   useThreadSelectionStore,
@@ -179,6 +181,7 @@ import {
   isSidebarV2VisibleThread,
   SidebarAutomationThreadFilter,
   groupSidebarThreadsByProject,
+  moveSidebarFolders,
   groupSidebarThreadFamilies,
   sidebarFolderExpansionKeys,
   buildBulkTitleRegenerationContextMenuItem,
@@ -297,6 +300,8 @@ import {
   addSidebarThreadGroup,
   arrangeSidebarThreadGroups,
   changedSidebarThreadGroupNames,
+  sidebarGroupToRecord,
+  sidebarThreadGroupNameOf,
   localSidebarThreadGroups,
   withServerSidebarGroups,
   deleteSidebarThreadGroup,
@@ -309,6 +314,7 @@ import {
   DEFAULT_UNGROUPED_NAME,
   hasSidebarManualThreadOrder,
   placeSidebarThread,
+  placeSidebarThreads,
   sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
   setSidebarUngroupedHeader,
@@ -1025,12 +1031,12 @@ function isOptimisticDropReleased(input: {
 }
 
 // Build maps in a hook so the compiler can prove they are frozen and cache them.
-function useSidebarLookups() {
+function useSidebarLookups(fixedProjectOrder: boolean) {
   const projects = useProjects();
   const environments = useEnvironmentIdentities();
   const serverConfigs = useServerConfigs();
   const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
-  const projectGroups = useSidebarProjectGroups();
+  const projectGroups = useSidebarProjectGroups({ fixedOrder: fixedProjectOrder });
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
@@ -1121,6 +1127,21 @@ function readRouteThreadKey(router: AnyRouter): string | null {
 }
 
 export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReveal }) {
+  // The old Labs switch for project folders now only picks the default grouping.
+  const legacyProjectFolders = useClientSettings((settings) => settings.boringSidebarEnabled);
+  const [groupBy, setGroupBy] = useLocalStorage(
+    GROUP_BY_KEY,
+    legacyProjectFolders ? "project" : "named",
+    SidebarGroupBy,
+  );
+  const boringSidebarEnabled = groupBy === "project";
+  const [threadOrder, setThreadOrder] = useLocalStorage(
+    THREAD_ORDER_KEY,
+    "recency",
+    SidebarThreadOrder,
+  );
+  // Fixed order holds project folders where the user dragged them, not where activity puts them.
+  const fixedProjectOrder = boringSidebarEnabled && threadOrder === "fixed";
   const {
     projects,
     serverConfigs,
@@ -1131,7 +1152,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectDisplayNameByKey,
     projectGroupByScopeKey,
     projectScopeItems: lookupProjectScopeItems,
-  } = useSidebarLookups();
+  } = useSidebarLookups(fixedProjectOrder);
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -1196,14 +1217,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       );
     },
   });
-  // The old Labs switch for project folders now only picks the default grouping.
-  const legacyProjectFolders = useClientSettings((settings) => settings.boringSidebarEnabled);
-  const [groupBy, setGroupBy] = useLocalStorage(
-    GROUP_BY_KEY,
-    legacyProjectFolders ? "project" : "named",
-    SidebarGroupBy,
-  );
-  const boringSidebarEnabled = groupBy === "project";
   const [denseRows, setDenseRows] = useLocalStorage(DENSE_ROWS_KEY, false, Schema.Boolean);
   const [denseProjectIcons, setDenseProjectIcons] = useLocalStorage(
     DENSE_PROJECT_ICONS_KEY,
@@ -1214,11 +1227,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     THREAD_NUMBERS_KEY,
     false,
     Schema.Boolean,
-  );
-  const [threadOrder, setThreadOrder] = useLocalStorage(
-    THREAD_ORDER_KEY,
-    "recency",
-    SidebarThreadOrder,
   );
   const [collapsedGroupBySections, setCollapsedGroupBySections] = useLocalStorage(
     GROUP_BY_COLLAPSED_KEY,
@@ -1718,11 +1726,111 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   // Edits apply to what the user sees, server-recorded groups included; membership changes go
   // back to each thread's server so other machines group it the same way. Stable so a menu
   // that resolves later edits the latest groups.
+  const settingProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const foldersReorderable =
+    boringSidebarEnabled && (fixedProjectOrder || settingProjectSortOrder === "manual");
+  const setProjectOrder = useUiStateStore((store) => store.setProjectOrder);
+  const [selectedFolderKeys, setSelectedFolderKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [folderDrop, setFolderDrop] = useState<{
+    readonly key: string;
+    readonly side: "before" | "after";
+  } | null>(null);
+  const folderSelectAnchorRef = useRef<string | null>(null);
+  const draggedFolderKeysRef = useRef<ReadonlySet<string> | null>(null);
+  const projectGroupMemberKeys = (keys: readonly string[]) => {
+    const groupByKey = new Map(projectGroups.map((group) => [group.projectKey, group] as const));
+    return keys.flatMap(
+      (key) => groupByKey.get(key)?.memberProjects.map((member) => member.physicalProjectKey) ?? [],
+    );
+  };
+  // Freezes the order on screen, so switching to Fixed never reshuffles the folders.
+  const freezeProjectOrder = () =>
+    setProjectOrder(projectGroupMemberKeys(projectGroups.map((group) => group.projectKey)));
+  const selectProjectFolder = useStableCallback(
+    (group: SidebarProjectSnapshot, mode: "toggle" | "range" | "clear") => {
+      const key = group.projectKey;
+      if (mode === "clear") {
+        folderSelectAnchorRef.current = null;
+        if (selectedFolderKeys.size > 0) setSelectedFolderKeys(new Set());
+        return;
+      }
+      const anchor = folderSelectAnchorRef.current;
+      const shown = (projectFolders ?? []).map((folder) => folder.group.projectKey);
+      if (mode === "range" && anchor !== null && shown.includes(anchor)) {
+        const [from, to] = [shown.indexOf(anchor), shown.indexOf(key)].toSorted((a, b) => a - b);
+        setSelectedFolderKeys(new Set(shown.slice(from, to! + 1)));
+        return;
+      }
+      folderSelectAnchorRef.current = key;
+      const next = new Set(selectedFolderKeys);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      setSelectedFolderKeys(next);
+    },
+  );
+  const startProjectFolderDrag = useStableCallback(
+    (group: SidebarProjectSnapshot, event: DragEvent<HTMLElement>) => {
+      const keys = selectedFolderKeys.has(group.projectKey)
+        ? selectedFolderKeys
+        : new Set([group.projectKey]);
+      draggedFolderKeysRef.current = keys;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData(PROJECT_FOLDER_DRAG_TYPE, [...keys].join("\n"));
+    },
+  );
+  const overProjectFolder = useStableCallback(
+    (group: SidebarProjectSnapshot, side: "before" | "after") => {
+      const dragged = draggedFolderKeysRef.current;
+      const next = dragged === null || dragged.has(group.projectKey) ? null : group.projectKey;
+      if (folderDrop?.key === next && (next === null || folderDrop.side === side)) return;
+      setFolderDrop(next === null ? null : { key: next, side });
+    },
+  );
+  const endProjectFolderDrag = useStableCallback(() => {
+    draggedFolderKeysRef.current = null;
+    setFolderDrop(null);
+  });
+  const dropOnProjectFolder = useStableCallback(
+    (group: SidebarProjectSnapshot, side: "before" | "after") => {
+      const dragged = draggedFolderKeysRef.current;
+      endProjectFolderDrag();
+      if (dragged === null) return;
+      const next = moveSidebarFolders(
+        projectGroups.map((candidate) => candidate.projectKey),
+        dragged,
+        group.projectKey,
+        side === "after",
+      );
+      if (next === null) return;
+      setProjectOrder(projectGroupMemberKeys(next));
+      setSelectedFolderKeys(new Set());
+    },
+  );
+  const projectFolderReorder = foldersReorderable
+    ? {
+        onSelect: selectProjectFolder,
+        onDragStart: startProjectFolderDrag,
+        onDragOver: overProjectFolder,
+        onDrop: dropOnProjectFolder,
+        onDragEnd: endProjectFolderDrag,
+      }
+    : null;
   const setThreadGroups = useStableCallback(
-    (update: (current: SidebarThreadGroups) => SidebarThreadGroups) => {
+    (
+      update: (current: SidebarThreadGroups) => SidebarThreadGroups,
+      // Threads the user just placed are checked against their server records directly, since a
+      // hidden thread's stale local entry can make its placement look unchanged.
+      placedKeys: readonly string[] = [],
+    ) => {
       const view = threadGroupsView ?? threadGroups;
       const next = update(view);
       const changed = changedSidebarThreadGroupNames(view, next);
+      for (const placedKey of placedKeys) {
+        if (changed.has(placedKey)) continue;
+        changed.set(placedKey, { from: null, to: sidebarThreadGroupNameOf(next, placedKey) });
+      }
       const changedThreads = new Map(
         changed.size === 0
           ? []
@@ -1732,23 +1840,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             }),
       );
       for (const [key, change] of changed) {
-        const { from, to } = change;
         const thread = changedThreads.get(key);
         if (
           thread === undefined ||
-          (to !== null && isUnnamedSidebarThreadGroup(to)) ||
-          to === thread.sidebarGroup ||
-          // A thread leaving an unnamed group it never synced returns to its local place.
-          (thread.sidebarGroup === undefined &&
-            from !== null &&
-            isUnnamedSidebarThreadGroup(from)) ||
           serverConfigs.get(thread.environmentId)?.environment.capabilities.sidebarGroups !== true
         ) {
           continue;
         }
+        const group = sidebarGroupToRecord(change, thread.sidebarGroup);
+        if (group === undefined) continue;
         void setThreadSidebarGroup({
           environmentId: thread.environmentId,
-          input: { threadId: thread.id, group: to },
+          input: { threadId: thread.id, group },
         });
       }
       setStoredThreadGroups(
@@ -1802,7 +1905,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (arrangement === null) return;
     const target = resolveSidebarGroupDrop(arrangement, threadKey, { kind: "header", groupId });
     if (target === null) return;
-    setThreadGroups((current) => placeSidebarThread(current, arrangement, threadKey, target));
+    setThreadGroups(
+      (current) => placeSidebarThread(current, arrangement, threadKey, target),
+      [threadKey],
+    );
   };
   const stepThread = (threadKey: string, delta: -1 | 1) => {
     const arrangement = readThreadGroupArrangement();
@@ -2769,6 +2875,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   })();
   const handleThreadDragEnd = (event: DragEndEvent) => {
     let overId = event.over === null ? null : String(event.over.id);
+    let placedInGroups = false;
     if (isGroupDrag) {
       const drop = groupDropStore.get();
       overId = groupDropStore.shelf()?.overId ?? null;
@@ -2777,15 +2884,35 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       const arrangement = threadGroupArrangement;
       if (drop !== null && arrangement !== null) {
         const key = String(event.active.id);
-        setThreadGroups((current) => placeSidebarThread(current, arrangement, key, drop.target));
-        return;
+        // A drag that starts on a selected Active thread carries the other selected Active ones.
+        const selected = useThreadSelectionStore.getState().selectedThreadKeys;
+        const keys = selected.has(key)
+          ? orderedThreadKeys.filter(
+              (candidate) =>
+                candidate === key ||
+                (selected.has(candidate) &&
+                  sectionByThreadKey.get(candidate) === "active" &&
+                  // A fork moves with its family's head, never on its own.
+                  (familyDepthByKey.get(candidate) ?? 0) === 0),
+            )
+          : [key];
+        setThreadGroups(
+          (current) => placeSidebarThreads(current, arrangement, keys, drop.target),
+          keys,
+        );
+        if (sectionByThreadKey.get(key) === "active") return;
+        placedInGroups = true;
       }
     }
     if (projectFolders !== null || derivedSections !== null) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
-    const target =
-      overId === null ? null : resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
+    // A thread placed into the groups from another section still has to join Active.
+    const target = placedInGroups
+      ? { section: "active" as const, pinnedOrder: pinnedKeys, activeOrder: activeKeys }
+      : overId === null
+        ? null
+        : resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
     const activeThread = threadByKey.get(activeKey);
     if (activeSection === undefined || target === null || activeThread === undefined) return;
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -4024,7 +4151,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       <MenuRadioGroup
                         value={threadOrder}
                         onValueChange={(value) => {
-                          if (isSidebarThreadOrder(value)) setThreadOrder(value);
+                          if (!isSidebarThreadOrder(value)) return;
+                          if (value === "fixed" && !fixedProjectOrder && boringSidebarEnabled) {
+                            freezeProjectOrder();
+                          }
+                          setThreadOrder(value);
                         }}
                       >
                         {SidebarThreadOrder.literals.map((option) => (
@@ -4569,6 +4700,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onToggle={toggleProjectFolder}
                                 onNewThread={startThreadInProjectFolder}
                                 onContextMenu={handleProjectFolderContextMenu}
+                                reorder={projectFolderReorder}
+                                selected={selectedFolderKeys.has(folder.group.projectKey)}
+                                dropSide={
+                                  folderDrop?.key === folder.group.projectKey
+                                    ? folderDrop.side
+                                    : null
+                                }
                               />,
                             );
                             for (const thread of folder.threads) {

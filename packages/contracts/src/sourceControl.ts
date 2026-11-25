@@ -233,6 +233,61 @@ export const SourceControlStarredInput = Schema.Struct({
 });
 export type SourceControlStarredInput = typeof SourceControlStarredInput.Type;
 
+export const SourceControlFileLinkInput = Schema.Struct({
+  /** The workspace a relative path stays inside; optional for an absolute or `~/` path. */
+  cwd: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4096))),
+  /** Workspace-relative, absolute or `~/`, as the file reader takes it. */
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+  line: Schema.optional(PositiveInt),
+  endLine: Schema.optional(PositiveInt),
+});
+export type SourceControlFileLinkInput = typeof SourceControlFileLinkInput.Type;
+
+/**
+ * `default` when the file exists on the remote's default branch; otherwise `current`, the checked
+ * out branch's upstream on that remote; `default-without-upstream` when the branch has none there.
+ */
+export const SourceControlFileLinkRefChoice = Schema.Literals([
+  "default",
+  "current",
+  "default-without-upstream",
+]);
+export type SourceControlFileLinkRefChoice = typeof SourceControlFileLinkRefChoice.Type;
+
+export const SourceControlFileLinkTarget = Schema.Struct({
+  ref: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+});
+export type SourceControlFileLinkTarget = typeof SourceControlFileLinkTarget.Type;
+
+export const SourceControlFileLink = Schema.Union([
+  Schema.TaggedStruct("Available", {
+    provider: SourceControlProviderKind,
+    providerLabel: TrimmedNonEmptyString,
+    remoteName: TrimmedNonEmptyString,
+    choice: SourceControlFileLinkRefChoice,
+    /** The checked out branch; null when HEAD is detached. */
+    branch: Schema.NullOr(TrimmedNonEmptyString),
+    /** The chosen ref's link. */
+    link: SourceControlFileLinkTarget,
+    defaultBranch: Schema.NullOr(SourceControlFileLinkTarget),
+    /** Null when the checked out branch has no upstream on the remote. */
+    currentBranch: Schema.NullOr(SourceControlFileLinkTarget),
+  }),
+  Schema.TaggedStruct("Unavailable", {
+    reason: Schema.Literals([
+      "not-repository",
+      "unsupported-host",
+      "no-branch",
+      "network-path",
+      "outside-workspace",
+    ]),
+    /** The remote's host, for `unsupported-host`. */
+    host: Schema.optional(TrimmedNonEmptyString),
+  }),
+]);
+export type SourceControlFileLink = typeof SourceControlFileLink.Type;
+
 export class SourceControlSignInError extends Schema.TaggedError<SourceControlSignInError>()(
   "SourceControlSignInError",
   {

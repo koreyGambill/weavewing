@@ -91,6 +91,19 @@ describe("reduceCommandPaletteUiState", () => {
     ).toBeNull();
   });
 
+  it("opens Go to file prefilled, carrying where the picked file opens", () => {
+    const state = reduceCommandPaletteUiState(
+      { open: false, mode: "command", openIntent: null, session: 3 },
+      { _tag: "OpenFilePicker", query: "docs/README.md", reveal: { line: 4, endLine: 8 } },
+    );
+    expect(state).toEqual({
+      open: true,
+      mode: "files",
+      openIntent: { kind: "files", query: "docs/README.md", reveal: { line: 4, endLine: 8 } },
+      session: 4,
+    });
+  });
+
   it("keeps the session across mode switches so only intents start the palette over", () => {
     let state: CommandPaletteUiState = {
       open: false,

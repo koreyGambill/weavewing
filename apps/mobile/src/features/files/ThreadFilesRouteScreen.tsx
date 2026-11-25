@@ -9,9 +9,14 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { type ComponentProps, type ReactNode, useId, useState } from "react";
-import { Platform, View } from "react-native";
+import { Alert, Platform, View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
-import { EnvironmentId, type ProjectReadFileResult, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ProjectReadFileResult,
+  type RepositoryIdentity,
+  ThreadId,
+} from "@t3tools/contracts";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   isWorkspaceBrowserPreviewPath,
@@ -39,6 +44,13 @@ import { useSelectedThreadWorktree } from "../../state/use-selected-thread-workt
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { projectEnvironment } from "../../state/projects";
+import { sourceControlEnvironment } from "../../state/sourceControl";
+import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
+import {
+  fileLinkPreflight,
+  pressTimeFileActions,
+  resolvePressedFileAction,
+} from "@t3tools/client-runtime/file-remote-actions";
 import type { AssetUrlFailureReason } from "../../state/asset-url-state";
 import {
   Inspector,
@@ -112,6 +124,8 @@ function FileHeader(props: {
     readonly title: string;
     readonly icon: string;
     readonly inline: boolean;
+    readonly disabled?: boolean;
+    readonly subtitle?: string;
     readonly onPress: () => unknown;
   }>;
 }) {
@@ -397,12 +411,14 @@ function useThreadFilesWorkspace(params: {
   const project = selectedThreadProject as {
     readonly title?: string;
     readonly workspaceRoot?: string;
+    readonly repositoryIdentity?: RepositoryIdentity | null;
   } | null;
 
   return {
     cwd: routeCwd ?? selectedThreadCwd ?? project?.workspaceRoot ?? null,
     environmentId,
     projectName: routeProjectName ?? project?.title ?? "Files",
+    repositoryIdentity: project?.repositoryIdentity ?? null,
     relativePath: normalizeRoutePath(params.path),
     selectedThread,
     threadId,
@@ -620,8 +636,15 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
   const { appearance, setCodeWordBreak } = useAppearancePreferences();
   const params = props.route.params;
   const targetLine = normalizeRouteLine(firstRouteParam(params.line));
-  const { cwd, environmentId, projectName, relativePath, selectedThread, threadId } =
-    useThreadFilesWorkspace(props.route.params);
+  const {
+    cwd,
+    environmentId,
+    projectName,
+    relativePath,
+    repositoryIdentity,
+    selectedThread,
+    threadId,
+  } = useThreadFilesWorkspace(props.route.params);
   const fileAccessSession = useEnvironmentQuery(
     environmentId !== null ? environmentSession.sessionStateAtom(environmentId) : null,
   );
@@ -641,6 +664,36 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       : null,
   );
   const metadataPending = !metadata.isSuccess && metadata.error === null;
+  const loadFileLink = useAtomQueryRunner(sourceControlEnvironment.fileLink, {
+    reportFailure: false,
+    reportDefect: false,
+    refresh: true,
+  });
+  const forgePreflight = fileLinkPreflight({
+    canReadFiles,
+    identity: repositoryIdentity,
+  });
+  // The menu has no open callback, so a row reads git when pressed, bounded as on web.
+  const runForgeAction = async (id: string) => {
+    if (environmentId === null || relativePath === null) return;
+    const lookup = loadFileLink({
+      environmentId,
+      input: {
+        path: relativePath,
+        ...(cwd === null ? {} : { cwd }),
+        ...(targetLine === null ? {} : { line: targetLine }),
+      },
+    }).then((result) =>
+      result._tag === "Success" ? result.value : Promise.reject(new Error("lookup failed")),
+    );
+    const action = await resolvePressedFileAction(id, lookup);
+    if (!action.url) {
+      Alert.alert(action.label, action.disabledReason ?? "No link for this file");
+      return;
+    }
+    if (action.kind === "copy") copyTextWithHaptic(action.url);
+    else await tryOpenExternalUrl(action.url, "forge-file");
+  };
   const directoryPath = metadata.data?.kind === "directory" ? targetPath : null;
   const [searchQuery, setSearchQuery] = useState("");
   const entriesQuery = useFileTreeEntries({
@@ -912,6 +965,18 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
               }),
           } as const)
         : null,
+      ...(metadata.data?.kind === "file"
+        ? pressTimeFileActions(forgePreflight).map((row) => ({
+            id: row.id,
+            title: row.label,
+            icon: row.kind === "copy" ? "link" : "arrow.up.right.square",
+            inline: false,
+            ...(row.disabledReason === null
+              ? {}
+              : { disabled: true, subtitle: row.disabledReason }),
+            onPress: () => void runForgeAction(row.id),
+          }))
+        : []),
       isBrowserFile && typeof assetPreviewUri === "string"
         ? ({
             id: "open-browser",

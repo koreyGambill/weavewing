@@ -537,6 +537,8 @@ import {
   SourceControlAppAccess,
   SourceControlAppAccessInput,
   SourceControlStarredInput,
+  SourceControlFileLinkInput,
+  SourceControlFileLink,
   SourceControlSignInError,
   SourceControlSignInInput,
   SourceControlSignInPrompt,
@@ -858,6 +860,7 @@ export const WS_METHODS = {
   sourceControlAppAccess: "sourceControl.appAccess",
   sourceControlStarred: "sourceControl.starred",
   sourceControlStar: "sourceControl.star",
+  sourceControlFileLink: "sourceControl.fileLink",
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
@@ -1592,6 +1595,13 @@ const WsSourceControlStarredRpc = Rpc.make(WS_METHODS.sourceControlStarred, {
 const WsSourceControlStarRpc = Rpc.make(WS_METHODS.sourceControlStar, {
   payload: SourceControlStarredInput,
   success: Schema.Boolean,
+  error: EnvironmentAuthorizationError,
+});
+
+// The forge's web view of a host file, read from local git refs without fetching.
+const WsSourceControlFileLinkRpc = Rpc.make(WS_METHODS.sourceControlFileLink, {
+  payload: SourceControlFileLinkInput,
+  success: SourceControlFileLink,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2948,6 +2958,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlAppAccessRpc,
   WsSourceControlStarredRpc,
   WsSourceControlStarRpc,
+  WsSourceControlFileLinkRpc,
   WsProjectCloneStartRpc,
   WsProjectCloneCancelRpc,
   WsProjectCloneRetryRpc,

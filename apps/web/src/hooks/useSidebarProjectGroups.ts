@@ -15,14 +15,16 @@ import {
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
-export function useSidebarProjectGroups() {
+/** `fixedOrder` keeps the user's dragged folder order whatever the sort setting says. */
+export function useSidebarProjectGroups(options?: { readonly fixedOrder?: boolean }) {
   const projects = useProjects();
   // Activity order lags a running thread's streaming ticks until its next
   // real change; reading every tick re-rendered the whole sidebar with it.
   const threads = useQuietThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const sortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const settingSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sortOrder = options?.fixedOrder === true ? "manual" : settingSortOrder;
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();

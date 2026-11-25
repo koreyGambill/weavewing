@@ -2,9 +2,11 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import { canonicalRepositoryPath } from "@t3tools/shared/git";
 import {
   buildCommitUrl,
+  buildFileUrl,
   changeRequestUrlBelow,
   type ChangeRequestHostIdentity,
   defineSourceControl,
+  gitHubStyleLines,
   isChangeRequestAuthorityOfProject,
   isChangeRequestInProjectRepository,
   isChangeRequestOnProjectHost,
@@ -90,6 +92,7 @@ export const definition = defineSourceControl({
   },
   changeRequestUrlFromReferenceAutolink: () => null,
   commitUrl: (input) => buildCommitUrl(input, "commit"),
+  fileUrl: (input) => buildFileUrl(input, "src/branch", gitHubStyleLines),
   parseCommitUrl: (url) => parseCommitPath(url, COMMIT_PATH),
   repositoryUrlFromPage: (url, known) => {
     // A mount path may itself contain `src/branch/`, so a `.git` path is always the clone URL.

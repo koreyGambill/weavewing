@@ -67,6 +67,8 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
 
 export function FileSurfaceAction(props: {
   readonly label: string;
+  /** Shown after the label in the tooltip, such as the branch a link names. */
+  readonly detail?: string | null;
   readonly pressed?: boolean;
   readonly disabled?: boolean;
   /** Keeps the action visible and hoverable, with the reason as its tooltip. */
@@ -112,7 +114,13 @@ export function FileSurfaceAction(props: {
           )
         }
       />
-      <TooltipPopup>{reason === null ? props.label : `${props.label}: ${reason}`}</TooltipPopup>
+      <TooltipPopup>
+        {reason !== null
+          ? `${props.label}: ${reason}`
+          : props.detail
+            ? `${props.label} at ${props.detail}`
+            : props.label}
+      </TooltipPopup>
     </Tooltip>
   );
 }

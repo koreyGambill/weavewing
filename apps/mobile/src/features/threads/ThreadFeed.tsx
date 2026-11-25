@@ -249,19 +249,8 @@ import { ThreadMcpApp } from "./McpAppWebView";
 import { assetEnvironment, useAssetUrl, useRefreshAssetUrl } from "../../state/assets";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { readEnvironmentScope, usePreparedConnection } from "../../state/session";
-import { environmentProjects, projectEnvironment } from "../../state/projects";
 import { filesystemEnvironment } from "../../state/filesystem";
-import {
-  agentWorkingDirectories,
-  childFoldersBrowsePath,
-  findAgentDirectoryMatch,
-  findChildCheckoutMatch,
-  needsWorkspaceBasenameLookup,
-  pickProjectLinkMatch,
-  pickWorkspaceLinkMatch,
-  WORKSPACE_BASENAME_LOOKUP_LIMIT,
-  workspaceLinkLookupQuery,
-} from "@t3tools/client-runtime/workspace-basename-lookup";
+import { safeDecodeURIComponent } from "@t3tools/shared/markdownLinks";
 import {
   resolveThreadLink,
   useLiveThreadLinkLabels,
@@ -276,24 +265,15 @@ import { useModelMentions } from "../../state/model-mentions";
 import { composerDocumentAttachmentRecord } from "../../lib/composerContext";
 import * as Option from "effect/Option";
 import { appAtomRegistry } from "../../state/atom-registry";
-import {
-  environmentThreadDetails,
-  environmentThreadShells,
-  threadEnvironment,
-} from "../../state/threads";
+import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { ThreadWorkflowOpening, useWorkflowOpening } from "./thread-workflow-opening";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useV2ItemSupport } from "../../state/v2-item-support";
-import {
-  fileRoutePathSegments,
-  isAbsolutePath,
-  resolveFileLinkPath,
-  resolveWorkspaceFilePath,
-  resolveWorkspaceRelativeFilePath,
-} from "../files/filePath";
+import { fileRoutePathSegments, isAbsolutePath } from "../files/filePath";
 import { waitForThreadShell } from "./threadForkNavigation";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
+import { decideFileLinkTap, decideMediaLinkTap } from "./fileLinkTap";
 import { useFileChipShare } from "./useFileChipShare";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import {
@@ -2989,150 +2969,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     // A v1 link names no environment, so it falls back to this message's.
     return scopeThreadRef(props.environmentId, link.threadId);
   };
-  // The file a chat link names: in this workspace, else in the one other project that has it.
-  const findFileLinkTarget = async (
-    linkPath: string,
-    path: string,
-    signal: AbortSignal,
-    reply: MarkdownLinkReply | undefined,
-  ): Promise<string> => {
-    const relativePath = resolveWorkspaceRelativeFilePath(props.workspaceRoot, path);
-    if (
-      !props.workspaceRoot ||
-      !relativePath ||
-      /[\\/]$/.test(linkPath) ||
-      workspaceLinkLookupQuery(linkPath, props.workspaceRoot) === null ||
-      !readEnvironmentScope(props.environmentId, AuthFilesystemReadScope)
-    ) {
-      return relativePath ?? path;
-    }
-    const workspaceRoot = props.workspaceRoot;
-    const originalPath = resolveWorkspaceFilePath(workspaceRoot, relativePath);
-    const queryOptions = { signal, reportFailure: false, reportDefect: false };
-    const replyAgentDirectories = (source: MarkdownLinkReply) =>
-      agentWorkingDirectories(
-        appAtomRegistry.get(
-          environmentThreadDetails.quietThreadAtom(
-            scopeThreadRef(props.environmentId, props.threadId),
-          ),
-        )?.projection.visibleTurnItems ?? [],
-        source,
-      );
-    const searchRoot = (root: string) =>
-      executeAtomQuery(
-        appAtomRegistry,
-        projectEnvironment.searchEntries({
-          environmentId: props.environmentId,
-          input: {
-            cwd: root,
-            query: workspaceLinkLookupQuery(relativePath, root) ?? relativePath,
-            kind: "file",
-            limit: WORKSPACE_BASENAME_LOOKUP_LIMIT,
-          },
-        }),
-        queryOptions,
-      ).then((result) => ({
-        root,
-        entries: result._tag === "Success" ? result.value.entries : [],
-      }));
-    const metadataOf = (target: string) =>
-      executeAtomQuery(
-        appAtomRegistry,
-        projectEnvironment.fileMetadata({
-          environmentId: props.environmentId,
-          input: { path: target },
-        }),
-        queryOptions,
-      );
-    const childCheckoutMatch = async () => {
-      if (needsWorkspaceBasenameLookup(relativePath)) return null;
-      const original = await metadataOf(originalPath);
-      if (original._tag !== "Success" || original.value !== null) return null;
-      const listing = await executeAtomQuery(
-        appAtomRegistry,
-        filesystemEnvironment.browse({
-          environmentId: props.environmentId,
-          input: { partialPath: childFoldersBrowsePath(workspaceRoot) },
-        }),
-        queryOptions,
-      );
-      if (listing._tag !== "Success") return null;
-      return findChildCheckoutMatch(
-        relativePath,
-        listing.value.entries,
-        reply === undefined ? [] : replyAgentDirectories(reply),
-        async (paths) => {
-          const metadata = await executeAtomQuery(
-            appAtomRegistry,
-            filesystemEnvironment.getMetadata({
-              environmentId: props.environmentId,
-              input: { paths },
-            }),
-            queryOptions,
-          );
-          return metadata._tag === "Success"
-            ? metadata.value.entries.map((entry) => entry?.kind === "file")
-            : paths.map(() => false);
-        },
-      );
-    };
-    const lookup = async () => {
-      const checkout = await childCheckoutMatch();
-      if (checkout !== null) return checkout;
-      const own = await searchRoot(workspaceRoot);
-      let match = pickWorkspaceLinkMatch(relativePath, workspaceRoot, own.entries);
-      const otherProject = match === null;
-      if (otherProject) {
-        const threadProjectId = appAtomRegistry.get(
-          environmentThreadShells.threadShellAtom(
-            scopeThreadRef(props.environmentId, props.threadId),
-          ),
-        )?.projectId;
-        const otherRoots = appAtomRegistry
-          .get(environmentProjects.projectsAtom)
-          .flatMap((project) =>
-            project.environmentId === props.environmentId &&
-            project.id !== threadProjectId &&
-            project.workspaceRoot !== workspaceRoot
-              ? [project.workspaceRoot]
-              : [],
-          );
-        match =
-          otherRoots.length === 0
-            ? null
-            : pickProjectLinkMatch(relativePath, await Promise.all(otherRoots.map(searchRoot)));
-      }
-      if (match === null && reply !== undefined && !signal.aborted) {
-        // No project has the file, so it opens where the agent last worked, as written.
-        const agentRoots = replyAgentDirectories(reply).filter((root) => root !== workspaceRoot);
-        const agentPaths = agentRoots.map((root) => resolveWorkspaceFilePath(root, relativePath));
-        if (agentPaths.length === 0) return relativePath;
-        const [original, ...found] = await Promise.all(
-          [originalPath, ...agentPaths].map(metadataOf),
-        );
-        if (original?._tag !== "Success" || original.value !== null) return relativePath;
-        const index = found.findIndex(
-          (result) => result._tag === "Success" && result.value?.kind === "file",
-        );
-        const literal = agentPaths[index];
-        if (literal !== undefined || !needsWorkspaceBasenameLookup(relativePath)) {
-          return literal ?? relativePath;
-        }
-        return (
-          (await findAgentDirectoryMatch(relativePath, agentRoots, searchRoot)) ?? relativePath
-        );
-      }
-      if (!match || match === relativePath || signal.aborted) return relativePath;
-      const metadata = await metadataOf(originalPath);
-      // Another project's file never replaces a thread-local file the search missed.
-      return metadata._tag === "Success" &&
-        (needsWorkspaceBasenameLookup(relativePath) && !otherProject
-          ? metadata.value?.kind !== "directory"
-          : metadata.value === null)
-        ? match
-        : relativePath;
-    };
-    return lookup().catch(() => relativePath);
+  // A tap reads the host afresh through the metadata request, never a cached answer.
+  const readTappedEntryKind = async (path: string, signal: AbortSignal) => {
+    const result = await executeAtomQuery(
+      appAtomRegistry,
+      filesystemEnvironment.getMetadata({
+        environmentId: props.environmentId,
+        input: { paths: [path] },
+      }),
+      { signal, refresh: true, reportFailure: false, reportDefect: false },
+    );
+    if (result._tag !== "Success") throw new Error("The file could not be read.");
+    return result.value.entries[0]?.kind ?? null;
   };
   const onMarkdownLinkPress = (
     href: string,
@@ -3179,44 +3027,55 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       };
       const resource = "resource" in media.source ? media.source.resource : null;
       const mediaPath = resource && "path" in resource ? resource.path : null;
-      if (
-        typeof mediaPath === "string" &&
-        readEnvironmentScope(props.environmentId, AuthFilesystemReadScope)
-      ) {
-        void executeAtomQuery(
-          appAtomRegistry,
-          projectEnvironment.fileMetadata({
-            environmentId: props.environmentId,
-            input: { path: mediaPath },
-          }),
-          { signal: request.signal, reportFailure: false, reportDefect: false },
-        ).then((result) => {
-          if (request.signal.aborted) return;
-          if (result._tag === "Success" && result.value?.kind === "directory") {
-            navigation.navigate("ThreadFile", {
-              environmentId: String(props.environmentId),
-              threadId: String(props.threadId),
-              path: fileRoutePathSegments(mediaPath),
-            });
-          } else openMediaPreview();
-        }, openMediaPreview);
-      } else openMediaPreview();
+      void decideMediaLinkTap({
+        href,
+        mediaPath: typeof mediaPath === "string" ? mediaPath : null,
+        canRead: readEnvironmentScope(props.environmentId, AuthFilesystemReadScope),
+        readKind: (path) => readTappedEntryKind(path, request.signal),
+      }).then((outcome) => {
+        if (request.signal.aborted) return;
+        if (outcome === "folder" && typeof mediaPath === "string") {
+          navigation.navigate("ThreadFile", {
+            environmentId: String(props.environmentId),
+            threadId: String(props.threadId),
+            path: fileRoutePathSegments(mediaPath),
+          });
+        } else openMediaPreview();
+      });
       return;
     }
 
     const presentation = resolveMarkdownLinkPresentation(href);
     if (presentation.kind === "file") {
-      const path = resolveFileLinkPath(props.workspaceRoot, presentation.path);
-      if (path === null) return;
-      void findFileLinkTarget(presentation.path, path, request.signal, reply).then((target) => {
+      // Open and copy share this target, so a tap opens exactly what Copy path copies.
+      const target = resolveFileChipTarget(href, props.workspaceRoot);
+      if (!target) return;
+      const openPath = target.relativePath ?? target.fullPath;
+      if (!openPath) return;
+      const open = () => {
         if (request.signal.aborted) return;
         void Haptics.selectionAsync();
         navigation.navigate("ThreadFile", {
           environmentId: String(props.environmentId),
           threadId: String(props.threadId),
-          path: fileRoutePathSegments(target),
+          path: fileRoutePathSegments(openPath),
           ...(presentation.line ? { line: String(presentation.line) } : {}),
         });
+      };
+      const fullPath = target.fullPath;
+      void decideFileLinkTap({
+        href,
+        fullPath,
+        canRead: readEnvironmentScope(props.environmentId, AuthFilesystemReadScope),
+        readKind: (path) => readTappedEntryKind(path, request.signal),
+      }).then((outcome) => {
+        if (request.signal.aborted) return;
+        if (outcome === "open") {
+          open();
+          return;
+        }
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Dialog.alert("No file there", `${safeDecodeURIComponent(href)}\n\n${fullPath ?? ""}`);
       });
       return;
     }
@@ -3278,7 +3137,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         };
       }
       const target = resolveFileChipTarget(href, props.workspaceRoot);
-      return target ? fileChipMenu(target) : undefined;
+      if (!target) return undefined;
+      const presentation = resolveMarkdownLinkPresentation(href);
+      // Nothing confirms a relative link's file before this menu opens, so it shows as written.
+      return presentation.kind === "file" && !isAbsolutePath(presentation.path)
+        ? { ...fileChipMenu(target), title: safeDecodeURIComponent(href) }
+        : fileChipMenu(target);
     },
     onFileContextMenuAction: (href, actionId, reply) => {
       const skill = enrichedSkillReference(href, props.skills);
@@ -3299,37 +3163,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       switch (actionId) {
         case "copy-full-path":
         case "copy-relative-path": {
-          const presentation = resolveMarkdownLinkPresentation(href);
-          const path =
-            presentation.kind === "file"
-              ? resolveFileLinkPath(props.workspaceRoot, presentation.path)
-              : null;
-          if (presentation.kind !== "file" || path === null) return;
-          markdownLinkRequest.current?.abort();
-          const request = new AbortController();
-          markdownLinkRequest.current = request;
-          void findFileLinkTarget(presentation.path, path, request.signal, reply).then((found) => {
-            if (request.signal.aborted) return;
-            const fullPath =
-              props.workspaceRoot && !isAbsolutePath(found)
-                ? resolveWorkspaceFilePath(props.workspaceRoot, found)
-                : found;
-            const clipboardPath = fileChipClipboardPath(
-              {
-                ...target,
-                ...(target.fullPath ? { fullPath } : {}),
-                ...(target.relativePath
-                  ? {
-                      relativePath:
-                        resolveWorkspaceRelativeFilePath(props.workspaceRoot, fullPath) ??
-                        target.relativePath,
-                    }
-                  : {}),
-              },
-              actionId,
-            );
-            if (clipboardPath !== undefined) copyTextWithHaptic(clipboardPath);
-          });
+          const clipboardPath = fileChipClipboardPath(target, actionId);
+          if (clipboardPath !== undefined) copyTextWithHaptic(clipboardPath);
           return;
         }
         case "open-file":

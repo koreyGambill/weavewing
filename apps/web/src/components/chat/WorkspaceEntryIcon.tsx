@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, FilesystemEntryMetadata } from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 
 import { useFileMetadata } from "../../hooks/useFileMetadata";
@@ -8,9 +8,15 @@ export function WorkspaceEntryIcon(props: {
   path: string;
   environmentId?: EnvironmentId | null | undefined;
   cwd?: string | undefined;
+  metadata?: FilesystemEntryMetadata | undefined;
   theme: "light" | "dark";
 }) {
-  const metadata = useFileMetadata(props.environmentId, props.path, props.cwd);
+  const queried = useFileMetadata(
+    props.metadata ? null : props.environmentId,
+    props.path,
+    props.cwd,
+  );
+  const metadata = props.metadata ?? queried;
   return (
     <PierreEntryIcon
       pathValue={props.path}
@@ -26,8 +32,14 @@ export function WorkspaceEntryTooltip(props: {
   label?: string;
   environmentId?: EnvironmentId | null | undefined;
   cwd?: string | undefined;
+  metadata?: FilesystemEntryMetadata | undefined;
 }) {
-  const metadata = useFileMetadata(props.environmentId, props.path, props.cwd);
+  const queried = useFileMetadata(
+    props.metadata ? null : props.environmentId,
+    props.path,
+    props.cwd,
+  );
+  const metadata = props.metadata ?? queried;
   return (
     <>
       {props.label ?? props.path}

@@ -16,6 +16,7 @@ import type {
   CommandPaletteLinkedThreads,
   CommandPaletteOpenDetail,
 } from "../commandPaletteBus";
+import type { FileLineReveal } from "../rightPanelStore";
 import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
@@ -89,6 +90,12 @@ export type CommandPaletteOpenIntent =
       readonly kind: "search";
       readonly query: string;
       readonly linkedThreads?: CommandPaletteLinkedThreads;
+    }
+  | {
+      /** Go to file, prefilled; a picked file opens at `reveal`. */
+      readonly kind: "files";
+      readonly query: string;
+      readonly reveal?: FileLineReveal;
     };
 
 export interface CommandPaletteUiState {
@@ -115,6 +122,7 @@ export type CommandPaletteUiAction =
       readonly onProjectReady?: CommandPaletteOpenDetail["onProjectReady"];
       readonly start?: AddProjectStart;
     }
+  | { readonly _tag: "OpenFilePicker"; readonly query: string; readonly reveal?: FileLineReveal }
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "OpenChangeTheme" }
   | {
@@ -174,6 +182,17 @@ export function reduceCommandPaletteUiState(
         ...(action.onProjectReady ? { onProjectReady: action.onProjectReady } : {}),
         ...(action.start ? { start: action.start } : {}),
       });
+    case "OpenFilePicker":
+      return {
+        open: true,
+        mode: "files",
+        openIntent: {
+          kind: "files",
+          query: action.query,
+          ...(action.reveal ? { reveal: action.reveal } : {}),
+        },
+        session: session + 1,
+      };
     case "OpenNewThreadIn":
       return openWithIntent({ kind: "new-thread-in" });
     case "OpenChangeTheme":

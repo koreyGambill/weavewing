@@ -92,6 +92,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadEnvironmentUsage } from "./xwing/ThreadEnvironments";
 import { XwingEnvironmentsPanel } from "./xwing/XwingEnvironmentsPanel";
+import { FileRemoteMenuSection } from "./files/FileRemoteActions";
 
 /** Views that lay out their own padding and scrolling. */
 export const FLUSH_THREAD_TOOLS: ReadonlySet<ThreadContextSection> = new Set([
@@ -302,10 +303,8 @@ function ThreadLinks({
   const [service, setService] = useState("all");
   const { copy, isCopied } = useRowCopy();
   const showsFiles = service === "all" || service === "Files";
-  const files = conversationFileLinks(
-    linkableMessages,
-    shell?.worktreePath ?? project?.workspaceRoot,
-  ).filter(
+  const fileLinkRoot = shell?.worktreePath ?? project?.workspaceRoot;
+  const files = conversationFileLinks(linkableMessages, fileLinkRoot).filter(
     (file) =>
       showsFiles &&
       matchesToolFilter([file.displayPath, ...file.ranges.map(formatFileLinkRange)], filter),
@@ -812,6 +811,14 @@ function ThreadLinks({
                   </MenuItem>
                 ) : null}
                 <MenuItem onClick={() => openFileLink(file)}>Open file</MenuItem>
+                <FileRemoteMenuSection
+                  environmentId={threadRef.environmentId}
+                  cwd={fileLinkRoot}
+                  path={file.panelPath}
+                  ranges={file.ranges}
+                  formatRange={formatFileLinkRange}
+                  threadRef={threadRef}
+                />
               </RowActions>
             </div>
           ))}

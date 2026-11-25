@@ -85,7 +85,9 @@ import { cn, isMacPlatform } from "~/lib/utils";
 import { focusTerminal } from "~/lib/terminalFocus";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import type { ChatFileAttachment } from "~/types";
-import { isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { fileBasename, isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { dispatchCommandPalette } from "~/commandPaletteStore";
+import { Button } from "../ui/button";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -105,6 +107,7 @@ import { useThreadTerminalActions } from "../terminal/useThreadTerminalActions";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { openEditorFind, SearchableSource } from "./fileFind";
 import { resolveFileHeaderActions } from "./fileHeaderActions.logic";
+import { FileRemoteHeaderActions, useFileLinkState } from "./FileRemoteActions";
 import { fileVimCommand } from "./fileVimCommand";
 import { AttachmentFilePreview } from "./AttachmentFilePreview";
 import { AudioPreview } from "./AudioPreview";
@@ -1567,6 +1570,13 @@ export default function FilePreviewPanel({
     previewPath && absolutePath && !attachment && canOperateTerminal
       ? fileVimCommand(absolutePath, serverConfig?.environment.platform.os === "windows")
       : null;
+  const fileLink = useFileLinkState({
+    environmentId,
+    cwd,
+    path: isFolder || absolutePath === null ? null : relativePath,
+    line: revealLine ?? undefined,
+    endLine: revealEndLine ?? undefined,
+  });
   const headerActions = resolveFileHeaderActions({
     absolutePath,
     isFolder,
@@ -1580,6 +1590,7 @@ export default function FilePreviewPanel({
     }),
     searchableText: file.data !== null && !isMedia && !isDocument && !isPdf,
     truncated: file.data?.truncated === true,
+    fileLink: fileLink.state,
   });
   const hasFileTypeActions =
     headerActions.find !== null ||
@@ -1789,6 +1800,11 @@ export default function FilePreviewPanel({
               {pathCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
             </FileSurfaceAction>
           ) : null}
+          <FileRemoteHeaderActions
+            actions={headerActions.remote}
+            provider={fileLink.provider}
+            threadRef={threadRef}
+          />
           {headerActions.explorer ? (
             <FileSurfaceAction
               label={explorerShown ? "Hide file explorer" : "Show file explorer"}
@@ -1799,6 +1815,12 @@ export default function FilePreviewPanel({
               <FolderTree className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
+          <FileRemoteHeaderActions
+            actions={headerActions.remote}
+            provider={fileLink.provider}
+            threadRef={threadRef}
+            overflow
+          />
           {hasFileTypeActions ? (
             <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-border" />
           ) : null}
@@ -1896,6 +1918,60 @@ export default function FilePreviewPanel({
               htmlRender={attachment.htmlRender === true}
               threadRef={threadRef}
             />
+          ) : relativePath &&
+            file.error &&
+            file.data === null &&
+            file.readError?.failure !== "binary_file" ? (
+            // A missing image, PDF or video says so before any preview tries to load it.
+            <div
+              role="alert"
+              className="scrollbar-gutter-both flex min-h-0 flex-1 flex-col overflow-auto"
+            >
+              <div className="my-auto flex shrink-0 flex-col gap-3 px-6 py-6 text-center text-xs leading-relaxed">
+                <p className="text-destructive">
+                  {file.readError ? filePreviewReadErrorMessage(file.readError) : file.error}
+                </p>
+                {attemptedPath ? (
+                  <p className="text-muted-foreground">
+                    Attempted path
+                    <code className="block break-all font-mono text-foreground select-all">
+                      {attemptedPath}
+                    </code>
+                  </p>
+                ) : null}
+                {!isHostFile ? (
+                  <p className="text-muted-foreground">
+                    Workspace folder:{" "}
+                    <code className="break-all font-mono select-all">
+                      {file.readError?.cwd ?? cwd}
+                    </code>
+                    . Check the link's path or locate the file in Files.
+                  </p>
+                ) : null}
+                {attachment === undefined && file.readError?.failure !== "path_not_file" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="self-center"
+                    onClick={() =>
+                      dispatchCommandPalette({
+                        _tag: "OpenFilePicker",
+                        // A host path names a file outside the project, so only its name is searched.
+                        query: isHostFile
+                          ? fileBasename(relativePath)
+                          : relativePath.replace(/^(?:\.[\\/])+/, ""),
+                        reveal: {
+                          line: revealLine ?? undefined,
+                          endLine: revealEndLine ?? undefined,
+                        },
+                      })
+                    }
+                  >
+                    Find {fileBasename(relativePath)}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           ) : relativePath && isVideo && absolutePath ? (
             <WorkspaceVideoPreview
               key={`${environmentId}:${threadRef.threadId}:${absolutePath}`}
@@ -1976,34 +2052,6 @@ export default function FilePreviewPanel({
               workspaceMutationId={workspaceMutationId}
               refreshRevision={fileRefreshRevision}
             />
-          ) : relativePath && file.error && file.data === null ? (
-            <div
-              role="alert"
-              className="scrollbar-gutter-both flex min-h-0 flex-1 flex-col overflow-auto"
-            >
-              <div className="my-auto flex shrink-0 flex-col gap-3 px-6 py-6 text-center text-xs leading-relaxed">
-                <p className="text-destructive">
-                  {file.readError ? filePreviewReadErrorMessage(file.readError) : file.error}
-                </p>
-                {attemptedPath ? (
-                  <p className="text-muted-foreground">
-                    Attempted path
-                    <code className="block break-all font-mono text-foreground select-all">
-                      {attemptedPath}
-                    </code>
-                  </p>
-                ) : null}
-                {!isHostFile ? (
-                  <p className="text-muted-foreground">
-                    Workspace folder:{" "}
-                    <code className="break-all font-mono select-all">
-                      {file.readError?.cwd ?? cwd}
-                    </code>
-                    . Check the link's path or locate the file in Files.
-                  </p>
-                ) : null}
-              </div>
-            </div>
           ) : relativePath && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
               <Spinner size="lg" />

@@ -4,6 +4,7 @@ import {
   buildCommitUrl,
   changeRequestUrlBelow,
   defineSourceControl,
+  fileLineRange,
   isChangeRequestAuthorityOfProject,
   parseChangeRequestPath,
   parseCommitPath,
@@ -105,6 +106,37 @@ export const definition = defineSourceControl({
     const key = `${host}/${repository}`.toLowerCase();
     const [canonicalHost = host, ...path] = (canonicalRepositoryKey(key) ?? key).split("/");
     return `${remoteWebOrigin(canonicalHost, remoteUrl)}/${path.join("/")}/pullrequest/${number}`;
+  },
+  // Azure addresses a file by query, not path: `?path=/src/a.ts&version=GBmain`.
+  fileUrl: (input) => {
+    const key = `${input.host}/${input.repository}`.toLowerCase();
+    const [host = input.host, ...path] = (canonicalRepositoryKey(key) ?? key).split("/");
+    if (!input.ref || !input.path || path.length === 0) return null;
+    try {
+      const url = new URL(
+        input.webUrl || `${remoteWebOrigin(host, input.remoteUrl)}/${path.join("/")}`,
+      );
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+      url.username = "";
+      url.password = "";
+      url.hash = "";
+      url.search = "";
+      url.searchParams.set("path", `/${input.path}`);
+      url.searchParams.set("version", `GB${input.ref}`);
+      const range = fileLineRange(input.line, input.endLine);
+      if (range !== null) {
+        // The selection ends at column 1 of the next line, so whole lines highlight.
+        url.searchParams.set("line", String(range.start));
+        url.searchParams.set("lineEnd", String((range.end ?? range.start) + 1));
+        url.searchParams.set("lineStartColumn", "1");
+        url.searchParams.set("lineEndColumn", "1");
+        url.searchParams.set("lineStyle", "plain");
+        url.searchParams.set("_a", "contents");
+      }
+      return url.toString();
+    } catch {
+      return null;
+    }
   },
   commitUrl: (input) => {
     const key = `${input.host}/${input.repository}`.toLowerCase();

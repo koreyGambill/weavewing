@@ -1165,6 +1165,24 @@ export function groupSidebarThreadsByProject<
   return folders.filter((folder) => folder.threads.length > 0 || keepEmpty(folder.group));
 }
 
+/**
+ * Moves folders, keeping their relative order, to just before or after `targetKey`.
+ * Null when the drop changes nothing or lands on a moving folder.
+ */
+export function moveSidebarFolders(
+  order: readonly string[],
+  moving: ReadonlySet<string>,
+  targetKey: string,
+  after: boolean,
+): string[] | null {
+  if (moving.has(targetKey) || !order.includes(targetKey)) return null;
+  const block = order.filter((key) => moving.has(key));
+  if (block.length === 0) return null;
+  const next = order.filter((key) => !moving.has(key));
+  next.splice(next.indexOf(targetKey) + (after ? 1 : 0), 0, ...block);
+  return next.every((key, index) => key === order[index]) ? null : next;
+}
+
 export type SidebarV2TopStatusKind =
   | "approval"
   | "done"

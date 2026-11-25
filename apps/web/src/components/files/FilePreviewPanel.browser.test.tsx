@@ -15,6 +15,7 @@ import {
 
 const state = vi.hoisted(() => ({
   file: null as ProjectReadFileResult | null,
+  readError: null as { failure: string; operation?: string; message: string } | null,
   optimistic: null as ProjectReadFileResult | null,
   writeFile: vi.fn(),
   canWrite: true,
@@ -90,9 +91,10 @@ vi.mock(import("./projectFilesQueryState"), async (original) => ({
   ...(await original()),
   useProjectFileQuery: () => ({
     data: state.file,
-    error: null,
+    error: state.readError?.message ?? null,
     isPending: false,
-    readError: null,
+    // The panel reads only failure and message; a plain object stands in for the error class.
+    readError: state.readError as never,
     isNotFile: false,
     isFile: true,
     refresh: vi.fn(),
@@ -110,6 +112,7 @@ vi.mock(import("./projectFilesQueryState"), async (original) => ({
   confirmProjectFileQueryData: () => true,
 }));
 
+import { dispatchCommandPalette, useCommandPaletteStore } from "~/commandPaletteStore";
 import FilePreviewPanel from "./FilePreviewPanel";
 
 const environmentId = EnvironmentId.make("markdown-preview-test");
@@ -121,6 +124,7 @@ function setup() {
   localStorage.setItem(keys[1]!, "true");
   state.canWrite = true;
   state.file = null;
+  state.readError = null;
   state.optimistic = null;
   state.assetUrl = { _tag: "Loading" };
   let mints = 0;
@@ -453,5 +457,66 @@ describe("rendered Markdown select all", () => {
     // A toggled checkbox keeps focus on an input inside the preview.
     await userEvent.click(screen.getByRole("checkbox"));
     await expectFileOnlySelection();
+  });
+});
+
+describe("missing linked files", () => {
+  it("shows a missing image as missing and finds it through Go to file at the linked lines", async () => {
+    using _settings = setup();
+    state.readError = {
+      failure: "operation_failed",
+      operation: "read-file",
+      message: "ENOENT: no such file",
+    };
+    using _palette = {
+      [Symbol.dispose]: () => dispatchCommandPalette({ _tag: "SetOpen", open: false }),
+    };
+    await using screen = await render(
+      <FilePreviewPanel
+        environmentId={environmentId}
+        cwd="/workspace"
+        projectName="Project"
+        relativePath="./shots/photo.png"
+        threadRef={threadRef}
+        composerDraftTarget={threadRef}
+        keybindings={[]}
+        availableEditors={[]}
+        openInShortcutEnabled={false}
+        revealLine={4}
+        revealEndLine={8}
+        revealRequestId={1}
+        onOpenFile={vi.fn()}
+        onNavigateFolder={vi.fn()}
+        onOpenFilesTab={vi.fn()}
+        folderTrail={undefined}
+        onPendingChange={vi.fn()}
+        selectedFilePending={false}
+        workspaceMutationId={null}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Find photo.png" }));
+    expect(useCommandPaletteStore.getState()).toMatchObject({
+      open: true,
+      mode: "files",
+      openIntent: { kind: "files", query: "shots/photo.png", reveal: { line: 4, endLine: 8 } },
+    });
+  });
+
+  it("offers Find by name for a missing image outside the workspace", async () => {
+    using _settings = setup();
+    state.readError = {
+      failure: "operation_failed",
+      operation: "read-file",
+      message: "ENOENT: no such file",
+    };
+    using _palette = {
+      [Symbol.dispose]: () => dispatchCommandPalette({ _tag: "SetOpen", open: false }),
+    };
+    await using screen = await render(filePreview("/elsewhere/shot.png"));
+    await userEvent.click(screen.getByRole("button", { name: "Find shot.png" }));
+    expect(useCommandPaletteStore.getState()).toMatchObject({
+      mode: "files",
+      openIntent: { kind: "files", query: "shot.png" },
+    });
   });
 });

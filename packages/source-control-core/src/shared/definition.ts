@@ -47,6 +47,15 @@ export interface CommitUrlInput extends Omit<ChangeRequestUrlInput, "number"> {
   readonly sha: string;
 }
 
+/** A file at a branch on the host's web view, optionally with the lines to highlight. */
+export interface FileUrlInput extends Omit<ChangeRequestUrlInput, "number"> {
+  readonly ref: string;
+  /** Repository-relative, `/`-separated. */
+  readonly path: string;
+  readonly line?: number | undefined;
+  readonly endLine?: number | undefined;
+}
+
 export interface ChangeRequestTerminology {
   readonly shortLabel: string;
   /** Spelled out because the article follows how the label is said: "an MR". */
@@ -259,6 +268,8 @@ export interface SourceControlDefinition {
   readonly defaultCloneTransport: "https" | "ssh";
   readonly changeRequestUrl: (input: ChangeRequestUrlInput) => string | null;
   readonly commitUrl?: (input: CommitUrlInput) => string | null;
+  /** Absent for a host whose web file view T3 does not link. */
+  readonly fileUrl?: (input: FileUrlInput) => string | null;
   /** `known` is set when the caller already knows this host serves the URL's repository. */
   readonly parseCommitUrl?: (url: URL, known: boolean) => CommitLink | null;
   /** Null when the URL is not one of this host's change requests. */
@@ -408,6 +419,53 @@ export function buildCommitUrl(
   } catch {
     return null;
   }
+}
+
+/**
+ * `route` names the file view below the repository, such as `blob` or `src/branch`; `lines`
+ * spells the host's line fragment, without `#`.
+ */
+export function buildFileUrl(
+  { host, repository, ref, path, line, endLine, remoteUrl, webUrl }: FileUrlInput,
+  route: string,
+  lines: (start: number, end: number | null) => string,
+): string | null {
+  const segments = [...ref.split("/"), ...path.split("/")];
+  if (!repository || !ref || !path || segments.some((s) => s === "" || s === "." || s === ".."))
+    return null;
+  try {
+    const url = new URL(webUrl || `${remoteWebOrigin(host, remoteUrl)}/${repository}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.pathname = changeRequestUrlBelow(
+      url.pathname,
+      `${route}/${segments.map(encodeURIComponent).join("/")}`,
+    );
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    const range = fileLineRange(line, endLine);
+    url.hash = range === null ? "" : lines(range.start, range.end);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** `end` is null for a single line. Null when `line` names no line. */
+export function fileLineRange(
+  line: number | undefined,
+  endLine: number | undefined,
+): { readonly start: number; readonly end: number | null } | null {
+  if (line === undefined || !Number.isSafeInteger(line) || line < 1) return null;
+  return {
+    start: line,
+    end: endLine !== undefined && Number.isSafeInteger(endLine) && endLine > line ? endLine : null,
+  };
+}
+
+/** GitHub's `L57-L64`, which Forgejo and GitCafe also read. */
+export function gitHubStyleLines(start: number, end: number | null): string {
+  return end === null ? `L${start}` : `L${start}-L${end}`;
 }
 
 /**

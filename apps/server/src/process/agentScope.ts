@@ -196,6 +196,31 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  const userId = yield* HostProcess.UserId;
+  const username = yield* HostProcess.Username;
+  // Without lingering, logind stops the user manager and every scope in it when the user's
+  // last login session ends, even while a server outside that manager keeps running.
+  // Checked per launch because an administrator can change lingering at any time.
+  const userManagerOutlivesServer = Effect.gen(function* () {
+    if (userId === undefined) return false;
+    const ownCgroup = yield* fileSystem
+      .readFileString("/proc/self/cgroup")
+      .pipe(Effect.orElseSucceed(() => ""));
+    const manager = `/user@${userId}.service/`;
+    // systemd tracks units in the unified row, or the named row on legacy hosts.
+    const underManager = ownCgroup.split("\n").some((line) => {
+      const [hierarchy, controllers, ...cgroupPath] = line.split(":");
+      const systemdRow =
+        (hierarchy === "0" && controllers === "") || controllers === "name=systemd";
+      return systemdRow && cgroupPath.join(":").includes(manager);
+    });
+    if (underManager) return true;
+    if (username === null) return false;
+    return yield* fileSystem
+      .exists(path.join("/var/lib/systemd/linger", username))
+      .pipe(Effect.orElseSucceed(() => false));
+  });
+
   const runtimeDir = hostEnvironment.XDG_RUNTIME_DIR;
   const systemctl = runtimeDir ? yield* resolve("systemctl", hostEnvironment) : null;
   const cleanup = yield* (systemctl === null ? Effect.void : stopLeftoverAgents(systemctl)).pipe(
@@ -295,6 +320,7 @@ export const make = Effect.gen(function* () {
     }),
   );
 
+  let loggedLoginBound = false;
   // `shared` scopes serve other threads too: tracked only for OOM diagnosis on old systemd.
   const scopeByThread = new Map<string, { unit: string; oomKilled: boolean; shared: boolean }>();
 
@@ -477,6 +503,17 @@ export const make = Effect.gen(function* () {
       yield* awaitCleanup;
       const resolved = yield* resolve(command, env ?? hostEnvironment);
       if (resolved === null) return { command, args };
+      if (!(yield* userManagerOutlivesServer)) {
+        if (!loggedLoginBound) {
+          loggedLoginBound = true;
+          yield* Effect.logInfo(
+            "Agents launch without scopes: the systemd user manager stops at logout without lingering",
+          );
+        }
+        // An earlier scoped launch must not answer for this process's exit.
+        if (threadId !== undefined) yield* clear(threadId);
+        return agentScopeCommand({ command: resolved, args });
+      }
       const scope = yield* systemd;
       if (scope === undefined) return agentScopeCommand({ command: resolved, args });
       yield* scope.applyMemoryLimits;

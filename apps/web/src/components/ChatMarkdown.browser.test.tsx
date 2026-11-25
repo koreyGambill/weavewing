@@ -545,49 +545,112 @@ describe("ChatMarkdown streaming", () => {
   );
 });
 
-describe("ChatMarkdown workspace file opens", () => {
+describe("ChatMarkdown relative file links", () => {
   const threadRef = {
     environmentId: EnvironmentId.make("workspace"),
     threadId: ThreadId.make("thread"),
   };
+  const chip = (container: HTMLElement) =>
+    container.querySelector<HTMLAnchorElement>(".chat-markdown-file-link")!;
+  const metadata = (kind: "file" | "directory" | null) =>
+    AsyncResult.success({ entries: [kind === null ? null : { kind }] });
 
-  it("keeps a newer absolute file open when an earlier repo-relative lookup finishes", async () => {
+  it("shows the absolute path only after the tooltip's read finds a file there", async () => {
     setup();
-    const result = AsyncResult.success({
-      entries: [{ path: "notes/a.md", kind: "file" }],
-      truncated: false,
+    filesystemMetadata.mockResolvedValueOnce(metadata("file"));
+    await using screen = await renderText("[Notes](notes/a.md#L4-L8)", {
+      cwd: "/school",
+      threadRef,
     });
-    let resolvePending!: (value: typeof result) => void;
-    const pending = new Promise<typeof result>((resolve) => {
-      resolvePending = resolve;
+    expect(chip(screen.container).getAttribute("href")).toBe("notes/a.md#L4-L8");
+    expect(filesystemMetadata).not.toHaveBeenCalled();
+
+    await userEvent.hover(chip(screen.container));
+    await expect.element(page.getByText("/school/notes/a.md#L4-L8")).toBeVisible();
+    expect(chip(screen.container).getAttribute("href")).toBe("/school/notes/a.md#L4-L8");
+  });
+
+  it("sizes the tooltip from the hover's own read", async () => {
+    setup();
+    filesystemMetadata.mockResolvedValueOnce(
+      AsyncResult.success({ entries: [{ kind: "file", byteLength: 2048 }] }),
+    );
+    await using screen = await renderText("[Notes](notes/a.md)", { cwd: "/school", threadRef });
+    await userEvent.hover(chip(screen.container));
+    await expect.element(page.getByText(/\/school\/notes\/a\.md · 2 KB/)).toBeVisible();
+    expect(filesystemMetadata).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the link as written when the path is a folder", async () => {
+    setup();
+    filesystemMetadata.mockResolvedValueOnce(metadata("directory"));
+    await using screen = await renderText("[Notes](notes/a.md#L4-L8)", {
+      cwd: "/school",
+      threadRef,
     });
-    workspaceSearch.mockReturnValueOnce(pending);
+    await userEvent.hover(chip(screen.container));
+    await vi.waitFor(() => expect(filesystemMetadata).toHaveBeenCalledOnce());
+    await expect.element(page.getByText("notes/a.md#L4-L8")).toBeVisible();
+    expect(chip(screen.container).getAttribute("href")).toBe("notes/a.md#L4-L8");
+  });
+
+  it("drops a read that finishes after its link changed, even when the link changes back", async () => {
+    setup();
+    let finish: () => void = () => {
+      throw new Error("Read not started");
+    };
+    filesystemMetadata.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve(metadata("file"));
+      }),
+    );
+    const text = "[Notes](notes/a.md)";
+    await using screen = await renderText(text, { cwd: "/school", threadRef });
+    await userEvent.hover(chip(screen.container));
+    await vi.waitFor(() => expect(filesystemMetadata).toHaveBeenCalledOnce());
+    await screen.rerender(
+      <ChatMarkdown cwd="/school" text="[Notes](notes/b.md)" threadRef={threadRef} />,
+    );
+    await screen.rerender(<ChatMarkdown cwd="/school" text={text} threadRef={threadRef} />);
+    await act(async () => finish());
+    expect(chip(screen.container).getAttribute("href")).toBe("notes/a.md");
+  });
+
+  it("opens the link where it points on click and checks it, without a hover first", async () => {
+    setup();
+    filesystemMetadata.mockResolvedValueOnce(metadata("file"));
     using openFile = vi
       .spyOn(useRightPanelStore.getState(), "openFile")
       .mockImplementation(() => {});
-    await using screen = await renderText(
-      "[Notes](physics/notes/a.md) and [Other](/elsewhere/b.md:9)",
-      {
-        cwd: "/school/physics",
-        threadRef,
-      },
-    );
-    const { container } = screen;
-    const [notes, other] = container.querySelectorAll("a");
-    await act(async () => notes!.click());
-    expect(workspaceSearch).toHaveBeenCalledOnce();
-    expect(openFile).not.toHaveBeenCalled();
-
-    await act(async () => other!.click());
-    await act(async () => resolvePending(result));
-
+    await using screen = await renderText("[Notes](physics/notes/a.md#L4-L8)", {
+      cwd: "/school",
+      threadRef,
+    });
+    await act(async () => chip(screen.container).click());
     expect(openFile).toHaveBeenCalledExactlyOnceWith(
       threadRef,
-      "/elsewhere/b.md",
-      expect.objectContaining({ line: 9 }),
+      "physics/notes/a.md",
+      expect.objectContaining({ line: 4, endLine: 8 }),
       "tile-2",
     );
-    expect(workspaceSearch).toHaveBeenCalledOnce();
+    expect(filesystemMetadata).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ input: { paths: ["/school/physics/notes/a.md"] } }),
+    );
+    expect(workspaceSearch).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(chip(screen.container).getAttribute("href")).toBe("/school/physics/notes/a.md#L4-L8"),
+    );
+  });
+
+  it("shows an absolute link exactly as written", async () => {
+    setup();
+    await using screen = await renderText("[Notes](/school/notes/a.md#L4-L8)", {
+      cwd: "/school",
+      threadRef,
+    });
+    expect(chip(screen.container).getAttribute("href")).toBe("/school/notes/a.md#L4-L8");
+    await userEvent.hover(chip(screen.container));
+    await expect.element(page.getByText("/school/notes/a.md#L4-L8")).toBeVisible();
   });
 });
 

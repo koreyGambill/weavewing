@@ -175,6 +175,13 @@ else {
   Assert ($failure -match "'fixture-distro' is unresponsive; refusing runtime operations" -and $failure -match 'WSAETIMEDOUT') 'Hung WSL was not refused with its last failure'
   Assert (@($calls.operations | Where-Object { $_ -ne 'wsl-responsive' }).Count -eq 0) 'Unresponsive WSL still received the operation'
   Assert ($calls.operations.Count -ge 10 -and $calls.operations.Count -le 20 -and ($clock.now - [DateTime]'2026-01-01T00:00:00Z').TotalSeconds -le 190) 'Unresponsive window was not bounded'
+  # wsl.exe writes service failures to stdout in UTF-16 and leaves stderr empty.
+  $helperOut = Join-Path $root 'helper.stdout'
+  $helperErr = Join-Path $root 'helper.stderr'
+  [IO.File]::WriteAllText($helperOut, 'Error code: Wsl/Service/WSAETIMEDOUT', [Text.UnicodeEncoding]::new($false, $false))
+  New-Item -ItemType File -Path $helperErr | Out-Null
+  $helperText = Get-LocalUpdateHelperFailure $helperOut $helperErr
+  Assert ($helperText -is [string] -and $helperText -match 'Wsl/Service/WSAETIMEDOUT') 'A WSL timeout reported on stdout was not read as transient'
   # A missing distro or node path fails the same way every time; retrying only delays the answer.
   $calls = @{ operations = @() }
   $failure = $null

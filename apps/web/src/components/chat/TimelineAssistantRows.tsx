@@ -7,7 +7,6 @@ import {
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MessageId, type RunId, type ThreadId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { Fragment, memo, use, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
@@ -45,7 +44,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
-import { readThreadTurnItems } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import {
   TimelineRowCtx,
@@ -142,10 +140,6 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const markdownProps = {
     renderInsights: true,
     cwd: ctx.markdownCwd,
-    agentDirectories: () =>
-      ctx.threadRef && row.projectedItem
-        ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
-        : [],
     threadRef: ctx.threadRef ?? undefined,
     isStreaming: Boolean(row.message.streaming),
     lineBreaks: shouldPreserveAssistantLineBreaks(messageText),

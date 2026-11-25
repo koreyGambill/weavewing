@@ -17,6 +17,7 @@ import type {
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -24,6 +25,7 @@ import * as LayerMap from "effect/LayerMap";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import type {
   ProjectEntry,
@@ -630,8 +632,325 @@ const isSharedScratchDirectory = Effect.fn("WorkspaceSearchIndex.isSharedScratch
   Effect.orElseSucceed(() => false),
 );
 
-// Shared scratch roots can contain many repositories; never scan or watch their descendants.
-const makeSharedScratchIndex = (cwd: string) => {
+// Searching a parent outside git, such as ~/code, lists the files of each repository directly
+// inside it by that repository's own rules. Nothing watches them, so the list is reused until a
+// refresh, until a repository is added or removed, or for this long.
+const CHILD_REPOSITORY_FILES_TTL_MS = 30_000;
+// A rebuild stops here; repositories not yet listed leave the result marked truncated.
+const CHILD_REPOSITORY_REBUILD_DEADLINE_MS = 15_000;
+// Each repository keeps the single-workspace cap; the parent stops at a few repositories' worth.
+const CHILD_REPOSITORY_MAX_ENTRIES = WORKSPACE_INDEX_MAX_ENTRIES * 4;
+// `ls-files -s` records run about 120 bytes; reading stops well past `limit` records, never short.
+const CHILD_REPOSITORY_RECORD_BYTES = 512;
+const CHILD_REPOSITORY_CHECK_CONCURRENCY = 8;
+// Repositories listed at once; each takes an equal share of what the budget has left.
+const CHILD_REPOSITORY_LIST_CONCURRENCY = 4;
+
+// Folders with a `.git` marker, by name; cheap enough to run on every search.
+const listRepositoryCandidates = (cwd: string) =>
+  Effect.promise(async () => {
+    const names: string[] = [];
+    for await (const entry of await NodeFSP.opendir(cwd)) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      // A worktree's `.git` is a file; either form marks a repository.
+      const marker = await NodeFSP.stat(NodePath.join(cwd, entry.name, ".git")).catch(() => null);
+      if (marker !== null) names.push(entry.name);
+    }
+    return names.toSorted();
+  }).pipe(Effect.catchDefect(() => Effect.succeed<string[]>([])));
+
+/**
+ * The candidates that are repositories in their own right inside `cwd`: a folder resolving outside
+ * the parent, or a `.git` file whose worktree lives elsewhere, would list another tree's files.
+ */
+const confirmChildRepositories = Effect.fn("WorkspaceSearchIndex.confirmChildRepositories")(
+  function* (
+    vcsProcess: VcsProcess.VcsProcess["Service"],
+    cwd: string,
+    candidates: ReadonlyArray<string>,
+  ) {
+    const parent = yield* Effect.promise(() => NodeFSP.realpath(cwd).catch(() => null));
+    if (parent === null) return [];
+    const confirmed = yield* Effect.forEach(
+      candidates,
+      Effect.fnUntraced(function* (name) {
+        const child = NodePath.join(cwd, name);
+        const real = yield* Effect.promise(() => NodeFSP.realpath(child).catch(() => null));
+        if (real === null || !real.startsWith(`${parent}${NodePath.sep}`)) return [];
+        const topLevel = yield* vcsProcess
+          .run({
+            operation: "WorkspaceSearchIndex.childRepositoryTopLevel",
+            command: "git",
+            args: ["rev-parse", "--show-toplevel"],
+            cwd: child,
+            allowNonZeroExit: true,
+            timeoutMs: 5_000,
+          })
+          .pipe(Effect.orElseSucceed(() => undefined));
+        if (!topLevel || topLevel.exitCode !== 0) return [];
+        const top = yield* Effect.promise(() =>
+          // Only git's own line break goes; a folder name may end in spaces or a carriage return.
+          NodeFSP.realpath(
+            topLevel.stdout.endsWith("\n") ? topLevel.stdout.slice(0, -1) : topLevel.stdout,
+          ).catch(() => null),
+        );
+        return top === real ? [name] : [];
+      }),
+      { concurrency: CHILD_REPOSITORY_CHECK_CONCURRENCY },
+    );
+    return confirmed.flat();
+  },
+);
+
+/**
+ * Paths a repository's files can be opened at, up to `limit`: tracked and untracked files minus
+ * what it ignores, without deleted or skip-worktree files, gitlinks, untracked nested
+ * repositories, or anything under a dot folder (vendored or tool state, such as `.repos`).
+ */
+export function parseRepositoryFileRecords(
+  stdout: string,
+  limit: number,
+): { readonly paths: string[]; readonly truncated: boolean } {
+  const present = new Set<string>();
+  const absent = new Set<string>();
+  for (const record of stdout.split("\0")) {
+    if (record.length < 3) continue;
+    const tag = record[0];
+    const rest = record.slice(2);
+    if (tag === "?") {
+      if (!rest.endsWith("/")) present.add(rest);
+      continue;
+    }
+    const tab = rest.indexOf("\t");
+    if (tab === -1) continue;
+    const path = rest.slice(tab + 1);
+    if (tag === "R" || tag === "S" || tag === "K" || rest.startsWith("160000 ")) absent.add(path);
+    else present.add(path);
+  }
+  const paths: string[] = [];
+  let truncated = false;
+  for (const path of present) {
+    if (absent.has(path) || /(?:^|\/)\.[^/]*\//.test(path)) continue;
+    if (paths.length === limit) {
+      truncated = true;
+      break;
+    }
+    paths.push(path);
+  }
+  return { paths, truncated };
+}
+
+export const listRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listRepositoryFiles")(function* (
+  vcsProcess: VcsProcess.VcsProcess["Service"],
+  cwd: string,
+  repository: string,
+  hostIsWindows: boolean,
+  limit: number,
+  timeoutMs: number,
+) {
+  const maxOutputBytes = Math.min(16 * 1024 * 1024, limit * CHILD_REPOSITORY_RECORD_BYTES);
+  // Kept here too, so a listing that times out after its cap still has the records it read.
+  const captured: Uint8Array[] = [];
+  let capturedBytes = 0;
+  const result = yield* vcsProcess
+    .run({
+      operation: "WorkspaceSearchIndex.listRepositoryFiles",
+      command: "git",
+      args: [
+        "-c",
+        "core.fsmonitor=false",
+        "ls-files",
+        "-z",
+        "-t",
+        "-s",
+        "--cached",
+        "--others",
+        "--deleted",
+        "--exclude-standard",
+        // Dot folders can dwarf a repository's source (`.repos` holds vendored trees).
+        "--",
+        ":(exclude,glob).*/**",
+        ":(exclude,glob)**/.*/**",
+      ],
+      cwd: NodePath.join(cwd, repository),
+      allowNonZeroExit: true,
+      timeoutMs,
+      maxOutputBytes,
+      outputMode: "truncate",
+      onStdoutChunk: (chunk) => {
+        if (capturedBytes >= maxOutputBytes) return;
+        const kept = chunk.subarray(0, maxOutputBytes - capturedBytes);
+        captured.push(kept);
+        capturedBytes += kept.byteLength;
+      },
+    })
+    .pipe(
+      // Waiting for a process slot counts against the deadline too.
+      Effect.timeoutOption(timeoutMs),
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
+    );
+  const complete = result !== undefined && result.exitCode === 0 && !result.stdoutTruncated;
+  // A cut-off, failed or timed-out read keeps only its complete records.
+  const stdout = complete
+    ? result.stdout
+    : (() => {
+        const text = Buffer.concat(captured, capturedBytes).toString("utf8");
+        return text.slice(0, text.lastIndexOf("\0") + 1);
+      })();
+  const parsed = parseRepositoryFileRecords(stdout, limit);
+  return {
+    paths: parsed.paths.map((entry) => `${repository}/${toPosixPath(entry, hostIsWindows)}`),
+    truncated: !complete || parsed.truncated,
+  };
+});
+
+const makeSharedScratchIndex = Effect.fn("WorkspaceSearchIndex.makeSharedScratchIndex")(function* (
+  cwd: string,
+) {
+  const vcsProcess = yield* VcsProcess.VcsProcess;
+  const hostIsWindows = yield* HostProcess.isWindows;
+  const scope = yield* Effect.scope;
+  // A parent that is itself inside a repository keeps listing only its own top level.
+  const insideRepository = yield* vcsProcess
+    .run({
+      operation: "WorkspaceSearchIndex.sharedScratchInsideRepository",
+      command: "git",
+      args: ["rev-parse", "--is-inside-work-tree"],
+      cwd,
+      allowNonZeroExit: true,
+      timeoutMs: 10_000,
+    })
+    .pipe(
+      Effect.map((result) => result.exitCode === 0 && result.stdout.trim() === "true"),
+      Effect.orElseSucceed(() => false),
+    );
+  type ChildFiles = { readonly entries: ProjectEntry[]; readonly truncated: boolean };
+  const buildChildFiles = Effect.fn("WorkspaceSearchIndex.buildChildRepositoryFiles")(function* () {
+    const candidates = yield* listRepositoryCandidates(cwd);
+    const deadline = (yield* Clock.currentTimeMillis) + CHILD_REPOSITORY_REBUILD_DEADLINE_MS;
+    const beforeDeadline = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) => Effect.timeoutOption(effect, Math.max(0, deadline - now))),
+      );
+    const confirmed = yield* beforeDeadline(confirmChildRepositories(vcsProcess, cwd, candidates));
+    if (Option.isNone(confirmed)) return { entries: [], truncated: true } satisfies ChildFiles;
+    const repositories = confirmed.value;
+    const entries: ProjectEntry[] = [];
+    let truncated = false;
+    for (let start = 0; start < repositories.length; start += CHILD_REPOSITORY_LIST_CONCURRENCY) {
+      const wave = repositories.slice(start, start + CHILD_REPOSITORY_LIST_CONCURRENCY);
+      const share = Math.floor((CHILD_REPOSITORY_MAX_ENTRIES - entries.length) / wave.length);
+      // Once the parent's budget or time is spent, no further repository is read at all.
+      if (share === 0 || (yield* Clock.currentTimeMillis) >= deadline) {
+        truncated = true;
+        break;
+      }
+      const remainingMs = deadline - (yield* Clock.currentTimeMillis);
+      const listed = yield* Effect.forEach(
+        wave,
+        (repository) =>
+          listRepositoryFiles(
+            vcsProcess,
+            cwd,
+            repository,
+            hostIsWindows,
+            Math.min(WORKSPACE_INDEX_MAX_ENTRIES, share),
+            Math.min(10_000, remainingMs),
+          ),
+        { concurrency: "unbounded" },
+      );
+      for (const repository of listed) {
+        truncated ||= repository.truncated;
+        for (const entryPath of repository.paths) entries.push({ path: entryPath, kind: "file" });
+      }
+    }
+    return { entries, truncated } satisfies ChildFiles;
+  });
+  // A search reuses a fresh result or joins the rebuild under way; a new rebuild waits for the
+  // previous one, so one listing runs at a time. Rebuilds belong to the index, so a cancelled
+  // search never cancels one that other searches are waiting on.
+  const decide = yield* Semaphore.make(1);
+  const listingSlot = yield* Semaphore.make(1);
+  let generation = 0;
+  let requested = 0;
+  let built:
+    | {
+        readonly key: string;
+        readonly generation: number;
+        readonly at: number;
+        readonly result: ChildFiles;
+      }
+    | undefined;
+  let rebuilding:
+    | {
+        readonly id: number;
+        readonly key: string;
+        readonly generation: number;
+        readonly fiber: Fiber.Fiber<ChildFiles>;
+      }
+    | undefined;
+  const listChildRepositoryFiles = Effect.fn("WorkspaceSearchIndex.listChildRepositoryFiles")(
+    function* () {
+      if (insideRepository) return { entries: [] as ProjectEntry[], truncated: false };
+      const key = (yield* listRepositoryCandidates(cwd)).join("\0");
+      const decision = yield* decide.withPermits(1)(
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          if (
+            built &&
+            built.key === key &&
+            built.generation === generation &&
+            now - built.at < CHILD_REPOSITORY_FILES_TTL_MS
+          ) {
+            return { result: built.result };
+          }
+          if (rebuilding && rebuilding.key === key && rebuilding.generation === generation) {
+            return { fiber: rebuilding.fiber };
+          }
+          const id = ++requested;
+          const startedGeneration = generation;
+          // Waits for the listing slot; a newer rebuild queued meanwhile then answers instead.
+          const attempt = (): Effect.Effect<ChildFiles> =>
+            listingSlot
+              .withPermits(1)(
+                Effect.gen(function* () {
+                  if (rebuilding && rebuilding.id !== id) return undefined;
+                  const at = yield* Clock.currentTimeMillis;
+                  const result = yield* buildChildFiles();
+                  built = { key, generation: startedGeneration, at, result };
+                  return result;
+                }),
+              )
+              .pipe(
+                Effect.flatMap((result) => {
+                  if (result !== undefined) return Effect.succeed(result);
+                  if (rebuilding && rebuilding.id !== id) return Fiber.join(rebuilding.fiber);
+                  return built ? Effect.succeed(built.result) : attempt();
+                }),
+              );
+          // Starts once this decision is recorded, so the checks above see it.
+          const run = decide
+            .withPermits(1)(Effect.void)
+            .pipe(
+              Effect.andThen(attempt),
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (rebuilding?.id === id) rebuilding = undefined;
+                }),
+              ),
+            );
+          const forked = yield* Effect.forkIn(run, scope);
+          rebuilding = { id, key, generation: startedGeneration, fiber: forked };
+          return { fiber: forked };
+        }),
+      );
+      return "result" in decision ? decision.result : yield* Fiber.join(decision.fiber);
+    },
+  );
+
   const list = Effect.fn("WorkspaceSearchIndex.listSharedScratch")(function* () {
     return yield* Effect.tryPromise({
       try: async () => {
@@ -665,16 +984,21 @@ const makeSharedScratchIndex = (cwd: string) => {
     list,
     search: Effect.fn("WorkspaceSearchIndex.searchSharedScratch")(
       function* (query, limit, kind, imageOnly) {
-        const result = yield* list();
-        const entries = result.entries.filter(
-          (entry) =>
-            (kind === undefined || entry.kind === kind) &&
-            (!imageOnly || (entry.kind === "file" && isProjectFaviconPath(entry.path))) &&
-            scoreSubsequenceMatch(entry.path.toLowerCase(), query.toLowerCase()) !== null,
+        const [topLevel, children] = yield* Effect.all([list(), listChildRepositoryFiles()]);
+        const normalizedQuery = query.toLowerCase();
+        const ranked = [...topLevel.entries, ...children.entries].flatMap((entry) => {
+          if (kind !== undefined && entry.kind !== kind) return [];
+          if (imageOnly && !(entry.kind === "file" && isProjectFaviconPath(entry.path))) return [];
+          const score = scoreSubsequenceMatch(entry.path.toLowerCase(), normalizedQuery);
+          return score === null ? [] : [{ entry, score }];
+        });
+        ranked.sort(
+          (left, right) =>
+            left.score - right.score || left.entry.path.localeCompare(right.entry.path),
         );
         return {
-          entries: entries.slice(0, limit),
-          truncated: result.truncated || entries.length > limit,
+          entries: ranked.slice(0, limit).map(({ entry }) => entry),
+          truncated: topLevel.truncated || children.truncated || ranked.length > limit,
         };
       },
     ),
@@ -688,15 +1012,19 @@ const makeSharedScratchIndex = (cwd: string) => {
         }),
       ),
     ),
-    refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(() => Effect.void),
+    refresh: Effect.fn("WorkspaceSearchIndex.refreshSharedScratch")(() =>
+      Effect.sync(() => {
+        generation += 1;
+      }),
+    ),
   });
-};
+});
 
 export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
   cwd: string,
   variant: WorkspaceSearchIndexVariant = "paths",
 ) {
-  if (yield* isSharedScratchDirectory(cwd)) return makeSharedScratchIndex(cwd);
+  if (yield* isSharedScratchDirectory(cwd)) return yield* makeSharedScratchIndex(cwd);
   const hostIsWindows = yield* HostProcess.isWindows;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

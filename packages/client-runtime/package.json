@@ -131,6 +131,10 @@
       "types": "./src/mediaSource.ts",
       "default": "./src/mediaSource.ts"
     },
+    "./file-remote-actions": {
+      "types": "./src/fileRemoteActions.ts",
+      "default": "./src/fileRemoteActions.ts"
+    },
     "./media-actions": {
       "types": "./src/mediaActions.ts",
       "default": "./src/mediaActions.ts"

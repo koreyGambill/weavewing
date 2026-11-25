@@ -22,11 +22,15 @@ export function markdownImageSourceFragment(source: string): string {
   return splitMarkdownLinkSearchAndHash(normalizeMarkdownLinkDestination(source)).hash;
 }
 
+// `\` separates folders only in a Windows workspace; on POSIX it belongs to a file name.
 function joinWorkspacePath(workspaceRoot: string, relativePath: string): string {
-  const separator = isWindowsAbsolutePath(workspaceRoot) ? "\\" : "/";
-  const root = workspaceRoot.replace(/[\\/]+$/, "");
-  const path = relativePath.replace(/[\\/]/g, separator).replace(/^[\\/]+/, "");
-  return `${root}${separator}${path}`;
+  const windows = isWindowsAbsolutePath(workspaceRoot);
+  const separator = windows ? "\\" : "/";
+  const root = workspaceRoot.replace(windows ? /[\\/]+$/ : /\/+$/, "");
+  const segments = relativePath
+    .split(windows ? /[\\/]/ : "/")
+    .filter((segment) => segment.length > 0 && segment !== ".");
+  return `${root}${separator}${segments.join(separator)}`;
 }
 
 /** Rendering is not a click, so a network path loads only from the project's own share. */

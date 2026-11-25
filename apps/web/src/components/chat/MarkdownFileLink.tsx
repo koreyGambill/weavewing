@@ -1,11 +1,18 @@
 import { useAssetUrlState } from "../../assets/assetUrls";
+import { fileLinkShownPath } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuSource, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  ContextMenuSource,
+  EnvironmentId,
+  FilesystemEntryMetadata,
+  ScopedThreadRef,
+  SourceControlFileLink,
+} from "@t3tools/contracts";
 import { memo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { FolderIcon } from "lucide-react";
 
@@ -13,7 +20,7 @@ import { contextMenuSourceOf } from "../../contextMenuSource";
 import { readLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { shouldOpenMarkdownFileLinkInEditor } from "../../markdown-links";
-import type { markdownFileCopyPaths } from "../../markdownFileHostPath";
+import type { markdownFileCopyPaths } from "../../markdown-links";
 import { documentChipKindForFileName } from "../../pierre-icons";
 import { ContextChip } from "../ContextChip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -26,11 +33,21 @@ import {
 } from "./MarkdownFileLink.logic";
 import { reportMarkdownActionFailure } from "./markdownActionFailure";
 import { WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
+import {
+  pressTimeFileActions,
+  resolvePressedFileAction,
+} from "@t3tools/client-runtime/file-remote-actions";
+import { useRunFileRemoteAction } from "../files/FileRemoteActions";
 
 interface MarkdownFileLinkProps {
   environmentId: EnvironmentId | null;
-  href: string;
   targetPath: string;
+  /** The destination as the agent wrote it, shown until a read confirms a relative link's file. */
+  authoredPath: string;
+  /** Reads where a relative link points; absent for links that open as written. */
+  verifyPath?:
+    | (() => Promise<{ readonly path: string; readonly entry: FilesystemEntryMetadata } | null>)
+    | undefined;
   iconPath: string;
   isAppBundle?: boolean;
   workspaceRelativePath: string | null;
@@ -43,6 +60,14 @@ interface MarkdownFileLinkProps {
   onOpen?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
+  /** The forge rows; git is read only when one is chosen. */
+  fileLink?:
+    | {
+        readonly forge: string;
+        readonly disabledReason: string | null;
+        readonly load: () => Promise<SourceControlFileLink>;
+      }
+    | undefined;
   openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenMedia?: (() => void) | undefined;
@@ -52,10 +77,14 @@ interface MarkdownFileLinkProps {
 
 const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link";
 
+// Every tooltip open reads afresh; only the newest read may update its chip.
+let fileLinkCheckSequence = 0;
+
 export const MarkdownFileLink = memo(function MarkdownFileLink({
   environmentId,
-  href,
   targetPath,
+  authoredPath,
+  verifyPath,
   iconPath,
   isAppBundle = false,
   workspaceRelativePath,
@@ -73,7 +102,36 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   onReveal,
   revealLabel,
   resolveCopyPaths,
+  fileLink,
 }: MarkdownFileLinkProps) {
+  const checkKey = `${environmentId}\u0000${targetPath}\u0000${authoredPath}`;
+  const [check, setCheck] = useState<{
+    id: number;
+    key: string;
+    verified: { readonly path: string; readonly entry: FilesystemEntryMetadata } | null;
+  } | null>(null);
+  // A different link drops the last result, so a late read can never land on it.
+  if (check !== null && check.key !== checkKey) setCheck(null);
+  const verified = verifyPath && check?.key === checkKey ? check.verified : null;
+  const verifiedPath = verified?.path ?? null;
+  // The icon and tooltip use the check's own read; an absolute link renders from what was written.
+  const verifiedEntry = verified?.entry;
+  const confirmed = verified !== null;
+  const shownPath = fileLinkShownPath(authoredPath, verifiedPath);
+  // Nothing reads an unconfirmed relative link's guessed path, the icon and tooltip included.
+  const readPath = verifiedPath ?? iconPath;
+  const verifyOnOpen = (open: boolean) => {
+    if (!open || !verifyPath) return;
+    fileLinkCheckSequence += 1;
+    const id = fileLinkCheckSequence;
+    const key = checkKey;
+    const settle = (
+      result: { readonly path: string; readonly entry: FilesystemEntryMetadata } | null,
+    ) => setCheck((previous) => (previous?.id === id ? { id, key, verified: result } : previous));
+    setCheck({ id, key, verified: null });
+    verifyPath().then(settle, () => settle(null));
+  };
+  const runRemoteAction = useRunFileRemoteAction(threadRef);
   const handleOpenInEditor = () => {
     if (!onOpen) {
       return;
@@ -200,7 +258,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     })();
   };
 
-  const handleCopy = (resolveValue: () => Promise<string>, title: string) => {
+  const handleCopy = (resolveValue: () => Promise<string>, title: string, raw = false) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
       toastManager.add(
         stackedThreadToast({
@@ -212,7 +270,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
       return;
     }
 
-    const value = resolveValue().then((text) => formatFilePathForClipboard(text, targetPath));
+    const value = resolveValue().then((text) =>
+      raw ? text : formatFilePathForClipboard(text, targetPath),
+    );
     // Start the write before workspace lookup finishes so Safari retains the user gesture.
     const write =
       typeof navigator.clipboard.write === "function" && typeof ClipboardItem !== "undefined"
@@ -246,6 +306,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
     try {
       const copyItems = markdownFileCopyMenuItems({ targetPath, workspaceRelativePath });
+      const forgeRows = fileLink
+        ? pressTimeFileActions(fileLink, ["open-on-forge", "copy-forge-link"])
+        : [];
       const clicked = await api.contextMenu.show(
         [
           ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
@@ -255,11 +318,43 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             : []),
           ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
           ...copyItems.map(({ id, label }) => ({ id, label })),
+          ...forgeRows.map((row, index) => ({
+            id: `remote:${row.id}`,
+            label: row.label,
+            separatorBefore: index === 0,
+            disabled: row.disabledReason !== null,
+            ...(row.disabledReason === null ? {} : { detail: row.disabledReason }),
+          })),
         ] as const,
         position,
         source,
       );
 
+      const forgeRow = forgeRows.find((row) => clicked === `remote:${row.id}`);
+      if (fileLink && forgeRow) {
+        const pressed = resolvePressedFileAction(forgeRow.id, fileLink.load());
+        if (forgeRow.kind === "copy") {
+          const link = pressed.then(
+            (action) =>
+              action.url ??
+              Promise.reject(new Error(action.disabledReason ?? "No link for this file")),
+          );
+          handleCopy(() => link, `${fileLink.forge} link`, true);
+          return;
+        }
+        void pressed.then((action) =>
+          action.url === null
+            ? toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: `Could not open on ${fileLink.forge}`,
+                  description: action.disabledReason ?? "No link for this file",
+                }),
+              )
+            : runRemoteAction(action),
+        );
+        return;
+      }
       if (clicked === "preview-media") {
         onOpenMedia?.();
         return;
@@ -323,19 +418,20 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   const chipKind = documentChipKindForFileName(iconPath) ?? "mention";
 
   return (
-    <Tooltip>
+    <Tooltip onOpenChange={verifyOnOpen}>
       <TooltipTrigger
         render={
           hasPrimaryAction ? (
             <ContextChip
               kind={chipKind}
               dir="ltr"
-              render={<a href={href} />}
+              render={<a href={shownPath} />}
               className={MARKDOWN_FILE_LINK_CLASS_NAME}
               data-markdown-copy={copyMarkdown}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                verifyOnOpen(true);
                 if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
                   handleOpenInEditor();
                   return;
@@ -350,12 +446,12 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             >
               <FileTagChipContent
                 icon={
-                  isAppBundle ? (
-                    <AppBundleIcon environmentId={environmentId} path={iconPath} />
+                  isAppBundle && confirmed ? (
+                    <AppBundleIcon environmentId={environmentId} path={readPath} />
                   ) : undefined
                 }
-                path={iconPath}
-                environmentId={environmentId}
+                path={readPath}
+                metadata={verifiedEntry}
                 label={label}
                 theme={theme}
               />
@@ -369,17 +465,20 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               aria-haspopup="menu"
               className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, "select-text")}
               data-markdown-copy={copyMarkdown}
-              onClick={handleContextMenu}
+              onClick={(event) => {
+                verifyOnOpen(true);
+                handleContextMenu(event);
+              }}
               onContextMenu={handleContextMenu}
             >
               <FileTagChipContent
                 icon={
-                  isAppBundle ? (
-                    <AppBundleIcon environmentId={environmentId} path={iconPath} />
+                  isAppBundle && confirmed ? (
+                    <AppBundleIcon environmentId={environmentId} path={readPath} />
                   ) : undefined
                 }
-                path={iconPath}
-                environmentId={environmentId}
+                path={readPath}
+                metadata={verifiedEntry}
                 label={label}
                 theme={theme}
               />
@@ -388,7 +487,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         }
       />
       <TooltipPopup side="top" variant="code">
-        <WorkspaceEntryTooltip path={iconPath} label={targetPath} environmentId={environmentId} />
+        <WorkspaceEntryTooltip path={readPath} label={shownPath} metadata={verifiedEntry} />
       </TooltipPopup>
     </Tooltip>
   );
@@ -399,8 +498,9 @@ function areMarkdownFileLinkPropsEqual(
   next: Readonly<MarkdownFileLinkProps>,
 ): boolean {
   return (
-    previous.href === next.href &&
     previous.targetPath === next.targetPath &&
+    previous.authoredPath === next.authoredPath &&
+    previous.verifyPath === next.verifyPath &&
     previous.iconPath === next.iconPath &&
     previous.environmentId === next.environmentId &&
     previous.workspaceRelativePath === next.workspaceRelativePath &&

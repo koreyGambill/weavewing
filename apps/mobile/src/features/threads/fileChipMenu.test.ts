@@ -7,6 +7,7 @@ import {
   fileChipShareSource,
   resolveFileChipTarget,
 } from "./fileChipMenu";
+import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
 
 it("copies native paths from a relative file chip in a Windows workspace", () => {
   const target = resolveFileChipTarget("reports/Device Users.csv", "C:/repo");
@@ -20,6 +21,21 @@ it("copies native paths from a relative file chip in a Windows workspace", () =>
 });
 
 describe("resolveFileChipTarget", () => {
+  it("keeps an encoded backslash in a POSIX file name and splits on it only on Windows", () => {
+    expect(resolveFileChipTarget("./notes%5Cweek.md", "/repo")).toEqual({
+      fullPath: "/repo/notes\\week.md",
+      relativePath: "notes\\week.md",
+    });
+    expect(resolveFileChipTarget("/repo/notes%5Cweek.md", "/repo")).toEqual({
+      fullPath: "/repo/notes\\week.md",
+      relativePath: "notes\\week.md",
+    });
+    expect(resolveFileChipTarget("./notes%5Cweek.md", "C:\\repo")).toEqual({
+      fullPath: "C:\\repo\\notes\\week.md",
+      relativePath: "notes/week.md",
+    });
+  });
+
   it("resolves a workspace-relative link to both paths", () => {
     expect(resolveFileChipTarget("src/app.ts:12", "/repo")).toEqual({
       fullPath: "/repo/src/app.ts",
@@ -88,3 +104,14 @@ describe("file chip downloads", () => {
     }
   });
 });
+
+it.each([["/repo"], ["C:\\repo"]])(
+  "opens and copies an image link with an encoded backslash at one path in %s",
+  (workspaceRoot) => {
+    const href = "./notes%5Cweek.png";
+    const opened = classifyMarkdownImageSource(href, workspaceRoot);
+    expect(opened._tag === "WorkspaceFile" ? opened.path : null).toBe(
+      resolveFileChipTarget(href, workspaceRoot)?.fullPath,
+    );
+  },
+);

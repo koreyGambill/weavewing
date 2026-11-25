@@ -64,6 +64,7 @@ const withFakeSystemd = <A, E>(
     readonly failingVerbs: Set<string>;
     readonly stateDir: string;
     readonly cgroupRoot: string;
+    readonly setLingering: (lingering: boolean) => void;
   }) => Effect.Effect<A, E, Scope.Scope>,
   // A user manager older than systemd 253 rejects OOMPolicy on scopes.
   {
@@ -73,6 +74,8 @@ const withFakeSystemd = <A, E>(
     liveOwner = false,
     slowCleanup = false,
     probeTimesOut = false,
+    userManager = "parent",
+    username = "tester",
   }: {
     readonly oomPolicy?: boolean;
     readonly stopFails?: boolean;
@@ -80,6 +83,15 @@ const withFakeSystemd = <A, E>(
     readonly liveOwner?: boolean;
     readonly slowCleanup?: boolean;
     readonly probeTimesOut?: boolean;
+    /** Whether the user manager outlives the server: it runs the server, or lingering keeps it. */
+    readonly userManager?:
+      | "parent"
+      | "legacy-parent"
+      | "other-user-parent"
+      | "other-controller-parent"
+      | "lingering"
+      | "login-bound";
+    readonly username?: string | null;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -88,6 +100,28 @@ const withFakeSystemd = <A, E>(
       NodeFS.writeFileSync(NodePath.join(bin, name), "", { mode: 0o755 });
     }
     const cgroupRoot = NodePath.join(bin, "cgroup");
+    const ownCgroup = NodePath.join(bin, "self-cgroup");
+    const underManager = (uid: number) =>
+      `/user.slice/user-${uid}.slice/user@${uid}.service/app.slice/t3.scope`;
+    NodeFS.writeFileSync(
+      ownCgroup,
+      {
+        parent: `0::${underManager(1000)}\n`,
+        "legacy-parent": `2:cpu,cpuacct:/\n1:name=systemd:${underManager(1000)}\n`,
+        "other-user-parent": `0::${underManager(1001)}\n`,
+        "other-controller-parent": `2:cpu,cpuacct:${underManager(1000)}\n0::/non-systemd\n`,
+        lingering: "0::/non-systemd\n",
+        "login-bound": "0::/non-systemd\n",
+      }[userManager],
+    );
+    const lingerDir = NodePath.join(bin, "linger");
+    NodeFS.mkdirSync(lingerDir);
+    const setLingering = (lingering: boolean) => {
+      const file = NodePath.join(lingerDir, "tester");
+      if (lingering) NodeFS.writeFileSync(file, "");
+      else NodeFS.rmSync(file, { force: true });
+    };
+    setLingering(userManager === "lingering");
     const units = new Map<string, FakeUnit>();
     const calls: Array<ReadonlyArray<string>> = [];
     const failingVerbs = new Set<string>();
@@ -169,10 +203,16 @@ const withFakeSystemd = <A, E>(
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
       Effect.provideService(HostProcess.Platform, "linux"),
       Effect.provideService(HostProcess.Environment, { PATH: bin, XDG_RUNTIME_DIR: "/run/user/1" }),
+      Effect.provideService(HostProcess.UserId, 1000),
+      Effect.provideService(HostProcess.Username, username),
       Effect.provideService(FileSystem.FileSystem, {
         ...fileSystem,
         readFileString: (path, encoding) =>
-          fileSystem.readFileString(path.replace("/sys/fs/cgroup", cgroupRoot), encoding),
+          fileSystem.readFileString(
+            path === "/proc/self/cgroup" ? ownCgroup : path.replace("/sys/fs/cgroup", cgroupRoot),
+            encoding,
+          ),
+        exists: (path) => fileSystem.exists(path.replace("/var/lib/systemd/linger", lingerDir)),
         writeFileString: (path, data, options) =>
           fileSystem.writeFileString(path.replace("/sys/fs/cgroup", cgroupRoot), data, options),
       }),
@@ -185,7 +225,15 @@ const withFakeSystemd = <A, E>(
       expect(yield* Deferred.isDone(constructed)).toBe(true);
     }
     const scope = yield* Fiber.join(construction);
-    return yield* body({ scope, units, calls, failingVerbs, stateDir, cgroupRoot }).pipe(
+    return yield* body({
+      scope,
+      units,
+      calls,
+      failingVerbs,
+      stateDir,
+      cgroupRoot,
+      setLingering,
+    }).pipe(
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(bin, { recursive: true, force: true }))),
     );
   }).pipe(
@@ -441,6 +489,47 @@ describe("AgentScope service", () => {
           expect((yield* Fiber.join(launch)).command).toBe("/bin/sh");
         }),
       { leftovers: true, slowCleanup: true },
+    ),
+  );
+
+  it.effect.each([
+    { userManager: "parent", username: "tester", scoped: true },
+    { userManager: "legacy-parent", username: "tester", scoped: true },
+    { userManager: "lingering", username: "tester", scoped: true },
+    { userManager: "login-bound", username: "tester", scoped: false },
+    { userManager: "other-user-parent", username: "tester", scoped: false },
+    { userManager: "other-controller-parent", username: "tester", scoped: false },
+    { userManager: "login-bound", username: null, scoped: false },
+  ] as const)(
+    "scopes agents only when the user manager outlives the server ($userManager, user $username)",
+    ({ userManager, username, scoped }) =>
+      withFakeSystemd(
+        ({ scope, calls }) =>
+          Effect.gen(function* () {
+            const command = yield* scope.wrap({ command: "agent", args: [], name: "t" });
+            expect(command.unit !== undefined).toBe(scoped);
+            expect(calls.some(([, verb]) => verb === "--scope")).toBe(scoped);
+          }),
+        { userManager, username },
+      ),
+  );
+
+  it.effect("follows a lingering change at the next launch", () =>
+    withFakeSystemd(
+      ({ scope, units, setLingering }) =>
+        Effect.gen(function* () {
+          const launch = () =>
+            scope.wrap({ command: "agent", args: [], name: "t", threadId: "thread-1" });
+          expect((yield* launch()).unit).toBeUndefined();
+          setLingering(true);
+          const scoped = (yield* launch()).unit;
+          assert(scoped !== undefined);
+          units.set(scoped, { activeState: "failed", result: "oom-kill" });
+          setLingering(false);
+          expect((yield* launch()).unit).toBeUndefined();
+          expect(yield* scope.oomKilled("thread-1")).toBe(false);
+        }),
+      { userManager: "login-bound" },
     ),
   );
 
