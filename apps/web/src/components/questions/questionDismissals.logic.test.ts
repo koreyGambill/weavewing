@@ -29,15 +29,24 @@ describe("question dismissals in the timeline", () => {
       entry("b", "2026-01-01T00:00:02.000Z"),
       entry("c", "2026-01-01T00:00:03.000Z"),
     ];
-    expect(withQuestionDismissals(entries, dismissals).map((row) => row.id)).toEqual([
+    expect(withQuestionDismissals(entries, dismissals, false).map((row) => row.id)).toEqual([
       "a",
       "b",
       "question-dismissed:Q3",
       "c",
       "question-dismissed:Q4",
     ]);
-    expect(withQuestionDismissals(entries, [])).toBe(entries);
-    expect(withQuestionDismissals([], dismissals).map((row) => row.id)).toEqual([
+    // With the whole history loaded, one older than the first message leads it.
+    expect(withQuestionDismissals(entries, dismissals, true).map((row) => row.id)).toEqual([
+      "question-dismissed:Q2",
+      "a",
+      "b",
+      "question-dismissed:Q3",
+      "c",
+      "question-dismissed:Q4",
+    ]);
+    expect(withQuestionDismissals(entries, [], false)).toBe(entries);
+    expect(withQuestionDismissals([], dismissals, false).map((row) => row.id)).toEqual([
       "question-dismissed:Q2",
       "question-dismissed:Q3",
       "question-dismissed:Q4",

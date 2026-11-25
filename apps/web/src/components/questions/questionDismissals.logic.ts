@@ -25,16 +25,17 @@ export function questionDismissalEntries(
 }
 
 /**
- * `entries` with each dismissal placed where it happened. One older than every loaded entry
- * waits until that part of the history loads, so it never lands at the top out of order.
+ * `entries` with each dismissal placed where it happened. While older history is still to load,
+ * one older than every loaded entry waits for it, so it never lands at the top out of order.
  */
 export function withQuestionDismissals(
   entries: ReadonlyArray<TimelineEntry>,
   dismissals: ReadonlyArray<DismissalEntry>,
+  historyComplete: boolean,
 ): ReadonlyArray<TimelineEntry> {
   const first = entries[0];
   const placed = dismissals.filter(
-    (dismissal) => first === undefined || dismissal.createdAt >= first.createdAt,
+    (dismissal) => historyComplete || first === undefined || dismissal.createdAt >= first.createdAt,
   );
   if (placed.length === 0) return entries;
   const merged: TimelineEntry[] = [];

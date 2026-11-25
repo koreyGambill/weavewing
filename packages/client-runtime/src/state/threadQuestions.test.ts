@@ -12,6 +12,7 @@ import {
   threadQuestionStatus,
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
+  withoutThreadQuestionRecords,
 } from "./threadQuestions.ts";
 
 const question = (
@@ -140,22 +141,62 @@ describe("thread questions", () => {
     const drafted = question("Q1", "open", { answer: draft(["a"]) });
     const record = threadQuestionAnswerRecord("t1", drafted)!;
     const other = { ...record, artifactId: "artifact-1", contextId: record.contextId };
-    expect(syncComposerQuestionAnswers("t1", [record, other], [drafted])).toBeNull();
-    // The draft moved on: the chip follows it in place.
+    const snapshot = (revision: number, ...questions: ThreadQuestion[]) => ({
+      revision,
+      questions,
+    });
+    expect(syncComposerQuestionAnswers("t1", [record, other], snapshot(1, drafted))).toBeNull();
+    // A newer draft: the chip follows it in place.
     const moved = question("Q1", "open", { answer: draft(["b"], "", 3) });
-    expect(syncComposerQuestionAnswers("t1", [record], [moved])).toEqual([
+    expect(syncComposerQuestionAnswers("t1", [record], snapshot(3, moved))).toEqual([
       threadQuestionAnswerRecord("t1", moved),
     ]);
-    // Closed, sent, cleared or gone: the chip leaves; an artifact answer stays.
+    // Closed or sent in any snapshot: the chip leaves; an artifact answer stays.
     for (const gone of [
-      [question("Q1", "withdrawn", { answer: draft(["a"]) })],
-      [question("Q1", "replaced", { answer: draft(["a"]) })],
-      [question("Q1", "answered", { answer: draft(["a"]), answeredBy: "agent" })],
-      [question("Q1", "open", { answer: draft(["a"]), sentInMessageId: sentIn })],
-      [question("Q1", "open", { answer: draft([], "") })],
-      [],
+      question("Q1", "withdrawn", { answer: draft(["a"]) }),
+      question("Q1", "replaced", { answer: draft(["a"]) }),
+      question("Q1", "answered", { answer: draft(["a"]), answeredBy: "agent" }),
+      question("Q1", "open", { answer: draft(["a"]), sentInMessageId: sentIn }),
     ])
-      expect(syncComposerQuestionAnswers("t1", [record, other], gone)).toEqual([other]);
+      expect(syncComposerQuestionAnswers("t1", [record, other], snapshot(0, gone))).toEqual([
+        other,
+      ]);
+    // A draft cleared in a snapshot at least as new as the chip removes it.
+    const cleared = question("Q1", "open", { answer: draft([], "", 2) });
+    expect(syncComposerQuestionAnswers("t1", [record, other], snapshot(2, cleared))).toEqual([
+      other,
+    ]);
+  });
+
+  it("lets no older snapshot from another tile change a chip", () => {
+    const newer = threadQuestionAnswerRecord(
+      "t1",
+      question("Q1", "open", { answer: draft(["b"], "", 5) }),
+    )!;
+    const older = question("Q1", "open", { answer: draft(["a"], "", 3) });
+    expect(
+      syncComposerQuestionAnswers("t1", [newer], { revision: 3, questions: [older] }),
+    ).toBeNull();
+    const notYetDrafted = question("Q1", "open");
+    expect(
+      syncComposerQuestionAnswers("t1", [newer], { revision: 4, questions: [notYetDrafted] }),
+    ).toBeNull();
+    // A snapshot from before the question existed.
+    expect(syncComposerQuestionAnswers("t1", [newer], { revision: 1, questions: [] })).toBeNull();
+  });
+
+  it("takes every question chip out of the composer and leaves other answers", () => {
+    const answer = threadQuestionAnswerRecord(
+      "t1",
+      question("Q1", "open", { answer: draft(["a"], "hm") }),
+    )!;
+    const discuss = threadQuestionDiscussRecord(
+      "t1",
+      question("Q2", "open", { answer: draft([], "why?") }),
+    )!;
+    const artifact = { ...answer, artifactId: "artifact-1", questionId: "q-1" };
+    expect(withoutThreadQuestionRecords([answer, artifact, discuss])).toEqual([artifact]);
+    expect(withoutThreadQuestionRecords([artifact])).toBeNull();
   });
 
   it("adds, replaces and removes one question's composer answer", () => {
@@ -216,15 +257,14 @@ describe("thread questions", () => {
     const before = question("Q1", "deferred", { answer: draft([], "first") });
     const record = threadQuestionDiscussRecord("t1", before)!;
     const after = question("Q1", "deferred", { answer: draft([], "second", 4) });
-    expect(syncComposerQuestionAnswers("t1", [record], [after])).toEqual([
-      threadQuestionDiscussRecord("t1", after),
-    ]);
     expect(
-      syncComposerQuestionAnswers(
-        "t1",
-        [record],
-        [question("Q1", "deferred", { answer: draft([], " ") })],
-      ),
+      syncComposerQuestionAnswers("t1", [record], { revision: 4, questions: [after] }),
+    ).toEqual([threadQuestionDiscussRecord("t1", after)]);
+    expect(
+      syncComposerQuestionAnswers("t1", [record], {
+        revision: 4,
+        questions: [question("Q1", "deferred", { answer: draft([], " ", 4) })],
+      }),
     ).toEqual([]);
     // Its status stays the question's own: a discussion is not an answer in the composer.
     expect(threadQuestionStatus(after, false)).toBe("drafted");

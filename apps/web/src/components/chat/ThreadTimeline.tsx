@@ -24,6 +24,7 @@ export function ThreadTimeline({
   inlineArchiveRunIds,
   draftEntries,
   questionDismissals,
+  historyComplete,
   activeThreadKey,
   syncing,
   detailLoading,
@@ -38,6 +39,8 @@ export function ThreadTimeline({
   draftEntries: ReadonlyArray<TimelineEntry> | null;
   /** The user's question dismissals, placed in the timeline where they happened. */
   questionDismissals: Parameters<typeof withQuestionDismissals>[1];
+  /** No older history is left to load, so a dismissal before the first row may show. */
+  historyComplete: boolean;
   activeThreadKey: string | null;
   syncing: boolean;
   detailLoading: boolean;
@@ -54,7 +57,8 @@ export function ThreadTimeline({
               (row.item.runId !== null && inlineArchiveRunIds.has(row.item.runId)),
           ),
   });
-  const entries = draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals);
+  const entries =
+    draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals, historyComplete);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({

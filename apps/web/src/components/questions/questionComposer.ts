@@ -1,5 +1,6 @@
 import {
   syncComposerQuestionAnswers,
+  withoutThreadQuestionRecords,
   threadQuestionsInComposer,
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
@@ -7,7 +8,6 @@ import {
 import type {
   ArtifactAnswerContextRecord,
   ScopedThreadRef,
-  ThreadQuestion,
   ThreadWorkspace,
 } from "@t3tools/contracts";
 
@@ -48,12 +48,18 @@ export function removeQuestionAnswerFromComposer(threadRef: ScopedThreadRef, que
     useComposerDraftStore.getState().setArtifactAnswers(threadRef, next);
 }
 
-/** Brings the composer's answers in line with the thread's questions after they change. */
+/** Brings the composer's answers in line with a snapshot of the thread's questions. */
 export function syncQuestionAnswersInComposer(
   threadRef: ScopedThreadRef,
-  questions: ReadonlyArray<ThreadQuestion>,
+  workspace: Pick<ThreadWorkspace, "revision" | "questions">,
 ) {
-  const next = syncComposerQuestionAnswers(threadRef.threadId, answersOf(threadRef), questions);
+  const next = syncComposerQuestionAnswers(threadRef.threadId, answersOf(threadRef), workspace);
+  if (next !== null) useComposerDraftStore.getState().setArtifactAnswers(threadRef, next);
+}
+
+/** Takes every question answer and discussion out of the composer; other chips stay. */
+export function removeQuestionRecordsFromComposer(threadRef: ScopedThreadRef) {
+  const next = withoutThreadQuestionRecords(answersOf(threadRef));
   if (next !== null) useComposerDraftStore.getState().setArtifactAnswers(threadRef, next);
 }
 

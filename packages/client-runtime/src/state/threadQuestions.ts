@@ -188,40 +188,38 @@ export function threadQuestionDiscussRecord(
 }
 
 /**
- * A composer's question records brought up to date with the thread's questions: each answer
- * follows its draft and each discussion its note, and one whose question closed, was sent, or
- * lost what it carries is dropped. Returns null when nothing changed.
+ * A composer's question records brought up to date with a workspace snapshot: each answer
+ * follows a newer draft and each discussion a newer note; one whose question closed or was sent
+ * is dropped, and one whose draft was cleared only when the snapshot is at least as new as the
+ * chip. Returns null when nothing changed.
  */
 export function syncComposerQuestionAnswers(
   threadId: string,
   records: ReadonlyArray<ArtifactAnswerContextRecord>,
-  questions: ReadonlyArray<ThreadQuestion>,
+  workspace: { readonly revision: number; readonly questions: ReadonlyArray<ThreadQuestion> },
 ): ArtifactAnswerContextRecord[] | null {
   let changed = false;
   const next = records.flatMap((record) => {
     if (!isQuestionRecord(record)) return [record];
-    const question = questions.find((entry) => entry.id === record.questionId);
-    const fresh =
-      question === undefined
-        ? null
-        : isQuestionAnswer(record)
-          ? threadQuestionAnswerRecord(threadId, question)
-          : threadQuestionDiscussRecord(threadId, question);
+    const question = workspace.questions.find((entry) => entry.id === record.questionId);
+    // Another tile can hold an older snapshot, so only what it has seen may change the chip.
+    if (question === undefined) return [record];
+    const closed =
+      (question.state !== "open" && question.state !== "deferred") ||
+      question.sentInMessageId !== undefined;
+    const fresh = closed
+      ? null
+      : isQuestionAnswer(record)
+        ? threadQuestionAnswerRecord(threadId, question)
+        : threadQuestionDiscussRecord(threadId, question);
     if (fresh === null) {
+      if (!closed && workspace.revision < record.answerRevision) return [record];
       changed = true;
       return [];
     }
-    if (
-      fresh.answerRevision !== record.answerRevision ||
-      fresh.choice !== record.choice ||
-      fresh.note !== record.note ||
-      fresh.label !== record.label ||
-      fresh.contextId !== record.contextId
-    ) {
-      changed = true;
-      return [fresh];
-    }
-    return [record];
+    if (fresh.answerRevision <= record.answerRevision) return [record];
+    changed = true;
+    return [fresh];
   });
   return changed ? next : null;
 }
@@ -265,4 +263,12 @@ export function threadQuestionChipText(record: ArtifactAnswerContextRecord): str
   return answer
     ? `${record.questionId} · ${title} · ${cut(answer)}`
     : `${record.questionId} · ${title}`;
+}
+
+/** `records` without question answers or discussions, or null when it holds none. */
+export function withoutThreadQuestionRecords(
+  records: ReadonlyArray<ArtifactAnswerContextRecord>,
+): ArtifactAnswerContextRecord[] | null {
+  const next = records.filter((record) => !isQuestionRecord(record));
+  return next.length === records.length ? null : next;
 }

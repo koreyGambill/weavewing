@@ -3,11 +3,14 @@ import {
   threadQuestionCounts,
   threadQuestionHasDraft,
 } from "@t3tools/client-runtime/state/thread-questions";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { ChevronDownIcon, ChevronUpIcon, MessageCircleQuestionIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useAtomValue } from "@effect/atom-react";
+
 import { useWorkspaceMutationRefresh } from "../../hooks/useWorkspaceMutationRefresh";
+import { serverEnvironment } from "../../state/server";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useSaveQuestionDraft, useThreadQuestionsWorkspace } from "../../state/threadQuestions";
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
@@ -15,6 +18,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
   addDraftedAnswersToComposer,
+  removeQuestionRecordsFromComposer,
   syncQuestionAnswersInComposer,
   useQuestionsInComposer,
 } from "./questionComposer";
@@ -28,6 +32,8 @@ import { ThreadQuestionsCompactList } from "./ThreadQuestionsCompactList";
  */
 export function useThreadQuestionsBanner(input: {
   readonly threadRef: ScopedThreadRef | null;
+  /** The chat's environment, whose agent questions setting governs the composer's chips. */
+  readonly environmentId: EnvironmentId;
   readonly enabled: boolean;
   readonly refreshKey: string;
   readonly focusComposer: () => void;
@@ -46,12 +52,20 @@ export function useThreadQuestionsBanner(input: {
     resourceKey:
       threadRef === null ? "" : `${threadRef.environmentId}:${threadRef.threadId}:questions`,
   });
-  const questions = workspace?.questions;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the composer's answer chips live in the persisted draft store, so they follow server-side question changes: a closed, sent or cleared question drops its chip, and a changed draft updates it
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the composer's answer chips live in the persisted draft store, so they follow server-side question changes: a closed, sent or cleared question drops its chip, and a newer draft updates it
   useEffect(() => {
-    if (threadRef !== null && questions !== undefined)
-      syncQuestionAnswersInComposer(threadRef, questions);
-  }, [threadRef, questions]);
+    if (threadRef !== null && workspace != null)
+      syncQuestionAnswersInComposer(threadRef, workspace);
+  }, [threadRef, workspace]);
+  // Null while settings load, so only a setting known to be off clears the chips.
+  const questionsEnabled = useAtomValue(
+    serverEnvironment.settingsValueAtom(input.environmentId),
+  )?.agentQuestionsEnabled;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- question chips persist in the draft store across a settings change; turning agent questions off takes them out so they never send
+  useEffect(() => {
+    if (threadRef !== null && questionsEnabled === false)
+      removeQuestionRecordsFromComposer(threadRef);
+  }, [threadRef, questionsEnabled]);
   if (threadRef === null || workspace == null) return null;
   const counts = threadQuestionCounts(workspace.questions);
   if (counts.waiting + counts.deferred === 0) return null;

@@ -1414,6 +1414,7 @@ export default function ChatView(props: ChatViewProps) {
     : EMPTY_AUTO_UPDATE_ENVIRONMENTS;
   const questionsBanner = useThreadQuestionsBanner({
     threadRef: isServerThread ? activeThreadRef : null,
+    environmentId,
     // Absent until the thread's first question, so other threads never fetch their workspace.
     enabled: settings.agentQuestionsEnabled && activeThreadShell?.openQuestionCount !== undefined,
     refreshKey: `${activeThreadShell?.openQuestionCount}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
@@ -3767,6 +3768,7 @@ export default function ChatView(props: ChatViewProps) {
                 }
                 draftEntries={isServerThread ? null : draftTimelineEntries}
                 questionDismissals={questionDismissals}
+                historyComplete={!serverThreadHistory.hasMoreHistory}
                 activeThreadKey={activeThreadKey}
                 syncing={threadSyncPhase !== null}
                 detailLoading={threadDetailLoading}
