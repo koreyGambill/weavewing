@@ -5886,6 +5886,60 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           }).pipe(Effect.orDie, turnTerminalizationPermit.withPermits(1)),
         );
 
+        // Codex stops waiting on a request (its approval timeout, or the turn ending) by sending
+        // serverRequest/resolved, which interrupts the handler. Close the card nobody can answer.
+        const awaitRuntimeRequestAnswer = <A>(
+          artifacts: {
+            readonly node: OrchestrationV2ExecutionNode;
+            readonly request: OrchestrationV2RuntimeRequest;
+            readonly turnItem: OrchestrationV2TurnItem;
+          },
+          answer: Deferred.Deferred<A, never>,
+        ) =>
+          Deferred.await(answer).pipe(
+            Effect.onInterrupt(() =>
+              Effect.gen(function* () {
+                const now = yield* DateTime.now;
+                yield* emitProviderEvent({
+                  type: "runtime_request.updated",
+                  driver: CODEX_PROVIDER,
+                  threadId: artifacts.node.threadId,
+                  runtimeRequest: {
+                    ...artifacts.request,
+                    status: "expired",
+                    responseCapability: {
+                      type: "not_resumable",
+                      reason: "Codex stopped waiting for an answer to this request.",
+                    },
+                    resolvedAt: now,
+                  },
+                });
+                yield* emitProviderEvent({
+                  type: "node.updated",
+                  driver: CODEX_PROVIDER,
+                  node: { ...artifacts.node, status: "cancelled", completedAt: now },
+                });
+                yield* emitProviderEvent({
+                  type: "turn_item.updated",
+                  driver: CODEX_PROVIDER,
+                  turnItem: {
+                    ...artifacts.turnItem,
+                    status: "cancelled",
+                    completedAt: now,
+                    updatedAt: now,
+                  },
+                });
+              }),
+            ),
+            Effect.ensuring(
+              Ref.update(pendingRuntimeRequests, (current) => {
+                const updated = new Map(current);
+                updated.delete(String(artifacts.request.id));
+                return updated;
+              }),
+            ),
+          );
+
         yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
           Effect.gen(function* () {
             const context = yield* awaitActiveTurn(payload.turnId);
@@ -5939,15 +5993,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, decision);
             if (resolved === "acceptForSession" || resolved === "acceptAlways") {
               allowance.add("command");
             }
@@ -6011,15 +6057,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, decision);
             if (resolved === "acceptForSession" || resolved === "acceptAlways") {
               allowance.add("file-change");
             }
@@ -6074,15 +6112,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, decision);
             return permissionsResponseFromDecision({
               decision: resolved,
               permissions: payload.permissions,
@@ -6167,15 +6197,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, decision);
             if (computerUse && (resolved === "acceptForSession" || resolved === "acceptAlways")) {
               allowance.add("computer-use");
             }
@@ -6234,15 +6256,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, decision);
             if (resolved === "acceptForSession" || resolved === "acceptAlways") {
               allowance.add("command");
             }
@@ -6302,15 +6316,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, decision);
             if (resolved === "acceptForSession" || resolved === "acceptAlways") {
               allowance.add("file-change");
             }
@@ -6362,15 +6368,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const resolved = yield* Deferred.await(answers).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
+            const resolved = yield* awaitRuntimeRequestAnswer(artifacts, answers);
             return {
               answers: toCodexUserInputAnswers(resolved, artifacts.nativeQuestionIds),
             } satisfies CodexSchema.ToolRequestUserInputResponse;
