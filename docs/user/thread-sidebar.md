@@ -128,15 +128,29 @@ and dropped items when you need them. These choices stay on this device.
 
 **Evidence** is the proof behind each land: what you asked for, the commits,
 the checks that ran, the reviewer's verdict, captures and anything left unproven.
-Agents record a landing with `evidence_record` after they merge work; you decide
-whether each change passed. Pick **Thread** for this thread's landings or **All**
-for every thread on this server, and filter to the ones that still need QA. Open a
-landing to see its changes and load their captures; click a capture to view it
-full size. Each change has one QA button: Pending, Confirmed, Failed or Waived, and
-you can change it at any time. Choosing **Failed** asks what went wrong; **Send to
-thread** drafts that note into the landing's thread for you to read and send.
-**Waived** takes one click; **Add note** under the change records why, if you want
-to. The strip badge counts changes waiting for QA and turns red when any failed.
+Agents record a landing with `evidence_record` after they merge work.
+
+A change that has something only you can judge, such as captures, an unverified
+or waived review, a failed or skipped check, or a gap, shows a **QA card** in the
+thread where the agent recorded it. A landing a delegated agent recorded shows in
+its lead's thread, where the delegated work reported back. A change with nothing
+to check leaves one quiet line instead. Each card has three buttons:
+
+- **Looks good** marks it confirmed.
+- **Dismiss** closes it without checking. Open the closed card to add why, if you want to.
+- **Discuss** puts a reference to the change in your composer, so you can say what's
+  wrong or ask about it. The card reads **Discussing** after you send.
+
+None of the three starts a turn. When you tell the agent in chat that a change works
+or what's wrong with it, the agent records that on the card as **Recorded by the
+agent**. A problem it records shows as **Agent fixing** until a later landing names the
+fix. **Reopen** on any settled card makes it open again.
+
+The Evidence tool lists the same landings. Pick **Thread** for this thread's landings
+or **All** for every thread on this server, and filter to the ones that still need QA.
+Open a landing to see its changes and load their captures; click a capture to view it
+full size. Each change's QA button sets it to Open, Confirmed or Dismissed, and you can
+change it at any time. The strip badge counts changes waiting for your QA.
 
 Each change's review shows as **Unverified review** with the verdict the agent
 reported, such as "agent reported approved". Weavewing does not yet check that
