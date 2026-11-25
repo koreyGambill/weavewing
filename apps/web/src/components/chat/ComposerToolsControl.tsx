@@ -1,17 +1,19 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import type {
-  ClaudeSettings,
-  EnvironmentId,
-  ThreadId,
-  ProviderInstanceId,
-  ThreadMcpServer,
-  ThreadToolOverrides,
+import {
+  CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS,
+  type ClaudeSettings,
+  type EnvironmentId,
+  type ThreadId,
+  type ProviderInstanceId,
+  type ThreadToolOverrides,
+  type ThreadToolOverridesReload,
+  type OrchestrationV2ListThreadMcpServersResult,
 } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { AsyncResult } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { WrenchIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
@@ -27,7 +29,7 @@ import { cn } from "~/lib/utils";
 import { ComposerControl } from "./ComposerControl";
 import {
   claudeSettingsForInstance,
-  connectorsMasterDecides,
+  connectorsMode,
   mcpServerSections,
   withConnectorsMaster,
   withMcpServerSwitched,
@@ -40,7 +42,6 @@ import {
   toolsFooterState,
   toolsLabel,
   withRowSwitched,
-  type ToolRow,
   type ToolsFooterState,
 } from "./ComposerToolsControl.logic";
 
@@ -49,6 +50,7 @@ export interface ComposerToolsThread {
   readonly id: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
   readonly toolOverrides?: ThreadToolOverrides | undefined;
+  readonly toolOverridesReload?: ThreadToolOverridesReload | undefined;
   readonly runtime: { readonly status: string } | null;
   readonly pendingBackgroundTasks: ReadonlyArray<unknown>;
 }
@@ -63,6 +65,12 @@ export interface ComposerRowItem {
 }
 
 const TOOLS_ROW_ITEM_PRIORITY = 40;
+
+const NO_INVENTORY_ATOM: Atom.Atom<
+  AsyncResult.AsyncResult<OrchestrationV2ListThreadMcpServersResult, unknown>
+> = Atom.make(AsyncResult.initial<OrchestrationV2ListThreadMcpServersResult, unknown>()).pipe(
+  Atom.withLabel("thread-tools:no-inventory"),
+);
 
 /** The per-thread tools item for the composer row; hidden for threads not on Claude. */
 export function useComposerToolsRowItem(
@@ -114,6 +122,8 @@ export function ComposerToolsControl({
     readonly threadId: ThreadId;
     readonly value: ThreadToolOverrides;
   } | null>(null);
+  // The request waits for the old session to end; keep showing it across a closed popover.
+  const [sendingThreadId, setSendingThreadId] = useState<ThreadId | null>(null);
   const saved = thread.toolOverrides ?? EMPTY_TOOL_OVERRIDES;
   const stagedValue = staged?.threadId === thread.id ? staged.value : saved;
   const label = toolsLabel(provider, thread.toolOverrides);
@@ -133,9 +143,7 @@ export function ComposerToolsControl({
         <WrenchIcon aria-hidden="true" />
         <span>
           <span className="font-medium text-foreground">Tools</span>{" "}
-          {label.onCount === 0
-            ? `${label.offCount} off`
-            : `${label.onCount} on · ${label.offCount} off`}
+          {label.text.slice("Tools ".length)}
         </span>
       </PopoverTrigger>
       {open ? (
@@ -144,7 +152,7 @@ export function ComposerToolsControl({
           align="start"
           width="lg"
           padding="none"
-          aria-label="Tools left out of this thread"
+          aria-label="Tools for this thread"
         >
           <ToolsPopoverContent
             environmentId={environmentId}
@@ -152,6 +160,8 @@ export function ComposerToolsControl({
             provider={provider}
             saved={saved}
             staged={stagedValue}
+            sending={sendingThreadId === thread.id}
+            onSending={(sending) => setSendingThreadId(sending ? thread.id : null)}
             onStage={(value) => setStaged({ threadId: thread.id, value })}
             onApplied={() => {
               setStaged(null);
@@ -170,6 +180,8 @@ function ToolsPopoverContent({
   provider,
   saved,
   staged,
+  sending,
+  onSending,
   onStage,
   onApplied,
 }: {
@@ -178,6 +190,8 @@ function ToolsPopoverContent({
   provider: Pick<ClaudeSettings, "omittedBuiltinTools" | "claudeAiConnectors">;
   saved: ThreadToolOverrides;
   staged: ThreadToolOverrides;
+  sending: boolean;
+  onSending: (sending: boolean) => void;
   onStage: (value: ThreadToolOverrides) => void;
   onApplied: () => void;
 }) {
@@ -188,25 +202,36 @@ function ToolsPopoverContent({
   const setToolOverrides = useAtomCommand(orchestrationEnvironment.setThreadToolOverrides, {
     reportFailure: false,
   });
-  const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  // Rows come from what is saved, so switching one off keeps it listed until it is applied.
-  const rows = toolRows(provider, saved);
+  const canList = useAtomValue(
+    orchestrationEnvironment.threadMcpServers.permissionAtom(environmentId),
+  );
+  // Mounted only while the popover is open; closing it or switching threads drops the request.
+  const inventoryAtom = canList
+    ? orchestrationEnvironment.threadMcpServers({ environmentId, input: { threadId: thread.id } })
+    : NO_INVENTORY_ATOM;
+  const inventory = useAtomValue(inventoryAtom);
+  const retryInventory = useAtomRefresh(inventoryAtom);
+  const servers = AsyncResult.isSuccess(inventory) ? inventory.value.servers : [];
+  const connectorNames = servers.filter((server) => server.connector).map((server) => server.name);
+  const rows = toolRows(provider);
   const footer = toolsFooterState({
     rows,
     saved,
     staged,
+    connectorNames,
+    reload: sending ? "pending" : thread.toolOverridesReload?.status,
     turnRunning: threadTurnRunning(thread.runtime?.status),
     backgroundWork: thread.pendingBackgroundTasks.length > 0,
   });
   const reload = async () => {
-    setSending(true);
+    onSending(true);
     setFailure(null);
     const result = await setToolOverrides({
       environmentId,
       input: { threadId: thread.id, toolOverrides: staged },
     });
-    setSending(false);
+    onSending(false);
     if (result._tag === "Failure") {
       if (isAtomCommandInterrupted(result)) return;
       const error = squashAtomCommandFailure(result);
@@ -214,41 +239,46 @@ function ToolsPopoverContent({
       return;
     }
     toastManager.add(reloadToast(result.value.outcome));
-    onApplied();
+    if (result.value.outcome !== "reload-failed") onApplied();
   };
   return (
     <div className="flex flex-col">
       <header className="border-b px-3 pt-2.5 pb-2">
-        <h2 className="font-semibold text-sm">Tools left out of this thread</h2>
+        <h2 className="font-semibold text-sm">Tools for this thread</h2>
         <p className="text-muted-foreground text-xs">
-          Switch one on for this thread only. Token figures are estimates of the context each adds.
+          Switch a left-out tool on, or a server off, for this thread only. Token figures are
+          estimates of the context each adds.
         </p>
       </header>
-      <ul className="divide-y" aria-label="Built-in tools">
-        {rows
-          .filter((row) => row.key !== "claudeAiConnectors")
-          .map((row) => (
+      {rows.length === 0 ? (
+        <p className="px-3 py-2 text-muted-foreground text-xs">
+          No built-in tools are left out for this provider.
+        </p>
+      ) : (
+        <ul className="divide-y" aria-label="Built-in tools">
+          {rows.map((row) => (
             <ToolSwitchRow
               key={row.key}
-              row={row}
+              label={row.label}
+              description={row.description}
+              estimatedTokens={row.estimatedTokens}
               on={isRowOn(row, staged)}
               onChange={(on) => onStage(withRowSwitched(staged, row.key, on))}
             />
           ))}
-      </ul>
+        </ul>
+      )}
       <McpServersSection
-        environmentId={environmentId}
-        threadId={thread.id}
+        canList={canList}
+        inventory={inventory}
+        onRetry={retryInventory}
         provider={provider}
-        connectorsRow={rows.find((row) => row.key === "claudeAiConnectors")}
-        saved={saved}
         staged={staged}
         onStage={onStage}
       />
       <ToolsFooter
         state={footer}
         permitted={permitted}
-        sending={sending}
         failure={failure}
         onReload={() => void reload()}
       />
@@ -257,91 +287,119 @@ function ToolsPopoverContent({
 }
 
 function McpServersSection({
-  environmentId,
-  threadId,
+  canList,
+  inventory,
+  onRetry,
   provider,
-  connectorsRow,
-  saved,
   staged,
   onStage,
 }: {
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
+  canList: boolean;
+  inventory: AsyncResult.AsyncResult<OrchestrationV2ListThreadMcpServersResult, unknown>;
+  onRetry: () => void;
   provider: Pick<ClaudeSettings, "claudeAiConnectors">;
-  connectorsRow: ToolRow | undefined;
-  saved: ThreadToolOverrides;
   staged: ThreadToolOverrides;
   onStage: (value: ThreadToolOverrides) => void;
 }) {
-  // Mounted only while the popover is open; closing it or switching threads drops the request.
-  const inventoryAtom = orchestrationEnvironment.threadMcpServers({
-    environmentId,
-    input: { threadId },
-  });
-  const inventory = useAtomValue(inventoryAtom);
-  const retry = useAtomRefresh(inventoryAtom);
   const servers = AsyncResult.isSuccess(inventory) ? inventory.value.servers : [];
   const connectorNames = servers.filter((server) => server.connector).map((server) => server.name);
-  const masterDecides = connectorsMasterDecides(provider, saved);
-  const sections = mcpServerSections({ inventory: servers, provider, saved, staged });
-  const switchServer = (server: ThreadMcpServer, on: boolean) =>
-    onStage(withMcpServerSwitched({ staged, server, on, connectorNames, masterDecides }));
+  const sections = mcpServerSections({ inventory: servers, provider, staged });
   return (
     <section className="border-t" aria-label="MCP servers">
-      <h3 className="px-3 pt-2 pb-1 font-medium text-muted-foreground text-xs">MCP servers</h3>
-      {AsyncResult.isFailure(inventory) ? (
+      <h3 className="px-3 pt-2 font-medium text-muted-foreground text-xs">MCP servers</h3>
+      <p className="px-3 pb-1 text-muted-foreground text-xs">
+        Off keeps a server's tools out of the model's context; the server may still connect.
+      </p>
+      {!canList ? (
+        <p className="px-3 pb-2 text-muted-foreground text-xs">
+          Your access can't list this thread's MCP servers.
+        </p>
+      ) : AsyncResult.isFailure(inventory) ? (
         <div className="flex items-center gap-2 px-3 pb-2 text-xs">
           <p className="min-w-0 flex-1 text-destructive-foreground">
             Could not list this thread's MCP servers.
           </p>
-          <Button size="xs" variant="outline" onClick={retry}>
+          <Button size="xs" variant="outline" onClick={onRetry}>
             Retry
           </Button>
         </div>
       ) : AsyncResult.isSuccess(inventory) ? null : (
         <p className="px-3 pb-2 text-muted-foreground text-xs">Loading MCP servers…</p>
       )}
-      <ul className="divide-y" aria-label="MCP servers">
-        {sections.servers.map((row) => (
-          <McpServerSwitchRow
-            key={row.name}
-            row={row}
-            onChange={(on) => switchServer({ name: row.name, connector: false, status: "" }, on)}
-          />
-        ))}
-        {connectorsRow === undefined && sections.connectors.length === 0 ? null : (
-          <li>
-            {connectorsRow === undefined ? (
-              <p className="px-3 py-2 text-sm">
-                <span className="font-medium">claude.ai connectors</span>{" "}
-                <span className="text-muted-foreground text-xs">left to Claude Code</span>
-              </p>
-            ) : (
-              <ToolSwitchRow
-                row={connectorsRow}
-                on={staged.claudeAiConnectors}
-                onChange={(on) => onStage(withConnectorsMaster(staged, on, connectorNames))}
-                asListItem={false}
-              />
-            )}
-            {sections.connectors.length === 0 ? null : (
-              <ul aria-label="claude.ai connectors" className="pb-1">
-                {sections.connectors.map((row) => (
-                  <McpServerSwitchRow
-                    key={row.name}
-                    row={row}
-                    nested
-                    onChange={(on) =>
-                      switchServer({ name: row.name, connector: true, status: "" }, on)
-                    }
-                  />
-                ))}
-              </ul>
-            )}
-          </li>
-        )}
-      </ul>
+      {sections.servers.length === 0 ? null : (
+        <ul className="divide-y" aria-label="MCP servers">
+          {sections.servers.map((row) => (
+            <McpServerSwitchRow
+              key={row.name}
+              row={row}
+              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on))}
+            />
+          ))}
+        </ul>
+      )}
+      <ConnectorsMaster
+        provider={provider}
+        staged={staged}
+        onStage={onStage}
+        connectorNames={connectorNames}
+      />
+      {sections.connectors.length === 0 ? null : (
+        <ul aria-label="claude.ai connectors" className="pb-1">
+          {sections.connectors.map((row) => (
+            <McpServerSwitchRow
+              key={row.name}
+              row={row}
+              nested
+              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on))}
+            />
+          ))}
+        </ul>
+      )}
     </section>
+  );
+}
+
+function ConnectorsMaster({
+  provider,
+  staged,
+  onStage,
+  connectorNames,
+}: {
+  provider: Pick<ClaudeSettings, "claudeAiConnectors">;
+  staged: ThreadToolOverrides;
+  onStage: (value: ThreadToolOverrides) => void;
+  connectorNames: ReadonlyArray<string>;
+}) {
+  const setOn = (on: boolean) => onStage(withConnectorsMaster(staged, on, connectorNames));
+  if (connectorsMode(provider) === "switch") {
+    return (
+      <div className="border-t">
+        <ToolSwitchRow
+          label="claude.ai connectors"
+          description="Every connector on your Claude account"
+          estimatedTokens={CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS}
+          on={staged.claudeAiConnectors}
+          onChange={setOn}
+          asListItem={false}
+        />
+      </div>
+    );
+  }
+  // Claude Code decides here, so the unforced state is never shown as off.
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-center gap-2.5 border-t px-3 py-2">
+      <span className="min-w-0">
+        <span className="block font-medium text-sm">claude.ai connectors</span>
+        <span className="block text-muted-foreground text-xs">
+          {staged.claudeAiConnectors
+            ? `On for this thread, about ${formatTokenEstimate(CLAUDE_AI_CONNECTORS_ESTIMATED_TOKENS)} tokens (estimate)`
+            : "Left to Claude Code"}
+        </span>
+      </span>
+      <Button size="xs" variant="outline" onClick={() => setOn(!staged.claudeAiConnectors)}>
+        {staged.claudeAiConnectors ? "Leave to Claude Code" : "Turn on for this thread"}
+      </Button>
+    </div>
   );
 }
 
@@ -354,28 +412,48 @@ function McpServerSwitchRow({
   nested?: boolean;
   onChange: (on: boolean) => void;
 }) {
+  const name = (
+    <span className="min-w-0 text-sm [overflow-wrap:anywhere]">
+      {row.name}
+      {row.active ? null : (
+        <span className="text-muted-foreground text-xs"> · not loaded in this session</span>
+      )}
+    </span>
+  );
+  const padding = nested ? "pl-9" : "pl-3";
+  if (!row.switchable) {
+    return (
+      <li className={cn("grid grid-cols-[1fr] py-1.5 pr-3 text-muted-foreground", padding)}>
+        {name}
+      </li>
+    );
+  }
   return (
     <li>
       <label
         className={cn(
           "grid cursor-pointer grid-cols-[auto_1fr] items-center gap-2.5 py-1.5 pr-3 hover:bg-accent/50",
-          nested ? "pl-9" : "pl-3",
+          padding,
         )}
       >
         <Switch size="sm" checked={row.on} onCheckedChange={onChange} />
-        <span className="min-w-0 text-sm [overflow-wrap:anywhere]">{row.name}</span>
+        {name}
       </label>
     </li>
   );
 }
 
 function ToolSwitchRow({
-  row,
+  label,
+  description,
+  estimatedTokens,
   on,
   onChange,
   asListItem = true,
 }: {
-  row: ToolRow;
+  label: string;
+  description: string;
+  estimatedTokens: number;
   on: boolean;
   onChange: (on: boolean) => void;
   asListItem?: boolean;
@@ -384,11 +462,11 @@ function ToolSwitchRow({
     <label className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-start gap-2.5 px-3 py-2 hover:bg-accent/50">
       <Switch size="sm" className="mt-0.5" checked={on} onCheckedChange={onChange} />
       <span className="min-w-0">
-        <span className="block font-medium text-sm">{row.label}</span>
-        <span className="block text-muted-foreground text-xs">{row.description}</span>
+        <span className="block font-medium text-sm">{label}</span>
+        <span className="block text-muted-foreground text-xs">{description}</span>
       </span>
       <span className="pt-0.5 font-mono text-muted-foreground text-xs tabular-nums">
-        ~{formatTokenEstimate(row.estimatedTokens)}
+        ~{formatTokenEstimate(estimatedTokens)}
       </span>
     </label>
   );
@@ -398,13 +476,11 @@ function ToolSwitchRow({
 function ToolsFooter({
   state,
   permitted,
-  sending,
   failure,
   onReload,
 }: {
   state: ToolsFooterState;
   permitted: boolean;
-  sending: boolean;
   failure: string | null;
   onReload: () => void;
 }) {
@@ -412,7 +488,14 @@ function ToolsFooter({
   return (
     <footer className="flex items-center gap-3 border-t bg-card px-3 py-2.5">
       <div className="min-w-0 flex-1 text-xs" aria-live="polite">
-        {state.kind === "running" ? (
+        {state.kind === "reloading" ? (
+          <>
+            <p>Reloading the session</p>
+            <p className="text-muted-foreground">
+              Waiting for the old Claude process to end. The conversation is kept.
+            </p>
+          </>
+        ) : state.kind === "running" ? (
           <p className="text-warning-foreground">
             A turn is running. Stop it or wait for it to finish, then reload. Your switches are
             kept.
@@ -423,17 +506,24 @@ function ToolsFooter({
             them, or press Stop.
           </p>
         ) : state.kind === "unchanged" ? (
-          <>
-            <p>Nothing changed</p>
-            <p className="text-muted-foreground">
-              Reload anyway to pick up changed settings, skills or MCP servers.
+          state.lastReloadFailed ? (
+            <p className="text-warning-foreground">
+              The last reload did not confirm the old session stopped, so it may still be running.
+              Reload again, or press Stop.
             </p>
-          </>
+          ) : (
+            <>
+              <p>Nothing changed</p>
+              <p className="text-muted-foreground">
+                Reload anyway to pick up changed settings, skills or MCP servers.
+              </p>
+            </>
+          )
         ) : (
           <>
             <p>{changedSummary(state)}</p>
             <p className="text-muted-foreground">
-              Reloading keeps the conversation. The next message re-reads it once without the cache.
+              Reloading keeps the conversation. It can raise the uncached input on the next message.
             </p>
           </>
         )}
@@ -444,11 +534,11 @@ function ToolsFooter({
       </div>
       <Button
         size="xs"
-        variant={state.kind === "unchanged" ? "outline" : "default"}
-        disabled={blocked || sending || !permitted}
+        variant={state.kind === "unchanged" && !state.lastReloadFailed ? "outline" : "default"}
+        disabled={blocked || state.kind === "reloading" || !permitted}
         onClick={onReload}
       >
-        {sending ? "Reloading…" : "Reload session"}
+        {state.kind === "reloading" ? "Reloading…" : "Reload session"}
       </Button>
     </footer>
   );
@@ -459,14 +549,12 @@ function changedSummary(state: Extract<ToolsFooterState, { readonly kind: "chang
     ...(state.onCount === 0 ? [] : [`${state.onCount} switched on`]),
     ...(state.serversLeftOut === 0
       ? []
-      : [
-          `${state.serversLeftOut} MCP ${state.serversLeftOut === 1 ? "server" : "servers"} left out`,
-        ]),
+      : [`${state.serversLeftOut} MCP ${state.serversLeftOut === 1 ? "server" : "servers"} off`]),
   ];
-  if (parts.length === 0) return "Nothing switched on";
-  return state.estimatedTokens === 0
-    ? parts.join(", ")
-    : `${parts.join(", ")}, about +${formatTokenEstimate(state.estimatedTokens)} tokens`;
+  const summary = parts.length === 0 ? "Nothing switched on" : parts.join(", ");
+  return state.estimatedTokens === undefined || state.estimatedTokens === 0
+    ? summary
+    : `${summary}, about +${formatTokenEstimate(state.estimatedTokens)} tokens`;
 }
 
 function reloadToast(outcome: "stored" | "reloaded" | "reload-failed") {

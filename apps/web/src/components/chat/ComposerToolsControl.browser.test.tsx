@@ -45,18 +45,19 @@ vi.mock(import("../../state/use-atom-command"), async (original) => ({
 
 const fixtureInventory = {
   servers: [
-    { name: "fixture-notes", connector: false, status: "connected" },
-    { name: "claude.ai Fixture Board", connector: true, status: "pending" },
-    { name: "claude.ai Fixture Mail", connector: true, status: "pending" },
+    { name: "fixture-notes", connector: false, status: "connected", active: true },
+    { name: "claude.ai Fixture Board", connector: true, status: "connected", active: true },
+    { name: "claude.ai Fixture Mail", connector: true, status: "connected", active: false },
   ],
 };
 
 function setup(
   permitted = true,
   inventory: AsyncResult.AsyncResult<unknown, unknown> = AsyncResult.success(fixtureInventory),
+  inventoryPermitted = true,
 ) {
   state.permitted = permitted;
-  state.inventoryPermitted = true;
+  state.inventoryPermitted = inventoryPermitted;
   state.run.mockReset().mockResolvedValue({ _tag: "Success", value: { outcome: "reloaded" } });
   state.inventory.mockReset().mockReturnValue(inventory);
 }
@@ -81,15 +82,20 @@ const idleThread: ComposerToolsThread = {
   pendingBackgroundTasks: [],
 };
 
-const renderControl = (thread: ComposerToolsThread = idleThread) =>
+const renderControl = (
+  thread: ComposerToolsThread = idleThread,
+  providerSettings: typeof provider | { readonly [K in keyof typeof provider]: unknown } = provider,
+) =>
   render(
     <ComposerToolsControl
       environmentId={environmentId}
       thread={thread}
-      provider={provider}
+      provider={providerSettings as typeof provider}
       presentation="row"
     />,
   );
+
+const dialogOf = () => page.getByRole("dialog", { name: "Tools for this thread" });
 
 it("opens, switches and closes by keyboard, sending nothing until Reload session", async () => {
   setup();
@@ -99,7 +105,7 @@ it("opens, switches and closes by keyboard, sending nothing until Reload session
 
   (trigger.element() as HTMLElement).focus();
   await userEvent.keyboard("{Enter}");
-  const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
+  const dialog = dialogOf();
   await expect.element(dialog).toBeVisible();
   await expect.element(dialog.getByText("Nothing changed")).toBeVisible();
 
@@ -150,7 +156,7 @@ it.each([
     setup();
     await using screen = await renderControl(thread);
     await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
-    const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
+    const dialog = dialogOf();
     await userEvent.click(dialog.getByRole("switch").nth(1));
     await expect.element(dialog.getByText(text)).toBeVisible();
     await expect.element(dialog.getByRole("switch").nth(1)).toBeChecked();
@@ -158,11 +164,59 @@ it.each([
   },
 );
 
+it("shows a reload as pending until its outcome arrives, then keeps the popover on failure", async () => {
+  setup();
+  let resolveOutcome: (value: unknown) => void = () => {};
+  state.run.mockReturnValue(new Promise((resolve) => (resolveOutcome = resolve)));
+  await using screen = await renderControl();
+  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  const dialog = dialogOf();
+  await userEvent.click(dialog.getByRole("switch").first());
+  await userEvent.click(dialog.getByRole("button", { name: "Reload session" }));
+  await expect.element(dialog.getByText("Reloading the session")).toBeVisible();
+  await expect.element(dialog.getByRole("button", { name: "Reloading…" })).toBeDisabled();
+
+  resolveOutcome({ _tag: "Success", value: { outcome: "reload-failed" } });
+  await expect.element(dialog.getByRole("button", { name: "Reload session" })).toBeEnabled();
+});
+
+it.each([
+  ["pending", "Reloading the session", { name: "Reloading…", disabled: true }],
+  [
+    "failed",
+    "The last reload did not confirm the old session stopped, so it may still be running. Reload again, or press Stop.",
+    { name: "Reload session", disabled: false },
+  ],
+] as const)("shows a %s reload recorded on the thread", async (status, text, button) => {
+  setup();
+  await using screen = await renderControl({
+    ...idleThread,
+    toolOverridesReload: { commandId: "command-test" as never, status },
+  });
+  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  const dialog = dialogOf();
+  await expect.element(dialog.getByText(text)).toBeVisible();
+  const reload = dialog.getByRole("button", { name: button.name });
+  await (button.disabled
+    ? expect.element(reload).toBeDisabled()
+    : expect.element(reload).toBeEnabled());
+});
+
 it("disables Reload session without permission to operate the thread", async () => {
   setup(false);
   await using screen = await renderControl();
   await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
-  await expect.element(page.getByRole("button", { name: "Reload session" })).toBeDisabled();
+  await expect.element(dialogOf().getByRole("button", { name: "Reload session" })).toBeDisabled();
+});
+
+it("says so, and requests nothing, without permission to list MCP servers", async () => {
+  setup(true, AsyncResult.success(fixtureInventory), false);
+  await using screen = await renderControl();
+  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  await expect
+    .element(dialogOf().getByText("Your access can't list this thread's MCP servers."))
+    .toBeVisible();
+  expect(state.inventory).not.toHaveBeenCalled();
 });
 
 it("shows the server's refusal in the footer and keeps the popover open", async () => {
@@ -179,14 +233,14 @@ it("shows the server's refusal in the footer and keeps the popover open", async 
   );
   await using screen = await renderControl();
   await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
-  const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
+  const dialog = dialogOf();
   await userEvent.click(dialog.getByRole("button", { name: "Reload session" }));
   await expect
     .element(dialog.getByText("A turn is running. Stop it or wait for it to finish, then reload."))
     .toBeVisible();
 });
 
-it("lists MCP servers only once open, and one connector switched on leaves the others out", async () => {
+it("lists MCP servers only once open, and gives no estimate for some of the connectors", async () => {
   setup();
   await using screen = await renderControl();
   expect(state.inventory).not.toHaveBeenCalled();
@@ -195,12 +249,13 @@ it("lists MCP servers only once open, and one connector switched on leaves the o
     environmentId,
     input: { threadId: idleThread.id },
   });
+  const dialog = dialogOf();
   const connectors = page.getByRole("list", { name: "claude.ai connectors" });
-  await userEvent.click(connectors.getByRole("switch").first());
-  const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
-  await expect
-    .element(dialog.getByText("1 switched on, 1 MCP server left out, about +3,200 tokens"))
-    .toBeVisible();
+  // With the provider keeping them out and the group off, no connector can be picked alone.
+  await expect.element(connectors.getByRole("switch")).not.toBeInTheDocument();
+  await userEvent.click(dialog.getByText("Every connector on your Claude account"));
+  await userEvent.click(connectors.getByRole("switch").nth(1));
+  await expect.element(dialog.getByText("1 switched on, 1 MCP server off")).toBeVisible();
   await userEvent.click(dialog.getByRole("button", { name: "Reload session" }));
   expect(state.run).toHaveBeenCalledWith({
     environmentId,
@@ -215,6 +270,24 @@ it("lists MCP servers only once open, and one connector switched on leaves the o
   });
 });
 
+it("never shows connectors left to Claude Code as off", async () => {
+  setup();
+  await using screen = await renderControl(idleThread, {
+    ...provider,
+    claudeAiConnectors: "inherit",
+  });
+  await userEvent.click(screen.getByRole("button", { name: /Tools 7 off/ }));
+  const dialog = dialogOf();
+  await expect.element(dialog.getByText("Left to Claude Code")).toBeVisible();
+  // Only the connector the live session loaded can be left out on its own.
+  const connectors = page.getByRole("list", { name: "claude.ai connectors" });
+  await expect.element(connectors.getByRole("switch")).toBeChecked();
+  await expect.element(connectors.getByText(/not loaded in this session/)).toBeVisible();
+  await userEvent.click(dialog.getByRole("button", { name: "Turn on for this thread" }));
+  await expect.element(dialog.getByText(/On for this thread/)).toBeVisible();
+  await expect.element(dialog.getByRole("button", { name: "Leave to Claude Code" })).toBeVisible();
+});
+
 it.each([
   ["loading", AsyncResult.initial(true), "Loading MCP servers…"],
   [
@@ -224,13 +297,13 @@ it.each([
   ],
 ] as const)(
   "keeps built-in tools usable while the inventory is %s",
-  async (_name, inventory, text) => {
+  async (name, inventory, text) => {
     setup(true, inventory);
     await using screen = await renderControl();
     await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
-    const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
+    const dialog = dialogOf();
     await expect.element(dialog.getByText(text)).toBeVisible();
-    if (_name === "failed") {
+    if (name === "failed") {
       await expect.element(dialog.getByRole("button", { name: "Retry" })).toBeVisible();
     }
     await userEvent.click(dialog.getByRole("switch").first());

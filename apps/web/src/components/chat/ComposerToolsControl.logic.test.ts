@@ -55,42 +55,45 @@ describe("toolsLabel", () => {
     expect(toolsLabel(provider, overrides)).toMatchObject({ hidden: false, text });
   });
 
-  it("hides for a thread not on Claude, and when nothing is left out or switched on", () => {
+  it("hides only off Claude, and reads all on when nothing is left out", () => {
     expect(toolsLabel(null, undefined).hidden).toBe(true);
+    const keepsEverything = { omittedBuiltinTools: [], claudeAiConnectors: "inherit" } as const;
+    expect(toolsLabel(keepsEverything, undefined)).toMatchObject({
+      hidden: false,
+      text: "Tools all on",
+    });
     expect(
-      toolsLabel({ omittedBuiltinTools: [], claudeAiConnectors: "inherit" }, undefined).hidden,
-    ).toBe(true);
-    expect(
-      toolsLabel(
-        { omittedBuiltinTools: [], claudeAiConnectors: "inherit" },
-        { ...EMPTY_TOOL_OVERRIDES, claudeAiConnectors: true },
-      ),
+      toolsLabel(keepsEverything, { ...EMPTY_TOOL_OVERRIDES, claudeAiConnectors: true }),
     ).toMatchObject({ hidden: false, text: "Tools 1 on · 0 off" });
   });
 });
 
 describe("toolRows", () => {
-  it("lists what the provider leaves out, largest estimate first", () => {
-    expect(toolRows(connectorsOff, undefined).map((row) => [row.key, row.estimatedTokens])).toEqual(
-      [
-        ["Artifact", 12_900],
-        ["Task", 3_300],
-        ["claudeAiConnectors", 3_200],
-        ["Workflow", 2_100],
-        ["ScheduleWakeup", 1_700],
-        ["ReportFindings", 900],
-        ["ArtifactData", 500],
-        ["ArtifactComments", 70],
-      ],
-    );
+  it("lists the built-in tools the provider leaves out, largest estimate first", () => {
+    expect(toolRows(connectorsOff).map((row) => [row.key, row.estimatedTokens])).toEqual([
+      ["Artifact", 12_900],
+      ["Task", 3_300],
+      ["Workflow", 2_100],
+      ["ScheduleWakeup", 1_700],
+      ["ReportFindings", 900],
+      ["ArtifactData", 500],
+      ["ArtifactComments", 70],
+    ]);
   });
 });
 
 describe("toolsFooterState", () => {
-  const rows = toolRows(connectorsOff, undefined);
-  const base = { rows, saved: EMPTY_TOOL_OVERRIDES, turnRunning: false, backgroundWork: false };
+  const rows = toolRows(connectorsOff);
+  const base = {
+    rows,
+    saved: EMPTY_TOOL_OVERRIDES,
+    connectorNames: ["claude.ai Fixture Board", "claude.ai Fixture Mail"],
+    reload: undefined,
+    turnRunning: false,
+    backgroundWork: false,
+  };
 
-  it("sums the switched-on estimates", () => {
+  it("sums the switched-on estimates, connectors as a whole", () => {
     expect(toolsFooterState({ ...base, staged: wakeupAndConnectors })).toEqual({
       kind: "changed",
       onCount: 2,
@@ -99,22 +102,31 @@ describe("toolsFooterState", () => {
     });
   });
 
-  it("offers a reload anyway when nothing changed, in any switch order", () => {
-    const staged = withRowSwitched(
-      withRowSwitched(EMPTY_TOOL_OVERRIDES, "ScheduleWakeup", true),
-      "claudeAiConnectors",
-      true,
-    );
-    expect(toolsFooterState({ ...base, saved: wakeupAndConnectors, staged }).kind).toBe(
-      "unchanged",
-    );
+  it("gives no sum for a partial connector selection", () => {
+    expect(
+      toolsFooterState({
+        ...base,
+        staged: { ...wakeupAndConnectors, omittedMcpServers: ["claude.ai Fixture Mail"] },
+      }),
+    ).toEqual({ kind: "changed", onCount: 2, estimatedTokens: undefined, serversLeftOut: 1 });
   });
 
-  it("blocks while a turn runs, then while background work runs", () => {
+  it("offers a reload anyway when nothing changed, and says when the last one failed", () => {
+    expect(toolsFooterState({ ...base, staged: EMPTY_TOOL_OVERRIDES })).toEqual({
+      kind: "unchanged",
+      lastReloadFailed: false,
+    });
+    expect(toolsFooterState({ ...base, staged: EMPTY_TOOL_OVERRIDES, reload: "failed" })).toEqual({
+      kind: "unchanged",
+      lastReloadFailed: true,
+    });
+  });
+
+  it("shows a pending reload first, then a running turn, then background work", () => {
     const staged = wakeupAndConnectors;
-    expect(
-      toolsFooterState({ ...base, staged, turnRunning: true, backgroundWork: true }).kind,
-    ).toBe("running");
+    const busy = { ...base, staged, turnRunning: true, backgroundWork: true };
+    expect(toolsFooterState({ ...busy, reload: "pending" }).kind).toBe("reloading");
+    expect(toolsFooterState(busy).kind).toBe("running");
     expect(toolsFooterState({ ...base, staged, backgroundWork: true }).kind).toBe("background");
   });
 
@@ -123,6 +135,17 @@ describe("toolsFooterState", () => {
     expect(threadTurnRunning("idle")).toBe(false);
     expect(threadTurnRunning("running")).toBe(true);
     expect(threadTurnRunning("waiting")).toBe(true);
+  });
+});
+
+describe("withRowSwitched", () => {
+  it("keeps the contract's order, so equal selections compare equal", () => {
+    const staged = withRowSwitched(
+      withRowSwitched(EMPTY_TOOL_OVERRIDES, "ScheduleWakeup", true),
+      "Artifact",
+      true,
+    );
+    expect(staged.enabledBuiltinTools).toEqual(["Artifact", "ScheduleWakeup"]);
   });
 });
 
@@ -151,31 +174,43 @@ describe("claudeSettingsForInstance", () => {
 
 describe("MCP servers", () => {
   const inventory = [
-    { name: "fixture-notes", connector: false, status: "connected" },
-    { name: "claude.ai Fixture Board", connector: true, status: "pending" },
-    { name: "claude.ai Fixture Mail", connector: true, status: "pending" },
+    { name: "fixture-notes", connector: false, status: "connected", active: false },
+    { name: "claude.ai Fixture Board", connector: true, status: "connected", active: true },
+    { name: "claude.ai Fixture Mail", connector: true, status: "pending", active: false },
   ];
   const connectorNames = ["claude.ai Fixture Board", "claude.ai Fixture Mail"];
 
-  it("switching one connector on with the master off turns the master on for it alone", () => {
-    const staged = withMcpServerSwitched({
-      staged: EMPTY_TOOL_OVERRIDES,
-      server: inventory[1]!,
-      on: true,
-      connectorNames,
-      masterDecides: true,
-    });
-    expect(staged).toEqual({
-      enabledBuiltinTools: [],
-      claudeAiConnectors: true,
-      omittedMcpServers: ["claude.ai Fixture Mail"],
-    });
-    expect(
-      mcpServerSections({ inventory, provider: connectorsOff, saved: EMPTY_TOOL_OVERRIDES, staged })
-        .connectors,
-    ).toEqual([
-      { name: "claude.ai Fixture Board", on: true },
-      { name: "claude.ai Fixture Mail", on: false },
+  it("offers connector switches only where the connectors load", () => {
+    const switchable = (
+      provider: typeof defaults | typeof connectorsOff,
+      staged: ThreadToolOverrides,
+    ) =>
+      mcpServerSections({ inventory, provider, staged }).connectors.map((row) => [
+        row.name,
+        row.switchable,
+      ]);
+    // The provider keeps them out and the thread has not forced them on: nothing loads.
+    expect(switchable(connectorsOff, EMPTY_TOOL_OVERRIDES)).toEqual([
+      ["claude.ai Fixture Board", false],
+      ["claude.ai Fixture Mail", false],
+    ]);
+    expect(switchable(connectorsOff, wakeupAndConnectors)).toEqual([
+      ["claude.ai Fixture Board", true],
+      ["claude.ai Fixture Mail", true],
+    ]);
+    // Left to Claude Code, only the connector the live session loaded is known to load.
+    expect(switchable(defaults, EMPTY_TOOL_OVERRIDES)).toEqual([
+      ["claude.ai Fixture Board", true],
+      ["claude.ai Fixture Mail", false],
+    ]);
+  });
+
+  it("leaves a server out by name and brings it back", () => {
+    const off = withMcpServerSwitched(EMPTY_TOOL_OVERRIDES, "fixture-notes", false);
+    expect(off.omittedMcpServers).toEqual(["fixture-notes"]);
+    expect(withMcpServerSwitched(off, "fixture-notes", true).omittedMcpServers).toEqual([]);
+    expect(mcpServerSections({ inventory, provider: defaults, staged: off }).servers).toEqual([
+      { name: "fixture-notes", active: false, switchable: true, on: false },
     ]);
   });
 
@@ -187,19 +222,5 @@ describe("MCP servers", () => {
     );
     expect(staged.claudeAiConnectors).toBe(false);
     expect(staged.omittedMcpServers).toEqual(["fixture-notes"]);
-  });
-
-  it("leaves Claude Code's choice alone where the master does not decide", () => {
-    const sections = mcpServerSections({
-      inventory,
-      provider: defaults,
-      saved: EMPTY_TOOL_OVERRIDES,
-      staged: { ...EMPTY_TOOL_OVERRIDES, omittedMcpServers: ["claude.ai Fixture Mail"] },
-    });
-    expect(sections.servers).toEqual([{ name: "fixture-notes", on: true }]);
-    expect(sections.connectors).toEqual([
-      { name: "claude.ai Fixture Board", on: true },
-      { name: "claude.ai Fixture Mail", on: false },
-    ]);
   });
 });
