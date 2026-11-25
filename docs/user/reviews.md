@@ -31,20 +31,30 @@ its status or your notes.
 Turn on **Agent questions** in **Settings → Labs** to let agents ask for the
 decisions they need without stopping their work. Each question appears in the
 chat where the agent asked it, with its options and a note field. Choosing an
-option or typing a note saves a draft; nothing reaches the agent until you send.
-A line above the composer counts the questions waiting, and **Review** opens
-them all beside the chat, where **Send answers** sends every drafted answer in
-one message. In the review panel, J and K move, 1 to 9 choose an option, and N
-defers.
+option or typing a note saves a draft; choosing the chosen option again clears
+it. Nothing reaches the agent by itself: **Add to composer** puts the answer in
+your message box, and it goes out with your next message, together with
+anything you type. Remove it from the card or the chip to keep it as a draft.
+
+Each question shows where its answer is: drafted, in the composer, sent (your
+message is waiting for the agent's next turn), or received once that turn
+starts. A sent answer stops counting as waiting on you. Editing or cancelling
+the queued message returns it with its draft.
+
+Clicking the line above the composer lists the waiting questions; picking one
+scrolls the chat to it, and **Add all drafted to composer** queues every draft.
+**Open panel** shows every question beside the chat in one scrolling column,
+where J and K move, 1 to 9 choose an option, and N defers.
 
 A thread with questions waiting shows a count in the thread list, and an idle
 one reads **Needs Decision**. It stays out of automatic settling until you answer
 or close them; you can still settle it yourself.
 
-- **Not yet** defers a question. Deferred questions leave the count and no longer
-  hold the thread open, but stay answerable and reopenable.
-- **Dismiss** closes a question without starting a run. The agent learns that you
-  dismissed, deferred, or reopened questions with your next message.
+- **Not yet** defers a question. It leaves the count and no longer holds the
+  thread open. The agent reopens it when its work comes to need that decision.
+- **Dismiss** closes a question without starting a run, and leaves a line in the
+  chat with **Undo**. The agent learns that you dismissed, deferred, or reopened
+  questions with your next message.
 - When the agent records an answer it read from one of your messages, the card
   says so, so you can reopen it if the agent misread you.
 
