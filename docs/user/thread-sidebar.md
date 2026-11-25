@@ -134,8 +134,17 @@ for every thread on this server, and filter to the ones that still need QA. Open
 landing to see its changes and load their captures; click a capture to view it
 full size. Each change has one QA button: Pending, Confirmed, Failed or Waived, and
 you can change it at any time. Choosing **Failed** asks what went wrong; **Send to
-thread** drafts that note into the landing's thread for you to read and send. The
+thread** drafts that note into the landing's thread for you to read and send.
+Choosing **Waived** asks why, and the reason shows under the change. The
 strip badge counts changes waiting for QA and turns red when any failed.
+
+A change's review links to its reviewer thread when the agent names one, or when
+the lead delegated a `review` child that clearly reviewed it: one whose brief
+names the change's branch or a commit, or else the reviewer started after the
+change's implementation child and before the next one. The verdict that thread
+states on a `Verdict:` line replaces the one the agent typed. A verdict with no
+reviewer thread shows as **unverified review**. Agents must give a one-line
+reason to waive review or skip a check, and the reason shows beside it.
 
 To come back to something later, bookmark it. Hover a message, yours or the
 agent's, and open its bookmark menu, or select text in a message to mark just that

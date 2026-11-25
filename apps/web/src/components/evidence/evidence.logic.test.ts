@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { coverageDraft, failedQaDraft, leavesNeedsQa } from "./evidence.logic";
+import { ThreadId } from "@t3tools/contracts";
+
+import {
+  checkLabel,
+  coverageDraft,
+  failedQaDraft,
+  leavesNeedsQa,
+  reviewDisplay,
+} from "./evidence.logic";
 
 describe("failedQaDraft", () => {
   const change = {
@@ -54,5 +62,49 @@ describe("leavesNeedsQa", () => {
     ["a", "waived", false],
   ] as const)("setting %s to %s leaves the list: %s", (id, next, expected) => {
     expect(leavesNeedsQa(changes, id, next)).toBe(expected);
+  });
+});
+
+describe("reviewDisplay", () => {
+  const reviewer = ThreadId.make("thread-reviewer");
+
+  it("shows a verdict with no reviewer thread as unverified", () => {
+    expect(reviewDisplay({ verdict: "approved", by: "opus" })).toEqual({
+      label: "unverified review",
+      variant: "outline",
+      hint: "Reported approved by opus, with no reviewer thread linked.",
+      threadId: null,
+    });
+    expect(reviewDisplay({ verdict: "changes_requested" }).label).toBe("unverified review");
+  });
+
+  it("shows a linked verdict as reviewed and says when the server linked it", () => {
+    expect(reviewDisplay({ verdict: "approved", by: "opus", threadId: reviewer })).toEqual({
+      label: "approved · opus",
+      variant: "success",
+      hint: null,
+      threadId: reviewer,
+    });
+    expect(
+      reviewDisplay({ verdict: "changes_requested", threadId: reviewer, linked: "derived" }),
+    ).toMatchObject({ label: "changes requested", variant: "warning", threadId: reviewer });
+  });
+
+  it("puts a waiver's reason next to it and still reads a waiver from before reasons", () => {
+    expect(reviewDisplay({ verdict: "waived", reason: "one-line fix" }).label).toBe(
+      "review waived: one-line fix",
+    );
+    expect(reviewDisplay({ verdict: "waived" }).label).toBe("review waived");
+  });
+});
+
+describe("checkLabel", () => {
+  it.each([
+    [{ label: "e2e", result: "skipped", reason: "no browser" }, "e2e skipped: no browser"],
+    [{ label: "e2e", result: "skipped" }, "e2e skipped"],
+    [{ label: "unit", result: "pass" }, "unit"],
+    [{ label: "unit", result: "fail" }, "unit failed"],
+  ] as const)("labels %j", (check, label) => {
+    expect(checkLabel(check)).toBe(label);
   });
 });

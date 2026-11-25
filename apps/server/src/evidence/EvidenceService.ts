@@ -6,6 +6,8 @@ import {
   EvidenceLanding,
   EvidenceLandingSummary,
   EvidenceRecord,
+  OrchestrationV2DelegateRole,
+  type EvidenceChange,
   type EvidenceCounts,
   type EvidenceCoverageInput,
   type EvidenceProjectCoverage,
@@ -38,6 +40,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
+import { type DelegatedChild, matchReviewThread, reviewVerdictFromText } from "./reviewLink.ts";
 
 /** Captures must resolve under ~/evidence. This catches wrong paths; minting a URL needs `filesystem:read`, which is the real boundary. */
 const EVIDENCE_ROOT_NAME = "evidence";
@@ -73,6 +76,15 @@ interface LandingRow {
   readonly updated_at: string;
   readonly record_json: string;
 }
+interface DelegatedChildRow {
+  readonly child_thread_id: string;
+  readonly started_at: string;
+  readonly updated_at: string;
+  readonly original_task_id: string | null;
+  readonly prompt: string | null;
+  readonly role: string | null;
+  readonly branch: string | null;
+}
 interface QaRow {
   readonly change_id: string;
   readonly state: EvidenceQaState;
@@ -94,6 +106,7 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
   }),
 );
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
+const isDelegateRole = Schema.is(OrchestrationV2DelegateRole);
 
 const invalid = (message: string) => new EvidenceError({ code: "invalid", message });
 const storage = (cause: unknown) =>
@@ -190,6 +203,83 @@ const make = Effect.gen(function* () {
     return canonical.value;
   });
 
+  // The lead's delegated children, so a change's reviewer can be found among them.
+  const readDelegation = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const [landing] = yield* sql<{
+      readonly relationship: string | null;
+      readonly parent_thread_id: string | null;
+    }>`SELECT json_extract(payload_json, '$.lineage.relationshipToParent') AS relationship,
+          json_extract(payload_json, '$.lineage.parentThreadId') AS parent_thread_id
+        FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+    const recordedByChild =
+      landing?.relationship === "subagent" && landing.parent_thread_id !== null;
+    const leadThreadId = recordedByChild ? landing.parent_thread_id! : threadId;
+    const rows = yield* sql<DelegatedChildRow>`SELECT s.child_thread_id, s.started_at, s.updated_at,
+          json_extract(s.payload_json, '$.originalTaskId') AS original_task_id,
+          json_extract(s.payload_json, '$.prompt') AS prompt,
+          json_extract(t.payload_json, '$.delegateRole') AS role,
+          json_extract(t.payload_json, '$.branch') AS branch
+        FROM orchestration_v2_projection_subagents s
+        JOIN orchestration_v2_projection_threads t ON t.thread_id = s.child_thread_id
+        WHERE s.thread_id = ${leadThreadId} AND s.origin = 'app_owned' AND s.started_at IS NOT NULL`;
+    const children = new Map<string, DelegatedChild>();
+    for (const row of rows) {
+      // A follow-up reuses the child; its first task holds the brief.
+      if (row.original_task_id !== null) continue;
+      children.set(row.child_thread_id, {
+        threadId: row.child_thread_id,
+        role: isDelegateRole(row.role) ? row.role : null,
+        startedAt: row.started_at,
+        prompt: row.prompt ?? "",
+        branch: row.branch,
+      });
+    }
+    return {
+      implementerThreadId: recordedByChild ? threadId : null,
+      children: [...children.values()],
+    };
+  });
+
+  // The final message of a delegated child's latest task, where a reviewer states its verdict.
+  const readChildResult = (childThreadId: string) =>
+    sql<{ readonly result: string | null }>`SELECT json_extract(payload_json, '$.result') AS result
+        FROM orchestration_v2_projection_subagents
+        WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'
+        ORDER BY updated_at DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.result ?? null));
+
+  const linkReview = Effect.fnUntraced(function* (
+    change: EvidenceChange,
+    targetBranch: string,
+    landedAt: string,
+    delegation: {
+      readonly implementerThreadId: string | null;
+      readonly children: ReadonlyArray<DelegatedChild>;
+    },
+    warnings: string[],
+  ) {
+    const { review } = change;
+    if (review.verdict === "waived") return review;
+    const matched =
+      review.threadId === undefined
+        ? matchReviewThread({ change, targetBranch, landedAt, ...delegation })
+        : null;
+    const reviewThreadId = review.threadId ?? matched?.threadId;
+    if (reviewThreadId === undefined) return review;
+    const result = yield* readChildResult(reviewThreadId);
+    const threadVerdict = result === null ? null : reviewVerdictFromText(result);
+    if (threadVerdict !== null && threadVerdict !== review.verdict)
+      warnings.push(
+        `change ${change.id}: review verdict taken from thread ${reviewThreadId} (${threadVerdict}), not ${review.verdict}`,
+      );
+    return {
+      ...review,
+      verdict: threadVerdict ?? review.verdict,
+      ...(matched === null
+        ? {}
+        : { threadId: ThreadId.make(matched.threadId), linked: "derived" as const }),
+    };
+  });
+
   const readQa = (landingId: string) =>
     sql<QaRow>`SELECT change_id, state, note, updated_at FROM evidence_qa WHERE landing_id = ${landingId}`;
 
@@ -206,11 +296,20 @@ const make = Effect.gen(function* () {
     const root = path.join(yield* HostProcess.HomeDirectory, EVIDENCE_ROOT_NAME);
     const warnings: string[] = [];
     const changes = [];
+    const recordedAt = landedAt ?? DateTime.formatIso(yield* DateTime.now);
+    const delegation = yield* readDelegation(input.threadId);
     for (const change of input.changes) {
       const captures = [];
       for (const capture of change.captures)
         captures.push({ ...capture, path: yield* checkCapture(capture.path, root, warnings) });
-      changes.push({ ...change, captures });
+      const review = yield* linkReview(
+        change,
+        input.target.branch,
+        recordedAt,
+        delegation,
+        warnings,
+      );
+      changes.push({ ...change, captures, review });
     }
     const recordJson = yield* encodeRecord({
       id: input.id,
@@ -287,7 +386,10 @@ const make = Effect.gen(function* () {
           LIMIT ${EVIDENCE_LIST_PAGE_SIZE + 1})
         SELECT p.landing_id AS id, json_extract(p.record_json, '$.title') AS title, p.thread_id, p.project_id, p.landed_at,
           json_extract(p.record_json, '$.target') AS target,
-          (SELECT json_group_array(json_object('label', json_extract(v.value, '$.label'), 'result', json_extract(v.value, '$.result')))
+          (SELECT json_group_array(CASE WHEN json_extract(v.value, '$.reason') IS NULL
+              THEN json_object('label', json_extract(v.value, '$.label'), 'result', json_extract(v.value, '$.result'))
+              ELSE json_object('label', json_extract(v.value, '$.label'), 'result', json_extract(v.value, '$.result'),
+                'reason', json_extract(v.value, '$.reason')) END)
             FROM json_each(p.record_json, '$.verifications') v) AS verifications,
           json_array_length(p.record_json, '$.changes') AS change_count,
           (SELECT json_object('pending', count(*) FILTER (WHERE state = 'pending'),

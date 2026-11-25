@@ -8,7 +8,7 @@ export const QA_STATES = [
   { state: "waived", label: "Waived", icon: MinusIcon, tone: "text-muted-foreground" },
 ] as const;
 
-export const VERDICTS = {
+const VERDICTS = {
   approved: { label: "approved", variant: "success" },
   changes_requested: { label: "changes requested", variant: "warning" },
   waived: { label: "review waived", variant: "outline" },
@@ -19,6 +19,53 @@ export const CHECKS = {
   fail: { suffix: " failed", variant: "error" },
   skipped: { suffix: " skipped", variant: "outline" },
 } as const;
+
+/** A check's badge text, with the reason a skipped one gives. Older records have none. */
+export function checkLabel(check: {
+  readonly label: string;
+  readonly result: keyof typeof CHECKS;
+  readonly reason?: string | undefined;
+}): string {
+  const base = `${check.label}${CHECKS[check.result].suffix}`;
+  return check.result === "skipped" && check.reason ? `${base}: ${check.reason}` : base;
+}
+
+/**
+ * How a change's review reads. A verdict with no reviewer thread behind it is
+ * only the agent's word, so it shows as unverified rather than as reviewed.
+ */
+export function reviewDisplay(review: EvidenceChange["review"]): {
+  readonly label: string;
+  readonly variant: "success" | "warning" | "outline";
+  readonly hint: string | null;
+  readonly threadId: EvidenceChange["review"]["threadId"] | null;
+} {
+  const by = review.by ? ` by ${review.by}` : "";
+  if (review.verdict === "waived")
+    return {
+      label: review.reason ? `review waived: ${review.reason}` : "review waived",
+      variant: "outline",
+      hint: null,
+      threadId: null,
+    };
+  const verdict = VERDICTS[review.verdict];
+  if (review.threadId === undefined)
+    return {
+      label: "unverified review",
+      variant: "outline",
+      hint: `Reported ${verdict.label}${by}, with no reviewer thread linked.`,
+      threadId: null,
+    };
+  return {
+    label: `${verdict.label}${review.by ? ` · ${review.by}` : ""}`,
+    variant: verdict.variant,
+    hint:
+      review.linked === "derived"
+        ? "Reviewer thread linked automatically from this lead's review delegates."
+        : null,
+    threadId: review.threadId,
+  };
+}
 
 export function captureKind(path: string): "image" | "video" | "file" {
   const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase();

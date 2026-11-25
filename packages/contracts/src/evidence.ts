@@ -18,12 +18,19 @@ export const EvidenceSlug = Text(120).check(Schema.isPattern(/^[A-Za-z0-9][A-Za-
 export const EvidenceQaState = Schema.Literals(["pending", "confirmed", "failed", "waived"]);
 export type EvidenceQaState = typeof EvidenceQaState.Type;
 
+const Reason = Text(300);
+
 export const EvidenceVerification = Schema.Struct({
   label: Text(80),
   result: Schema.Literals(["pass", "fail", "skipped"]),
   runId: Schema.optional(Text(200)),
   detail: Schema.optional(Text(500)),
+  /** Records from before reasons were required may lack one. */
+  reason: Schema.optional(
+    Reason.annotate({ description: "Required when result is skipped: why, in one line." }),
+  ),
 });
+export type EvidenceVerification = typeof EvidenceVerification.Type;
 
 export const EvidenceChange = Schema.Struct({
   id: EvidenceSlug,
@@ -39,7 +46,17 @@ export const EvidenceChange = Schema.Struct({
     verdict: Schema.Literals(["approved", "changes_requested", "waived"]),
     by: Schema.optional(Text(120)),
     summary: Schema.optional(Text(2000)),
-    threadId: Schema.optional(ThreadId),
+    threadId: Schema.optional(
+      ThreadId.annotate({
+        description:
+          "The reviewer thread. Omitted, the server links the lead's review-role child that reviewed this change when it can tell which.",
+      }),
+    ),
+    reason: Schema.optional(
+      Reason.annotate({ description: "Required when verdict is waived: why, in one line." }),
+    ),
+    /** Set when the server, not the agent, linked `threadId`. */
+    linked: Schema.optional(Schema.Literal("derived")),
   }),
   /** Absolute server paths under the evidence root; clients mint asset URLs when a change opens. */
   captures: Schema.Array(Schema.Struct({ path: Text(1024), caption: Text(300) })).check(
@@ -60,9 +77,30 @@ export const EvidenceRecord = Schema.Struct({
 });
 export type EvidenceRecord = typeof EvidenceRecord.Type;
 
-/** Recording again with the same id replaces the record and keeps QA. */
+const EvidenceVerificationInput = EvidenceVerification.check(
+  Schema.makeFilter((verification: EvidenceVerification) =>
+    verification.result !== "skipped" || verification.reason !== undefined
+      ? true
+      : `Verification "${verification.label}" is skipped; give a one-line reason.`,
+  ),
+);
+
+const EvidenceChangeInput = EvidenceChange.check(
+  Schema.makeFilter((change: EvidenceChange) =>
+    change.review.verdict !== "waived" || change.review.reason !== undefined
+      ? true
+      : `Change "${change.id}" waives review; give review.reason in one line.`,
+  ),
+);
+
+/**
+ * Recording again with the same id replaces the record and keeps QA. A waived
+ * review or skipped check needs its reason here; stored records may predate that.
+ */
 export const EvidenceRecordInput = Schema.Struct({
   ...EvidenceRecord.fields,
+  verifications: Schema.Array(EvidenceVerificationInput).check(Schema.isMaxLength(20)),
+  changes: Schema.Array(EvidenceChangeInput).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   threadId: Schema.optional(ThreadId),
   landedAt: Schema.optional(IsoDateTime),
 });
@@ -104,6 +142,7 @@ export const EvidenceLandingSummary = Schema.Struct({
     Schema.Struct({
       label: EvidenceVerification.fields.label,
       result: EvidenceVerification.fields.result,
+      reason: EvidenceVerification.fields.reason,
     }),
   ),
   changeCount: NonNegativeInt,
@@ -130,12 +169,21 @@ export type EvidenceListResult = typeof EvidenceListResult.Type;
 export const EvidenceGetInput = Schema.Struct({ landingId: EvidenceSlug });
 export type EvidenceGetInput = typeof EvidenceGetInput.Type;
 
-export const EvidenceSetQaInput = Schema.Struct({
+const EvidenceSetQaFields = Schema.Struct({
   landingId: EvidenceSlug,
   changeId: EvidenceSlug,
   state: EvidenceQaState,
   note: Schema.optional(EvidenceChangeQa.fields.note),
 });
+
+/** Waiving QA needs a note that says why. */
+export const EvidenceSetQaInput = EvidenceSetQaFields.check(
+  Schema.makeFilter((input: typeof EvidenceSetQaFields.Type) =>
+    input.state !== "waived" || (input.note ?? "").trim() !== ""
+      ? true
+      : "Waiving QA needs a note that says why.",
+  ),
+);
 export type EvidenceSetQaInput = typeof EvidenceSetQaInput.Type;
 
 export const EvidenceCounts = Schema.Struct({ pending: NonNegativeInt, failed: NonNegativeInt });

@@ -2,7 +2,14 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { EvidenceRecordInput, ProjectId, ThreadId, type EvidenceChange } from "@t3tools/contracts";
+import {
+  EvidenceRecord,
+  EvidenceRecordInput,
+  EvidenceSetQaInput,
+  ProjectId,
+  ThreadId,
+  type EvidenceChange,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as Deferred from "effect/Deferred";
@@ -648,4 +655,211 @@ it.effect("a slow repository doesn't hold up another project's cached answer", (
     yield* Deferred.succeed(release, undefined);
     assert.strictEqual((yield* Fiber.join(held))[0]?.uncoveredCount, 1);
   }).pipe(Effect.provide(testLayer)),
+);
+
+const decodeRecord = Schema.decodeUnknownExit(EvidenceRecordInput);
+const decodeQa = Schema.decodeUnknownExit(EvidenceSetQaInput);
+const decodeStoredRecord = Schema.decodeUnknownExit(EvidenceRecord);
+
+/** Seeds a thread and, for a delegated child, the lead's task record that started it. */
+const seedThread = (input: {
+  readonly id: string;
+  readonly parent?: string;
+  readonly role?: string;
+  readonly branch?: string;
+  readonly startedAt?: string;
+  readonly prompt?: string;
+  readonly result?: string;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const payload = JSON.stringify({
+      lineage: {
+        parentThreadId: input.parent ?? null,
+        relationshipToParent: input.parent === undefined ? null : "subagent",
+      },
+      ...(input.role === undefined ? {} : { delegateRole: input.role }),
+      branch: input.branch ?? null,
+    });
+    const now = "2026-11-20T10:00:00.000Z";
+    yield* sql`INSERT INTO orchestration_v2_projection_threads (thread_id, project_id, title, default_provider,
+        runtime_mode, interaction_mode, created_at, updated_at, payload_json)
+      VALUES (${input.id}, ${project}, ${input.id}, 'codex', 'full-access', 'default', ${now}, ${now}, ${payload})`;
+    if (input.parent === undefined) return;
+    const startedAt = input.startedAt ?? now;
+    const task = JSON.stringify({ prompt: input.prompt ?? "", result: input.result ?? null });
+    yield* sql`INSERT INTO orchestration_v2_projection_subagents (subagent_id, thread_id, parent_node_id, provider,
+        child_thread_id, origin, status, started_at, updated_at, payload_json)
+      VALUES (${`task-${input.id}`}, ${input.parent}, 'node', 'codex', ${input.id}, 'app_owned', 'completed',
+        ${startedAt}, ${startedAt}, ${task})`;
+  });
+
+it.effect("links the lead's reviewer to a change and takes the verdict it stated", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({
+        id: "impl",
+        parent: "lead",
+        role: "implementation",
+        branch: "feat-a",
+        startedAt: "2026-11-20T10:01:00.000Z",
+      });
+      yield* seedThread({
+        id: "reviewer",
+        parent: "lead",
+        role: "review",
+        startedAt: "2026-11-20T10:05:00.000Z",
+        prompt: "Review branch feat-a.",
+        result: "Two findings.\n\n**Verdict: request changes.** Fix the race.",
+      });
+      const landedAt = "2026-11-20T11:00:00.000Z";
+      const result = yield* evidence.record(
+        recordInput(
+          "derived",
+          [
+            change("linked", { branch: "feat-a" }),
+            change("unmatched", { branch: "feat-z" }),
+            change("waived", { review: { verdict: "waived", reason: "Docs typo." } }),
+          ],
+          { landedAt },
+        ),
+      );
+      assert.deepStrictEqual(result.warnings, [
+        "change linked: review verdict taken from thread reviewer (changes_requested), not approved",
+      ]);
+      const landing = yield* evidence.get({ landingId: "derived" });
+      assert.deepStrictEqual(
+        landing.changes.map((item) => item.review),
+        [
+          {
+            verdict: "changes_requested",
+            by: "opus",
+            threadId: ThreadId.make("reviewer"),
+            linked: "derived",
+          },
+          { verdict: "approved", by: "opus" },
+          { verdict: "waived", reason: "Docs typo." },
+        ],
+      );
+
+      // An explicit thread wins over the derived match, and its stated verdict still counts.
+      yield* seedThread({
+        id: "other-reviewer",
+        parent: "lead",
+        role: "review",
+        startedAt: "2026-11-20T10:06:00.000Z",
+        result: "Verdict: approve.",
+      });
+      yield* evidence.record(
+        recordInput(
+          "explicit",
+          [
+            change("linked", {
+              branch: "feat-a",
+              review: { verdict: "approved", threadId: ThreadId.make("other-reviewer") },
+            }),
+          ],
+          { landedAt },
+        ),
+      );
+      const explicit = yield* evidence.get({ landingId: "explicit" });
+      assert.deepStrictEqual(explicit.changes[0]?.review, {
+        verdict: "approved",
+        threadId: ThreadId.make("other-reviewer"),
+      });
+
+      // A child recording its own landing is the implementer, so the sibling reviewer after it links.
+      yield* seedThread({
+        id: "impl-2",
+        parent: "lead",
+        role: "implementation",
+        startedAt: "2026-11-20T10:20:00.000Z",
+      });
+      yield* seedThread({
+        id: "reviewer-2",
+        parent: "lead",
+        role: "review",
+        startedAt: "2026-11-20T10:25:00.000Z",
+        result: "Verdict: approve.",
+      });
+      yield* evidence.record(
+        recordInput("by-child", [change("own")], {
+          threadId: ThreadId.make("impl-2"),
+          landedAt,
+        }),
+      );
+      const byChild = yield* evidence.get({ landingId: "by-child" });
+      assert.deepStrictEqual(byChild.changes[0]?.review, {
+        verdict: "approved",
+        by: "opus",
+        threadId: ThreadId.make("reviewer-2"),
+        linked: "derived",
+      });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it("requires a reason to waive review, skip a check or waive QA, and keeps old records readable", () => {
+  const base = recordInput("reasons", [change("a")]);
+  const { threadId: _threadId, projectId: _projectId, ...input } = base;
+  assert.isTrue(decodeRecord(input)._tag === "Success");
+
+  const waived = { ...input, changes: [change("a", { review: { verdict: "waived" } })] };
+  const waivedExit = decodeRecord(waived);
+  assert.isTrue(waivedExit._tag === "Failure");
+  assert.include(String(waivedExit), 'Change "a" waives review; give review.reason in one line.');
+  assert.isTrue(
+    decodeRecord({
+      ...input,
+      changes: [change("a", { review: { verdict: "waived", reason: "One-line fix." } })],
+    })._tag === "Success",
+  );
+
+  const skipped = { ...input, verifications: [{ label: "e2e", result: "skipped" }] };
+  const skippedExit = decodeRecord(skipped);
+  assert.isTrue(skippedExit._tag === "Failure");
+  assert.include(String(skippedExit), 'Verification "e2e" is skipped; give a one-line reason.');
+  assert.isTrue(
+    decodeRecord({
+      ...input,
+      verifications: [{ label: "e2e", result: "skipped", reason: "No browser here." }],
+    })._tag === "Success",
+  );
+
+  const qa = { landingId: "reasons", changeId: "a", state: "waived" };
+  assert.include(String(decodeQa(qa)), "Waiving QA needs a note that says why.");
+  assert.include(String(decodeQa({ ...qa, note: "  " })), "Waiving QA needs a note that says why.");
+  assert.isTrue(decodeQa({ ...qa, note: "Covered by the e2e run." })._tag === "Success");
+  assert.isTrue(decodeQa({ ...qa, state: "confirmed" })._tag === "Success");
+
+  // A stored record from before reasons were required still decodes.
+  const stored = decodeStoredRecord({
+    ...input,
+    verifications: [{ label: "e2e", result: "skipped" }],
+    changes: [change("a", { review: { verdict: "waived" } })],
+  });
+  assert.isTrue(stored._tag === "Success");
+});
+
+it.effect("lists a skipped check's reason and leaves it off checks without one", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* evidence.record(
+        recordInput("checks", [change("a")], {
+          verifications: [
+            { label: "unit", result: "pass" },
+            { label: "e2e", result: "skipped", reason: "No browser here." },
+          ],
+        }),
+      );
+      const { items } = yield* evidence.list({});
+      assert.deepStrictEqual(items[0]?.verifications, [
+        { label: "unit", result: "pass" },
+        { label: "e2e", result: "skipped", reason: "No browser here." },
+      ]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
 );
