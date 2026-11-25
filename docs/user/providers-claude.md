@@ -72,6 +72,35 @@ Task (native subagents), Workflow, ScheduleWakeup and ReportFindings; **Clear** 
 **Recommended** returns to the default. A change applies when a thread's Claude process next starts, which includes an existing thread
 resuming after a restart or an idle period.
 
+## claude.ai connectors
+
+**claude.ai connectors** in the Claude provider settings decides whether threads load the
+connectors on your Claude account. **Leave to Claude Code**, the default, changes nothing.
+**Off** keeps them out of every thread and saves an estimated 3,200 tokens of context; a single
+thread can still switch them on with its **Tools** control. A change applies when a thread's
+Claude process next starts.
+
+## Tools for one thread
+
+The **Tools** control under the composer counts what a Claude thread leaves out, for example
+"Tools 8 off". Open it to switch a left-out tool, or the claude.ai connectors, on for this
+thread only. Each row shows an estimate of the context the item adds. Switches take effect when
+you choose **Reload session**.
+
+A reload keeps the conversation: the next message resumes it with the new tools. That message
+re-reads the conversation once without the prompt cache, so it costs about as many input tokens
+as the conversation is long. The thread's timeline notes the reload. Choosing **Reload session**
+with nothing changed restarts the session anyway, which picks up changed Claude settings, skills
+or MCP servers.
+
+A reload waits until no turn is running and the session has no background agents or commands.
+Queued messages stay queued and run on the reloaded session. A fork keeps its source thread's
+tools; new threads, delegated tasks and a switch to another provider start from the provider's
+defaults.
+
+Per-thread tools are a Claude feature. Threads on Codex, Antigravity, OpenCode, Pi, Kiro, fx,
+Muse Code, Cursor or an ACP provider do not show the control.
+
 ## Usage limits
 
 If your Claude subscription runs out of usage mid-turn, the thread shows which
