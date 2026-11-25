@@ -5353,6 +5353,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           Effect.gen(function* () {
             instructionSourcesByThread.delete(payload.threadId);
             injectedToolsByThread.delete(payload.threadId);
+            computerUseCallEnds.delete(payload.threadId);
             const closing = threadClosings.get(payload.threadId);
             threadClosings.delete(payload.threadId);
             if (closing !== undefined) yield* Deferred.succeed(closing, undefined);
@@ -5538,21 +5539,27 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         // Codex gives up on an unanswered computer-use prompt by failing the tool call that raised
         // it, without resolving the request. Record each call's end, whichever of the prompt and
-        // the completion arrives first, until the thread's turn completes.
-        const computerUseCallEnds = new Map<string, Deferred.Deferred<void>>();
-        const computerUseCallEnd = (nativeThreadId: string, callId: string) =>
-          Effect.suspend(() => {
-            const key = `${nativeThreadId}\u0000${callId}`;
-            const existing = computerUseCallEnds.get(key);
-            if (existing !== undefined) return Effect.succeed(existing);
-            return Deferred.make<void>().pipe(
-              Effect.tap((ended) => Effect.sync(() => computerUseCallEnds.set(key, ended))),
-            );
+        // the completion arrives first, until its turn completes or its thread unloads.
+        const computerUseCallEnds = new Map<string, Map<string, Deferred.Deferred<void>>>();
+        const computerUseCallEnd = (nativeThreadId: string, nativeTurnId: string, callId: string) =>
+          Effect.sync(() => {
+            const calls = computerUseCallEnds.get(nativeThreadId) ?? new Map();
+            computerUseCallEnds.set(nativeThreadId, calls);
+            const key = `${nativeTurnId}\u0000${callId}`;
+            const existing = calls.get(key);
+            if (existing !== undefined) return existing;
+            const ended = Deferred.makeUnsafe<void>();
+            calls.set(key, ended);
+            return ended;
           });
         yield* client.handleServerNotification("item/completed", (payload) =>
           Effect.gen(function* () {
             if (payload.item.type === "mcpToolCall" && payload.item.server === "cua_repl") {
-              const ended = yield* computerUseCallEnd(payload.threadId, payload.item.id);
+              const ended = yield* computerUseCallEnd(
+                payload.threadId,
+                payload.turnId,
+                payload.item.id,
+              );
               yield* Deferred.succeed(ended, undefined);
             }
             if (payload.item.type === "contextCompaction")
@@ -6178,7 +6185,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const callEnd =
               callId === undefined
                 ? undefined
-                : yield* computerUseCallEnd(payload.threadId, callId);
+                : yield* computerUseCallEnd(
+                    payload.threadId,
+                    payload.turnId ?? context.nativeTurnId,
+                    callId,
+                  );
             // Codex already abandoned this prompt's tool call and expects no reply.
             if (callEnd !== undefined && (yield* Deferred.isDone(callEnd))) {
               return yield* Effect.interrupt;
@@ -7364,8 +7375,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("turn/completed", (payload) =>
           Effect.gen(function* () {
-            for (const key of computerUseCallEnds.keys()) {
-              if (key.startsWith(`${payload.threadId}\u0000`)) computerUseCallEnds.delete(key);
+            const calls = computerUseCallEnds.get(payload.threadId);
+            for (const key of calls?.keys() ?? []) {
+              if (key.startsWith(`${payload.turn.id}\u0000`)) calls?.delete(key);
             }
             const compacted = yield* Ref.modify(threadsAwaitingContextRestore, (current) => {
               if (!current.has(payload.threadId)) return [false, current] as const;
@@ -8267,6 +8279,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             function* (unloadInput) {
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
               sessionApprovals.delete(nativeThreadId);
+              computerUseCallEnds.delete(nativeThreadId);
               // Archive also unloads, inline and without thread/closed; resumeNativeThread
               // unarchives it on the next turn.
               if (unloadInput.archive === true) {

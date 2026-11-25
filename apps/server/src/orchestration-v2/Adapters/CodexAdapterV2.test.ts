@@ -1918,7 +1918,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             },
           },
         });
-        const elicitation = (id: number, callId: string) => ({
+        const elicitation = (id: number, callId: string, app: string) => ({
           type: "emit_inbound" as const,
           frame: {
             id,
@@ -1934,7 +1934,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 connector_id: "computer-use",
                 persist: ["session", "always"],
               },
-              message: "Allow Codex to use Calculator?",
+              message: `Allow Codex to use ${app}?`,
               requestedSchema: { type: "object", properties: {} },
             },
           },
@@ -1942,8 +1942,14 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         // Codex's approval timeout fails call_first and never resolves its prompt, then retries.
         const abandonment =
           completion === "after"
-            ? [elicitation(0, "call_first"), toolCallEvent("item/completed", "call_first")]
-            : [toolCallEvent("item/completed", "call_first"), elicitation(0, "call_first")];
+            ? [
+                elicitation(0, "call_first", "Calculator"),
+                toolCallEvent("item/completed", "call_first"),
+              ]
+            : [
+                toolCallEvent("item/completed", "call_first"),
+                elicitation(0, "call_first", "Calculator"),
+              ];
         const pending = yield* Queue.unbounded<OrchestrationV2RuntimeRequest>();
         const expired = yield* Queue.unbounded<OrchestrationV2RuntimeRequest>();
         const firstPending = yield* Deferred.make<void>();
@@ -1955,7 +1961,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               toolCallEvent("item/started", "call_first"),
               ...abandonment,
               toolCallEvent("item/started", "call_retry"),
-              elicitation(1, "call_retry"),
+              elicitation(1, "call_retry", "Notepad"),
               {
                 type: "expect_outbound",
                 frame: {
@@ -2012,6 +2018,18 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         }
         // Only the retry is answerable; answering it must reach Codex as request 1.
         const retry = yield* Queue.take(pending);
+        const retryCard = harness.events.findLast(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "approval_request" &&
+            event.turnItem.requestId === retry.id,
+        );
+        assert.equal(
+          retryCard?.type === "turn_item.updated" && retryCard.turnItem.type === "approval_request"
+            ? retryCard.turnItem.prompt
+            : undefined,
+          "Allow Codex to use Notepad?",
+        );
         yield* harness.runtime.respondToRuntimeRequest({
           requestId: retry.id,
           decision: "acceptForSession",
