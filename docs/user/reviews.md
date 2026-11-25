@@ -50,9 +50,10 @@ Paste or drop an image into a question's note to show the agent what you mean.
 The note gets a marker such as `[Q1 image 1]` and the card shows the image. The
 image waits on the card and joins your message only together with the answer or
 comment: **Cancel**, removing the chip, dismissing or deferring the question
-takes it back out, and the card keeps it. Deleting the marker from the note, or
-the image's remove button, drops the image. Images follow the message box's
-limits on type, size and count.
+takes it back out, and the card keeps it. Deleting the marker from the note, the
+image's remove button on the card, or removing the image from the message box
+drops the image and its marker. Images follow the message box's limits on type,
+size and count; an answer whose images would not fit is not added.
 
 Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
