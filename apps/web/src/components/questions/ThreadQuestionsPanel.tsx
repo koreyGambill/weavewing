@@ -86,7 +86,12 @@ export function ThreadQuestionsPanel({
   const send = async () => {
     setSending(true);
     // Notes still waiting or in flight are part of what the user means to send.
-    const saved = await writer.flushAll(saveDraft);
+    const flushed = await writer.flushAll(saveDraft);
+    if (flushed === null) {
+      setSending(false);
+      return;
+    }
+    const saved = flushed.saved;
     const latest =
       saved !== null && saved.revision > (workspace?.revision ?? -1) ? saved : workspace;
     const ids = (latest?.questions ?? []).filter(threadQuestionHasDraft).map((entry) => entry.id);

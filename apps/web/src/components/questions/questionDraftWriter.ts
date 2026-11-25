@@ -12,6 +12,7 @@ interface Entry<R> {
   latest: QuestionDraft | null;
   // The newest values handed to a save. Callers' `saved` lags until that save returns.
   sent: QuestionDraft | null;
+  failed: boolean;
   timer: ReturnType<typeof setTimeout> | null;
   chain: Promise<R | null>;
   waiters: Array<() => void>;
@@ -34,7 +35,14 @@ export function createQuestionDraftWriter<R>(
   const entryOf = (id: string): Entry<R> => {
     let entry = entries.get(id);
     if (entry === undefined) {
-      entry = { latest: null, sent: null, timer: null, chain: Promise.resolve(null), waiters: [] };
+      entry = {
+        latest: null,
+        sent: null,
+        failed: false,
+        timer: null,
+        chain: Promise.resolve(null),
+        waiters: [],
+      };
       entries.set(id, entry);
     }
     return entry;
@@ -54,6 +62,7 @@ export function createQuestionDraftWriter<R>(
     entry.chain = entry.chain.then(async () => {
       const result = await save(id, draft);
       if (entry.sent === draft) entry.sent = null;
+      entry.failed = result === null;
       if (result !== null) lastResult = result;
       for (const resolve of waiters) resolve();
       return result;
@@ -82,10 +91,13 @@ export function createQuestionDraftWriter<R>(
       return done;
     },
     flush: (id: string, save: SaveQuestionDraft<R>) => flush(id, save).then(() => undefined),
-    /** Sends every waiting draft and resolves after all writes, with the newest save result. */
-    async flushAll(save: SaveQuestionDraft<R>): Promise<R | null> {
+    /**
+     * Sends every waiting draft and resolves after all writes with the newest save result, or
+     * null when a question's last save failed, so a caller never submits what was not saved.
+     */
+    async flushAll(save: SaveQuestionDraft<R>): Promise<{ readonly saved: R | null } | null> {
       await Promise.all([...entries.keys()].map((id) => flush(id, save)));
-      return lastResult;
+      return [...entries.values()].some((entry) => entry.failed) ? null : { saved: lastResult };
     },
   };
 }

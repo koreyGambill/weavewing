@@ -89,7 +89,18 @@ describe("question draft writer", () => {
     expect(sent[1]).toEqual(["Q2", { chosenOptionIds: ["a"], notes: "typed just now" }]);
     expect(flushed).toBe(false);
     release("Q1");
-    expect(await done).toBe(2);
+    expect(await done).toEqual({ saved: 2 });
+  });
+
+  it("reports a failed save instead of an older result", async () => {
+    const writer = createQuestionDraftWriter<number>(manualTimers());
+    const results: Array<number | null> = [1, null];
+    const save = async () => results.shift() ?? null;
+
+    await writer.edit("Q1", saved, { chosenOptionIds: ["b"] }, save);
+    void writer.edit("Q1", saved, { notes: "lost" }, save, 600);
+
+    expect(await writer.flushAll(save)).toBeNull();
   });
 
   it("starts a question's next write only after the previous one settled", async () => {
