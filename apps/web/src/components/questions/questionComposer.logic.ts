@@ -1,22 +1,27 @@
 import {
   threadQuestionAnswerRecord,
+  threadQuestionDiscussRecord,
   threadQuestionHasDraft,
 } from "@t3tools/client-runtime/state/thread-questions";
 import type { ThreadQuestion, ThreadWorkspace } from "@t3tools/contracts";
 
 /**
- * The record to put in the composer for `shown` once its draft writes settled: the draft the
- * newest save returned, else the rendered one. Null when that save failed, so an answer the
- * server never stored is not queued, or when there is no draft to send.
+ * The record to put in the composer for `shown` once its draft writes settled, as its answer or
+ * as a discussion of it: from the draft the newest save returned, else the rendered one. Null
+ * when that save failed, so nothing the server never stored is queued, or when there is nothing
+ * to send.
  */
 export function questionAnswerForComposer(
   threadId: string,
   shown: ThreadQuestion,
   flushed: { readonly saved: ThreadWorkspace | null } | null,
+  kind: "answer" | "discuss" = "answer",
 ) {
   if (flushed === null) return null;
   const latest = flushed.saved?.questions.find((question) => question.id === shown.id) ?? shown;
-  return threadQuestionAnswerRecord(threadId, latest);
+  return kind === "answer"
+    ? threadQuestionAnswerRecord(threadId, latest)
+    : threadQuestionDiscussRecord(threadId, latest);
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   EnvironmentId,
   MessageId,
   ThreadId,
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -164,6 +165,21 @@ describe("provider projection", () => {
         records: [questionAnswer],
       }),
     ).toContain(">\nquestion Q3: Which store?\nchoice: SQLite\nnote:");
+    const questionComment: ComposerContextRecord = {
+      ...questionAnswer,
+      contextId: ctx("comment_3"),
+      artifactId: THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
+      choice: "",
+      note: "Would SQLite survive two writers?",
+    };
+    const comment = projectComposerContextForProvider({
+      text: formatComposerContextReference(questionComment),
+      records: [questionComment],
+    });
+    expect(comment).toContain(
+      ">\ncomment on question Q3, not an answer; the question stays open: Which store?\ncomment: Would SQLite survive two writers?",
+    );
+    expect(comment).not.toContain("choice:");
   });
   const terminal: ComposerContextRecord = {
     version: 1,

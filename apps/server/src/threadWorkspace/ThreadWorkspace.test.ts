@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ServerCommand,
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   type OrchestrationV2ThreadQuestionSummary,
 } from "@t3tools/contracts";
@@ -749,12 +750,18 @@ it.effect("moves questions through their states with ids that are never reused",
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
-const answerRecord = (questionId: string, answerRevision: number, choice = "", note = "") => ({
+const answerRecord = (
+  questionId: string,
+  answerRevision: number,
+  choice = "",
+  note = "",
+  artifactId: string = THREAD_QUESTIONS_ARTIFACT_ID,
+) => ({
   version: 1 as const,
   kind: "artifact-answer" as const,
   contextId: ComposerContextId.make(`answer_${questionId}_${answerRevision}`),
   label: questionId,
-  artifactId: THREAD_QUESTIONS_ARTIFACT_ID,
+  artifactId,
   questionId,
   answerRevision,
   title: questionId,
@@ -893,6 +900,44 @@ it.effect("counts an answer a queued message carries as sent until its turn star
     expect(reopened.questions[0]).not.toHaveProperty("sentInMessageId");
     expect((yield* h.service.get({ threadId })).questions[0]?.state).toBe("open");
     expect(sentState()[0]).toEqual(["Q1", false]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("keeps a question waiting and counted when a message only discusses it", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [{ prompt: "Database?", options: [choice("pg", "Postgres")] }],
+    });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: ["pg"], notes: "Would it survive two writers?" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(
+      userMessage("m1", [
+        answerRecord(
+          "Q1",
+          revision,
+          "",
+          "Would it survive two writers?",
+          THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
+        ),
+      ]),
+    );
+    h.threadRuns.push(threadRun("r1", "m1", "queued"));
+    const queued = yield* h.service.get({ threadId });
+    expect(queued.questions[0]).not.toHaveProperty("sentInMessageId");
+    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
+    h.threadRuns[0] = threadRun("r1", "m1", "running");
+    const started = yield* h.service.get({ threadId });
+    expect(started.questions[0]).toMatchObject({
+      state: "open",
+      answeredBy: null,
+      answer: { chosenOptionIds: ["pg"], submittedAt: null },
+    });
+    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 

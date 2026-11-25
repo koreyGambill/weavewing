@@ -251,6 +251,11 @@ export const threadQuestionTitle = (prompt: string): string => {
 };
 /** The `artifactId` of an answer record that answers a thread question rather than an artifact. */
 export const THREAD_QUESTIONS_ARTIFACT_ID = "thread-questions";
+/**
+ * The `artifactId` of a record that comments on a thread question without answering it: the
+ * question stays open, and nothing marks it sent or answered.
+ */
+export const THREAD_QUESTION_COMMENTS_ARTIFACT_ID = "thread-question-comments";
 
 /** Linked work stays handed off until its ticket closes or its lane is ready for review. */
 export const listItemNeedsHandoff = (item: Pick<ListItem, "linkStates">) =>

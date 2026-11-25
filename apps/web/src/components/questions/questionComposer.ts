@@ -1,6 +1,6 @@
 import {
   syncComposerQuestionAnswers,
-  threadQuestionIdsInComposer,
+  threadQuestionsInComposer,
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
 } from "@t3tools/client-runtime/state/thread-questions";
@@ -19,9 +19,11 @@ import type { questionDraftWriter, SaveQuestionDraft } from "./questionDraftWrit
 const answersOf = (threadRef: ScopedThreadRef) =>
   useComposerDraftStore.getState().getComposerDraft(threadRef)?.artifactAnswers ?? [];
 
-/** The questions whose answers this device's composer for the thread holds. */
-export function useQuestionIdsInComposer(threadRef: ScopedThreadRef | null): ReadonlySet<string> {
-  return threadQuestionIdsInComposer(useComposerArtifactAnswers(threadRef));
+/** What this device's composer for the thread holds per question: an answer or a discussion. */
+export function useQuestionsInComposer(
+  threadRef: ScopedThreadRef | null,
+): ReadonlyMap<string, "answer" | "discuss"> {
+  return threadQuestionsInComposer(useComposerArtifactAnswers(threadRef));
 }
 
 /** Puts answers in the thread's composer, each replacing an earlier one for its question. */
@@ -56,7 +58,8 @@ export function syncQuestionAnswersInComposer(
 }
 
 /**
- * Saves every waiting draft edit, then puts each drafted answer in the composer. Toasts the
+ * Saves every waiting draft edit, then puts each drafted answer in the composer, except where
+ * the composer holds a discussion of that question. Toasts the
  * outcome, and adds nothing when a save failed.
  */
 export async function addDraftedAnswersToComposer(input: {
@@ -65,11 +68,15 @@ export async function addDraftedAnswersToComposer(input: {
   readonly writer: ReturnType<typeof questionDraftWriter>;
   readonly saveDraft: SaveQuestionDraft<ThreadWorkspace>;
 }) {
-  const records = draftedAnswersForComposer(
+  const drafted = draftedAnswersForComposer(
     input.threadRef.threadId,
     input.workspace,
     await input.writer.flushAll(input.saveDraft),
   );
+  // A question the user is discussing keeps that comment rather than turning into an answer.
+  const discussing = threadQuestionsInComposer(answersOf(input.threadRef));
+  const records =
+    drafted?.filter((record) => discussing.get(record.questionId) !== "discuss") ?? null;
   if (records === null) {
     toastManager.add({
       type: "error",

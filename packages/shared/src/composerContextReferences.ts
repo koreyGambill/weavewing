@@ -9,6 +9,7 @@ import {
   type KnownComposerContextRecord,
   type ScopedThreadRef,
   type ThreadContextRecord,
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
 } from "@t3tools/contracts";
 
@@ -334,6 +335,11 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
       return lines.join("\n");
     }
     case "artifact-answer":
+      if (record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID)
+        return [
+          `comment on question ${record.questionId}, not an answer; the question stays open: ${record.question}`,
+          `comment: ${record.note}`,
+        ].join("\n");
       if (record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID)
         return [
           `question ${record.questionId}: ${record.question}`,

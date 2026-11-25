@@ -1,4 +1,5 @@
 import {
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   threadQuestionTitle,
   type ArtifactAnswerContextRecord,
@@ -105,12 +106,20 @@ export function threadQuestionStatus(
 
 const isQuestionAnswer = (record: ArtifactAnswerContextRecord) =>
   record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID;
+const isQuestionComment = (record: ArtifactAnswerContextRecord) =>
+  record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID;
+const isQuestionRecord = (record: ArtifactAnswerContextRecord) =>
+  isQuestionAnswer(record) || isQuestionComment(record);
 
-/** The ids of the questions whose answers ride in a composer's answer records. */
-export function threadQuestionIdsInComposer(
+/** What a composer holds for each question: its answer, or a comment to discuss it. */
+export function threadQuestionsInComposer(
   records: ReadonlyArray<ArtifactAnswerContextRecord>,
-): ReadonlySet<string> {
-  return new Set(records.filter(isQuestionAnswer).map((record) => record.questionId));
+): ReadonlyMap<string, "answer" | "discuss"> {
+  return new Map(
+    records
+      .filter(isQuestionRecord)
+      .map((record) => [record.questionId, isQuestionAnswer(record) ? "answer" : "discuss"]),
+  );
 }
 
 /**
@@ -147,9 +156,41 @@ export function threadQuestionAnswerRecord(
 }
 
 /**
- * A composer's answer records brought up to date with the thread's questions: each question
- * answer follows its draft, and one whose question closed, was sent, or lost its draft is
- * dropped. Returns null when nothing changed.
+ * The composer record that discusses a question without answering it: the note alone, so a
+ * chosen option stays a draft. Null without a note, or once the question no longer waits.
+ */
+export function threadQuestionDiscussRecord(
+  threadId: string,
+  question: Pick<ThreadQuestion, "id" | "prompt" | "state" | "answer" | "sentInMessageId">,
+): ArtifactAnswerContextRecord | null {
+  const note = question.answer?.notes.trim() ?? "";
+  if (
+    note === "" ||
+    (question.state !== "open" && question.state !== "deferred") ||
+    question.sentInMessageId !== undefined
+  )
+    return null;
+  const title = `${question.id} · discuss: ${threadQuestionTitle(question.prompt)}`;
+  return {
+    version: 1,
+    kind: "artifact-answer",
+    contextId: toComposerContextId(`comment_${threadId}:${question.id}`),
+    label: sanitizeComposerContextLabel(title, "artifact-answer"),
+    artifactId: THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
+    questionId: question.id,
+    answerRevision: question.answer?.draftRevision ?? 0,
+    title: title.slice(0, 200),
+    artifactVersion: 1,
+    question: question.prompt,
+    choice: "",
+    note,
+  };
+}
+
+/**
+ * A composer's question records brought up to date with the thread's questions: each answer
+ * follows its draft and each discussion its note, and one whose question closed, was sent, or
+ * lost what it carries is dropped. Returns null when nothing changed.
  */
 export function syncComposerQuestionAnswers(
   threadId: string,
@@ -158,9 +199,14 @@ export function syncComposerQuestionAnswers(
 ): ArtifactAnswerContextRecord[] | null {
   let changed = false;
   const next = records.flatMap((record) => {
-    if (!isQuestionAnswer(record)) return [record];
+    if (!isQuestionRecord(record)) return [record];
     const question = questions.find((entry) => entry.id === record.questionId);
-    const fresh = question === undefined ? null : threadQuestionAnswerRecord(threadId, question);
+    const fresh =
+      question === undefined
+        ? null
+        : isQuestionAnswer(record)
+          ? threadQuestionAnswerRecord(threadId, question)
+          : threadQuestionDiscussRecord(threadId, question);
     if (fresh === null) {
       changed = true;
       return [];
@@ -180,13 +226,16 @@ export function syncComposerQuestionAnswers(
   return changed ? next : null;
 }
 
-/** `records` with `record` added, or replacing the answer to the same question. */
+/**
+ * `records` with `record` added, replacing whatever the composer held for the same question, so
+ * a question has an answer or a discussion there, never both.
+ */
 export function withComposerQuestionAnswer(
   records: ReadonlyArray<ArtifactAnswerContextRecord>,
   record: ArtifactAnswerContextRecord,
 ): ArtifactAnswerContextRecord[] {
   const index = records.findIndex(
-    (entry) => isQuestionAnswer(entry) && entry.questionId === record.questionId,
+    (entry) => isQuestionRecord(entry) && entry.questionId === record.questionId,
   );
   if (index < 0) return [...records, record];
   return records.map((entry, position) => (position === index ? record : entry));
@@ -196,5 +245,5 @@ export function withoutComposerQuestionAnswer(
   records: ReadonlyArray<ArtifactAnswerContextRecord>,
   questionId: string,
 ): ArtifactAnswerContextRecord[] {
-  return records.filter((entry) => !(isQuestionAnswer(entry) && entry.questionId === questionId));
+  return records.filter((entry) => !(isQuestionRecord(entry) && entry.questionId === questionId));
 }

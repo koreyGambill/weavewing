@@ -6,7 +6,8 @@ import {
   syncComposerQuestionAnswers,
   threadQuestionAnswerRecord,
   threadQuestionCounts,
-  threadQuestionIdsInComposer,
+  threadQuestionDiscussRecord,
+  threadQuestionsInComposer,
   threadQuestionStatus,
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
@@ -171,6 +172,60 @@ describe("thread questions", () => {
     expect(withoutComposerQuestionAnswer([first, second], "Q1")).toEqual([second]);
     expect(withoutComposerQuestionAnswer([first], "Q9")).toEqual([first]);
     const artifact = { ...first, artifactId: "artifact-1", questionId: "Q7" };
-    expect([...threadQuestionIdsInComposer([first, second, artifact])]).toEqual(["Q1", "Q2"]);
+    expect([...threadQuestionsInComposer([first, second, artifact])]).toEqual([
+      ["Q1", "answer"],
+      ["Q2", "answer"],
+    ]);
+  });
+
+  it("holds an answer or a discussion for a question in the composer, never both", () => {
+    const drafted = question("Q1", "open", { answer: draft(["a"], "why not b?") });
+    const answer = threadQuestionAnswerRecord("t1", drafted)!;
+    const discuss = threadQuestionDiscussRecord("t1", drafted)!;
+    // The discussion carries the note alone, so the chosen option stays a draft.
+    expect(discuss).toMatchObject({
+      artifactId: "thread-question-comments",
+      questionId: "Q1",
+      label: "Q1 · discuss: Prompt Q1",
+      choice: "",
+      note: "why not b?",
+    });
+    expect(discuss.contextId).not.toBe(answer.contextId);
+    const withDiscuss = withComposerQuestionAnswer([answer], discuss);
+    expect(withDiscuss).toEqual([discuss]);
+    expect([...threadQuestionsInComposer(withDiscuss)]).toEqual([["Q1", "discuss"]]);
+    expect(withComposerQuestionAnswer(withDiscuss, answer)).toEqual([answer]);
+    expect(withoutComposerQuestionAnswer(withDiscuss, "Q1")).toEqual([]);
+  });
+
+  it("discusses only a waiting question with a note, and follows that note", () => {
+    expect(
+      threadQuestionDiscussRecord("t1", question("Q1", "open", { answer: draft(["a"]) })),
+    ).toBeNull();
+    expect(threadQuestionDiscussRecord("t1", question("Q1", "open"))).toBeNull();
+    expect(
+      threadQuestionDiscussRecord("t1", question("Q1", "answered", { answer: draft([], "hm") })),
+    ).toBeNull();
+    expect(
+      threadQuestionDiscussRecord(
+        "t1",
+        question("Q1", "open", { answer: draft([], "hm"), sentInMessageId: sentIn }),
+      ),
+    ).toBeNull();
+    const before = question("Q1", "deferred", { answer: draft([], "first") });
+    const record = threadQuestionDiscussRecord("t1", before)!;
+    const after = question("Q1", "deferred", { answer: draft([], "second", 4) });
+    expect(syncComposerQuestionAnswers("t1", [record], [after])).toEqual([
+      threadQuestionDiscussRecord("t1", after),
+    ]);
+    expect(
+      syncComposerQuestionAnswers(
+        "t1",
+        [record],
+        [question("Q1", "deferred", { answer: draft([], " ") })],
+      ),
+    ).toEqual([]);
+    // Its status stays the question's own: a discussion is not an answer in the composer.
+    expect(threadQuestionStatus(after, false)).toBe("drafted");
   });
 });

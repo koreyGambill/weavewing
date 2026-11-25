@@ -2,6 +2,7 @@ import {
   ComposerContextId,
   MessageId,
   RunId,
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   type ArtifactAnswerContextRecord,
   type OrchestrationV2Run,
@@ -149,5 +150,11 @@ describe("questionDeliveries", () => {
         [run("r1", "m1", "running"), run("r2", "m2", "queued")],
       ),
     ).toEqual({ Q1: "m1:received" });
+  });
+
+  it("ignores a comment that discusses a question, queued or started", () => {
+    const comment = message("m1", [record("Q1", 3, THREAD_QUESTION_COMMENTS_ARTIFACT_ID)]);
+    expect(reach([question("Q1")], [comment], [run("r1", "m1", "queued")])).toEqual({});
+    expect(reach([question("Q1")], [comment], [run("r1", "m1", "running")])).toEqual({});
   });
 });
