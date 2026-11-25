@@ -115,6 +115,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   autoCompactWindow: "",
   omittedBuiltinTools: [],
   idleCompaction: "default",
+  contextRewind: false,
   ...overrides,
 });
 

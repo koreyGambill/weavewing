@@ -1047,9 +1047,25 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    contextRewind: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Let Claude rewind its context",
+        description:
+          "Offers the context_rewind tool: Claude can replace its latest tool calls and their results with a summary it writes, and the thread keeps every item. Applies when a thread's Claude process next starts.",
+        providerSettingsForm: { control: "switch", clearWhenEmpty: "omit" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "launchArgs", "omittedBuiltinTools"],
+    order: [
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "launchArgs",
+      "omittedBuiltinTools",
+      "contextRewind",
+    ],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
