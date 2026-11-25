@@ -1,3 +1,5 @@
+import { toastManager } from "../ui/toast";
+
 type RevealListener = (questionId: string) => boolean;
 
 // Keyed by scoped thread key: the panel asks, the thread's timeline scrolls its list.
@@ -10,7 +12,7 @@ const pending = new Map<string, string>();
  * open timeline does not have the card loaded; "pending" means no timeline is open yet, so the
  * next one to mount serves the request.
  */
-export function requestQuestionReveal(
+function requestQuestionReveal(
   threadKey: string,
   questionId: string,
 ): "revealed" | "missing" | "pending" {
@@ -44,3 +46,13 @@ export function subscribeQuestionReveal(threadKey: string, listener: RevealListe
 }
 
 export const threadQuestionElementId = (questionId: string) => `thread-question-${questionId}`;
+
+/** Scrolls the thread's chat to a question's card, or says it is not in the loaded chat. */
+export function revealQuestionInChat(threadKey: string, questionId: string) {
+  if (requestQuestionReveal(threadKey, questionId) === "missing")
+    toastManager.add({
+      type: "info",
+      title: `${questionId} is not in the loaded part of the chat`,
+      description: "Scroll up to load earlier messages, then try again.",
+    });
+}

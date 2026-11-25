@@ -1,3 +1,4 @@
+import { threadQuestionReplaced } from "@t3tools/client-runtime/state/thread-questions";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
 import { useThreadQuestionsWorkspace } from "../../state/threadQuestions";
@@ -18,7 +19,13 @@ export function ThreadQuestionsTimelineRow({
       {questionIds.map((id) => {
         const question = workspace?.questions.find((entry) => entry.id === id);
         return question ? (
-          <ThreadQuestionCard key={id} question={question} threadRef={threadRef} inTimeline />
+          <ThreadQuestionCard
+            key={id}
+            question={question}
+            threadRef={threadRef}
+            replaces={threadQuestionReplaced(workspace?.questions ?? [], id)}
+            inTimeline
+          />
         ) : (
           <p
             key={id}

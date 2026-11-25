@@ -33,7 +33,9 @@ describe("closedQuestionOutcome", () => {
     ["an answer with nothing recorded", question("answered"), "Answered"],
     // The badge says Dismissed, so the line does not repeat it.
     ["a dismissal", question("withdrawn", { answer: answer(["a"]) }), ""],
-    ["a replacement", question("replaced", { replacedBy: "Q7" }), "Replaced by Q7"],
+    // Its link to the replacement, in the badge's place, says Replaced by Q7.
+    ["a replacement", question("replaced", { replacedBy: "Q7" }), ""],
+    ["a replacement whose successor is unknown", question("replaced"), ""],
   ] as const)("shows %s", (_name, entry, outcome) => {
     expect(closedQuestionOutcome(entry)).toBe(outcome);
   });

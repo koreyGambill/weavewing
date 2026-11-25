@@ -17,7 +17,7 @@ function questionAnswerLine(question: Pick<ThreadQuestion, "options" | "answer">
  * open or deferred and keeps its full card. Empty when the status badge already says it.
  */
 export function closedQuestionOutcome(
-  question: Pick<ThreadQuestion, "state" | "options" | "answer" | "replacedBy">,
+  question: Pick<ThreadQuestion, "state" | "options" | "answer">,
 ): string | null {
   switch (question.state) {
     case "open":
@@ -25,11 +25,10 @@ export function closedQuestionOutcome(
       return null;
     case "answered":
       return questionAnswerLine(question) || "Answered";
+    // The badge already says Dismissed, and a replaced question's link says Replaced by Qn.
     case "withdrawn":
-      // The status badge already says Dismissed.
-      return "";
     case "replaced":
-      return question.replacedBy === null ? "Replaced" : `Replaced by ${question.replacedBy}`;
+      return "";
   }
 }
 

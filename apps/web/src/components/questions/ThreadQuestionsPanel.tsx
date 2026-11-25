@@ -3,6 +3,8 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   sectionThreadQuestions,
   threadQuestionHasDraft,
+  threadQuestionReplaced,
+  withQuestionsRefreshRequest,
   THREAD_QUESTION_SECTIONS,
   type ThreadQuestionSection,
 } from "@t3tools/client-runtime/state/thread-questions";
@@ -21,10 +23,12 @@ import {
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
-import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
 import { addDraftedAnswersToComposer, useQuestionsInComposer } from "./questionComposer";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { requestWorkspaceFocus } from "../../lib/workspaceFocus";
+import { toastManager } from "../ui/toast";
 import { questionDraftWriter } from "./questionDraftWriter";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { Toggle } from "../ui/toggle";
@@ -43,7 +47,7 @@ import {
   toggleQuestionFilter,
   type QuestionFilter,
 } from "./ThreadQuestionsPanel.logic";
-import { requestQuestionReveal } from "./questionReveal";
+import { revealQuestionInChat } from "./questionReveal";
 import { serverEnvironment } from "../../state/server";
 import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
 import { CONVERSATION_TAB_ID, getTileGroups } from "../../threadTileLayout";
@@ -108,6 +112,7 @@ export function ThreadQuestionsPanel({
   const order = questionPanelOrder(questions);
   const sections = sectionThreadQuestions(questions);
   const shownId = resolveSelectedQuestionId(order, focusedId);
+  const openCount = allQuestions.filter((question) => question.state === "open").length;
   const toAdd = allQuestions.filter(
     (question) => threadQuestionHasDraft(question) && !inComposer.has(question.id),
   ).length;
@@ -172,13 +177,25 @@ export function ThreadQuestionsPanel({
         tabId: CONVERSATION_TAB_ID,
       });
     // A frame later, so a chat tab that was hidden has laid out before its list scrolls.
-    requestAnimationFrame(() => {
-      if (requestQuestionReveal(scopedThreadKey(threadRef), id) === "missing")
-        toastManager.add({
-          type: "info",
-          title: `${id} is not in the loaded part of the chat`,
-          description: "Scroll up to load earlier messages, then try again.",
-        });
+    requestAnimationFrame(() => revealQuestionInChat(scopedThreadKey(threadRef), id));
+  };
+  // In the panel when the filters list it, else in the chat.
+  const revealQuestion = (id: string) => {
+    if (questions.some((question) => question.id === id)) jumpTo(id);
+    else showInChat(id);
+  };
+  // Nothing is sent: the request waits in the composer, after whatever the user already wrote.
+  const requestRefresh = () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(
+      threadRef,
+      withQuestionsRefreshRequest(store.getComposerDraft(threadRef)?.prompt ?? ""),
+    );
+    requestWorkspaceFocus({ area: "composer" });
+    toastManager.add({
+      type: "success",
+      title: "Refresh request in the composer",
+      description: "Send it when you are ready.",
     });
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -293,6 +310,11 @@ export function ThreadQuestionsPanel({
                               <span className="min-w-0 flex-1 truncate">
                                 {threadQuestionTitle(question.prompt)}
                               </span>
+                              {question.state === "replaced" && question.replacedBy !== null ? (
+                                <span className="shrink-0 text-xs">
+                                  Replaced by {question.replacedBy}
+                                </span>
+                              ) : null}
                             </button>
                           </li>
                         ))}
@@ -328,6 +350,8 @@ export function ThreadQuestionsPanel({
                           <ThreadQuestionCard
                             question={question}
                             threadRef={threadRef}
+                            replaces={threadQuestionReplaced(allQuestions, question.id)}
+                            onReveal={revealQuestion}
                             actions={
                               <Button
                                 size="xs"
@@ -354,6 +378,23 @@ export function ThreadQuestionsPanel({
           <Kbd>J</Kbd>
           <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> defer
         </p>
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex" />}>
+            <Button
+              size="sm"
+              variant="contrast-outline"
+              disabled={!canAct || openCount === 0}
+              onClick={requestRefresh}
+            >
+              Refresh questions
+            </Button>
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-72">
+            {openCount === 0
+              ? "No open questions to review."
+              : "Ask the agent to withdraw stale questions and replace outdated ones. It goes in your composer; nothing is sent until you send it."}
+          </TooltipPopup>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger render={<span className="inline-flex" />}>
             <Button

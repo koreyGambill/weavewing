@@ -34,10 +34,20 @@ const STATUS: Record<
     variant: "info-outline",
     help: "In your composer. It goes with your next message.",
   },
+  "comment-in-composer": {
+    label: "Comment in composer",
+    variant: "info-outline",
+    help: "Your note is in your composer as a comment. It goes with your next message; the question stays open.",
+  },
   sent: {
     label: "Sent · waiting for the agent",
     variant: "warning-outline",
     help: "Sent. The agent has not started the turn that carries it.",
+  },
+  discussing: {
+    label: "Discussing",
+    variant: "info-outline",
+    help: "You sent a comment on this. The agent replies in chat and may ask it again as a newer question. You can still answer, comment again or dismiss it here.",
   },
   received: {
     label: "Received by the agent",

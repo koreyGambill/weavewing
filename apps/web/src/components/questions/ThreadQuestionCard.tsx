@@ -29,7 +29,7 @@ import {
   useQuestionsInComposer,
 } from "./questionComposer";
 import { questionDraftWriter, type QuestionDraft } from "./questionDraftWriter";
-import { requestQuestionReveal, threadQuestionElementId } from "./questionReveal";
+import { revealQuestionInChat, threadQuestionElementId } from "./questionReveal";
 
 const NOTE_SAVE_DELAY_MS = 600;
 
@@ -81,12 +81,18 @@ export function ThreadQuestionCard({
   threadRef,
   actions,
   inTimeline = false,
+  replaces = null,
+  onReveal,
 }: {
   readonly question: ThreadQuestion;
   readonly threadRef: ScopedThreadRef;
   /** Extra header controls, such as the panel's Show in chat. */
   readonly actions?: ReactNode;
   readonly inTimeline?: boolean;
+  /** The question this one replaced, linked from its header. */
+  readonly replaces?: string | null;
+  /** Shows another question's card; the chat's by default. */
+  readonly onReveal?: (questionId: string) => void;
 }) {
   const canAct = useAtomValue(threadQuestionDraft.permissionAtom(threadRef.environmentId));
   const saveDraft = useSaveQuestionDraft(threadRef);
@@ -101,7 +107,7 @@ export function ThreadQuestionCard({
   const [descriptionsCollapsed, setDescriptionsCollapsed] = useState(false);
   const chosenOptionIds = pendingChoice ?? question.answer?.chosenOptionIds ?? [];
   const notes = pendingNotes ?? question.answer?.notes ?? "";
-  const status = threadQuestionStatus(question, inComposer === "answer");
+  const status = threadQuestionStatus(question, inComposer);
   const waiting = question.state === "open" || question.state === "deferred";
   const editable = waiting && status !== "sent";
   const usable = canAct && !busy && editable;
@@ -160,16 +166,23 @@ export function ThreadQuestionCard({
       Reopen
     </HelpButton>
   ) : null;
-  const replacementButton =
+  const reveal = onReveal ?? ((id: string) => revealQuestionInChat(scopedThreadKey(threadRef), id));
+  const questionLink = (id: string, label: string, help: string) => (
+    <HelpButton help={help} onClick={() => reveal(id)}>
+      {label}
+    </HelpButton>
+  );
+  // A replaced question links to its replacement where its badge would be, so it says it once.
+  const statusControl =
     question.state === "replaced" && question.replacedBy !== null ? (
-      <Button
-        size="xs"
-        variant="contrast-outline"
-        onClick={() => requestQuestionReveal(scopedThreadKey(threadRef), question.replacedBy!)}
-      >
-        See {question.replacedBy}
-      </Button>
-    ) : null;
+      questionLink(
+        question.replacedBy,
+        `Replaced by ${question.replacedBy}`,
+        `The agent asked this again as ${question.replacedBy}. Show it.`,
+      )
+    ) : (
+      <QuestionStatusBadge status={status} />
+    );
 
   if (closed && !expanded) {
     return (
@@ -203,10 +216,9 @@ export function ThreadQuestionCard({
               {outcome ? <p className="font-semibold">{outcome}</p> : null}
             </TooltipPopup>
           </Tooltip>
-          <QuestionStatusBadge status={status} />
+          {statusControl}
           {actions}
           {reopenButton}
-          {replacementButton}
         </div>
       </section>
     );
@@ -253,7 +265,10 @@ export function ThreadQuestionCard({
           heading
         )}
         {actions}
-        <QuestionStatusBadge status={status} />
+        {replaces === null
+          ? null
+          : questionLink(replaces, `Replaces ${replaces}`, `This replaces ${replaces}. Show it.`)}
+        {statusControl}
         {question.options.some((option) => option.description) ? (
           <Tooltip>
             <TooltipTrigger
@@ -310,12 +325,7 @@ export function ThreadQuestionCard({
               {shown.notes || "No note"}
             </p>
           }
-          actions={
-            <>
-              {reopenButton}
-              {replacementButton}
-            </>
-          }
+          actions={reopenButton}
         />
       ) : (
         <QuestionNoteBox

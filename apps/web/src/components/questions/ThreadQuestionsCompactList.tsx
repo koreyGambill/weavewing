@@ -7,10 +7,9 @@ import { threadQuestionTitle, type ScopedThreadRef, type ThreadQuestion } from "
 import { useState, type KeyboardEvent } from "react";
 
 import { cn } from "~/lib/utils";
-import { toastManager } from "../ui/toast";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
 import { useQuestionsInComposer } from "./questionComposer";
-import { requestQuestionReveal, threadQuestionElementId } from "./questionReveal";
+import { revealQuestionInChat, threadQuestionElementId } from "./questionReveal";
 import { compactListKeyTarget } from "./ThreadQuestionsCompactList.logic";
 
 // Module-level, so React calls it once as the list opens and never refocuses it on a render.
@@ -40,12 +39,7 @@ export function ThreadQuestionsCompactList({
   const reveal = (id: string) => {
     setActiveId(id);
     document.getElementById(optionId(id))?.scrollIntoView({ block: "nearest" });
-    if (requestQuestionReveal(scopedThreadKey(threadRef), id) === "missing")
-      toastManager.add({
-        type: "info",
-        title: `${id} is not in the loaded part of the chat`,
-        description: "Scroll up to load earlier messages, then try again.",
-      });
+    revealQuestionInChat(scopedThreadKey(threadRef), id);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
@@ -95,7 +89,7 @@ export function ThreadQuestionsCompactList({
           </span>
           <span className="min-w-0 flex-1 truncate">{threadQuestionTitle(question.prompt)}</span>
           <QuestionStatusBadge
-            status={threadQuestionStatus(question, inComposer.get(question.id) === "answer")}
+            status={threadQuestionStatus(question, inComposer.get(question.id))}
           />
         </div>
       ))}
