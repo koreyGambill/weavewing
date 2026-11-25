@@ -1,4 +1,5 @@
 import {
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   type MessageId,
   type OrchestrationV2ConversationMessage,
@@ -111,4 +112,64 @@ export function questionDeliveries(
     }
   }
   return deliveries;
+}
+
+/** A comment the user sent on a waiting question; `clearNote` once its turn took the note. */
+export interface QuestionDiscussion {
+  readonly messageId: MessageId;
+  readonly received: boolean;
+  readonly clearNote: boolean;
+}
+
+/**
+ * Where each waiting question's discussion is: the user message carrying a comment on its
+ * current note, or else the message already recorded as discussing it while that message still
+ * carries a comment on it. Only a turn a provider accepted clears the note, and only while the
+ * draft still holds what was sent; a message whose run ended unstarted discusses nothing.
+ */
+export function questionDiscussions(
+  questions: ReadonlyArray<ThreadQuestion>,
+  messages: ReadonlyArray<Message>,
+  runs: ReadonlyArray<Run>,
+  accepted: ReadonlySet<RunId>,
+): ReadonlyMap<string, QuestionDiscussion> {
+  const discussions = new Map<string, QuestionDiscussion>();
+  for (const question of questions) {
+    if (question.state !== "open" && question.state !== "deferred") continue;
+    const answer = question.answer;
+    const commentOf = (message: Message) =>
+      message.role === "user" && message.createdBy === "user"
+        ? message.context?.records.find(
+            (record) =>
+              record.kind === "artifact-answer" &&
+              "artifactId" in record &&
+              record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID &&
+              record.questionId === question.id,
+          )
+        : undefined;
+    const isCurrent = (message: Message) => {
+      const record = commentOf(message);
+      return (
+        answer !== null &&
+        record !== undefined &&
+        "answerRevision" in record &&
+        record.answerRevision === (answer.draftRevision ?? 0) &&
+        record.note === answer.notes &&
+        answer.notes.trim() !== ""
+      );
+    };
+    let found: QuestionDiscussion | undefined;
+    for (const message of messages) {
+      const current = isCurrent(message);
+      if (!current && message.id !== question.discussedInMessageId) continue;
+      if (commentOf(message) === undefined) continue;
+      const reach = messageReach(message, runs, accepted);
+      if (reach === "none") continue;
+      const received = reach === "received";
+      found = { messageId: message.id, received, clearNote: received && current };
+      if (current && received) break;
+    }
+    if (found !== undefined) discussions.set(question.id, found);
+  }
+  return discussions;
 }

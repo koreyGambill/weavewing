@@ -100,6 +100,11 @@ export const ThreadQuestion = Schema.Struct({
    * waits for a turn that has not started; once answered by the user, the agent received it.
    */
   sentInMessageId: Schema.optional(MessageId),
+  /**
+   * The user message carrying the user's latest comment on this question, while that message's
+   * turn is queued or started. Cleared once the user changes the draft or the question's state.
+   */
+  discussedInMessageId: Schema.optional(MessageId),
 });
 export type ThreadQuestion = typeof ThreadQuestion.Type;
 export const ThreadWorkspace = Schema.Struct({

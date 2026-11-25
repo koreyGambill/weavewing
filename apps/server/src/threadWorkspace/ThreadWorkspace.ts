@@ -11,6 +11,7 @@ import {
   parseArtifactQuestions,
   artifactAnswerFits,
   artifactQuestionIsConsistent,
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
   threadQuestionTitle,
   type ArtifactAnswerContextRecord,
@@ -53,7 +54,12 @@ import {
   sanitizeComposerContextLabel,
 } from "@t3tools/shared/composerContextReferences";
 import { migrateAnnotations } from "./ThreadMarks.ts";
-import { questionDeliveries, runsWithProviderTurn } from "./questionDelivery.ts";
+import {
+  questionDeliveries,
+  questionDiscussions,
+  runsWithProviderTurn,
+  type QuestionDiscussion,
+} from "./questionDelivery.ts";
 import * as Stream from "effect/Stream";
 
 export class ThreadWorkspace extends Context.Service<
@@ -291,6 +297,23 @@ const make = Effect.gen(function* () {
         ),
       );
   });
+  // A sent comment takes the note it carried once its turn starts; a chosen option stays a draft.
+  const discussedAs = (
+    question: ThreadQuestion,
+    discussion: QuestionDiscussion | undefined,
+  ): ThreadQuestion => {
+    const { discussedInMessageId: previous, ...rest } = question;
+    if (discussion === undefined) return previous === undefined ? question : rest;
+    if (previous === discussion.messageId && !discussion.clearNote) return question;
+    return {
+      ...rest,
+      discussedInMessageId: discussion.messageId,
+      answer:
+        discussion.clearNote && question.answer
+          ? { ...question.answer, notes: "" }
+          : question.answer,
+    };
+  };
   // Answers ride ordinary user messages, so where each one went is read from the thread itself.
   // Written without a new revision: nothing the user or agent wrote changed.
   // A draft save reads too, so only a full read looks for messages carrying unsent drafts.
@@ -303,6 +326,7 @@ const make = Effect.gen(function* () {
         (question) =>
           isWaiting(question) &&
           (question.sentInMessageId !== undefined ||
+            question.discussedInMessageId !== undefined ||
             (scan === "drafts" &&
               question.answer !== null &&
               (question.answer.chosenOptionIds.length > 0 || question.answer.notes.trim()))),
@@ -314,16 +338,25 @@ const make = Effect.gen(function* () {
         messageRoles: ["user"],
       })
       .pipe(Effect.mapError(storage));
+    const accepted = runsWithProviderTurn(records.attempts, records.providerTurns);
     const deliveries = questionDeliveries(
       workspace.questions,
       records.messages,
       records.runs,
-      runsWithProviderTurn(records.attempts, records.providerTurns),
+      accepted,
+    );
+    const discussions = questionDiscussions(
+      workspace.questions,
+      records.messages,
+      records.runs,
+      accepted,
     );
     const now = DateTime.formatIso(yield* DateTime.now);
     let changed = false;
-    const questions = workspace.questions.map((question): ThreadQuestion => {
-      if (!isWaiting(question)) return question;
+    const questions = workspace.questions.map((waiting): ThreadQuestion => {
+      if (!isWaiting(waiting)) return waiting;
+      const question = discussedAs(waiting, discussions.get(waiting.id));
+      if (question !== waiting) changed = true;
       const delivery = deliveries.get(question.id);
       if (delivery?.received && question.answer) {
         changed = true;
@@ -992,9 +1025,14 @@ const make = Effect.gen(function* () {
           break;
         }
       }
-      const { userChangedAt: _reported, ...changed } = next;
+      const { userChangedAt: _reported, discussedInMessageId: discussed, ...changed } = next;
       const questions = [...current.questions];
-      questions[index] = by === "user" ? { ...changed, userChangedAt: now } : changed;
+      // The user's own change, or a reopening, ends a discussion.
+      const kept =
+        by === "user" || input.state === "open" || discussed === undefined
+          ? changed
+          : { ...changed, discussedInMessageId: discussed };
+      questions[index] = by === "user" ? { ...kept, userChangedAt: now } : kept;
       return yield* commitQuestions(current, questions);
     }, lock.withPermit),
     questionDraft: Effect.fn("ThreadWorkspace.questionDraft")(function* (input) {
@@ -1011,8 +1049,10 @@ const make = Effect.gen(function* () {
           );
         if (!artifactAnswerFits(question, answer.chosenOptionIds))
           return yield* invalid(`Answer choices must be options of ${id}.`);
+        // A new draft ends the discussion it followed.
+        const { discussedInMessageId: _discussed, ...rest } = question;
         questions[index] = {
-          ...question,
+          ...rest,
           answer: { ...answer, submittedAt: null, draftRevision: current.revision + 1 },
         };
       }
@@ -1063,13 +1103,15 @@ const make = Effect.gen(function* () {
             (record) =>
               record.kind === "artifact-answer" &&
               "artifactId" in record &&
-              record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID,
+              (record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID ||
+                record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID),
           ) ??
             false);
         if (!carriesAnswer) {
-          // A start, cancel or edit only matters to an answer already sent.
+          // A start, cancel or edit only matters to an answer or comment already sent, which
+          // only a waiting question can have.
           const { thread } = yield* orchestrator.getThreadRecords(event.threadId, []);
-          if (!(thread.questions ?? []).some((question) => question.sent)) return;
+          if (!(thread.questions ?? []).some((question) => question.state !== "withdrawn")) return;
         }
         yield* read(event.threadId, "drafts").pipe(lock.withPermit);
       }).pipe(

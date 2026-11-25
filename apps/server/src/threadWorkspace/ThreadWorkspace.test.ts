@@ -1028,15 +1028,117 @@ it.effect("keeps a question waiting and counted when a message only discusses it
     h.threadRuns.push(threadRun("r1", "m1", "queued"));
     const queued = yield* h.service.get({ threadId });
     expect(queued.questions[0]).not.toHaveProperty("sentInMessageId");
+    expect(queued.questions[0]).toMatchObject({
+      discussedInMessageId: "m1",
+      answer: { notes: "Would it survive two writers?" },
+    });
     expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
+    // Running but not yet accepted by a provider: the note stays.
     h.threadRuns[0] = threadRun("r1", "m1", "running");
+    expect((yield* h.service.get({ threadId })).questions[0]?.answer?.notes).toBe(
+      "Would it survive two writers?",
+    );
+    // Accepted: the comment has gone, so its note clears; the chosen option stays a draft.
+    h.acceptTurn("r1");
     const started = yield* h.service.get({ threadId });
     expect(started.questions[0]).toMatchObject({
       state: "open",
       answeredBy: null,
-      answer: { chosenOptionIds: ["pg"], submittedAt: null },
+      discussedInMessageId: "m1",
+      answer: { chosenOptionIds: ["pg"], notes: "", submittedAt: null },
     });
+    expect((yield* h.service.get({ threadId })).questions[0]).toEqual(started.questions[0]);
     expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
+    // A new draft ends the discussion, and the old comment never restarts it.
+    const redrafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "" } },
+    });
+    expect(redrafted.questions[0]).not.toHaveProperty("discussedInMessageId");
+    expect((yield* h.service.get({ threadId })).questions[0]).not.toHaveProperty(
+      "discussedInMessageId",
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("keeps a comment's note until its turn starts, and never one edited since", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Flag name?" }] });
+    const comment = (id: string, revision: number, note: string) =>
+      userMessage(id, [
+        answerRecord("Q1", revision, "", note, THREAD_QUESTION_COMMENTS_ARTIFACT_ID),
+      ]);
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "Why not cache-v1?" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    // Cancelled before it started: no discussion, the note is intact.
+    h.messages.push(comment("m1", revision, "Why not cache-v1?"));
+    h.threadRuns.push(threadRun("r1", "m1", "queued"));
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      discussedInMessageId: "m1",
+    });
+    h.threadRuns[0] = threadRun("r1", "m1", "cancelled", { startedAt: null });
+    const cancelled = yield* h.service.get({ threadId });
+    expect(cancelled.questions[0]).not.toHaveProperty("discussedInMessageId");
+    expect(cancelled.questions[0]?.answer?.notes).toBe("Why not cache-v1?");
+    // Sent again and edited in the queue: it still discusses the question.
+    h.messages.push(comment("m2", revision, "Why not cache-v1?"));
+    h.threadRuns.push(threadRun("r2", "m2", "queued"));
+    yield* h.service.get({ threadId });
+    h.messages[1] = comment("m2", revision, "Why not cache-v1, really?");
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      discussedInMessageId: "m2",
+    });
+    // Accepted, but the queued text no longer matches the note: the note stays.
+    h.threadRuns[1] = threadRun("r2", "m2", "running");
+    h.acceptTurn("r2");
+    const received = yield* h.service.get({ threadId });
+    expect(received.questions[0]).toMatchObject({
+      discussedInMessageId: "m2",
+      answer: { notes: "Why not cache-v1?" },
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("ends a discussion when the user defers it and when the agent replaces it", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Flag name?" }] });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "Why?" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(
+      userMessage("m1", [
+        answerRecord("Q1", revision, "", "Why?", THREAD_QUESTION_COMMENTS_ARTIFACT_ID),
+      ]),
+    );
+    h.threadRuns.push(threadRun("r1", "m1", "running"));
+    h.acceptTurn("r1");
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      discussedInMessageId: "m1",
+      answer: { notes: "" },
+    });
+    const deferred = yield* h.service.questionUpdate(
+      { threadId, id: "Q1", state: "deferred" },
+      "user",
+    );
+    expect(deferred.questions[0]).not.toHaveProperty("discussedInMessageId");
+    expect((yield* h.service.get({ threadId })).questions[0]).not.toHaveProperty(
+      "discussedInMessageId",
+    );
+    const replaced = yield* h.service.questionAsk({
+      threadId,
+      questions: [{ prompt: "Flag name, given the cache split?", replaces: "Q1" }],
+    });
+    expect(replaced.questions.map((question) => [question.id, question.state])).toEqual([
+      ["Q1", "replaced"],
+      ["Q2", "open"],
+    ]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 

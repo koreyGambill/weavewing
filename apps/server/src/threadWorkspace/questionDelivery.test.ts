@@ -11,7 +11,11 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { questionDeliveries, runsWithProviderTurn } from "./questionDelivery.ts";
+import {
+  questionDeliveries,
+  questionDiscussions,
+  runsWithProviderTurn,
+} from "./questionDelivery.ts";
 
 const question = (id: string, extra: Partial<ThreadQuestion> = {}): ThreadQuestion => ({
   id,
@@ -193,5 +197,112 @@ describe("questionDeliveries", () => {
         [run("r1", "m1", "queued")],
       ),
     ).toEqual({});
+  });
+});
+
+describe("questionDiscussions", () => {
+  const comment = (questionId: string, answerRevision = 3, note = "yes") => ({
+    ...record(questionId, answerRevision, THREAD_QUESTION_COMMENTS_ARTIFACT_ID),
+    note,
+  });
+  const discussed = (
+    questions: ReadonlyArray<ThreadQuestion>,
+    messages: ReadonlyArray<ReturnType<typeof message>>,
+    runs: ReadonlyArray<ReturnType<typeof run>>,
+  ) =>
+    Object.fromEntries(
+      [
+        ...questionDiscussions(
+          questions,
+          messages,
+          runs,
+          new Set(runs.filter((entry) => entry.accepted).map((entry) => entry.id)),
+        ),
+      ].map(([id, entry]) => [
+        id,
+        `${entry.messageId}:${entry.received ? "received" : "sent"}${entry.clearNote ? ":clear" : ""}`,
+      ]),
+    );
+
+  it("discusses a question once its current note is sent, and clears the note once received", () => {
+    const m1 = message("m1", [comment("Q1")]);
+    expect(discussed([question("Q1")], [m1], [run("r1", "m1", "queued")])).toEqual({
+      Q1: "m1:sent",
+    });
+    expect(
+      discussed([question("Q1")], [m1], [run("r1", "m1", "running", { accepted: true })]),
+    ).toEqual({ Q1: "m1:received:clear" });
+  });
+
+  it("ends when the comment's turn ends before a provider accepted it", () => {
+    const m1 = message("m1", [comment("Q1")]);
+    for (const status of ["cancelled", "failed", "rolled_back"] as const)
+      expect(discussed([question("Q1")], [m1], [run("r1", "m1", status)])).toEqual({});
+    expect(
+      discussed(
+        [question("Q1", { discussedInMessageId: MessageId.make("m1") })],
+        [m1],
+        [run("r1", "m1", "cancelled")],
+      ),
+    ).toEqual({});
+  });
+
+  it("keeps a discussion the queued message no longer matches, without clearing the note", () => {
+    // The user edited the note after sending: the sent comment still counts, the new note stays.
+    const edited = question("Q1", {
+      discussedInMessageId: MessageId.make("m1"),
+      answer: { chosenOptionIds: [], notes: "changed", submittedAt: null, draftRevision: 3 },
+    });
+    expect(
+      discussed(
+        [edited],
+        [message("m1", [comment("Q1")])],
+        [run("r1", "m1", "running", { accepted: true })],
+      ),
+    ).toEqual({ Q1: "m1:received" });
+    // The queued message itself was edited to say something else.
+    expect(
+      discussed(
+        [question("Q1", { discussedInMessageId: MessageId.make("m1") })],
+        [message("m1", [comment("Q1", 3, "other words")])],
+        [run("r1", "m1", "queued")],
+      ),
+    ).toEqual({ Q1: "m1:sent" });
+  });
+
+  it("drops a discussion whose message was edited to carry no comment on the question", () => {
+    expect(
+      discussed(
+        [question("Q1", { discussedInMessageId: MessageId.make("m1") })],
+        [message("m1", [comment("Q2")])],
+        [run("r1", "m1", "queued")],
+      ),
+    ).toEqual({});
+  });
+
+  it("keeps a received discussion after its note was cleared, without clearing again", () => {
+    const cleared = question("Q1", {
+      discussedInMessageId: MessageId.make("m1"),
+      answer: { chosenOptionIds: ["a"], notes: "", submittedAt: null, draftRevision: 3 },
+    });
+    expect(
+      discussed(
+        [cleared],
+        [message("m1", [comment("Q1")])],
+        [run("r1", "m1", "completed", { accepted: true })],
+      ),
+    ).toEqual({ Q1: "m1:received" });
+  });
+
+  it("ignores comments on an older draft, answers, closed questions and agent messages", () => {
+    const runs = [run("r1", "m1", "queued")];
+    expect(discussed([question("Q1")], [message("m1", [comment("Q1", 2)])], runs)).toEqual({});
+    expect(discussed([question("Q1")], [message("m1", [record("Q1")])], runs)).toEqual({});
+    expect(
+      discussed([question("Q1", { state: "replaced" })], [message("m1", [comment("Q1")])], runs),
+    ).toEqual({});
+    expect(discussed([question("Q1")], [message("m1", [comment("Q1")], "agent")], runs)).toEqual(
+      {},
+    );
   });
 });
