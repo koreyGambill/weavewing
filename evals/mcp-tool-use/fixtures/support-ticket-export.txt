@@ -1,0 +1,1500 @@
+KEY: SUP-1001
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with password reset: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 2.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1002
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with email digest: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 3.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1003
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with CSV export: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 4.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1004
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with avatar upload: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 5.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1005
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with dark mode: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 6.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1006
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with search ranking: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 7.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1007
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with webhook retry: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 8.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1008
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with SSO login: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 9.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1009
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with mobile push: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 1.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1010
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 2.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1011
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with password reset: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 3.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1012
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with email digest: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 4.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1013
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with CSV export: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 5.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1014
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with avatar upload: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 6.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1015
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with dark mode: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 7.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1016
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with search ranking: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 8.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1017
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with webhook retry: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 9.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1018
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with SSO login: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 1.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1019
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with mobile push: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 2.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1020
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 3.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1021
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with password reset: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 4.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1022
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with email digest: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 5.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1023
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with CSV export: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 6.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1024
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 7.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1025
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with dark mode: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 8.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1026
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with search ranking: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 9.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1027
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 1.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1028
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with SSO login: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 2.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1029
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with mobile push: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 3.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1030
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 4.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1031
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with password reset: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 5.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1032
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with email digest: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 6.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1033
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with CSV export: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 7.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1034
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with avatar upload: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 8.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1035
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with dark mode: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 9.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1036
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with search ranking: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 1.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1037
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with webhook retry: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 2.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1038
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with SSO login: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 3.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1039
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with mobile push: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 4.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1040
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 5.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1041
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with password reset: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 6.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1042
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with email digest: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 7.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1043
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with CSV export: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 8.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1044
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with avatar upload: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 9.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1045
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with dark mode: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 1.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1046
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with search ranking: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 2.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1047
+OWNER: Imani Okafor
+STATUS: open
+BODY: Cart payment step takes 9s since Tuesday's deploy. Root cause: the tax service client lost its connection pool and opens a new TLS session per call.
+
+KEY: SUP-1048
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with SSO login: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 4.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1049
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with mobile push: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 5.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1050
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 6.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1051
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with password reset: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 7.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1052
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with email digest: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 8.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1053
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with CSV export: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 9.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1054
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 1.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1055
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with dark mode: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 2.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1056
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with search ranking: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 3.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1057
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 4.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1058
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with SSO login: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 5.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1059
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with mobile push: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 6.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1060
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 7.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1061
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with password reset: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 8.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1062
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with email digest: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 9.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1063
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with CSV export: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 1.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1064
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with avatar upload: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 2.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1065
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with dark mode: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 3.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1066
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with search ranking: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 4.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1067
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with webhook retry: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 5.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1068
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with SSO login: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 6.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1069
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with mobile push: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 7.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1070
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 8.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1071
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with password reset: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 9.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1072
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with email digest: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 1.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1073
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with CSV export: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 2.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1074
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with avatar upload: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 3.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1075
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with dark mode: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 4.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1076
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with search ranking: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 5.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1077
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with webhook retry: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 6.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1078
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with SSO login: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 7.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1079
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with mobile push: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 8.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1080
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 9.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1081
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with password reset: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 1.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1082
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with email digest: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 2.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1083
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with CSV export: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 3.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1084
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 4.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1085
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with dark mode: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 5.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1086
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with search ranking: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 6.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1087
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 7.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1088
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with SSO login: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 8.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1089
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with mobile push: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 9.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1090
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 1.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1091
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with password reset: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 2.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1092
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with email digest: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 3.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1093
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with CSV export: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 4.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1094
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with avatar upload: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 5.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1095
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with dark mode: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 6.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1096
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with search ranking: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 7.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1097
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with webhook retry: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 8.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1098
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with SSO login: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 9.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1099
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with mobile push: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 1.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1100
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 2.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1101
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with password reset: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 3.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1102
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with email digest: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 4.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1103
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with CSV export: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 5.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1104
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with avatar upload: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 6.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1105
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with dark mode: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 7.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1106
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with search ranking: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 8.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1107
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with webhook retry: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 9.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1108
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with SSO login: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 1.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1109
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with mobile push: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 2.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1110
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 3.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1111
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with password reset: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 4.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1112
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with email digest: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 5.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1113
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with CSV export: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 6.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1114
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 7.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1115
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with dark mode: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 8.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1116
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with search ranking: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 9.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1117
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 1.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1118
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with SSO login: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 2.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1119
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with mobile push: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 3.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1120
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 4.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1121
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with password reset: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 5.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1122
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with email digest: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 6.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1123
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with CSV export: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 7.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1124
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with avatar upload: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 8.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1125
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with dark mode: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 9.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1126
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with search ranking: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 1.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1127
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with webhook retry: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 2.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1128
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with SSO login: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 3.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1129
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with mobile push: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 4.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1130
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 5.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1131
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with password reset: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 6.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1132
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with email digest: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 7.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1133
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with CSV export: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 8.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1134
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with avatar upload: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 9.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1135
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with dark mode: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 1.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1136
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with search ranking: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 2.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1137
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with webhook retry: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 3.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1138
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with SSO login: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 4.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1139
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with mobile push: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 5.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1140
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 6.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1141
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with password reset: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 7.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1142
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with email digest: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 8.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1143
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with CSV export: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 9.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1144
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 1.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1145
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with dark mode: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 2.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1146
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with search ranking: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 3.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1147
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 4.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1148
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with SSO login: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 5.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1149
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with mobile push: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 6.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1150
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 7.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1151
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with password reset: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 8.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1152
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with email digest: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 9.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1153
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with CSV export: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 1.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1154
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with avatar upload: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 2.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1155
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with dark mode: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 3.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1156
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with search ranking: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 4.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1157
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with webhook retry: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 5.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1158
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with SSO login: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 6.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1159
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with mobile push: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 7.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1160
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 8.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1161
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with password reset: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 9.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1162
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with email digest: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 1.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1163
+OWNER: Tomas Lindqvist
+STATUS: open
+BODY: Customers report the pay button spinning. Root cause: a missing index on order_items(sku_id) after the schema migration makes the stock check scan the table.
+
+KEY: SUP-1164
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with avatar upload: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 3.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1165
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with dark mode: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 4.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1166
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with search ranking: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 5.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1167
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with webhook retry: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 6.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1168
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with SSO login: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 7.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1169
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with mobile push: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 8.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1170
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 9.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1171
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with password reset: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 1.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1172
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with email digest: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 2.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1173
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with CSV export: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 3.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1174
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 4.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1175
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with dark mode: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 5.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1176
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with search ranking: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 6.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1177
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 7.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1178
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with SSO login: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 8.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1179
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with mobile push: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 9.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1180
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 1.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1181
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with password reset: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 2.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1182
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with email digest: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 3.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1183
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with CSV export: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 4.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1184
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with avatar upload: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 5.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1185
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with dark mode: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 6.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1186
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with search ranking: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 7.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1187
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with webhook retry: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 8.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1188
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with SSO login: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 9.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1189
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with mobile push: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 1.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1190
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 2.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1191
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with password reset: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 3.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1192
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with email digest: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 4.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1193
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with CSV export: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 5.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1194
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with avatar upload: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 6.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1195
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with dark mode: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 7.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1196
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with search ranking: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 8.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1197
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with webhook retry: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 9.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1198
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with SSO login: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 1.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1199
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with mobile push: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 2.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1200
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 3.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1201
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with password reset: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 4.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1202
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with email digest: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 5.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1203
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with CSV export: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 6.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1204
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 7.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1205
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with dark mode: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 8.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1206
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with search ranking: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 9.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1207
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 1.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1208
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with SSO login: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 2.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1209
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with mobile push: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 3.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1210
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 4.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1211
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with password reset: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 5.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1212
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with email digest: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 6.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1213
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with CSV export: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 7.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1214
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with avatar upload: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 8.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1215
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with dark mode: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 9.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1216
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with search ranking: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 1.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1217
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with webhook retry: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 2.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1218
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with SSO login: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 3.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1219
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with mobile push: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 4.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1220
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 5.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1221
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with password reset: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 6.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1222
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with email digest: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 7.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1223
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with CSV export: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 8.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1224
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with avatar upload: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 9.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1225
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with dark mode: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 1.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1226
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with search ranking: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 2.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1227
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with webhook retry: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 3.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1228
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with SSO login: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 4.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1229
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with mobile push: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 5.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1230
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 6.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1231
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with password reset: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 7.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1232
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with email digest: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 8.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1233
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with CSV export: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 9.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1234
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 1.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1235
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with dark mode: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 2.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1236
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with search ranking: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 3.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1237
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 4.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1238
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with SSO login: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 5.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1239
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with mobile push: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 6.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1240
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 7.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1241
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with password reset: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 8.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1242
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with email digest: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 9.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1243
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with CSV export: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 1.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1244
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with avatar upload: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 2.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1245
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with dark mode: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 3.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1246
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with search ranking: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 4.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1247
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with webhook retry: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 5.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1248
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with SSO login: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 6.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1249
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with mobile push: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 7.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1250
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 8.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1251
+OWNER: Rehana Siddiqui
+STATUS: open
+BODY: Slow order confirmation in the EU region. Root cause: the fraud scoring call was moved from async to inline and its p99 is 4s.
+
+KEY: SUP-1252
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with email digest: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 1.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1253
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with CSV export: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 2.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1254
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with avatar upload: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 3.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1255
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with dark mode: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 4.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1256
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with search ranking: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 5.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1257
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with webhook retry: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 6.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1258
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with SSO login: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 7.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1259
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with mobile push: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 8.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1260
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 9.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1261
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with password reset: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 1.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1262
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with email digest: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 2.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1263
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with CSV export: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 3.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1264
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 4.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1265
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with dark mode: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 5.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1266
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with search ranking: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 6.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1267
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 7.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1268
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with SSO login: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 8.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1269
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with mobile push: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 9.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1270
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 1.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1271
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with password reset: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 2.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1272
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with email digest: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 3.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1273
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with CSV export: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 4.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1274
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with avatar upload: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 5.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1275
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with dark mode: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 6.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1276
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with search ranking: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 7.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1277
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with webhook retry: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 8.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1278
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with SSO login: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 9.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1279
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with mobile push: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 1.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1280
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 2.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1281
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with password reset: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 3.1 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1282
+OWNER: D. Petrov
+STATUS: closed
+BODY: User reports a problem with email digest: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 4.2 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1283
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with CSV export: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 5.3 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1284
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with avatar upload: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 6.4 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1285
+OWNER: G. Oyelaran
+STATUS: closed
+BODY: User reports a problem with dark mode: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 7.5 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1286
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with search ranking: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 8.6 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1287
+OWNER: A. Brandt
+STATUS: open
+BODY: User reports a problem with webhook retry: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 9.7 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1288
+OWNER: C. Mwangi
+STATUS: closed
+BODY: User reports a problem with SSO login: step 1 of the flow shows the wrong state after a refresh, and the workaround from release 1.8 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1289
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with mobile push: step 8 of the flow shows the wrong state after a refresh, and the workaround from release 2.9 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1290
+OWNER: E. Nakamura
+STATUS: open
+BODY: User reports a problem with invoice PDF: step 2 of the flow shows the wrong state after a refresh, and the workaround from release 3.10 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+
+KEY: SUP-1291
+OWNER: F. Alvarez
+STATUS: closed
+BODY: User reports a problem with password reset: step 9 of the flow shows the wrong state after a refresh, and the workaround from release 4.11 no longer applies. Needs triage by the password reset team; no customer deadline.
+
+KEY: SUP-1292
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with email digest: step 3 of the flow shows the wrong state after a refresh, and the workaround from release 5.12 no longer applies. Needs triage by the email digest team; no customer deadline.
+
+KEY: SUP-1293
+OWNER: H. Castell
+STATUS: open
+BODY: User reports a problem with CSV export: step 10 of the flow shows the wrong state after a refresh, and the workaround from release 6.13 no longer applies. Needs triage by the CSV export team; no customer deadline.
+
+KEY: SUP-1294
+OWNER: A. Brandt
+STATUS: closed
+BODY: User reports a problem with avatar upload: step 4 of the flow shows the wrong state after a refresh, and the workaround from release 7.14 no longer applies. Needs triage by the avatar upload team; no customer deadline.
+
+KEY: SUP-1295
+OWNER: C. Mwangi
+STATUS: open
+BODY: User reports a problem with dark mode: step 11 of the flow shows the wrong state after a refresh, and the workaround from release 8.15 no longer applies. Needs triage by the dark mode team; no customer deadline.
+
+KEY: SUP-1296
+OWNER: D. Petrov
+STATUS: open
+BODY: User reports a problem with search ranking: step 5 of the flow shows the wrong state after a refresh, and the workaround from release 9.16 no longer applies. Needs triage by the search ranking team; no customer deadline.
+
+KEY: SUP-1297
+OWNER: E. Nakamura
+STATUS: closed
+BODY: User reports a problem with webhook retry: step 12 of the flow shows the wrong state after a refresh, and the workaround from release 1.17 no longer applies. Needs triage by the webhook retry team; no customer deadline.
+
+KEY: SUP-1298
+OWNER: F. Alvarez
+STATUS: open
+BODY: User reports a problem with SSO login: step 6 of the flow shows the wrong state after a refresh, and the workaround from release 2.18 no longer applies. Needs triage by the SSO login team; no customer deadline.
+
+KEY: SUP-1299
+OWNER: G. Oyelaran
+STATUS: open
+BODY: User reports a problem with mobile push: step 0 of the flow shows the wrong state after a refresh, and the workaround from release 3.19 no longer applies. Needs triage by the mobile push team; no customer deadline.
+
+KEY: SUP-1300
+OWNER: H. Castell
+STATUS: closed
+BODY: User reports a problem with invoice PDF: step 7 of the flow shows the wrong state after a refresh, and the workaround from release 4.0 no longer applies. Needs triage by the invoice PDF team; no customer deadline.
+

@@ -70,6 +70,10 @@ import {
 } from "../../apps/server/src/mcp/toolkits/questions/tools.ts";
 import { t3OpenQuestionsContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
+import {
+  CONTEXT_REWIND_TOOL_NAMES,
+  ContextRewindToolkit,
+} from "../../apps/server/src/mcp/toolkits/contextRewind/tools.ts";
 import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
 import { TerminalToolkit } from "../../apps/server/src/mcp/toolkits/terminal/tools.ts";
@@ -341,6 +345,8 @@ export const McpToolUseCase = Schema.Struct({
     harness: Schema.optional(Schema.Literals(["claude", "codex"])),
     /** The Linked environments beta is on, so T3 lists its link tools. */
     linkedEnvironments: Schema.optional(Schema.Boolean),
+    /** The Claude context rewind setting is on, so T3 lists context_rewind. */
+    contextRewind: Schema.optional(Schema.Boolean),
     /**
      * The Agent questions beta is on: T3 lists the question tools, adds their text, and puts these
      * open and deferred questions ahead of the user's `prompt`.
@@ -372,8 +378,8 @@ export const McpToolUseCase = Schema.Struct({
     /**
      * Canned tool results by bare name, T3 or native. `"default"` uses the runner's result. For a
      * device tool, a T3 `DeviceError` (`{"_tag": ..., "cause": null}`) fails it inside T3; for a
-     * preview tool, a `PreviewAutomationError` fails it with that error's message. A
-     * `{"$sequence": [...]}` mock answers its nth call with the nth result, then repeats the last.
+     * preview tool, a `PreviewAutomationError` fails it with that error's message. See the README
+     * for `{"$sequence": [...]}` and `{"$file": "<repository-relative path>"}` mocks.
      */
     mocks: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
     /** Regexes on one part of a shell command. A match wins over the shell simulator. */
@@ -531,6 +537,7 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   ReviewToolkit,
   MessageToolkit,
   QuestionToolkit,
+  ContextRewindToolkit,
 ].flatMap((toolkit): ReadonlyArray<Tool.Any> => Object.values(toolkit.tools));
 // McpHttpServer decodes arguments with each tool's JSON codec, which drops undeclared keys.
 const t3InputDecoders = new Map(
@@ -587,17 +594,21 @@ const hiddenFromSubagents = enabledWhen(McpInvocationContext.hiddenFromSubagents
 // The Linked environments beta starts off, and T3 lists its tools only while it is on.
 const hiddenWhileLinksOff = enabledWhen(McpInvocationContext.hiddenWhileLinksOff);
 // T3 lists the question tools only to sessions the Agent questions setting grants them.
+// T3 lists context_rewind only to Claude sessions whose provider setting turns it on.
 const visibleT3Tools = (options: {
   readonly subagent?: boolean;
   readonly links?: boolean;
   readonly questionTools?: boolean;
+  readonly contextRewind?: boolean;
 }) =>
   t3Tools.filter(
     (tool) =>
       (options.links === true || !hiddenWhileLinksOff.has(tool.name)) &&
       !(options.subagent === true && hiddenFromSubagents.has(tool.name)) &&
       (options.questionTools === true ||
-        !QUESTION_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))),
+        !QUESTION_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))) &&
+      (options.contextRewind === true ||
+        !CONTEXT_REWIND_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))),
   );
 
 /**
@@ -717,6 +728,8 @@ export const buildBase = (
     readonly browserAccess?: boolean;
     /** The Agent questions setting is on: T3 lists the question tools and adds their text. */
     readonly questionTools?: boolean;
+    /** The Claude context rewind setting is on: T3 lists context_rewind. */
+    readonly contextRewind?: boolean;
   },
 ) => {
   const t3 = visibleT3Tools(options);
@@ -2983,11 +2996,25 @@ const main = Effect.gen(function* () {
           return { ...turn, toolCalls };
         }),
       );
+      const mocks = testCase.setup.mocks;
+      const loadedMocks =
+        mocks === undefined
+          ? undefined
+          : Object.fromEntries(
+              yield* Effect.forEach(Object.entries(mocks), ([tool, mock]) =>
+                isRecord(mock) && typeof mock.$file === "string"
+                  ? fs
+                      .readFileString(path.resolve(import.meta.dirname, "../..", mock.$file))
+                      .pipe(Effect.map((text) => [tool, text] as const))
+                  : Effect.succeed([tool, mock] as const),
+              ),
+            );
       return {
         ...testCase,
         setup: {
           ...testCase.setup,
           priorTurns,
+          ...(loadedMocks === undefined ? {} : { mocks: loadedMocks }),
         },
       };
     }),
@@ -3008,6 +3035,7 @@ const main = Effect.gen(function* () {
     browserAccess: boolean,
     links: boolean,
     questionTools: boolean,
+    contextRewind: boolean,
   ): Effect.Effect<Base, Schema.SchemaError> =>
     codex
       ? decodeCodexCapture(template).pipe(
@@ -3035,6 +3063,7 @@ const main = Effect.gen(function* () {
               deviceAccess,
               browserAccess,
               questionTools,
+              contextRewind,
             });
             return role === "native-subagent"
               ? Effect.promise(() =>
@@ -3045,14 +3074,15 @@ const main = Effect.gen(function* () {
         );
   // Codex has no native subagents; its cases with that role run as top-level threads.
   const baseKey = ({ setup }: McpToolUseCase) =>
-    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.world?.browserAgentAccess !== false}:${setup.linkedEnvironments === true}:${setup.questions !== undefined}`;
-  const base = yield* buildFor("top", true, true, false, false);
-  const bases = new Map<string, Base>([["top:true:true:false:false", base]]);
+    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.world?.browserAgentAccess !== false}:${setup.linkedEnvironments === true}:${setup.questions !== undefined}:${setup.contextRewind === true}`;
+  const base = yield* buildFor("top", true, true, false, false, false);
+  const bases = new Map<string, Base>([["top:true:true:false:false:false", base]]);
   for (const testCase of selected) {
     const key = baseKey(testCase);
     if (bases.has(key)) continue;
-    const [role = "top", device, browser, links, questions] = key.split(":") as [
+    const [role = "top", device, browser, links, questions, contextRewind] = key.split(":") as [
       McpToolUseCase["setup"]["role"],
+      string,
       string,
       string,
       string,
@@ -3066,6 +3096,7 @@ const main = Effect.gen(function* () {
         browser === "true",
         links === "true",
         questions === "true",
+        contextRewind === "true",
       ),
     );
   }
