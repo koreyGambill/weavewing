@@ -83,26 +83,31 @@ Claude process next starts.
 ## Tools for one thread
 
 The **Tools** control under the composer counts what a Claude thread leaves out, for example
-"Tools 8 off". Open it to switch a left-out tool, or the claude.ai connectors, on for this
-thread only. Each row shows an estimate of the context the item adds. Switches take effect when
-you choose **Reload session**.
+"Tools 8 off", or reads "Tools all on". Open it to switch a left-out tool on for this thread
+only. Each row shows an estimate of the context the item adds. Switches take effect when you
+choose **Reload session**.
 
-The popover also lists the MCP servers the thread's session can load, read when you open it.
-Switch a server off to leave it out of this thread; T3 Code's own server always stays in. The
-claude.ai connectors form a group: its switch brings them all in or out, and each connector has
-its own switch. Switching one connector on while the group is off brings in that connector alone.
-Only the connectors as a whole have a token estimate.
+The popover also lists the MCP servers the thread's session can load, read when you open it, and
+marks the ones the current session has not loaded. Switching a server off keeps its tools out of
+the model's context; the server may still connect. T3 Code's own server always stays in.
 
-A reload keeps the conversation: the next message resumes it with the new tools. That message
-re-reads the conversation once without the prompt cache, so it costs about as many input tokens
-as the conversation is long. The thread's timeline notes the reload. Choosing **Reload session**
-with nothing changed restarts the session anyway, which picks up changed Claude settings, skills
-or MCP servers.
+The claude.ai connectors form a group. When the provider setting is **Off**, the group's switch
+brings them into this thread. When it is **Leave to Claude Code**, the group reads "Left to
+Claude Code" and the thread can turn them on; otherwise Claude Code decides. Each connector gets
+its own switch once the connectors are known to load. Only the connectors as a whole have a
+token estimate, so a selection of some connectors shows no total.
 
-A reload waits until no turn is running and the session has no background agents or commands.
-Queued messages stay queued and run on the reloaded session. A fork keeps its source thread's
-tools; new threads, delegated tasks and a switch to another provider start from the provider's
-defaults.
+A reload keeps the conversation: the next message resumes it with the new tools. Changing the
+tools can raise the uncached input on that message. The popover shows the reload until the old
+Claude process has ended, and the thread's timeline notes how it went. If the old process does
+not confirm it stopped, the notice says it may still be running; reload again or press Stop.
+Choosing **Reload session** with nothing changed restarts the session anyway, which picks up
+changed Claude settings, skills or MCP servers.
+
+A reload is refused while a turn is running or the session has background agents or commands;
+stop them or wait, then reload. Queued messages stay queued and run on the reloaded session. A
+fork keeps its source thread's tools; new threads, delegated tasks and a switch to another
+provider start from the provider's defaults.
 
 Per-thread tools are a Claude feature. Threads on Codex, Antigravity, OpenCode, Pi, Kiro, fx,
 Muse Code, Cursor or an ACP provider do not show the control.
