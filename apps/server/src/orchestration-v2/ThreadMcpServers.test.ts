@@ -92,8 +92,8 @@ it.effect("answers from the live session when it already loaded the connectors",
   return list.pipe(
     Effect.map(({ servers }) => {
       assert.deepEqual(servers, [
-        { name: "fixture-notes", connector: false, status: "connected" },
-        { name: "claude.ai Fixture Board", connector: true, status: "connected" },
+        { name: "fixture-notes", connector: false, status: "connected", active: true },
+        { name: "claude.ai Fixture Board", connector: true, status: "connected", active: true },
       ]);
       assert.deepEqual(probes, []);
     }),
@@ -121,17 +121,21 @@ it.effect("probes for connectors a live session left out, and for a thread with 
     const live = yield* list.pipe(
       Effect.provide(layer({ live: [server("fixture-notes", "user")], probe, probes: liveProbes })),
     );
+    // The probe's connectors are only discovered: the live session did not load them.
     assert.deepEqual(
-      live.servers.map((entry) => [entry.name, entry.connector]),
+      live.servers.map((entry) => [entry.name, entry.connector, entry.active]),
       [
-        ["fixture-notes", false],
-        ["claude.ai Fixture Board", true],
+        ["fixture-notes", false, true],
+        ["claude.ai Fixture Board", true, false],
       ],
     );
     assert.deepEqual(liveProbes, ["/fixture/project"]);
     const idleProbes: Array<string | null> = [];
     const idle = yield* list.pipe(Effect.provide(layer({ probe, probes: idleProbes })));
-    assert.lengthOf(idle.servers, 2);
+    assert.deepEqual(
+      idle.servers.map((entry) => entry.active),
+      [false, false],
+    );
     assert.deepEqual(idleProbes, ["/fixture/project"]);
   }),
 );

@@ -90,5 +90,7 @@ export const ThreadMcpServer = Schema.Struct({
   connector: Schema.Boolean,
   /** Claude Code's connection status, such as connected, pending or needs-auth. */
   status: Schema.String,
+  /** Loaded by the thread's live session; false when only a probe found it. */
+  active: Schema.Boolean,
 });
 export type ThreadMcpServer = typeof ThreadMcpServer.Type;

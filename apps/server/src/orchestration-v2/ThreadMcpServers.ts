@@ -41,21 +41,25 @@ function mergeThreadMcpServers(
   live: ReadonlyArray<ProviderAdapter.ProviderAdapterV2McpServer> | undefined,
   probed: ReadonlyArray<ProviderAdapter.ProviderAdapterV2McpServer>,
 ): ReadonlyArray<ThreadMcpServer> {
-  const byName = new Map<string, ProviderAdapter.ProviderAdapterV2McpServer>();
-  for (const server of [...(live ?? []), ...probed]) {
-    if (server.name === T3_MCP_SERVER_NAME || byName.has(server.name)) continue;
-    byName.set(server.name, server);
+  const byName = new Map<string, ThreadMcpServer>();
+  for (const [servers, active] of [
+    [live ?? [], true],
+    [probed, false],
+  ] as const) {
+    for (const server of servers) {
+      if (server.name === T3_MCP_SERVER_NAME || byName.has(server.name)) continue;
+      byName.set(server.name, {
+        name: server.name,
+        connector: server.source === CLAUDE_AI_SOURCE,
+        status: server.status,
+        active,
+      });
+    }
   }
-  return [...byName.values()]
-    .map((server) => ({
-      name: server.name,
-      connector: server.source === CLAUDE_AI_SOURCE,
-      status: server.status,
-    }))
-    .toSorted(
-      (left, right) =>
-        Number(left.connector) - Number(right.connector) || left.name.localeCompare(right.name),
-    );
+  return [...byName.values()].toSorted(
+    (left, right) =>
+      Number(left.connector) - Number(right.connector) || left.name.localeCompare(right.name),
+  );
 }
 
 const make = Effect.gen(function* () {
