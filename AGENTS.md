@@ -27,7 +27,7 @@ Weavewing is a private fork of T3 Code, a GUI for coding agents. A Node WebSocke
 - User-visible changes get one integrated pass in the real client: the `test-t3-app` skill for web, `test-t3-mobile` for mobile. The lead does this once after integrating; subagents launch no dev servers of their own.
 - Real agent turns cost money: watch turns with the free `Replay (dev)` provider, and use a real provider's cheapest model only when the change depends on it.
 - Installing a test build on Korey's machines restarts the running app, so ask first: [Install Weavewing test builds](docs/operations/weavewing-local-install.md).
-- Before changing model-facing text (agent instructions, MCP tool descriptions, generated titles), read [evals/README.md](evals/README.md) and run the evals it names.
+- Before changing model-facing text (agent instructions, MCP tool descriptions, generated titles), read [evals/README.md](evals/README.md) and run the evals it names. A model-behavior fix adds an eval case that fails before it.
 
 ## Hit every surface
 
