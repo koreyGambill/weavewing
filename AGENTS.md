@@ -1,6 +1,6 @@
 # Weavewing
 
-Weavewing is a private fork of T3 Code, a GUI for coding agents. A Node WebSocket server wraps provider CLIs and serves web, desktop (Electron), and mobile (React Native) clients. Terms such as environment, project, thread and turn: [glossary](docs/internals/glossary.md). You are probably running inside the developer's own T3 Code instance, so a careless kill or write can take down the app driving you.
+Weavewing is a public fork of T3 Code, a GUI for coding agents. The repository is public, so keep personal data, hostnames and credentials out of everything you commit. A Node WebSocket server wraps provider CLIs and serves web, desktop (Electron), and mobile (React Native) clients. Terms such as environment, project, thread and turn: [glossary](docs/internals/glossary.md). You are probably running inside the developer's own T3 Code instance, so a careless kill or write can take down the app driving you.
 
 ## Hazards
 
@@ -26,7 +26,7 @@ Weavewing is a private fork of T3 Code, a GUI for coding agents. A Node WebSocke
 - Before writing or reviewing a test, read [Testing](docs/internals/testing.md): what to test, bug-fix proof, and the browser-test pattern. Server side effects run after the command commits, so tests drain `OrchestrationEffectWorkerV2` or await the persisted event, never sleep or poll; lint enforces this.
 - User-visible changes get one integrated pass in the real client: the `test-t3-app` skill for web, `test-t3-mobile` for mobile. The lead does this once after integrating; subagents launch no dev servers of their own.
 - Real agent turns cost money: watch turns with the free `Replay (dev)` provider, and use a real provider's cheapest model only when the change depends on it.
-- Installing a test build on Korey's machines restarts the running app, so ask first: [Install Weavewing test builds](docs/operations/weavewing-local-install.md).
+- Installing a test build on the maintainer's machines restarts the running app, so ask first: [Install Weavewing test builds](docs/operations/weavewing-local-install.md).
 - Before changing model-facing text (agent instructions, MCP tool descriptions, generated titles), read [evals/README.md](evals/README.md) and run the evals it names. A model-behavior fix adds an eval case that fails before it.
 
 ## Hit every surface
@@ -64,4 +64,4 @@ Clients send typed WebSocket requests that the server turns into _commands_. The
 - Prefer inferred types over annotations, and never `any`.
 - Users notice a dropped frame, a lying spinner, or a stale label. Avoid continuously repainting animations (they peg the GPU) and oversized WebSocket payloads.
 - `t3code/*` and `shadcn/*` lint rules enforce comments, UI restyling, effect reasons, the `Effect.fn` function pattern, and test waits; their messages say the fix. Span names and `Effect.fnUntraced` choices are in [Effect services](docs/internals/effect-services.md).
-- If a rule here fights the task, say so and get Korey's sign-off before breaking it.
+- If a rule here fights the task, say so and get the maintainer's sign-off before breaking it.
