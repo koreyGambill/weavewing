@@ -177,7 +177,7 @@ describe("provider projection", () => {
       records: [questionComment],
     });
     expect(comment).toContain(
-      ">\ncomment on question Q3, not an answer; the question stays open: Which store?\ncomment: Would SQLite survive two writers?",
+      ">\ncomment on question Q3, not an answer: Which store?\ncomment: Would SQLite survive two writers?",
     );
     expect(comment).not.toContain("choice:");
   });

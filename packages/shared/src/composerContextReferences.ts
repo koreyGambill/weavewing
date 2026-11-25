@@ -337,7 +337,7 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
     case "artifact-answer":
       if (record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID)
         return [
-          `comment on question ${record.questionId}, not an answer; the question stays open: ${record.question}`,
+          `comment on question ${record.questionId}, not an answer: ${record.question}`,
           `comment: ${record.note}`,
         ].join("\n");
       if (record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID)
