@@ -82,7 +82,6 @@ import {
   ThreadArtifactAnswerInput,
   ThreadArtifactSubmitInput,
   ThreadQuestionDraftInput,
-  ThreadQuestionSubmitInput,
   ThreadQuestionUpdateInput,
 } from "./threadWorkspace.ts";
 import {
@@ -632,7 +631,6 @@ export const WS_METHODS = {
   threadArtifactSubmit: "threadWorkspace.artifactSubmit",
   threadQuestionUpdate: "threadWorkspace.questionUpdate",
   threadQuestionDraft: "threadWorkspace.questionDraft",
-  threadQuestionSubmit: "threadWorkspace.questionSubmit",
   reviewsCreate: "reviews.create",
   reviewsList: "reviews.list",
   reviewsGet: "reviews.get",
@@ -1887,11 +1885,6 @@ const WsThreadQuestionDraftRpc = Rpc.make(WS_METHODS.threadQuestionDraft, {
   success: ThreadWorkspace,
   error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
 });
-const WsThreadQuestionSubmitRpc = Rpc.make(WS_METHODS.threadQuestionSubmit, {
-  payload: ThreadQuestionSubmitInput,
-  success: ThreadWorkspace,
-  error: Schema.Union([ThreadWorkspaceError, EnvironmentAuthorizationError]),
-});
 
 const WsReviewsCreateRpc = Rpc.make(WS_METHODS.reviewsCreate, {
   payload: ReviewCreateInput,
@@ -3007,7 +3000,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadArtifactSubmitRpc,
   WsThreadQuestionUpdateRpc,
   WsThreadQuestionDraftRpc,
-  WsThreadQuestionSubmitRpc,
   WsReviewsCreateRpc,
   WsReviewsListRpc,
   WsReviewsGetRpc,

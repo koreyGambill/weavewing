@@ -74,7 +74,10 @@ it.effect.each([
     };
     const imports = { importedThreadCount: 0, importedMessageCount: 0 };
     const dependencies = Layer.mergeAll(
-      Layer.mock(ThreadWorkspace.ThreadWorkspace)({ reconcileQuestions: Effect.succeed(0) }),
+      Layer.mock(ThreadWorkspace.ThreadWorkspace)({
+        reconcileQuestions: Effect.succeed(0),
+        followQuestionDeliveries: Effect.void,
+      }),
       NodeCrypto.layer,
       Layer.succeed(AgentScope, {
         ...AgentScope.defaultValue(),

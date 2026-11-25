@@ -1789,12 +1789,15 @@ function buildVisibleTurnItems(input: {
   );
 }
 
-// Absent until the thread's first question, like the mirror it counts.
+// Absent until the thread's first question, like the mirror it counts. A sent answer no longer
+// waits on the user, though its turn may not have started.
 const openQuestionCount = (thread: Pick<OrchestrationV2AppThread, "questions">) =>
   thread.questions === undefined
     ? {}
     : {
-        openQuestionCount: thread.questions.filter((question) => question.state === "open").length,
+        openQuestionCount: thread.questions.filter(
+          (question) => question.state === "open" && question.sent !== true,
+        ).length,
       };
 
 function pendingRuntimeRequestSummary(

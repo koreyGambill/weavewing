@@ -585,6 +585,7 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
       Effect.catch((cause) => Effect.logWarning("Failed to reconcile thread questions", { cause })),
       forkParked,
     );
+    yield* forkParked(threadWorkspace.followQuestionDeliveries);
     // Runs after activation: the status check fetches every enabled project's
     // remote, and awaiting it here held command readiness for that long.
     yield* runStartupPhase(

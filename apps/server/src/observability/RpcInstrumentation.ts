@@ -205,7 +205,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.threadArtifactSubmit]: "workspace",
   [WS_METHODS.threadQuestionUpdate]: "workspace",
   [WS_METHODS.threadQuestionDraft]: "workspace",
-  [WS_METHODS.threadQuestionSubmit]: "workspace",
   [WS_METHODS.threadMarksAnnotate]: "workspace",
   [WS_METHODS.reviewsCreate]: "workspace",
   [WS_METHODS.reviewsList]: "workspace",

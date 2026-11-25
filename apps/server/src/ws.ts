@@ -3227,7 +3227,6 @@ export const layerWsRpc = (
         [WS_METHODS.threadArtifactSubmit]: (input) => threadWorkspace.artifactSubmit(input),
         [WS_METHODS.threadQuestionUpdate]: (input) => threadWorkspace.questionUpdate(input, "user"),
         [WS_METHODS.threadQuestionDraft]: (input) => threadWorkspace.questionDraft(input),
-        [WS_METHODS.threadQuestionSubmit]: (input) => threadWorkspace.questionSubmit(input),
         [WS_METHODS.reviewsCreate]: (input) => reviewArtifacts.create(input),
         [WS_METHODS.reviewsList]: (input) => reviewArtifacts.list(input),
         [WS_METHODS.reviewsGet]: (input) => reviewArtifacts.get(input),

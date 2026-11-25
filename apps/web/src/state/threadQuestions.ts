@@ -61,11 +61,6 @@ export const threadQuestionDraft = createEnvironmentRpcCommand(connectionAtomRun
   tag: WS_METHODS.threadQuestionDraft,
   onSuccess: remember,
 });
-export const threadQuestionSubmit = createEnvironmentRpcCommand(connectionAtomRuntime, {
-  label: "question:submit",
-  tag: WS_METHODS.threadQuestionSubmit,
-  onSuccess: remember,
-});
 
 /** Saves one question's draft through the thread's draft writer; null when the save failed. */
 export function useSaveQuestionDraft(threadRef: ScopedThreadRef) {

@@ -596,6 +596,8 @@ export const OrchestrationV2ThreadQuestionSummary = Schema.Struct({
   state: Schema.Literals(["open", "deferred", "withdrawn"]),
   /** When the user last deferred, withdrew or reopened it. */
   userChangedAt: Schema.optional(IsoDateTime),
+  /** A user message carries its answer, so it no longer waits on the user. */
+  sent: Schema.optional(Schema.Literal(true)),
 });
 export type OrchestrationV2ThreadQuestionSummary = typeof OrchestrationV2ThreadQuestionSummary.Type;
 

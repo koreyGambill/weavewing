@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ArtifactQuestion, ArtifactAnswer } from "./artifactQuestions.ts";
-import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, MessageId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const TicketData = Schema.Struct({
@@ -95,6 +95,11 @@ export const ThreadQuestion = Schema.Struct({
   replacedBy: Schema.NullOr(TrimmedNonEmptyString),
   /** When the user last deferred, withdrew or reopened it; cleared once the agent changes it. */
   userChangedAt: Schema.optional(IsoDateTime),
+  /**
+   * The user message carrying this answer. While the question is open or deferred, that message
+   * waits for a turn that has not started; once answered by the user, the agent received it.
+   */
+  sentInMessageId: Schema.optional(MessageId),
 });
 export type ThreadQuestion = typeof ThreadQuestion.Type;
 export const ThreadWorkspace = Schema.Struct({
@@ -238,11 +243,6 @@ export const ThreadQuestionDraftInput = Schema.Struct({
   ),
 });
 export type ThreadQuestionDraftInput = typeof ThreadQuestionDraftInput.Type;
-export const ThreadQuestionSubmitInput = Schema.Struct({
-  threadId: ThreadId,
-  ids: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
-});
-export type ThreadQuestionSubmitInput = typeof ThreadQuestionSubmitInput.Type;
 /** A question's short title: its prompt's first eight words, at most 80 characters. */
 export const threadQuestionTitle = (prompt: string): string => {
   const words = prompt.replace(/\s+/g, " ").trim().split(" ");

@@ -7,13 +7,11 @@ import {
   type ThreadQuestionSection,
 } from "@t3tools/client-runtime/state/thread-questions";
 import { threadQuestionTitle, type ScopedThreadRef } from "@t3tools/contracts";
-import { SendIcon } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { cn } from "~/lib/utils";
 import { isEditableFocused } from "~/lib/editableFocus";
 import {
-  threadQuestionSubmit,
   threadQuestionUpdate,
   useSaveQuestionDraft,
   useThreadQuestionsWorkspace,
@@ -70,9 +68,6 @@ export function ThreadQuestionsPanel({
   }, [active]);
   const { workspace, error } = useThreadQuestionsWorkspace(threadRef, true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const canAct = useAtomValue(threadQuestionSubmit.permissionAtom(threadRef.environmentId));
-  const submit = useAtomCommand(threadQuestionSubmit);
   const saveDraft = useSaveQuestionDraft(threadRef);
   const writer = questionDraftWriter(scopedThreadKey(threadRef));
   const update = useAtomCommand(threadQuestionUpdate);
@@ -81,34 +76,6 @@ export function ThreadQuestionsPanel({
   const sections = sectionThreadQuestions(questions);
   const shownId = resolveSelectedQuestionId(order, selectedId);
   const shown = order.find((question) => question.id === shownId) ?? null;
-  const drafted = questions.filter(threadQuestionHasDraft);
-
-  const send = async () => {
-    setSending(true);
-    // Notes still waiting or in flight are part of what the user means to send.
-    const flushed = await writer.flushAll(saveDraft);
-    if (flushed === null) {
-      setSending(false);
-      return;
-    }
-    const saved = flushed.saved;
-    const latest =
-      saved !== null && saved.revision > (workspace?.revision ?? -1) ? saved : workspace;
-    const ids = (latest?.questions ?? []).filter(threadQuestionHasDraft).map((entry) => entry.id);
-    const result =
-      ids.length === 0
-        ? null
-        : await submit({
-            environmentId: threadRef.environmentId,
-            input: { threadId: threadRef.threadId, ids },
-          });
-    setSending(false);
-    if (result?._tag === "Success")
-      toastManager.add({
-        type: "success",
-        title: `Sent ${ids.length} ${ids.length === 1 ? "answer" : "answers"}`,
-      });
-  };
   const showInChat = (id: string) => {
     const store = useRightPanelStore.getState();
     const chat = getTileGroups(selectThreadTileLayout(store.byThreadKey, threadRef)).find((group) =>
@@ -256,14 +223,6 @@ export function ThreadQuestionsPanel({
           <Kbd>J</Kbd>
           <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> not yet
         </p>
-        <Button
-          size="sm"
-          disabled={!canAct || drafted.length === 0 || sending}
-          onClick={() => void send()}
-        >
-          <SendIcon />
-          {drafted.length === 1 ? "Send 1 answer" : `Send ${drafted.length} answers`}
-        </Button>
       </footer>
     </div>
   );

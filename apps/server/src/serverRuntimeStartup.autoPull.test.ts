@@ -73,7 +73,10 @@ it.effect("parks automatic pull until activation without delaying command readin
     const dependencies: Layer.Layer<
       Layer.Services<ReturnType<typeof ServerRuntimeStartup.layerWithOptions>>
     > = Layer.mergeAll(
-      Layer.mock(ThreadWorkspace.ThreadWorkspace)({ reconcileQuestions: Effect.succeed(0) }),
+      Layer.mock(ThreadWorkspace.ThreadWorkspace)({
+        reconcileQuestions: Effect.succeed(0),
+        followQuestionDeliveries: Effect.void,
+      }),
       Layer.mock(ServerConfig.ServerConfig)({
         ...(yield* ServerConfig.deriveServerPaths(cwd, undefined).pipe(Effect.provide(Path.layer))),
         baseDir: cwd,

@@ -3745,6 +3745,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         ["defer", ["deferred", "open"], 1],
         ["repeat", ["deferred", "open"], 1],
         ["reopen", ["open", "open"], 2],
+        ["send", ["open", "open sent"], 1],
+        ["unsend", ["open", "open"], 2],
         ["close", [], 0],
       ] as const) {
         yield* orchestrator.dispatch({
@@ -3754,7 +3756,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           questions: states.map((state, index) => ({
             id: `Q${index + 1}`,
             title: "Which database?",
-            state,
+            ...(state === "open sent"
+              ? { state: "open" as const, sent: true as const }
+              : { state }),
           })),
         });
         assert.strictEqual(
@@ -3789,7 +3793,14 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         })
         .pipe(Effect.flip);
       assert.instanceOf(heldAutoSettle, Orchestrator.OrchestratorDispatchError);
-      yield* reopenQuestion("close-before-auto-settle");
+      // An answer a message carries no longer holds the thread for the user, so the sweep's
+      // settle below lands.
+      yield* orchestrator.dispatch({
+        type: "thread.questions.sync",
+        commandId: CommandId.make("runtime-layer-lifecycle-questions-sent-before-auto-settle"),
+        threadId,
+        questions: [{ id: "Q1", title: "Which database?", state: "open", sent: true }],
+      });
       const preAutoProjection = yield* orchestrator.getThreadProjection(threadId);
       const staleAutoSettle = yield* orchestrator
         .dispatch({
@@ -3807,9 +3818,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         commandId: CommandId.make("runtime-layer-lifecycle-auto-settle"),
         threadId,
         snapshotAt: preAutoProjection.thread.updatedAt,
+        holdForOpenQuestions: true,
       });
       const autoSettledProjection = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(autoSettledProjection.thread.settledOverride, "settled");
+      yield* reopenQuestion("close-after-auto-settle");
       assert.isNull(autoSettledProjection.thread.activeOrderKey);
       yield* orchestrator.dispatch({
         type: "thread.unsettle",

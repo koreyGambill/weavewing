@@ -4666,7 +4666,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             question.id === next.id &&
             question.title === next.title &&
             question.state === next.state &&
-            question.userChangedAt === next.userChangedAt
+            question.userChangedAt === next.userChangedAt &&
+            question.sent === next.sent
           );
         }))
     )
@@ -17035,7 +17036,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt) ||
           // Question changes keep updatedAt, so the sweep's snapshot cannot see a reopen.
           (command.holdForOpenQuestions === true &&
-            (thread.questions ?? []).some((question) => question.state === "open"))
+            (thread.questions ?? []).some(
+              (question) => question.state === "open" && question.sent !== true,
+            ))
         ) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,

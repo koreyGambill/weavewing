@@ -67,7 +67,9 @@ export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
 
 /** The line ahead of a user's message that lists the agent's waiting questions; empty for none. */
 export function t3OpenQuestionsContext(questions: ReadonlyArray<ThreadQuestionLine>): string {
-  const waiting = questions.filter((question) => question.state !== "withdrawn");
+  const waiting = questions.filter(
+    (question) => question.state !== "withdrawn" && question.sent !== true,
+  );
   if (waiting.length === 0) return "";
   const list = waiting
     .map((question) =>
@@ -84,6 +86,7 @@ type ThreadQuestionLine = {
   readonly title: string;
   readonly state: "open" | "deferred" | "withdrawn";
   readonly userChangedAt?: string | undefined;
+  readonly sent?: true | undefined;
 };
 
 /**
