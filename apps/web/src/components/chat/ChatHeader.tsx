@@ -425,7 +425,8 @@ export const ChatHeader = memo(function ChatHeader({
                     aria-haspopup="menu"
                     onClick={openMenuFromTitle}
                     onDoubleClick={canOperateThread ? handleTitleDoubleClick : undefined}
-                    className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    // Beside a role chip the title keeps its width and the chip takes what is left.
+                    className={`group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${activeThreadDelegateRole ? "shrink-0" : ""}`}
                   />
                 }
               >
@@ -458,7 +459,9 @@ export const ChatHeader = memo(function ChatHeader({
           )}
           {renamingTitle === null && activeThreadDelegateRole ? (
             <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+              <TooltipTrigger
+                render={<span className="inline-flex min-w-0 shrink-[1000] overflow-hidden" />}
+              >
                 <DelegateRoleChip role={activeThreadDelegateRole} />
               </TooltipTrigger>
               <TooltipPopup side="top">

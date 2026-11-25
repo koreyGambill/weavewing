@@ -8,8 +8,8 @@ export function DelegateRoleChip(props: {
 }) {
   if (!props.role) return null;
   return (
-    <Badge variant="outline" size="sm" data-delegate-role={props.role}>
-      {props.role}
+    <Badge variant="outline" size="sm" className="max-w-full" data-delegate-role={props.role}>
+      <span className="truncate">{props.role}</span>
     </Badge>
   );
 }
