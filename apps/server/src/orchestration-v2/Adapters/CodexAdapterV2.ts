@@ -114,6 +114,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { buildCodexAdditionalContext } from "../../provider/CodexDeveloperInstructions.ts";
 import {
   describeMcpElicitation,
+  isComputerUseElicitation,
   toMcpElicitationResponse,
 } from "../../provider/CodexMcpElicitation.ts";
 import {
@@ -632,6 +633,8 @@ function approvalDecisionToLegacyReviewDecision(
       return "abort";
   }
 }
+
+type SessionApprovalKind = ProviderRequestKind | "computer-use";
 
 function providerRequestKindFromPermissions(
   permissions: CodexSchema.PermissionsRequestApprovalParams["permissions"],
@@ -2176,7 +2179,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         /** Codex acceptForSession covers only the exact command or patch, not future commands. */
         const sessionApprovals = new Map<
           string,
-          { readonly runtimeMode: RuntimeMode; readonly kinds: Set<ProviderRequestKind> }
+          { readonly runtimeMode: RuntimeMode; readonly kinds: Set<SessionApprovalKind> }
         >();
         /** Bind answers to the request's approval set so mode changes invalidate late answers. */
         const endSessionApprovalsOnModeChange = (context: ActiveCodexTurnContext) => {
@@ -2192,12 +2195,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const sessionAllowance = (
           nativeThreadId: string,
           context: ActiveCodexTurnContext,
-        ): Set<ProviderRequestKind> => {
+        ): Set<SessionApprovalKind> => {
           const runtimeMode = context.input.runtimePolicy.runtimeMode;
           const allowed = sessionApprovals.get(nativeThreadId);
           if (allowed?.runtimeMode === runtimeMode) return allowed.kinds;
           if (allowed !== undefined) return new Set();
-          const kinds = new Set<ProviderRequestKind>();
+          const kinds = new Set<SessionApprovalKind>();
           sessionApprovals.set(nativeThreadId, { runtimeMode, kinds });
           return kinds;
         };
@@ -6113,7 +6116,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               } satisfies CodexSchema.McpServerElicitationRequestResponse;
             }
 
-            if (context.input.runtimePolicy.runtimeMode === "full-access") {
+            // Computer use asks once per session in every mode, full access included.
+            const computerUse = isComputerUseElicitation(payload);
+            const allowance = sessionAllowance(payload.threadId, context);
+            if (computerUse && allowance.has("computer-use")) {
+              return toMcpElicitationResponse(payload, "acceptForSession");
+            }
+            if (!computerUse && context.input.runtimePolicy.runtimeMode === "full-access") {
               return acceptance;
             }
 
@@ -6167,6 +6176,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 }),
               ),
             );
+            if (computerUse && (resolved === "acceptForSession" || resolved === "acceptAlways")) {
+              allowance.add("computer-use");
+            }
             return toMcpElicitationResponse(payload, resolved);
           }).pipe(Effect.orDie),
         );

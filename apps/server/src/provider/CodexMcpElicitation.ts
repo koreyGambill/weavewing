@@ -9,6 +9,7 @@ const McpElicitationMetadata = Schema.Struct({
   appName: Schema.optionalKey(NullableMcpElicitationString),
   connector_name: Schema.optionalKey(NullableMcpElicitationString),
   connectorName: Schema.optionalKey(NullableMcpElicitationString),
+  connector_id: Schema.optionalKey(NullableMcpElicitationString),
   allowPersistentApproval: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
   persist: Schema.optionalKey(
     Schema.NullOr(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
@@ -110,6 +111,12 @@ function isMcpElicitationPersistenceField(
     mcpElicitationPersistenceDecision(field.title ?? "") !== null ||
     mcpElicitationPersistenceDecision(field.description ?? "") !== null
   );
+}
+
+export function isComputerUseElicitation(
+  payload: EffectCodexSchema.McpServerElicitationRequestParams,
+): boolean {
+  return isMcpElicitationMetadata(payload._meta) && payload._meta.connector_id === "computer-use";
 }
 
 export function describeMcpElicitation(
