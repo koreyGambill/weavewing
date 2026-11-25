@@ -5525,6 +5525,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     WHERE thread_id = ${threadId} AND role = 'user'
                       AND json_extract(payload_json, '$.createdBy') = 'user'
                       AND COALESCE(json_extract(payload_json, '$.origin.kind'), 'user') = 'user'
+                      -- These turns carry no question context, so they told the agent nothing.
+                      AND lower(trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace})) <> '/compact'
+                      AND trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace}) NOT GLOB '/goal*'
                       AND message_id NOT IN ${sql.in(messageIds)}
                       AND created_at < (
                         SELECT MIN(created_at) FROM orchestration_v2_projection_messages

@@ -675,6 +675,9 @@ it.effect("dates the user's previous own message only while a question has a use
       ["message:typed", 10, {}],
       ["message:agent", 15, { createdBy: "agent" }],
       ["message:scheduled", 20, { origin: { kind: "scheduled-task", title: "Nightly" } }],
+      // Compact and goal turns carry no question context, so they cannot be the cutoff.
+      ["message:compact", 26, { text: " /compact" }],
+      ["message:goal", 28, { text: "/goal ship it" }],
       ["message:now", 30, {}],
       ["message:later", 40, {}],
     ] as const) {
