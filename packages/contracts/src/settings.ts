@@ -1028,7 +1028,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Built-in tools to leave out",
         description:
-          "Removes these tools from Claude's context to save tokens. The recommended default leaves out all seven, including the artifact tools; tick fewer or choose Keep artifact tools to let Claude publish claude.ai artifact pages. Applies to new sessions.",
+          "Saves context tokens. Recommended, the default, removes all seven, artifact tools included; tick fewer or choose Keep artifact tools to let Claude publish claude.ai artifact pages. New sessions only.",
         providerSettingsForm: {
           control: "checklist",
           options: CLAUDE_REMOVABLE_BUILTIN_TOOLS,
