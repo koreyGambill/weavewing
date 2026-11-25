@@ -69,7 +69,8 @@ its configured context threshold.
 tokens. By default it leaves out all seven it lists, including the artifact tools, so Claude
 cannot publish claude.ai artifact pages from threads. **Keep artifact tools** leaves out only
 Task (native subagents), Workflow, ScheduleWakeup and ReportFindings; **Clear** keeps every tool;
-**Recommended** returns to the default. Changes apply to sessions started afterwards.
+**Recommended** returns to the default. A change applies when a thread's Claude process next starts, which includes an existing thread
+resuming after a restart or an idle period.
 
 ## Usage limits
 
