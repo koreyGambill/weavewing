@@ -4,7 +4,6 @@ import type * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 const NullableMcpElicitationString = Schema.NullOr(Schema.String);
 const McpElicitationMetadata = Schema.Struct({
-  callId: Schema.optionalKey(NullableMcpElicitationString),
   app: Schema.optionalKey(NullableMcpElicitationString),
   app_name: Schema.optionalKey(NullableMcpElicitationString),
   appName: Schema.optionalKey(NullableMcpElicitationString),
@@ -120,17 +119,21 @@ const isComputerUseMetadata = Schema.is(
   }),
 );
 
-/** The id of the MCP tool call item that raised this elicitation, when Codex names it. */
-export function mcpElicitationToolCallId(
-  payload: EffectCodexSchema.McpServerElicitationRequestParams,
-): string | undefined {
-  return (isMcpElicitationMetadata(payload._meta) ? payload._meta.callId : undefined) ?? undefined;
-}
-
 export function isComputerUseElicitation(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
 ): boolean {
   return payload.serverName === "cua_repl" && isComputerUseMetadata(payload._meta);
+}
+
+const hasToolCallId = Schema.is(Schema.Struct({ callId: Schema.String }));
+
+/** The id of the computer-use tool call item that raised this prompt, when Codex names it. */
+export function computerUseToolCallId(
+  payload: EffectCodexSchema.McpServerElicitationRequestParams,
+): string | undefined {
+  return isComputerUseElicitation(payload) && hasToolCallId(payload._meta)
+    ? payload._meta.callId
+    : undefined;
 }
 
 export function describeMcpElicitation(

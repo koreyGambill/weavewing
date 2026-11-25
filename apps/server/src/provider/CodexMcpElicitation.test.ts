@@ -4,6 +4,7 @@ import { describe, it } from "vite-plus/test";
 import type * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import {
+  computerUseToolCallId,
   describeMcpElicitation,
   isComputerUseElicitation,
   toMcpElicitationResponse,
@@ -69,6 +70,18 @@ describe("Codex MCP elicitation approvals", () => {
       { ...computerUse, _meta: { codex_approval_kind: "mcp_tool_call", persist: ["session"] } },
     ];
     NodeAssert.deepStrictEqual(variants.map(isComputerUseElicitation), [true, false, false, false]);
+    // The tool call id is read on its own, so malformed display metadata cannot hide it.
+    NodeAssert.deepStrictEqual(
+      [
+        ...variants.map((variant) => ({
+          ...variant,
+          _meta: { ...variant._meta, callId: "call_1" },
+        })),
+        { ...computerUse, _meta: { ...computerUse._meta, callId: "call_1", app_name: 5 } },
+        { ...computerUse, _meta: { ...computerUse._meta, callId: 5 } },
+      ].map(computerUseToolCallId),
+      ["call_1", undefined, undefined, undefined, "call_1", undefined],
+    );
     // Only computer use lifts its session choice out of the web overflow menu.
     NodeAssert.deepStrictEqual(
       variants.map(

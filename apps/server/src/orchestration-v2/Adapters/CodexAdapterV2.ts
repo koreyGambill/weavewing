@@ -115,7 +115,7 @@ import { buildCodexAdditionalContext } from "../../provider/CodexDeveloperInstru
 import {
   describeMcpElicitation,
   isComputerUseElicitation,
-  mcpElicitationToolCallId,
+  computerUseToolCallId,
   toMcpElicitationResponse,
 } from "../../provider/CodexMcpElicitation.ts";
 import {
@@ -5536,25 +5536,24 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           }).pipe(Effect.orDie, turnTerminalizationPermit.withPermits(1)),
         );
 
-        // Codex gives up on an unanswered elicitation by failing the tool call that raised it,
-        // without resolving the request. Each waiting prompt watches its tool call for that end.
-        const toolCallEnds = new Map<string, Deferred.Deferred<void>>();
-        const awaitToolCallEnd = Effect.fn("CodexAdapterV2.awaitToolCallEnd")(function* (
-          callId: string,
-        ) {
-          const existing = toolCallEnds.get(callId);
-          if (existing !== undefined) return yield* Deferred.await(existing);
-          const ended = yield* Deferred.make<void>();
-          toolCallEnds.set(callId, ended);
-          return yield* Deferred.await(ended);
-        });
+        // Codex gives up on an unanswered computer-use prompt by failing the tool call that raised
+        // it, without resolving the request. Record each call's end, whichever of the prompt and
+        // the completion arrives first, until the thread's turn completes.
+        const computerUseCallEnds = new Map<string, Deferred.Deferred<void>>();
+        const computerUseCallEnd = (nativeThreadId: string, callId: string) =>
+          Effect.suspend(() => {
+            const key = `${nativeThreadId}\u0000${callId}`;
+            const existing = computerUseCallEnds.get(key);
+            if (existing !== undefined) return Effect.succeed(existing);
+            return Deferred.make<void>().pipe(
+              Effect.tap((ended) => Effect.sync(() => computerUseCallEnds.set(key, ended))),
+            );
+          });
         yield* client.handleServerNotification("item/completed", (payload) =>
           Effect.gen(function* () {
-            const toolCallEnd =
-              payload.item.type === "mcpToolCall" ? toolCallEnds.get(payload.item.id) : undefined;
-            if (toolCallEnd !== undefined) {
-              toolCallEnds.delete(payload.item.id);
-              yield* Deferred.succeed(toolCallEnd, undefined);
+            if (payload.item.type === "mcpToolCall" && payload.item.server === "cua_repl") {
+              const ended = yield* computerUseCallEnd(payload.threadId, payload.item.id);
+              yield* Deferred.succeed(ended, undefined);
             }
             if (payload.item.type === "contextCompaction")
               yield* Ref.update(threadsAwaitingContextRestore, (current) =>
@@ -6175,6 +6174,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return acceptance;
             }
 
+            const callId = computerUseToolCallId(payload);
+            const callEnd =
+              callId === undefined
+                ? undefined
+                : yield* computerUseCallEnd(payload.threadId, callId);
+            // Codex already abandoned this prompt's tool call and expects no reply.
+            if (callEnd !== undefined && (yield* Deferred.isDone(callEnd))) {
+              return yield* Effect.interrupt;
+            }
+
             const nativeRequestId =
               payload.mode === "url"
                 ? payload.elicitationId
@@ -6216,14 +6225,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimeRequest: artifacts.request,
             });
 
-            const callId = mcpElicitationToolCallId(payload);
             const answer = awaitRuntimeRequestAnswer(artifacts, decision);
             const outcome =
-              callId === undefined
+              callEnd === undefined
                 ? Option.some(yield* answer)
                 : yield* Effect.raceFirst(
                     answer.pipe(Effect.asSome),
-                    awaitToolCallEnd(callId).pipe(Effect.as(Option.none())),
+                    Deferred.await(callEnd).pipe(Effect.as(Option.none())),
                   );
             // The losing answer wait has expired the prompt; Codex expects no reply.
             if (Option.isNone(outcome)) return yield* Effect.interrupt;
@@ -7356,6 +7364,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("turn/completed", (payload) =>
           Effect.gen(function* () {
+            for (const key of computerUseCallEnds.keys()) {
+              if (key.startsWith(`${payload.threadId}\u0000`)) computerUseCallEnds.delete(key);
+            }
             const compacted = yield* Ref.modify(threadsAwaitingContextRestore, (current) => {
               if (!current.has(payload.threadId)) return [false, current] as const;
               const next = new Set(current);
