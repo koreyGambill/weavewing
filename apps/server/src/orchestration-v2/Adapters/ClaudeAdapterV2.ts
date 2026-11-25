@@ -98,6 +98,7 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   ClaudeSettings,
   type ThreadToolOverrides,
+  T3_MCP_SERVER_NAME,
   TrimmedNonEmptyString,
   defaultInstanceIdForDriver,
   isCompactionCommandMessage,
@@ -949,6 +950,12 @@ function claudeMcpServerPrefixOverlaps(
     const other = claudeMcpToolPrefix(status.name);
     return other.startsWith(prefix) || prefix.startsWith(other);
   });
+}
+
+export function claudeMcpServerSummary(
+  status: Pick<ClaudeMcpServerStatus, "name" | "status" | "source" | "scope">,
+): ProviderAdapter.ProviderAdapterV2McpServer {
+  return { name: status.name, source: status.source ?? status.scope, status: status.status };
 }
 
 function findClaudeMcpTool(
@@ -2514,6 +2521,10 @@ export function makeClaudeQueryOptions(input: {
       ...(input.settings?.omittedBuiltinTools ?? [])
         .filter((tool) => !threadEnabledTools.includes(tool))
         .flatMap((tool) => (tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool])),
+      // A server-level rule, `mcp__<server>`, removes every tool the server offers.
+      ...(input.toolOverrides?.omittedMcpServers ?? [])
+        .filter((server) => server !== T3_MCP_SERVER_NAME)
+        .map((server) => claudeMcpToolPrefix(server).slice(0, -2)),
     ]),
   ];
   const options: ClaudeAgentSdkQueryOptions = {
@@ -5803,6 +5814,8 @@ export interface ClaudeAdapterV2Options {
    * SessionStart hooks have run, so cwd-keyed workspace scans can be refreshed.
    */
   readonly onSessionInit?: (cwd: string) => Effect.Effect<void>;
+  /** Lists the MCP servers a new session in `cwd` could load, without a model request. */
+  readonly probeMcpServers?: ProviderAdapter.ProviderAdapterV2["Service"]["probeMcpServers"];
   /**
    * Applies Claude Code's reported model ids for a turn's cwd, so turns send ids its backend
    * accepts. Defaults to the catalog unchanged.
@@ -6071,6 +6084,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     planSelectionTransition: Effect.fn("ClaudeAdapterV2.planSelectionTransition")(function () {
       return Effect.succeed(turnScopedSelectionTransition());
     }),
+    ...(adapterOptions.probeMcpServers === undefined
+      ? {}
+      : { probeMcpServers: adapterOptions.probeMcpServers }),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const promptSuggestionsEnabled = input.promptSuggestions ?? Effect.succeed(false);
@@ -14539,6 +14555,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               message: { ...turnInput.message, text: "/compact" },
             }),
           steerTurn,
+          listMcpServers: Effect.fn("ClaudeAdapterV2.listMcpServers")(function* ({
+            providerThread,
+          }) {
+            const liveQuery = yield* Ref.get(queryContext);
+            if (
+              liveQuery === null ||
+              liveQuery.stopping ||
+              liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId
+            ) {
+              return undefined;
+            }
+            const statuses = yield* liveQuery.query.mcpServerStatus.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: "Failed to list Claude MCP servers.",
+                    cause,
+                  }),
+              ),
+            );
+            return statuses.map(claudeMcpServerSummary);
+          }),
           mcpApps: {
             listTools: Effect.fn("ClaudeAdapterV2.listMcpTools")(function* ({
               providerThread,
@@ -15025,7 +15064,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
     hooks: Pick<
       ClaudeAdapterV2Options,
-      "scopedLimitNames" | "onUsageLimits" | "onSessionInit" | "modelCatalog" | "routeModelCatalog"
+      | "scopedLimitNames"
+      | "onUsageLimits"
+      | "onSessionInit"
+      | "modelCatalog"
+      | "routeModelCatalog"
+      | "probeMcpServers"
     > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;

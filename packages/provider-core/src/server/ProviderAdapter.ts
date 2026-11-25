@@ -770,6 +770,13 @@ export type ProviderAdapterV2SubagentOutcome = {
   readonly result: OrchestrationV2Subagent["result"];
 };
 
+/** An MCP server a provider session reports; `source` is the provider's own origin label. */
+export interface ProviderAdapterV2McpServer {
+  readonly name: string;
+  readonly source: string | undefined;
+  readonly status: string;
+}
+
 export interface ProviderAdapterV2SessionRuntime {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
@@ -895,6 +902,13 @@ export interface ProviderAdapterV2SessionRuntime {
   }) => Effect.Effect<{ readonly feedbackId: string }, ProviderAdapterV2Error>;
   /** Absent means non-interactive apps with plain tool rows. */
   readonly mcpApps?: ProviderAdapterV2McpApps;
+  /** The MCP servers the thread's live process loaded; none when no process is open for it. */
+  readonly listMcpServers?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+  }) => Effect.Effect<
+    ReadonlyArray<ProviderAdapterV2McpServer> | undefined,
+    ProviderAdapterV2Error
+  >;
   readonly rollbackThread: (
     input: ProviderAdapterV2RollbackThreadInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;
@@ -920,5 +934,12 @@ export class ProviderAdapterV2 extends Context.Service<
     readonly openSession: (
       input: ProviderAdapterV2OpenSessionInput,
     ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
+    /**
+     * Every MCP server a new session in `cwd` could load, including ones a setting switches off,
+     * read without a model request. Absent where the provider has no such probe.
+     */
+    readonly probeMcpServers?: (input: {
+      readonly cwd: string | null;
+    }) => Effect.Effect<ReadonlyArray<ProviderAdapterV2McpServer>, ProviderAdapterV2Error>;
   }
 >()("@t3tools/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}

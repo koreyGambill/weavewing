@@ -709,6 +709,27 @@ describe("environment query lifecycle", () => {
   );
 
   // The server sizes a shared PTY to every attached viewer, so a lingering attach pins its grid.
+  it.effect("a query without idle time interrupts its request when its last viewer leaves", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      const harness = yield* makeEnvironmentQueryHarness(
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+        ),
+        { idleTtlMs: 0 },
+      );
+      const registry = AtomRegistry.make();
+      yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
+      const unsubscribe = registry.subscribe(harness.atom, () => {}, { immediate: true });
+      yield* Deferred.await(started);
+
+      unsubscribe();
+      yield* Deferred.await(interrupted);
+    }),
+  );
+
   it.effect("terminal attach detaches as soon as its last viewer leaves", () =>
     Effect.gen(function* () {
       const harness = yield* makeEnvironmentQueryHarness(Effect.void);

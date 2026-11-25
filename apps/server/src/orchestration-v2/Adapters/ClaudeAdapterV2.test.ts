@@ -736,6 +736,25 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     ]);
   });
 
+  it("leaves a thread's omitted MCP servers out by server rule, never T3 Code's own", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-omitted-mcp",
+      resume: false,
+      cwd: "/workspace",
+      settings: NO_OMITTED_TOOLS_CLAUDE_SETTINGS,
+      toolOverrides: {
+        enabledBuiltinTools: [],
+        claudeAiConnectors: true,
+        omittedMcpServers: ["fixture-notes", "claude.ai Fixture Board", "t3-code"],
+      },
+    });
+    assert.deepEqual(options.disallowedTools, [
+      "mcp__fixture-notes",
+      "mcp__claude_ai_Fixture_Board",
+    ]);
+  });
+
   it.each([
     ["inherit", undefined, undefined],
     ["off", undefined, "false"],

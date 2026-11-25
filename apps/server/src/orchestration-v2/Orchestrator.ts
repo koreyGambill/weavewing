@@ -84,6 +84,7 @@ import {
   TrimmedNonEmptyString,
   managedRuntimeModeCeilingMessage,
   CLAUDE_REMOVABLE_BUILTIN_TOOLS,
+  T3_MCP_SERVER_NAME,
   type ThreadToolOverrides,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -355,7 +356,12 @@ export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedE
   {
     commandId: CommandId,
     threadId: ThreadId,
-    reason: Schema.Literals(["busy", "background-work", "unsupported-provider"]),
+    reason: Schema.Literals([
+      "busy",
+      "background-work",
+      "unsupported-provider",
+      "protected-mcp-server",
+    ]),
   },
 ) {
   override get message(): string {
@@ -366,6 +372,8 @@ export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedE
         return "The current session is still running background agents or commands, and this change would end them. Wait for them to finish, or press Stop, then try again.";
       case "unsupported-provider":
         return "Per-thread tools are available only for Claude threads.";
+      case "protected-mcp-server":
+        return "T3 Code's own MCP server cannot be left out of a thread.";
     }
   }
 }
@@ -740,9 +748,12 @@ function threadToolOverridesNotice(overrides: ThreadToolOverrides, reloaded: boo
     ...(overrides.claudeAiConnectors ? ["claude.ai connectors"] : []),
   ];
   const tools = switchedOn.length === 0 ? "the provider's default tools" : listInProse(switchedOn);
+  const omitted = overrides.omittedMcpServers.length;
+  const servers =
+    omitted === 0 ? "" : `, leaving out ${omitted} MCP ${omitted === 1 ? "server" : "servers"}`;
   return reloaded
-    ? `Session reloaded with ${tools}.`
-    : `Tools changed to ${tools}. They apply when the session next starts.`;
+    ? `Session reloaded with ${tools}${servers}.`
+    : `Tools changed to ${tools}${servers}. They apply when the session next starts.`;
 }
 
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
@@ -6502,6 +6513,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       .get(thread.providerInstanceId)
       .pipe(mapDispatchError(command));
     if (adapter.driver !== "claudeAgent") return yield* reject("unsupported-provider");
+    if (command.toolOverrides.omittedMcpServers.includes(T3_MCP_SERVER_NAME)) {
+      return yield* reject("protected-mcp-server");
+    }
     if (projection.runs.some(isActiveRun)) return yield* reject("busy");
     const liveSessions = projection.providerSessions.filter(
       (session) =>

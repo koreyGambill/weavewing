@@ -206,6 +206,13 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:force-stop-thread",
       tag: ORCHESTRATION_V2_WS_METHODS.forceStopThread,
     }),
+    // Mounted only while a thread's tools popover is open; closing or switching threads cancels it.
+    threadMcpServers: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:thread-mcp-servers",
+      tag: ORCHESTRATION_V2_WS_METHODS.listThreadMcpServers,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
     setThreadToolOverrides: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:orchestration:set-thread-tool-overrides",
       tag: ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides,

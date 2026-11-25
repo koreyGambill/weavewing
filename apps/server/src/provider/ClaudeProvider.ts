@@ -633,6 +633,66 @@ const probeClaudeCapabilities = (
 
 type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
 
+export class ClaudeMcpServersProbeError extends Schema.TaggedError<ClaudeMcpServersProbeError>()(
+  "ClaudeMcpServersProbeError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Claude MCP server probe failed.";
+  }
+}
+
+/**
+ * Lists the MCP servers a session in `cwd` would load, with the claude.ai connectors switched on
+ * so their names are known even where a setting keeps them out. Like the capability probe, a
+ * never-yielding prompt keeps it off the API; it starts the configured servers to read them.
+ */
+export const probeClaudeMcpServers = Effect.fn("probeClaudeMcpServers")(function* (
+  claudeSettings: ClaudeSettings,
+  environment: NodeJS.ProcessEnv,
+  cwd: string | null,
+) {
+  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const executablePath = yield* resolveClaudeSdkExecutablePath(
+    claudeSettings.binaryPath,
+    claudeEnvironment,
+  );
+  return yield* Effect.tryPromise({
+    try: async (signal) => {
+      // Aborting ends the Claude process, so it runs on success, failure and interruption.
+      const abort = new AbortController();
+      signal.addEventListener("abort", () => abort.abort(), { once: true });
+      const { mcpServers: _noServers, ...options } = buildClaudeCapabilitiesProbeQueryOptions({
+        executablePath,
+        abortController: abort,
+        environment: claudeEnvironment,
+        cwd: cwd ?? undefined,
+        // Filesystem MCP servers are the point here, so strict MCP config stays off.
+        managedMcpConfig: true,
+        spawnVia: undefined,
+      });
+      try {
+        const q = claudeQuery({
+          // oxlint-disable-next-line require-yield -- never yields, so no prompt reaches the API
+          prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+            await waitForAbortSignal(abort.signal);
+          })(),
+          options: { ...options, env: { ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: "true" } },
+        });
+        await q.initializationResult();
+        return await q.mcpServerStatus();
+      } finally {
+        abort.abort();
+      }
+    },
+    catch: (cause) => new ClaudeMcpServersProbeError({ cause }),
+  }).pipe(
+    Effect.timeout(
+      resolveProviderProbeTimeoutMs("claude", CAPABILITIES_PROBE_TIMEOUT_MS, environment),
+    ),
+  );
+});
+
 function describeClaudeUsageFailure(error: { readonly _tag: string }) {
   if (error._tag !== "ClaudeCapabilitiesProbeSdkError") {
     return `Claude Code did not answer the usage request within ${DEFAULT_TIMEOUT_MS / 1000} seconds.`;

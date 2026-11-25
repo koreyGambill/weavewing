@@ -46,7 +46,7 @@ import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
-import { ThreadToolOverrides } from "./threadToolOverrides.ts";
+import { ThreadMcpServer, ThreadToolOverrides } from "./threadToolOverrides.ts";
 import { ThreadTitleRegenerationOutcome } from "./threadTitle.ts";
 import {
   OrchestrationSearchThreadsInput,
@@ -4259,6 +4259,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   stopWorkflow: "orchestration.stopWorkflow",
   forceStopThread: "orchestration.forceStopThread",
   setThreadToolOverrides: "orchestration.setThreadToolOverrides",
+  listThreadMcpServers: "orchestration.listThreadMcpServers",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
   subscribeShell: "orchestration.subscribeShell",
@@ -4742,7 +4743,13 @@ export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedErr
      * `busy`: a turn is running. `background-work`: a reload would end background agents or
      * commands. `unsupported-provider`: the thread is not on Claude.
      */
-    reason: Schema.Literals(["busy", "background-work", "unsupported-provider", "failed"]),
+    reason: Schema.Literals([
+      "busy",
+      "background-work",
+      "unsupported-provider",
+      "protected-mcp-server",
+      "failed",
+    ]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -4754,9 +4761,37 @@ export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedErr
         return "This session is running background agents or commands that a reload would end. Wait for them, or press Stop.";
       case "unsupported-provider":
         return "Per-thread tools are available only for Claude threads.";
+      case "protected-mcp-server":
+        return "T3 Code's own MCP server cannot be left out of a thread.";
       case "failed":
         return "Failed to reload the session with the new tools.";
     }
+  }
+}
+
+export const OrchestrationV2ListThreadMcpServersInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationV2ListThreadMcpServersInput =
+  typeof OrchestrationV2ListThreadMcpServersInput.Type;
+
+export const OrchestrationV2ListThreadMcpServersResult = Schema.Struct({
+  /** Every MCP server the thread's Claude session can load, T3 Code's own excluded. */
+  servers: Schema.Array(ThreadMcpServer),
+});
+export type OrchestrationV2ListThreadMcpServersResult =
+  typeof OrchestrationV2ListThreadMcpServersResult.Type;
+
+export class OrchestrationV2ListThreadMcpServersError extends Schema.TaggedError<OrchestrationV2ListThreadMcpServersError>()(
+  "OrchestrationV2ListThreadMcpServersError",
+  {
+    threadId: ThreadId,
+    reason: Schema.Literals(["unsupported-provider", "failed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return this.reason === "unsupported-provider"
+      ? "MCP servers per thread are available only for Claude threads."
+      : "Could not list this thread's MCP servers.";
   }
 }
 
@@ -5044,6 +5079,10 @@ export const OrchestrationV2RpcSchemas = {
   setThreadToolOverrides: {
     input: OrchestrationV2SetThreadToolOverridesInput,
     output: OrchestrationV2SetThreadToolOverridesResult,
+  },
+  listThreadMcpServers: {
+    input: OrchestrationV2ListThreadMcpServersInput,
+    output: OrchestrationV2ListThreadMcpServersResult,
   },
   getWorkflowScript: {
     input: OrchestrationV2GetWorkflowScriptInput,

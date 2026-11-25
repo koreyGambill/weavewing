@@ -6309,6 +6309,34 @@ describe("orchestration v2 provider switching", () => {
       }),
     );
 
+    it.live("stores omitted MCP servers but never T3 Code's own", () =>
+      Effect.gen(function* () {
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const layer = yield* harness("tool-overrides-mcp", { capturedTurns });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+          const refused = yield* setTools(toolsThreadId, "t3", {
+            ...wakeupAndConnectors,
+            omittedMcpServers: ["fixture-notes", "t3-code"],
+          }).pipe(Effect.flip);
+          assert.deepInclude(refused, {
+            _tag: "OrchestratorThreadToolOverridesRejectedError",
+            reason: "protected-mcp-server",
+          });
+          assert.isUndefined(
+            (yield* orchestrator.getThreadProjection(toolsThreadId)).thread.toolOverrides,
+          );
+          const withServer = { ...wakeupAndConnectors, omittedMcpServers: ["fixture-notes"] };
+          yield* setTools(toolsThreadId, "server", withServer);
+          assert.deepEqual(
+            (yield* orchestrator.getThreadProjection(toolsThreadId)).thread.toolOverrides,
+            withServer,
+          );
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
     it.live(
       "stores the value without a reload when no session is live, and touches no other thread",
       () =>

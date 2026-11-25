@@ -332,6 +332,7 @@ import {
   OrchestrationV2StopWorkflowError,
   OrchestrationV2ForceStopThreadError,
   OrchestrationV2SetThreadToolOverridesError,
+  OrchestrationV2ListThreadMcpServersError,
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2CommandOutputError,
@@ -2528,6 +2529,15 @@ const WsOrchestrationV2SetThreadToolOverridesRpc = Rpc.make(
   },
 );
 
+const WsOrchestrationV2ListThreadMcpServersRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.listThreadMcpServers,
+  {
+    payload: OrchestrationV2RpcSchemas.listThreadMcpServers.input,
+    success: OrchestrationV2RpcSchemas.listThreadMcpServers.output,
+    error: Schema.Union([OrchestrationV2ListThreadMcpServersError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsOrchestrationV2GetWorkflowScriptRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
   {
@@ -3107,6 +3117,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2StopWorkflowRpc,
   WsOrchestrationV2ForceStopThreadRpc,
   WsOrchestrationV2SetThreadToolOverridesRpc,
+  WsOrchestrationV2ListThreadMcpServersRpc,
   WsOrchestrationV2GetTurnItemRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,

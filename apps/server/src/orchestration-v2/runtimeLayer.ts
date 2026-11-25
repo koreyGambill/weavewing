@@ -28,6 +28,7 @@ import * as OrchestrationCommandReceipts from "../persistence/OrchestrationComma
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -460,8 +461,20 @@ const layerMcpAppRequestsProvided = McpAppRequests.layer.pipe(
   ),
 );
 
+const layerThreadMcpServersProvided = ThreadMcpServers.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerOrchestratorProvided,
+      ProjectStore.layer,
+      ProviderAdapterRegistry.layerFromProviderInstanceRegistry,
+      layerProviderSessionManagerProvided,
+    ),
+  ),
+);
+
 export const layer = Layer.mergeAll(
   layerCommandOutputHubProvided,
+  layerThreadMcpServersProvided,
   layerAutomationLimitsProvided,
   layerOrchestratorProvided,
   layerMcpAppRequestsProvided,

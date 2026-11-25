@@ -79,3 +79,16 @@ export const ThreadToolOverrides = Schema.Struct({
   ),
 });
 export type ThreadToolOverrides = typeof ThreadToolOverrides.Type;
+
+/** The MCP server that carries a thread's T3 tools; a thread can never leave it out. */
+export const T3_MCP_SERVER_NAME = "t3-code";
+
+/** An MCP server a Claude thread's session can load, as Claude Code reports it. */
+export const ThreadMcpServer = Schema.Struct({
+  name: Schema.String,
+  /** A claude.ai connector, switched on and off as a group by `claudeAiConnectors`. */
+  connector: Schema.Boolean,
+  /** Claude Code's connection status, such as connected, pending or needs-auth. */
+  status: Schema.String,
+});
+export type ThreadMcpServer = typeof ThreadMcpServer.Type;
