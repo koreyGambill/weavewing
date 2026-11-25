@@ -205,6 +205,37 @@ it.effect(
   },
 );
 
+it.effect("gives each tool override change its own command id within one clock tick", () => {
+  const threadId = ThreadId.make("thread:thread-management:tool-overrides");
+  const commandIds: Array<string> = [];
+  const layerTest = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+    Layer.provide(
+      Layer.mock(Orchestrator.OrchestratorV2)({
+        dispatch: (command) =>
+          Effect.sync(() => {
+            commandIds.push(command.commandId);
+            return { sequence: commandIds.length, storedEvents: [] } as never;
+          }),
+      }),
+    ),
+    Layer.provide(ServerSettings.layerTest({})),
+    Layer.provideMerge(layerReceiptsTest),
+  );
+  return Effect.gen(function* () {
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    // The test clock stands still, so both calls land in the same millisecond.
+    for (const claudeAiConnectors of [true, false]) {
+      yield* threads.setThreadToolOverrides({
+        threadId,
+        toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors, omittedMcpServers: [] },
+      });
+    }
+    expect(commandIds).toHaveLength(2);
+    expect(new Set(commandIds).size).toBe(2);
+  }).pipe(Effect.provide(layerTest));
+});
+
 it.effect(
   "a replay of an already-accepted command id dispatches despite the instance now being disabled",
   () => {

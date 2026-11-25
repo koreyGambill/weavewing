@@ -54,6 +54,7 @@ import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -1500,7 +1501,7 @@ const make = Effect.gen(function* () {
       const result = yield* orchestrator.dispatch({
         type: "thread.tool-overrides.set",
         commandId: CommandId.make(
-          `server:tool-overrides:${input.threadId}:${yield* Clock.currentTimeMillis}`,
+          `server:tool-overrides:${input.threadId}:${yield* Effect.sync(() => SecureRandom.uuidV4Unsafe())}`,
         ),
         threadId: input.threadId,
         toolOverrides: input.toolOverrides,
