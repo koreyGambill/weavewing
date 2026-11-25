@@ -14247,83 +14247,91 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               reason,
             });
           const nativeThreadId = yield* getNativeThreadId(rewindInput.providerThread);
-          // Checked and reserved in one synchronous step: steerTurn registers a steer the same way.
-          const reserved = yield* Ref.modify(
-            activeTurn,
-            (
-              turn,
-            ): readonly [
-              (
-                | ProviderAdapter.ProviderAdapterContextRewindRefusal
-                | {
-                    readonly turn: ActiveClaudeTurnContext;
-                    readonly reservation: { readonly providerTurnId: ProviderTurnId };
+          // Masked so an interrupt cannot land between the reservation and its cleanup handler.
+          return yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              // Checked and reserved in one synchronous step: steerTurn registers a steer the same way.
+              const reserved = yield* Ref.modify(
+                activeTurn,
+                (
+                  turn,
+                ): readonly [
+                  (
+                    | ProviderAdapter.ProviderAdapterContextRewindRefusal
+                    | {
+                        readonly turn: ActiveClaudeTurnContext;
+                        readonly reservation: { readonly providerTurnId: ProviderTurnId };
+                      }
+                  ),
+                  ActiveClaudeTurnContext | null,
+                ] => {
+                  if (turn === null || turn.nativeThreadId !== nativeThreadId) {
+                    return ["no_active_turn", turn];
                   }
-              ),
-              ActiveClaudeTurnContext | null,
-            ] => {
-              if (turn === null || turn.nativeThreadId !== nativeThreadId) {
-                return ["no_active_turn", turn];
-              }
-              if (
-                pendingContextRewinds.get(nativeThreadId)?.providerTurnId === turn.providerTurnId
-              ) {
-                return ["already_pending", turn];
-              }
-              if (turn.pendingSteers.size > 0) return ["message_pending", turn];
-              const reservation = { providerTurnId: turn.providerTurnId };
-              pendingContextRewinds.set(nativeThreadId, reservation);
-              return [{ turn, reservation }, turn];
-            },
-          );
-          if (typeof reserved === "string") return yield* refuse(reserved);
-          const { turn, reservation } = reserved;
-          return yield* Effect.gen(function* () {
-            const live = yield* Ref.get(queryContext);
-            if (
-              live !== null &&
-              live.nativeThreadId === nativeThreadId &&
-              (yield* liveProcessRunsBackgroundWork(live))
-            ) {
-              return yield* refuse("background_work");
-            }
-            const lines = yield* readClaudeTranscriptLines(
-              nativeThreadId,
-              turn.input.runtimePolicy.cwd,
-            ).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
-            if (turn.promptUuid === null) return yield* refuse("cut_not_found");
-            const cut = claudeContextRewindCut(lines, {
-              promptUuid: turn.promptUuid,
-              toolCalls: rewindInput.toolCalls,
-            });
-            if ("refused" in cut) return yield* refuse(cut.refused);
-            // The reservation allows one rewind per provider turn, so its id names the continuation.
-            const continuationMessageId = MessageIdSchema.make(
-              `message:context-rewind:${turn.providerTurnId}`,
-            );
-            yield* rewindInput.deliver({
-              removedToolCalls: cut.removedToolCalls,
-              continuationMessageId,
-            });
-            if (pendingContextRewinds.get(nativeThreadId) === reservation) {
-              pendingContextRewinds.set(nativeThreadId, {
-                providerTurnId: turn.providerTurnId,
-                confirmed: {
-                  cutUuid: cut.cutUuid,
-                  continuationMessageId,
-                  removedToolCalls: cut.removedToolCalls,
+                  if (
+                    pendingContextRewinds.get(nativeThreadId)?.providerTurnId ===
+                    turn.providerTurnId
+                  ) {
+                    return ["already_pending", turn];
+                  }
+                  if (turn.pendingSteers.size > 0) return ["message_pending", turn];
+                  const reservation = { providerTurnId: turn.providerTurnId };
+                  pendingContextRewinds.set(nativeThreadId, reservation);
+                  return [{ turn, reservation }, turn];
                 },
-              });
-            }
-            return { removedToolCalls: cut.removedToolCalls };
-          }).pipe(
-            Effect.onError(() =>
-              Effect.sync(() => {
-                if (pendingContextRewinds.get(nativeThreadId) === reservation) {
-                  pendingContextRewinds.delete(nativeThreadId);
-                }
-              }),
-            ),
+              );
+              if (typeof reserved === "string") return yield* refuse(reserved);
+              const { turn, reservation } = reserved;
+              return yield* restore(
+                Effect.gen(function* () {
+                  const live = yield* Ref.get(queryContext);
+                  if (
+                    live !== null &&
+                    live.nativeThreadId === nativeThreadId &&
+                    (yield* liveProcessRunsBackgroundWork(live))
+                  ) {
+                    return yield* refuse("background_work");
+                  }
+                  const lines = yield* readClaudeTranscriptLines(
+                    nativeThreadId,
+                    turn.input.runtimePolicy.cwd,
+                  ).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+                  if (turn.promptUuid === null) return yield* refuse("cut_not_found");
+                  const cut = claudeContextRewindCut(lines, {
+                    promptUuid: turn.promptUuid,
+                    toolCalls: rewindInput.toolCalls,
+                  });
+                  if ("refused" in cut) return yield* refuse(cut.refused);
+                  // The reservation allows one rewind per provider turn, so its id names the continuation.
+                  const continuationMessageId = MessageIdSchema.make(
+                    `message:context-rewind:${turn.providerTurnId}`,
+                  );
+                  yield* rewindInput.deliver({
+                    removedToolCalls: cut.removedToolCalls,
+                    continuationMessageId,
+                  });
+                  if (pendingContextRewinds.get(nativeThreadId) === reservation) {
+                    pendingContextRewinds.set(nativeThreadId, {
+                      providerTurnId: turn.providerTurnId,
+                      confirmed: {
+                        cutUuid: cut.cutUuid,
+                        continuationMessageId,
+                        removedToolCalls: cut.removedToolCalls,
+                      },
+                    });
+                  }
+                  return { removedToolCalls: cut.removedToolCalls };
+                }),
+              ).pipe(
+                Effect.onError(() =>
+                  Effect.sync(() => {
+                    if (pendingContextRewinds.get(nativeThreadId) === reservation) {
+                      pendingContextRewinds.delete(nativeThreadId);
+                    }
+                  }),
+                ),
+              );
+            }),
           );
         });
 
