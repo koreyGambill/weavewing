@@ -463,7 +463,7 @@ describe("copying rendered Markdown tables", () => {
     vi.unstubAllGlobals();
   });
 
-  it("copies a fixed-width table with space-padded, aligned columns", () => {
+  it("copies a fixed-width table with a rule under the header and aligned columns", () => {
     const text = (value: string) => new FakeText(value);
     const table = renderedTable(
       [text("Name"), text("Score"), text("Note")],
@@ -474,7 +474,12 @@ describe("copying rendered Markdown tables", () => {
     Object.assign(score, { style: { textAlign: "right" } });
 
     expect(serializeTableElementToFixedWidth(table as unknown as Element)).toBe(
-      ["Name   Score  Note", "Alice      7  first place", "Bob     1234"].join("\n"),
+      [
+        "Name   Score  Note",
+        "-------------------------",
+        "Alice      7  first place",
+        "Bob     1234",
+      ].join("\n"),
     );
   });
 
@@ -487,7 +492,7 @@ describe("copying rendered Markdown tables", () => {
     );
 
     expect(serializeTableElementToFixedWidth(table as unknown as Element)).toBe(
-      ["Word  Mark", "日本  ✅", "abc"].join("\n"),
+      ["Word  Mark", "----------", "日本  ✅", "abc"].join("\n"),
     );
   });
 

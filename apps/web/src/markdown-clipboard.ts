@@ -511,7 +511,9 @@ export function serializeTableElementToFixedWidth(table: Element): string {
       .map((width, column) => padCell(row[column] ?? "", width, alignments[column] ?? ""))
       .join("  ")
       .trimEnd();
-  return rows.map(line).join("\n");
+  const [header = [], ...body] = rows;
+  const rule = "-".repeat(widths.reduce((total, width) => total + width, 2 * (columnCount - 1)));
+  return [line(header), rule, ...body.map(line)].join("\n");
 }
 
 function mermaidSourceHtml(source: string) {
