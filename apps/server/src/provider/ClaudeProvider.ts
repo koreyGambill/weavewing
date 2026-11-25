@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -230,6 +231,10 @@ function claudeAuthStatus(
 
 // Bedrock initialization includes backend startup and awsAuthRefresh, taking longer than first-party auth.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000;
+// At least one second, and up to six, of re-reads while MCP servers finish connecting.
+const MCP_SERVERS_PROBE_POLL = Duration.millis(250);
+const MCP_SERVERS_PROBE_SETTLE_READS = 24;
+const MCP_SERVERS_PROBE_MIN_READS = 4;
 // Native CLI startup on Windows can exceed the shared probe deadline.
 const CLAUDE_VERSION_CHECK_TIMEOUT_MS = 20_000;
 
@@ -657,9 +662,9 @@ export const probeClaudeMcpServers = Effect.fn("probeClaudeMcpServers")(function
     claudeSettings.binaryPath,
     claudeEnvironment,
   );
-  return yield* Effect.tryPromise({
+  const opened = Effect.tryPromise({
     try: async (signal) => {
-      // Aborting ends the Claude process, so it runs on success, failure and interruption.
+      // Aborting ends the Claude process; the release below and an interrupted open both do it.
       const abort = new AbortController();
       signal.addEventListener("abort", () => abort.abort(), { once: true });
       const { mcpServers: _noServers, ...options } = buildClaudeCapabilitiesProbeQueryOptions({
@@ -677,16 +682,48 @@ export const probeClaudeMcpServers = Effect.fn("probeClaudeMcpServers")(function
           prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
             await waitForAbortSignal(abort.signal);
           })(),
-          options: { ...options, env: { ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: "true" } },
+          options: {
+            ...options,
+            env: { ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: "true" },
+            // Flag settings too, because a user's settings.json env beats the process env.
+            settings: { disableAllHooks: true, env: { ENABLE_CLAUDEAI_MCP_SERVERS: "true" } },
+          },
         });
         await q.initializationResult();
-        return await q.mcpServerStatus();
-      } finally {
+        return { q, abort };
+      } catch (cause) {
         abort.abort();
+        throw cause;
       }
     },
     catch: (cause) => new ClaudeMcpServersProbeError({ cause }),
-  }).pipe(
+  });
+  const readStatuses = (q: ReturnType<typeof claudeQuery>) =>
+    Effect.tryPromise({
+      try: () => q.mcpServerStatus(),
+      catch: (cause) => new ClaudeMcpServersProbeError({ cause }),
+    });
+  return yield* Effect.acquireUseRelease(
+    opened,
+    Effect.fnUntraced(function* ({ q }) {
+      // Claude Code reports no event when servers finish connecting. Right after init it may not
+      // have registered any yet, and claude.ai connectors arrive a second or two later, so read
+      // for a short minimum and then for a bounded while any is pending.
+      let statuses = yield* readStatuses(q);
+      for (
+        let attempt = 0;
+        attempt < MCP_SERVERS_PROBE_SETTLE_READS &&
+        (attempt < MCP_SERVERS_PROBE_MIN_READS ||
+          statuses.some((status) => status.status === "pending"));
+        attempt++
+      ) {
+        yield* Effect.sleep(MCP_SERVERS_PROBE_POLL);
+        statuses = yield* readStatuses(q);
+      }
+      return statuses;
+    }),
+    ({ abort }) => Effect.sync(() => abort.abort()),
+  ).pipe(
     Effect.timeout(
       resolveProviderProbeTimeoutMs("claude", CAPABILITIES_PROBE_TIMEOUT_MS, environment),
     ),
