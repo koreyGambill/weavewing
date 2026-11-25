@@ -464,17 +464,31 @@ function LandingChanges({
       </div>
     );
   }
-  const { threadId, changes } = landing.data;
-  return changes.map((change) => (
-    <ChangeRow
-      key={change.id}
-      environmentId={environmentId}
-      landingId={landingId}
-      threadId={threadId}
-      change={change}
-      leaves={(next) => needsQa && leavesNeedsQa(changes, change.id, next)}
-    />
-  ));
+  const { threadId, changes, verifications } = landing.data;
+  // Badges truncate a long reason, so the opened landing spells each one out.
+  const skipped = verifications.filter((check) => check.result === "skipped" && check.reason);
+  return [
+    skipped.length > 0 ? (
+      <ul key="skipped" className="space-y-0.5 border-t border-border p-2 text-muted-foreground">
+        {skipped.map((check, index) => (
+          // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a check label.
+          <li key={index} className="break-words">
+            {checkLabel(check)}
+          </li>
+        ))}
+      </ul>
+    ) : null,
+    ...changes.map((change) => (
+      <ChangeRow
+        key={change.id}
+        environmentId={environmentId}
+        landingId={landingId}
+        threadId={threadId}
+        change={change}
+        leaves={(next) => needsQa && leavesNeedsQa(changes, change.id, next)}
+      />
+    )),
+  ];
 }
 
 function ChangeRow({
@@ -501,19 +515,8 @@ function ChangeRow({
   const long = change.ask.length > 90 || change.ask.includes("\n") || change.summary.length > 0;
   const key = change.ticket?.key ?? change.id;
   const review = reviewDisplay(change.review);
-  const [waiving, setWaiving] = useState(false);
-  const row = useRef<HTMLDivElement>(null);
-  // The note unmounts with focus in it, so hand focus back to the QA button.
-  const closeWaive = () => {
-    setWaiving(false);
-    requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (active !== null && active !== document.body && !row.current?.contains(active)) return;
-      row.current?.querySelector<HTMLElement>("[data-qa-trigger]")?.focus();
-    });
-  };
   return (
-    <div ref={row} className="min-w-0 space-y-1.5 border-t border-border p-2">
+    <div className="min-w-0 space-y-1.5 border-t border-border p-2">
       <div className="flex items-center gap-1">
         <span className="min-w-0 truncate font-medium">{key}</span>
         {long ? (
@@ -534,19 +537,10 @@ function ChangeRow({
           label={key}
           leaves={leaves}
           onFocusNote={setFocusNote}
-          onWaive={() => setWaiving(true)}
         />
       </div>
-      {waiving ? (
-        <WaiveNote
-          environmentId={environmentId}
-          landingId={landingId}
-          change={change}
-          leaves={leaves("waived")}
-          onDone={closeWaive}
-        />
-      ) : change.qa.state === "waived" && change.qa.note.trim() ? (
-        <p className="break-words text-muted-foreground">QA waived: {change.qa.note}</p>
+      {change.qa.state === "waived" ? (
+        <WaivedNote environmentId={environmentId} landingId={landingId} change={change} />
       ) : null}
       {change.qa.state === "failed" ? (
         <FailedNote
@@ -627,6 +621,9 @@ function ChangeRow({
           </Button>
         ))}
       </div>
+      {full && review.hint !== null ? (
+        <p className="break-words text-muted-foreground">{review.hint}</p>
+      ) : null}
       {full && change.review.reason ? (
         <p className="whitespace-pre-wrap break-words text-muted-foreground">
           Review waived: {change.review.reason}
@@ -689,7 +686,6 @@ function QaMenu({
   label,
   leaves,
   onFocusNote,
-  onWaive,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
@@ -697,8 +693,6 @@ function QaMenu({
   label: string;
   leaves: (next: EvidenceChangeQa["state"]) => boolean;
   onFocusNote: (focus: boolean) => void;
-  /** Waiving needs a reason, so it opens a note instead of setting the state. */
-  onWaive: () => void;
 }) {
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
@@ -706,7 +700,6 @@ function QaMenu({
   const current = QA_STATES.find((entry) => entry.state === change.qa.state)!;
   const choose = async (next: EvidenceChangeQa["state"]) => {
     if (next === change.qa.state) return;
-    if (next === "waived") return onWaive();
     if (next === "failed") onFocusNote(true);
     if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } }))) {
       onFocusNote(false);
@@ -721,7 +714,6 @@ function QaMenu({
         render={
           <Button
             ref={trigger}
-            data-qa-trigger
             variant="outline"
             size="micro"
             className="ml-auto shrink-0 justify-between @min-[11rem]/evidence:min-w-23"
@@ -747,7 +739,7 @@ function QaMenu({
               <CheckedLabel>
                 <span className="flex items-center gap-2">
                   <Icon aria-hidden className={tone} />
-                  {state === "failed" || state === "waived" ? `${name}…` : name}
+                  {state === "failed" ? "Failed…" : name}
                 </span>
               </CheckedLabel>
             </MenuRadioItem>
@@ -758,49 +750,68 @@ function QaMenu({
   );
 }
 
-function WaiveNote({
+/** A waived change's optional note: shown when set, and added or edited on demand. */
+function WaivedNote({
   environmentId,
   landingId,
   change,
-  leaves,
-  onDone,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
   change: Change;
-  leaves: boolean;
-  onDone: () => void;
 }) {
-  const [note, setNote] = useState("");
+  const [editing, setEditing] = useState(false);
+  // The editor unmounts with focus in it, so the button that opened it takes focus back.
+  const [returnFocus, setReturnFocus] = useState(false);
+  const [note, setNote] = useState(change.qa.note);
   const setQa = useSetQa();
-  const form = useRef<HTMLFormElement>(null);
-  const reason = note.trim();
-  const waive = async () => {
-    if (!reason) return;
+  const key = change.ticket?.key ?? change.id;
+  const close = () => {
+    setEditing(false);
+    setReturnFocus(true);
+  };
+  const save = async () => {
     if (
+      note.trim() !== change.qa.note.trim() &&
       !(await setQa({
         environmentId,
-        input: { landingId, changeId: change.id, state: "waived", note: reason },
+        input: { landingId, changeId: change.id, state: "waived", note: note.trim() },
       }))
     )
       return;
-    if (leaves) focusAfterCardLeaves(form.current);
-    onDone();
+    close();
     reloadEvidence();
   };
+  if (!editing)
+    return (
+      <div className="min-w-0 space-y-0.5 text-muted-foreground">
+        {change.qa.note.trim() ? <p className="break-words">QA waived: {change.qa.note}</p> : null}
+        <Button
+          autoFocus={returnFocus}
+          variant="ghost"
+          size="micro"
+          aria-label={`${change.qa.note.trim() ? "Edit" : "Add"} QA note for ${key}`}
+          onClick={() => {
+            setNote(change.qa.note);
+            setEditing(true);
+          }}
+        >
+          {change.qa.note.trim() ? "Edit note" : "Add note"}
+        </Button>
+      </div>
+    );
   return (
     <form
-      ref={form}
       className="space-y-1.5 rounded-md border border-border p-1.5"
       onSubmit={(event) => {
         event.preventDefault();
-        void waive();
+        void save();
       }}
     >
       <Textarea
         size="sm"
-        aria-label={`Why waive QA for ${change.ticket?.key ?? change.id}`}
-        placeholder="Why waive QA?"
+        aria-label={`Why QA was waived for ${key}`}
+        placeholder="Why waive QA? (optional)"
         value={note}
         maxLength={2000}
         autoFocus
@@ -808,18 +819,18 @@ function WaiveNote({
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
-            onDone();
+            close();
           } else if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            void waive();
+            void save();
           }
         }}
       />
       <div className="flex gap-1">
-        <Button size="micro" type="submit" disabled={!reason}>
-          Waive QA
+        <Button size="micro" type="submit">
+          Save note
         </Button>
-        <Button size="micro" variant="ghost" type="button" onClick={onDone}>
+        <Button size="micro" variant="ghost" type="button" onClick={close}>
           Cancel
         </Button>
       </div>

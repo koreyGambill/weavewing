@@ -68,26 +68,41 @@ describe("leavesNeedsQa", () => {
 describe("reviewDisplay", () => {
   const reviewer = ThreadId.make("thread-reviewer");
 
-  it("shows a verdict with no reviewer thread as unverified", () => {
+  it("shows a verdict with no checked reviewer thread as unverified", () => {
     expect(reviewDisplay({ verdict: "approved", by: "opus" })).toEqual({
       label: "unverified review",
       variant: "outline",
-      hint: "Reported approved by opus, with no reviewer thread linked.",
+      hint: "Reported approved by opus, with no finished reviewer thread behind it.",
       threadId: null,
     });
-    expect(reviewDisplay({ verdict: "changes_requested" }).label).toBe("unverified review");
-  });
-
-  it("shows a linked verdict as reviewed and says when the server linked it", () => {
-    expect(reviewDisplay({ verdict: "approved", by: "opus", threadId: reviewer })).toEqual({
-      label: "approved · opus",
-      variant: "success",
-      hint: null,
-      threadId: reviewer,
+    // An agent-named or older thread id without the server's check is not proof.
+    expect(reviewDisplay({ verdict: "approved", threadId: reviewer })).toMatchObject({
+      label: "unverified review",
+      threadId: null,
     });
     expect(
-      reviewDisplay({ verdict: "changes_requested", threadId: reviewer, linked: "derived" }),
+      reviewDisplay({ verdict: "approved", threadId: reviewer, check: "unverified" }).label,
+    ).toBe("unverified review");
+  });
+
+  it("shows a checked verdict as reviewed and says when the server linked it", () => {
+    expect(
+      reviewDisplay({ verdict: "approved", by: "opus", threadId: reviewer, check: "verified" }),
+    ).toEqual({ label: "approved · opus", variant: "success", hint: null, threadId: reviewer });
+    expect(
+      reviewDisplay({
+        verdict: "changes_requested",
+        threadId: reviewer,
+        linked: "derived",
+        check: "verified",
+      }),
     ).toMatchObject({ label: "changes requested", variant: "warning", threadId: reviewer });
+  });
+
+  it("links a reviewer whose verdict it could not read without calling it reviewed", () => {
+    expect(
+      reviewDisplay({ verdict: "approved", threadId: reviewer, check: "verdict_unconfirmed" }),
+    ).toMatchObject({ label: "verdict not confirmed", variant: "outline", threadId: reviewer });
   });
 
   it("puts a waiver's reason next to it and still reads a waiver from before reasons", () => {

@@ -1,40 +1,72 @@
 import type { EvidenceChange, OrchestrationV2DelegateRole } from "@t3tools/contracts";
 
-/** One delegated child of the lead, folded from its task records. */
-export interface DelegatedChild {
-  readonly threadId: string;
+/** One delegated task of the lead: a child's first task or a follow-up on the same child. */
+export interface DelegatedTask {
+  readonly childThreadId: string;
   readonly role: OrchestrationV2DelegateRole | null;
-  /** ISO time its first task started. */
+  /** ISO times. A task without a completion time has not finished. */
   readonly startedAt: string;
-  /** The brief its parent sent. */
+  readonly completedAt: string | null;
+  /** This task's own brief and final message. */
   readonly prompt: string;
+  readonly result: string | null;
   readonly branch: string | null;
 }
 
 export type ThreadReviewVerdict = "approved" | "changes_requested";
 
-const VERDICT_LINE = /\bverdict\b[\s*_]*[:\-–—]+[\s*_]*([a-z][a-z -]{0,40})/gi;
+const VERDICTS: ReadonlyMap<string, ThreadReviewVerdict> = new Map([
+  ["approve", "approved"],
+  ["approved", "approved"],
+  ["lgtm", "approved"],
+  ["request changes", "changes_requested"],
+  ["requested changes", "changes_requested"],
+  ["changes requested", "changes_requested"],
+  ["changes_requested", "changes_requested"],
+  ["request-changes", "changes_requested"],
+]);
 
-/**
- * The verdict a reviewer's final message states on a `Verdict:` line, the last
- * one when it gives several. Anything else is left to the agent's own record.
- */
-export function reviewVerdictFromText(text: string): ThreadReviewVerdict | null {
-  const phrase = [...text.matchAll(VERDICT_LINE)].at(-1)?.[1]?.trim().toLowerCase();
-  if (phrase === undefined) return null;
-  if (
-    /^(request(ed|ing|s)? changes|changes[ -]requested|needs? (changes|work)|rework|hold|block|reject|do not (merge|land|ship))/.test(
-      phrase,
-    ) ||
-    /\bwith[ -](fixes|changes)\b/.test(phrase)
-  )
-    return "changes_requested";
-  if (/^(approved?|lgtm|pass(es|ed)?|ship|safe to (merge|land|ship))\b/.test(phrase))
-    return "approved";
-  return null;
+const VERDICT_LINE = /^verdict\s*[:–—-]\s*(.+?)\.?$/i;
+
+/** The line's verdict value, from a plain `Verdict: x` line or one wholly in bold. */
+function verdictValue(line: string): string | null {
+  const trimmed = line.trim().replace(/^[-*+]\s+/, "");
+  const bold = /^(\*\*|__)(.+?)\1(.*)$/.exec(trimmed);
+  const candidate = bold === null ? trimmed : bold[2]!;
+  const match = VERDICT_LINE.exec(candidate.trim());
+  return match === null ? null : match[1]!.trim().replace(/\.$/, "").toLowerCase();
 }
 
-const HEX_TOKEN = /\b[0-9a-f]{7,64}\b/g;
+/**
+ * The verdict a reviewer's final message states, only when it has exactly one verdict line
+ * outside quotes and code blocks and that line's whole value is a known verdict. Anything else,
+ * including a conditional ("approve after tests pass"), is not a confirmed verdict.
+ */
+export function reviewVerdictFromText(text: string): ThreadReviewVerdict | null {
+  let fenced = false;
+  const values: Array<string> = [];
+  for (const line of text.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced || /^\s*>/.test(line)) continue;
+    const value = verdictValue(line);
+    if (value !== null) values.push(value);
+  }
+  return values.length === 1 ? (VERDICTS.get(values[0]!) ?? null) : null;
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Whether `text` contains `name` as a whole branch name, not as part of a longer one. */
+function namesBranch(text: string, name: string): boolean {
+  return new RegExp(
+    `(?<![A-Za-z0-9._/-])${escapeRegExp(name)}(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9_/-])`,
+  ).test(text);
+}
+
+const HEX_TOKEN = /(?<![0-9a-z])[0-9a-f]{7,64}(?![0-9a-z])/gi;
 
 function namesChange(
   prompt: string,
@@ -42,8 +74,8 @@ function namesChange(
   targetBranch: string,
 ): boolean {
   const branch = change.branch;
-  if (branch !== undefined && branch !== targetBranch && prompt.includes(branch)) return true;
-  const tokens = prompt.toLowerCase().match(HEX_TOKEN) ?? [];
+  if (branch !== undefined && branch !== targetBranch && namesBranch(prompt, branch)) return true;
+  const tokens = (prompt.match(HEX_TOKEN) ?? []).map((token) => token.toLowerCase());
   return change.commits.some(
     (commit) =>
       commit.length >= 7 &&
@@ -51,47 +83,73 @@ function namesChange(
   );
 }
 
-const latest = (children: ReadonlyArray<DelegatedChild>) =>
-  children.toSorted((left, right) => right.startedAt.localeCompare(left.startedAt))[0] ?? null;
+const byStart = (left: DelegatedTask, right: DelegatedTask) =>
+  left.startedAt.localeCompare(right.startedAt);
+
+/** A review task that finished with a result before the landing; only these can back a verdict. */
+export function isFinishedReview(task: DelegatedTask, landedAt: string): boolean {
+  return (
+    task.role === "review" &&
+    task.completedAt !== null &&
+    task.completedAt <= landedAt &&
+    task.result !== null &&
+    task.result.trim() !== ""
+  );
+}
 
 /**
- * The lead's review-role child that reviewed a change: the latest whose brief names its branch or
- * a commit, else the latest started after the implementing child and before the next one. A
- * re-check supersedes the first round; reviewers started after the landing never count.
+ * The lead's finished review task for a change, declining whenever there is doubt: the latest whose
+ * own brief names the change's branch or a commit, else the latest started after the implementing
+ * child and before the next one, while no other implementation lane is still awaiting review.
  */
-export function matchReviewThread(input: {
+export function matchReviewTask(input: {
   readonly change: Pick<EvidenceChange, "branch" | "commits">;
   readonly targetBranch: string;
   readonly landedAt: string;
   /** The landing's thread when it is itself one of the lead's children. */
   readonly implementerThreadId: string | null;
-  readonly children: ReadonlyArray<DelegatedChild>;
-}): DelegatedChild | null {
-  const reviewers = input.children.filter(
-    (child) => child.role === "review" && child.startedAt <= input.landedAt,
+  readonly tasks: ReadonlyArray<DelegatedTask>;
+}): DelegatedTask | null {
+  const reviews = input.tasks
+    .filter((task) => isFinishedReview(task, input.landedAt))
+    .toSorted(byStart);
+  const named = reviews.filter((task) =>
+    namesChange(task.prompt, input.change, input.targetBranch),
   );
-  const named = reviewers.filter((child) =>
-    namesChange(child.prompt, input.change, input.targetBranch),
-  );
-  if (named.length > 0) return latest(named);
+  if (named.length > 0) return named.at(-1)!;
 
-  const implementations = input.children.filter((child) => child.role === "implementation");
+  // Each implementation child counts once, from its first task.
+  const firstTasks = new Map<string, DelegatedTask>();
+  for (const task of input.tasks.filter((task) => task.role === "implementation").toSorted(byStart))
+    if (!firstTasks.has(task.childThreadId)) firstTasks.set(task.childThreadId, task);
+  const lanes = [...firstTasks.values()];
   const onBranch =
     input.change.branch === undefined || input.change.branch === input.targetBranch
       ? []
-      : implementations.filter((child) => child.branch === input.change.branch);
+      : lanes.filter((lane) => lane.branch === input.change.branch);
   const implementer =
-    input.children.find((child) => child.threadId === input.implementerThreadId) ??
+    lanes.find((lane) => lane.childThreadId === input.implementerThreadId) ??
     (onBranch.length === 1 ? onBranch[0] : undefined);
   if (implementer === undefined) return null;
-  const nextImplementation = implementations
-    .filter((child) => child.startedAt > implementer.startedAt)
-    .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt))[0];
-  return latest(
-    reviewers.filter(
-      (child) =>
-        child.startedAt > implementer.startedAt &&
-        (nextImplementation === undefined || child.startedAt < nextImplementation.startedAt),
-    ),
+  const allReviews = input.tasks.filter((task) => task.role === "review");
+  // Another lane started earlier with no review since is still open, so a review could be its.
+  const otherOpenLane = lanes.some(
+    (lane) =>
+      lane !== implementer &&
+      lane.startedAt < implementer.startedAt &&
+      !allReviews.some(
+        (review) => review.startedAt > lane.startedAt && review.startedAt < implementer.startedAt,
+      ),
+  );
+  if (otherOpenLane) return null;
+  const next = lanes.find((lane) => lane.startedAt > implementer.startedAt);
+  return (
+    reviews
+      .filter(
+        (task) =>
+          task.startedAt > implementer.startedAt &&
+          (next === undefined || task.startedAt < next.startedAt),
+      )
+      .at(-1) ?? null
   );
 }

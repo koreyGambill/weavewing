@@ -32,6 +32,22 @@ export const EvidenceVerification = Schema.Struct({
 });
 export type EvidenceVerification = typeof EvidenceVerification.Type;
 
+/** The review as an agent reports it; the server decides whether a reviewer thread backs it. */
+const EvidenceReviewInput = Schema.Struct({
+  verdict: Schema.Literals(["approved", "changes_requested", "waived"]),
+  by: Schema.optional(Text(120)),
+  summary: Schema.optional(Text(2000)),
+  threadId: Schema.optional(
+    ThreadId.annotate({
+      description:
+        "The reviewer thread: a review-role delegate of the lead that finished before the landing. Omitted, the server links one when it can tell which.",
+    }),
+  ),
+  reason: Schema.optional(
+    Reason.annotate({ description: "Required when verdict is waived: why, in one line." }),
+  ),
+});
+
 export const EvidenceChange = Schema.Struct({
   id: EvidenceSlug,
   ask: Text(2000),
@@ -43,20 +59,15 @@ export const EvidenceChange = Schema.Struct({
   ),
   summary: Text(2000),
   review: Schema.Struct({
-    verdict: Schema.Literals(["approved", "changes_requested", "waived"]),
-    by: Schema.optional(Text(120)),
-    summary: Schema.optional(Text(2000)),
-    threadId: Schema.optional(
-      ThreadId.annotate({
-        description:
-          "The reviewer thread. Omitted, the server links the lead's review-role child that reviewed this change when it can tell which.",
-      }),
-    ),
-    reason: Schema.optional(
-      Reason.annotate({ description: "Required when verdict is waived: why, in one line." }),
-    ),
-    /** Set when the server, not the agent, linked `threadId`. */
+    ...EvidenceReviewInput.fields,
+    /** Set when the server, not the agent, chose `threadId`. */
     linked: Schema.optional(Schema.Literal("derived")),
+    /**
+     * Set by the server from the reviewer thread: `verified` when a completed review-role child
+     * stated this verdict, `verdict_unconfirmed` when it finished without one plain verdict line,
+     * and `unverified` (or absent, on older records) otherwise.
+     */
+    check: Schema.optional(Schema.Literals(["verified", "verdict_unconfirmed", "unverified"])),
   }),
   /** Absolute server paths under the evidence root; clients mint asset URLs when a change opens. */
   captures: Schema.Array(Schema.Struct({ path: Text(1024), caption: Text(300) })).check(
@@ -85,8 +96,13 @@ const EvidenceVerificationInput = EvidenceVerification.check(
   ),
 );
 
-const EvidenceChangeInput = EvidenceChange.check(
-  Schema.makeFilter((change: EvidenceChange) =>
+const EvidenceChangeInputFields = Schema.Struct({
+  ...EvidenceChange.fields,
+  review: EvidenceReviewInput,
+});
+
+const EvidenceChangeInput = EvidenceChangeInputFields.check(
+  Schema.makeFilter((change: typeof EvidenceChangeInputFields.Type) =>
     change.review.verdict !== "waived" || change.review.reason !== undefined
       ? true
       : `Change "${change.id}" waives review; give review.reason in one line.`,
@@ -169,21 +185,12 @@ export type EvidenceListResult = typeof EvidenceListResult.Type;
 export const EvidenceGetInput = Schema.Struct({ landingId: EvidenceSlug });
 export type EvidenceGetInput = typeof EvidenceGetInput.Type;
 
-const EvidenceSetQaFields = Schema.Struct({
+export const EvidenceSetQaInput = Schema.Struct({
   landingId: EvidenceSlug,
   changeId: EvidenceSlug,
   state: EvidenceQaState,
   note: Schema.optional(EvidenceChangeQa.fields.note),
 });
-
-/** Waiving QA needs a note that says why. */
-export const EvidenceSetQaInput = EvidenceSetQaFields.check(
-  Schema.makeFilter((input: typeof EvidenceSetQaFields.Type) =>
-    input.state !== "waived" || (input.note ?? "").trim() !== ""
-      ? true
-      : "Waiving QA needs a note that says why.",
-  ),
-);
 export type EvidenceSetQaInput = typeof EvidenceSetQaInput.Type;
 
 export const EvidenceCounts = Schema.Struct({ pending: NonNegativeInt, failed: NonNegativeInt });

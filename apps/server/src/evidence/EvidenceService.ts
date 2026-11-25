@@ -40,7 +40,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
-import { type DelegatedChild, matchReviewThread, reviewVerdictFromText } from "./reviewLink.ts";
+import {
+  type DelegatedTask,
+  isFinishedReview,
+  matchReviewTask,
+  reviewVerdictFromText,
+} from "./reviewLink.ts";
 
 /** Captures must resolve under ~/evidence. This catches wrong paths; minting a URL needs `filesystem:read`, which is the real boundary. */
 const EVIDENCE_ROOT_NAME = "evidence";
@@ -76,12 +81,12 @@ interface LandingRow {
   readonly updated_at: string;
   readonly record_json: string;
 }
-interface DelegatedChildRow {
+interface DelegatedTaskRow {
   readonly child_thread_id: string;
   readonly started_at: string;
-  readonly updated_at: string;
-  readonly original_task_id: string | null;
+  readonly completed_at: string | null;
   readonly prompt: string | null;
+  readonly result: string | null;
   readonly role: string | null;
   readonly branch: string | null;
 }
@@ -203,7 +208,7 @@ const make = Effect.gen(function* () {
     return canonical.value;
   });
 
-  // The lead's delegated children, so a change's reviewer can be found among them.
+  // Every task the lead delegated, so a change's reviewer can be found and checked among them.
   const readDelegation = Effect.fnUntraced(function* (threadId: ThreadId) {
     const [landing] = yield* sql<{
       readonly relationship: string | null;
@@ -214,71 +219,89 @@ const make = Effect.gen(function* () {
     const recordedByChild =
       landing?.relationship === "subagent" && landing.parent_thread_id !== null;
     const leadThreadId = recordedByChild ? landing.parent_thread_id! : threadId;
-    const rows = yield* sql<DelegatedChildRow>`SELECT s.child_thread_id, s.started_at, s.updated_at,
-          json_extract(s.payload_json, '$.originalTaskId') AS original_task_id,
+    const rows =
+      yield* sql<DelegatedTaskRow>`SELECT s.child_thread_id, s.started_at, s.completed_at,
           json_extract(s.payload_json, '$.prompt') AS prompt,
-          json_extract(t.payload_json, '$.delegateRole') AS role,
+          json_extract(s.payload_json, '$.result') AS result,
+          coalesce(json_extract(t.payload_json, '$.delegateRole'),
+            json_extract(s.payload_json, '$.delegateRole')) AS role,
           json_extract(t.payload_json, '$.branch') AS branch
         FROM orchestration_v2_projection_subagents s
         JOIN orchestration_v2_projection_threads t ON t.thread_id = s.child_thread_id
         WHERE s.thread_id = ${leadThreadId} AND s.origin = 'app_owned' AND s.started_at IS NOT NULL`;
-    const children = new Map<string, DelegatedChild>();
-    for (const row of rows) {
-      // A follow-up reuses the child; its first task holds the brief.
-      if (row.original_task_id !== null) continue;
-      children.set(row.child_thread_id, {
-        threadId: row.child_thread_id,
-        role: isDelegateRole(row.role) ? row.role : null,
-        startedAt: row.started_at,
-        prompt: row.prompt ?? "",
-        branch: row.branch,
-      });
-    }
     return {
       implementerThreadId: recordedByChild ? threadId : null,
-      children: [...children.values()],
+      tasks: rows.map((row): DelegatedTask => ({
+        childThreadId: row.child_thread_id,
+        role: isDelegateRole(row.role) ? row.role : null,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        prompt: row.prompt ?? "",
+        result: row.result,
+        branch: row.branch,
+      })),
     };
   });
 
-  // The final message of a delegated child's latest task, where a reviewer states its verdict.
-  const readChildResult = (childThreadId: string) =>
-    sql<{ readonly result: string | null }>`SELECT json_extract(payload_json, '$.result') AS result
-        FROM orchestration_v2_projection_subagents
-        WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'
-        ORDER BY updated_at DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.result ?? null));
-
-  const linkReview = Effect.fnUntraced(function* (
-    change: EvidenceChange,
+  /**
+   * The review as stored: the agent's claim, plus the reviewer task that backs it when one does.
+   * Only a finished review-role task of the same lead counts, and its verdict replaces the claim
+   * only when it states exactly one plain verdict.
+   */
+  const linkReview = (
+    change: RecordInput["changes"][number],
     targetBranch: string,
     landedAt: string,
     delegation: {
       readonly implementerThreadId: string | null;
-      readonly children: ReadonlyArray<DelegatedChild>;
+      readonly tasks: ReadonlyArray<DelegatedTask>;
     },
     warnings: string[],
-  ) {
+  ): EvidenceChange["review"] => {
     const { review } = change;
     if (review.verdict === "waived") return review;
-    const matched =
-      review.threadId === undefined
-        ? matchReviewThread({ change, targetBranch, landedAt, ...delegation })
-        : null;
-    const reviewThreadId = review.threadId ?? matched?.threadId;
-    if (reviewThreadId === undefined) return review;
-    const result = yield* readChildResult(reviewThreadId);
-    const threadVerdict = result === null ? null : reviewVerdictFromText(result);
-    if (threadVerdict !== null && threadVerdict !== review.verdict)
-      warnings.push(
-        `change ${change.id}: review verdict taken from thread ${reviewThreadId} (${threadVerdict}), not ${review.verdict}`,
-      );
-    return {
+    const explicit = review.threadId;
+    let reviewer: DelegatedTask | undefined;
+    if (explicit !== undefined) {
+      const ofThread = delegation.tasks.filter((task) => task.childThreadId === explicit);
+      reviewer = ofThread
+        .filter((task) => isFinishedReview(task, landedAt))
+        .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt))
+        .at(-1);
+      if (reviewer === undefined) {
+        warnings.push(
+          `change ${change.id}: review shown as unverified because thread ${explicit} ${
+            ofThread.length === 0
+              ? "is not a task this lead delegated"
+              : ofThread.every((task) => task.role !== "review")
+                ? "was not delegated with role review"
+                : "has no result finished before the landing"
+          }`,
+        );
+        return { ...review, check: "unverified" };
+      }
+    } else {
+      reviewer = matchReviewTask({ change, targetBranch, landedAt, ...delegation }) ?? undefined;
+      if (reviewer === undefined) return { ...review, check: "unverified" };
+    }
+    const linked = {
       ...review,
-      verdict: threadVerdict ?? review.verdict,
-      ...(matched === null
-        ? {}
-        : { threadId: ThreadId.make(matched.threadId), linked: "derived" as const }),
+      threadId: ThreadId.make(reviewer.childThreadId),
+      ...(explicit === undefined ? { linked: "derived" as const } : {}),
     };
-  });
+    const threadVerdict = reviewVerdictFromText(reviewer.result ?? "");
+    if (threadVerdict === null) {
+      warnings.push(
+        `change ${change.id}: reviewer thread ${reviewer.childThreadId} states no single plain verdict line, so ${review.verdict} is not confirmed`,
+      );
+      return { ...linked, check: "verdict_unconfirmed" };
+    }
+    if (threadVerdict !== review.verdict)
+      warnings.push(
+        `change ${change.id}: review verdict taken from thread ${reviewer.childThreadId} (${threadVerdict}), not ${review.verdict}`,
+      );
+    return { ...linked, verdict: threadVerdict, check: "verified" };
+  };
 
   const readQa = (landingId: string) =>
     sql<QaRow>`SELECT change_id, state, note, updated_at FROM evidence_qa WHERE landing_id = ${landingId}`;
@@ -302,13 +325,7 @@ const make = Effect.gen(function* () {
       const captures = [];
       for (const capture of change.captures)
         captures.push({ ...capture, path: yield* checkCapture(capture.path, root, warnings) });
-      const review = yield* linkReview(
-        change,
-        input.target.branch,
-        recordedAt,
-        delegation,
-        warnings,
-      );
+      const review = linkReview(change, input.target.branch, recordedAt, delegation, warnings);
       changes.push({ ...change, captures, review });
     }
     const recordJson = yield* encodeRecord({

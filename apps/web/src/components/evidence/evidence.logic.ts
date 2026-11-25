@@ -31,8 +31,8 @@ export function checkLabel(check: {
 }
 
 /**
- * How a change's review reads. A verdict with no reviewer thread behind it is
- * only the agent's word, so it shows as unverified rather than as reviewed.
+ * How a change's review reads. Only a review the server checked against a finished reviewer
+ * thread shows as reviewed; any other verdict is the agent's word and shows as unverified.
  */
 export function reviewDisplay(review: EvidenceChange["review"]): {
   readonly label: string;
@@ -49,20 +49,26 @@ export function reviewDisplay(review: EvidenceChange["review"]): {
       threadId: null,
     };
   const verdict = VERDICTS[review.verdict];
-  if (review.threadId === undefined)
+  const linked =
+    review.linked === "derived" ? " The reviewer thread was linked automatically." : "";
+  if (review.check === "verdict_unconfirmed" && review.threadId !== undefined)
+    return {
+      label: "verdict not confirmed",
+      variant: "outline",
+      hint: `Reported ${verdict.label}${by}; the reviewer thread does not state one plain verdict.${linked}`,
+      threadId: review.threadId,
+    };
+  if (review.check !== "verified" || review.threadId === undefined)
     return {
       label: "unverified review",
       variant: "outline",
-      hint: `Reported ${verdict.label}${by}, with no reviewer thread linked.`,
+      hint: `Reported ${verdict.label}${by}, with no finished reviewer thread behind it.`,
       threadId: null,
     };
   return {
     label: `${verdict.label}${review.by ? ` · ${review.by}` : ""}`,
     variant: verdict.variant,
-    hint:
-      review.linked === "derived"
-        ? "Reviewer thread linked automatically from this lead's review delegates."
-        : null,
+    hint: linked === "" ? null : linked.trim(),
     threadId: review.threadId,
   };
 }
