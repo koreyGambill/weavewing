@@ -1,9 +1,9 @@
 import type { LegendListRef } from "@legendapp/list/react";
 import type {
   AssistantCitation,
+  MessageFollowUp,
   MessageId,
   ScopedThreadRef,
-  SideChatAnchor,
 } from "@t3tools/contracts";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import {
@@ -13,6 +13,7 @@ import {
 import { toastManager } from "../ui/toast";
 import { observeResize } from "~/lib/observeResize";
 import { useMessageBookmarks } from "../reviews/FollowUps";
+import { BookmarkPassageHover, type PlacedPassage } from "./BookmarkPassageHover";
 
 const CITATION_PULSE_DURATION_MS = 650;
 const CITATION_HIGHLIGHT_HOLD_MS = 1575;
@@ -27,24 +28,33 @@ const BOOKMARK_HIGHLIGHT_NAME = "t3-bookmark";
 /**
  * Marks bookmarked passages in one message, finding them again as its text re-renders. Rows
  * mount and unmount in any order, so each change reads the registered highlight afresh rather
- * than holding one another row may have unregistered.
+ * than holding one another row may have unregistered. `onPlace` receives where each passage now
+ * sits, so hovering its text can find its bookmark.
  */
-function observeBookmarkedPassages(root: HTMLElement, anchors: ReadonlyArray<SideChatAnchor>) {
+function observeBookmarkedPassages(
+  root: HTMLElement,
+  bookmarks: ReadonlyArray<MessageFollowUp>,
+  onPlace: (placed: ReadonlyArray<PlacedPassage>) => void,
+) {
   const registry = typeof CSS !== "undefined" ? CSS.highlights : undefined;
   if (typeof Highlight === "undefined" || !registry) return () => {};
-  let ranges: Range[] = [];
+  let placed: PlacedPassage[] = [];
   const unmark = () => {
     const highlight = registry.get(BOOKMARK_HIGHLIGHT_NAME);
-    for (const range of ranges) highlight?.delete(range);
+    for (const { range } of placed) highlight?.delete(range);
     if (highlight?.size === 0) registry.delete(BOOKMARK_HIGHLIGHT_NAME);
-    ranges = [];
+    placed = [];
   };
   const place = () => {
     unmark();
-    ranges = anchors.flatMap((anchor) => resolveAssistantCitationRange(root, anchor) ?? []);
-    if (ranges.length === 0) return;
+    placed = bookmarks.flatMap((bookmark) => {
+      const range = bookmark.anchor && resolveAssistantCitationRange(root, bookmark.anchor);
+      return range ? [{ bookmark, range }] : [];
+    });
+    onPlace(placed);
+    if (placed.length === 0) return;
     const highlight = registry.get(BOOKMARK_HIGHLIGHT_NAME) ?? new Highlight();
-    for (const range of ranges) highlight.add(range);
+    for (const { range } of placed) highlight.add(range);
     registry.set(BOOKMARK_HIGHLIGHT_NAME, highlight);
   };
   place();
@@ -53,6 +63,7 @@ function observeBookmarkedPassages(root: HTMLElement, anchors: ReadonlyArray<Sid
   return () => {
     observer.disconnect();
     unmark();
+    onPlace([]);
   };
 }
 
@@ -420,6 +431,7 @@ export function AssistantCitationSource({
   children: ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const placedRef = useRef<ReadonlyArray<PlacedPassage>>([]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes this message's DOM for a citation reveal request and scrolls the LegendList to it
   useEffect(() => {
     const root = rootRef.current;
@@ -431,10 +443,13 @@ export function AssistantCitationSource({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this message's bookmarked passages with the CSS highlight registry while it is mounted
   useEffect(() => {
     const root = rootRef.current;
-    const anchors = bookmarks.flatMap((bookmark) => bookmark.anchor ?? []);
-    if (!root || anchors.length === 0) return;
-    return observeBookmarkedPassages(root, anchors);
+    const passages = bookmarks.filter((bookmark) => bookmark.anchor !== undefined);
+    if (!root || passages.length === 0) return;
+    return observeBookmarkedPassages(root, passages, (placed) => {
+      placedRef.current = placed;
+    });
   }, [bookmarks]);
+  const hasPassages = bookmarks.some((bookmark) => bookmark.anchor !== undefined);
 
   return (
     <div
@@ -446,6 +461,14 @@ export function AssistantCitationSource({
       data-assistant-citation-thread={citable ? threadRef?.threadId : undefined}
     >
       {children}
+      {threadRef && hasPassages ? (
+        <BookmarkPassageHover
+          environmentId={threadRef.environmentId}
+          rootRef={rootRef}
+          placedRef={placedRef}
+          bookmarks={bookmarks}
+        />
+      ) : null}
     </div>
   );
 }

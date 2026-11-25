@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
-import { BookmarkToggles } from "../reviews/FollowUps";
+import { BookmarkCardBody } from "../reviews/FollowUps";
 import {
   bookmarkKey,
   bookmarkRailBars,
@@ -159,8 +159,6 @@ function BookmarkRailBarCard({
   onJump: () => void;
   children: ReactNode;
 }) {
-  const todo = isBookmarkTodo(bookmark);
-  const done = todo && bookmark.doneAt !== null;
   const text = bookmarkText(bookmark);
   return (
     <PreviewCard>
@@ -179,21 +177,12 @@ function BookmarkRailBarCard({
         {children}
       </PreviewCardTrigger>
       <PreviewCardPopup side="left" align="center">
-        <div className="w-64 p-2 text-xs">
-          <p className="text-muted-foreground">
-            {label}
-            {todo ? (done ? " · done" : " · to-do") : ""}
-          </p>
-          <p className="mt-0.5 line-clamp-3 wrap-anywhere">{text}</p>
-          <div className="mt-1.5 flex justify-end gap-0.5">
-            <BookmarkToggles
-              environmentId={environmentId}
-              target={bookmark}
-              bookmark={bookmark}
-              showDone
-            />
-          </div>
-        </div>
+        <BookmarkCardBody
+          environmentId={environmentId}
+          bookmark={bookmark}
+          title={label}
+          text={text}
+        />
       </PreviewCardPopup>
     </PreviewCard>
   );

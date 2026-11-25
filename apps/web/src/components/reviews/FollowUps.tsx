@@ -202,6 +202,38 @@ export function BookmarkToggles({
   );
 }
 
+/** A bookmark's status, optional text and toggles, for the hover cards beside and over its text. */
+export function BookmarkCardBody({
+  environmentId,
+  bookmark,
+  title,
+  text,
+}: {
+  environmentId: EnvironmentId;
+  bookmark: MessageFollowUp;
+  title: string;
+  text?: string;
+}) {
+  const todo = isBookmarkTodo(bookmark);
+  return (
+    <div className="w-64 p-2 text-xs">
+      <p className="text-muted-foreground">
+        {title}
+        {todo ? (bookmark.doneAt ? " · done" : " · to-do") : ""}
+      </p>
+      {text === undefined ? null : <p className="mt-0.5 line-clamp-3 wrap-anywhere">{text}</p>}
+      <div className="mt-1.5 flex justify-end gap-0.5">
+        <BookmarkToggles
+          environmentId={environmentId}
+          target={bookmark}
+          bookmark={bookmark}
+          showDone
+        />
+      </div>
+    </div>
+  );
+}
+
 function IconToggle({
   label,
   pressed,
