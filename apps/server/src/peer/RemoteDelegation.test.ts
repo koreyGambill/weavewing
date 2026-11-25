@@ -941,6 +941,7 @@ const delegateToBox = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>)
       },
       mode: "async",
       group: "suite",
+      role: "test",
       clientRequestId: "suite-on-box",
     })
     .pipe(
@@ -1057,12 +1058,13 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
         environmentId: laptop.environmentId,
         threadId: parentThreadId,
         title: "Laptop parent",
+        role: "test",
       });
       // A retry with the same key launches nothing new and records nothing new.
       const retried = yield* delegateToBox(a);
       expect(retried.taskId).toBe(delegated.taskId);
       expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toMatchObject([
-        { completionGroup: "suite" },
+        { completionGroup: "suite", delegateRole: "test" },
       ]);
 
       // Its provider there has not started the turn yet.

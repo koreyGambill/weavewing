@@ -510,6 +510,7 @@ it.effect("leaves a task delegated from a linked environment out of the top-leve
         environmentId: EnvironmentId.make("environment:linked"),
         threadId: ThreadId.make("thread:remote-parent"),
         title: "Remote parent",
+        role: "review",
       },
     });
     const listed = yield* threads.listProjectThreads({ projectId, includeSubagents: false });
@@ -522,6 +523,9 @@ it.effect("leaves a task delegated from a linked environment out of the top-leve
       all.map((thread) => thread.id),
       delegated.threadId,
     );
+    // The role the linked environment named shows here too.
+    const projection = yield* threads.getThreadProjection(delegated.threadId);
+    assert.equal(projection.thread.delegateRole, "review");
   }).pipe(Effect.provide(harness.layer));
 });
 

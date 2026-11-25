@@ -163,10 +163,22 @@ export const linkOriginIsFenced = (origin: OrchestrationV2LinkOrigin) =>
  * The thread in a linked environment that delegated this one, when it did:
  * this thread is that parent's subagent, run here instead of there.
  */
+/** What the delegating agent asked a child to act as. Only `delegate_task` sets it. */
+export const OrchestrationV2DelegateRole = Schema.Literals([
+  "implementation",
+  "research",
+  "review",
+  "design",
+  "test",
+]);
+export type OrchestrationV2DelegateRole = typeof OrchestrationV2DelegateRole.Type;
+
 export const OrchestrationV2DelegatedFrom = Schema.Struct({
   environmentId: EnvironmentId,
   threadId: ThreadId,
   title: Schema.String,
+  /** The role the delegating agent named; an older peer drops it. */
+  role: Schema.optional(OrchestrationV2DelegateRole),
 });
 export type OrchestrationV2DelegatedFrom = typeof OrchestrationV2DelegatedFrom.Type;
 
@@ -206,16 +218,6 @@ const OrchestrationV2ContextRewind = Schema.Struct({
   archiveThreadId: ThreadId,
   createdAt: IsoDateTime,
 });
-
-/** What the delegating agent asked a child to act as. Only `delegate_task` sets it. */
-export const OrchestrationV2DelegateRole = Schema.Literals([
-  "implementation",
-  "research",
-  "review",
-  "design",
-  "test",
-]);
-export type OrchestrationV2DelegateRole = typeof OrchestrationV2DelegateRole.Type;
 
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),

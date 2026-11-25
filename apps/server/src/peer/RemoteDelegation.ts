@@ -352,6 +352,7 @@ const make = Effect.gen(function* () {
       // the forwarder scopes the launch's, and the record's names it.
       const key = input.clientRequestId ?? (yield* random.uuidV4());
       const task = taskPrompt(input);
+      const { delegateRole } = storedDelegateRole(input.role);
       const title = input.title ?? parent.thread.title;
       const launched = yield* forwarding.call(
         scope,
@@ -370,6 +371,7 @@ const make = Effect.gen(function* () {
             environmentId: hereId,
             threadId: parent.thread.id,
             title: parent.thread.title,
+            ...(delegateRole === undefined ? {} : { role: delegateRole }),
           },
         },
       );
