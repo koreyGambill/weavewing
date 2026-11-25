@@ -3474,6 +3474,8 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     snapshotAt: Schema.DateTimeUtc,
     settledAt: Schema.optional(Schema.DateTimeUtc),
+    /** Agent questions are on, so a question reopened since the sweep keeps the thread. */
+    holdForOpenQuestions: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.unsettle"),

@@ -17032,7 +17032,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           );
         if (
           thread.settledOverride !== null ||
-          DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt)
+          DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt) ||
+          // Question changes keep updatedAt, so the sweep's snapshot cannot see a reopen.
+          (command.holdForOpenQuestions === true &&
+            (thread.questions ?? []).some((question) => question.state === "open"))
         ) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,

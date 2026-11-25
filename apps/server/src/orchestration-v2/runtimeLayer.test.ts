@@ -3770,6 +3770,26 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         DateTime.toEpochMillis(untaggedShell.updatedAt),
       );
 
+      const reopenQuestion = (step: string, state?: "open") =>
+        orchestrator.dispatch({
+          type: "thread.questions.sync",
+          commandId: CommandId.make(`runtime-layer-lifecycle-questions-${step}`),
+          threadId,
+          questions: state ? [{ id: "Q1", title: "Which database?", state }] : [],
+        });
+      yield* reopenQuestion("reopen-before-auto-settle", "open");
+      const reopenedProjection = yield* orchestrator.getThreadProjection(threadId);
+      const heldAutoSettle = yield* orchestrator
+        .dispatch({
+          type: "thread.auto-settle",
+          commandId: CommandId.make("runtime-layer-lifecycle-auto-settle-held"),
+          threadId,
+          snapshotAt: reopenedProjection.thread.updatedAt,
+          holdForOpenQuestions: true,
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(heldAutoSettle, Orchestrator.OrchestratorDispatchError);
+      yield* reopenQuestion("close-before-auto-settle");
       const preAutoProjection = yield* orchestrator.getThreadProjection(threadId);
       const staleAutoSettle = yield* orchestrator
         .dispatch({

@@ -384,6 +384,7 @@ export const make = Effect.gen(function* () {
             commandId: CommandId.make(`server:auto-settle:${thread.id}:${uuid}`),
             threadId: thread.id,
             snapshotAt: thread.updatedAt,
+            holdForOpenQuestions: settings.agentQuestionsEnabled,
           });
           return null;
         }
@@ -409,6 +410,7 @@ export const make = Effect.gen(function* () {
           threadId: thread.id,
           snapshotAt: thread.updatedAt,
           settledAt,
+          holdForOpenQuestions: settings.agentQuestionsEnabled,
         });
         return null;
       },
