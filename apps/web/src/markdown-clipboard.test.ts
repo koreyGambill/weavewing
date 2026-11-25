@@ -5,7 +5,6 @@ import {
   serializeRenderedMarkdownFragment,
   serializeTableElementToFixedWidth,
   serializeTableElementToMarkdown,
-  tableWidestCellWidth,
 } from "./markdown-clipboard";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import {
@@ -505,7 +504,6 @@ describe("copying rendered Markdown tables", () => {
       [text("Edit"), text("+4 lines")],
     );
 
-    expect(tableWidestCellWidth(table as unknown as Element)).toBe(49);
     expect(serializeTableElementToFixedWidth(table as unknown as Element, 20)).toBe(
       [
         "Step  Note",

@@ -502,12 +502,6 @@ function fixedWidthCellTexts(table: Element): { cellRows: Element[][]; rows: str
   return { cellRows, rows };
 }
 
-/** The display width of the table's widest cell, so callers know whether wrapping would change it. */
-export function tableWidestCellWidth(table: Element): number {
-  const { rows } = fixedWidthCellTexts(table);
-  return Math.max(0, ...rows.flat().map(monospaceWidth));
-}
-
 /** Breaks text at spaces into lines no wider than `width`, splitting a longer word. */
 function wrapCellText(text: string, width: number): string[] {
   const lines: string[] = [];
