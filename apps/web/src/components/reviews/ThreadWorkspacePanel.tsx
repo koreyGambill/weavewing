@@ -21,10 +21,9 @@ import { useEnvironmentScope } from "../../state/session";
 import { threadWorkspaceGet, threadArtifactAnswer } from "../../state/threadWorkspace";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
+import { QuestionOptions } from "../questions/QuestionOptions";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
-import { Checkbox } from "../ui/checkbox";
-import { Radio, RadioGroup } from "../ui/radio-group";
 import { Badge } from "../ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
@@ -306,43 +305,6 @@ function ArtifactDocument({
         : saved && (saved.chosenOptionIds.length || saved.notes.trim())
           ? "Answered · queued"
           : "Unanswered";
-    const options = entry.options.map((option) => (
-      <label
-        key={option.id}
-        className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-lg border border-border p-3 transition-colors hover:bg-muted/40 has-[[data-checked]]:border-primary/60 has-[[data-checked]]:bg-primary/5 has-[[data-disabled]]:cursor-default"
-      >
-        {entry.multiSelect ? (
-          <Checkbox
-            checked={answer.chosenOptionIds.includes(option.id)}
-            disabled={disabled}
-            onCheckedChange={(checked) =>
-              edit({
-                chosenOptionIds: checked
-                  ? [...answer.chosenOptionIds, option.id]
-                  : answer.chosenOptionIds.filter((id) => id !== option.id),
-              })
-            }
-          />
-        ) : (
-          <Radio value={option.id} disabled={disabled} />
-        )}
-        <span className="min-w-0 contents">
-          <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            {option.label}
-            {entry.recommendedOptionIds.includes(option.id) ? (
-              <Badge variant="info" size="sm">
-                Recommended
-              </Badge>
-            ) : null}
-          </span>
-          {option.description ? (
-            <span className="col-span-2 block text-xs leading-relaxed text-muted-foreground @min-[320px]:col-start-2 @min-[320px]:col-span-1">
-              {option.description}
-            </span>
-          ) : null}
-        </span>
-      </label>
-    ));
     return (
       <section
         key={entry.id}
@@ -369,19 +331,12 @@ function ArtifactDocument({
         {entry.details ? (
           <ChatMarkdown text={entry.details} cwd={undefined} threadRef={threadRef} />
         ) : null}
-        {entry.multiSelect ? (
-          <div role="group" aria-label={entry.prompt} className="space-y-2">
-            {options}
-          </div>
-        ) : (
-          <RadioGroup
-            aria-label={entry.prompt}
-            value={answer.chosenOptionIds[0] ?? ""}
-            onValueChange={(value) => edit({ chosenOptionIds: [value] })}
-          >
-            {options}
-          </RadioGroup>
-        )}
+        <QuestionOptions
+          question={entry}
+          chosenOptionIds={answer.chosenOptionIds}
+          disabled={disabled}
+          onChoose={(chosenOptionIds) => edit({ chosenOptionIds })}
+        />
         <label className="block space-y-2 text-xs font-medium text-muted-foreground">
           Your answer or notes
           <Textarea

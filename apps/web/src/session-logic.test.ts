@@ -1373,7 +1373,7 @@ describe("HTML renders in the timeline", () => {
     type: "command_execution",
     input: "vp test run",
   });
-  const turn = (render: OrchestrationV2TurnItem) => {
+  const turn = (render: OrchestrationV2TurnItem, threadQuestions?: boolean) => {
     const items: OrchestrationV2TurnItem[] = [
       {
         ...base("prompt", 0),
@@ -1399,6 +1399,7 @@ describe("HTML renders in the timeline", () => {
     return deriveTimelineEntriesFromVisibleTurnItems({
       visibleTurnItems: items.map(visible),
       optimisticMessages: [],
+      ...(threadQuestions === undefined ? {} : { threadQuestions }),
     });
   };
   const rowsFor = (entries: TimelineEntry[], expanded: boolean) =>
@@ -1458,6 +1459,29 @@ describe("HTML renders in the timeline", () => {
     });
     expect(rowsFor(entries, false)).toEqual(["message", "turn-fold", "sent-message", "message"]);
     expect(turn(send("running")).some((entry) => entry.kind === "sent-message")).toBe(false);
+  });
+
+  it("shows the questions an ask created in place of its tool row, only while questions are on", () => {
+    const ask: OrchestrationV2TurnItem = {
+      ...base("render", 2),
+      type: "dynamic_tool",
+      toolName: "mcp__t3-code__question_ask",
+      input: { questions: [{ prompt: "Ship?" }] },
+      output: { questionIds: ["Q3", "Q4"] },
+    };
+    const entries = turn(ask, true);
+    expect(entries.find((entry) => entry.kind === "thread-questions")).toMatchObject({
+      id: "render",
+      runId,
+      questionIds: ["Q3", "Q4"],
+    });
+    expect(rowsFor(entries, false)).toEqual([
+      "message",
+      "turn-fold",
+      "thread-questions",
+      "message",
+    ]);
+    expect(turn(ask, false).some((entry) => entry.kind === "thread-questions")).toBe(false);
   });
 
   it("hosts a captured MCP app after its tool row, from any provider's tool", () => {

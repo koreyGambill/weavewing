@@ -732,7 +732,8 @@ export interface ThreadStatusPill {
     | "Awaiting Input"
     | "Guest Request"
     | "Waiting"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Needs Decision";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -754,6 +755,8 @@ type ThreadStatusInput = Pick<
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
   lineage?: SidebarThreadSummary["lineage"] | undefined;
   blockedOnThreadWait?: boolean | undefined;
+  /** Pass only while agent questions are on, so a hidden feature changes no status. */
+  openQuestionCount?: number | undefined;
 };
 
 // Read at event time: subscribing Sidebar to terminal or modifier state re-renders every row.
@@ -1283,6 +1286,20 @@ export function resolveWorkingStartedAt(
   return resolveThreadWorkingStartedAt(thread);
 }
 
+const AWAITING_INPUT_COLORS = {
+  colorClass: "text-indigo-600 dark:text-indigo-300/90",
+  dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
+};
+
+/** A sidebar row the agent left idle with questions waiting reads Needs Decision. */
+export function sidebarRowNeedsDecision(input: {
+  readonly status: SidebarThreadStatus;
+  readonly isWoke: boolean;
+  readonly openQuestionCount: number;
+}): boolean {
+  return input.status === "ready" && !input.isWoke && input.openQuestionCount > 0;
+}
+
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
@@ -1298,12 +1315,7 @@ export function resolveThreadStatusPill(input: {
   }
 
   if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") {
-    return {
-      label: "Awaiting Input",
-      colorClass: "text-indigo-600 dark:text-indigo-300/90",
-      dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
-      pulse: false,
-    };
+    return { ...AWAITING_INPUT_COLORS, label: "Awaiting Input", pulse: false };
   }
 
   if ((thread.pendingGuestMessageCount ?? 0) > 0) {
@@ -1373,6 +1385,12 @@ export function resolveThreadStatusPill(input: {
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
       pulse: false,
     };
+  }
+
+  // Below every running, waiting and failed state, above Completed: the questions are what is
+  // left for the user once the agent stopped.
+  if ((thread.openQuestionCount ?? 0) > 0) {
+    return { ...AWAITING_INPUT_COLORS, label: "Needs Decision", pulse: false };
   }
 
   if (hasUnseenCompletion(thread)) {

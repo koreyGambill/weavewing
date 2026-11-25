@@ -368,6 +368,7 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
 import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useThreadQuestionsBanner } from "./questions/useThreadQuestionsBanner";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -1397,6 +1398,12 @@ export default function ChatView(props: ChatViewProps) {
         return environment ? [environment] : [];
       })
     : EMPTY_AUTO_UPDATE_ENVIRONMENTS;
+  const questionsBanner = useThreadQuestionsBanner({
+    threadRef: isServerThread ? activeThreadRef : null,
+    // Absent until the thread's first question, so other threads never fetch their workspace.
+    enabled: settings.agentQuestionsEnabled && activeThreadShell?.openQuestionCount !== undefined,
+    refreshKey: `${activeThreadShell?.openQuestionCount}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
+  });
   const systemComposerBannerItems = useSystemComposerBanners({
     activeEnvironment,
     activeEnvironmentUnavailable,
@@ -1641,6 +1648,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timelineEntriesInput = {
     environmentId,
+    threadQuestions: settings.agentQuestionsEnabled,
     optimisticMessages: optimisticUserMessages,
     anchoredMessages: anchoredTimelineMessages,
     attachmentUrlById: timelineAttachmentUrlById,
@@ -2738,6 +2746,7 @@ export default function ChatView(props: ChatViewProps) {
         ...usageLimitsItems,
         ...projectCloneItems,
         ...freshSessionItems,
+        ...(questionsBanner === null ? [] : [questionsBanner]),
         ...systemComposerBannerItems,
       ];
     }
@@ -2749,6 +2758,7 @@ export default function ChatView(props: ChatViewProps) {
       ...usageLimitsItems,
       ...projectCloneItems,
       ...freshSessionItems,
+      ...(questionsBanner === null ? [] : [questionsBanner]),
       ...systemComposerBannerItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,

@@ -23,6 +23,7 @@ import {
   Files,
   Globe2,
   GitForkIcon,
+  MessageCircleQuestionIcon,
   MessagesSquare,
   NotebookPen,
   Smartphone,
@@ -140,6 +141,8 @@ export function surfaceTitle(
       return sideChatTitles?.get(surface.threadRef.threadId) || surface.title;
     case "notes":
       return "Notes";
+    case "questions":
+      return "Questions";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -217,6 +220,8 @@ export function SurfaceIcon({
       );
     case "notes":
       return <NotebookPen className="size-3 shrink-0" />;
+    case "questions":
+      return <MessageCircleQuestionIcon className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />

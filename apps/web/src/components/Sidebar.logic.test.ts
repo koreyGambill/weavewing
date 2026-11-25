@@ -579,6 +579,38 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Plan Ready", pulse: false });
   });
 
+  it.each([
+    ["Working", { runtime: baseThread.runtime }],
+    ["Connecting", { runtime: { ...baseThread.runtime, status: "queued" as const } }],
+    ["Awaiting Input", { hasPendingUserInput: true }],
+    ["Pending Approval", { hasPendingApprovals: true }],
+    ["Guest Request", { pendingGuestMessageCount: 1 }],
+    ["Waiting", { blockedOnThreadWait: true, runtime: baseThread.runtime }],
+    [
+      "Failed",
+      {
+        latestRun: { ...makeLatestRun(), status: "failed" as const },
+        runtime: { ...baseThread.runtime, status: "failed" as const, lastError: "boom" },
+      },
+    ],
+    ["Plan Ready", { hasActionableProposedPlan: true }],
+    ["Needs Decision", {}],
+  ] as const)("shows %s over an idle thread's waiting questions", (label, overrides) => {
+    const thread = {
+      ...baseThread,
+      latestRun: makeLatestRun(),
+      lastVisitedAt: "2026-03-09T10:04:00.000Z",
+      runtime: { ...baseThread.runtime, status: "completed" as const, activeRunId: null },
+      openQuestionCount: 2,
+      ...overrides,
+    };
+    expect(resolveThreadStatusPill({ thread })?.label).toBe(label);
+    // Off, or with every question deferred, the thread reads as it did before questions.
+    expect(resolveThreadStatusPill({ thread: { ...thread, openQuestionCount: 0 } })?.label).toBe(
+      label === "Needs Decision" ? "Completed" : label,
+    );
+  });
+
   it("does not manufacture completed state without a client visit marker", () => {
     expect(
       resolveThreadStatusPill({

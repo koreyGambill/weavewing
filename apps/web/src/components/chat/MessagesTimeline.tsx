@@ -116,6 +116,8 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import { TimelineMinimap } from "./TimelineMinimap";
 import { BookmarkRail } from "./BookmarkRail";
+import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
+import { useQuestionReveal } from "../questions/useQuestionReveal";
 import { orderBookmarks } from "../reviews/bookmarks.logic";
 import { useMessageBookmarksSupported, useThreadFollowUpList } from "../reviews/FollowUps";
 import {
@@ -927,6 +929,19 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
+  useQuestionReveal(routeThreadKey, (questionId) => {
+    const index = rows.findIndex(
+      (row) => row.kind === "thread-questions" && row.questionIds.includes(questionId),
+    );
+    if (index < 0) return false;
+    navigateTimeline();
+    void listRef.current?.scrollToIndex({
+      index,
+      animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
+    });
+    return true;
+  });
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
   // is not keyed per thread and reports no "new data" event, and the restore
@@ -1771,6 +1786,13 @@ function timelineRowSpanIndices(
   return Array.from({ length: last - first + 1 }, (_, i) => first + i);
 }
 
+function ThreadQuestionsRow({ questionIds }: { questionIds: ReadonlyArray<string> }) {
+  const ctx = use(TimelineRowCtx);
+  return ctx.threadRef ? (
+    <ThreadQuestionsTimelineRow threadRef={ctx.threadRef} questionIds={questionIds} />
+  ) : null;
+}
+
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
 }
@@ -1814,6 +1836,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "attempt-fold" ||
                   row.kind === "html-render" ||
                   row.kind === "sent-message" ||
+                  row.kind === "thread-questions" ||
                   row.kind === "mcp-app" ||
                   row.kind === "viewed-images"
                 ? "pb-2"
@@ -1865,6 +1888,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "sent-message" ? <SentMessageTimelineRow row={row} /> : null}
+      {row.kind === "thread-questions" ? (
+        <ThreadQuestionsRow questionIds={row.questionIds} />
+      ) : null}
       {row.kind === "viewed-images" ? <ViewedImagesTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}

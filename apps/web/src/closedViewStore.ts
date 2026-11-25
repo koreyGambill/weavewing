@@ -65,6 +65,7 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
       return surface.id === surface.kind || surface.id.startsWith(`${surface.kind}:`);
     case "diff":
     case "notes":
+    case "questions":
     case "pull-requests":
       return surface.id === surface.kind || surface.id.startsWith(`${surface.kind}:`);
     case "preview":

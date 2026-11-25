@@ -86,7 +86,12 @@ export function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.runId;
   }
-  if (entry.kind === "html-render" || entry.kind === "mcp-app" || entry.kind === "sent-message") {
+  if (
+    entry.kind === "html-render" ||
+    entry.kind === "mcp-app" ||
+    entry.kind === "sent-message" ||
+    entry.kind === "thread-questions"
+  ) {
     return entry.runId;
   }
   return entry.kind === "work" ? (entry.entry.runId ?? null) : null;
@@ -661,6 +666,12 @@ type MessagesTimelineRowContent =
       text: string;
     }
   | {
+      kind: "thread-questions";
+      id: string;
+      createdAt: string;
+      questionIds: ReadonlyArray<string>;
+    }
+  | {
       kind: "mcp-app";
       id: string;
       createdAt: string;
@@ -859,6 +870,7 @@ function deriveSupersededAttemptFolds(
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
       entry.kind === "sent-message" ||
+      entry.kind === "thread-questions" ||
       timelineEntryIsPersistentResourceCard(entry) ||
       liveSubagentEntryIds.has(entry.id) ||
       (entry.kind === "work" && entry.entry.itemType === "system_notice")
@@ -2251,6 +2263,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "thread-questions") {
+      nextRows.push({
+        kind: "thread-questions",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        questionIds: timelineEntry.questionIds,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "mcp-app") {
       nextRows.push({
         kind: "mcp-app",
@@ -2875,6 +2897,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "sent-message": {
       const bs = b as typeof a;
       return a.createdAt === bs.createdAt && a.text === bs.text;
+    }
+
+    case "thread-questions": {
+      const bq = b as typeof a;
+      return a.createdAt === bq.createdAt && a.questionIds.join() === bq.questionIds.join();
     }
 
     case "mcp-app": {

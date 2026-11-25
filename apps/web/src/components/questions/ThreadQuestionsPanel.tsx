@@ -1,0 +1,224 @@
+import { useAtomValue } from "@effect/atom-react";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import {
+  sectionThreadQuestions,
+  threadQuestionHasDraft,
+  THREAD_QUESTION_SECTIONS,
+  type ThreadQuestionSection,
+} from "@t3tools/client-runtime/state/thread-questions";
+import { threadQuestionTitle, type ScopedThreadRef } from "@t3tools/contracts";
+import { SendIcon } from "lucide-react";
+import { useState, type KeyboardEvent } from "react";
+
+import { cn } from "~/lib/utils";
+import { isEditableFocused } from "~/lib/editableFocus";
+import {
+  threadQuestionDraft,
+  threadQuestionSubmit,
+  threadQuestionUpdate,
+  useThreadQuestionsWorkspace,
+} from "../../state/threadQuestions";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
+import { toastManager } from "../ui/toast";
+import { ThreadQuestionCard } from "./ThreadQuestionCard";
+import {
+  questionPanelKeyAction,
+  questionPanelOrder,
+  resolveSelectedQuestionId,
+} from "./ThreadQuestionsPanel.logic";
+import { requestQuestionReveal } from "./questionReveal";
+
+const SECTION_LABELS: Record<ThreadQuestionSection, string> = {
+  waiting: "Waiting",
+  deferred: "Deferred",
+  closed: "Closed",
+};
+
+/**
+ * Every question of a thread beside the chat: a sectioned list, the selected question's card,
+ * and one stationary button that sends every drafted answer in a single message.
+ */
+export function ThreadQuestionsPanel({
+  threadRef,
+  onClose,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly onClose: () => void;
+}) {
+  const { workspace, error } = useThreadQuestionsWorkspace(threadRef, true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const canAct = useAtomValue(threadQuestionSubmit.permissionAtom(threadRef.environmentId));
+  const submit = useAtomCommand(threadQuestionSubmit);
+  const saveDraft = useAtomCommand(threadQuestionDraft);
+  const update = useAtomCommand(threadQuestionUpdate);
+  const questions = workspace?.questions ?? [];
+  const order = questionPanelOrder(questions);
+  const sections = sectionThreadQuestions(questions);
+  const shownId = resolveSelectedQuestionId(order, selectedId);
+  const shown = order.find((question) => question.id === shownId) ?? null;
+  const drafted = questions.filter(threadQuestionHasDraft);
+
+  const send = async () => {
+    setSending(true);
+    const result = await submit({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, ids: drafted.map((question) => question.id) },
+    });
+    setSending(false);
+    if (result._tag === "Success")
+      toastManager.add({
+        type: "success",
+        title: `Sent ${drafted.length} ${drafted.length === 1 ? "answer" : "answers"}`,
+      });
+  };
+  const showInChat = (id: string) => {
+    if (!requestQuestionReveal(scopedThreadKey(threadRef), id))
+      toastManager.add({
+        type: "info",
+        title: `${id} is not in the loaded part of the chat`,
+        description: "Scroll up to load earlier messages, then try again.",
+      });
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key !== "Escape" && isEditableFocused(event.target)) return;
+    const action = questionPanelKeyAction({ key: event.key, order, selectedId: shownId });
+    if (action === null) return;
+    event.preventDefault();
+    switch (action.type) {
+      case "close":
+        onClose();
+        return;
+      case "select":
+        setSelectedId(action.id);
+        document.getElementById(`question-panel-item-${action.id}`)?.scrollIntoView({
+          block: "nearest",
+        });
+        return;
+      case "choose": {
+        const question = order.find((entry) => entry.id === action.id);
+        void saveDraft({
+          environmentId: threadRef.environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            answers: {
+              [action.id]: {
+                chosenOptionIds: action.chosenOptionIds,
+                notes: question?.answer?.notes ?? "",
+              },
+            },
+          },
+        });
+        return;
+      }
+      case "defer":
+        void update({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, id: action.id, state: "deferred" },
+        });
+        return;
+    }
+  };
+
+  if (workspace == null)
+    return (
+      <p role="status" className="p-4 text-sm text-muted-foreground">
+        {error ?? "Loading questions…"}
+      </p>
+    );
+  return (
+    <div
+      className="@container flex h-full min-h-0 flex-col outline-none"
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+    >
+      {questions.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">
+          No questions yet. When an agent asks one, it shows here and in the chat.
+        </p>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col @min-[560px]:flex-row">
+          <nav
+            aria-label="Questions"
+            className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border p-2 @min-[560px]:max-h-none @min-[560px]:w-64 @min-[560px]:border-r @min-[560px]:border-b-0"
+          >
+            {THREAD_QUESTION_SECTIONS.map((section) =>
+              sections[section].length === 0 ? null : (
+                <section key={section} className="mb-2">
+                  <h3 className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    {SECTION_LABELS[section]}
+                  </h3>
+                  <ul>
+                    {sections[section].map((question) => (
+                      <li key={question.id}>
+                        <button
+                          type="button"
+                          id={`question-panel-item-${question.id}`}
+                          aria-current={question.id === shownId ? "true" : undefined}
+                          onClick={() => setSelectedId(question.id)}
+                          className={cn(
+                            "flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                            question.id === shownId && "bg-accent",
+                            section === "closed" && "text-muted-foreground",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "shrink-0 font-semibold tabular-nums",
+                              section === "waiting" && "text-primary",
+                            )}
+                          >
+                            {question.id}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">
+                            {threadQuestionTitle(question.prompt)}
+                          </span>
+                          {threadQuestionHasDraft(question) ? (
+                            <span className="shrink-0 text-xs text-success-foreground">
+                              drafted
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ),
+            )}
+          </nav>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
+            {shown ? (
+              <ThreadQuestionCard
+                key={shown.id}
+                question={shown}
+                threadRef={threadRef}
+                actions={
+                  <Button size="xs" variant="ghost" onClick={() => showInChat(shown.id)}>
+                    Show in chat
+                  </Button>
+                }
+              />
+            ) : null}
+          </div>
+        </div>
+      )}
+      <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border p-3">
+        <p className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <Kbd>J</Kbd>
+          <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> not yet
+        </p>
+        <Button
+          size="sm"
+          disabled={!canAct || drafted.length === 0 || sending}
+          onClick={() => void send()}
+        >
+          <SendIcon />
+          {drafted.length === 1 ? "Send 1 answer" : `Send ${drafted.length} answers`}
+        </Button>
+      </footer>
+    </div>
+  );
+}

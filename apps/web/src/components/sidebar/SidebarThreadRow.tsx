@@ -98,6 +98,7 @@ import {
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
   resolveSidebarRowStatus,
+  sidebarRowNeedsDecision,
   resolveThreadLastVisitedAt,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
@@ -106,6 +107,7 @@ import {
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
+import { ThreadQuestionCountChip } from "../questions/ThreadQuestionCountChip";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
@@ -632,6 +634,8 @@ type SidebarThreadRowProps = {
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   scratchMachineLabel: string | null;
+  /** The thread's environment has agent questions on. */
+  questionsEnabled: boolean;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
@@ -803,13 +807,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     wokeAtDate !== null &&
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
     thread.settledOverride !== "settled";
-  const shouldRecede = shouldRecedeSidebarThread({
-    status,
-    isUnread,
-    isWoke,
-    isActive: props.isActive,
-    isSelected,
-  });
+  const openQuestionCount = props.questionsEnabled ? (thread.openQuestionCount ?? 0) : 0;
+  const needsDecision = sidebarRowNeedsDecision({ status, isWoke, openQuestionCount });
+  const shouldRecede =
+    !needsDecision &&
+    shouldRecedeSidebarThread({
+      status,
+      isUnread,
+      isWoke,
+      isActive: props.isActive,
+      isSelected,
+    });
+  const questionChip =
+    openQuestionCount > 0 ? (
+      <ThreadQuestionCountChip threadRef={threadRef} count={openQuestionCount} />
+    ) : null;
   const topStatus =
     status === "preparing" || status === "working"
       ? {
@@ -864,13 +876,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         icon: "woke" as const,
                         className: "text-warning-foreground",
                       }
-                    : isUnread
+                    : needsDecision
                       ? {
-                          label: "Done",
-                          icon: "done" as const,
-                          className: "text-success-foreground",
+                          label: "Needs Decision",
+                          icon: "input" as const,
+                          className: "text-indigo-600 dark:text-indigo-300",
                         }
-                      : null;
+                      : isUnread
+                        ? {
+                            label: "Done",
+                            icon: "done" as const,
+                            className: "text-success-foreground",
+                          }
+                        : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
@@ -1531,6 +1549,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   {jumpHintLabel ? <JumpHintBadge label={jumpHintLabel} /> : null}
                 </span>
               )}
+              {showsDropVerb ? null : questionChip}
               {props.sweepAction !== null ? dragDestination : null}
               {/* Last on the line, so the locality marker never moves as the status changes. */}
               {multiline ? null : computerLocalityIcon}
@@ -1737,6 +1756,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   {jumpHintLabel ? <JumpHintBadge label={jumpHintLabel} /> : null}
                 </span>
               )}
+              {showsDropVerb ? null : questionChip}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="@container/title-line mt-1 flex min-w-0 items-center gap-1.5">

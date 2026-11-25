@@ -33,6 +33,7 @@ import type { McpAppReference } from "@t3tools/shared/mcpApp";
 import {
   htmlRenderFromToolItem,
   mcpAppFromToolItem,
+  questionIdsFromToolItem,
   sentMessageFromToolItem,
 } from "@t3tools/shared/toolOutput";
 import {
@@ -150,6 +151,13 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: RunId | null;
       readonly text: string;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "thread-questions";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly questionIds: ReadonlyArray<string>;
     }
   | {
       readonly id: string;
@@ -523,6 +531,8 @@ export interface TimelineEntriesInput {
   readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
   readonly plans?: ReadonlyArray<OrchestrationV2PlanArtifact>;
   readonly runs?: ReadonlyArray<import("@t3tools/contracts").OrchestrationV2Run>;
+  /** Agent questions are on: a `question_ask` call becomes its questions' cards. */
+  readonly threadQuestions?: boolean;
 }
 
 export interface TimelineEntriesProjection {
@@ -684,6 +694,22 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         createdAt,
         runId: item.runId,
         htmlRender,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const questionIds =
+      input.threadQuestions === true && item.type === "dynamic_tool" && item.status === "completed"
+        ? questionIdsFromToolItem(item)
+        : [];
+    if (questionIds.length > 0) {
+      entries.push({
+        id: item.id,
+        kind: "thread-questions",
+        createdAt,
+        runId: item.runId,
+        questionIds,
         ...attemptMetadata,
       });
       continue;
@@ -952,6 +978,7 @@ function reuseTimelineEntries(
   const before = previous.input;
   if (
     input.visibleTurnItems.length < before.visibleTurnItems.length ||
+    input.threadQuestions !== before.threadQuestions ||
     !shallow(input.optimisticMessages, before.optimisticMessages) ||
     !shallow(input.anchoredMessages, before.anchoredMessages) ||
     !shallow(input.attachmentUrlById, before.attachmentUrlById) ||

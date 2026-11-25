@@ -5,7 +5,14 @@ import { useRenderedAppearance } from "../../hooks/useTheme";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
-import { COMPOSER_CONTEXT_KINDS } from "@t3tools/contracts";
+import {
+  COMPOSER_CONTEXT_KINDS,
+  THREAD_QUESTIONS_ARTIFACT_ID,
+  type ArtifactAnswerContextRecord,
+  type EnvironmentId,
+} from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import { agentQuestionsEnvironmentIdsAtom } from "~/state/threadQuestions";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { use, type ReactNode } from "react";
 import { FileDiff } from "@pierre/diffs/react";
@@ -308,7 +315,9 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       render: (record) =>
         record.kind === "artifact-answer" ? (
           <Tooltip>
-            <TooltipTrigger render={<span />}>{record.label}</TooltipTrigger>
+            <TooltipTrigger render={<span />}>
+              <ArtifactAnswerChipLabel record={record} />
+            </TooltipTrigger>
             <TooltipPopup>
               {[record.question, record.choice, record.note].filter(Boolean).join("\n")}
             </TooltipPopup>
@@ -637,5 +646,22 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         </pre>
       )}
     </div>
+  );
+}
+
+/** A thread question's answer reads as its id, short title and the answer, not just a label. */
+function ArtifactAnswerChipLabel({ record }: { record: ArtifactAnswerContextRecord }) {
+  const threadRef = use(TimelineRowCtx)?.threadRef ?? null;
+  const enabledIds: ReadonlyArray<EnvironmentId> = useAtomValue(agentQuestionsEnvironmentIdsAtom);
+  const questionsEnabled = threadRef !== null && enabledIds.includes(threadRef.environmentId);
+  const answer = record.choice || record.note.trim();
+  if (!questionsEnabled || record.artifactId !== THREAD_QUESTIONS_ARTIFACT_ID || !answer)
+    return record.label;
+  return (
+    <>
+      {record.title}
+      <span className="text-muted-foreground"> · </span>
+      <span className="font-medium">{answer.length > 60 ? `${answer.slice(0, 60)}…` : answer}</span>
+    </>
   );
 }

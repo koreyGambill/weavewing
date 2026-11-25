@@ -45,6 +45,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-requests",
   "side-chat",
   "notes",
+  "questions",
 ] as const;
 
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
@@ -114,6 +115,7 @@ export type RightPanelSurface =
     }
   | { id: "pull-requests" | `pull-requests:${string}`; kind: "pull-requests" }
   | { id: "notes" | `notes:${string}`; kind: "notes" }
+  | { id: "questions" | `questions:${string}`; kind: "questions" }
   | {
       id: `related-thread:${string}`;
       kind: "related-thread";
@@ -306,6 +308,8 @@ const singletonSurface = (
       return { id: "device", kind };
     case "notes":
       return { id: "notes", kind };
+    case "questions":
+      return { id: "questions", kind };
   }
 };
 
@@ -703,6 +707,8 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       return [];
                     if (surface.kind === "notes")
                       return validAreaId(surface.id, "notes") ? [surface] : [];
+                    if (surface.kind === "questions")
+                      return validAreaId(surface.id, "questions") ? [surface] : [];
                     if (
                       (surface.kind === "file" || surface.kind === "files") &&
                       "folderTrail" in surface &&

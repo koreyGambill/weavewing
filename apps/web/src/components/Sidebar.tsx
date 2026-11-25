@@ -129,6 +129,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
+import { agentQuestionsEnvironmentIdsAtom } from "../state/threadQuestions";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -1243,6 +1244,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeTarget?.kind === "draft" ? store.getPromotedDraftRedirect(routeTarget.draftId) : null,
   );
   const environmentMachineById = useEnvironmentMachines();
+  const questionsEnvironmentIds = useAtomValue(agentQuestionsEnvironmentIdsAtom);
   const projectGroupsRef = useRef(projectGroups);
   const persistedProjectScopeKeys = useUiStateStore((store) => store.sidebarProjectScopeKeys);
   const setPersistedProjectScopeKeys = useUiStateStore((store) => store.setSidebarProjectScopeKeys);
@@ -4403,6 +4405,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               environmentMachineById.get(thread.environmentId) ?? "server"
                             }
                             scratchMachineLabel={scratchMachineLabelFor(thread)}
+                            questionsEnabled={questionsEnvironmentIds.includes(
+                              thread.environmentId,
+                            )}
                             project={
                               projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
                               null
