@@ -62,13 +62,17 @@ export const threadQuestionDraft = createEnvironmentRpcCommand(connectionAtomRun
   onSuccess: remember,
 });
 
-/** Saves one question's draft through the thread's draft writer; null when the save failed. */
-export function useSaveQuestionDraft(threadRef: ScopedThreadRef) {
+/**
+ * Saves one question's draft through the thread's draft writer; null when the save failed or
+ * there is no thread.
+ */
+export function useSaveQuestionDraft(threadRef: ScopedThreadRef | null) {
   const saveDraft = useAtomCommand(threadQuestionDraft);
   return async (
     id: string,
     draft: { readonly chosenOptionIds: ReadonlyArray<string>; readonly notes: string },
   ) => {
+    if (threadRef === null) return null;
     const result = await saveDraft({
       environmentId: threadRef.environmentId,
       input: {

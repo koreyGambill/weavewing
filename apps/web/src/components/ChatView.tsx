@@ -1415,6 +1415,7 @@ export default function ChatView(props: ChatViewProps) {
     // Absent until the thread's first question, so other threads never fetch their workspace.
     enabled: settings.agentQuestionsEnabled && activeThreadShell?.openQuestionCount !== undefined,
     refreshKey: `${activeThreadShell?.openQuestionCount}:${activeThreadShell?.latestRun?.runId}:${activeThreadShell?.latestRun?.status}`,
+    focusComposer: () => composerRef.current?.focusAtEnd(),
   });
   const systemComposerBannerItems = useSystemComposerBanners({
     activeEnvironment,

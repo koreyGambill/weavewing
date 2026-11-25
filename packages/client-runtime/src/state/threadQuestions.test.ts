@@ -6,6 +6,7 @@ import {
   syncComposerQuestionAnswers,
   threadQuestionAnswerRecord,
   threadQuestionCounts,
+  threadQuestionIdsInComposer,
   threadQuestionStatus,
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
@@ -169,5 +170,7 @@ describe("thread questions", () => {
     expect(withComposerQuestionAnswer([first, second], replaced)).toEqual([replaced, second]);
     expect(withoutComposerQuestionAnswer([first, second], "Q1")).toEqual([second]);
     expect(withoutComposerQuestionAnswer([first], "Q9")).toEqual([first]);
+    const artifact = { ...first, artifactId: "artifact-1", questionId: "Q7" };
+    expect([...threadQuestionIdsInComposer([first, second, artifact])]).toEqual(["Q1", "Q2"]);
   });
 });

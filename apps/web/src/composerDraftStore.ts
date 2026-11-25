@@ -4810,6 +4810,17 @@ export function useComposerThreadDraft(threadRef: ComposerThreadTarget): Compose
   });
 }
 
+/** The thread composer's answer records; stable while only the prompt text changes. */
+export function useComposerArtifactAnswers(
+  threadRef: ComposerThreadTarget | null,
+): ReadonlyArray<ArtifactAnswerContextRecord> {
+  return useComposerDraftStore((state) =>
+    threadRef === null
+      ? EMPTY_ARTIFACT_ANSWERS
+      : (getComposerDraftState(state, threadRef)?.artifactAnswers ?? EMPTY_ARTIFACT_ANSWERS),
+  );
+}
+
 export function useThreadHasUnsentDraft(threadRef: ScopedThreadRef): boolean {
   return useComposerDraftStore((state) =>
     composerDraftHasUserContent(getComposerDraftState(state, threadRef)),

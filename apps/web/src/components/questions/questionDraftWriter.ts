@@ -13,6 +13,7 @@ interface Entry<R> {
   // The newest values handed to a save. Callers' `saved` lags until that save returns.
   sent: QuestionDraft | null;
   failed: boolean;
+  saved: R | null;
   timer: ReturnType<typeof setTimeout> | null;
   chain: Promise<R | null>;
   waiters: Array<() => void>;
@@ -39,6 +40,7 @@ export function createQuestionDraftWriter<R>(
         latest: null,
         sent: null,
         failed: false,
+        saved: null,
         timer: null,
         chain: Promise.resolve(null),
         waiters: [],
@@ -63,7 +65,10 @@ export function createQuestionDraftWriter<R>(
       const result = await save(id, draft);
       if (entry.sent === draft) entry.sent = null;
       entry.failed = result === null;
-      if (result !== null) lastResult = result;
+      if (result !== null) {
+        lastResult = result;
+        entry.saved = result;
+      }
       for (const resolve of waiters) resolve();
       return result;
     });
@@ -90,7 +95,18 @@ export function createQuestionDraftWriter<R>(
       else void flush(id, save);
       return done;
     },
-    flush: (id: string, save: SaveQuestionDraft<R>) => flush(id, save).then(() => undefined),
+    /**
+     * Sends this question's waiting edit and resolves after its writes with the newest save
+     * result (null when nothing was written yet), or null when its last save failed.
+     */
+    async flush(
+      id: string,
+      save: SaveQuestionDraft<R>,
+    ): Promise<{ readonly saved: R | null } | null> {
+      await flush(id, save);
+      const entry = entryOf(id);
+      return entry.failed ? null : { saved: entry.saved };
+    },
     /**
      * Sends every waiting draft and resolves after all writes with the newest save result, or
      * null when a question's last save failed, so a caller never submits what was not saved.

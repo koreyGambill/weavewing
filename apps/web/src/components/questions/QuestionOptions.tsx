@@ -4,7 +4,10 @@ import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
 import { Radio, RadioGroup } from "../ui/radio-group";
 
-/** A question's options as radios or checkboxes; recommendations are marked, never preselected. */
+/**
+ * A question's options as radios or checkboxes; recommendations are marked, never preselected.
+ * Choosing the chosen option again clears it.
+ */
 export function QuestionOptions({
   question,
   chosenOptionIds,
@@ -22,6 +25,17 @@ export function QuestionOptions({
   const options = question.options.map((option) => (
     <label
       key={option.id}
+      // A radio group never reports a click on its chosen option, so the label clears it. The
+      // click the label forwards to the radio's hidden input is the same click, so it is skipped.
+      onClick={(event) => {
+        if (
+          !question.multiSelect &&
+          !disabled &&
+          !(event.target instanceof HTMLInputElement) &&
+          chosenOptionIds[0] === option.id
+        )
+          onChoose([]);
+      }}
       className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-lg border border-border p-3 transition-colors hover:bg-muted/40 has-[[data-checked]]:border-primary/60 has-[[data-checked]]:bg-primary/5 has-[[data-disabled]]:cursor-default"
     >
       {question.multiSelect ? (

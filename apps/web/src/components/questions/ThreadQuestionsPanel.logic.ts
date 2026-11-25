@@ -31,11 +31,11 @@ export type QuestionPanelKeyAction =
  */
 export const QUESTION_PANEL_KEY_SHORTCUTS = "J K N 1 2 3 4 5 6 7 8 9 Escape";
 
-/** J/K move, 1–9 choose an option, N defers, Escape closes the panel. */
+/** J/K move, 1–9 choose or clear an option, N defers, Escape closes the panel. */
 export function questionPanelKeyAction(input: {
   readonly key: string;
   readonly order: ReadonlyArray<
-    Pick<ThreadQuestion, "id" | "state" | "options" | "multiSelect" | "answer">
+    Pick<ThreadQuestion, "id" | "state" | "options" | "multiSelect" | "answer" | "sentInMessageId">
   >;
   readonly selectedId: string | null;
 }): QuestionPanelKeyAction | null {
@@ -49,8 +49,12 @@ export function questionPanelKeyAction(input: {
     return next === undefined ? null : { type: "select", id: next.id };
   }
   if (selected === undefined) return null;
-  const answerable = selected.state === "open" || selected.state === "deferred";
-  if (lower === "n") return selected.state === "open" ? { type: "defer", id: selected.id } : null;
+  // A sent answer stays as sent until its message is edited or cancelled.
+  const answerable =
+    (selected.state === "open" || selected.state === "deferred") &&
+    selected.sentInMessageId === undefined;
+  if (lower === "n")
+    return selected.state === "open" && answerable ? { type: "defer", id: selected.id } : null;
   if (!answerable || !/^[1-9]$/.test(key)) return null;
   const option = selected.options[Number(key) - 1];
   if (option === undefined) return null;
@@ -62,6 +66,24 @@ export function questionPanelKeyAction(input: {
       ? chosen.includes(option.id)
         ? chosen.filter((id) => id !== option.id)
         : [...chosen, option.id]
-      : [option.id],
+      : chosen.includes(option.id)
+        ? []
+        : [option.id],
   };
+}
+
+/**
+ * The question the panel's column is on: the focused one while any of it shows, so a jump to a
+ * card near the end sticks, else the first card reaching below the column's top.
+ */
+export function questionInView(
+  cards: ReadonlyArray<{ readonly id: string; readonly top: number; readonly bottom: number }>,
+  view: { readonly top: number; readonly bottom: number },
+  focusedId: string | null,
+): string | null {
+  const visible = (card: (typeof cards)[number]) =>
+    card.bottom > view.top && card.top < view.bottom;
+  const focused = cards.find((card) => card.id === focusedId);
+  if (focused !== undefined && visible(focused)) return focused.id;
+  return cards.find((card) => card.bottom > view.top + 8)?.id ?? null;
 }

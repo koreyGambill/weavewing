@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "~/lib/utils";
 import { isEditableFocused } from "~/lib/editableFocus";
 import {
+  threadQuestionDraft,
   threadQuestionUpdate,
   useSaveQuestionDraft,
   useThreadQuestionsWorkspace,
@@ -20,10 +21,13 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
+import { addDraftedAnswersToComposer, useQuestionIdsInComposer } from "./questionComposer";
 import { questionDraftWriter } from "./questionDraftWriter";
 import {
   QUESTION_PANEL_KEY_SHORTCUTS,
+  questionInView,
   questionPanelKeyAction,
   questionPanelOrder,
   resolveSelectedQuestionId,
@@ -46,8 +50,8 @@ export function GatedThreadQuestionsPanel(props: Parameters<typeof ThreadQuestio
 }
 
 /**
- * Every question of a thread beside the chat: a sectioned list, the selected question's card,
- * and one stationary button that sends every drafted answer in a single message.
+ * Every question of a thread beside the chat: a sectioned list that jumps to and follows one
+ * scrolling column of full cards, and a button that queues every drafted answer in the composer.
  */
 export function ThreadQuestionsPanel({
   threadRef,
@@ -60,6 +64,7 @@ export function ThreadQuestionsPanel({
   readonly onClose: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves keyboard focus into the panel as its tab is shown, so its keys never reach a hidden composer
   useEffect(() => {
     const root = rootRef.current;
@@ -67,15 +72,59 @@ export function ThreadQuestionsPanel({
       root.focus({ preventScroll: true });
   }, [active]);
   const { workspace, error } = useThreadQuestionsWorkspace(threadRef, true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const canAct = useAtomValue(threadQuestionDraft.permissionAtom(threadRef.environmentId));
   const saveDraft = useSaveQuestionDraft(threadRef);
   const writer = questionDraftWriter(scopedThreadKey(threadRef));
   const update = useAtomCommand(threadQuestionUpdate);
+  const inComposer = useQuestionIdsInComposer(threadRef);
   const questions = workspace?.questions ?? [];
   const order = questionPanelOrder(questions);
   const sections = sectionThreadQuestions(questions);
-  const shownId = resolveSelectedQuestionId(order, selectedId);
-  const shown = order.find((question) => question.id === shownId) ?? null;
+  const shownId = resolveSelectedQuestionId(order, focusedId);
+  const toAdd = questions.filter(
+    (question) => threadQuestionHasDraft(question) && !inComposer.has(question.id),
+  ).length;
+
+  const cardOf = (id: string) =>
+    columnRef.current?.querySelector<HTMLElement>(`[data-question-card="${CSS.escape(id)}"]`);
+  const jumpTo = (id: string) => {
+    setFocusedId(id);
+    cardOf(id)?.scrollIntoView({ block: "start" });
+    rootRef.current
+      ?.querySelector(`[data-question-item="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  };
+  const followScroll = () => {
+    const column = columnRef.current;
+    if (!column) return;
+    const view = column.getBoundingClientRect();
+    const id = questionInView(
+      [...column.querySelectorAll<HTMLElement>("[data-question-card]")].map((card) => {
+        const rect = card.getBoundingClientRect();
+        return { id: card.dataset.questionCard ?? "", top: rect.top, bottom: rect.bottom };
+      }),
+      { top: view.top, bottom: view.bottom },
+      shownId,
+    );
+    if (id !== null && id !== shownId) {
+      setFocusedId(id);
+      rootRef.current
+        ?.querySelector(`[data-question-item="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    }
+  };
+  const addDrafted = async () => {
+    setAdding(true);
+    await addDraftedAnswersToComposer({
+      threadRef,
+      workspace: workspace ?? null,
+      writer,
+      saveDraft,
+    });
+    setAdding(false);
+  };
   const showInChat = (id: string) => {
     const store = useRightPanelStore.getState();
     const chat = getTileGroups(selectThreadTileLayout(store.byThreadKey, threadRef)).find((group) =>
@@ -108,10 +157,7 @@ export function ThreadQuestionsPanel({
         onClose();
         return;
       case "select":
-        setSelectedId(action.id);
-        rootRef.current
-          ?.querySelector(`[data-question-item="${CSS.escape(action.id)}"]`)
-          ?.scrollIntoView({ block: "nearest" });
+        jumpTo(action.id);
         return;
       case "choose": {
         const question = order.find((entry) => entry.id === action.id);
@@ -156,7 +202,7 @@ export function ThreadQuestionsPanel({
         <div className="flex min-h-0 flex-1 flex-col @min-[560px]:flex-row">
           <nav
             aria-label="Questions"
-            className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border p-2 @min-[560px]:max-h-none @min-[560px]:w-64 @min-[560px]:border-r @min-[560px]:border-b-0"
+            className="max-h-[35%] shrink-0 overflow-y-auto border-b border-border p-2 @min-[560px]:max-h-none @min-[560px]:w-56 @min-[560px]:border-r @min-[560px]:border-b-0"
           >
             {THREAD_QUESTION_SECTIONS.map((section) =>
               sections[section].length === 0 ? null : (
@@ -171,7 +217,7 @@ export function ThreadQuestionsPanel({
                           type="button"
                           data-question-item={question.id}
                           aria-current={question.id === shownId ? "true" : undefined}
-                          onClick={() => setSelectedId(question.id)}
+                          onClick={() => jumpTo(question.id)}
                           className={cn(
                             "flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                             question.id === shownId && "bg-accent",
@@ -189,11 +235,6 @@ export function ThreadQuestionsPanel({
                           <span className="min-w-0 flex-1 truncate">
                             {threadQuestionTitle(question.prompt)}
                           </span>
-                          {threadQuestionHasDraft(question) ? (
-                            <span className="shrink-0 text-xs text-success-foreground">
-                              drafted
-                            </span>
-                          ) : null}
                         </button>
                       </li>
                     ))}
@@ -202,19 +243,44 @@ export function ThreadQuestionsPanel({
               ),
             )}
           </nav>
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
-            {shown ? (
-              <ThreadQuestionCard
-                key={shown.id}
-                question={shown}
-                threadRef={threadRef}
-                actions={
-                  <Button size="xs" variant="ghost" onClick={() => showInChat(shown.id)}>
-                    Show in chat
-                  </Button>
-                }
-              />
-            ) : null}
+          <div
+            ref={columnRef}
+            onScroll={followScroll}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3"
+          >
+            {THREAD_QUESTION_SECTIONS.map((section) =>
+              sections[section].length === 0 ? null : (
+                <section
+                  key={section}
+                  aria-label={SECTION_LABELS[section]}
+                  className="space-y-2 pb-3"
+                >
+                  <h3 className="text-xs font-medium text-muted-foreground">
+                    {SECTION_LABELS[section]}
+                  </h3>
+                  {sections[section].map((question) => (
+                    <div
+                      key={question.id}
+                      data-question-card={question.id}
+                      className={cn(
+                        "scroll-mt-3 rounded-lg",
+                        question.id === shownId && "ring-1 ring-ring/40",
+                      )}
+                    >
+                      <ThreadQuestionCard
+                        question={question}
+                        threadRef={threadRef}
+                        actions={
+                          <Button size="xs" variant="ghost" onClick={() => showInChat(question.id)}>
+                            Show in chat
+                          </Button>
+                        }
+                      />
+                    </div>
+                  ))}
+                </section>
+              ),
+            )}
           </div>
         </div>
       )}
@@ -223,6 +289,22 @@ export function ThreadQuestionsPanel({
           <Kbd>J</Kbd>
           <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> not yet
         </p>
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex" />}>
+            <Button
+              size="sm"
+              disabled={!canAct || toAdd === 0 || adding}
+              onClick={() => void addDrafted()}
+            >
+              {toAdd === 1 ? "Add 1 to composer" : `Add ${toAdd} to composer`}
+            </Button>
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-72">
+            {toAdd === 0
+              ? "Choose an option or add a note to a question first."
+              : "Queue every drafted answer to go with your next message."}
+          </TooltipPopup>
+        </Tooltip>
       </footer>
     </div>
   );

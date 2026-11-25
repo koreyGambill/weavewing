@@ -103,6 +103,34 @@ describe("question draft writer", () => {
     expect(await writer.flushAll(save)).toBeNull();
   });
 
+  it("resolves one question's flush with the save carrying its newest edit", async () => {
+    const writer = createQuestionDraftWriter<number>(manualTimers());
+    const { save, started, release } = recordingSave(new Set(["Q1"]));
+
+    // Nothing written yet: no save result, and nothing failed.
+    expect(await writer.flush("Q1", save)).toEqual({ saved: null });
+    void writer.edit("Q1", saved, { notes: "first" }, save);
+    await started("Q1").promise;
+    // A note typed while that save is in flight waits on its delay; flushing sends it too.
+    void writer.edit("Q1", saved, { notes: "second" }, save, 600);
+    const flushed = writer.flush("Q1", save);
+    release("Q1");
+    expect(await flushed).toEqual({ saved: 2 });
+  });
+
+  it("resolves a flush with null when the question's last save failed", async () => {
+    const writer = createQuestionDraftWriter<number>(manualTimers());
+    const results: Array<number | null> = [1, null, 3];
+    const save = async () => results.shift() ?? null;
+
+    await writer.edit("Q1", saved, { notes: "kept" }, save);
+    void writer.edit("Q1", saved, { notes: "lost" }, save, 600);
+    expect(await writer.flush("Q1", save)).toBeNull();
+    // Retrying with a new edit recovers.
+    void writer.edit("Q1", saved, { notes: "again" }, save);
+    expect(await writer.flush("Q1", save)).toEqual({ saved: 3 });
+  });
+
   it("starts a question's next write only after the previous one settled", async () => {
     const writer = createQuestionDraftWriter<number>(manualTimers());
     const { sent, save, started, release } = recordingSave(new Set(["Q1"]));

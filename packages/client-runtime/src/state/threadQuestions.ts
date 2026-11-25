@@ -106,6 +106,13 @@ export function threadQuestionStatus(
 const isQuestionAnswer = (record: ArtifactAnswerContextRecord) =>
   record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID;
 
+/** The ids of the questions whose answers ride in a composer's answer records. */
+export function threadQuestionIdsInComposer(
+  records: ReadonlyArray<ArtifactAnswerContextRecord>,
+): ReadonlySet<string> {
+  return new Set(records.filter(isQuestionAnswer).map((record) => record.questionId));
+}
+
 /**
  * The composer record that carries a question's draft, or null without a draft. Its context id
  * is fixed per question, so a changed draft replaces the chip instead of adding another.
