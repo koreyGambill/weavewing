@@ -114,7 +114,7 @@ export interface EventSinkV2Shape {
       OrchestrationV2ProviderThread,
       "driver" | "providerInstanceId" | "appThreadId" | "nativeThreadRef"
     >;
-    readonly guardPendingUserInputCancellations?: boolean;
+    readonly guardStaleRequestClosures?: boolean;
     readonly commandId?: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
   }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
@@ -128,13 +128,13 @@ export interface EventSinkV2Shape {
       OrchestrationV2ProviderThread,
       "driver" | "providerInstanceId" | "appThreadId" | "nativeThreadRef"
     >;
-    readonly guardPendingUserInputCancellations?: boolean;
+    readonly guardStaleRequestClosures?: boolean;
     readonly commandId?: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
     readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
   }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
   readonly writeIfRunCurrent: (input: {
-    readonly guardPendingUserInputCancellations?: boolean;
+    readonly guardStaleRequestClosures?: boolean;
     readonly commandId?: CommandId;
     readonly threadId: ThreadId;
     readonly runId: RunId;
@@ -156,7 +156,7 @@ export interface EventSinkV2Shape {
   >;
   /** Commits only if the expected attempt and ordinal still own the provider thread, protecting newer attempts. */
   readonly writeIfProviderThreadOwner: (input: {
-    readonly guardPendingUserInputCancellations?: boolean;
+    readonly guardStaleRequestClosures?: boolean;
     readonly commandId?: CommandId;
     readonly providerThreadId: ProviderThreadId;
     readonly runId: RunId;
@@ -356,14 +356,44 @@ const layerBase: Layer.Layer<
           );
       });
 
-    // A user can answer after terminal normalization reads the pending request.
-    // Recheck inside the write transaction so stale cleanup cannot erase answers.
-    const guardUserInputCancellations =
+    // A user can answer, or a run interrupt can cancel, after a provider or terminal cleanup
+    // read a request as pending. Recheck inside the write transaction so a stale closure
+    // erases neither the answer nor the earlier cancellation.
+    const guardStaleRequestClosures =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
       Effect.fnUntraced(function* (events: ReadonlyArray<OrchestrationV2DomainEvent>) {
         const staleRequests = new Set<RuntimeRequestId>();
         const staleNodes = new Set<NodeId>();
+        const answeredRequests = new Set<RuntimeRequestId>();
         for (const event of events) {
+          if (event.type === "runtime-request.updated" && event.payload.status === "expired") {
+            const current = yield* projectionStore.getRuntimeRequest(
+              event.threadId,
+              event.payload.id,
+            );
+            if (current !== undefined && current.status !== "pending") {
+              staleRequests.add(event.payload.id);
+              staleNodes.add(event.payload.nodeId);
+            }
+            continue;
+          }
+          const closedRequestId =
+            event.type === "node.updated" && event.payload.status === "cancelled"
+              ? event.payload.runtimeRequestId
+              : event.type === "turn-item.updated" &&
+                  event.payload.status === "cancelled" &&
+                  (event.payload.type === "approval_request" ||
+                    event.payload.type === "user_input_request")
+                ? event.payload.requestId
+                : null;
+          if (closedRequestId !== null) {
+            const current = yield* projectionStore.getRuntimeRequest(
+              event.threadId,
+              closedRequestId,
+            );
+            if (current?.status === "resolved") answeredRequests.add(closedRequestId);
+            continue;
+          }
           if (
             event.type !== "runtime-request.updated" ||
             event.payload.kind !== "user_input" ||
@@ -387,14 +417,28 @@ const layerBase: Layer.Layer<
         return events.filter((event) => {
           switch (event.type) {
             case "runtime-request.updated":
-              return event.payload.status !== "cancelled" || !staleRequests.has(event.payload.id);
+              return (
+                (event.payload.status !== "cancelled" && event.payload.status !== "expired") ||
+                !staleRequests.has(event.payload.id)
+              );
             case "node.updated":
-              return event.payload.status !== "cancelled" || !staleNodes.has(event.payload.id);
+              return (
+                event.payload.status !== "cancelled" ||
+                !(
+                  staleNodes.has(event.payload.id) ||
+                  (event.payload.runtimeRequestId !== null &&
+                    answeredRequests.has(event.payload.runtimeRequestId))
+                )
+              );
             case "turn-item.updated":
               return (
-                event.payload.type !== "user_input_request" ||
+                (event.payload.type !== "user_input_request" &&
+                  event.payload.type !== "approval_request") ||
                 event.payload.status !== "cancelled" ||
-                !staleRequests.has(event.payload.requestId)
+                !(
+                  staleRequests.has(event.payload.requestId) ||
+                  answeredRequests.has(event.payload.requestId)
+                )
               );
             default:
               return true;
@@ -521,8 +565,8 @@ const layerBase: Layer.Layer<
             ? yield* updateDelegatedCompletionOnly(input.events, () => true)
             : input.events;
           const normalized = yield* normalizeEvents(
-            input.guardPendingUserInputCancellations === true
-              ? yield* guardUserInputCancellations(events)
+            input.guardStaleRequestClosures === true
+              ? yield* guardStaleRequestClosures(events)
               : events,
           );
           const committed = yield* eventStore.append({
@@ -599,8 +643,8 @@ const layerBase: Layer.Layer<
             }
 
             const normalized = yield* normalizeEvents(
-              input.guardPendingUserInputCancellations === true
-                ? yield* guardUserInputCancellations(input.events)
+              input.guardStaleRequestClosures === true
+                ? yield* guardStaleRequestClosures(input.events)
                 : input.events,
             );
             const storedEvents = yield* eventStore.append({
@@ -665,8 +709,8 @@ const layerBase: Layer.Layer<
           }
 
           const normalized = yield* normalizeEvents(
-            input.guardPendingUserInputCancellations === true
-              ? yield* guardUserInputCancellations(input.events)
+            input.guardStaleRequestClosures === true
+              ? yield* guardStaleRequestClosures(input.events)
               : input.events,
           );
           const storedEvents = yield* eventStore.append({

@@ -2020,8 +2020,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           card?.type === "turn_item.updated" ? card.turnItem.status : undefined,
           "cancelled",
         );
+        // Valid for every kind here, so only a request that is gone can reject it.
         const late = yield* harness.runtime
-          .respondToRuntimeRequest({ requestId, decision: "accept" })
+          .respondToRuntimeRequest({ requestId, decision: "accept", answers: { q: "a" } })
           .pipe(Effect.flip);
         assert.equal(late._tag, "ProviderAdapterRuntimeRequestResponseError");
       }
