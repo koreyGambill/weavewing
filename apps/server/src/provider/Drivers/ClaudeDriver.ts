@@ -39,7 +39,7 @@ import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
-  probeClaudeMcpServers,
+  makeClaudeMcpServersProbe,
   probeClaudeWorkspaceSnapshot,
   type ClaudeCapabilitiesProbe,
 } from "../ClaudeProvider.ts";
@@ -74,7 +74,6 @@ const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
-const MCP_SERVERS_PROBE_TTL = Duration.minutes(2);
 
 const withoutUsage = (capabilities: ClaudeCapabilitiesProbe): ClaudeCapabilitiesProbe => {
   const { usage: _usage, ...rest } = capabilities;
@@ -188,18 +187,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     // Retain reports until the registry subscribes; end its listener on teardown.
     const workspaceRescans = yield* Queue.unbounded<string, Cause.Done>();
     yield* Effect.addFinalizer(() => Queue.end(workspaceRescans));
-    // Listing starts each configured MCP server, so one read per folder serves a burst of opens.
-    const mcpServersProbeCache = yield* Cache.makeWith(
-      (cwd: string) =>
-        probeClaudeMcpServers(effectiveConfig, processEnv, cwd === "" ? null : cwd).pipe(
-          Effect.map((statuses) => statuses.map(claudeMcpServerSummary)),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        ),
-      {
-        capacity: 32,
-        timeToLive: (exit) => (Exit.isSuccess(exit) ? MCP_SERVERS_PROBE_TTL : Duration.zero),
-      },
+    const probeMcpServers = yield* makeClaudeMcpServersProbe(effectiveConfig, processEnv).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
     );
     const orchestrationAdapter = yield* createClaudeAdapterV2(
       {
@@ -215,7 +205,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         onUsageLimits: (update) => snapshot.applyUsageLimits(update),
         onSessionInit: (cwd) => Queue.offer(workspaceRescans, cwd).pipe(Effect.asVoid),
         probeMcpServers: ({ cwd }) =>
-          Cache.get(mcpServersProbeCache, cwd ?? "").pipe(
+          probeMcpServers(cwd).pipe(
+            Effect.map((statuses) => statuses.map(claudeMcpServerSummary)),
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterProtocolError({

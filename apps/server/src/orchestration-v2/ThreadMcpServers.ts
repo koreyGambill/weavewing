@@ -34,6 +34,7 @@ export class ThreadMcpServers extends Context.Service<
 >()("t3/orchestration-v2/ThreadMcpServers") {}
 
 const CLAUDE_AI_SOURCE = "claudeai";
+const LIVE_STATUS_READ_TIMEOUT = "3 seconds";
 
 /** Live entries win; probed ones add only servers the live process did not load. */
 function mergeThreadMcpServers(
@@ -97,6 +98,8 @@ const make = Effect.gen(function* () {
       providerThread === undefined || Option.isNone(runtime)
         ? undefined
         : yield* (runtime.value.listMcpServers?.({ providerThread }) ?? Effect.undefined).pipe(
+            // A busy or stuck process may never answer; the probe can still list the servers.
+            Effect.timeout(LIVE_STATUS_READ_TIMEOUT),
             Effect.catchCause((cause) =>
               Effect.logWarning("Could not read the live session's MCP servers.", { cause }).pipe(
                 Effect.as(undefined),

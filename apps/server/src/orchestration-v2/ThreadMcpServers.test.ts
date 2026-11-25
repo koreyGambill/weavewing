@@ -9,8 +9,10 @@ import {
 } from "@t3tools/contracts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -29,7 +31,7 @@ const server = (name: string, source: string): ProviderAdapter.ProviderAdapterV2
 
 function layer(input: {
   readonly driver?: string;
-  readonly live?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2McpServer>;
+  readonly live?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2McpServer> | "stalls";
   readonly probe: Effect.Effect<
     ReadonlyArray<ProviderAdapter.ProviderAdapterV2McpServer>,
     ProviderAdapter.ProviderAdapterV2Error
@@ -69,7 +71,10 @@ function layer(input: {
             Effect.succeed(
               input.live === undefined
                 ? Option.none()
-                : Option.some({ listMcpServers: () => Effect.succeed(input.live) } as never),
+                : Option.some({
+                    listMcpServers: () =>
+                      input.live === "stalls" ? Effect.never : Effect.succeed(input.live),
+                  } as never),
             ),
         }),
       ),
@@ -148,6 +153,29 @@ it.effect("fails without a session when the probe fails, and keeps live servers 
       live.servers.map((entry) => entry.name),
       ["fixture-notes"],
     );
+  }),
+);
+
+it.effect("falls back to the probe when the live session never answers", () =>
+  Effect.gen(function* () {
+    const probes: Array<string | null> = [];
+    const listing = yield* list.pipe(
+      Effect.provide(
+        layer({
+          live: "stalls",
+          probe: Effect.succeed([server("fixture-notes", "user")]),
+          probes,
+        }),
+      ),
+      Effect.forkChild,
+    );
+    yield* TestClock.adjust("4 seconds");
+    const { servers } = yield* Fiber.join(listing);
+    assert.deepEqual(
+      servers.map((entry) => entry.name),
+      ["fixture-notes"],
+    );
+    assert.deepEqual(probes, ["/fixture/project"]);
   }),
 );
 
