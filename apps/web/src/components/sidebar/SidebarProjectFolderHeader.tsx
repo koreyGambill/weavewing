@@ -77,6 +77,7 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
   return (
     <li
       data-testid="sidebar-project-folder"
+      data-sidebar-group-header={rowId}
       className="group/project-folder relative mt-2 list-none first:mt-0"
       {...(reorder === null
         ? {}

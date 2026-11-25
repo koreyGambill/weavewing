@@ -12,14 +12,17 @@ import {
   EMPTY_SIDEBAR_THREAD_GROUPS,
   hasSidebarManualThreadOrder,
   moveSidebarThreadGroup,
+  placeSidebarFolderThreads,
   placeSidebarThread,
   placeSidebarThreads,
   sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
   setSidebarUngroupedHeader,
+  resolveSidebarFolderDrop,
   resolveSidebarGroupDrop,
   resolveSidebarGroupHit,
   resolveSidebarShelfHit,
+  stepSidebarFolderThread,
   stepSidebarThread,
   toggleSidebarThreadGroup,
   withServerSidebarGroups,
@@ -319,6 +322,65 @@ describe("stepSidebarThread", () => {
     expect(stepSidebarThread(current, arranged, "a", -1)).toBe(null);
     expect(stepSidebarThread(current, arranged, "c", 1)).toBe(null);
     expect(stepSidebarThread(current, arranged, "u", 1)).toBe(null);
+  });
+});
+
+describe("project folder order", () => {
+  // The flat list interleaved b1 between a1 and a2; a3 has never been arranged.
+  const current = state([["g", ["a2"]]], ["a1", "b1", "a2"]);
+  const folderA = families("a1", "a2", "a3+a3fork");
+  const folders = {
+    groups: [
+      { group: { id: "A", name: "A", collapsed: false, threadKeys: [] }, families: folderA },
+      { group: { id: "B", name: "B", collapsed: false, threadKeys: [] }, families: families("b1") },
+    ],
+    ungrouped: [],
+    ungroupedAt: 0,
+    freshAtEnd: true,
+  };
+
+  it("reorders within a folder in the slots its threads held, leaving groups and other folders", () => {
+    const next = placeSidebarFolderThreads(current, folderA, ["a3"], "a1");
+    expect(next.ungroupedOrder).toEqual(["a3", "b1", "a1", "a2"]);
+    expect(next.groups).toBe(current.groups);
+    expect(placeSidebarFolderThreads(current, folderA, ["a1"], null).ungroupedOrder).toEqual([
+      "a2",
+      "b1",
+      "a3",
+      "a1",
+    ]);
+  });
+
+  it("drops only inside the dragged thread's own folder", () => {
+    expect(resolveSidebarFolderDrop(folders, "a3", { kind: "header", groupId: "A" })).toEqual({
+      groupId: "A",
+      beforeKey: "a1",
+    });
+    expect(
+      resolveSidebarFolderDrop(folders, "a1", { kind: "thread", key: "a3fork", after: false }),
+    ).toEqual({
+      groupId: "A",
+      beforeKey: null,
+    });
+    expect(
+      resolveSidebarFolderDrop(folders, "a1", { kind: "thread", key: "b1", after: false }),
+    ).toBe(null);
+    expect(resolveSidebarFolderDrop(folders, "a1", { kind: "header", groupId: "B" })).toBe(null);
+    expect(
+      resolveSidebarFolderDrop(folders, "x", { kind: "thread", key: "a1", after: false }),
+    ).toBe(null);
+  });
+
+  it("steps a thread within its folder and stops at the folder's ends", () => {
+    expect(stepSidebarFolderThread(current, folders, "a2", -1)?.ungroupedOrder).toEqual([
+      "a2",
+      "b1",
+      "a1",
+      "a3",
+    ]);
+    expect(stepSidebarFolderThread(current, folders, "a1", -1)).toBe(null);
+    expect(stepSidebarFolderThread(current, folders, "a3", 1)).toBe(null);
+    expect(stepSidebarFolderThread(current, folders, "a3fork", -1)).toBe(null);
   });
 });
 

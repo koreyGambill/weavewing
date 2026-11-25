@@ -30,19 +30,14 @@ describe("buildThreadActionMenuItems", () => {
     [[], false, false],
     [[], true, true],
     [[{ id: "g", name: "G" }], true, true],
+    [null, true, true],
   ])(
-    "offers Move up and down only when the list is reorderable (%j, %s)",
+    "offers Move up and down only when the list is reorderable, with or without groups (%j, %s)",
     (options, reorderable, shown) => {
       const items = buildThreadActionMenuItems({
         ...baseState,
-        groups: {
-          options,
-          current: null,
-          ungroupedName: "Ungrouped",
-          reorderable,
-          canMoveUp: true,
-          canMoveDown: false,
-        },
+        groups: options && { options, current: null, ungroupedName: "Ungrouped" },
+        order: reorderable ? { canMoveUp: true, canMoveDown: false } : null,
       });
       const ids = items.map((item) => item.id);
       expect(ids.includes("move-up") && ids.includes("move-down")).toBe(shown);
