@@ -1248,19 +1248,15 @@ const provideRegistrationServices = <Services>() =>
 export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, RX>(
   toolkit: Toolkit.Toolkit<Tools>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
-  options?: { readonly endsTurn?: true },
+) => toolkitLayer(toolkit, handlers, McpServer.registerToolkit(decodeAsAdvertised(toolkit)));
+
+const toolkitLayer = <Tools extends Record<string, Tool.Any>, EX, RX, A, E, R>(
+  toolkit: Toolkit.Toolkit<Tools>,
+  handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
+  register: Effect.Effect<A, E, R>,
 ) =>
   Layer.effectDiscard(
-    withToolAnalytics(
-      withToolSpans(
-        withAdvertisedSchemas(
-          toolkit,
-          options?.endsTurn === true
-            ? withEndTurnResults(McpServer.registerToolkit(decodeAsAdvertised(toolkit)))
-            : McpServer.registerToolkit(decodeAsAdvertised(toolkit)),
-        ),
-      ),
-    ),
+    withToolAnalytics(withToolSpans(withAdvertisedSchemas(toolkit, register))),
   ).pipe(
     Layer.provide(
       provideRegistrationServices<
@@ -1329,10 +1325,10 @@ const contextRewindVisible = McpServer.visibility(
   }),
 );
 
-export const layerContextRewindToolkit = toolkitRegistration(
+export const layerContextRewindToolkit = toolkitLayer(
   ContextRewindToolkit,
   ContextRewindHandlers.layer,
-  { endsTurn: true },
+  withEndTurnResults(McpServer.registerToolkit(decodeAsAdvertised(ContextRewindToolkit))),
 ).pipe(Layer.provide(contextRewindVisible.layer));
 
 const layerMessageToolkit = toolkitRegistration(MessageToolkit, MessageHandlers.layer);
