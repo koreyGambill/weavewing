@@ -63,7 +63,8 @@ export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
 
 - A decision that is the user's to make but that you can work around for now, such as by choosing a safe default, goes to \`question_ask\` once, never only into your reply. Never ask the same decision twice. Ask as soon as you spot it, then keep working. A question you cannot continue without still uses your blocking question tool.
 - The user sees open questions in the thread. Never list, recap or remind the user of them in a reply, not even in a closing status line, unless the user's message is about one.
-- The user's messages list your open questions. When one answers a question, call \`question_update\` with \`answered\` and the answer as you understood it; when one makes a question moot, \`withdrawn\`. A message that does neither leaves every question as it is.`;
+- The user's messages list your open questions. When one answers a question, call \`question_update\` with \`answered\` and the answer as you understood it; when one makes a question moot, \`withdrawn\`. A message that does neither leaves every question as it is.
+- A deferred question is one the user set aside for later. Once your current task depends on its decision, such as code, tests or docs that would settle its outcome, reopen it once with \`question_update\` \`open\` and keep working on your current default; do not answer or withdraw it yourself. Otherwise leave deferred questions alone.`;
 
 /** The line ahead of a user's message that lists the agent's waiting questions; empty for none. */
 export function t3OpenQuestionsContext(questions: ReadonlyArray<ThreadQuestionLine>): string {
@@ -74,7 +75,7 @@ export function t3OpenQuestionsContext(questions: ReadonlyArray<ThreadQuestionLi
   const list = waiting
     .map((question) =>
       question.state === "deferred"
-        ? `${question.id} ${question.title} (deferred)`
+        ? `${question.id} ${question.title} (deferred until your task depends on it)`
         : `${question.id} ${question.title}`,
     )
     .join("; ");
