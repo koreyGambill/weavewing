@@ -915,6 +915,10 @@ const make = Effect.gen(function* () {
           next = { ...question, state: "withdrawn", closedAt: now };
           break;
         case "answered": {
+          // The user's submit already recorded it; an agent following its instructions after
+          // reading that message has nothing left to do.
+          if (by === "agent" && question.state === "answered" && question.answeredBy === "user")
+            return current;
           if (!isWaiting(question))
             return yield* invalid(`${question.id} is already ${question.state}.`);
           if (by === "user") return yield* invalid("Submit answers so the agent receives them.");

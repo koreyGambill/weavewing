@@ -788,6 +788,13 @@ it.effect("submits drafted answers to the thread as one user message", () =>
       ["open", null],
     ]);
     expect(h.mirror.questions.map((question) => question.id)).toEqual(["Q3"]);
+    // An agent recording an answer the user already sent succeeds and keeps the user's answer.
+    const recorded = yield* h.service.questionUpdate(
+      { threadId, id: "Q1", state: "answered", answer: { chosenOptionIds: ["lite"] } },
+      "agent",
+    );
+    expect(recorded.revision).toBe(submitted.revision);
+    expect(recorded.questions[0]).toEqual(submitted.questions[0]);
     expect((yield* failureOf(h.service.questionSubmit({ threadId, ids: ["Q1"] }))).code).toBe(
       "invalid",
     );
