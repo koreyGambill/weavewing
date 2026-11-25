@@ -1,11 +1,7 @@
 import type { ThreadQuestion } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  sectionThreadQuestions,
-  threadQuestionAnswerText,
-  threadQuestionCounts,
-} from "./threadQuestions.ts";
+import { sectionThreadQuestions, threadQuestionCounts } from "./threadQuestions.ts";
 
 const question = (
   id: string,
@@ -63,14 +59,5 @@ describe("thread questions", () => {
         }),
       ]),
     ).toEqual({ waiting: 3, deferred: 1, drafted: 2 });
-  });
-
-  it.each([
-    [draft(["a", "b"], "soon"), "Alpha, Beta: soon"],
-    [draft([], "my own words"), "my own words"],
-    [draft(["b"]), "Beta"],
-    [null, ""],
-  ])("reads an answer as one line: %j", (answer, text) => {
-    expect(threadQuestionAnswerText(question("Q1", "answered", { answer }))).toBe(text);
   });
 });

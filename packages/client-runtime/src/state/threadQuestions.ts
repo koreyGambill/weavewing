@@ -51,17 +51,3 @@ export function threadQuestionCounts(
   }
   return { waiting, deferred, drafted };
 }
-
-/** The chosen options, then the note, as one line; empty when nothing was chosen. */
-export function threadQuestionAnswerText(
-  question: Pick<ThreadQuestion, "options" | "answer">,
-): string {
-  const answer = question.answer;
-  if (answer === null) return "";
-  const choice = question.options
-    .filter((option) => answer.chosenOptionIds.includes(option.id))
-    .map((option) => option.label)
-    .join(", ");
-  const note = answer.notes.trim();
-  return choice && note ? `${choice}: ${note}` : choice || note;
-}

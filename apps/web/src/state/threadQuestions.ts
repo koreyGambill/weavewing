@@ -13,6 +13,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSummaries } from "./presentation";
 import { useEnvironmentQuery } from "./query";
+import { useAtomCommand } from "./use-atom-command";
 import { serverEnvironment } from "./server";
 import { useEnvironmentScope } from "./session";
 import { threadWorkspaceGet } from "./threadWorkspace";
@@ -65,6 +66,24 @@ export const threadQuestionSubmit = createEnvironmentRpcCommand(connectionAtomRu
   tag: WS_METHODS.threadQuestionSubmit,
   onSuccess: remember,
 });
+
+/** Saves one question's draft through the thread's draft writer; null when the save failed. */
+export function useSaveQuestionDraft(threadRef: ScopedThreadRef) {
+  const saveDraft = useAtomCommand(threadQuestionDraft);
+  return async (
+    id: string,
+    draft: { readonly chosenOptionIds: ReadonlyArray<string>; readonly notes: string },
+  ) => {
+    const result = await saveDraft({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        answers: { [id]: { chosenOptionIds: [...draft.chosenOptionIds], notes: draft.notes } },
+      },
+    });
+    return result._tag === "Success" ? result.value : null;
+  };
+}
 
 /**
  * The thread's questions from its workspace. Every reader shares one query; a null thread or

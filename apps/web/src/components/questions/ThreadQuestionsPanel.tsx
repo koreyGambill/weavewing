@@ -13,9 +13,9 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "~/lib/utils";
 import { isEditableFocused } from "~/lib/editableFocus";
 import {
-  threadQuestionDraft,
   threadQuestionSubmit,
   threadQuestionUpdate,
+  useSaveQuestionDraft,
   useThreadQuestionsWorkspace,
 } from "../../state/threadQuestions";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -23,6 +23,7 @@ import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
 import { toastManager } from "../ui/toast";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
+import { questionDraftWriter } from "./questionDraftWriter";
 import {
   QUESTION_PANEL_KEY_SHORTCUTS,
   questionPanelKeyAction,
@@ -30,6 +31,7 @@ import {
   resolveSelectedQuestionId,
 } from "./ThreadQuestionsPanel.logic";
 import { requestQuestionReveal } from "./questionReveal";
+import { serverEnvironment } from "../../state/server";
 import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
 import { CONVERSATION_TAB_ID, getTileGroups } from "../../threadTileLayout";
 
@@ -38,6 +40,12 @@ const SECTION_LABELS: Record<ThreadQuestionSection, string> = {
   deferred: "Deferred",
   closed: "Closed",
 };
+
+/** The panel while the environment's agent questions setting is on; nothing otherwise. */
+export function GatedThreadQuestionsPanel(props: Parameters<typeof ThreadQuestionsPanel>[0]) {
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.threadRef.environmentId));
+  return settings?.agentQuestionsEnabled === true ? <ThreadQuestionsPanel {...props} /> : null;
+}
 
 /**
  * Every question of a thread beside the chat: a sectioned list, the selected question's card,
@@ -65,7 +73,8 @@ export function ThreadQuestionsPanel({
   const [sending, setSending] = useState(false);
   const canAct = useAtomValue(threadQuestionSubmit.permissionAtom(threadRef.environmentId));
   const submit = useAtomCommand(threadQuestionSubmit);
-  const saveDraft = useAtomCommand(threadQuestionDraft);
+  const saveDraft = useSaveQuestionDraft(threadRef);
+  const writer = questionDraftWriter(scopedThreadKey(threadRef));
   const update = useAtomCommand(threadQuestionUpdate);
   const questions = workspace?.questions ?? [];
   const order = questionPanelOrder(questions);
@@ -76,15 +85,23 @@ export function ThreadQuestionsPanel({
 
   const send = async () => {
     setSending(true);
-    const result = await submit({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, ids: drafted.map((question) => question.id) },
-    });
+    // Notes still waiting or in flight are part of what the user means to send.
+    const saved = await writer.flushAll(saveDraft);
+    const latest =
+      saved !== null && saved.revision > (workspace?.revision ?? -1) ? saved : workspace;
+    const ids = (latest?.questions ?? []).filter(threadQuestionHasDraft).map((entry) => entry.id);
+    const result =
+      ids.length === 0
+        ? null
+        : await submit({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId, ids },
+          });
     setSending(false);
-    if (result._tag === "Success")
+    if (result?._tag === "Success")
       toastManager.add({
         type: "success",
-        title: `Sent ${drafted.length} ${drafted.length === 1 ? "answer" : "answers"}`,
+        title: `Sent ${ids.length} ${ids.length === 1 ? "answer" : "answers"}`,
       });
   };
   const showInChat = (id: string) => {
@@ -120,24 +137,21 @@ export function ThreadQuestionsPanel({
         return;
       case "select":
         setSelectedId(action.id);
-        document.getElementById(`question-panel-item-${action.id}`)?.scrollIntoView({
-          block: "nearest",
-        });
+        rootRef.current
+          ?.querySelector(`[data-question-item="${CSS.escape(action.id)}"]`)
+          ?.scrollIntoView({ block: "nearest" });
         return;
       case "choose": {
         const question = order.find((entry) => entry.id === action.id);
-        void saveDraft({
-          environmentId: threadRef.environmentId,
-          input: {
-            threadId: threadRef.threadId,
-            answers: {
-              [action.id]: {
-                chosenOptionIds: action.chosenOptionIds,
-                notes: question?.answer?.notes ?? "",
-              },
-            },
+        void writer.edit(
+          action.id,
+          {
+            chosenOptionIds: question?.answer?.chosenOptionIds ?? [],
+            notes: question?.answer?.notes ?? "",
           },
-        });
+          { chosenOptionIds: action.chosenOptionIds },
+          saveDraft,
+        );
         return;
       }
       case "defer":
@@ -183,7 +197,7 @@ export function ThreadQuestionsPanel({
                       <li key={question.id}>
                         <button
                           type="button"
-                          id={`question-panel-item-${question.id}`}
+                          data-question-item={question.id}
                           aria-current={question.id === shownId ? "true" : undefined}
                           onClick={() => setSelectedId(question.id)}
                           className={cn(

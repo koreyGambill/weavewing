@@ -369,6 +369,7 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { useThreadQuestionsBanner } from "./questions/useThreadQuestionsBanner";
+import { questionSurfaceIdsToClose } from "./questions/questionsSurface.logic";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -1168,6 +1169,17 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
+  const environmentSettings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
+  const questionSurfacesToClose = questionSurfaceIdsToClose(
+    rightPanelState.surfaces,
+    environmentSettings?.agentQuestionsEnabled ?? null,
+  ).join("\n");
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes persisted Questions tabs once the server setting that allows them reads off
+  useEffect(() => {
+    if (activeThreadRef === null || questionSurfacesToClose === "") return;
+    for (const id of questionSurfacesToClose.split("\n"))
+      useRightPanelStore.getState().closeSurface(activeThreadRef, id);
+  }, [activeThreadRef, questionSurfacesToClose]);
   const tiledWorkspace =
     !embedded && (relatedWorkspace === null || rightPanelState.surfaces.length > 0);
   const activeRightPanelSurface = useRightPanelStore((state) =>

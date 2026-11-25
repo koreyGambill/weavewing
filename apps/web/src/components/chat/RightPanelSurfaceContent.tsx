@@ -27,7 +27,7 @@ import { PullRequestDetailPanel } from "../pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "../pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "../pullRequest/PullRequestsUnavailableState";
 import { ThreadPullRequestsPanel } from "../pullRequest/ThreadPullRequestsPanel";
-import { ThreadQuestionsPanel } from "../questions/ThreadQuestionsPanel";
+import { GatedThreadQuestionsPanel } from "../questions/ThreadQuestionsPanel";
 
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
@@ -94,7 +94,7 @@ export function RightPanelSurfaceContent(props: {
   switch (surface.kind) {
     case "questions":
       return props.startedThread ? (
-        <ThreadQuestionsPanel
+        <GatedThreadQuestionsPanel
           key={scopedThreadKey(threadRef)}
           threadRef={threadRef}
           active={visible}

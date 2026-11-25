@@ -2,15 +2,20 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, ThreadQuestion } from "@t3tools/contracts";
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { threadQuestionDraft, threadQuestionUpdate } from "../../state/threadQuestions";
+import {
+  threadQuestionDraft,
+  threadQuestionUpdate,
+  useSaveQuestionDraft,
+} from "../../state/threadQuestions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { QuestionOptions } from "./QuestionOptions";
+import { questionDraftWriter, type QuestionDraft } from "./questionDraftWriter";
 import { requestQuestionReveal, threadQuestionElementId } from "./questionReveal";
 
 const NOTE_SAVE_DELAY_MS = 600;
@@ -50,44 +55,37 @@ export function ThreadQuestionCard({
   readonly inTimeline?: boolean;
 }) {
   const canAct = useAtomValue(threadQuestionDraft.permissionAtom(threadRef.environmentId));
-  const saveDraft = useAtomCommand(threadQuestionDraft);
+  const saveDraft = useSaveQuestionDraft(threadRef);
+  const writer = questionDraftWriter(scopedThreadKey(threadRef));
   const update = useAtomCommand(threadQuestionUpdate);
   // Local until the server returns them, so typing and choosing never wait on a round trip.
   const [pendingChoice, setPendingChoice] = useState<ReadonlyArray<string> | null>(null);
   const [pendingNotes, setPendingNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chosenOptionIds = pendingChoice ?? question.answer?.chosenOptionIds ?? [];
   const notes = pendingNotes ?? question.answer?.notes ?? "";
   const answerable = question.state === "open" || question.state === "deferred";
 
-  const save = async (next: {
-    readonly chosenOptionIds: ReadonlyArray<string>;
-    readonly notes: string;
-  }) => {
-    const result = await saveDraft({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        answers: {
-          [question.id]: { chosenOptionIds: [...next.chosenOptionIds], notes: next.notes },
+  const edit = (change: Partial<QuestionDraft>, delayMs?: number) =>
+    void writer
+      .edit(
+        question.id,
+        {
+          chosenOptionIds: question.answer?.chosenOptionIds ?? [],
+          notes: question.answer?.notes ?? "",
         },
-      },
-    });
-    // A later edit keeps its own pending value; this save only clears what it sent.
-    setPendingChoice((current) => (current === next.chosenOptionIds ? null : current));
-    setPendingNotes((current) => (current === next.notes ? null : current));
-    return result;
-  };
-  const flushNotes = () => {
-    if (noteTimer.current === null) return;
-    clearTimeout(noteTimer.current);
-    noteTimer.current = null;
-    void save({ chosenOptionIds, notes });
-  };
+        change,
+        saveDraft,
+        delayMs,
+      )
+      .then(() => {
+        // A later edit keeps its own pending value; this write only clears what it carried.
+        setPendingChoice((current) => (current === change.chosenOptionIds ? null : current));
+        setPendingNotes((current) => (current === change.notes ? null : current));
+      });
   const changeState = async (state: "open" | "deferred" | "withdrawn") => {
-    flushNotes();
     setBusy(true);
+    await writer.flush(question.id, saveDraft);
     await update({
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId, id: question.id, state },
@@ -168,7 +166,7 @@ export function ThreadQuestionCard({
               disabled={!canAct}
               onChoose={(next) => {
                 setPendingChoice(next);
-                void save({ chosenOptionIds: next, notes });
+                edit({ chosenOptionIds: next });
               }}
             />
           ) : null}
@@ -179,15 +177,10 @@ export function ThreadQuestionCard({
             placeholder={question.options.length > 0 ? "Add a note…" : "Your answer…"}
             value={notes}
             disabled={!canAct}
-            onBlur={flushNotes}
+            onBlur={() => void writer.flush(question.id, saveDraft)}
             onChange={(event) => {
-              const value = event.target.value;
-              setPendingNotes(value);
-              if (noteTimer.current !== null) clearTimeout(noteTimer.current);
-              noteTimer.current = setTimeout(() => {
-                noteTimer.current = null;
-                void save({ chosenOptionIds, notes: value });
-              }, NOTE_SAVE_DELAY_MS);
+              setPendingNotes(event.target.value);
+              edit({ notes: event.target.value }, NOTE_SAVE_DELAY_MS);
             }}
           />
         </>
