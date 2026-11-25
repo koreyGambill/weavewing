@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { threadQuestionStatus } from "@t3tools/client-runtime/state/thread-questions";
 import type { ScopedThreadRef, ThreadQuestion } from "@t3tools/contracts";
+import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
@@ -97,6 +98,7 @@ export function ThreadQuestionCard({
   const [pendingNotes, setPendingNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [descriptionsCollapsed, setDescriptionsCollapsed] = useState(false);
   const chosenOptionIds = pendingChoice ?? question.answer?.chosenOptionIds ?? [];
   const notes = pendingNotes ?? question.answer?.notes ?? "";
   const status = threadQuestionStatus(question, inComposer === "answer");
@@ -252,6 +254,31 @@ export function ThreadQuestionCard({
         )}
         {actions}
         <QuestionStatusBadge status={status} />
+        {question.options.some((option) => option.description) ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="contrast-outline"
+                  aria-label={
+                    descriptionsCollapsed
+                      ? "Expand option descriptions"
+                      : "Collapse option descriptions"
+                  }
+                  onClick={() => setDescriptionsCollapsed((current) => !current)}
+                />
+              }
+            >
+              {descriptionsCollapsed ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {descriptionsCollapsed
+                ? "Expand option descriptions"
+                : "Collapse option descriptions"}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
       </header>
       {question.details ? (
         <div className="text-sm text-muted-foreground">
@@ -263,6 +290,7 @@ export function ThreadQuestionCard({
           question={question}
           chosenOptionIds={shown.chosenOptionIds}
           disabled={closed || !canAct || !editable}
+          collapsed={descriptionsCollapsed}
           onChoose={(next) => {
             setPendingChoice(next);
             edit({ chosenOptionIds: next });

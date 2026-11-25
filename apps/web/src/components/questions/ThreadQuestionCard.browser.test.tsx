@@ -1,7 +1,9 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, type ThreadQuestion, ThreadId } from "@t3tools/contracts";
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+
+import "~/index.css";
 
 import { render } from "../../../test/render";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
@@ -51,4 +53,49 @@ it("expands a closed question into the full card, read-only, with its answer cho
 
   await userEvent.click(screen.getByRole("button", { name: /Which machine/ }));
   await expect.element(screen.getByRole("radio")).not.toBeInTheDocument();
+});
+
+const longDescription =
+  "Runs every agent on the Mac today, then measures whether the PC can take over the long builds.";
+
+it("shows option descriptions in full until the card's toggle cuts them to one line", async () => {
+  const question = {
+    ...answered,
+    options: [{ id: "mac", label: "Mac only", description: longDescription }, answered.options[1]!],
+  };
+  // router: false because the card never navigates.
+  await using screen = await render(
+    <div style={{ width: 280 }}>
+      <ThreadQuestionCard question={question} threadRef={threadRef} />
+    </div>,
+    { router: false },
+  );
+  await userEvent.click(screen.getByRole("button", { name: /Which machine/ }));
+
+  const description = screen.getByText(longDescription);
+  const cutOff = () => description.element().scrollWidth > description.element().clientWidth;
+  await expect.element(description).toBeVisible();
+  expect(cutOff()).toBe(false);
+
+  await userEvent.click(screen.getByRole("button", { name: "Collapse option descriptions" }));
+  await vi.waitFor(() => expect(cutOff()).toBe(true));
+  await userEvent.click(screen.getByRole("button", { name: "Expand option descriptions" }));
+  await vi.waitFor(() => expect(cutOff()).toBe(false));
+});
+
+it("offers the description toggle only when an option has a description", async () => {
+  const question = {
+    ...answered,
+    options: answered.options.map((option) => ({ ...option, description: "" })),
+  };
+  // router: false because the card never navigates.
+  await using screen = await render(
+    <ThreadQuestionCard question={question} threadRef={threadRef} />,
+    { router: false },
+  );
+  await userEvent.click(screen.getByRole("button", { name: /Which machine/ }));
+  await expect.element(screen.getByRole("radio", { name: /Mac only/ })).toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: /option descriptions/ }))
+    .not.toBeInTheDocument();
 });
