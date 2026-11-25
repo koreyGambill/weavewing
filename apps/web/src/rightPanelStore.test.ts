@@ -64,6 +64,33 @@ describe("rightPanelStore", () => {
     expect(groups()).toHaveLength(2);
   });
 
+  it("opens a surface beside the chat when every tab shares the chat's tile", () => {
+    const store = useRightPanelStore.getState();
+    const groups = () =>
+      getTileGroups(selectThreadTileLayout(useRightPanelStore.getState().byThreadKey, refA));
+    store.open(refA, "notes");
+    const [chat, panels] = groups();
+    store.applyTileAction(refA, {
+      type: "merge-groups",
+      groupId: panels!.id,
+      targetGroupId: chat!.id,
+    });
+    store.applyTileAction(refA, {
+      type: "activate",
+      groupId: chat!.id,
+      tabId: CONVERSATION_TAB_ID,
+    });
+    expect(groups()).toHaveLength(1);
+
+    store.open(refA, "questions", "tile-2");
+    const [main, beside] = groups();
+    expect(main?.activeTabId).toBe(CONVERSATION_TAB_ID);
+    expect(beside?.tabs).toEqual(["questions"]);
+    // Opening it again keeps it where it is.
+    store.open(refA, "questions", "tile-2");
+    expect(groups()).toHaveLength(2);
+  });
+
   it("opens related threads beside the main chat and keeps them in the current browser session", async () => {
     const store = useRightPanelStore.getState();
     const agentRef = scopeThreadRef("env-2" as EnvironmentId, refB.threadId);

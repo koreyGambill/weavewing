@@ -179,9 +179,11 @@ interface RightPanelStoreState {
     ref: ScopedThreadRef,
     surface: Exclude<RightPanelSurface, { kind: "terminal" }>,
   ) => void;
+  /** `destination` places a newly opened surface the way links open, such as beside the chat. */
   open: (
     ref: ScopedThreadRef,
     kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-chat">,
+    destination?: LinkTileDestination,
   ) => void;
   openSideChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
   openRelatedThread: (
@@ -1013,7 +1015,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           ),
         ),
-      open: (ref, kind) =>
+      open: (ref, kind, destination) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             if (kind === "preview") {
@@ -1023,7 +1025,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             const existing = current.surfaces.find(
               (surface) => surface.kind === kind && kind !== "device",
             );
-            return upsertSurface(current, existing ?? singletonSurface(kind));
+            const surface = existing ?? singletonSurface(kind);
+            const next = upsertSurface(current, surface, true, !destination);
+            return placeLinkedSurface(current, next, surface.id, destination);
           }),
         ),
       openDevice: (ref, target, automatic = false, surfaceId) =>

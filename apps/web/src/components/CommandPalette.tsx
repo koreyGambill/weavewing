@@ -1814,7 +1814,7 @@ function OpenCommandPaletteDialog(props: {
       run: async () => {
         useRightPanelStore
           .getState()
-          .open(scopeThreadRef(activeThread.environmentId, activeThread.id), "questions");
+          .open(scopeThreadRef(activeThread.environmentId, activeThread.id), "questions", "tile-2");
       },
     });
   }

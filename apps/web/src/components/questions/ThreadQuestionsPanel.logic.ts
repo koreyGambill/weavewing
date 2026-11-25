@@ -25,6 +25,12 @@ export type QuestionPanelKeyAction =
   | { readonly type: "defer"; readonly id: string }
   | { readonly type: "close" };
 
+/**
+ * The keys the panel handles, as `aria-keyshortcuts`, so type-to-focus leaves them out of the
+ * composer.
+ */
+export const QUESTION_PANEL_KEY_SHORTCUTS = "J K N 1 2 3 4 5 6 7 8 9 Escape";
+
 /** J/K move, 1–9 choose an option, N defers, Escape closes the panel. */
 export function questionPanelKeyAction(input: {
   readonly key: string;

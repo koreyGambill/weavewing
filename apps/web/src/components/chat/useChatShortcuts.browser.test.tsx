@@ -7,6 +7,7 @@ import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
 import { render } from "../../../test/render";
 import type { ChatComposerHandle } from "./ChatComposer";
 import { useChatShortcuts } from "./useChatShortcuts";
+import { QUESTION_PANEL_KEY_SHORTCUTS } from "../questions/ThreadQuestionsPanel.logic";
 
 const shortcutContext = {
   terminalFocus: false,
@@ -132,6 +133,21 @@ it.each([
 
   expect(composerKeys).toEqual(composer);
   expect(received).toEqual(launcher);
+});
+
+it("leaves the question panel's keys to the panel and types other letters into the composer", async () => {
+  const composerKeys: string[] = [];
+  await using _screen = await render(
+    <>
+      <Chat composerKeys={composerKeys} />
+      <div ref={focusOnMount} tabIndex={-1} aria-keyshortcuts={QUESTION_PANEL_KEY_SHORTCUTS} />
+    </>,
+    options,
+  );
+
+  await userEvent.keyboard("jk19nx");
+
+  expect(composerKeys).toEqual(["x"]);
 });
 
 const ctrlShift = (key: string, command: KeybindingCommand) => ({

@@ -8,7 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-questions";
 import { threadQuestionTitle, type ScopedThreadRef } from "@t3tools/contracts";
 import { SendIcon } from "lucide-react";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { cn } from "~/lib/utils";
 import { isEditableFocused } from "~/lib/editableFocus";
@@ -24,11 +24,14 @@ import { Kbd } from "../ui/kbd";
 import { toastManager } from "../ui/toast";
 import { ThreadQuestionCard } from "./ThreadQuestionCard";
 import {
+  QUESTION_PANEL_KEY_SHORTCUTS,
   questionPanelKeyAction,
   questionPanelOrder,
   resolveSelectedQuestionId,
 } from "./ThreadQuestionsPanel.logic";
 import { requestQuestionReveal } from "./questionReveal";
+import { selectThreadTileLayout, useRightPanelStore } from "../../rightPanelStore";
+import { CONVERSATION_TAB_ID, getTileGroups } from "../../threadTileLayout";
 
 const SECTION_LABELS: Record<ThreadQuestionSection, string> = {
   waiting: "Waiting",
@@ -42,11 +45,21 @@ const SECTION_LABELS: Record<ThreadQuestionSection, string> = {
  */
 export function ThreadQuestionsPanel({
   threadRef,
+  active,
   onClose,
 }: {
   readonly threadRef: ScopedThreadRef;
+  /** Its tab is the one shown, so the panel takes keyboard focus. */
+  readonly active: boolean;
   readonly onClose: () => void;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves keyboard focus into the panel as its tab is shown, so its keys never reach a hidden composer
+  useEffect(() => {
+    const root = rootRef.current;
+    if (active && root && !root.contains(document.activeElement))
+      root.focus({ preventScroll: true });
+  }, [active]);
   const { workspace, error } = useThreadQuestionsWorkspace(threadRef, true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -75,12 +88,25 @@ export function ThreadQuestionsPanel({
       });
   };
   const showInChat = (id: string) => {
-    if (!requestQuestionReveal(scopedThreadKey(threadRef), id))
-      toastManager.add({
-        type: "info",
-        title: `${id} is not in the loaded part of the chat`,
-        description: "Scroll up to load earlier messages, then try again.",
+    const store = useRightPanelStore.getState();
+    const chat = getTileGroups(selectThreadTileLayout(store.byThreadKey, threadRef)).find((group) =>
+      group.tabs.includes(CONVERSATION_TAB_ID),
+    );
+    if (chat && chat.activeTabId !== CONVERSATION_TAB_ID)
+      store.applyTileAction(threadRef, {
+        type: "activate",
+        groupId: chat.id,
+        tabId: CONVERSATION_TAB_ID,
       });
+    // A frame later, so a chat tab that was hidden has laid out before its list scrolls.
+    requestAnimationFrame(() => {
+      if (requestQuestionReveal(scopedThreadKey(threadRef), id) === "missing")
+        toastManager.add({
+          type: "info",
+          title: `${id} is not in the loaded part of the chat`,
+          description: "Scroll up to load earlier messages, then try again.",
+        });
+    });
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -123,20 +149,21 @@ export function ThreadQuestionsPanel({
     }
   };
 
-  if (workspace == null)
-    return (
-      <p role="status" className="p-4 text-sm text-muted-foreground">
-        {error ?? "Loading questions…"}
-      </p>
-    );
   return (
     <div
+      ref={rootRef}
       className="@container flex h-full min-h-0 flex-col outline-none"
       tabIndex={-1}
+      aria-label="Question review"
+      aria-keyshortcuts={QUESTION_PANEL_KEY_SHORTCUTS}
       onKeyDown={onKeyDown}
     >
-      {questions.length === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">
+      {workspace == null ? (
+        <p role="status" className="flex-1 p-4 text-sm text-muted-foreground">
+          {error ?? "Loading questions…"}
+        </p>
+      ) : questions.length === 0 ? (
+        <p className="flex-1 p-4 text-sm text-muted-foreground">
           No questions yet. When an agent asks one, it shows here and in the chat.
         </p>
       ) : (
@@ -205,7 +232,7 @@ export function ThreadQuestionsPanel({
           </div>
         </div>
       )}
-      <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border p-3">
+      <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border p-3 pe-9">
         <p className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-xs text-muted-foreground">
           <Kbd>J</Kbd>
           <Kbd>K</Kbd> move · <Kbd>1</Kbd>–<Kbd>9</Kbd> choose · <Kbd>N</Kbd> not yet

@@ -929,7 +929,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
-  useQuestionReveal(routeThreadKey, (questionId) => {
+  useQuestionReveal(routeThreadKey, rows.length, (questionId) => {
     const index = rows.findIndex(
       (row) => row.kind === "thread-questions" && row.questionIds.includes(questionId),
     );

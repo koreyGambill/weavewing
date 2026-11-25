@@ -59,7 +59,7 @@ export function useThreadQuestionsBanner(input: {
       <Button
         size="xs"
         variant="outline"
-        onClick={() => useRightPanelStore.getState().open(threadRef, "questions")}
+        onClick={() => useRightPanelStore.getState().open(threadRef, "questions", "tile-2")}
       >
         Review
       </Button>

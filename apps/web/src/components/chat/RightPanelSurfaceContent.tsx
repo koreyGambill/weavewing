@@ -97,6 +97,7 @@ export function RightPanelSurfaceContent(props: {
         <ThreadQuestionsPanel
           key={scopedThreadKey(threadRef)}
           threadRef={threadRef}
+          active={visible}
           onClose={() => onCloseSurface(surface)}
         />
       ) : null;
