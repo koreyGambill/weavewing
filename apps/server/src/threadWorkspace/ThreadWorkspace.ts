@@ -298,20 +298,20 @@ const make = Effect.gen(function* () {
       );
   });
   // A sent comment takes the note it carried once its turn starts; a chosen option stays a draft.
+  // An answer carrying the same draft wins: its note is what the agent was sent.
   const discussedAs = (
     question: ThreadQuestion,
     discussion: QuestionDiscussion | undefined,
+    answerSent: boolean,
   ): ThreadQuestion => {
     const { discussedInMessageId: previous, ...rest } = question;
     if (discussion === undefined) return previous === undefined ? question : rest;
-    if (previous === discussion.messageId && !discussion.clearNote) return question;
+    const clearNote = discussion.clearNote && !answerSent && question.answer !== null;
+    if (previous === discussion.messageId && !clearNote) return question;
     return {
       ...rest,
       discussedInMessageId: discussion.messageId,
-      answer:
-        discussion.clearNote && question.answer
-          ? { ...question.answer, notes: "" }
-          : question.answer,
+      answer: clearNote && question.answer ? { ...question.answer, notes: "" } : question.answer,
     };
   };
   // Answers ride ordinary user messages, so where each one went is read from the thread itself.
@@ -355,7 +355,11 @@ const make = Effect.gen(function* () {
     let changed = false;
     const questions = workspace.questions.map((waiting): ThreadQuestion => {
       if (!isWaiting(waiting)) return waiting;
-      const question = discussedAs(waiting, discussions.get(waiting.id));
+      const question = discussedAs(
+        waiting,
+        discussions.get(waiting.id),
+        deliveries.has(waiting.id),
+      );
       if (question !== waiting) changed = true;
       const delivery = deliveries.get(question.id);
       if (delivery?.received && question.answer) {
@@ -958,7 +962,13 @@ const make = Effect.gen(function* () {
             return yield* invalid(
               `${old.id} is ${old.state}; only an open or deferred question can be replaced.`,
             );
-          questions[index] = { ...old, state: "replaced", closedAt: now, replacedBy: question.id };
+          const { discussedInMessageId: _discussed, ...replaced } = old;
+          questions[index] = {
+            ...replaced,
+            state: "replaced",
+            closedAt: now,
+            replacedBy: question.id,
+          };
         }
         questions.push(question);
       }
@@ -1027,10 +1037,13 @@ const make = Effect.gen(function* () {
       }
       const { userChangedAt: _reported, discussedInMessageId: discussed, ...changed } = next;
       const questions = [...current.questions];
-      // The user's own change, or a reopening, ends a discussion.
+      // The user's own change, or a reopening, ends a discussion. A new draft revision keeps a
+      // comment still queued from matching again; a sent answer keeps its revision.
       const kept =
         by === "user" || input.state === "open" || discussed === undefined
-          ? changed
+          ? by === "user" && changed.answer && changed.sentInMessageId === undefined
+            ? { ...changed, answer: { ...changed.answer, draftRevision: current.revision + 1 } }
+            : changed
           : { ...changed, discussedInMessageId: discussed };
       questions[index] = by === "user" ? { ...kept, userChangedAt: now } : kept;
       return yield* commitQuestions(current, questions);
@@ -1096,7 +1109,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         if (event.type === "message.updated") {
           if (event.payload.role !== "user") return;
-        } else if (event.type !== "run.updated") return;
+          // A provider's acceptance can arrive alone, as its turn record, and it is what clears
+          // a sent comment's note and closes a sent answer.
+        } else if (event.type !== "run.updated" && event.type !== "provider-turn.updated") return;
         const carriesAnswer =
           event.type === "message.updated" &&
           (event.payload.context?.records.some(

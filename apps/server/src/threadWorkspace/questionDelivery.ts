@@ -117,14 +117,13 @@ export function questionDeliveries(
 /** A comment the user sent on a waiting question; `clearNote` once its turn took the note. */
 export interface QuestionDiscussion {
   readonly messageId: MessageId;
-  readonly received: boolean;
   readonly clearNote: boolean;
 }
 
 /**
  * Where each waiting question's discussion is: the user message carrying a comment on its
- * current note, or else the message already recorded as discussing it while that message still
- * carries a comment on it. Only a turn a provider accepted clears the note, and only while the
+ * current note, or else the message already recorded as discussing it once a provider accepted
+ * its turn and its note was consumed. Only an accepted turn clears the note, and only while the
  * draft still holds what was sent; a message whose run ended unstarted discusses nothing.
  */
 export function questionDiscussions(
@@ -158,15 +157,19 @@ export function questionDiscussions(
         answer.notes.trim() !== ""
       );
     };
+    // The recorded message counts only once its note has gone; a queued one must still match.
+    const consumed = (message: Message) =>
+      message.id === question.discussedInMessageId &&
+      (answer === null || answer.notes === "") &&
+      commentOf(message) !== undefined;
     let found: QuestionDiscussion | undefined;
     for (const message of messages) {
       const current = isCurrent(message);
-      if (!current && message.id !== question.discussedInMessageId) continue;
-      if (commentOf(message) === undefined) continue;
+      if (!current && !consumed(message)) continue;
       const reach = messageReach(message, runs, accepted);
-      if (reach === "none") continue;
+      if (reach === "none" || (!current && reach !== "received")) continue;
       const received = reach === "received";
-      found = { messageId: message.id, received, clearNote: received && current };
+      found = { messageId: message.id, clearNote: received && current };
       if (current && received) break;
     }
     if (found !== undefined) discussions.set(question.id, found);

@@ -218,20 +218,17 @@ describe("questionDiscussions", () => {
           runs,
           new Set(runs.filter((entry) => entry.accepted).map((entry) => entry.id)),
         ),
-      ].map(([id, entry]) => [
-        id,
-        `${entry.messageId}:${entry.received ? "received" : "sent"}${entry.clearNote ? ":clear" : ""}`,
-      ]),
+      ].map(([id, entry]) => [id, `${entry.messageId}${entry.clearNote ? ":clear" : ""}`]),
     );
 
   it("discusses a question once its current note is sent, and clears the note once received", () => {
     const m1 = message("m1", [comment("Q1")]);
     expect(discussed([question("Q1")], [m1], [run("r1", "m1", "queued")])).toEqual({
-      Q1: "m1:sent",
+      Q1: "m1",
     });
     expect(
       discussed([question("Q1")], [m1], [run("r1", "m1", "running", { accepted: true })]),
-    ).toEqual({ Q1: "m1:received:clear" });
+    ).toEqual({ Q1: "m1:clear" });
   });
 
   it("ends when the comment's turn ends before a provider accepted it", () => {
@@ -247,8 +244,8 @@ describe("questionDiscussions", () => {
     ).toEqual({});
   });
 
-  it("keeps a discussion the queued message no longer matches, without clearing the note", () => {
-    // The user edited the note after sending: the sent comment still counts, the new note stays.
+  it("drops a discussion its draft or its queued message no longer matches", () => {
+    // The draft's note changed after sending: the earlier comment no longer discusses it.
     const edited = question("Q1", {
       discussedInMessageId: MessageId.make("m1"),
       answer: { chosenOptionIds: [], notes: "changed", submittedAt: null, draftRevision: 3 },
@@ -259,7 +256,7 @@ describe("questionDiscussions", () => {
         [message("m1", [comment("Q1")])],
         [run("r1", "m1", "running", { accepted: true })],
       ),
-    ).toEqual({ Q1: "m1:received" });
+    ).toEqual({});
     // The queued message itself was edited to say something else.
     expect(
       discussed(
@@ -267,7 +264,7 @@ describe("questionDiscussions", () => {
         [message("m1", [comment("Q1", 3, "other words")])],
         [run("r1", "m1", "queued")],
       ),
-    ).toEqual({ Q1: "m1:sent" });
+    ).toEqual({});
   });
 
   it("drops a discussion whose message was edited to carry no comment on the question", () => {
@@ -291,7 +288,11 @@ describe("questionDiscussions", () => {
         [message("m1", [comment("Q1")])],
         [run("r1", "m1", "completed", { accepted: true })],
       ),
-    ).toEqual({ Q1: "m1:received" });
+    ).toEqual({ Q1: "m1" });
+    // Not yet accepted, a recorded message whose note is gone discusses nothing.
+    expect(
+      discussed([cleared], [message("m1", [comment("Q1")])], [run("r1", "m1", "queued")]),
+    ).toEqual({});
   });
 
   it("ignores comments on an older draft, answers, closed questions and agent messages", () => {
