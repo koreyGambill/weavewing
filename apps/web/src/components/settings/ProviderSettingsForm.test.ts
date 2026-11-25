@@ -12,6 +12,7 @@ import {
   deriveProviderSettingsFields,
   nextProviderConfigWithChecklist,
   nextProviderConfigWithFieldValue,
+  readChecklistSelection,
   reconcileRowsDraft,
   seedRowsDraft,
 } from "./ProviderSettingsForm";
@@ -71,7 +72,7 @@ describe("ProviderSettingsForm helpers", () => {
     ).toEqual({ launchArgs: "--x", autoCompactWindow: "300000" });
   });
 
-  it("offers Claude's removable built-in tools as a checklist that clears back to the default", () => {
+  it("offers Claude's removable built-in tools as a checklist that saves a cleared list", () => {
     const claude = providerClients.get(ProviderDriverKind.make("claudeAgent"));
     const field = deriveProviderSettingsFields(claude!).find(
       (candidate) => candidate.key === "omittedBuiltinTools",
@@ -79,7 +80,11 @@ describe("ProviderSettingsForm helpers", () => {
     expect(field?.control).toBe("checklist");
     expect(field?.options?.map((option) => option.value)).not.toContain("ToolSearch");
     expect(field?.options?.map((option) => option.value)).not.toContain("Skill");
-    expect(field?.presets?.[0]?.values).toHaveLength(7);
+    expect(field?.presets?.map((preset) => preset.label)).toEqual([
+      "Recommended",
+      "Leave out all seven",
+    ]);
+    expect(field?.presets?.[1]?.values).toHaveLength(7);
 
     const next = nextProviderConfigWithChecklist({ launchArgs: "--x" }, field!, [
       "Workflow",
@@ -87,7 +92,20 @@ describe("ProviderSettingsForm helpers", () => {
       "ToolSearch",
     ]);
     expect(next).toEqual({ launchArgs: "--x", omittedBuiltinTools: ["Artifact", "Workflow"] });
-    expect(nextProviderConfigWithChecklist(next, field!, [])).toEqual({ launchArgs: "--x" });
+    const cleared = nextProviderConfigWithChecklist(next, field!, []);
+    expect(cleared).toEqual({ launchArgs: "--x", omittedBuiltinTools: [] });
+    expect(readChecklistSelection(cleared, field!)).toEqual([]);
+  });
+
+  it("shows the recommended built-in tools as selected when nothing is saved", () => {
+    const claude = providerClients.get(ProviderDriverKind.make("claudeAgent"));
+    const field = deriveProviderSettingsFields(claude!).find(
+      (candidate) => candidate.key === "omittedBuiltinTools",
+    );
+    const recommended = ["Task", "Workflow", "ScheduleWakeup", "ReportFindings"];
+    expect(field?.presets?.[0]?.values).toEqual(recommended);
+    expect(readChecklistSelection(undefined, field!)).toEqual(recommended);
+    expect(readChecklistSelection({ launchArgs: "--x" }, field!)).toEqual(recommended);
   });
 
   it("stores false boolean fields when true is the default", () => {

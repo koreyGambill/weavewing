@@ -608,8 +608,23 @@ it("ignores a stored client setting this build removed and keeps the rest", () =
 });
 
 describe("Claude omitted built-in tools", () => {
-  it("leaves every built-in tool in place by default", () => {
-    expect(decodeClaudeSettings({}).omittedBuiltinTools).toEqual([]);
+  it("leaves out the recommended tools and keeps the artifact tools when nothing is saved", () => {
+    expect(decodeClaudeSettings({}).omittedBuiltinTools).toEqual([
+      "Task",
+      "Workflow",
+      "ScheduleWakeup",
+      "ReportFindings",
+    ]);
+  });
+
+  it("keeps every built-in tool when an empty selection is saved", () => {
+    expect(decodeClaudeSettings({ omittedBuiltinTools: [] }).omittedBuiltinTools).toEqual([]);
+  });
+
+  it("keeps a saved selection exactly", () => {
+    expect(
+      decodeClaudeSettings({ omittedBuiltinTools: ["Artifact", "Workflow"] }).omittedBuiltinTools,
+    ).toEqual(["Artifact", "Workflow"]);
   });
 
   it("never lets ToolSearch, Skill or an unknown name through, and keeps the rest", () => {
@@ -620,13 +635,13 @@ describe("Claude omitted built-in tools", () => {
     ).toEqual(["Artifact", "Task"]);
   });
 
-  it("keeps valid names from a mixed array and reads any other shape as no selection", () => {
+  it("keeps valid names from a mixed array and reads any other shape as the default", () => {
     expect(
       decodeClaudeSettings({ omittedBuiltinTools: ["Artifact", 42] }).omittedBuiltinTools,
     ).toEqual(["Artifact"]);
     for (const malformed of ["Task", null, 7, { Task: true }]) {
       const decoded = decodeClaudeSettings({ launchArgs: "--x", omittedBuiltinTools: malformed });
-      expect(decoded.omittedBuiltinTools).toEqual([]);
+      expect(decoded.omittedBuiltinTools).toEqual(decodeClaudeSettings({}).omittedBuiltinTools);
       expect(decoded.launchArgs).toBe("--x");
     }
   });

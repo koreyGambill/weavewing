@@ -49,6 +49,8 @@ export interface ProviderSettingsFieldModel {
 
   readonly options?: ReadonlyArray<ProviderSettingsFormOption> | undefined;
   readonly presets?: ReadonlyArray<ProviderSettingsFormPreset> | undefined;
+  /** What a checklist's schema decodes when nothing is saved, shown until the user saves a list. */
+  readonly defaultSelection?: ReadonlyArray<string> | undefined;
 }
 
 function titleizeFieldKey(key: string): string {
@@ -92,6 +94,15 @@ function readFieldBooleanDefault(
   const decodeDefault = Schema.decodeUnknownOption(fieldSchema as Schema.Decoder<unknown>);
   const decoded = decodeDefault(undefined);
   return Option.isSome(decoded) && typeof decoded.value === "boolean" ? decoded.value : undefined;
+}
+
+function readFieldStringsDefault(
+  fieldSchema: ProviderClientDefinition["settingsSchema"]["fields"][string],
+): ReadonlyArray<string> {
+  const decoded = Schema.decodeUnknownOption(fieldSchema as Schema.Decoder<unknown>)(undefined);
+  return Option.isSome(decoded) && Array.isArray(decoded.value)
+    ? decoded.value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function fieldAcceptsString(
@@ -161,6 +172,9 @@ export function deriveProviderSettingsFields(
             : {}),
           ...(formAnnotation.control === "checklist" && formAnnotation.presets
             ? { presets: formAnnotation.presets }
+            : {}),
+          ...(formAnnotation.control === "checklist"
+            ? { defaultSelection: readFieldStringsDefault(fieldSchema) }
             : {}),
         } satisfies ProviderSettingsFieldModel,
       ];
@@ -307,12 +321,18 @@ function readProviderConfigString(config: unknown, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-function readProviderConfigStrings(config: unknown, key: string): ReadonlyArray<string> {
-  if (config === null || typeof config !== "object") return [];
-  const value = (config as Record<string, unknown>)[key];
+/** The checklist's effective selection: the saved list, or the schema default when none is saved. */
+export function readChecklistSelection(
+  config: unknown,
+  field: ProviderSettingsFieldModel,
+): ReadonlyArray<string> {
+  const value =
+    config !== null && typeof config === "object"
+      ? (config as Record<string, unknown>)[field.key]
+      : undefined;
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
-    : [];
+    : (field.defaultSelection ?? []);
 }
 
 /** Keeps the field's option order, so a saved list does not depend on click order. */
@@ -347,7 +367,7 @@ function ProviderSettingsChecklist({
   readonly disabled: boolean;
   readonly onChange: ProviderSettingsFormProps["onChange"];
 }) {
-  const selected = readProviderConfigStrings(value, field.key);
+  const selected = readChecklistSelection(value, field);
   return (
     <ul className="mt-3 grid gap-2 pb-2" aria-label={field.label}>
       {(field.options ?? []).map((option) => {
@@ -402,7 +422,7 @@ function ProviderSettingsChecklistActions({
   readonly disabled: boolean;
   readonly onChange: ProviderSettingsFormProps["onChange"];
 }) {
-  const selected = readProviderConfigStrings(value, field.key);
+  const selected = readChecklistSelection(value, field);
   // An action that is already applied stays focusable: disabling the button the keyboard just
   // used would drop focus out of the checklist.
   return (

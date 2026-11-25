@@ -155,6 +155,9 @@ const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
 const OMITTED_TOOLS_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
   omittedBuiltinTools: ["Artifact", "Task", "Workflow", "ToolSearch", "Skill"],
 });
+const NO_OMITTED_TOOLS_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
+  omittedBuiltinTools: [],
+});
 const AUTO_COMPACT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
   autoCompactWindow: "300000",
 });
@@ -522,13 +525,30 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     ]);
   });
 
-  it("sends no disallowed tools when nothing is omitted", () => {
+  it("leaves out the recommended tools and keeps Artifact when nothing is saved", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-default-omitted-tools",
+      resume: false,
+      cwd: "/workspace",
+      settings: DEFAULT_CLAUDE_SETTINGS,
+    });
+    assert.deepEqual(options.disallowedTools, [
+      "Agent",
+      "Task",
+      "Workflow",
+      "ScheduleWakeup",
+      "ReportFindings",
+    ]);
+  });
+
+  it("sends no disallowed tools when an empty selection is saved", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
       nativeThreadId: "native-no-omitted-tools",
       resume: false,
       cwd: "/workspace",
-      settings: DEFAULT_CLAUDE_SETTINGS,
+      settings: NO_OMITTED_TOOLS_CLAUDE_SETTINGS,
     });
     assert.notProperty(options, "disallowedTools");
   });
@@ -11691,6 +11711,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 model: "claude-sonnet-4-6",
                 tools: { type: "preset", preset: "claude_code" },
                 permissionMode: "bypassPermissions",
+                disallowedTools: ["Agent", "Task", "Workflow", "ScheduleWakeup", "ReportFindings"],
                 allowDangerouslySkipPermissions: true,
                 settings: { showThinkingSummaries: true },
                 sessionId: WAKE_NATIVE_SESSION,

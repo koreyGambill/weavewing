@@ -939,14 +939,28 @@ export type ClaudeRemovableBuiltinTool = typeof ClaudeRemovableBuiltinTool.Type;
 
 const isClaudeRemovableBuiltinTool = Schema.is(ClaudeRemovableBuiltinTool);
 
-// Unknown names and malformed values are dropped rather than rejected, so a hand-edited or
-// outdated entry never disables the whole Claude instance.
+/**
+ * Left out when the setting was never saved. The artifact tools stay, so threads can still
+ * publish claude.ai artifact pages.
+ */
+const CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS: ReadonlyArray<ClaudeRemovableBuiltinTool> = [
+  "Task",
+  "Workflow",
+  "ScheduleWakeup",
+  "ReportFindings",
+];
+
+// An absent key means the recommended set and a saved empty array means none. Unknown names are
+// dropped and a non-array value falls back to the recommended set, so a hand-edited or outdated
+// entry never disables the whole Claude instance.
 const OmittedBuiltinTools = Schema.Unknown.pipe(
   Schema.decodeTo(
     Schema.Array(ClaudeRemovableBuiltinTool),
     SchemaTransformation.transform<ReadonlyArray<ClaudeRemovableBuiltinTool>, unknown>({
       decode: (tools) =>
-        Array.isArray(tools) ? [...new Set(tools.filter(isClaudeRemovableBuiltinTool))] : [],
+        Array.isArray(tools)
+          ? [...new Set(tools.filter(isClaudeRemovableBuiltinTool))]
+          : CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS,
       encode: (tools) => tools,
     }),
   ),
@@ -1008,15 +1022,18 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     omittedBuiltinTools: OmittedBuiltinTools.pipe(
-      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.withDecodingDefault(Effect.succeed(CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS)),
       Schema.annotateKey({
         title: "Built-in tools to leave out",
         description:
-          "Removes these Claude Code tools from the model's context to save tokens. Applies to sessions started after you change it; Claude Code in a terminal is unaffected.",
+          "Removes these Claude Code tools from the model's context to save tokens. The recommended set is the default; leaving out Artifact stops Claude publishing claude.ai artifact pages from threads. Applies to sessions started after you change it; Claude Code in a terminal is unaffected.",
         providerSettingsForm: {
           control: "checklist",
           options: CLAUDE_REMOVABLE_BUILTIN_TOOLS,
+          // Clear saves an empty list, which keeps every tool instead of restoring the default.
+          clearWhenEmpty: "persist",
           presets: [
+            { label: "Recommended", values: CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS },
             {
               label: "Leave out all seven",
               values: CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value),
