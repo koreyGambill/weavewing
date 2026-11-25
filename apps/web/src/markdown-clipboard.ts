@@ -494,10 +494,7 @@ function padCell(text: string, width: number, align: string): string {
   return `${text}${" ".repeat(gap)}`;
 }
 
-/**
- * A space-padded table in a code fence, which Slack and other chat apps show
- * in a monospace font so the columns line up.
- */
+/** Columns padded with spaces, which line up wherever the text shows in a monospace font. */
 export function serializeTableElementToFixedWidth(table: Element): string {
   const cellRows = tableCellRows(table);
   if (cellRows.length === 0) return "";
@@ -512,12 +509,9 @@ export function serializeTableElementToFixedWidth(table: Element): string {
   const line = (row: string[]) =>
     widths
       .map((width, column) => padCell(row[column] ?? "", width, alignments[column] ?? ""))
-      .join(" | ")
+      .join("  ")
       .trimEnd();
-  const [header = [], ...body] = rows;
-  const separator = widths.map((width) => "-".repeat(width)).join("-+-");
-  const lines = [line(header), separator, ...body.map(line)];
-  return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
+  return rows.map(line).join("\n");
 }
 
 function mermaidSourceHtml(source: string) {
