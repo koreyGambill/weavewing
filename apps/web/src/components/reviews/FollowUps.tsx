@@ -9,9 +9,9 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { BookmarkIcon, MoreHorizontalIcon } from "lucide-react";
+import { BookmarkIcon, FlagIcon, MoreHorizontalIcon } from "lucide-react";
 import { AsyncResult } from "effect/reactivity";
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useRef, useState, type ReactNode } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
@@ -45,6 +45,7 @@ import {
   bookmarkUpdate,
   isBookmarkTodo,
   isOpenBookmarkTodo,
+  wholeMessageToggle,
 } from "./bookmarks.logic";
 
 /** Servers before bookmarks list only follow-ups, and reject the `bookmarks` mode. */
@@ -115,7 +116,7 @@ function BookmarkMenuItems({
   ));
 }
 
-/** Message action row menu for the whole-message bookmark; never shown to agents. */
+/** Message action row toggles between bookmarked and to-do for the whole message; never shown to agents. */
 export function MessageFollowUpButton({
   threadRef,
   messageId,
@@ -130,47 +131,70 @@ export function MessageFollowUpButton({
   const update = useMessageFollowUpUpdate();
   if (!canWrite) return null;
   const whole = bookmarks.find((item) => item.anchor === undefined) ?? null;
-  const flag = (todo: boolean) =>
-    void update(threadRef.environmentId, {
-      threadId: threadRef.threadId,
-      messageId,
-      action: "flag",
-      todo,
-    });
-  const label = whole ? "Bookmarked" : "Bookmark";
+  const todo = whole !== null && isBookmarkTodo(whole);
+  const bookmarked = whole !== null && !todo;
+  const toggle = (button: "bookmark" | "todo") =>
+    void update(
+      threadRef.environmentId,
+      wholeMessageToggle({ threadId: threadRef.threadId, messageId }, whole, button),
+    );
   return (
-    <Menu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <MenuTrigger
-              render={
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost-muted"
-                  aria-label={label}
-                  aria-pressed={whole !== null}
-                />
-              }
-            />
-          }
+    <>
+      {/* Servers before bookmarks hold only to-dos. */}
+      {supported ? (
+        <MessageToggleButton
+          label={bookmarked ? "Remove bookmark" : todo ? "Keep as bookmark only" : "Bookmark"}
+          pressed={bookmarked}
+          onClick={() => toggle("bookmark")}
         >
-          <BookmarkIcon className={cn("size-3", whole && "fill-current text-warning")} />
-        </TooltipTrigger>
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
-      <MenuPopup align="end">
-        {whole ? (
-          <BookmarkMenuItems environmentId={threadRef.environmentId} bookmark={whole} />
-        ) : (
-          <>
-            {supported ? <MenuItem onClick={() => flag(false)}>Bookmark</MenuItem> : null}
-            <MenuItem onClick={() => flag(true)}>Bookmark as to-do</MenuItem>
-          </>
-        )}
-      </MenuPopup>
-    </Menu>
+          <BookmarkIcon className={cn("size-3", bookmarked && "fill-current text-warning")} />
+        </MessageToggleButton>
+      ) : null}
+      <MessageToggleButton
+        label={todo ? "Remove to-do" : "Flag as to-do"}
+        pressed={todo}
+        onClick={() => toggle("todo")}
+      >
+        <FlagIcon
+          className={cn(
+            "size-3",
+            todo && (whole.doneAt ? "text-muted-foreground/60" : "fill-current text-warning"),
+          )}
+        />
+      </MessageToggleButton>
+    </>
+  );
+}
+
+function MessageToggleButton({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string;
+  pressed: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-muted"
+            aria-label={label}
+            aria-pressed={pressed}
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 

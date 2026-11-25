@@ -6,7 +6,7 @@ import {
   type SideChatAnchor,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { BookmarkIcon, GitBranchIcon, ListTodoIcon, QuoteIcon } from "lucide-react";
+import { BookmarkIcon, FlagIcon, GitBranchIcon, QuoteIcon } from "lucide-react";
 import { use, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -329,8 +329,8 @@ export function AssistantSelectionToolbar({
                 disabled={tooLong}
                 onClick={() => applyBookmark(true)}
               >
-                <ListTodoIcon aria-hidden="true" className="size-3.5 text-warning" />
-                Bookmark as to-do
+                <FlagIcon aria-hidden="true" className="size-3.5 text-warning" />
+                Flag as to-do
               </Button>
             </>
           )}
