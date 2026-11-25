@@ -187,6 +187,37 @@ it("saves and closes, with no pending state, and reads all on when nothing is le
   );
 });
 
+it("reads all on when the thread switched everything on", async () => {
+  setup();
+  await using screen = await renderControl({
+    ...idleThread,
+    toolOverrides: {
+      enabledBuiltinTools: [...provider.omittedBuiltinTools],
+      claudeAiConnectors: true,
+      omittedMcpServers: [],
+    },
+  });
+  await expect.element(screen.getByRole("button", { name: /Tools all on/ })).toBeVisible();
+});
+
+it("gives no token sum while a left-out server might be a connector", async () => {
+  setup(true, AsyncResult.initial(true));
+  await using screen = await renderControl({
+    ...idleThread,
+    toolOverrides: {
+      enabledBuiltinTools: [],
+      claudeAiConnectors: true,
+      omittedMcpServers: ["claude.ai Fixture Mail"],
+    },
+  });
+  await userEvent.click(screen.getByRole("button", { name: /Tools 1 on/ }));
+  const dialog = dialogOf();
+  await userEvent.click(dialog.getByRole("switch").first());
+  await expect
+    .element(dialog.getByText("2 switched on, 1 MCP server off", { exact: true }))
+    .toBeVisible();
+});
+
 it("disables Reload session without permission to operate the thread", async () => {
   setup(false);
   await using screen = await renderControl();
