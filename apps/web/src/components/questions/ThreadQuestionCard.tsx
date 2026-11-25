@@ -1,8 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { threadQuestionStatus } from "@t3tools/client-runtime/state/thread-questions";
+import {
+  threadQuestionImageMarker,
+  threadQuestionImageMarkerNumbers,
+  threadQuestionImageNumber,
+  threadQuestionImagesWithoutMarkers,
+  threadQuestionStatus,
+} from "@t3tools/client-runtime/state/thread-questions";
 import type { ScopedThreadRef, ThreadQuestion } from "@t3tools/contracts";
-import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
+import { ChevronsDownUpIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
@@ -29,6 +35,12 @@ import {
   useQuestionsInComposer,
 } from "./questionComposer";
 import { questionDraftWriter, type QuestionDraft } from "./questionDraftWriter";
+import {
+  dropQuestionNoteImages,
+  holdQuestionNoteImages,
+  transferHasImage,
+  useQuestionNoteImages,
+} from "./questionNoteImages";
 import { revealQuestionInChat, threadQuestionElementId } from "./questionReveal";
 
 const NOTE_SAVE_DELAY_MS = 600;
@@ -113,6 +125,15 @@ export function ThreadQuestionCard({
   const usable = canAct && !busy && editable;
   const hasDraft = chosenOptionIds.length > 0 || notes.trim() !== "";
   const outcome = closedQuestionOutcome(question);
+  const heldImages = useQuestionNoteImages(threadRef, question.id);
+  // An image whose marker left the note, such as a comment the agent took, no longer shows.
+  const markedNumbers = threadQuestionImageMarkerNumbers(question.id, notes);
+  const noteImages = heldImages.flatMap((image) => {
+    const number = threadQuestionImageNumber(question.id, image.name);
+    return number !== null && markedNumbers.has(number)
+      ? [{ image, marker: threadQuestionImageMarker(question.id, number) }]
+      : [];
+  });
 
   const edit = (change: Partial<QuestionDraft>, delayMs?: number) =>
     void writer
@@ -131,6 +152,38 @@ export function ThreadQuestionCard({
         setPendingChoice((current) => (current === change.chosenOptionIds ? null : current));
         setPendingNotes((current) => (current === change.notes ? null : current));
       });
+  const changeNotes = (next: string, delayMs?: number) => {
+    setPendingNotes(next);
+    edit({ notes: next }, delayMs);
+    dropQuestionNoteImages(
+      threadRef,
+      question.id,
+      threadQuestionImagesWithoutMarkers(question.id, heldImages, next),
+    );
+  };
+  const attachImages = async (field: HTMLTextAreaElement, files: ReadonlyArray<File>) => {
+    const before = field.value;
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    const { markers, error } = await holdQuestionNoteImages({
+      threadRef,
+      questionId: question.id,
+      files,
+      note: () => field.value,
+    });
+    if (error !== null) toastManager.add({ type: "error", title: error });
+    if (markers.length === 0) return;
+    const current = field.value;
+    // At the caret when the note did not change meanwhile; otherwise after it.
+    const [head, tail] =
+      current === before ? [current.slice(0, start), current.slice(end)] : [current, ""];
+    const lead = head === "" || /\s$/.test(head) ? "" : " ";
+    changeNotes(`${head}${lead}${markers.join(" ")}${tail}`);
+  };
+  const removeImage = (imageId: string, marker: string) => {
+    dropQuestionNoteImages(threadRef, question.id, [imageId]);
+    changeNotes(notes.replace(` ${marker}`, "").replace(marker, ""));
+  };
   const changeState = async (state: "open" | "deferred" | "withdrawn") => {
     setBusy(true);
     await writer.flush(question.id, saveDraft);
@@ -344,9 +397,23 @@ export function ThreadQuestionCard({
               disabled={!canAct || !editable}
               className="w-full"
               onBlur={() => void writer.flush(question.id, saveDraft)}
-              onChange={(event) => {
-                setPendingNotes(event.target.value);
-                edit({ notes: event.target.value }, NOTE_SAVE_DELAY_MS);
+              onChange={(event) => changeNotes(event.target.value, NOTE_SAVE_DELAY_MS)}
+              onPaste={(event) => {
+                const files = [...event.clipboardData.files];
+                if (!transferHasImage(files)) return;
+                event.preventDefault();
+                void attachImages(event.currentTarget, files);
+              }}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                const files = [...event.dataTransfer.files];
+                if (!transferHasImage(files)) return;
+                // The chat's own drop target would put the image straight in the composer.
+                event.preventDefault();
+                event.stopPropagation();
+                void attachImages(event.currentTarget, files);
               }}
             />
           }
@@ -423,6 +490,49 @@ export function ThreadQuestionCard({
           }
         />
       )}
+      {!closed && noteImages.length > 0 ? (
+        <ul aria-label={`Images for ${question.id}`} className="flex flex-wrap gap-1.5">
+          {noteImages.map(({ image, marker }) => (
+            <li
+              key={image.id}
+              className="flex items-start gap-1 rounded-md border border-foreground/30 p-0.5"
+            >
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <img
+                      src={image.previewUrl}
+                      alt={marker}
+                      className="h-10 w-auto max-w-24 rounded-sm object-contain"
+                    />
+                  }
+                />
+                <TooltipPopup side="top">{marker}</TooltipPopup>
+              </Tooltip>
+              {editable ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-micro"
+                        variant="contrast-outline"
+                        aria-label={`Remove ${marker}`}
+                        disabled={!usable}
+                        onClick={() => removeImage(image.id, marker)}
+                      />
+                    }
+                  >
+                    <XIcon />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    Remove {marker} from this note and your message
+                  </TooltipPopup>
+                </Tooltip>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

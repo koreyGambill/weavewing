@@ -14,6 +14,7 @@ import {
   threadQuestionImageMarkerNumbers,
   threadQuestionImageName,
   threadQuestionImageNumber,
+  threadQuestionImagesWithoutMarkers,
   threadQuestionsInComposer,
   threadQuestionReplaced,
   threadQuestionStatus,
@@ -380,6 +381,17 @@ describe("thread questions", () => {
     expect(nextThreadQuestionImageNumber("Q1", [], "")).toBe(1);
     expect(nextThreadQuestionImageNumber("Q1", ["Q1-image-1.png", "Q2-image-7.png"], "")).toBe(2);
     expect(nextThreadQuestionImageNumber("Q1", ["Q1-image-1.png"], "[Q1 image 4]")).toBe(5);
+  });
+
+  it("finds the held images whose markers were deleted from the note", () => {
+    const images = [
+      { id: "one", name: "Q1-image-1.png" },
+      { id: "two", name: "Q1-image-2.png" },
+    ];
+    expect(threadQuestionImagesWithoutMarkers("Q1", images, "[Q1 image 2] only")).toEqual(["one"]);
+    expect(threadQuestionImagesWithoutMarkers("Q1", images, "[Q1 image 1][Q1 image 2]")).toEqual(
+      [],
+    );
   });
 
   it("tells question answers and comments from other artifacts' answers", () => {

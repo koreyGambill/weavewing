@@ -346,3 +346,18 @@ export function nextThreadQuestionImageNumber(
   ];
   return Math.max(0, ...used) + 1;
 }
+
+/** The ids of `questionId`'s held images whose markers `note` no longer holds. */
+export function threadQuestionImagesWithoutMarkers(
+  questionId: string,
+  images: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+  note: string,
+): string[] {
+  const marked = threadQuestionImageMarkerNumbers(questionId, note);
+  return images
+    .filter((image) => {
+      const number = threadQuestionImageNumber(questionId, image.name);
+      return number === null || !marked.has(number);
+    })
+    .map((image) => image.id);
+}
