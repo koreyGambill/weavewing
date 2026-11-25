@@ -3,6 +3,7 @@ import { SideChatAnchor } from "./assistantCitations.ts";
 import { IsoDateTime, MessageId, ThreadId } from "./baseSchemas.ts";
 
 export const MESSAGE_FOLLOW_UP_EXCERPT_MAX_LENGTH = 200;
+export const MESSAGE_BOOKMARK_NOTE_MAX_LENGTH = 4000;
 
 /**
  * A bookmark: a whole message, or a passage of one, the user marked to come back to. A to-do
@@ -24,6 +25,8 @@ export const MessageFollowUp = Schema.Struct({
   todo: Schema.optional(Schema.Boolean),
   excerpt: Schema.String,
   flaggedAt: IsoDateTime,
+  /** The user's own note; absent means none. */
+  note: Schema.optional(Schema.String),
   /** Always null for a bookmark that is not a to-do. */
   doneAt: Schema.NullOr(IsoDateTime),
 });
@@ -47,13 +50,15 @@ export type MessageFollowUpListInput = typeof MessageFollowUpListInput.Type;
 export const MessageFollowUpUpdateInput = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
-  action: Schema.Literals(["flag", "unflag", "done", "reopen", "todo", "untodo"]),
+  action: Schema.Literals(["flag", "unflag", "done", "reopen", "todo", "untodo", "note"]),
   /** With `flag`, whether the new bookmark is a to-do. Absent means a to-do, as follow-ups were. */
   todo: Schema.optional(Schema.Boolean),
   /** Targets one bookmark; absent targets the message's whole-message bookmark. */
   bookmarkId: Schema.optional(Schema.String),
   /** With `flag`, bookmarks this passage of the message instead of all of it. */
   anchor: Schema.optional(SideChatAnchor),
+  /** With `note`, the bookmark's new note; blank or absent removes it. */
+  note: Schema.optional(Schema.String.check(Schema.isMaxLength(MESSAGE_BOOKMARK_NOTE_MAX_LENGTH))),
 });
 export type MessageFollowUpUpdateInput = typeof MessageFollowUpUpdateInput.Type;
 

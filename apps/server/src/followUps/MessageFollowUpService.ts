@@ -37,6 +37,7 @@ const FollowUpRow = Schema.Struct({
   anchor: Schema.NullOr(Schema.fromJsonString(SideChatAnchor)),
   messageCreatedAt: Schema.NullOr(MessageFollowUp.fields.flaggedAt),
   todo: Schema.Number,
+  note: Schema.NullOr(Schema.String),
 });
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(FollowUpRow));
 const encodeAnchor = Schema.encodeEffect(Schema.fromJsonString(SideChatAnchor));
@@ -62,7 +63,7 @@ const make = Effect.gen(function* () {
   const select = (where: Statement.Fragment) =>
     sql`SELECT f.bookmark_id AS "id", f.thread_id AS "threadId", t.title AS "threadTitle",
       f.message_id AS "messageId", f.role, f.anchor_json AS "anchor",
-      m.created_at AS "messageCreatedAt", f.todo, f.excerpt, f.flagged_at AS "flaggedAt",
+      m.created_at AS "messageCreatedAt", f.todo, f.excerpt, f.note, f.flagged_at AS "flaggedAt",
       f.done_at AS "doneAt"
       FROM message_bookmarks f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
@@ -71,9 +72,10 @@ const make = Effect.gen(function* () {
       ORDER BY f.flagged_at DESC, f.message_id, f.bookmark_id`.pipe(
       Effect.flatMap(decodeRows),
       Effect.map((rows) =>
-        rows.map(({ anchor, messageCreatedAt, todo, ...row }): MessageFollowUp => ({
+        rows.map(({ anchor, messageCreatedAt, todo, note, ...row }): MessageFollowUp => ({
           ...row,
           todo: todo === 1,
+          ...(note === null ? {} : { note }),
           ...(anchor === null ? {} : { anchor }),
           ...(messageCreatedAt === null ? {} : { messageCreatedAt }),
         })),
@@ -144,6 +146,14 @@ const make = Effect.gen(function* () {
           return row === undefined
             ? null
             : yield* selectOne(sql`f.bookmark_id = ${row.bookmark_id}`);
+        }
+        case "note": {
+          const note = input.note?.trim() || null;
+          const [row] = yield* sql<{
+            readonly bookmark_id: string;
+          }>`UPDATE message_bookmarks AS f SET note = ${note} WHERE ${key} RETURNING bookmark_id`;
+          if (row === undefined) return yield* notFound(input);
+          return yield* selectOne(sql`f.bookmark_id = ${row.bookmark_id}`);
         }
         case "unflag":
           yield* sql`DELETE FROM message_bookmarks AS f WHERE ${key}`;

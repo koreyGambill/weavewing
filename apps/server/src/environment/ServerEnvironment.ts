@@ -240,6 +240,7 @@ export const make = Effect.gen(function* () {
       pullRequestChecks: true,
       sidebarGroups: true,
       messageBookmarks: true,
+      messageBookmarkNotes: true,
       linkedThreadRefreshes: true,
       sideChats: true,
       sideChatContextRefresh: true,

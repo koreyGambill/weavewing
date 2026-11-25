@@ -35,9 +35,10 @@ const seed = Effect.gen(function* () {
 const update = (
   threadId: string,
   messageId: string,
-  action: "flag" | "unflag" | "done" | "reopen" | "todo" | "untodo",
+  action: "flag" | "unflag" | "done" | "reopen" | "todo" | "untodo" | "note",
   target: {
     readonly bookmarkId?: string;
+    readonly note?: string;
     readonly anchor?: SideChatAnchor;
     readonly todo?: boolean;
   } = {},
@@ -253,5 +254,21 @@ it.effect("keeps different quotes saved at the same offsets apart", () =>
     const first = yield* update("t1", "m1", "flag", { anchor: passage("m1", 4, "pin chats") });
     const moved = yield* update("t1", "m1", "flag", { anchor: passage("m1", 4, "pin rooms") });
     assert.notStrictEqual(first?.id, moved?.id);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("keeps a note on one bookmark until it is cleared", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const reply = yield* update("t1", "m2", "flag", { todo: false });
+    const target = { bookmarkId: reply!.id! };
+    assert.strictEqual(
+      (yield* update("t1", "m2", "note", { ...target, note: "  why  " }))?.note,
+      "why",
+    );
+    assert.strictEqual((yield* update("t1", "m2", "todo", target))?.note, "why");
+    assert.isUndefined((yield* update("t1", "m2", "note", { ...target, note: " " }))?.note);
+    const missing = yield* Effect.flip(update("t1", "m1", "note", { note: "x" }));
+    assert.strictEqual(missing.code, "not_found");
   }).pipe(Effect.provide(testLayer)),
 );

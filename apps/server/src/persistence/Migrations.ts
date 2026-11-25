@@ -123,6 +123,7 @@ import Migration0111 from "./Migrations/111_RepairStaleTitleRegeneration.ts";
 
 import Migration0112 from "./Migrations/112_InboxImportance.ts";
 import Migration0113 from "./Migrations/113_MessageBookmarks.ts";
+import Migration0114 from "./Migrations/114_MessageBookmarkNotes.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001, true],
@@ -239,6 +240,7 @@ const migrationEntries = [
   [111, "RepairStaleTitleRegeneration", Migration0111, true],
   [112, "InboxImportance", Migration0112, true],
   [113, "MessageBookmarks", Migration0113, false],
+  [114, "MessageBookmarkNotes", Migration0114, false],
 ] as const;
 
 // Destructive includes incompatible schema changes and rewrites of existing data.
