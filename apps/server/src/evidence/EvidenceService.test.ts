@@ -1184,6 +1184,7 @@ it.effect("lets an agent settle QA only from a user's own message in its current
       const cases = [
         ["system", { createdBy: "system", origin: { kind: "system", event: "evidence prompt" } }],
         ["brief", { createdBy: "agent", senderThreadId: "lead-thread" }],
+        ["agent-written", { createdBy: "agent", origin: { kind: "user" } }],
         [
           "scheduled",
           {
@@ -1237,7 +1238,7 @@ it.effect("lets an agent settle QA only from a user's own message in its current
         messageId: "message-user",
         note: "The count overlaps the close button.",
       });
-      assert.deepStrictEqual(yield* evidence.counts(), { pending: 4, problem: 1 });
+      assert.deepStrictEqual(yield* evidence.counts(), { pending: 5, problem: 1 });
       // Another thread's QA is settled in that thread.
       assert.strictEqual(
         yield* errorOf(
