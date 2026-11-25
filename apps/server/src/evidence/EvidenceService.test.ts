@@ -8,7 +8,7 @@ import {
   EvidenceSetQaInput,
   ProjectId,
   ThreadId,
-  type EvidenceChange,
+  EvidenceChange,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
@@ -660,6 +660,7 @@ it.effect("a slow repository doesn't hold up another project's cached answer", (
 const decodeRecord = Schema.decodeUnknownExit(EvidenceRecordInput);
 const decodeQa = Schema.decodeUnknownExit(EvidenceSetQaInput);
 const decodeStoredRecord = Schema.decodeUnknownExit(EvidenceRecord);
+const decodeChange = Schema.decodeUnknownExit(EvidenceChange);
 
 /** Seeds one task the lead delegated; a null child is a delegate running in a linked environment. */
 const seedTask = (input: {
@@ -787,8 +788,8 @@ it.effect("stores every claimed review as unverified and never changes the claim
       const unverified = { verdict: "changes_requested", by: "opus", check: "unverified" } as const;
       assert.deepStrictEqual(yield* reviewsOf("claims"), [
         unverified,
-        { ...unverified, threadId: ThreadId.make("reviewer") },
-        { ...unverified, threadId: ThreadId.make("running") },
+        { ...unverified, threadId: ThreadId.make("reviewer"), thread: "reviewer" },
+        { ...unverified, threadId: ThreadId.make("running"), thread: "reviewer" },
         unverified,
         unverified,
         unverified,
@@ -822,7 +823,7 @@ it.effect("keeps the claimed verdict when the reviewer of that change approved i
         [...(yield* reviewsOf("unnamed")), ...(yield* reviewsOf("cited"))],
         [
           { ...claimed, check: "unverified" },
-          { ...cited, check: "unverified" },
+          { ...cited, check: "unverified", thread: "reviewer" },
         ],
       );
     }),
@@ -843,7 +844,52 @@ it.effect("keeps a reviewer link when the lead's own child records the landing",
           landedAt,
         }),
       );
-      assert.deepStrictEqual(yield* reviewsOf("by-child"), [{ ...cited, check: "unverified" }]);
+      assert.deepStrictEqual(yield* reviewsOf("by-child"), [
+        { ...cited, check: "unverified", thread: "reviewer" },
+      ]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("reads each linked thread's current state in one query when a landing is read", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedThread({ id: "lead" });
+      const ids = ["idle", "relabelled", "archived", "deleted", "removed"];
+      for (const id of ids) yield* seedThread({ id, parent: "lead", role: "review" });
+      yield* evidence.record(
+        recordInput(
+          "states",
+          ids.map((id) =>
+            change(id, { review: { verdict: "approved", threadId: ThreadId.make(id) } }),
+          ),
+          { landedAt },
+        ),
+      );
+      // Threads change after the landing: a role edit, an archive, a soft delete and a hard delete.
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(payload_json, '$.delegateRole', 'implementation')
+        WHERE thread_id = 'relabelled'`;
+      yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${landedAt} WHERE thread_id = 'archived'`;
+      yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${landedAt} WHERE thread_id = 'deleted'`;
+      yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = 'removed'`;
+      const reviews = yield* reviewsOf("states");
+      assert.deepStrictEqual(
+        reviews.map((review) => [String(review.threadId), review.thread]),
+        [
+          ["idle", "reviewer"],
+          ["relabelled", "other"],
+          ["archived", "archived"],
+          ["deleted", "missing"],
+          ["removed", "missing"],
+        ],
+      );
+      // The state is read, never stored.
+      const [row] = yield* sql<{ readonly record_json: string }>`SELECT record_json FROM
+        evidence_landings WHERE landing_id = 'states'`;
+      assert.notInclude(row!.record_json, '"thread"');
     }),
   ).pipe(Effect.provide(testLayer)),
 );
@@ -939,18 +985,23 @@ it("requires a reason to waive review or skip a check, not to waive QA, and keep
     decodeQa({ landingId: "reasons", changeId: "a", state: "waived" })._tag === "Success",
   );
 
-  // Agents cannot claim the server's check.
+  // Agents cannot claim the server's check or a linked thread's state.
   const decoded = decodeRecord({
     ...input,
     changes: [
-      change("a", {
-        review: { verdict: "approved", check: "verified" },
-      }),
+      { ...change("a"), review: { verdict: "approved", check: "verified", thread: "reviewer" } },
     ],
   });
   assert.isTrue(decoded._tag === "Success");
   if (decoded._tag === "Success")
     assert.deepStrictEqual(decoded.value.changes[0]?.review, { verdict: "approved" });
+
+  // A client built before the linked thread's state existed reads a change carrying it.
+  const olderClientChange = decodeChange({
+    ...change("a"),
+    review: { verdict: "approved", threadId: "reviewer", thread: "reviewer" },
+  });
+  assert.isTrue(olderClientChange._tag === "Success");
 
   // A stored record from before reasons were required still decodes.
   const stored = decodeStoredRecord({

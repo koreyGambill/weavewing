@@ -8,6 +8,7 @@ import {
   EvidenceRecord,
   type EvidenceChange,
   type EvidenceCounts,
+  type EvidenceReviewThread,
   type EvidenceCoverageInput,
   type EvidenceProjectCoverage,
   type EvidenceGetInput,
@@ -381,6 +382,37 @@ const make = Effect.gen(function* () {
     };
   }, Effect.mapError(passStorage));
 
+  // What each cited reviewer thread is now, in one query for the whole landing.
+  const readReviewThreads = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
+    const states = new Map<string, EvidenceReviewThread>();
+    if (ids.length === 0) return states;
+    const rows = yield* sql<{
+      readonly thread_id: string;
+      readonly archived_at: string | null;
+      readonly deleted_at: string | null;
+      readonly role: string | null;
+    }>`SELECT t.thread_id, t.archived_at, t.deleted_at,
+          coalesce(json_extract(t.payload_json, '$.delegateRole'),
+            (SELECT json_extract(s.payload_json, '$.delegateRole')
+              FROM orchestration_v2_projection_subagents s
+              WHERE s.child_thread_id = t.thread_id
+                AND json_extract(s.payload_json, '$.delegateRole') IS NOT NULL
+              LIMIT 1)) AS role
+        FROM orchestration_v2_projection_threads t WHERE t.thread_id IN ${sql.in(ids)}`;
+    for (const row of rows)
+      states.set(
+        row.thread_id,
+        row.deleted_at !== null
+          ? "missing"
+          : row.archived_at !== null
+            ? "archived"
+            : row.role === "review"
+              ? "reviewer"
+              : "other",
+      );
+    return states;
+  });
+
   const get = Effect.fn("EvidenceService.get")(function* (input: EvidenceGetInput) {
     const [row] =
       yield* sql<LandingRow>`SELECT * FROM evidence_landings WHERE landing_id = ${input.landingId}`;
@@ -391,6 +423,10 @@ const make = Effect.gen(function* () {
       });
     const stored = yield* decodeRecord(row.record_json);
     const qa = new Map((yield* readQa(row.landing_id)).map((q) => [q.change_id, q]));
+    const cited = stored.changes.flatMap((change) =>
+      change.review.threadId === undefined ? [] : [change.review.threadId],
+    );
+    const threads = yield* readReviewThreads([...new Set(cited)]);
     return yield* decodeLanding({
       ...stored,
       threadId: row.thread_id,
@@ -399,8 +435,13 @@ const make = Effect.gen(function* () {
       updatedAt: row.updated_at,
       changes: stored.changes.map((change) => {
         const state = qa.get(change.id);
+        const threadId = change.review.threadId;
         return {
           ...change,
+          review:
+            threadId === undefined
+              ? change.review
+              : { ...change.review, thread: threads.get(threadId) ?? "missing" },
           qa: {
             state: state?.state ?? "pending",
             note: state?.note ?? "",

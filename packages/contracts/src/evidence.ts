@@ -126,13 +126,29 @@ export const EvidenceChangeQa = Schema.Struct({
 });
 export type EvidenceChangeQa = typeof EvidenceChangeQa.Type;
 
+/**
+ * What a review's `threadId` points at when the landing is read: a review delegate, another thread,
+ * an archived thread, or one that is gone. Set on read only; it is never stored or accepted.
+ */
+export const EvidenceReviewThread = Schema.Literals(["reviewer", "other", "archived", "missing"]);
+export type EvidenceReviewThread = typeof EvidenceReviewThread.Type;
+
 export const EvidenceLanding = Schema.Struct({
   ...EvidenceRecord.fields,
   threadId: ThreadId,
   projectId: Schema.NullOr(ProjectId),
   landedAt: IsoDateTime,
   updatedAt: IsoDateTime,
-  changes: Schema.Array(Schema.Struct({ ...EvidenceChange.fields, qa: EvidenceChangeQa })),
+  changes: Schema.Array(
+    Schema.Struct({
+      ...EvidenceChange.fields,
+      review: Schema.Struct({
+        ...EvidenceChange.fields.review.fields,
+        thread: Schema.optional(EvidenceReviewThread),
+      }),
+      qa: EvidenceChangeQa,
+    }),
+  ),
 });
 export type EvidenceLanding = typeof EvidenceLanding.Type;
 
