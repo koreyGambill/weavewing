@@ -47,6 +47,20 @@ function recordingSave(gated: ReadonlySet<string> = new Set()) {
 const saved: QuestionDraft = { chosenOptionIds: ["a"], notes: "" };
 
 describe("question draft writer", () => {
+  it("keeps a note whose save is in flight when a choice follows", async () => {
+    const writer = createQuestionDraftWriter<number>(manualTimers());
+    const { sent, save, started, release } = recordingSave(new Set(["Q1"]));
+
+    void writer.edit("Q1", saved, { notes: "soon" }, save, 600);
+    void writer.flush("Q1", save);
+    await started("Q1").promise;
+    void writer.edit("Q1", saved, { chosenOptionIds: ["b"] }, save);
+    release("Q1");
+    await writer.flushAll(save);
+
+    expect(sent.at(-1)).toEqual(["Q1", { chosenOptionIds: ["b"], notes: "soon" }]);
+  });
+
   it("sends a choice made while a note waits with both, and never the stale choice", async () => {
     const timers = manualTimers();
     const writer = createQuestionDraftWriter<number>(timers);

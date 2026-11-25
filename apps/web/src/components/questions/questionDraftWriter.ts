@@ -10,6 +10,8 @@ export type SaveQuestionDraft<R> = (id: string, draft: QuestionDraft) => Promise
 
 interface Entry<R> {
   latest: QuestionDraft | null;
+  // The newest values handed to a save. Callers' `saved` lags until that save returns.
+  sent: QuestionDraft | null;
   timer: ReturnType<typeof setTimeout> | null;
   chain: Promise<R | null>;
   waiters: Array<() => void>;
@@ -32,7 +34,7 @@ export function createQuestionDraftWriter<R>(
   const entryOf = (id: string): Entry<R> => {
     let entry = entries.get(id);
     if (entry === undefined) {
-      entry = { latest: null, timer: null, chain: Promise.resolve(null), waiters: [] };
+      entry = { latest: null, sent: null, timer: null, chain: Promise.resolve(null), waiters: [] };
       entries.set(id, entry);
     }
     return entry;
@@ -47,9 +49,11 @@ export function createQuestionDraftWriter<R>(
     if (draft === null) return entry.chain;
     const waiters = entry.waiters;
     entry.latest = null;
+    entry.sent = draft;
     entry.waiters = [];
     entry.chain = entry.chain.then(async () => {
       const result = await save(id, draft);
+      if (entry.sent === draft) entry.sent = null;
       if (result !== null) lastResult = result;
       for (const resolve of waiters) resolve();
       return result;
@@ -69,7 +73,7 @@ export function createQuestionDraftWriter<R>(
       delayMs = 0,
     ): Promise<void> {
       const entry = entryOf(id);
-      entry.latest = { ...(entry.latest ?? saved), ...change };
+      entry.latest = { ...(entry.latest ?? entry.sent ?? saved), ...change };
       const done = new Promise<void>((resolve) => entry.waiters.push(resolve));
       if (entry.timer !== null) timers.clear(entry.timer);
       entry.timer = null;
