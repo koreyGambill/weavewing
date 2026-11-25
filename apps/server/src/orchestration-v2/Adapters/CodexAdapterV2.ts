@@ -5543,7 +5543,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const computerUseCallEnds = new Map<string, Map<string, Deferred.Deferred<void>>>();
         const computerUseCallEnd = (nativeThreadId: string, nativeTurnId: string, callId: string) =>
           Effect.sync(() => {
-            const calls = computerUseCallEnds.get(nativeThreadId) ?? new Map();
+            const calls =
+              computerUseCallEnds.get(nativeThreadId) ?? new Map<string, Deferred.Deferred<void>>();
             computerUseCallEnds.set(nativeThreadId, calls);
             const key = `${nativeTurnId}\u0000${callId}`;
             const existing = calls.get(key);
