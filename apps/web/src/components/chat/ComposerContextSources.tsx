@@ -135,7 +135,7 @@ function SourceDetails({
       ? `Messages, tool calls and their output: the latest report (${formatContextWindowTokens(usedTokens)}) minus the first turn's prompt (${formatContextWindowTokens(firstTurnTokens)}). Compaction shrinks it.`
       : source.key === "harness"
         ? `The first turn's prompt as the provider reported it (${formatContextWindowTokens(firstTurnTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message and anything that turn read.`
-        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). The provider gave no first-turn prompt size for this thread, so this includes the conversation.`;
+        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). There is no clean first-turn report to separate them, because the thread was forked or handed off or the provider never sent one, so this includes the conversation.`;
   return (
     <div className="text-muted-foreground">
       <p>{explanation}</p>
