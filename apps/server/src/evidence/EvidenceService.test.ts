@@ -798,6 +798,37 @@ it.effect("stores every claimed review as unverified and never changes the claim
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("keeps the claimed verdict when the reviewer of that change approved it", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({
+        id: "reviewer",
+        parent: "lead",
+        role: "review",
+        prompt: "Review branch feat-a.",
+        result: "No findings.\n\nVerdict: approved",
+      });
+      const claimed = { verdict: "changes_requested", by: "opus" } as const;
+      const cited = { ...claimed, threadId: ThreadId.make("reviewer") };
+      yield* evidence.record(
+        recordInput("unnamed", [change("a", { branch: "feat-a", review: claimed })], { landedAt }),
+      );
+      yield* evidence.record(
+        recordInput("cited", [change("a", { branch: "feat-a", review: cited })], { landedAt }),
+      );
+      assert.deepStrictEqual(
+        [...(yield* reviewsOf("unnamed")), ...(yield* reviewsOf("cited"))],
+        [
+          { ...claimed, check: "unverified" },
+          { ...cited, check: "unverified" },
+        ],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("keeps a reviewer link when the lead's own child records the landing", () =>
   withHome(() =>
     Effect.gen(function* () {
