@@ -2369,7 +2369,7 @@ effectIt.effect.each([
     if (input.expected)
       expect(text).toBe(
         withInlineContext(
-          "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q2 Flag name? (deferred until your task depends on it)",
+          "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q2 Flag name? (deferred; reopen it if this task settles or describes it)",
           "My own prompt",
         ),
       );
@@ -2411,7 +2411,7 @@ effectIt.effect(
       yield* harness.start;
       expect(harness.startTurn.mock.calls[0]?.[0].message.text).toBe(
         withInlineContext(
-          "Since your last turn the user withdrew Q3 (Flag name?); deferred Q4.\nYour open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q4 Ship? (deferred until your task depends on it)",
+          "Since your last turn the user withdrew Q3 (Flag name?); deferred Q4.\nYour open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q4 Ship? (deferred; reopen it if this task settles or describes it)",
           "My own prompt",
         ),
       );

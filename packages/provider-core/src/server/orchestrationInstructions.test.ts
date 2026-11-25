@@ -86,7 +86,7 @@ describe("T3 question instructions", () => {
         { id: "Q1", title: "Which database?", state: "open" },
         { id: "Q3", title: "Flag name?", state: "deferred" },
       ]),
-      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q3 Flag name? (deferred until your task depends on it)",
+      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q1 Which database?; Q3 Flag name? (deferred; reopen it if this task settles or describes it)",
     );
     assert.equal(t3OpenQuestionsContext([{ id: "Q2", title: "Gone?", state: "withdrawn" }]), "");
     // A message already carries the answer, so the question no longer waits on the user.
