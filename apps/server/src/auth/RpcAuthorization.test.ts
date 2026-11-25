@@ -173,6 +173,19 @@ describe("RPC authorization scopes", () => {
   });
 });
 
+it("guards a thread's tool changes and MCP server listing on the client too", () => {
+  expect(
+    clientRpcRequiredScopes(ORCHESTRATION_V2_WS_METHODS.listThreadMcpServers, {
+      threadId: "thread-1",
+    }),
+  ).toEqual([AuthOrchestrationReadScope]);
+  expect(
+    clientRpcRequiredScopes(ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides, {
+      threadId: "thread-1",
+    }),
+  ).toEqual([AuthOrchestrationOperateScope]);
+});
+
 it("requires operate permission for host retry while preserving read-only listing", () => {
   expect(requiredScopeForDeviceList({})).toBe(AuthOrchestrationReadScope);
   expect(requiredScopeForDeviceList({ retryHostId: "remote-host" })).toBe(
