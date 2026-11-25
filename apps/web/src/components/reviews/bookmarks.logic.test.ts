@@ -10,7 +10,7 @@ import {
   bookmarkUpdate,
   findOverlappingBookmark,
   orderBookmarks,
-  wholeMessageToggle,
+  bookmarkToggle,
 } from "./bookmarks.logic";
 
 const threadId = ThreadId.make("thread");
@@ -181,9 +181,9 @@ describe("bookmarkMenuActions", () => {
   });
 });
 
-describe("wholeMessageToggle", () => {
+describe("bookmarkToggle", () => {
   const send = (whole: MessageFollowUp | null, button: "bookmark" | "todo") => {
-    const { action, todo } = wholeMessageToggle(prompt, whole, button);
+    const { action, todo } = bookmarkToggle(prompt, whole, button);
     return todo === undefined ? action : `${action}:${todo}`;
   };
 

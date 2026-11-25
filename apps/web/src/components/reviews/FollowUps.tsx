@@ -9,7 +9,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { BookmarkIcon, FlagIcon, MoreHorizontalIcon } from "lucide-react";
+import { BookmarkIcon, CircleCheckIcon, FlagIcon, MoreHorizontalIcon } from "lucide-react";
 import { AsyncResult } from "effect/reactivity";
 import { Fragment, useRef, useState, type ReactNode } from "react";
 
@@ -45,7 +45,7 @@ import {
   bookmarkUpdate,
   isBookmarkTodo,
   isOpenBookmarkTodo,
-  wholeMessageToggle,
+  bookmarkToggle,
 } from "./bookmarks.logic";
 
 /** Servers before bookmarks list only follow-ups, and reject the `bookmarks` mode. */
@@ -127,53 +127,91 @@ export function MessageFollowUpButton({
   bookmarks: ReadonlyArray<MessageFollowUp>;
 }) {
   const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId));
-  const supported = useMessageBookmarksSupported(threadRef.environmentId);
-  const update = useMessageFollowUpUpdate();
   if (!canWrite) return null;
-  const whole = bookmarks.find((item) => item.anchor === undefined) ?? null;
-  const todo = whole !== null && isBookmarkTodo(whole);
-  const bookmarked = whole !== null && !todo;
+  return (
+    <BookmarkToggles
+      environmentId={threadRef.environmentId}
+      target={{ threadId: threadRef.threadId, messageId }}
+      bookmark={bookmarks.find((item) => item.anchor === undefined) ?? null}
+    />
+  );
+}
+
+/**
+ * Icon toggles for one bookmark record: bookmark, to-do flag and, when asked, done. Every surface
+ * that changes a bookmark uses these so they keep one shape.
+ */
+export function BookmarkToggles({
+  environmentId,
+  target,
+  bookmark,
+  showDone = false,
+}: {
+  environmentId: EnvironmentId;
+  target: Pick<MessageFollowUp, "threadId" | "messageId">;
+  bookmark: MessageFollowUp | null;
+  showDone?: boolean;
+}) {
+  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
+  const supported = useMessageBookmarksSupported(environmentId);
+  const update = useMessageFollowUpUpdate();
+  const todo = bookmark !== null && isBookmarkTodo(bookmark);
+  const bookmarked = bookmark !== null && !todo;
+  const done = todo && bookmark.doneAt !== null;
   const toggle = (button: "bookmark" | "todo") =>
-    void update(
-      threadRef.environmentId,
-      wholeMessageToggle({ threadId: threadRef.threadId, messageId }, whole, button),
-    );
+    void update(environmentId, bookmarkToggle(target, bookmark, button));
   return (
     <>
       {/* Servers before bookmarks hold only to-dos. */}
       {supported ? (
-        <MessageToggleButton
+        <IconToggle
           label={bookmarked ? "Remove bookmark" : todo ? "Keep as bookmark only" : "Bookmark"}
           pressed={bookmarked}
+          disabled={!canWrite}
           onClick={() => toggle("bookmark")}
         >
           <BookmarkIcon className={cn("size-3", bookmarked && "fill-current text-warning")} />
-        </MessageToggleButton>
+        </IconToggle>
       ) : null}
-      <MessageToggleButton
+      <IconToggle
         label={todo ? "Remove to-do" : "Flag as to-do"}
         pressed={todo}
+        disabled={!canWrite}
         onClick={() => toggle("todo")}
       >
         <FlagIcon
           className={cn(
             "size-3",
-            todo && (whole.doneAt ? "text-muted-foreground/60" : "fill-current text-warning"),
+            todo && (done ? "text-muted-foreground/60" : "fill-current text-warning"),
           )}
         />
-      </MessageToggleButton>
+      </IconToggle>
+      {showDone && todo ? (
+        <IconToggle
+          label={done ? "Reopen" : "Mark done"}
+          pressed={done}
+          disabled={!canWrite}
+          onClick={() =>
+            void update(environmentId, bookmarkUpdate(bookmark, done ? "reopen" : "done"))
+          }
+        >
+          <CircleCheckIcon className={cn("size-3", done && "text-success-foreground")} />
+        </IconToggle>
+      ) : null}
     </>
   );
 }
 
-function MessageToggleButton({
+function IconToggle({
   label,
   pressed,
+  disabled,
   onClick,
   children,
 }: {
   label: string;
   pressed: boolean;
+  disabled: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -187,6 +225,7 @@ function MessageToggleButton({
             variant="ghost-muted"
             aria-label={label}
             aria-pressed={pressed}
+            disabled={disabled}
             onClick={onClick}
           />
         }

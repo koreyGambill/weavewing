@@ -177,17 +177,20 @@ export function bookmarkMenuActions(bookmark: MessageFollowUp): ReadonlyArray<{
   ];
 }
 
+export const bookmarkText = (bookmark: MessageFollowUp) =>
+  bookmark.excerpt || "Message without text";
+
 /**
- * What the message row's bookmark or to-do flag button sends for the whole-message bookmark. Both
- * share one record, so a message is unmarked, bookmarked or a to-do: pressing the lit button
- * clears the record, and pressing the other one switches to it.
+ * What a bookmark or to-do flag toggle sends. Both share one record, so a message or passage is
+ * unmarked, bookmarked or a to-do: pressing the lit button clears the record, and pressing the
+ * other one switches to it. Only a whole message can be marked from unmarked here.
  */
-export function wholeMessageToggle(
+export function bookmarkToggle(
   target: Pick<MessageFollowUp, "threadId" | "messageId">,
-  whole: MessageFollowUp | null,
+  bookmark: MessageFollowUp | null,
   button: "bookmark" | "todo",
 ): MessageFollowUpUpdateInput {
-  if (whole === null) {
+  if (bookmark === null) {
     return {
       threadId: target.threadId,
       messageId: target.messageId,
@@ -195,7 +198,7 @@ export function wholeMessageToggle(
       todo: button === "todo",
     };
   }
-  const lit = isBookmarkTodo(whole) ? "todo" : "bookmark";
-  if (button === lit) return bookmarkUpdate(whole, "unflag");
-  return bookmarkUpdate(whole, button === "todo" ? "todo" : "untodo");
+  const lit = isBookmarkTodo(bookmark) ? "todo" : "bookmark";
+  if (button === lit) return bookmarkUpdate(bookmark, "unflag");
+  return bookmarkUpdate(bookmark, button === "todo" ? "todo" : "untodo");
 }
