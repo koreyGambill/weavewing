@@ -15,13 +15,15 @@ import { makeClaudeMcpServersProbe } from "./ClaudeProvider.ts";
 
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
-// Connects to the test's socket so the test sees it start and exit, then never initializes.
+// Connects to the test's socket so the test sees it start and exit, ignores SIGTERM, and never
+// initializes.
 const SILENT_CLAUDE = `#!/usr/bin/env node
-require("node:net").connect(process.env.FAKE_CLAUDE_SOCKET);
+process.on("SIGTERM", () => {});
+require("node:net").connect(process.env.FAKE_CLAUDE_SOCKET).write(String(process.pid));
 process.stdin.resume();
 `;
 
-it.effect("ends a Claude process that never initializes when the probe deadline passes", () =>
+it.effect("ends a Claude process that never initializes and ignores SIGTERM by the deadline", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -30,12 +32,12 @@ it.effect("ends a Claude process that never initializes when the probe deadline 
     yield* fileSystem.writeFileString(binaryPath, SILENT_CLAUDE);
     yield* fileSystem.chmod(binaryPath, 0o755);
     const socketPath = path.join(dir, "probe.sock");
-    const started = yield* Deferred.make<void>();
+    const started = yield* Deferred.make<number>();
     const exited = yield* Deferred.make<void>();
     yield* Effect.acquireRelease(
       Effect.callback<NodeNet.Server>((resume) => {
         const server = NodeNet.createServer((socket) => {
-          Deferred.doneUnsafe(started, Exit.void);
+          socket.once("data", (pid) => Deferred.doneUnsafe(started, Exit.succeed(Number(pid))));
           socket.on("close", () => Deferred.doneUnsafe(exited, Exit.void));
         });
         server.listen(socketPath, () => resume(Effect.succeed(server)));
@@ -51,10 +53,12 @@ it.effect("ends a Claude process that never initializes when the probe deadline 
     });
 
     const listing = yield* probe(dir).pipe(Effect.exit, Effect.forkChild);
-    yield* Deferred.await(started);
+    const pid = yield* Deferred.await(started);
     yield* TestClock.adjust("26 seconds");
 
     assert.isTrue(Exit.isFailure(yield* Fiber.join(listing)));
+    // The probe returns only after its child has exited.
+    assert.throws(() => process.kill(pid, 0), /ESRCH/);
     yield* Deferred.await(exited);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

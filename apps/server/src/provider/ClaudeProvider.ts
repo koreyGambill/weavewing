@@ -504,6 +504,55 @@ const claudeProbeSpawnVia = Effect.gen(function* () {
       : undefined;
 });
 
+const PROBE_KILL_GRACE_MS = 2_000;
+
+type ClaudeProbeChild = ReturnType<NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>>;
+
+function spawnClaudeProbeDirectly({ command, args, cwd, env, signal }: ClaudeSpawnOptions) {
+  return NodeChildProcess.spawn(command, args, {
+    ...(cwd === undefined ? {} : { cwd }),
+    env,
+    signal,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+}
+
+/** Remembers the child a spawner starts, so its owner can end it. */
+function trackSpawnedChild() {
+  const holder: {
+    child: ClaudeProbeChild | undefined;
+    wrap: (
+      spawn: NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>,
+    ) => NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>;
+  } = {
+    child: undefined,
+    wrap: (spawn) => (options) => {
+      holder.child = spawn(options);
+      return holder.child;
+    },
+  };
+  return holder;
+}
+
+/** Sends SIGTERM, then SIGKILL after `graceMs`, and resolves once the child has exited. */
+function endChildProcess(child: ClaudeProbeChild | undefined, graceMs: number): Promise<void> {
+  if (child === undefined) return Promise.resolve();
+  const exited = () => child.exitCode !== null || (child.signalCode ?? null) !== null;
+  if (exited()) return Promise.resolve();
+  return new Promise((resolve) => {
+    // @effect-diagnostics-next-line globalTimers:off -- The grace runs in the release step on wall time, so a test clock cannot stall a hard kill.
+    const kill = setTimeout(() => child.kill("SIGKILL"), graceMs);
+    const done = () => {
+      clearTimeout(kill);
+      resolve();
+    };
+    child.once("exit", done);
+    // A child that failed to spawn reports an error and never exits.
+    child.once("error", done);
+    child.kill("SIGTERM");
+  });
+}
+
 /** Starts Claude with a prompt that never yields; aborting `abort` ends the process. */
 function startPromptlessClaudeQuery(
   buildOptions: (abortController: AbortController) => ClaudeQueryOptions,
@@ -687,8 +736,9 @@ export const makeClaudeMcpServersProbe = Effect.fn("makeClaudeMcpServersProbe")(
       const spawnVia = yield* claudeProbeSpawnVia;
       // Taken before initialization, so a deadline or a cancelled request ends the process.
       const { query } = yield* Effect.acquireRelease(
-        Effect.sync(() =>
-          startPromptlessClaudeQuery((abortController) => {
+        Effect.sync(() => {
+          const spawned = trackSpawnedChild();
+          const started = startPromptlessClaudeQuery((abortController) => {
             const { mcpServers: _noServers, ...options } = buildClaudeCapabilitiesProbeQueryOptions(
               {
                 executablePath,
@@ -702,13 +752,22 @@ export const makeClaudeMcpServersProbe = Effect.fn("makeClaudeMcpServersProbe")(
             );
             return {
               ...options,
+              spawnClaudeCodeProcess: spawned.wrap(
+                options.spawnClaudeCodeProcess ?? spawnClaudeProbeDirectly,
+              ),
               env: { ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: "true" },
               // Flag settings too, because a user's settings.json env beats the process env.
               settings: { disableAllHooks: true, env: { ENABLE_CLAUDEAI_MCP_SERVERS: "true" } },
             };
-          }),
-        ),
-        ({ abort }) => Effect.sync(() => abort.abort()),
+          });
+          return { ...started, spawned };
+        }),
+        // The SDK's abort only starts a graceful close, so the probe ends its own child for certain
+        // first: aborting a child spawned with the signal reports an error before it exits.
+        ({ abort, spawned }) =>
+          Effect.promise(() => endChildProcess(spawned.child, PROBE_KILL_GRACE_MS)).pipe(
+            Effect.andThen(Effect.sync(() => abort.abort())),
+          ),
       );
       const call = <A>(run: () => Promise<A>) =>
         Effect.tryPromise({
