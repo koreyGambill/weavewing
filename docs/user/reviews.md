@@ -46,6 +46,14 @@ up your comment, the note clears from the card and the question reads
 and, when the decision is still open, asks it again as a newer question that
 reflects the discussion.
 
+Paste or drop an image into a question's note to show the agent what you mean.
+The note gets a marker such as `[Q1 image 1]` and the card shows the image. The
+image waits on the card and joins your message only together with the answer or
+comment: **Cancel**, removing the chip, dismissing or deferring the question
+takes it back out, and the card keeps it. Deleting the marker from the note, or
+the image's remove button, drops the image. Images follow the message box's
+limits on type, size and count.
+
 Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
 starts; or, for a comment, in the composer or discussing. A sent answer stops counting as waiting on you. Editing or cancelling

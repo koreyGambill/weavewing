@@ -23,6 +23,7 @@ import {
   useQuestionsInComposer,
 } from "./questionComposer";
 import { questionDraftWriter } from "./questionDraftWriter";
+import { discardClosedQuestionNoteImages } from "./questionNoteImages";
 import { ThreadQuestionsCompactList } from "./ThreadQuestionsCompactList";
 
 /**
@@ -52,10 +53,11 @@ export function useThreadQuestionsBanner(input: {
     resourceKey:
       threadRef === null ? "" : `${threadRef.environmentId}:${threadRef.threadId}:questions`,
   });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the composer's answer chips live in the persisted draft store, so they follow server-side question changes: a closed, sent or cleared question drops its chip, and a newer draft updates it
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the composer's answer chips and the cards' pasted images live in the persisted draft store, so they follow server-side question changes: a closed, sent or cleared question drops its chip, a newer draft updates it, and a question closed for good forgets its images
   useEffect(() => {
-    if (threadRef !== null && workspace != null)
-      syncQuestionAnswersInComposer(threadRef, workspace);
+    if (threadRef === null || workspace == null) return;
+    syncQuestionAnswersInComposer(threadRef, workspace);
+    discardClosedQuestionNoteImages(threadRef, workspace.questions);
   }, [threadRef, workspace]);
   // Null while settings load, so only a setting known to be off clears the chips.
   const questionsEnabled = useAtomValue(
