@@ -517,40 +517,45 @@ function spawnClaudeProbeDirectly({ command, args, cwd, env, signal }: ClaudeSpa
   });
 }
 
-/** Remembers the child a spawner starts, so its owner can end it. */
+/**
+ * Owns the child a spawner starts. Its terminal state is recorded from spawn on, because a failed
+ * launch reports one error and no exit, possibly before anyone asks to end it.
+ */
 function trackSpawnedChild() {
-  const holder: {
-    child: ClaudeProbeChild | undefined;
-    wrap: (
+  let child: ClaudeProbeChild | undefined;
+  let ended = false;
+  let whenEnded = Promise.resolve();
+  const wrap =
+    (
       spawn: NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>,
-    ) => NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>;
-  } = {
-    child: undefined,
-    wrap: (spawn) => (options) => {
-      holder.child = spawn(options);
-      return holder.child;
-    },
-  };
-  return holder;
-}
-
-/** Sends SIGTERM, then SIGKILL after `graceMs`, and resolves once the child has exited. */
-function endChildProcess(child: ClaudeProbeChild | undefined, graceMs: number): Promise<void> {
-  if (child === undefined) return Promise.resolve();
-  const exited = () => child.exitCode !== null || (child.signalCode ?? null) !== null;
-  if (exited()) return Promise.resolve();
-  return new Promise((resolve) => {
-    // @effect-diagnostics-next-line globalTimers:off -- The grace runs in the release step on wall time, so a test clock cannot stall a hard kill.
-    const kill = setTimeout(() => child.kill("SIGKILL"), graceMs);
-    const done = () => {
-      clearTimeout(kill);
-      resolve();
+    ): NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]> =>
+    (options) => {
+      const started = spawn(options);
+      child = started;
+      whenEnded = new Promise((resolve) => {
+        const markEnded = () => {
+          ended = true;
+          resolve();
+        };
+        started.once("exit", markEnded);
+        // Only a launch that never produced a process has no pid; other errors precede an exit.
+        started.on("error", () => {
+          if ((started as { readonly pid?: number }).pid === undefined) markEnded();
+        });
+      });
+      return started;
     };
-    child.once("exit", done);
-    // A child that failed to spawn reports an error and never exits.
-    child.once("error", done);
-    child.kill("SIGTERM");
-  });
+  /** Sends SIGTERM, then SIGKILL after `graceMs`, and resolves once the child has ended. */
+  const end = async (graceMs: number) => {
+    if (child === undefined || ended) return;
+    const running = child;
+    // @effect-diagnostics-next-line globalTimers:off -- The grace runs in the release step on wall time, so a test clock cannot stall a hard kill.
+    const kill = setTimeout(() => running.kill("SIGKILL"), graceMs);
+    running.kill("SIGTERM");
+    await whenEnded;
+    clearTimeout(kill);
+  };
+  return { wrap, end };
 }
 
 /** Starts Claude with a prompt that never yields; aborting `abort` ends the process. */
@@ -765,7 +770,7 @@ export const makeClaudeMcpServersProbe = Effect.fn("makeClaudeMcpServersProbe")(
         // The SDK's abort only starts a graceful close, so the probe ends its own child for certain
         // first: aborting a child spawned with the signal reports an error before it exits.
         ({ abort, spawned }) =>
-          Effect.promise(() => endChildProcess(spawned.child, PROBE_KILL_GRACE_MS)).pipe(
+          Effect.promise(() => spawned.end(PROBE_KILL_GRACE_MS)).pipe(
             Effect.andThen(Effect.sync(() => abort.abort())),
           ),
       );

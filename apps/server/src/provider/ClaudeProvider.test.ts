@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { makeClaudeMcpServersProbe } from "./ClaudeProvider.ts";
 
@@ -61,4 +62,23 @@ it.effect("ends a Claude process that never initializes and ignores SIGTERM by t
     assert.throws(() => process.kill(pid, 0), /ESRCH/);
     yield* Deferred.await(exited);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("returns a failed inventory at once when the Claude process cannot launch", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-mcp-probe-" });
+    const probe = yield* makeClaudeMcpServersProbe(
+      decodeClaudeSettings({ binaryPath: process.execPath }),
+      process.env,
+    );
+    // The launcher thread reports a failed spawn as one error and never an exit.
+    const listing = yield* probe(path.join(dir, "missing")).pipe(Effect.exit);
+    assert.isTrue(Exit.isFailure(listing));
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(NodeServices.layer),
+    Effect.provideService(HostProcess.Platform, "win32"),
+  ),
 );
