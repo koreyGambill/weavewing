@@ -903,6 +903,77 @@ it.effect("counts an answer a queued message carries as sent until its turn star
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("closes an answer only once the turn carrying it has really started", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [{ prompt: "Database?", options: [choice("pg", "Postgres")] }],
+    });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: ["pg"], notes: "" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "Postgres")]));
+    h.threadRuns.push(threadRun("r1", "m1", "queued"));
+    // The save is refused even before any read has marked the answer sent.
+    expect(
+      (yield* failureOf(
+        h.service.questionDraft({ threadId, answers: { Q1: { chosenOptionIds: [], notes: "" } } }),
+      )).code,
+    ).toBe("invalid");
+    // Promoted from the queue, but the provider has not accepted the turn yet.
+    h.threadRuns[0] = threadRun("r1", "m1", "starting", { startedAt: null });
+    const starting = yield* h.service.get({ threadId });
+    expect(starting.questions[0]).toMatchObject({ state: "open", sentInMessageId: "m1" });
+    // The provider failed before the turn started: the answer never reached the agent.
+    h.threadRuns[0] = threadRun("r1", "m1", "failed", { startedAt: null });
+    const failed = yield* h.service.get({ threadId });
+    expect(failed.questions[0]).toMatchObject({
+      state: "open",
+      answer: { chosenOptionIds: ["pg"], submittedAt: null },
+    });
+    expect(failed.questions[0]).not.toHaveProperty("sentInMessageId");
+    // Sent again, and this time the turn starts.
+    h.messages.push(userMessage("m2", [answerRecord("Q1", revision, "Postgres")]));
+    h.threadRuns.push(threadRun("r2", "m2", "starting", { startedAt: null }));
+    yield* h.service.get({ threadId });
+    h.threadRuns[1] = threadRun("r2", "m2", "running");
+    const received = yield* h.service.get({ threadId });
+    expect(received.questions[0]).toMatchObject({
+      state: "answered",
+      answeredBy: "user",
+      sentInMessageId: "m2",
+    });
+    expect((yield* h.service.get({ threadId })).questions[0]).toEqual(received.questions[0]);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect(
+  "ignores a queued message edited to carry a different answer under the same revision",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      yield* h.service.questionAsk({
+        threadId,
+        questions: [
+          { prompt: "Database?", options: [choice("pg", "Postgres"), choice("lite", "SQLite")] },
+        ],
+      });
+      const drafted = yield* h.service.questionDraft({
+        threadId,
+        answers: { Q1: { chosenOptionIds: ["pg"], notes: "" } },
+      });
+      const revision = drafted.questions[0]!.answer!.draftRevision!;
+      h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "SQLite")]));
+      h.threadRuns.push(threadRun("r1", "m1", "running"));
+      const read = yield* h.service.get({ threadId });
+      expect(read.questions[0]).toMatchObject({ state: "open", answeredBy: null });
+      expect(read.questions[0]).not.toHaveProperty("sentInMessageId");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("keeps a question waiting and counted when a message only discusses it", () =>
   Effect.gen(function* () {
     const h = yield* harness();

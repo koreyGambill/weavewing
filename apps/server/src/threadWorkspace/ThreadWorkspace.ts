@@ -991,7 +991,8 @@ const make = Effect.gen(function* () {
       return yield* commitQuestions(current, questions);
     }, lock.withPermit),
     questionDraft: Effect.fn("ThreadWorkspace.questionDraft")(function* (input) {
-      const current = yield* read(input.threadId);
+      // A full scan, so a message accepted before the follower marked it still blocks the edit.
+      const current = yield* read(input.threadId, "drafts");
       const questions = [...current.questions];
       for (const [id, answer] of Object.entries(input.answers)) {
         const { index, question } = yield* findQuestion(current, id);

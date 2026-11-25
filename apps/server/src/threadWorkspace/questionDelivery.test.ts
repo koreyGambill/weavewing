@@ -89,6 +89,10 @@ describe("questionDeliveries", () => {
     expect(reach([question("Q1")], [m1], [run("r1", "m1", "preparing")])).toEqual({
       Q1: "m1:sent",
     });
+    // Queue promotion writes `starting` before the provider accepts the turn.
+    expect(
+      reach([question("Q1")], [m1], [run("r1", "m1", "starting", { startedAt: null })]),
+    ).toEqual({ Q1: "m1:sent" });
     for (const status of ["starting", "running", "waiting", "completed", "interrupted"] as const)
       expect(reach([question("Q1")], [m1], [run("r1", "m1", status)])).toEqual({
         Q1: "m1:received",
@@ -156,5 +160,19 @@ describe("questionDeliveries", () => {
     const comment = message("m1", [record("Q1", 3, THREAD_QUESTION_COMMENTS_ARTIFACT_ID)]);
     expect(reach([question("Q1")], [comment], [run("r1", "m1", "queued")])).toEqual({});
     expect(reach([question("Q1")], [comment], [run("r1", "m1", "running")])).toEqual({});
+  });
+
+  it("does not count a record whose answer differs from the draft under the same revision", () => {
+    const edited = { ...record("Q1"), note: "no, actually" };
+    expect(reach([question("Q1")], [message("m1", [edited])], [run("r1", "m1", "queued")])).toEqual(
+      {},
+    );
+    expect(
+      reach(
+        [question("Q1")],
+        [message("m1", [{ ...record("Q1"), choice: "Other" }])],
+        [run("r1", "m1", "queued")],
+      ),
+    ).toEqual({});
   });
 });

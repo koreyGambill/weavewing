@@ -25,22 +25,12 @@ function runReach(run: Run, runs: ReadonlyArray<Run>, depth = 0): Reach {
     const target = runs.find((candidate) => candidate.id === run.mergedIntoRunId);
     return target === undefined || depth > 8 ? "none" : runReach(target, runs, depth + 1);
   }
-  switch (run.status) {
-    case "preparing":
-    case "queued":
-      return "sent";
-    case "starting":
-    case "running":
-    case "waiting":
-    case "completed":
-    case "interrupted":
-      return "received";
-    case "failed":
-    case "cancelled":
-    case "rolled_back":
-      // Cancelled or failed before it started, the turn never reached the agent.
-      return run.startedAt === null ? "none" : "received";
-  }
+  // Only a turn the provider started has delivered its input. Queue promotion writes `starting`
+  // before the provider accepts the turn, so `starting` alone is still sent.
+  if (run.startedAt !== null) return "received";
+  return run.status === "preparing" || run.status === "queued" || run.status === "starting"
+    ? "sent"
+    : "none";
 }
 
 function messageReach(message: Message, runs: ReadonlyArray<Run>): Reach {
@@ -56,7 +46,7 @@ function messageReach(message: Message, runs: ReadonlyArray<Run>): Reach {
 
 /**
  * Where each waiting question's current draft has gone: the user message carrying an answer
- * record for that draft revision, and whether that message's turn has started. A question whose
+ * record for that draft revision and content, and whether that message's turn has started. A question whose
  * message was cancelled or edited to drop the record has no entry, so it waits on the user again.
  */
 export function questionDeliveries(
@@ -77,7 +67,14 @@ export function questionDeliveries(
           "artifactId" in record &&
           record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID &&
           record.questionId === question.id &&
-          record.answerRevision === (answer.draftRevision ?? 0),
+          record.answerRevision === (answer.draftRevision ?? 0) &&
+          // A queued message edited under the same revision carries a different answer.
+          record.choice ===
+            question.options
+              .filter((option) => answer.chosenOptionIds.includes(option.id))
+              .map((option) => option.label)
+              .join(", ") &&
+          record.note === answer.notes,
       );
       if (!carries) continue;
       const reach = messageReach(message, runs);
