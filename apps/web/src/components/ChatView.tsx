@@ -349,8 +349,8 @@ import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
 import { useThreadApiCost } from "./chat/useThreadApiCost";
-import { ChatFooterBookmarks } from "./chat/ChatFooterBookmarks";
-import { ChatFooterLineage } from "./chat/ChatFooterLineage";
+import { ComposerRow } from "./chat/ComposerRow";
+import { useThreadComposerRowItems } from "./chat/threadComposerRowItems";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
@@ -1211,7 +1211,6 @@ export default function ChatView(props: ChatViewProps) {
     activeRightPanelSurface,
   );
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
-  const [threadLineageHandle] = useState(PopoverCreateHandle);
   const [chatCanvasStore] = useState(createChatCanvasStore);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
@@ -3420,6 +3419,14 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : null;
 
+  const composerRowItems = useThreadComposerRowItems({
+    threadRef: !embedded && isServerThread ? activeThreadRef : null,
+    bookmarksThreadRef: !embedded && isServerThread ? displayedThreadRef : null,
+    agents: serverProjection?.subagents,
+    onOpenSideChat: sideChatsOffered && sideChat.available ? openSideChatStable : undefined,
+    onRevealBookmark: revealBookmark,
+  });
+
   if (!activeThread) {
     return embedded ? null : <NoActiveThreadState />;
   }
@@ -3553,16 +3560,8 @@ export default function ChatView(props: ChatViewProps) {
       </header>
     </WorkspaceTitlebar>
   );
-  const composerLineage =
-    !embedded && isServerThread ? (
-      <>
-        <ChatFooterLineage
-          lineageHandle={threadLineageHandle}
-          agents={serverProjection?.subagents}
-        />
-        <ChatFooterBookmarks threadRef={displayedThreadRef} onReveal={revealBookmark} />
-      </>
-    ) : null;
+  const showComposerRowAlone =
+    !showComposerContextStrip && composerRowItems.some((item) => !item.hidden);
   const conversationColumn = (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden"
@@ -3606,7 +3605,6 @@ export default function ChatView(props: ChatViewProps) {
               <ThreadDetailsPanel
                 anchor={threadPanelPopoverAnchorRef}
                 handle={threadPanelPopoverHandle}
-                {...(!embedded && isServerThread ? { lineageHandle: threadLineageHandle } : {})}
                 forceNewWorktree={multipleModelSelections !== null}
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}
@@ -4263,7 +4261,7 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
-                                leading={composerLineage}
+                                rowItems={composerRowItems}
                                 whereProjectTitle={
                                   activeProjectIsScratch ? null : (activeProject?.title ?? null)
                                 }
@@ -4319,7 +4317,7 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     ) : null}
                   </div>
-                  {!inlineSideChat && (showComposerContextStrip || !composerLineage) ? (
+                  {!inlineSideChat && !showComposerRowAlone ? (
                     <div
                       aria-hidden
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
@@ -4328,9 +4326,9 @@ export default function ChatView(props: ChatViewProps) {
                 </div>
               </div>
             </div>
-            {composerLineage && !showComposerContextStrip ? (
-              <div className="pointer-events-auto flex w-fit pl-(--workspace-gutter-start) pb-safe">
-                {composerLineage}
+            {showComposerRowAlone ? (
+              <div className="pointer-events-auto flex pl-(--workspace-gutter-start) pb-safe">
+                <ComposerRow items={composerRowItems} />
               </div>
             ) : null}
           </div>

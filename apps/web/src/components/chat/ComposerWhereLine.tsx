@@ -12,7 +12,9 @@ import { shortcutLabelForCommand } from "~/keybindings";
 import { registerCommands } from "~/shortcuts/dispatcher";
 import { useProject } from "~/state/entities";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { cn } from "~/lib/utils";
 import { InlineButton } from "../ui/button";
+import { MiddleTruncate } from "../ui/middle-truncate";
 import { ComposerContextLabel } from "../ComposerContextLabel";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -92,9 +94,21 @@ export function ComposerWhereLine({
     <>
       <MapPinIcon className="shrink-0" />
       <ComposerContextLabel>
-        <span className={atDefaultPlace ? "text-muted-foreground" : "text-foreground"}>
-          {isScratch ? null : <span className="font-medium">{project.title} </span>}
-          <span className="font-mono">{folderLabel}</span>
+        <span
+          className={cn(
+            "flex min-w-0",
+            atDefaultPlace ? "text-muted-foreground" : "text-foreground",
+          )}
+        >
+          {isScratch ? null : (
+            // Phone widths drop the project name and keep the folder's tail.
+            <span className="min-w-0 max-w-[60%] shrink-0 truncate whitespace-pre font-medium @max-md/composer-surface:hidden">
+              {project.title}{" "}
+            </span>
+          )}
+          <span className="flex min-w-0 font-mono">
+            <MiddleTruncate value={folderLabel} showTitle={false} />
+          </span>
         </span>
       </ComposerContextLabel>
     </>
