@@ -123,7 +123,7 @@ export interface QuestionDiscussion {
 /**
  * Where each waiting question's discussion is: the user message carrying a comment on its
  * current note, or else the message already recorded as discussing it once a provider accepted
- * its turn and its note was consumed. Only an accepted turn clears the note, and only while the
+ * its turn and its note was consumed, or the answer the agent reopened to discuss. Only an accepted turn clears the note, and only while the
  * draft still holds what was sent; a message whose run ended unstarted discusses nothing.
  */
 export function questionDiscussions(
@@ -136,16 +136,17 @@ export function questionDiscussions(
   for (const question of questions) {
     if (question.state !== "open" && question.state !== "deferred") continue;
     const answer = question.answer;
-    const commentOf = (message: Message) =>
+    const recordOf = (message: Message, artifactId: string) =>
       message.role === "user" && message.createdBy === "user"
         ? message.context?.records.find(
             (record) =>
               record.kind === "artifact-answer" &&
               "artifactId" in record &&
-              record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID &&
+              record.artifactId === artifactId &&
               record.questionId === question.id,
           )
         : undefined;
+    const commentOf = (message: Message) => recordOf(message, THREAD_QUESTION_COMMENTS_ARTIFACT_ID);
     const isCurrent = (message: Message) => {
       const record = commentOf(message);
       return (
@@ -157,11 +158,12 @@ export function questionDiscussions(
         answer.notes.trim() !== ""
       );
     };
-    // The recorded message counts only once its note has gone; a queued one must still match.
+    // The recorded message counts only once its note has gone; a queued one must still match. An
+    // answer the agent reopened keeps its note, which the user can still send as an answer.
     const consumed = (message: Message) =>
       message.id === question.discussedInMessageId &&
-      (answer === null || answer.notes === "") &&
-      commentOf(message) !== undefined;
+      (((answer === null || answer.notes === "") && commentOf(message) !== undefined) ||
+        recordOf(message, THREAD_QUESTIONS_ARTIFACT_ID) !== undefined);
     let found: QuestionDiscussion | undefined;
     for (const message of messages) {
       const current = isCurrent(message);

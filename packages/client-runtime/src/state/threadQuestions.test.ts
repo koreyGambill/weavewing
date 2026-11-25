@@ -111,6 +111,12 @@ describe("thread questions", () => {
         undefined,
         "discussing",
       ],
+      // An answer the agent reopened to reply to keeps its choice and note as a draft.
+      [
+        question("Q1", "open", { answer: draft(["a"], "why"), discussedInMessageId: discussedIn }),
+        undefined,
+        "discussing",
+      ],
       [
         question("Q1", "open", { answer: draft(["a"]), discussedInMessageId: discussedIn }),
         "answer",

@@ -102,7 +102,8 @@ export const ThreadQuestion = Schema.Struct({
   sentInMessageId: Schema.optional(MessageId),
   /**
    * The user message carrying the user's latest comment on this question, while that message's
-   * turn is queued or started. Cleared once the user changes the draft or the question's state.
+   * turn is queued or started, or the answer the agent reopened to reply to. Cleared once the user
+   * changes the draft or the question's state, or the agent replaces it.
    */
   discussedInMessageId: Schema.optional(MessageId),
 });

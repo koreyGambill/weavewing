@@ -159,6 +159,9 @@ const mirroredQuestions = (
             state: question.state as "open" | "deferred" | "withdrawn",
             ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
             ...(isWaiting(question) && question.sentInMessageId ? { sent: true as const } : {}),
+            ...(isWaiting(question) && question.discussedInMessageId
+              ? { discussing: true as const }
+              : {}),
           },
         ]
       : [],
@@ -1041,12 +1044,20 @@ const make = Effect.gen(function* () {
           break;
         }
       }
-      const { userChangedAt: _reported, discussedInMessageId: discussed, ...changed } = next;
+      const { userChangedAt: _reported, discussedInMessageId: previous, ...changed } = next;
+      // The agent reopening the user's answer is answering back, so the answer's message starts
+      // a discussion; any other reopening, and every change of the user's own, ends one.
+      const discussed =
+        input.state !== "open"
+          ? previous
+          : by === "agent" && question.state === "answered" && question.answeredBy === "user"
+            ? question.sentInMessageId
+            : undefined;
       const questions = [...current.questions];
-      // The user's own change, or a reopening, ends a discussion. A new draft revision keeps a
-      // comment still queued from matching again; a sent answer keeps its revision.
+      // A new draft revision keeps a comment still queued from matching again; a sent answer keeps
+      // its revision.
       const kept =
-        by === "user" || input.state === "open" || discussed === undefined
+        by === "user" || discussed === undefined
           ? by === "user" && changed.answer && changed.sentInMessageId === undefined
             ? { ...changed, answer: { ...changed.answer, draftRevision: current.revision + 1 } }
             : changed

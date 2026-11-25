@@ -1032,7 +1032,9 @@ it.effect("keeps a question waiting and counted when a message only discusses it
       discussedInMessageId: "m1",
       answer: { notes: "Would it survive two writers?" },
     });
-    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
+    expect(h.mirror.questions).toEqual([
+      { id: "Q1", title: "Database?", state: "open", discussing: true },
+    ]);
     // Running but not yet accepted by a provider: the note stays.
     h.threadRuns[0] = threadRun("r1", "m1", "running");
     expect((yield* h.service.get({ threadId })).questions[0]?.answer?.notes).toBe(
@@ -1048,7 +1050,9 @@ it.effect("keeps a question waiting and counted when a message only discusses it
       answer: { chosenOptionIds: ["pg"], notes: "", submittedAt: null },
     });
     expect((yield* h.service.get({ threadId })).questions[0]).toEqual(started.questions[0]);
-    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
+    expect(h.mirror.questions).toEqual([
+      { id: "Q1", title: "Database?", state: "open", discussing: true },
+    ]);
     // A new draft ends the discussion, and the old comment never restarts it.
     const redrafted = yield* h.service.questionDraft({
       threadId,
@@ -1058,6 +1062,7 @@ it.effect("keeps a question waiting and counted when a message only discusses it
     expect((yield* h.service.get({ threadId })).questions[0]).not.toHaveProperty(
       "discussedInMessageId",
     );
+    expect(h.mirror.questions).toEqual([{ id: "Q1", title: "Database?", state: "open" }]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
@@ -1264,6 +1269,101 @@ it.effect("ends a discussion when the agent replaces the question", () =>
       ["Q2", "open"],
     ]);
     expect(replaced.questions[0]).not.toHaveProperty("discussedInMessageId");
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("discusses a user's answer the agent reopens until the agent acts on it", () =>
+  Effect.gen(function* () {
+    for (const end of ["replaced", "answered", "withdrawn"] as const) {
+      const h = yield* harness();
+      yield* h.service.questionAsk({
+        threadId,
+        questions: [{ prompt: "Database?", options: [choice("pg", "Postgres")] }],
+      });
+      const drafted = yield* h.service.questionDraft({
+        threadId,
+        answers: { Q1: { chosenOptionIds: ["pg"], notes: "Does it need a server?" } },
+      });
+      const revision = drafted.questions[0]!.answer!.draftRevision!;
+      h.messages.push(
+        userMessage("m1", [answerRecord("Q1", revision, "Postgres", "Does it need a server?")]),
+      );
+      h.threadRuns.push(threadRun("r1", "m1", "running"));
+      h.acceptTurn("r1");
+      expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+        state: "answered",
+        answeredBy: "user",
+        sentInMessageId: "m1",
+      });
+      const reopened = yield* h.service.questionUpdate(
+        { threadId, id: "Q1", state: "open" },
+        "agent",
+      );
+      expect(reopened.questions[0]).toMatchObject({
+        state: "open",
+        discussedInMessageId: "m1",
+        answer: { chosenOptionIds: ["pg"], notes: "Does it need a server?", submittedAt: null },
+      });
+      expect(reopened.questions[0]).not.toHaveProperty("sentInMessageId");
+      const later = yield* h.service.get({ threadId });
+      expect(later.questions[0]).toEqual(reopened.questions[0]);
+      expect(h.mirror.questions).toEqual([
+        { id: "Q1", title: "Database?", state: "open", discussing: true },
+      ]);
+      const ended =
+        end === "replaced"
+          ? yield* h.service.questionAsk({
+              threadId,
+              questions: [{ prompt: "Database, given a server?", replaces: "Q1" }],
+            })
+          : yield* h.service.questionUpdate(
+              {
+                threadId,
+                id: "Q1",
+                state: end,
+                ...(end === "answered"
+                  ? { answer: { chosenOptionIds: ["pg"], notes: "Postgres with a server" } }
+                  : {}),
+              },
+              "agent",
+            );
+      expect(ended.questions[0]?.state, end).toBe(end);
+      expect(h.mirror.questions, end).not.toContainEqual(expect.objectContaining({ id: "Q1" }));
+    }
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("starts no discussion when the user reopens, or the agent reopens its own record", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({
+      threadId,
+      questions: [{ prompt: "Flag name?" }, { prompt: "Cache size?" }, { prompt: "Region?" }],
+    });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "cache-v2, but why?" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "", "cache-v2, but why?")]));
+    h.threadRuns.push(threadRun("r1", "m1", "running"));
+    h.acceptTurn("r1");
+    yield* h.service.get({ threadId });
+    yield* h.service.questionUpdate(
+      { threadId, id: "Q2", state: "answered", answer: { chosenOptionIds: [], notes: "64 MB" } },
+      "agent",
+    );
+    yield* h.service.questionUpdate({ threadId, id: "Q3", state: "deferred" }, "user");
+    yield* h.service.questionUpdate({ threadId, id: "Q1", state: "open" }, "user");
+    yield* h.service.questionUpdate({ threadId, id: "Q2", state: "open" }, "agent");
+    const reopened = yield* h.service.questionUpdate(
+      { threadId, id: "Q3", state: "open" },
+      "agent",
+    );
+    for (const question of reopened.questions) {
+      expect(question.state, question.id).toBe("open");
+      expect(question, question.id).not.toHaveProperty("discussedInMessageId");
+    }
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 

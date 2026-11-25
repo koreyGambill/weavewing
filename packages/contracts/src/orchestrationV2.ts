@@ -610,6 +610,8 @@ export const OrchestrationV2ThreadQuestionSummary = Schema.Struct({
   userChangedAt: Schema.optional(IsoDateTime),
   /** A user message carries its answer, so it no longer waits on the user. */
   sent: Schema.optional(Schema.Literal(true)),
+  /** The agent owes a reply to the user's comment or answer before asking again. */
+  discussing: Schema.optional(Schema.Literal(true)),
 });
 export type OrchestrationV2ThreadQuestionSummary = typeof OrchestrationV2ThreadQuestionSummary.Type;
 
