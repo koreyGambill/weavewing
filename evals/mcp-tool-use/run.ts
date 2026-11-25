@@ -350,7 +350,7 @@ export const McpToolUseCase = Schema.Struct({
     contextRewind: Schema.optional(Schema.Boolean),
     /**
      * The Agent questions beta is on: T3 lists the question tools, adds their text, and puts these
-     * open and deferred questions ahead of the user's `prompt`.
+     * open and deferred questions ahead of the user's `prompt`, marking those under discussion.
      */
     questions: Schema.optional(
       Schema.Array(
@@ -358,6 +358,7 @@ export const McpToolUseCase = Schema.Struct({
           id: Schema.String,
           title: Schema.String,
           state: Schema.Literals(["open", "deferred"]),
+          discussing: Schema.optional(Schema.Literal(true)),
         }),
       ),
     ),
