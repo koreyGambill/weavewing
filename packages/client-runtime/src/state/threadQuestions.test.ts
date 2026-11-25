@@ -15,7 +15,9 @@ import {
   threadQuestionImageName,
   threadQuestionImageNumber,
   threadQuestionImagesWithoutMarkers,
+  threadQuestionMarkersDroppedByChip,
   threadQuestionsInComposer,
+  withoutThreadQuestionImageMarkers,
   threadQuestionReplaced,
   threadQuestionStatus,
   withQuestionsRefreshRequest,
@@ -375,6 +377,33 @@ describe("thread questions", () => {
     expect([
       ...threadQuestionImageMarkerNumbers("Q1", "see [Q1 image 1] and [Q1 image 3], [Q12 image 2]"),
     ]).toEqual([1, 3]);
+  });
+
+  it("deletes a marker in whatever spelling counts as that image", () => {
+    const note = "like [Q1 image 01] and [Q1 image 2], not [Q12 image 1]";
+    expect([...threadQuestionImageMarkerNumbers("Q1", note)]).toEqual([1, 2]);
+    expect(withoutThreadQuestionImageMarkers("Q1", note, new Set([1]))).toBe(
+      "like and [Q1 image 2], not [Q12 image 1]",
+    );
+    expect(withoutThreadQuestionImageMarkers("Q1", "[Q1 image 1] [Q1 image 2]", new Set([1]))).toBe(
+      "[Q1 image 2]",
+    );
+    expect(
+      withoutThreadQuestionImageMarkers("Q1", "[Q1 image 1] [Q1 image 2]", new Set([1, 2])),
+    ).toBe("");
+  });
+
+  it("drops from the note only markers the chip lost whose image is gone", () => {
+    const note = "[Q1 image 1] [Q1 image 2] [Q1 image 3]";
+    // Image 1 left the message; image 2 was pasted after staging and is still held.
+    expect([
+      ...threadQuestionMarkersDroppedByChip("Q1", note, "[Q1 image 3]", [
+        "Q1-image-2.png",
+        "Q1-image-3.png",
+      ]),
+    ]).toEqual([1]);
+    // On a device that holds none of the images, a chip carrying every marker drops nothing.
+    expect([...threadQuestionMarkersDroppedByChip("Q1", note, note, [])]).toEqual([]);
   });
 
   it("numbers a new image past every held image and every marker still in the note", () => {

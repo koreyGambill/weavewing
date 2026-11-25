@@ -322,13 +322,36 @@ export function threadQuestionImageNumber(questionId: string, name: string): num
   return match ? Number(match[1]) : null;
 }
 
+// One rule for reading and deleting markers, so an edited spelling such as `[Q1 image 01]` that
+// counts as image 1 is also what deleting image 1 removes.
+const markerPattern = (questionId: string) =>
+  new RegExp(`( ?)\\[${escapeRegExp(questionId)} image (\\d+)\\]`, "g");
+
 /** The image numbers whose markers `note` still holds for `questionId`. */
 export function threadQuestionImageMarkerNumbers(
   questionId: string,
   note: string,
 ): ReadonlySet<number> {
-  const pattern = new RegExp(`\\[${escapeRegExp(questionId)} image (\\d+)\\]`, "g");
-  return new Set([...note.matchAll(pattern)].map((match) => Number(match[1])));
+  return new Set([...note.matchAll(markerPattern(questionId))].map((match) => Number(match[2])));
+}
+
+/** `note` without any marker for `questionId`'s images in `numbers`, or the space beside it. */
+export function withoutThreadQuestionImageMarkers(
+  questionId: string,
+  note: string,
+  numbers: ReadonlySet<number>,
+): string {
+  let result = "";
+  let cursor = 0;
+  for (const match of note.matchAll(markerPattern(questionId))) {
+    if (!numbers.has(Number(match[2]))) continue;
+    // Take the space before the marker, or after it when the marker leads its line.
+    let end = match.index + match[0].length;
+    if (match[1] === "" && note[end] === " ") end += 1;
+    result += note.slice(cursor, Math.max(cursor, match.index));
+    cursor = Math.max(cursor, end);
+  }
+  return result + note.slice(cursor);
 }
 
 /**
@@ -360,4 +383,24 @@ export function threadQuestionImagesWithoutMarkers(
       return number === null || !marked.has(number);
     })
     .map((image) => image.id);
+}
+
+/**
+ * The markers to take out of a staged question's note: those its chip in the composer no longer
+ * carries and whose image this device no longer holds, as after the image was removed from the
+ * message. A marker the chip never carried, or whose image is still held, stays.
+ */
+export function threadQuestionMarkersDroppedByChip(
+  questionId: string,
+  note: string,
+  chipNote: string,
+  heldNames: ReadonlyArray<string>,
+): ReadonlySet<number> {
+  const onChip = threadQuestionImageMarkerNumbers(questionId, chipNote);
+  const held = new Set(heldNames.map((name) => threadQuestionImageNumber(questionId, name)));
+  return new Set(
+    [...threadQuestionImageMarkerNumbers(questionId, note)].filter(
+      (number) => !onChip.has(number) && !held.has(number),
+    ),
+  );
 }
