@@ -39,12 +39,10 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   options = DEFAULT_APPROVAL_OPTIONS,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
-  const primaryOptions = options.filter(
-    (option) => option.decision === "decline" || option.decision === "accept",
-  );
-  const moreOptions = options.filter(
-    (option) => option.decision !== "decline" && option.decision !== "accept",
-  );
+  const isPrimary = (option: ProviderApprovalOption) =>
+    option.decision === "decline" || option.decision === "accept" || option.prominent === true;
+  const primaryOptions = options.filter(isPrimary);
+  const moreOptions = options.filter((option) => !isPrimary(option));
 
   return (
     <>
