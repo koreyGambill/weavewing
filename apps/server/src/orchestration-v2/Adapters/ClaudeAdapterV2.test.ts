@@ -127,6 +127,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderInstallationGate from "../../provider/ProviderInstallationGate.ts";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
 import { withInlineContext } from "../ContextHandoffDelivery.ts";
+import { CONTEXT_REWIND_MIN_REMOVED_CHARS, CONTEXT_REWIND_ORIGIN } from "../contextRewind.ts";
 import { provideDeterministicTestRuntime } from "../testkit/DeterministicRuntime.ts";
 import { runOrchestratorV2Scenario } from "../testkit/OrchestratorScenario.ts";
 import { layerProviderReplay } from "../testkit/ProviderReplayHarness.ts";
@@ -356,6 +357,93 @@ describe("ClaudeAdapterV2 native resume history", () => {
     },
   ])("selects the native history head for $name", ({ messages, head }) => {
     assert.equal(ClaudeAdapterV2.claudeResumeSessionAt(messages), head);
+  });
+});
+
+// A turn that read a large file, ran one more lookup and called context_rewind, preceded by an
+// earlier turn and an abandoned branch from a previous rewind.
+function contextRewindTranscript(options?: { readonly lastResultChars?: number }) {
+  const line = (
+    uuid: string,
+    parentUuid: string | null,
+    type: string,
+    content?: unknown,
+    messageId?: string,
+  ) =>
+    JSON.stringify({
+      uuid,
+      parentUuid,
+      type,
+      ...(content === undefined
+        ? {}
+        : { message: { ...(messageId === undefined ? {} : { id: messageId }), content } }),
+    });
+  const toolUse = (id: string, name: string) => [{ type: "tool_use", id, name, input: {} }];
+  const toolResult = (id: string, chars: number) => [
+    { type: "tool_result", tool_use_id: id, content: "x".repeat(chars) },
+  ];
+  return [
+    line("earlier-prompt", null, "user", "Set up the repo"),
+    line("earlier-call", "earlier-prompt", "assistant", toolUse("t0", "Bash"), "msg_0"),
+    line("earlier-result", "earlier-call", "user", toolResult("t0", 30_000)),
+    line("earlier-reply", "earlier-result", "assistant", "Done.", "msg_0b"),
+    line("prompt", "earlier-reply", "user", "Find the checkout tickets"),
+    line("abandoned", "prompt", "assistant", toolUse("old", "Read"), "msg_old"),
+    line("attachment", "prompt", "attachment"),
+    line(
+      "thinking",
+      "attachment",
+      "assistant",
+      [{ type: "thinking", thinking: "Read it" }],
+      "msg_1",
+    ),
+    line("read", "thinking", "assistant", toolUse("t1", "Read"), "msg_1"),
+    line("read-result", "read", "user", toolResult("t1", 25_000)),
+    line("grep", "read-result", "assistant", toolUse("t2", "Grep"), "msg_2"),
+    line("grep-result", "grep", "user", toolResult("t2", options?.lastResultChars ?? 100)),
+    line(
+      "rewind",
+      "grep-result",
+      "assistant",
+      toolUse("t3", "mcp__t3-code__context_rewind"),
+      "msg_3",
+    ),
+  ];
+}
+
+describe("ClaudeAdapterV2 context rewind cut", () => {
+  it("removes every call since the prompt and the rest of the first call's API message", () => {
+    assert.deepEqual(ClaudeAdapterV2.claudeContextRewindCut(contextRewindTranscript(), undefined), {
+      cutUuid: "attachment",
+      removedToolCalls: 2,
+    });
+  });
+
+  it("never cuts past the last prompt when asked for more calls than it has", () => {
+    assert.deepEqual(ClaudeAdapterV2.claudeContextRewindCut(contextRewindTranscript(), 5), {
+      cutUuid: "attachment",
+      removedToolCalls: 2,
+    });
+  });
+
+  it.each([
+    [CONTEXT_REWIND_MIN_REMOVED_CHARS - 1, { refused: "too_small" }],
+    [CONTEXT_REWIND_MIN_REMOVED_CHARS, { cutUuid: "read-result", removedToolCalls: 1 }],
+  ])("measures only the removed results against the minimum (%d characters)", (chars, cut) => {
+    assert.deepEqual(
+      ClaudeAdapterV2.claudeContextRewindCut(
+        contextRewindTranscript({ lastResultChars: chars }),
+        1,
+      ),
+      cut,
+    );
+  });
+
+  it("refuses when no call follows the last prompt", () => {
+    const lines = contextRewindTranscript().slice(0, 7);
+    assert.deepEqual(ClaudeAdapterV2.claudeContextRewindCut(lines, undefined), {
+      refused: "nothing_to_remove",
+    });
   });
 });
 
@@ -9108,6 +9196,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     ),
   );
+
+  describe("context rewind", () => {
+    const rewindLayer = Layer.mergeAll(
+      IdAllocator.layer,
+      McpProviderSessions.layer,
+      NodeServices.layer,
+      NodeCrypto.layer,
+    );
+    const contentText = (message: SDKUserMessage | undefined) =>
+      JSON.stringify(message?.message.content ?? "");
+
+    const makeRewindHarness = Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const configDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-claude-rewind-",
+      });
+      const projectDir = path.join(configDir, "projects", "-workspace");
+      yield* fileSystem.makeDirectory(projectDir, { recursive: true });
+      const transcriptPath = path.join(projectDir, `${WAKE_NATIVE_SESSION}.jsonl`);
+      yield* fileSystem.writeFileString(transcriptPath, contextRewindTranscript().join("\n"));
+      const harness = yield* makeWakeHarnessWithOptions({
+        close: (sdkMessages) => Queue.shutdown(sdkMessages),
+        freshQueueOnReopen: true,
+        environment: { CLAUDE_CONFIG_DIR: configDir },
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, contextRewind: true },
+      });
+      const rewindContext = harness.runtime.rewindContext;
+      if (rewindContext === undefined) throw new Error("Context rewind must be offered.");
+      const now = yield* DateTime.now;
+      const delivered: Array<{ removedToolCalls: number; continuationMessageId: MessageId }> = [];
+      const turn = (ordinal: number) =>
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make(`attempt-claude-rewind-${ordinal}`),
+          text: `Request ${ordinal}`,
+          attachments: [],
+          providerTurnOrdinal: ordinal,
+          nativeThreadHasTurns: ordinal > 1,
+        });
+      const continuation = (ordinal: number, messageId: MessageId) => {
+        const base = turn(ordinal);
+        return {
+          ...base,
+          message: {
+            ...base.message,
+            messageId,
+            origin: CONTEXT_REWIND_ORIGIN,
+            text: "<context-rewind>Your last 2 tool calls were removed.</context-rewind>",
+            createdBy: "agent" as const,
+            creationSource: "server" as const,
+          },
+        };
+      };
+      const rewind = (toolCalls?: number) =>
+        rewindContext({
+          providerThread: harness.providerThread,
+          ...(toolCalls === undefined ? {} : { toolCalls }),
+          deliver: (plan) => Effect.sync(() => void delivered.push(plan)),
+        });
+      const providerTurnId = (ordinal: number) =>
+        IdAllocator.IdAllocatorV2.pipe(
+          Effect.map((ids) =>
+            ids.derive.providerTurn({
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeTurnId: `turn:attempt-claude-rewind-${ordinal}`,
+            }),
+          ),
+        );
+      const endTurn = (uuid: string) =>
+        Effect.gen(function* () {
+          yield* harness.offerAndWait(makeResultFrame({ uuid, result: "" }));
+          yield* Queue.take(harness.terminalReceipts);
+        });
+      return {
+        harness,
+        fileSystem,
+        transcriptPath,
+        delivered,
+        turn,
+        continuation,
+        rewind,
+        providerTurnId,
+        endTurn,
+      };
+    });
+
+    it.effect(
+      "resumes the continuation in a new process at the cut fixed when the tool was called",
+      () =>
+        Effect.gen(function* () {
+          const rewind = yield* makeRewindHarness;
+          yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+          const result = yield* rewind.rewind();
+          assert.equal(result.removedToolCalls, 2);
+          const [plan] = rewind.delivered;
+          assert.equal(plan?.removedToolCalls, 2);
+          // Work the agent does after the call does not move the cut.
+          yield* rewind.fileSystem.writeFileString(
+            rewind.transcriptPath,
+            `\n${JSON.stringify({ uuid: "late", parentUuid: "rewind", type: "assistant" })}`,
+            { flag: "a" },
+          );
+          yield* rewind.endTurn("00000000-0000-4000-8000-000000038001");
+
+          yield* rewind.harness.runtime.startTurn(
+            rewind.continuation(2, plan!.continuationMessageId),
+          );
+          assert.equal(rewind.harness.processQueues.length, 2);
+          assert.equal(rewind.harness.getOpenedOptions()?.resumeSessionAt, "attachment");
+          assert.notInclude(
+            contentText(rewind.harness.offeredMessages.at(-1)),
+            "did not take effect",
+          );
+        }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect(
+      "drops the rewind when another turn runs first, and says so to the continuation",
+      () =>
+        Effect.gen(function* () {
+          const rewind = yield* makeRewindHarness;
+          yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+          yield* rewind.rewind();
+          yield* rewind.endTurn("00000000-0000-4000-8000-000000038002");
+          yield* rewind.harness.runtime.startTurn(rewind.turn(2));
+          yield* rewind.endTurn("00000000-0000-4000-8000-000000038003");
+
+          yield* rewind.harness.runtime.startTurn(
+            rewind.continuation(3, rewind.delivered[0]!.continuationMessageId),
+          );
+          assert.equal(rewind.harness.processQueues.length, 1);
+          assert.isUndefined(rewind.harness.getOpenedOptions()?.resumeSessionAt);
+          assert.include(contentText(rewind.harness.offeredMessages.at(-1)), "did not take effect");
+        }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect("declines a steer while the rewind is pending, so it queues instead", () =>
+      Effect.gen(function* () {
+        const rewind = yield* makeRewindHarness;
+        const first = rewind.turn(1);
+        yield* rewind.harness.runtime.startTurn(first);
+        yield* rewind.rewind();
+        const steered = yield* Effect.flip(
+          rewind.harness.runtime.steerTurn({
+            threadId: rewind.harness.threadId,
+            runId: first.runId,
+            providerThread: rewind.harness.providerThread,
+            providerTurnId: yield* rewind.providerTurnId(1),
+            message: { ...first.message, messageId: MessageId.make("message-steer") },
+          }),
+        );
+        assert.equal(steered._tag, "ProviderAdapterSteerDeclinedError");
+      }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect(
+      "refuses without a running turn, twice in one turn, and while background work runs",
+      () =>
+        Effect.gen(function* () {
+          const isRefused = Schema.is(ProviderAdapter.ProviderAdapterContextRewindRefusedError);
+          const reasonOf = (error: unknown) => (isRefused(error) ? error.reason : error);
+          const rewind = yield* makeRewindHarness;
+          assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "no_active_turn");
+
+          yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+          yield* rewind.rewind();
+          assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "already_pending");
+          assert.lengthOf(rewind.delivered, 1);
+          yield* rewind.endTurn("00000000-0000-4000-8000-000000038004");
+
+          yield* rewind.harness.runtime.startTurn(rewind.turn(2));
+          yield* rewind.harness.offerAndWait(wakeTaskStarted);
+          assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "background_work");
+          assert.lengthOf(rewind.delivered, 1);
+        }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect("records nothing when the continuation cannot be queued", () =>
+      Effect.gen(function* () {
+        const rewind = yield* makeRewindHarness;
+        yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+        const failed = yield* Effect.flip(
+          rewind.harness.runtime.rewindContext!({
+            providerThread: rewind.harness.providerThread,
+            deliver: () =>
+              Effect.fail(
+                new ProviderAdapter.ProviderAdapterContextRewindDeliveryError({ cause: "full" }),
+              ),
+          }),
+        );
+        assert.equal(failed._tag, "ProviderAdapterContextRewindDeliveryError");
+        // Nothing pending, so a retry in the same turn is not refused as a duplicate.
+        assert.equal((yield* rewind.rewind()).removedToolCalls, 2);
+      }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+  });
 
   it.effect("never records a subagent uuid for a turn with no main-thread assistant message", () =>
     Effect.gen(function* () {

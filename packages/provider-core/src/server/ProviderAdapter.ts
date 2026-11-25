@@ -397,6 +397,53 @@ export class ProviderAdapterSteerDeclinedError extends Schema.TaggedError<Provid
   },
 ) {}
 
+export const ProviderAdapterContextRewindRefusal = Schema.Literals([
+  "no_active_turn",
+  "background_work",
+  "already_pending",
+  "nothing_to_remove",
+  "too_small",
+  "cut_not_found",
+]);
+export type ProviderAdapterContextRewindRefusal = typeof ProviderAdapterContextRewindRefusal.Type;
+
+/** The adapter left the conversation unchanged; `reason` says why. */
+export class ProviderAdapterContextRewindRefusedError extends Schema.TaggedError<ProviderAdapterContextRewindRefusedError>()(
+  "ProviderAdapterContextRewindRefusedError",
+  {
+    driver: ProviderDriverKind,
+    providerThreadId: ProviderThreadId,
+    reason: ProviderAdapterContextRewindRefusal,
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "no_active_turn":
+        return "Context rewind works only during your own running turn. Nothing was removed.";
+      case "background_work":
+        return "Background work is still running, and rewinding would stop it. Nothing was removed; wait for it to finish first.";
+      case "already_pending":
+        return "A context rewind is already pending for this turn. End your turn now.";
+      case "nothing_to_remove":
+        return "There are no tool calls since the last message to remove. Nothing was removed.";
+      case "too_small":
+        return "The tool results this would remove are too small to be worth a rewind, which costs more than it saves. Nothing was removed; carry on with the task.";
+      case "cut_not_found":
+        return "The rewind point could not be found in the conversation transcript. Nothing was removed.";
+    }
+  }
+}
+
+/** The continuation message could not be queued, so the adapter recorded no rewind. */
+export class ProviderAdapterContextRewindDeliveryError extends Schema.TaggedError<ProviderAdapterContextRewindDeliveryError>()(
+  "ProviderAdapterContextRewindDeliveryError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "The context rewind could not queue its continuation message. Nothing was removed.";
+  }
+}
+
 export class ProviderAdapterSteerRunError extends Schema.TaggedError<ProviderAdapterSteerRunError>()(
   "ProviderAdapterSteerRunError",
   {
@@ -788,6 +835,26 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly taskIds: ReadonlyArray<string>;
     readonly awaited: boolean;
   }) => Effect.Effect<{ readonly matched: ReadonlyArray<string> }, ProviderAdapterV2Error>;
+  /**
+   * Removes the most recent tool calls and their results from the model's context. The cut is
+   * fixed when this is called; the turn that sends `continuationMessageId` resumes the native
+   * conversation there. `deliver` queues that message, and the rewind is recorded only when it
+   * succeeds, so a refusal or a failed delivery leaves the conversation unchanged.
+   */
+  readonly rewindContext?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    /** Counted back from the newest call; omitted means every call since the last user message. */
+    readonly toolCalls?: number;
+    readonly deliver: (plan: {
+      readonly removedToolCalls: number;
+      readonly continuationMessageId: MessageId;
+    }) => Effect.Effect<void, ProviderAdapterContextRewindDeliveryError>;
+  }) => Effect.Effect<
+    { readonly removedToolCalls: number },
+    | ProviderAdapterContextRewindRefusedError
+    | ProviderAdapterContextRewindDeliveryError
+    | ProviderAdapterV2Error
+  >;
   readonly interruptTurn: (
     input: ProviderAdapterV2InterruptInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
@@ -827,6 +894,8 @@ export class ProviderAdapterV2 extends Context.Service<
   {
     readonly instanceId: ProviderInstanceId;
     readonly driver: ProviderDriverKind;
+    /** This instance's settings turned on context rewind, so its sessions implement `rewindContext`. */
+    readonly offersContextRewind?: true;
     readonly getCapabilities: () => Effect.Effect<
       OrchestrationV2ProviderCapabilities,
       ProviderAdapterV2Error

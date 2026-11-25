@@ -101,6 +101,7 @@ import {
   defaultInstanceIdForDriver,
   isCompactionCommandMessage,
   parseGoalCommand,
+  MessageId as MessageIdSchema,
   type MessageId,
   type ModelSelection,
   type OrchestrationV2ConversationMessage,
@@ -131,6 +132,7 @@ import {
   type ProviderRequestKind,
   type ProviderUserInputAnswers,
   type ProviderThreadId,
+  type ProviderTurnId,
   type RunId,
   type ThreadId,
   resolveIdleCompaction,
@@ -186,6 +188,12 @@ import * as PortScanner from "../../preview/PortScanner.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { withTurnOriginPrefix } from "@t3tools/provider-core/server/turnOriginText";
+import {
+  CONTEXT_REWIND_MIN_REMOVED_CHARS,
+  contextRewindNotAppliedText,
+  isContextRewindContinuation,
+} from "../contextRewind.ts";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
@@ -1269,6 +1277,121 @@ const decodeClaudeHistoryMessages = Schema.decodeUnknownEffect(
     ),
   ),
 );
+
+const isProviderAdapterSteerDeclinedError = Schema.is(
+  ProviderAdapter.ProviderAdapterSteerDeclinedError,
+);
+
+const ClaudeChainEntry = Schema.Struct({
+  uuid: Schema.String,
+  parentUuid: Schema.optional(Schema.NullOr(Schema.String)),
+  type: Schema.String,
+  isMeta: Schema.optional(Schema.Boolean),
+  message: Schema.optional(
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      content: Schema.optional(Schema.Unknown),
+    }),
+  ),
+});
+type ClaudeChainEntry = typeof ClaudeChainEntry.Type;
+const decodeClaudeChainEntry = Schema.decodeUnknownOption(Schema.fromJsonString(ClaudeChainEntry));
+
+const claudeContentBlocks = (entry: ClaudeChainEntry): ReadonlyArray<unknown> => {
+  const content = entry.message?.content;
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  return Array.isArray(content) ? content : [];
+};
+
+const isClaudeInterruptionText = (block: unknown) =>
+  Predicate.isObject(block) &&
+  block.type === "text" &&
+  typeof block.text === "string" &&
+  block.text.startsWith("[Request interrupted");
+
+const isClaudePromptEntry = (entry: ClaudeChainEntry) => {
+  if (entry.type !== "user" || entry.isMeta === true) return false;
+  const blocks = claudeContentBlocks(entry);
+  return (
+    blocks.length > 0 &&
+    !blocks.every(isClaudeInterruptionText) &&
+    !blocks.some((block) => Predicate.isObject(block) && block.type === "tool_result")
+  );
+};
+
+const claudeRemovableToolUses = (entry: ClaudeChainEntry) =>
+  entry.type !== "assistant"
+    ? 0
+    : claudeContentBlocks(entry).filter(
+        (block) =>
+          Predicate.isObject(block) &&
+          block.type === "tool_use" &&
+          !(typeof block.name === "string" && block.name.endsWith("__context_rewind")),
+      ).length;
+
+const claudeToolResultChars = (entry: ClaudeChainEntry) =>
+  entry.type !== "user"
+    ? 0
+    : claudeContentBlocks(entry).reduce<number>((chars, block) => {
+        if (!Predicate.isObject(block) || block.type !== "tool_result") return chars;
+        const content = block.content;
+        return (
+          chars +
+          (typeof content === "string" ? content.length : JSON.stringify(content ?? "").length)
+        );
+      }, 0);
+
+/**
+ * Where `resumeSessionAt` must point so the conversation forgets its most recent tool calls, read
+ * from a raw transcript. The chain is walked back from the newest entry because the file also
+ * holds attachment entries and abandoned branches. The cut never crosses the last user prompt, and
+ * it drops earlier blocks of the first removed call's API message so no half message is kept.
+ */
+export function claudeContextRewindCut(
+  transcriptLines: ReadonlyArray<string>,
+  toolCalls: number | undefined,
+):
+  | { readonly cutUuid: string; readonly removedToolCalls: number }
+  | { readonly refused: "nothing_to_remove" | "too_small" | "cut_not_found" } {
+  const entries = transcriptLines.flatMap((line) => Option.toArray(decodeClaudeChainEntry(line)));
+  const byUuid = new Map(entries.map((entry) => [entry.uuid, entry]));
+  const chain: Array<ClaudeChainEntry> = [];
+  const seen = new Set<string>();
+  for (let entry = entries.at(-1); entry !== undefined && !seen.has(entry.uuid);) {
+    seen.add(entry.uuid);
+    chain.unshift(entry);
+    entry = entry.parentUuid == null ? undefined : byUuid.get(entry.parentUuid);
+  }
+  const lastPromptIndex = chain.findLastIndex(isClaudePromptEntry);
+  const callIndexes = chain.flatMap((entry, index) =>
+    index > lastPromptIndex && claudeRemovableToolUses(entry) > 0 ? [index] : [],
+  );
+  if (callIndexes.length === 0 || (toolCalls !== undefined && toolCalls < 1)) {
+    return { refused: "nothing_to_remove" };
+  }
+  const calls = callIndexes.flatMap((index) =>
+    Array.from({ length: claudeRemovableToolUses(chain[index]!) }, () => index),
+  );
+  const firstRemoved = calls[calls.length - Math.min(toolCalls ?? calls.length, calls.length)]!;
+  const messageId = chain[firstRemoved]?.message?.id;
+  let cutIndex = firstRemoved - 1;
+  if (messageId !== undefined) {
+    while (chain[cutIndex]?.message?.id === messageId) cutIndex -= 1;
+  }
+  const cut = chain[cutIndex];
+  if (cut === undefined || cutIndex < lastPromptIndex) return { refused: "cut_not_found" };
+  const removed = chain.slice(cutIndex + 1);
+  if (
+    removed.reduce((chars, entry) => chars + claudeToolResultChars(entry), 0) <
+    CONTEXT_REWIND_MIN_REMOVED_CHARS
+  ) {
+    return { refused: "too_small" };
+  }
+  return {
+    cutUuid: cut.uuid,
+    removedToolCalls: removed.reduce((count, entry) => count + claudeRemovableToolUses(entry), 0),
+  };
+}
 
 // Claude's interactive reply-on-resume removes native abort rows before querying the saved history.
 export function claudeResumeSessionAt(
@@ -5884,6 +6007,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
     driver: CLAUDE_PROVIDER,
+    ...(adapterOptions.settings.contextRewind ? { offersContextRewind: true as const } : {}),
     getCapabilities: Effect.fn("ClaudeAdapterV2.getCapabilities")(function () {
       return Effect.succeed(ClaudeProviderCapabilitiesV2);
     }),
@@ -5904,6 +6028,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         });
         const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
         const activeTurn = yield* Ref.make<ActiveClaudeTurnContext | null>(null);
+        // Held in memory: after a server restart the continuation reports that no rewind happened.
+        const pendingContextRewinds = new Map<
+          string,
+          {
+            readonly cutUuid: string;
+            readonly continuationMessageId: MessageId;
+            readonly providerTurnId: ProviderTurnId;
+          }
+        >();
         const taskOutputTails = new Map<
           string,
           { readonly fiber: Fiber.Fiber<void>; readonly stop: Deferred.Deferred<void> }
@@ -12715,6 +12848,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
           nativeThreadId: string,
           requestedQueryPolicy: Effect.Success<ReturnType<typeof queryPolicyForTurn>>,
+          /** A context rewind replaces the live process so it resumes at this entry. */
+          rewindCut?: string,
         ) {
           let queryPolicy = requestedQueryPolicy;
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
@@ -12737,7 +12872,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : { allowedTools: queryPolicy.allowedTools }),
           });
 
-          const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
+          const resumeSessionAt =
+            rewindCut ?? (yield* getNativeConversationHeadId(turnInput.providerThread));
           const existing = yield* Ref.get(queryContext);
           // Directory refreshes must not replace a process that still owns background work.
           if (
@@ -12801,6 +12937,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           if (
             !turnInput.resume &&
+            rewindCut === undefined &&
             existing !== null &&
             existing.nativeThreadId === nativeThreadId &&
             existing.queryPolicyKey === queryPolicyKey &&
@@ -13177,6 +13314,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 reason: "previous_turn_active",
               });
             }
+            // Any other turn moves the conversation past the cut, so only the continuation may apply it.
+            const pendingRewind = pendingContextRewinds.get(nativeThreadId);
+            pendingContextRewinds.delete(nativeThreadId);
+            const rewindCut =
+              pendingRewind?.continuationMessageId === turnInput.message.messageId
+                ? pendingRewind.cutUuid
+                : undefined;
+            const turnText =
+              rewindCut === undefined && isContextRewindContinuation(turnInput.message.origin)
+                ? withTurnOriginPrefix(
+                    turnInput.message.text,
+                    turnInput.message.origin,
+                    contextRewindNotAppliedText,
+                  )
+                : turnInput.message.text;
             yield* Ref.update(lastTurnRouteByNativeThread, (current) => {
               const updated = new Map(current);
               updated.set(nativeThreadId, {
@@ -13233,7 +13385,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               persistAttachmentBudget(nativeThreadId),
             );
             const promptText = applyClaudePromptEffortPrefix(
-              turnInput.message.text,
+              turnText,
               compileClaudeModelSelection(turnInput.modelSelection, modelCatalog).promptEffort,
             );
             const userMessage =
@@ -13267,7 +13419,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
                       Effect.provideService(Path.Path, path),
                     );
-            const querySession = yield* openQuery(turnInput, nativeThreadId, queryPolicy);
+            const querySession = yield* openQuery(
+              turnInput,
+              nativeThreadId,
+              queryPolicy,
+              rewindCut,
+            );
             yield* applySessionTitle(querySession.query, nativeThreadId, turnInput.appThread.title);
             const autoCompactWindow = yield* resolveAutoCompactWindow(
               querySession.settingsCwd,
@@ -13752,6 +13909,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 detail: `Claude provider turn ${turnInput.providerTurnId} is not the active turn.`,
               });
             }
+            // A steer after the cut would be rewound away; declined, it queues behind the continuation.
+            if (
+              pendingContextRewinds.get(existing.nativeThreadId)?.providerTurnId ===
+              turnInput.providerTurnId
+            ) {
+              return yield* new ProviderAdapter.ProviderAdapterSteerDeclinedError({
+                driver: CLAUDE_PROVIDER,
+                providerThreadId: turnInput.providerThread.id,
+                providerTurnId: turnInput.providerTurnId,
+              });
+            }
             // Claude echoes this uuid once it accepts the steer.
             const steerUuid = yield* random.uuidV4().pipe(
               Effect.filterOrFail(isClaudePromptUuid),
@@ -13862,14 +14030,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           (effect, turnInput) =>
             effect.pipe(
               Effect.scoped,
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapter.ProviderAdapterSteerRunError({
-                    driver: CLAUDE_PROVIDER,
-                    providerThreadId: turnInput.providerThread.id,
-                    providerTurnId: turnInput.providerTurnId,
-                    cause,
-                  }),
+              Effect.mapError((cause) =>
+                isProviderAdapterSteerDeclinedError(cause)
+                  ? cause
+                  : new ProviderAdapter.ProviderAdapterSteerRunError({
+                      driver: CLAUDE_PROVIDER,
+                      providerThreadId: turnInput.providerThread.id,
+                      providerTurnId: turnInput.providerTurnId,
+                      cause,
+                    }),
               ),
             ),
         );
@@ -13929,17 +14098,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         });
         yield* Effect.addFinalizer(() => closeSession());
 
-        // Metadata-only transcripts cannot be resumed or recreated; fail resumeThread to trigger a fresh session and handoff.
-        const claudeTranscriptState = Effect.fn("ClaudeAdapterV2.claudeTranscriptState")(function* (
-          nativeThreadId: string,
-        ) {
+        const claudeProjectsDir = Effect.gen(function* () {
           const configuredDir = adapterOptions.environment.CLAUDE_CONFIG_DIR?.trim() ?? "";
-          const projectsDir = path.join(
+          return path.join(
             configuredDir.length > 0
               ? path.resolve(session.cwd, configuredDir)
               : path.join(yield* HostProcess.HomeDirectory, ".claude"),
             "projects",
           );
+        });
+
+        // Metadata-only transcripts cannot be resumed or recreated; fail resumeThread to trigger a fresh session and handoff.
+        const claudeTranscriptState = Effect.fn("ClaudeAdapterV2.claudeTranscriptState")(function* (
+          nativeThreadId: string,
+        ) {
+          const projectsDir = yield* claudeProjectsDir;
           // Any message in any transcript copy means Claude may still resume it.
           let found = false;
           let unreadable = false;
@@ -13970,6 +14143,76 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             found = true;
           }
           return found && !unreadable ? ("empty" as const) : ("missing" as const);
+        });
+
+        // Claude names a project folder after its cwd; other folders can hold copies of the session.
+        const readClaudeTranscriptLines = Effect.fn("ClaudeAdapterV2.readClaudeTranscriptLines")(
+          function* (nativeThreadId: string, cwd: string | null) {
+            const projectsDir = yield* claudeProjectsDir;
+            const cwdProject = cwd?.replace(/[^a-zA-Z0-9]/g, "-");
+            const candidates: Array<string> = [];
+            for (const project of yield* fileSystem.readDirectory(projectsDir)) {
+              const transcriptPath = path.join(projectsDir, project, `${nativeThreadId}.jsonl`);
+              if (
+                yield* fileSystem.exists(transcriptPath).pipe(Effect.orElseSucceed(() => false))
+              ) {
+                if (project === cwdProject) candidates.unshift(transcriptPath);
+                else candidates.push(transcriptPath);
+              }
+            }
+            const transcriptPath = candidates[0];
+            if (transcriptPath === undefined) return [];
+            return (yield* fileSystem.readFileString(transcriptPath)).split("\n");
+          },
+        );
+
+        const rewindContext = Effect.fn("ClaudeAdapterV2.rewindContext")(function* (
+          rewindInput: Parameters<
+            NonNullable<ProviderAdapter.ProviderAdapterV2SessionRuntime["rewindContext"]>
+          >[0],
+        ) {
+          const refuse = (reason: ProviderAdapter.ProviderAdapterContextRewindRefusal) =>
+            new ProviderAdapter.ProviderAdapterContextRewindRefusedError({
+              driver: CLAUDE_PROVIDER,
+              providerThreadId: rewindInput.providerThread.id,
+              reason,
+            });
+          const nativeThreadId = yield* getNativeThreadId(rewindInput.providerThread);
+          const turn = yield* Ref.get(activeTurn);
+          if (turn === null || turn.nativeThreadId !== nativeThreadId) {
+            return yield* refuse("no_active_turn");
+          }
+          if (pendingContextRewinds.get(nativeThreadId)?.providerTurnId === turn.providerTurnId) {
+            return yield* refuse("already_pending");
+          }
+          const live = yield* Ref.get(queryContext);
+          if (
+            live !== null &&
+            live.nativeThreadId === nativeThreadId &&
+            (yield* liveProcessRunsBackgroundWork(live))
+          ) {
+            return yield* refuse("background_work");
+          }
+          const lines = yield* readClaudeTranscriptLines(
+            nativeThreadId,
+            turn.input.runtimePolicy.cwd,
+          ).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+          const cut = claudeContextRewindCut(lines, rewindInput.toolCalls);
+          if ("refused" in cut) return yield* refuse(cut.refused);
+          // One rewind per provider turn, so its id names the continuation and makes delivery idempotent.
+          const continuationMessageId = MessageIdSchema.make(
+            `message:context-rewind:${turn.providerTurnId}`,
+          );
+          yield* rewindInput.deliver({
+            removedToolCalls: cut.removedToolCalls,
+            continuationMessageId,
+          });
+          pendingContextRewinds.set(nativeThreadId, {
+            cutUuid: cut.cutUuid,
+            continuationMessageId,
+            providerTurnId: turn.providerTurnId,
+          });
+          return { removedToolCalls: cut.removedToolCalls };
         });
 
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
@@ -14329,6 +14572,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             },
             (effect) => sdkMessageLock.withPermits(1)(effect),
           ),
+          ...(adapterOptions.settings.contextRewind ? { rewindContext } : {}),
           interruptTurn,
           stopSubagent: Effect.fn("ClaudeAdapterV2.stopSubagent")(function* (input) {
             const existing = yield* Ref.get(queryContext);
