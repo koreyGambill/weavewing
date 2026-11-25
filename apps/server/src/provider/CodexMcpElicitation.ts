@@ -9,7 +9,6 @@ const McpElicitationMetadata = Schema.Struct({
   appName: Schema.optionalKey(NullableMcpElicitationString),
   connector_name: Schema.optionalKey(NullableMcpElicitationString),
   connectorName: Schema.optionalKey(NullableMcpElicitationString),
-  connector_id: Schema.optionalKey(NullableMcpElicitationString),
   allowPersistentApproval: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
   persist: Schema.optionalKey(
     Schema.NullOr(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
@@ -113,10 +112,17 @@ function isMcpElicitationPersistenceField(
   );
 }
 
+const isComputerUseMetadata = Schema.is(
+  Schema.Struct({
+    codex_approval_kind: Schema.Literal("mcp_tool_call"),
+    connector_id: Schema.Literal("computer-use"),
+  }),
+);
+
 export function isComputerUseElicitation(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
 ): boolean {
-  return isMcpElicitationMetadata(payload._meta) && payload._meta.connector_id === "computer-use";
+  return payload.serverName === "cua_repl" && isComputerUseMetadata(payload._meta);
 }
 
 export function describeMcpElicitation(
@@ -166,7 +172,11 @@ export function describeMcpElicitation(
         ? [
             {
               decision: "acceptForSession" as const,
-              label: persistenceOptions.get("acceptForSession") || "Always allow this session",
+              label:
+                persistenceOptions.get("acceptForSession") ||
+                (isComputerUseElicitation(payload)
+                  ? "Allow any app this session"
+                  : "Always allow this session"),
             },
           ]
         : []),

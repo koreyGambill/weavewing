@@ -3,7 +3,11 @@ import * as NodeAssert from "node:assert/strict";
 import { describe, it } from "vite-plus/test";
 import type * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { describeMcpElicitation, toMcpElicitationResponse } from "./CodexMcpElicitation.ts";
+import {
+  describeMcpElicitation,
+  isComputerUseElicitation,
+  toMcpElicitationResponse,
+} from "./CodexMcpElicitation.ts";
 
 describe("Codex MCP elicitation approvals", () => {
   const request = {
@@ -43,6 +47,26 @@ describe("Codex MCP elicitation approvals", () => {
         { decision: "accept", label: "Approve" },
       ],
     });
+  });
+
+  it("recognizes computer use only from the computer-use server's tool approvals", () => {
+    const computerUse = {
+      mode: "form",
+      message: 'Allow Computer Use to use "TextEdit"?',
+      serverName: "cua_repl",
+      threadId: "provider-thread-1",
+      _meta: { codex_approval_kind: "mcp_tool_call", connector_id: "computer-use" },
+      requestedSchema: { type: "object", properties: {} },
+    } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
+    NodeAssert.deepStrictEqual(
+      [
+        computerUse,
+        { ...computerUse, serverName: "other-server" },
+        { ...computerUse, _meta: { ...computerUse._meta, codex_approval_kind: "elicitation" } },
+        { ...computerUse, _meta: { codex_approval_kind: "mcp_tool_call" } },
+      ].map(isComputerUseElicitation),
+      [true, false, false, false],
+    );
   });
 
   it("returns the accepted form option to Codex", () => {
