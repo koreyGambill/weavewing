@@ -15,6 +15,7 @@ import {
   EnvironmentId,
   PreviewAutomationUnavailableError,
   ThreadId,
+  THREAD_QUESTIONS_REFRESH_REQUEST,
 } from "@t3tools/contracts";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 
@@ -1172,6 +1173,15 @@ it.effect("fails preview calls with T3's errors when browser access is off or a 
     ]);
   }).pipe(Effect.provide(FetchHttpClient.layer)),
 );
+
+it("sends the questions refresh case exactly what Refresh questions puts in the composer", () => {
+  const refresh = NodeFS.readFileSync(new URL("./cases/questions.ndjson", import.meta.url), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => decodeMcpToolUseCase(line))
+    .find((testCase) => testCase.id === "questions-refresh-curates");
+  assert.equal(refresh?.prompt, THREAD_QUESTIONS_REFRESH_REQUEST);
+});
 
 const deviceCases = () =>
   NodeFS.readFileSync(new URL("./cases/device-manager.ndjson", import.meta.url), "utf8")

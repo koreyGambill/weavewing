@@ -257,6 +257,10 @@ export const THREAD_QUESTIONS_ARTIFACT_ID = "thread-questions";
  */
 export const THREAD_QUESTION_COMMENTS_ARTIFACT_ID = "thread-question-comments";
 
+/** What Refresh questions puts in the composer: asks the agent to curate its open questions. */
+export const THREAD_QUESTIONS_REFRESH_REQUEST =
+  "Review your open questions against where the work is now. Withdraw any that no longer matter, replace any whose options or details are out of date (`question_ask` with `replaces`), and leave the rest as they are. Then tell me in one line what you changed.";
+
 /** Linked work stays handed off until its ticket closes or its lane is ready for review. */
 export const listItemNeedsHandoff = (item: Pick<ListItem, "linkStates">) =>
   item.linkStates?.some(
