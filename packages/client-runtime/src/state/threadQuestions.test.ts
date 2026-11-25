@@ -2,12 +2,18 @@ import { THREAD_QUESTIONS_REFRESH_REQUEST, type ThreadQuestion } from "@t3tools/
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  isThreadQuestionRecord,
+  nextThreadQuestionImageNumber,
   sectionThreadQuestions,
   syncComposerQuestionAnswers,
   threadQuestionChipText,
   threadQuestionAnswerRecord,
   threadQuestionCounts,
   threadQuestionDiscussRecord,
+  threadQuestionImageMarker,
+  threadQuestionImageMarkerNumbers,
+  threadQuestionImageName,
+  threadQuestionImageNumber,
   threadQuestionsInComposer,
   threadQuestionReplaced,
   threadQuestionStatus,
@@ -356,5 +362,32 @@ describe("thread questions", () => {
     })!;
     expect(threadQuestionChipText(discuss)).toBe(`Q5 · discuss · ${"x".repeat(60)}…`);
     expect(threadQuestionChipText({ ...answer, artifactId: "artifact-1" })).toBeNull();
+  });
+
+  it("pairs a question's pasted images with the markers in its note", () => {
+    expect(threadQuestionImageMarker("Q1", 2)).toBe("[Q1 image 2]");
+    expect(threadQuestionImageName("Q1", 2, "png")).toBe("Q1-image-2.png");
+    expect(threadQuestionImageNumber("Q1", "Q1-image-2.png")).toBe(2);
+    // Another question's image, or a name that only starts the same way, is not this one's.
+    expect(threadQuestionImageNumber("Q1", "Q12-image-2.png")).toBeNull();
+    expect(threadQuestionImageNumber("Q1", "image.png")).toBeNull();
+    expect([
+      ...threadQuestionImageMarkerNumbers("Q1", "see [Q1 image 1] and [Q1 image 3], [Q12 image 2]"),
+    ]).toEqual([1, 3]);
+  });
+
+  it("numbers a new image past every held image and every marker still in the note", () => {
+    expect(nextThreadQuestionImageNumber("Q1", [], "")).toBe(1);
+    expect(nextThreadQuestionImageNumber("Q1", ["Q1-image-1.png", "Q2-image-7.png"], "")).toBe(2);
+    expect(nextThreadQuestionImageNumber("Q1", ["Q1-image-1.png"], "[Q1 image 4]")).toBe(5);
+  });
+
+  it("tells question answers and comments from other artifacts' answers", () => {
+    const answer = threadQuestionAnswerRecord(
+      "t1",
+      question("Q1", "open", { answer: draft(["a"], "") }),
+    )!;
+    expect(isThreadQuestionRecord(answer)).toBe(true);
+    expect(isThreadQuestionRecord({ ...answer, artifactId: "rollout" })).toBe(false);
   });
 });

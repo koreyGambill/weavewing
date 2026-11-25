@@ -135,8 +135,10 @@ const isQuestionAnswer = (record: ArtifactAnswerContextRecord) =>
   record.artifactId === THREAD_QUESTIONS_ARTIFACT_ID;
 const isQuestionComment = (record: ArtifactAnswerContextRecord) =>
   record.artifactId === THREAD_QUESTION_COMMENTS_ARTIFACT_ID;
-const isQuestionRecord = (record: ArtifactAnswerContextRecord) =>
+/** A composer record that answers or discusses an agent question, not another artifact's answer. */
+export const isThreadQuestionRecord = (record: ArtifactAnswerContextRecord) =>
   isQuestionAnswer(record) || isQuestionComment(record);
+const isQuestionRecord = isThreadQuestionRecord;
 
 /** What a composer holds for each question: its answer, or a comment to discuss it. */
 export function threadQuestionsInComposer(
@@ -293,4 +295,54 @@ export function withoutThreadQuestionRecords(
 ): ArtifactAnswerContextRecord[] | null {
   const next = records.filter((record) => !isQuestionRecord(record));
   return next.length === records.length ? null : next;
+}
+
+/** What a question's note says where its `number`th pasted image belongs, such as `[Q1 image 1]`. */
+export function threadQuestionImageMarker(questionId: string, number: number): string {
+  return `[${questionId} image ${number}]`;
+}
+
+/**
+ * The file name a question's pasted image travels under, such as `Q1-image-1.png`. Providers name
+ * each attachment to the model, so the name pairs the image with the marker in the note.
+ */
+export function threadQuestionImageName(
+  questionId: string,
+  number: number,
+  extension: string,
+): string {
+  return `${questionId}-image-${number}.${extension}`;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The number of `questionId`'s image called `name`, or null for any other file. */
+export function threadQuestionImageNumber(questionId: string, name: string): number | null {
+  const match = new RegExp(`^${escapeRegExp(questionId)}-image-(\\d+)\\.[^.]+$`).exec(name);
+  return match ? Number(match[1]) : null;
+}
+
+/** The image numbers whose markers `note` still holds for `questionId`. */
+export function threadQuestionImageMarkerNumbers(
+  questionId: string,
+  note: string,
+): ReadonlySet<number> {
+  const pattern = new RegExp(`\\[${escapeRegExp(questionId)} image (\\d+)\\]`, "g");
+  return new Set([...note.matchAll(pattern)].map((match) => Number(match[1])));
+}
+
+/**
+ * The number for `questionId`'s next image: one past the highest held image or marker, so a
+ * pasted image never takes the number of one the note still mentions.
+ */
+export function nextThreadQuestionImageNumber(
+  questionId: string,
+  heldNames: ReadonlyArray<string>,
+  note: string,
+): number {
+  const used = [
+    ...heldNames.flatMap((name) => threadQuestionImageNumber(questionId, name) ?? []),
+    ...threadQuestionImageMarkerNumbers(questionId, note),
+  ];
+  return Math.max(0, ...used) + 1;
 }
