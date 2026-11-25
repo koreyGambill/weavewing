@@ -257,7 +257,7 @@ describe("reviewVerdictFromText", () => {
       "Example:\n```ts\n```ts\nVerdict: approved",
     ],
     ["a fence that an indented line cannot close", "Example:\n```\n    ```\nVerdict: approved"],
-    ["a fence after inline code", "Run ```x``` first.\n```\nVerdict: approved"],
+    ["a fence after inline code", "```x``` runs first.\n```\nVerdict: approved"],
     ["a tilde fence that backticks cannot close", "Example:\n~~~\n```\nVerdict: approved"],
     ["an earlier verdict", "Verdict: changes requested\n\nVerdict: approved"],
     ["an earlier quoted verdict", "> Verdict: changes requested\n\nVerdict: approved"],
