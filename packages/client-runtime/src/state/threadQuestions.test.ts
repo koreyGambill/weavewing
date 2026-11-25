@@ -158,7 +158,7 @@ describe("thread questions", () => {
       question("Q1", "answered", { answer: draft(["a"]), answeredBy: "agent" }),
       question("Q1", "open", { answer: draft(["a"]), sentInMessageId: sentIn }),
     ])
-      expect(syncComposerQuestionAnswers("t1", [record, other], snapshot(0, gone))).toEqual([
+      expect(syncComposerQuestionAnswers("t1", [record, other], snapshot(1, gone))).toEqual([
         other,
       ]);
     // A draft cleared in a snapshot at least as new as the chip removes it.
@@ -183,6 +183,22 @@ describe("thread questions", () => {
     ).toBeNull();
     // A snapshot from before the question existed.
     expect(syncComposerQuestionAnswers("t1", [newer], { revision: 1, questions: [] })).toBeNull();
+    // Draft A was sent and cancelled, then draft B chipped; a stale snapshot still shows A sent.
+    const staleSent = question("Q1", "open", {
+      answer: draft(["a"], "", 3),
+      sentInMessageId: sentIn,
+    });
+    expect(
+      syncComposerQuestionAnswers("t1", [newer], { revision: 3, questions: [staleSent] }),
+    ).toBeNull();
+    // From before the question was reopened and redrafted, when it was still answered.
+    const staleAnswered = question("Q1", "answered", {
+      answer: draft(["a"], "", 3),
+      answeredBy: "user",
+    });
+    expect(
+      syncComposerQuestionAnswers("t1", [newer], { revision: 4, questions: [staleAnswered] }),
+    ).toBeNull();
   });
 
   it("takes every question chip out of the composer and leaves other answers", () => {

@@ -188,10 +188,10 @@ export function threadQuestionDiscussRecord(
 }
 
 /**
- * A composer's question records brought up to date with a workspace snapshot: each answer
- * follows a newer draft and each discussion a newer note; one whose question closed or was sent
- * is dropped, and one whose draft was cleared only when the snapshot is at least as new as the
- * chip. Returns null when nothing changed.
+ * A composer's question records brought up to date with a workspace snapshot at least as new as
+ * each chip's draft: an answer follows a newer draft and a discussion a newer note, and one whose
+ * question closed, was sent, or lost what it carries is dropped. An older snapshot changes
+ * nothing. Returns null when nothing changed.
  */
 export function syncComposerQuestionAnswers(
   threadId: string,
@@ -202,18 +202,13 @@ export function syncComposerQuestionAnswers(
   const next = records.flatMap((record) => {
     if (!isQuestionRecord(record)) return [record];
     const question = workspace.questions.find((entry) => entry.id === record.questionId);
-    // Another tile can hold an older snapshot, so only what it has seen may change the chip.
-    if (question === undefined) return [record];
-    const closed =
-      (question.state !== "open" && question.state !== "deferred") ||
-      question.sentInMessageId !== undefined;
-    const fresh = closed
-      ? null
-      : isQuestionAnswer(record)
-        ? threadQuestionAnswerRecord(threadId, question)
-        : threadQuestionDiscussRecord(threadId, question);
+    // Another tile can hold an older snapshot: one older than the chip's draft changes nothing.
+    if (question === undefined || workspace.revision < record.answerRevision) return [record];
+    // Null once the question is closed or sent, or its draft no longer carries anything.
+    const fresh = isQuestionAnswer(record)
+      ? threadQuestionAnswerRecord(threadId, question)
+      : threadQuestionDiscussRecord(threadId, question);
     if (fresh === null) {
-      if (!closed && workspace.revision < record.answerRevision) return [record];
       changed = true;
       return [];
     }
