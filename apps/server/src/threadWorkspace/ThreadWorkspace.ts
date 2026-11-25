@@ -53,7 +53,7 @@ import {
   sanitizeComposerContextLabel,
 } from "@t3tools/shared/composerContextReferences";
 import { migrateAnnotations } from "./ThreadMarks.ts";
-import { questionDeliveries } from "./questionDelivery.ts";
+import { questionDeliveries, runsWithProviderTurn } from "./questionDelivery.ts";
 import * as Stream from "effect/Stream";
 
 export class ThreadWorkspace extends Context.Service<
@@ -310,9 +310,16 @@ const make = Effect.gen(function* () {
     )
       return workspace;
     const records = yield* orchestrator
-      .getThreadRecords(workspace.threadId, ["messages", "runs"], { messageRoles: ["user"] })
+      .getThreadRecords(workspace.threadId, ["messages", "runs", "attempts", "providerTurns"], {
+        messageRoles: ["user"],
+      })
       .pipe(Effect.mapError(storage));
-    const deliveries = questionDeliveries(workspace.questions, records.messages, records.runs);
+    const deliveries = questionDeliveries(
+      workspace.questions,
+      records.messages,
+      records.runs,
+      runsWithProviderTurn(records.attempts, records.providerTurns),
+    );
     const now = DateTime.formatIso(yield* DateTime.now);
     let changed = false;
     const questions = workspace.questions.map((question): ThreadQuestion => {

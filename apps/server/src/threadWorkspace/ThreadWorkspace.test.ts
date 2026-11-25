@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import { expect, it } from "@effect/vitest";
 import {
+  RunAttemptId,
   RunId,
   MessageId,
   ComposerContextId,
@@ -9,7 +10,9 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type OrchestrationV2ProviderTurn,
   type OrchestrationV2Run,
+  type OrchestrationV2RunAttempt,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ServerCommand,
@@ -85,6 +88,9 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
   const messages: OrchestrationV2ConversationMessage[] = [];
   // The thread's own runs; another thread id reads as a delegated lane with one run.
   const threadRuns: OrchestrationV2Run[] = [];
+  // A provider turn for one of a run's attempts is how a provider's acceptance is recorded.
+  const threadAttempts: OrchestrationV2RunAttempt[] = [];
+  const threadProviderTurns: OrchestrationV2ProviderTurn[] = [];
   const domainEvents = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
   const syncSignals = yield* Queue.unbounded<ReadonlyArray<OrchestrationV2ThreadQuestionSummary>>();
   const run = (): OrchestrationV2Run => ({
@@ -131,6 +137,8 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
             archivedAt: threadState.archivedAt,
           },
           runs: id === threadId ? threadRuns : [run()],
+          attempts: id === threadId ? threadAttempts : [],
+          providerTurns: id === threadId ? threadProviderTurns : [],
         })),
       streamDomainEvents: Stream.fromQueue(domainEvents),
       dispatch: (command: OrchestrationV2ServerCommand) => {
@@ -194,6 +202,12 @@ const harness = Effect.fn("test.workspaceHarness")(function* () {
     dispatchFailures,
     messages,
     threadRuns,
+    /** Records the provider accepting `runId`'s turn: an attempt and its provider turn. */
+    acceptTurn: (runId: string) => {
+      const attemptId = RunAttemptId.make(`${runId}-attempt`);
+      threadAttempts.push({ id: attemptId, runId: RunId.make(runId) } as OrchestrationV2RunAttempt);
+      threadProviderTurns.push({ runAttemptId: attemptId } as OrchestrationV2ProviderTurn);
+    },
     domainEvents,
     syncSignals,
     fs,
@@ -877,8 +891,9 @@ it.effect("counts an answer a queued message carries as sent until its turn star
       ["Q2", false],
     ]);
 
-    // Its turn starts: the agent received Q1, which closes as answered by the user.
+    // The provider accepts its turn: the agent received Q1, which closes as answered by the user.
     h.threadRuns[1] = threadRun("r2", "m2", "running");
+    h.acceptTurn("r2");
     const received = yield* h.service.get({ threadId });
     expect(received.questions[0]).toMatchObject({
       state: "answered",
@@ -903,7 +918,7 @@ it.effect("counts an answer a queued message carries as sent until its turn star
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
-it.effect("closes an answer only once the turn carrying it has really started", () =>
+it.effect("closes an answer only once a provider has accepted the turn carrying it", () =>
   Effect.gen(function* () {
     const h = yield* harness();
     yield* h.service.questionAsk({
@@ -915,6 +930,7 @@ it.effect("closes an answer only once the turn carrying it has really started", 
       answers: { Q1: { chosenOptionIds: ["pg"], notes: "" } },
     });
     const revision = drafted.questions[0]!.answer!.draftRevision!;
+    const sentState = () => h.mirror.questions.map((question) => question.sent === true);
     h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "Postgres")]));
     h.threadRuns.push(threadRun("r1", "m1", "queued"));
     // The save is refused even before any read has marked the answer sent.
@@ -923,29 +939,41 @@ it.effect("closes an answer only once the turn carrying it has really started", 
         h.service.questionDraft({ threadId, answers: { Q1: { chosenOptionIds: [], notes: "" } } }),
       )).code,
     ).toBe("invalid");
-    // Promoted from the queue, but the provider has not accepted the turn yet.
     h.threadRuns[0] = threadRun("r1", "m1", "starting", { startedAt: null });
-    const starting = yield* h.service.get({ threadId });
-    expect(starting.questions[0]).toMatchObject({ state: "open", sentInMessageId: "m1" });
-    // The provider failed before the turn started: the answer never reached the agent.
-    h.threadRuns[0] = threadRun("r1", "m1", "failed", { startedAt: null });
-    const failed = yield* h.service.get({ threadId });
-    expect(failed.questions[0]).toMatchObject({
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      state: "open",
+      sentInMessageId: "m1",
+    });
+    // The running write lands, with a start time, before the start service calls the adapter.
+    h.threadRuns[0] = threadRun("r1", "m1", "running");
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      state: "open",
+      sentInMessageId: "m1",
+    });
+    expect(sentState()).toEqual([true]);
+    // The adapter refuses the start: no provider turn, so the agent never got the answer.
+    h.threadRuns[0] = threadRun("r1", "m1", "failed");
+    const refused = yield* h.service.get({ threadId });
+    expect(refused.questions[0]).toMatchObject({
       state: "open",
       answer: { chosenOptionIds: ["pg"], submittedAt: null },
     });
-    expect(failed.questions[0]).not.toHaveProperty("sentInMessageId");
-    // Sent again, and this time the turn starts.
+    expect(refused.questions[0]).not.toHaveProperty("sentInMessageId");
+    expect(sentState()).toEqual([false]);
+    // Sent again, and this time the provider accepts the turn.
     h.messages.push(userMessage("m2", [answerRecord("Q1", revision, "Postgres")]));
-    h.threadRuns.push(threadRun("r2", "m2", "starting", { startedAt: null }));
-    yield* h.service.get({ threadId });
-    h.threadRuns[1] = threadRun("r2", "m2", "running");
+    h.threadRuns.push(threadRun("r2", "m2", "running"));
+    h.acceptTurn("r2");
     const received = yield* h.service.get({ threadId });
     expect(received.questions[0]).toMatchObject({
       state: "answered",
       answeredBy: "user",
       sentInMessageId: "m2",
     });
+    expect(h.mirror.questions).toEqual([]);
+    expect((yield* h.service.get({ threadId })).questions[0]).toEqual(received.questions[0]);
+    // Accepted, then failed later: the agent had the answer, so it stays received.
+    h.threadRuns[1] = threadRun("r2", "m2", "failed");
     expect((yield* h.service.get({ threadId })).questions[0]).toEqual(received.questions[0]);
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
