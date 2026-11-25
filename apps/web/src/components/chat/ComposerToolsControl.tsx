@@ -7,6 +7,7 @@ import {
   type ProviderInstanceId,
   type ThreadToolOverrides,
   type OrchestrationV2ListThreadMcpServersResult,
+  threadToolOverridesNotice,
 } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
@@ -227,11 +228,7 @@ function ToolsPopoverContent({
       setFailure(error instanceof Error ? error.message : "Could not reload the session.");
       return;
     }
-    toastManager.add({
-      type: "success",
-      title: "Tools saved",
-      description: "This applies from the next message.",
-    });
+    toastManager.add({ type: "success", title: threadToolOverridesNotice(staged) });
     onApplied();
   };
   return (

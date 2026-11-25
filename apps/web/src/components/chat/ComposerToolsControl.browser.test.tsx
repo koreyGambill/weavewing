@@ -181,8 +181,7 @@ it("saves and closes, with no pending state, and reads all on when nothing is le
   await expect.element(dialog).not.toBeInTheDocument();
   expect(toast).toHaveBeenCalledWith(
     expect.objectContaining({
-      title: "Tools saved",
-      description: "This applies from the next message.",
+      title: "Tools changed: 1 MCP server off. This applies from the next message.",
     }),
   );
 });

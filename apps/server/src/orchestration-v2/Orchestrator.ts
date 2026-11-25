@@ -83,9 +83,8 @@ import {
   TurnItemId,
   TrimmedNonEmptyString,
   managedRuntimeModeCeilingMessage,
-  CLAUDE_REMOVABLE_BUILTIN_TOOLS,
   T3_MCP_SERVER_NAME,
-  type ThreadToolOverrides,
+  threadToolOverridesNotice,
 } from "@t3tools/contracts";
 import { claudeMcpServerRule } from "@t3tools/shared/mcpApp";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -735,29 +734,6 @@ export function threadHasUnfinishedWork(records: {
         run.status !== "rolled_back",
     ) || records.runtimeRequests.some((request) => request.status === "pending")
   );
-}
-
-function listInProse(items: ReadonlyArray<string>): string {
-  return items.length <= 1
-    ? (items[0] ?? "")
-    : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
-
-/** The timeline line after a tool change, e.g. "Tools changed: ScheduleWakeup on. …" */
-function threadToolOverridesNotice(overrides: ThreadToolOverrides): string {
-  const switchedOn = [
-    ...CLAUDE_REMOVABLE_BUILTIN_TOOLS.filter((tool) =>
-      overrides.enabledBuiltinTools.includes(tool.value),
-    ).map((tool) => tool.label),
-    ...(overrides.claudeAiConnectors ? ["claude.ai connectors"] : []),
-  ];
-  const omitted = overrides.omittedMcpServers.length;
-  const changes = [
-    ...(switchedOn.length === 0 ? [] : [`${listInProse(switchedOn)} on`]),
-    ...(omitted === 0 ? [] : [`${omitted} MCP ${omitted === 1 ? "server" : "servers"} off`]),
-  ];
-  const summary = changes.length === 0 ? "the provider's defaults" : changes.join(", ");
-  return `Tools changed: ${summary}. This applies from the next message.`;
 }
 
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {

@@ -94,3 +94,26 @@ export const ThreadMcpServer = Schema.Struct({
   active: Schema.Boolean,
 });
 export type ThreadMcpServer = typeof ThreadMcpServer.Type;
+
+function listInProse(items: ReadonlyArray<string>): string {
+  return items.length <= 1
+    ? (items[0] ?? "")
+    : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** What a saved tool change says in the timeline and the toast, e.g. "Tools changed: ScheduleWakeup on. …" */
+export function threadToolOverridesNotice(overrides: ThreadToolOverrides): string {
+  const switchedOn = [
+    ...CLAUDE_REMOVABLE_BUILTIN_TOOLS.filter((tool) =>
+      overrides.enabledBuiltinTools.includes(tool.value),
+    ).map((tool) => tool.label),
+    ...(overrides.claudeAiConnectors ? ["claude.ai connectors"] : []),
+  ];
+  const omitted = overrides.omittedMcpServers.length;
+  const changes = [
+    ...(switchedOn.length === 0 ? [] : [`${listInProse(switchedOn)} on`]),
+    ...(omitted === 0 ? [] : [`${omitted} MCP ${omitted === 1 ? "server" : "servers"} off`]),
+  ];
+  const summary = changes.length === 0 ? "the provider's defaults" : changes.join(", ");
+  return `Tools changed: ${summary}. This applies from the next message.`;
+}
