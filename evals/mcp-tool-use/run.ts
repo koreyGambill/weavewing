@@ -70,6 +70,7 @@ import {
 } from "../../apps/server/src/mcp/toolkits/questions/tools.ts";
 import { t3OpenQuestionsContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
+import { ticketExport } from "./ticketExport.ts";
 import {
   CONTEXT_REWIND_TOOL_NAMES,
   ContextRewindToolkit,
@@ -379,7 +380,7 @@ export const McpToolUseCase = Schema.Struct({
      * Canned tool results by bare name, T3 or native. `"default"` uses the runner's result. For a
      * device tool, a T3 `DeviceError` (`{"_tag": ..., "cause": null}`) fails it inside T3; for a
      * preview tool, a `PreviewAutomationError` fails it with that error's message. See the README
-     * for `{"$sequence": [...]}` and `{"$file": "<repository-relative path>"}` mocks.
+     * for `{"$sequence": [...]}` and `{"$ticketExport": <count>}` mocks.
      */
     mocks: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
     /** Regexes on one part of a shell command. A match wins over the shell simulator. */
@@ -3001,13 +3002,12 @@ const main = Effect.gen(function* () {
         mocks === undefined
           ? undefined
           : Object.fromEntries(
-              yield* Effect.forEach(Object.entries(mocks), ([tool, mock]) =>
-                isRecord(mock) && typeof mock.$file === "string"
-                  ? fs
-                      .readFileString(path.resolve(import.meta.dirname, "../..", mock.$file))
-                      .pipe(Effect.map((text) => [tool, text] as const))
-                  : Effect.succeed([tool, mock] as const),
-              ),
+              Object.entries(mocks).map(([tool, mock]) => [
+                tool,
+                isRecord(mock) && typeof mock.$ticketExport === "number"
+                  ? ticketExport(mock.$ticketExport)
+                  : mock,
+              ]),
             );
       return {
         ...testCase,
