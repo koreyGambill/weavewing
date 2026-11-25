@@ -14,6 +14,7 @@ import {
   NodeId,
   type ProjectId,
   ThreadId,
+  type TurnItemId,
 } from "@t3tools/contracts";
 import * as ProviderCommitBatch from "./ProviderCommitBatch.ts";
 import * as Context from "effect/Context";
@@ -356,62 +357,57 @@ const layerBase: Layer.Layer<
           );
       });
 
-    // A user can answer, or a run interrupt can cancel, after a provider or terminal cleanup
-    // read a request as pending. Recheck inside the write transaction so a stale closure
-    // erases neither the answer nor the earlier cancellation.
+    // A user can answer, or Stop can interrupt, after a provider or terminal cleanup read a
+    // request as open. Recheck inside the write transaction: a provider closure only closes what
+    // is still open, so it erases neither the answer nor the earlier interruption.
     const guardStaleRequestClosures =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
       Effect.fnUntraced(function* (events: ReadonlyArray<OrchestrationV2DomainEvent>) {
+        const isOpen = (status: string) =>
+          status === "idle" || status === "pending" || status === "running" || status === "waiting";
         const staleRequests = new Set<RuntimeRequestId>();
         const staleNodes = new Set<NodeId>();
-        const answeredRequests = new Set<RuntimeRequestId>();
+        const staleItems = new Set<TurnItemId>();
         for (const event of events) {
-          if (event.type === "runtime-request.updated" && event.payload.status === "expired") {
+          if (
+            event.type === "runtime-request.updated" &&
+            (event.payload.status === "cancelled" || event.payload.status === "expired")
+          ) {
             const current = yield* projectionStore.getRuntimeRequest(
               event.threadId,
               event.payload.id,
             );
-            if (current !== undefined && current.status !== "pending") {
+            const userInputStale =
+              event.payload.kind === "user_input" &&
+              event.payload.status === "cancelled" &&
+              (current?.kind !== "user_input" ||
+                current.providerTurnId !== event.payload.providerTurnId ||
+                current.responseCapability.type === "message");
+            if (userInputStale || (current !== undefined && current.status !== "pending")) {
               staleRequests.add(event.payload.id);
               staleNodes.add(event.payload.nodeId);
             }
-            continue;
-          }
-          const closedRequestId =
-            event.type === "node.updated" && event.payload.status === "cancelled"
-              ? event.payload.runtimeRequestId
-              : event.type === "turn-item.updated" &&
-                  event.payload.status === "cancelled" &&
-                  (event.payload.type === "approval_request" ||
-                    event.payload.type === "user_input_request")
-                ? event.payload.requestId
-                : null;
-          if (closedRequestId !== null) {
-            const current = yield* projectionStore.getRuntimeRequest(
-              event.threadId,
-              closedRequestId,
-            );
-            if (current?.status === "resolved") answeredRequests.add(closedRequestId);
-            continue;
-          }
-          if (
-            event.type !== "runtime-request.updated" ||
-            event.payload.kind !== "user_input" ||
-            event.payload.status !== "cancelled"
-          )
-            continue;
-          const current = yield* projectionStore.getRuntimeRequest(
-            event.threadId,
-            event.payload.id,
-          );
-          if (
-            current?.status !== "pending" ||
-            current.kind !== "user_input" ||
-            current.providerTurnId !== event.payload.providerTurnId ||
-            current.responseCapability.type === "message"
+          } else if (
+            event.type === "node.updated" &&
+            event.payload.status === "cancelled" &&
+            event.payload.runtimeRequestId !== null
           ) {
-            staleRequests.add(event.payload.id);
-            staleNodes.add(event.payload.nodeId);
+            const { nodes } = yield* projectionStore.getThreadRecords(event.threadId, ["nodes"], {
+              nodeIds: [event.payload.id],
+            });
+            const current = nodes.find((node) => node.id === event.payload.id);
+            if (current !== undefined && !isOpen(current.status)) staleNodes.add(current.id);
+          } else if (
+            event.type === "turn-item.updated" &&
+            event.payload.status === "cancelled" &&
+            (event.payload.type === "approval_request" ||
+              event.payload.type === "user_input_request")
+          ) {
+            const current = yield* projectionStore.getTurnItem({
+              threadId: event.threadId,
+              itemId: event.payload.id,
+            });
+            if (current !== null && !isOpen(current.status)) staleItems.add(current.id);
           }
         }
         return events.filter((event) => {
@@ -422,23 +418,13 @@ const layerBase: Layer.Layer<
                 !staleRequests.has(event.payload.id)
               );
             case "node.updated":
-              return (
-                event.payload.status !== "cancelled" ||
-                !(
-                  staleNodes.has(event.payload.id) ||
-                  (event.payload.runtimeRequestId !== null &&
-                    answeredRequests.has(event.payload.runtimeRequestId))
-                )
-              );
+              return event.payload.status !== "cancelled" || !staleNodes.has(event.payload.id);
             case "turn-item.updated":
               return (
                 (event.payload.type !== "user_input_request" &&
                   event.payload.type !== "approval_request") ||
                 event.payload.status !== "cancelled" ||
-                !(
-                  staleRequests.has(event.payload.requestId) ||
-                  answeredRequests.has(event.payload.requestId)
-                )
+                !(staleRequests.has(event.payload.requestId) || staleItems.has(event.payload.id))
               );
             default:
               return true;

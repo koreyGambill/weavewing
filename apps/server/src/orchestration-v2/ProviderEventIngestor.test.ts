@@ -1574,7 +1574,7 @@ layer("ProviderEventIngestorV2", (it) => {
       }),
   );
 
-  it.effect("expires only approvals that are still waiting when the provider gives up", () =>
+  it.effect("closes only approvals that are still open when the provider gives up", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
       const eventSink = yield* EventSink.EventSinkV2;
@@ -1613,8 +1613,9 @@ layer("ProviderEventIngestorV2", (it) => {
           resolvedAt: settledAt,
           ...(key === "answered" ? { decision: "acceptForSession" as const } : {}),
         };
+        // Stop cancels the request and interrupts its node and card.
         const status =
-          key === "waiting" ? "waiting" : key === "answered" ? "completed" : "cancelled";
+          key === "waiting" ? "waiting" : key === "answered" ? "completed" : "interrupted";
         const node: OrchestrationV2ExecutionNode = {
           id: nodeId,
           threadId,
@@ -1670,16 +1671,17 @@ layer("ProviderEventIngestorV2", (it) => {
       }
       yield* eventSink.write({ events: seedEvents });
 
-      // What the Codex adapter emits from its stale snapshots when Codex resolves each request.
+      // Closures built from stale snapshots. Codex expires the request first; the answered case
+      // takes Claude's abort shape instead, which cancels the request after its node and card.
       for (const fixture of fixtures) {
-        for (const event of [
+        const closures = [
           {
             type: "runtime_request.updated" as const,
             driver: CODEX_DRIVER,
             threadId,
             runtimeRequest: {
               ...fixture.request,
-              status: "expired" as const,
+              status: fixture.key === "answered" ? ("cancelled" as const) : ("expired" as const),
               responseCapability: { type: "not_resumable" as const, reason: "Codex stopped" },
               resolvedAt: now,
             },
@@ -1694,7 +1696,8 @@ layer("ProviderEventIngestorV2", (it) => {
             driver: CODEX_DRIVER,
             turnItem: { ...fixture.item, status: "cancelled" as const, completedAt: now },
           },
-        ]) {
+        ];
+        for (const event of fixture.key === "answered" ? closures.toReversed() : closures) {
           yield* ingestor.ingestNormalized({
             providerSessionId,
             providerInstanceId: modelSelection.instanceId,
@@ -1714,7 +1717,7 @@ layer("ProviderEventIngestorV2", (it) => {
       assert.deepEqual(statuses, [
         ["waiting", "expired", "cancelled", "cancelled"],
         ["answered", "resolved", "completed", "completed"],
-        ["interrupted", "cancelled", "cancelled", "cancelled"],
+        ["interrupted", "cancelled", "interrupted", "interrupted"],
       ]);
       assert.equal(
         projection.runtimeRequests.find((entry) => entry.id === fixtures[1]!.request.id)?.decision,
