@@ -92,17 +92,17 @@ marks the ones the current session has not loaded. Switching a server off keeps 
 the model's context; the server may still connect. T3 Code's own server always stays in.
 
 The claude.ai connectors form a group. When the provider setting is **Off**, the group's switch
-brings them into this thread. When it is **Leave to Claude Code**, the group reads "Left to
-Claude Code" and the thread can turn them on; otherwise Claude Code decides. Each connector gets
-its own switch once the connectors are known to load. Only the connectors as a whole have a
-token estimate, so a selection of some connectors shows no total.
+brings them all into this thread, and switching on one connector brings in that connector alone.
+When it is **Leave to Claude Code**, the group reads "Left to Claude Code" and the thread can turn
+them on; otherwise Claude Code decides, and a connector the session loaded can be left out. Only
+the connectors as a whole have a token estimate, so the popover shows no total when some of them
+may be left out.
 
-A reload keeps the conversation: the next message resumes it with the new tools. Changing the
-tools can raise the uncached input on that message. The popover shows the reload until the old
-Claude process has ended, and the thread's timeline notes how it went. If the old process does
-not confirm it stopped, the notice says it may still be running; reload again or press Stop.
-Choosing **Reload session** with nothing changed restarts the session anyway, which picks up
-changed Claude settings, skills or MCP servers.
+**Reload session** saves the tools, and the thread's Claude session restarts before the next
+message, keeping the conversation. The change applies from that message, which can carry more
+uncached input. The thread's timeline notes what changed. Choosing **Reload session** with
+nothing changed restarts the session anyway, which picks up changed Claude settings, skills or
+MCP servers.
 
 A reload is refused while a turn is running or the session has background agents or commands;
 stop them or wait, then reload. Queued messages stay queued and run on the reloaded session. A
