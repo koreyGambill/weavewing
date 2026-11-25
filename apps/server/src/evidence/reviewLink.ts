@@ -15,15 +15,35 @@ export interface DelegatedTask {
 export type ThreadReviewVerdict = "approved" | "changes_requested";
 
 const FINAL_VERDICT = /^verdict: (approved|changes requested)$/i;
-// Leading whitespace, quote and list marks, then heading and emphasis marks as well.
-const CONTAINER_MARKS = /^(?:\s|>|[-*+]\s|\d+[.)]\s)+/;
 const LOOKS_LIKE_VERDICT = /^(?:\s|>|[-*+#_`]|\d+[.)])*verdict\s*[:–—-]/i;
-const FENCE = /^(```|~~~)/;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Whether a code fence is still open after these lines, by CommonMark's rules: an opener is a run
+ * of three or more backticks or tildes indented at most three spaces, and only a bare run of the
+ * same character, at least as long, closes it.
+ */
+function endsInsideFence(lines: ReadonlyArray<string>): boolean {
+  let open: string | null = null;
+  for (const line of lines) {
+    const fence = FENCE_LINE.exec(line);
+    if (fence === null) continue;
+    const marker = fence[1]!;
+    const rest = fence[2]!;
+    if (open === null) {
+      // A backtick run followed by another backtick on the line is inline code, not a fence.
+      if (!(marker.startsWith("`") && rest.includes("`"))) open = marker;
+    } else if (marker[0] === open[0] && marker.length >= open.length && rest.trim() === "") {
+      open = null;
+    }
+  }
+  return open !== null;
+}
 
 /**
  * The verdict a reviewer's final message states. Only an exact last line, `Verdict: approved` or
- * `Verdict: changes requested`, counts, and only when no other line looks like a verdict and every
- * code fence before it is closed. Anything else is not a confirmed verdict.
+ * `Verdict: changes requested`, counts, and only when no other line looks like a verdict and no
+ * code fence is open around it. Anything else is not a confirmed verdict.
  */
 export function reviewVerdictFromText(text: string): ThreadReviewVerdict | null {
   const lines = text.split("\n").map((line) => line.trimEnd());
@@ -33,8 +53,7 @@ export function reviewVerdictFromText(text: string): ThreadReviewVerdict | null 
   if (final === null) return null;
   const earlier = lines.slice(0, lastIndex);
   if (earlier.some((line) => LOOKS_LIKE_VERDICT.test(line))) return null;
-  const fences = earlier.filter((line) => FENCE.test(line.replace(CONTAINER_MARKS, "")));
-  if (fences.length % 2 !== 0) return null;
+  if (endsInsideFence(earlier)) return null;
   return final[1]!.toLowerCase() === "approved" ? "approved" : "changes_requested";
 }
 

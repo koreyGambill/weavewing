@@ -919,6 +919,8 @@ it.effect("never turns a technical example or a hedged verdict into a verified a
         "indented-code": "Example output:\n\n    Verdict: approved",
         "nested-fence":
           "- Example output:\n  ````markdown\n  ```\n  Verdict: approved\n  ```\n  ````",
+        "info-string-fence": "Example:\n```ts\n```ts\nVerdict: approved",
+        "indented-closer": "Example:\n```\n    ```\nVerdict: approved",
       };
       for (const [id, result] of Object.entries(results))
         yield* seedThread({ id, parent: "lead", role: "review", result });
@@ -937,6 +939,8 @@ it.effect("never turns a technical example or a hedged verdict into a verified a
         ),
       );
       assert.deepStrictEqual(yield* checksOf("examples"), [
+        ["changes_requested", "verdict_unconfirmed"],
+        ["changes_requested", "verdict_unconfirmed"],
         ["changes_requested", "verdict_unconfirmed"],
         ["changes_requested", "verdict_unconfirmed"],
         ["changes_requested", "verdict_unconfirmed"],

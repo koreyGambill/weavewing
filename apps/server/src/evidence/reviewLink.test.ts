@@ -227,6 +227,7 @@ describe("reviewVerdictFromText", () => {
     ["Verdict: approved", "approved"],
     ["verdict: APPROVED  \n\n", "approved"],
     ["Notes.\n\n```ts\nconst x = 1;\n```\n\nVerdict: approved", "approved"],
+    ["Notes.\n\n````md\n```ts\nx\n```\n  ````  \n\nVerdict: approved", "approved"],
     ["- item one\n> quoted text\n\nVerdict: changes requested\r\n", "changes_requested"],
   ] as const)("reads %j as %s", (text, verdict) => {
     expect(reviewVerdictFromText(text)).toBe(verdict);
@@ -247,6 +248,17 @@ describe("reviewVerdictFromText", () => {
       "- Example output:\n  ````markdown\n  ```\n  Verdict: approved\n  ```\n  ````",
     ],
     ["an unclosed fence", "Example:\n```\nVerdict: approved"],
+    [
+      "a four-backtick fence that shorter fences cannot close",
+      "Example:\n````md\n```\n```ts\n```\nVerdict: approved",
+    ],
+    [
+      "a fence that lines with an info string cannot close",
+      "Example:\n```ts\n```ts\nVerdict: approved",
+    ],
+    ["a fence that an indented line cannot close", "Example:\n```\n    ```\nVerdict: approved"],
+    ["a fence after inline code", "Run ```x``` first.\n```\nVerdict: approved"],
+    ["a tilde fence that backticks cannot close", "Example:\n~~~\n```\nVerdict: approved"],
     ["an earlier verdict", "Verdict: changes requested\n\nVerdict: approved"],
     ["an earlier quoted verdict", "> Verdict: changes requested\n\nVerdict: approved"],
     ["an earlier bold verdict", "**Verdict — request changes.**\n\nVerdict: approved"],
