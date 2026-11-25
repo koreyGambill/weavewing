@@ -10,7 +10,7 @@ const indicatorClassName =
 
 const variantClassNames = {
   default: "",
-  contrast: "border-foreground/55",
+  contrast: "border-foreground/55 bg-clip-padding data-disabled:opacity-100",
 };
 
 type CheckboxVariant = keyof typeof variantClassNames;
