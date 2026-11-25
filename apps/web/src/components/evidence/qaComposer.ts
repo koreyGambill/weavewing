@@ -45,6 +45,12 @@ function focusNearestComposer(from: HTMLElement | null) {
       const editor = node.querySelector<HTMLElement>('[data-testid="composer-editor"]');
       if (editor) {
         editor.focus();
+        // After the reference the store just appended, so the user's words follow it.
+        const caret = document.createRange();
+        caret.selectNodeContents(editor);
+        caret.collapse(false);
+        window.getSelection()?.removeAllRanges();
+        window.getSelection()?.addRange(caret);
         return;
       }
     }

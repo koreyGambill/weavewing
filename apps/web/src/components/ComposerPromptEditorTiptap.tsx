@@ -595,8 +595,8 @@ function ComposerContextReferenceNodeView({ node, deleteNode }: NodeViewProps) {
         contextId={(node.attrs.contextId as string) ?? ""}
         label={label}
       />
-      {/* An answer chip is easy to miss as text, so it carries its own way out. */}
-      {kind === "artifact-answer" ? (
+      {/* Answer and Discuss chips are easy to miss as text, so they carry their own way out. */}
+      {kind === "artifact-answer" || kind === "waiting-item" ? (
         <Button
           size="icon-micro"
           variant="ghost-muted"

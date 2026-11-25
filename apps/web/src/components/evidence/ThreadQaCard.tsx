@@ -194,6 +194,7 @@ export function ThreadQaCard({
         hint={note ? <p className="whitespace-pre-wrap">{note}</p> : undefined}
         expandRef={focusOnMount("line")}
         onExpand={() => setExpanded(true)}
+        stackOnNarrow
       >
         <QaStatusBadge status={status} note={note} />
         {reopenButton}

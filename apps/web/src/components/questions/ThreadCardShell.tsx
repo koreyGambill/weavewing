@@ -48,6 +48,7 @@ export function ThreadCardClosedLine({
   hint,
   expandRef,
   onExpand,
+  stackOnNarrow = false,
   children,
 }: {
   readonly id: string | undefined;
@@ -60,6 +61,8 @@ export function ThreadCardClosedLine({
   readonly hint?: ReactNode;
   readonly expandRef?: Ref<HTMLButtonElement>;
   readonly onExpand: () => void;
+  /** On a narrow card, `children` move under the title so the title stays readable. */
+  readonly stackOnNarrow?: boolean;
   readonly children?: ReactNode;
 }) {
   return (
@@ -68,7 +71,12 @@ export function ThreadCardClosedLine({
       aria-label={label}
       className="@container min-w-0 rounded-lg border border-border bg-background px-2.5 py-1.5"
     >
-      <div className="flex min-w-0 items-center gap-2 text-sm">
+      <div
+        className={cn(
+          "flex min-w-0 items-center gap-2 text-sm",
+          stackOnNarrow && "flex-wrap justify-end @min-[28rem]:flex-nowrap",
+        )}
+      >
         <Tooltip>
           <TooltipTrigger
             render={
@@ -77,7 +85,11 @@ export function ThreadCardClosedLine({
                 type="button"
                 aria-expanded={false}
                 onClick={onExpand}
-                className={cn(headingButtonClass, "items-baseline gap-2")}
+                className={cn(
+                  headingButtonClass,
+                  "items-baseline gap-2",
+                  stackOnNarrow && "basis-full @min-[28rem]:basis-auto",
+                )}
               />
             }
           >
