@@ -1786,6 +1786,104 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
+  it.effect("asks once before computer use in full access, then allows it for the session", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "computer-use-thread";
+      const nativeTurnId = "computer-use-turn";
+      const prompt = "Read the TextEdit window title.";
+      const computerUseElicitation = (id: number, app: string) => ({
+        type: "emit_inbound" as const,
+        frame: {
+          id,
+          method: "mcpServer/elicitation/request",
+          params: {
+            threadId: nativeThreadId,
+            turnId: nativeTurnId,
+            serverName: "cua_repl",
+            mode: "form",
+            _meta: {
+              codex_approval_kind: "mcp_tool_call",
+              connector_id: "computer-use",
+              connector_name: "Computer Use",
+              persist: ["session", "always"],
+              tool_name: "get_app_state",
+              tool_params: { app },
+            },
+            message: `Allow Computer Use to use "${app}"?`,
+            requestedSchema: { type: "object", properties: {} },
+          },
+        },
+      });
+      const sessionAcceptance = (id: number) => ({
+        type: "expect_outbound" as const,
+        frame: { id, result: { action: "accept", _meta: { persist: "session" }, content: {} } },
+      });
+      const pending = yield* Queue.unbounded<OrchestrationV2RuntimeRequest>();
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: "computer-use-session-approval",
+          entries: [
+            ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+            computerUseElicitation(0, "com.apple.TextEdit"),
+            sessionAcceptance(0),
+            computerUseElicitation(1, "com.apple.Notes"),
+            sessionAcceptance(1),
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        }),
+        (event) =>
+          event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+            ? Queue.offer(pending, event.runtimeRequest)
+            : Effect.void,
+      );
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("computer-use-session-approval-attempt"),
+          text: prompt,
+        }),
+      );
+      const request = yield* Effect.raceFirst(
+        Queue.take(pending),
+        harness.firstTerminal.pipe(
+          Effect.andThen(Effect.die("Computer use ran without asking first")),
+        ),
+      );
+      assert.equal(request.kind, "mcp-elicitation");
+      yield* harness.runtime.respondToRuntimeRequest({
+        requestId: request.id,
+        decision: "acceptForSession",
+      });
+      yield* harness.firstTerminal;
+      assert.isTrue(Option.isNone(yield* Queue.poll(pending)));
+      assert.deepEqual(
+        harness.terminalEvents().map((event) => event.status),
+        ["completed"],
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect("starts turns before tool discovery and reuses the native thread footprint", () =>
     Effect.gen(function* () {
       const nativeThreadId = "footprint-thread";

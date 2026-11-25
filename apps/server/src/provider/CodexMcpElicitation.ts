@@ -112,6 +112,19 @@ function isMcpElicitationPersistenceField(
   );
 }
 
+const isComputerUseMetadata = Schema.is(
+  Schema.Struct({
+    codex_approval_kind: Schema.Literal("mcp_tool_call"),
+    connector_id: Schema.Literal("computer-use"),
+  }),
+);
+
+export function isComputerUseElicitation(
+  payload: EffectCodexSchema.McpServerElicitationRequestParams,
+): boolean {
+  return payload.serverName === "cua_repl" && isComputerUseMetadata(payload._meta);
+}
+
 export function describeMcpElicitation(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
 ): { readonly appName: string; readonly options: ReadonlyArray<ProviderApprovalOption> } {
@@ -159,7 +172,11 @@ export function describeMcpElicitation(
         ? [
             {
               decision: "acceptForSession" as const,
-              label: persistenceOptions.get("acceptForSession") || "Always allow this session",
+              label:
+                persistenceOptions.get("acceptForSession") ||
+                (isComputerUseElicitation(payload)
+                  ? "Allow any app this session"
+                  : "Always allow this session"),
             },
           ]
         : []),

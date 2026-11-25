@@ -51,6 +51,10 @@ continues without the removal and tells you what it skipped.
 While a Claude approval is pending, type a text reply to decline that request and give feedback
 directly to the agent that asked, including a subagent. Other pending requests stay unanswered.
 
+Codex asks before its first computer-use action in a thread, in every mode including **Full
+access**. Choose **Allow any app this session** to let it control any app Codex permits for the rest of the
+session without asking again.
+
 Antigravity can still send native approval requests in **Full access**. It only offers remembered
 approvals for actions that support them.
 
