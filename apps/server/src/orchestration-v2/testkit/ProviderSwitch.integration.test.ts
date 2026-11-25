@@ -23,6 +23,7 @@ import {
   ProviderTurnId,
   ScheduledTaskId,
   ThreadId,
+  type ThreadToolOverrides,
   TurnItemId,
   ProviderDriverKind,
 } from "@t3tools/contracts";
@@ -90,6 +91,7 @@ interface CapturedTurn {
   readonly nativeThreadId?: string | null;
   readonly providerTurnOrdinal?: number;
   readonly nativeThreadHasTurns?: boolean;
+  readonly toolOverrides?: ThreadToolOverrides;
 }
 
 function unimplemented(driver: ProviderDriverKind, detail: string) {
@@ -323,6 +325,9 @@ function makeTestAdapter(input: {
                   attachments: turnInput.message.attachments,
                   nativeThreadId: turnInput.providerThread.nativeThreadRef?.nativeId ?? null,
                   providerTurnOrdinal: turnInput.providerTurnOrdinal,
+                  ...(turnInput.appThread.toolOverrides === undefined
+                    ? {}
+                    : { toolOverrides: turnInput.appThread.toolOverrides }),
                   ...(turnInput.nativeThreadHasTurns === undefined
                     ? {}
                     : { nativeThreadHasTurns: turnInput.nativeThreadHasTurns }),
@@ -6007,4 +6012,383 @@ describe("orchestration v2 provider switching", () => {
         );
       }),
   );
+
+  describe("thread tool overrides", () => {
+    const toolsThreadId = ThreadId.make("thread:tool-overrides");
+    const wakeupAndConnectors: ThreadToolOverrides = {
+      enabledBuiltinTools: ["ScheduleWakeup"],
+      claudeAiConnectors: true,
+      omittedMcpServers: [],
+    };
+    const harness = (
+      name: string,
+      claude: Omit<
+        Parameters<typeof makeTestAdapter>[0],
+        "instanceId" | "driver" | "capabilities" | "modelSelection" | "responseByRunOrdinal"
+      >,
+    ) =>
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace(name);
+        return ProviderReplayHarness.layerWithRegistry(
+          {
+            name,
+            runtimePolicyOverride: {
+              cwd,
+              approvalPolicy: "never",
+              sandboxPolicy: {
+                type: "readOnly",
+                access: { type: "fullAccess" },
+                networkAccess: false,
+              },
+            },
+          },
+          ProviderAdapterRegistry.layerFromAdapters([
+            makeTestAdapter({
+              ...claude,
+              instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+              driver: CLAUDE_DRIVER,
+              capabilities: ClaudeProviderCapabilitiesV2,
+              modelSelection: CLAUDE_MODEL_SELECTION,
+              responseByRunOrdinal: {},
+            }),
+            makeTestAdapter({
+              instanceId: CODEX_MODEL_SELECTION.instanceId,
+              driver: CODEX_DRIVER,
+              capabilities: CodexProviderCapabilitiesV2,
+              modelSelection: CODEX_MODEL_SELECTION,
+              responseByRunOrdinal: {},
+              capturedTurns: claude.capturedTurns,
+            }),
+          ]),
+        );
+      });
+    const createThread = (threadId: ThreadId, modelSelection: ModelSelection) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:${threadId}:create`),
+          threadId,
+          projectId: ProjectId.make("project:tool-overrides"),
+          title: "Tool overrides",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+      });
+    const sendTo = (
+      threadId: ThreadId,
+      key: string,
+      dispatchMode: "start_immediately" | "queue_after_active" = "start_immediately",
+    ) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          origin: { kind: "user" as const },
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:${threadId}:${key}`),
+          threadId,
+          messageId: MessageId.make(`message:${threadId}:${key}`),
+          text: `Prompt ${key}`,
+          attachments: [],
+          modelSelection: thread.modelSelection,
+          dispatchMode: { type: dispatchMode },
+        });
+      });
+    const setTools = (threadId: ThreadId, key: string, toolOverrides: ThreadToolOverrides) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        return yield* orchestrator.dispatch({
+          type: "thread.tool-overrides.set",
+          commandId: CommandId.make(`command:${threadId}:tools:${key}`),
+          threadId,
+          toolOverrides,
+        });
+      });
+
+    it.live("reloads an idle Claude session and resumes its conversation with the new tools", () =>
+      Effect.gen(function* () {
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const closedSessions = yield* Ref.make<ReadonlyArray<string>>([]);
+        const layer = yield* harness("tool-overrides-idle", {
+          capturedTurns,
+          closedSessions,
+          nativeThreadGeneration: yield* Ref.make(0),
+        });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const outbox = yield* EffectOutbox.EffectOutboxV2;
+          yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+          yield* sendTo(toolsThreadId, "first");
+          yield* worker.drain();
+          const afterFirst = yield* waitForIdle(toolsThreadId);
+          const session = afterFirst.providerSessions[0]!;
+          assert.equal(session.status, "ready");
+
+          const reload = Effect.fn("ToolOverridesTest.reload")(function* (key: string) {
+            yield* setTools(toolsThreadId, key, wakeupAndConnectors);
+            const detach = (yield* outbox.listByCommandId(
+              CommandId.make(`command:${toolsThreadId}:tools:${key}`),
+            )).find((effect) => effect.request.type === "provider-session.detach");
+            if (detach !== undefined) yield* outbox.awaitSettled(detach.id);
+            return detach;
+          });
+          const detach = yield* reload("on");
+          const reloaded = yield* orchestrator.getThreadProjection(toolsThreadId);
+          assert.deepEqual(reloaded.thread.toolOverrides, wakeupAndConnectors);
+          assert.deepEqual(yield* Ref.get(closedSessions), [session.id]);
+          // A reload keeps the thread's MCP credential; only terminal detaches revoke it.
+          assert.deepInclude(detach?.request, { detail: "Tools changed." });
+          assert.notProperty(detach?.request, "revokeMcpCredential");
+          const notice = reloaded.turnItems.find((item) => item.type === "system_notice");
+          assert.deepInclude(notice, {
+            runId: afterFirst.runs[0]!.id,
+            level: "info",
+            message: "Session reloaded with ScheduleWakeup and claude.ai connectors.",
+          });
+
+          // Unchanged values still reload, which picks up changed settings or MCP servers.
+          yield* sendTo(toolsThreadId, "second");
+          yield* worker.drain();
+          const afterSecond = yield* waitForIdle(toolsThreadId);
+          assert.isDefined(yield* reload("again"));
+          assert.lengthOf(yield* Ref.get(closedSessions), 2);
+
+          yield* sendTo(toolsThreadId, "third");
+          yield* worker.drain();
+          yield* waitForIdle(toolsThreadId);
+          const turns = yield* Ref.get(capturedTurns);
+          assert.deepEqual(
+            turns.map((turn) => [turn.text, turn.toolOverrides]),
+            [
+              ["Prompt first", undefined],
+              ["Prompt second", wakeupAndConnectors],
+              ["Prompt third", wakeupAndConnectors],
+            ],
+          );
+          // Every turn resumes the same native conversation.
+          assert.lengthOf(new Set(turns.map((turn) => turn.nativeThreadId)), 1);
+          assert.isAbove(afterSecond.runs.length, 1);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    it.live("refuses while a turn runs and stores nothing", () =>
+      Effect.gen(function* () {
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const closedSessions = yield* Ref.make<ReadonlyArray<string>>([]);
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const layer = yield* harness("tool-overrides-busy", {
+          capturedTurns,
+          closedSessions,
+          holdFirstTurn: started,
+          releaseFirstTurn: release,
+        });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+          yield* sendTo(toolsThreadId, "first");
+          yield* Deferred.await(started);
+          const refused = yield* setTools(toolsThreadId, "busy", wakeupAndConnectors).pipe(
+            Effect.flip,
+          );
+          assert.deepInclude(refused, {
+            _tag: "OrchestratorThreadToolOverridesRejectedError",
+            reason: "busy",
+          });
+          assert.include(refused.message, "Stop it or wait for it to finish");
+          const unchanged = yield* orchestrator.getThreadProjection(toolsThreadId);
+          assert.isUndefined(unchanged.thread.toolOverrides);
+          assert.deepEqual(yield* Ref.get(closedSessions), []);
+          yield* Deferred.succeed(release, undefined);
+          yield* waitForIdle(toolsThreadId);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    it.live("refuses while the session runs background work and stores nothing", () =>
+      Effect.gen(function* () {
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const closedSessions = yield* Ref.make<ReadonlyArray<string>>([]);
+        const backgroundWork = yield* Ref.make(false);
+        const layer = yield* harness("tool-overrides-background", {
+          capturedTurns,
+          closedSessions,
+          backgroundWork,
+        });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+          yield* sendTo(toolsThreadId, "first");
+          yield* worker.drain();
+          yield* waitForIdle(toolsThreadId);
+          yield* Ref.set(backgroundWork, true);
+          const refused = yield* setTools(toolsThreadId, "background", wakeupAndConnectors).pipe(
+            Effect.flip,
+          );
+          assert.deepInclude(refused, {
+            _tag: "OrchestratorThreadToolOverridesRejectedError",
+            reason: "background-work",
+          });
+          assert.include(refused.message, "still running background agents or commands");
+          yield* worker.drain();
+          const unchanged = yield* orchestrator.getThreadProjection(toolsThreadId);
+          assert.isUndefined(unchanged.thread.toolOverrides);
+          assert.deepEqual(yield* Ref.get(closedSessions), []);
+          assert.equal(unchanged.providerSessions[0]?.status, "ready");
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    it.live("keeps a held queued message, which then runs on the reloaded session", () =>
+      Effect.gen(function* () {
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const closedSessions = yield* Ref.make<ReadonlyArray<string>>([]);
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const layer = yield* harness("tool-overrides-queued", {
+          capturedTurns,
+          closedSessions,
+          holdFirstTurn: started,
+          releaseFirstTurn: release,
+          nativeThreadGeneration: yield* Ref.make(0),
+        });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+          yield* sendTo(toolsThreadId, "first");
+          yield* Deferred.await(started);
+          yield* sendTo(toolsThreadId, "queued", "queue_after_active");
+          const [first, queued] = (yield* orchestrator.getThreadProjection(toolsThreadId)).runs;
+          yield* orchestrator.dispatch({
+            type: "run.interrupt",
+            commandId: CommandId.make("command:tool-overrides-queued:interrupt"),
+            threadId: toolsThreadId,
+            runId: first!.id,
+            holdQueue: true,
+          });
+          yield* Deferred.succeed(release, undefined);
+          yield* worker.drain();
+          const held = yield* orchestrator.getThreadProjection(toolsThreadId);
+          assert.deepInclude(
+            held.runs.find((run) => run.id === queued!.id),
+            { status: "queued", queueHeld: true },
+          );
+
+          yield* setTools(toolsThreadId, "on", wakeupAndConnectors);
+          yield* worker.drain();
+          assert.deepInclude(
+            (yield* orchestrator.getThreadProjection(toolsThreadId)).runs.find(
+              (run) => run.id === queued!.id,
+            ),
+            { status: "queued", queueHeld: true },
+          );
+          yield* orchestrator.dispatch({
+            type: "queue.resume",
+            commandId: CommandId.make("command:tool-overrides-queued:resume"),
+            threadId: toolsThreadId,
+          });
+          yield* worker.drain();
+          const resumed = yield* waitForIdle(toolsThreadId);
+          assert.equal(resumed.runs.find((run) => run.id === queued!.id)?.status, "completed");
+          const turns = yield* Ref.get(capturedTurns);
+          assert.deepEqual(turns.at(-1)?.toolOverrides, wakeupAndConnectors);
+          assert.equal(turns.at(-1)?.nativeThreadId, turns[0]?.nativeThreadId);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    it.live(
+      "stores the value without a reload when no session is live, and touches no other thread",
+      () =>
+        Effect.gen(function* () {
+          const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+          const closedSessions = yield* Ref.make<ReadonlyArray<string>>([]);
+          const layer = yield* harness("tool-overrides-no-session", {
+            capturedTurns,
+            closedSessions,
+          });
+          const childThreadId = ThreadId.make("thread:tool-overrides-child");
+          yield* Effect.gen(function* () {
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+            yield* createThread(childThreadId, CLAUDE_MODEL_SELECTION);
+            yield* sendTo(childThreadId, "child");
+            yield* worker.drain();
+            const child = yield* waitForIdle(childThreadId);
+
+            yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+            const result = yield* setTools(toolsThreadId, "fresh", wakeupAndConnectors);
+            yield* worker.drain();
+            assert.notInclude(
+              result.storedEvents.map((stored) => stored.event.type),
+              "provider-session.detached",
+            );
+            const stored = yield* orchestrator.getThreadProjection(toolsThreadId);
+            assert.deepEqual(stored.thread.toolOverrides, wakeupAndConnectors);
+            // Another thread, such as a delegated child, keeps its own session and defaults.
+            const childAfter = yield* orchestrator.getThreadProjection(childThreadId);
+            assert.isUndefined(childAfter.thread.toolOverrides);
+            assert.deepEqual(yield* Ref.get(closedSessions), []);
+            assert.equal(childAfter.providerSessions[0]?.id, child.providerSessions[0]?.id);
+            assert.equal(childAfter.providerSessions[0]?.status, "ready");
+
+            yield* sendTo(toolsThreadId, "first");
+            yield* worker.drain();
+            yield* waitForIdle(toolsThreadId);
+            assert.deepEqual(
+              (yield* Ref.get(capturedTurns)).at(-1)?.toolOverrides,
+              wakeupAndConnectors,
+            );
+          }).pipe(Effect.provide(layer));
+        }),
+    );
+
+    it.live(
+      "rejects a non-Claude thread and drops the overrides on a switch to another provider",
+      () =>
+        Effect.gen(function* () {
+          const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+          const layer = yield* harness("tool-overrides-provider", { capturedTurns });
+          const codexThreadId = ThreadId.make("thread:tool-overrides-codex");
+          yield* Effect.gen(function* () {
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            yield* createThread(codexThreadId, CODEX_MODEL_SELECTION);
+            const refused = yield* setTools(codexThreadId, "codex", wakeupAndConnectors).pipe(
+              Effect.flip,
+            );
+            assert.deepInclude(refused, {
+              _tag: "OrchestratorThreadToolOverridesRejectedError",
+              reason: "unsupported-provider",
+            });
+            assert.isUndefined(
+              (yield* orchestrator.getThreadProjection(codexThreadId)).thread.toolOverrides,
+            );
+
+            yield* createThread(toolsThreadId, CLAUDE_MODEL_SELECTION);
+            yield* setTools(toolsThreadId, "on", wakeupAndConnectors);
+            yield* orchestrator.dispatch({
+              type: "thread.model-selection.set",
+              commandId: CommandId.make("command:tool-overrides-provider:switch"),
+              threadId: toolsThreadId,
+              modelSelection: CODEX_MODEL_SELECTION,
+            });
+            const switched = yield* orchestrator.getThreadProjection(toolsThreadId);
+            assert.equal(switched.thread.providerInstanceId, CODEX_MODEL_SELECTION.instanceId);
+            assert.isUndefined(switched.thread.toolOverrides);
+          }).pipe(Effect.provide(layer));
+        }),
+    );
+  });
 });

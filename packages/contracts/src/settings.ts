@@ -33,6 +33,10 @@ import {
   WorktreeSubmodules,
 } from "./environment.ts";
 import { OrchestrationV2ForkHistoryPolicy } from "./orchestrationV2.ts";
+import {
+  CLAUDE_REMOVABLE_BUILTIN_TOOLS,
+  ClaudeRemovableBuiltinTool,
+} from "./threadToolOverrides.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
   CustomModelSetting,
@@ -890,56 +894,16 @@ const InstanceIdleCompaction = Schema.Literals(
   INSTANCE_IDLE_COMPACTION_MODES.map((mode) => mode.value),
 );
 
-/**
- * Claude Code built-in tools a user may leave out of the sessions T3 starts. ToolSearch and Skill
- * are never offered: removing either loads more context than it saves.
- */
-export const CLAUDE_REMOVABLE_BUILTIN_TOOLS = [
-  {
-    value: "Artifact",
-    label: "Artifact",
-    description: "Claude cannot publish claude.ai artifact pages; T3's artifact_write still works.",
-  },
-  {
-    value: "ArtifactData",
-    label: "ArtifactData",
-    description: "Claude cannot read or write a published artifact's shared database.",
-  },
-  {
-    value: "ArtifactComments",
-    label: "ArtifactComments",
-    description: "Claude cannot read or answer comments on published artifacts.",
-  },
-  {
-    value: "Task",
-    label: "Task (Agent)",
-    description:
-      "No native subagents; skills that fan out through them must use delegate_task instead.",
-  },
-  {
-    value: "Workflow",
-    label: "Workflow",
-    description:
-      "Claude cannot run multi-agent workflow scripts; skills that use them must delegate instead.",
-  },
-  {
-    value: "ScheduleWakeup",
-    label: "ScheduleWakeup",
-    description: "/loop without an interval cannot pace itself; /loop with an interval still runs.",
-  },
-  {
-    value: "ReportFindings",
-    label: "ReportFindings",
-    description: "/code-review reports its findings as text instead of a typed list.",
-  },
-] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
-
-export const ClaudeRemovableBuiltinTool = Schema.Literals(
-  CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value),
-);
-export type ClaudeRemovableBuiltinTool = typeof ClaudeRemovableBuiltinTool.Type;
-
 const isClaudeRemovableBuiltinTool = Schema.is(ClaudeRemovableBuiltinTool);
+
+const CLAUDE_AI_CONNECTOR_MODES = [
+  { value: "inherit", label: "Leave to Claude Code" },
+  { value: "off", label: "Off" },
+] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
+export const ClaudeAiConnectorMode = Schema.Literals(
+  CLAUDE_AI_CONNECTOR_MODES.map((mode) => mode.value),
+);
+export type ClaudeAiConnectorMode = typeof ClaudeAiConnectorMode.Type;
 
 /** Left out when the setting was never saved: every removable tool. */
 const CLAUDE_RECOMMENDED_OMITTED_BUILTIN_TOOLS = CLAUDE_REMOVABLE_BUILTIN_TOOLS.map(
@@ -1056,6 +1020,19 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         providerSettingsForm: { control: "switch", clearWhenEmpty: "omit" },
       }),
     ),
+    claudeAiConnectors: ClaudeAiConnectorMode.pipe(
+      Schema.withDecodingDefault(Effect.succeed("inherit" as const)),
+      Schema.annotateKey({
+        title: "claude.ai connectors",
+        description:
+          "Off keeps your Claude account's connectors out of every thread, saving about 3,200 tokens (an estimate); a thread can still switch them on. Applies when a thread's Claude process next starts.",
+        providerSettingsForm: {
+          control: "select",
+          options: CLAUDE_AI_CONNECTOR_MODES,
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
   },
   {
     order: [
@@ -1065,6 +1042,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       "launchArgs",
       "omittedBuiltinTools",
       "contextRewind",
+      "claudeAiConnectors",
     ],
   },
 );

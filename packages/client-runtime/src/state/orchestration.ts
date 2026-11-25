@@ -206,6 +206,10 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:force-stop-thread",
       tag: ORCHESTRATION_V2_WS_METHODS.forceStopThread,
     }),
+    setThreadToolOverrides: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:set-thread-tool-overrides",
+      tag: ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides,
+    }),
     turnItem: (target: {
       readonly environmentId: EnvironmentId;
       readonly input: OrchestrationV2GetTurnItemInput;

@@ -22,6 +22,9 @@ import {
   OrchestrationV2ForceStopThreadError,
   type OrchestrationV2ForceStopThreadInput,
   type OrchestrationV2ForceStopThreadResult,
+  OrchestrationV2SetThreadToolOverridesError,
+  type OrchestrationV2SetThreadToolOverridesInput,
+  type OrchestrationV2SetThreadToolOverridesResult,
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2Command,
@@ -564,6 +567,16 @@ export interface ThreadManagementServiceShape {
   readonly forceStopThread: (
     input: OrchestrationV2ForceStopThreadInput,
   ) => Effect.Effect<OrchestrationV2ForceStopThreadResult, OrchestrationV2ForceStopThreadError>;
+  /**
+   * Replaces a Claude thread's tool overrides and reloads its session so the next turn resumes
+   * the same conversation with the new tools. Refuses while a turn or background work runs.
+   */
+  readonly setThreadToolOverrides: (
+    input: OrchestrationV2SetThreadToolOverridesInput,
+  ) => Effect.Effect<
+    OrchestrationV2SetThreadToolOverridesResult,
+    OrchestrationV2SetThreadToolOverridesError
+  >;
   readonly awaitBackgroundTasks: (input: {
     readonly threadId: ThreadId;
     readonly taskIds: ReadonlyArray<string>;
@@ -1480,6 +1493,45 @@ const make = Effect.gen(function* () {
     return { type: "interrupt_requested", run: interruptibleRun, dispatch } as const;
   });
 
+  const setThreadToolOverrides: ThreadManagementServiceShape["setThreadToolOverrides"] = Effect.fn(
+    "ThreadManagementService.setThreadToolOverrides",
+  )(
+    function* (input) {
+      const result = yield* orchestrator.dispatch({
+        type: "thread.tool-overrides.set",
+        commandId: CommandId.make(
+          `server:tool-overrides:${input.threadId}:${yield* Clock.currentTimeMillis}`,
+        ),
+        threadId: input.threadId,
+        toolOverrides: input.toolOverrides,
+      });
+      return {
+        reloaded: result.storedEvents.some(
+          (stored) => stored.event.type === "provider-session.detached",
+        ),
+      };
+    },
+    Effect.catchTags({
+      OrchestratorThreadToolOverridesRejectedError: (cause) =>
+        Effect.fail(
+          new OrchestrationV2SetThreadToolOverridesError({
+            threadId: cause.threadId,
+            reason: cause.reason,
+          }),
+        ),
+    }),
+    (effect, input) =>
+      Effect.mapError(effect, (cause) =>
+        cause._tag === "OrchestrationV2SetThreadToolOverridesError"
+          ? cause
+          : new OrchestrationV2SetThreadToolOverridesError({
+              threadId: input.threadId,
+              reason: "failed",
+              cause,
+            }),
+      ),
+  );
+
   const forceStopThread: ThreadManagementServiceShape["forceStopThread"] = Effect.fn(
     "ThreadManagementService.forceStopThread",
   )(
@@ -2011,6 +2063,7 @@ const make = Effect.gen(function* () {
     stopDelegatedTasks,
     stopWorkflow,
     forceStopThread,
+    setThreadToolOverrides,
     awaitBackgroundTasks,
     rewindContext,
     getThreadEventSequence: orchestrator.getThreadEventSequence,

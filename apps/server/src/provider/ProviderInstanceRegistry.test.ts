@@ -116,6 +116,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   omittedBuiltinTools: [],
   idleCompaction: "default",
   contextRewind: false,
+  claudeAiConnectors: "inherit",
   ...overrides,
 });
 

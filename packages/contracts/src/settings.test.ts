@@ -11,7 +11,6 @@ import {
   ClientSettingsSchema,
   ClientSettingsPatch,
   ClientServerSettingsPatch,
-  CLAUDE_REMOVABLE_BUILTIN_TOOLS,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
@@ -25,6 +24,7 @@ import {
   ServerSettingsPatch,
   withIdleCompaction,
 } from "./settings.ts";
+import { CLAUDE_REMOVABLE_BUILTIN_TOOLS } from "./threadToolOverrides.ts";
 
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
@@ -652,6 +652,11 @@ describe("Claude omitted built-in tools", () => {
       expect(decoded.omittedBuiltinTools).toEqual(decodeClaudeSettings({}).omittedBuiltinTools);
       expect(decoded.launchArgs).toBe("--x");
     }
+  });
+
+  it("leaves the claude.ai connectors to Claude Code unless a mode is saved", () => {
+    expect(decodeClaudeSettings({}).claudeAiConnectors).toBe("inherit");
+    expect(decodeClaudeSettings({ claudeAiConnectors: "off" }).claudeAiConnectors).toBe("off");
   });
 
   it("offers the seven measured tools and neither ToolSearch nor Skill", () => {

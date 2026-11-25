@@ -1049,6 +1049,7 @@ export function applyToProjection(
     case "thread.pin-reordered":
     case "thread.metadata-updated":
     case "thread.runtime-mode-updated":
+    case "thread.tool-overrides-updated":
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":
     case "thread.provider-switched":
@@ -2055,6 +2056,9 @@ export function threadShellFromProjection(
     ...(projection.thread.sidebarGroup === undefined
       ? {}
       : { sidebarGroup: projection.thread.sidebarGroup }),
+    ...(projection.thread.toolOverrides === undefined
+      ? {}
+      : { toolOverrides: projection.thread.toolOverrides }),
     lastVisitedAt: projection.thread.lastVisitedAt,
     opens: projection.thread.opens ?? null,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -2386,6 +2390,9 @@ function shellFromState(input: {
     ...(input.state.thread.sidebarGroup === undefined
       ? {}
       : { sidebarGroup: input.state.thread.sidebarGroup }),
+    ...(input.state.thread.toolOverrides === undefined
+      ? {}
+      : { toolOverrides: input.state.thread.toolOverrides }),
     lastVisitedAt: input.state.thread.lastVisitedAt,
     opens: input.state.thread.opens ?? null,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
@@ -2583,6 +2590,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.metadata-updated":
             case "thread.pull-request-synced":
             case "thread.runtime-mode-updated":
+            case "thread.tool-overrides-updated":
             case "thread.interaction-mode-updated":
             case "thread.model-selection-updated":
             case "thread.provider-switched":
@@ -3453,6 +3461,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.pull-request-synced" &&
             event.type !== "thread.pull-request-link-updated" &&
             event.type !== "thread.runtime-mode-updated" &&
+            event.type !== "thread.tool-overrides-updated" &&
             event.type !== "thread.interaction-mode-updated" &&
             event.type !== "thread.model-selection-updated" &&
             event.type !== "thread.provider-switched" &&

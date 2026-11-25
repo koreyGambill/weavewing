@@ -97,6 +97,7 @@ import {
   type ChatAttachment,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   ClaudeSettings,
+  type ThreadToolOverrides,
   TrimmedNonEmptyString,
   defaultInstanceIdForDriver,
   isCompactionCommandMessage,
@@ -2409,6 +2410,8 @@ export function makeClaudeQueryOptions(input: {
   readonly appendSystemPromptFileText?: string;
   // Flag settings, because a user's settings.json env beats the process env in Claude Code.
   readonly toolSearchOverride?: "true";
+  /** The thread's own tool overrides, applied on top of `settings`. */
+  readonly toolOverrides?: ThreadToolOverrides;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection, input.modelCatalog);
   const {
@@ -2471,11 +2474,18 @@ export function makeClaudeQueryOptions(input: {
           [`ANTHROPIC_DEFAULT_${compiledSelection.pinnedAlias.toUpperCase()}_MODEL`]:
             compiledSelection.pinnedAlias,
         };
+  // Unset leaves the choice to Claude Code and the user's own settings.
+  const claudeAiConnectorsEnv = input.toolOverrides?.claudeAiConnectors
+    ? "true"
+    : input.settings?.claudeAiConnectors === "off"
+      ? "false"
+      : undefined;
   // A settings file path cannot take extra keys, so it goes through unchanged.
   const effectiveQuerySettings =
     (input.toolSearchOverride === undefined &&
       aliasOverrideEnv === undefined &&
-      autoCompactWindow === undefined) ||
+      autoCompactWindow === undefined &&
+      claudeAiConnectorsEnv === undefined) ||
     typeof compactQuerySettings === "string"
       ? compactQuerySettings
       : ({
@@ -2490,16 +2500,20 @@ export function makeClaudeQueryOptions(input: {
             ...(input.toolSearchOverride === undefined
               ? {}
               : { ENABLE_TOOL_SEARCH: input.toolSearchOverride }),
+            ...(claudeAiConnectorsEnv === undefined
+              ? {}
+              : { ENABLE_CLAUDEAI_MCP_SERVERS: claudeAiConnectorsEnv }),
           },
         } as ClaudeSdkSettings);
   const deviceInstructions = input.mcpServers !== undefined && input.deviceToolsAvailable === true;
   // The SDK removes disallowed tools from the model's context, not only their calls.
+  const threadEnabledTools = input.toolOverrides?.enabledBuiltinTools ?? [];
   const disallowedTools = [
     ...new Set([
       ...(input.disallowedTools ?? []),
-      ...(input.settings?.omittedBuiltinTools ?? []).flatMap((tool) =>
-        tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool],
-      ),
+      ...(input.settings?.omittedBuiltinTools ?? [])
+        .filter((tool) => !threadEnabledTools.includes(tool))
+        .flatMap((tool) => (tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool])),
     ]),
   ];
   const options: ClaudeAgentSdkQueryOptions = {
@@ -3786,8 +3800,10 @@ export function claudeEffectiveQueryPolicyKey(
     readonly allowedTools?: ReadonlyArray<string>;
     readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   },
+  toolOverrides?: ThreadToolOverrides,
 ): string {
   return JSON.stringify({
+    toolOverrides,
     runtimePolicy: claudeRuntimeQueryPolicyKey({
       ...queryPolicy,
       ...(mcpOverrides.allowedTools === undefined
@@ -12952,10 +12968,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 ? {}
                 : { additionalDirectories: existing.queryPolicy.additionalDirectories }),
             };
-            if (claudeEffectiveQueryPolicyKey(retained, mcpOverrides) === existing.queryPolicyKey)
+            if (
+              claudeEffectiveQueryPolicyKey(
+                retained,
+                mcpOverrides,
+                turnInput.appThread.toolOverrides,
+              ) === existing.queryPolicyKey
+            )
               queryPolicy = retained;
           }
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          const queryPolicyKey = claudeEffectiveQueryPolicyKey(
+            queryPolicy,
+            mcpOverrides,
+            turnInput.appThread.toolOverrides,
+          );
           // Continuations drain existing output without prompting; retain the live process regardless of selection.
           if (
             existing !== null &&
@@ -13131,6 +13157,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             supportedDialogKinds: ["resume_return"],
             ...(appendSystemPromptFileText === undefined ? {} : { appendSystemPromptFileText }),
             ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
+            ...(turnInput.appThread.toolOverrides === undefined
+              ? {}
+              : { toolOverrides: turnInput.appThread.toolOverrides }),
           });
           if (turnInput.onContextPrepared) {
             const prompt = queryOptions.systemPrompt;

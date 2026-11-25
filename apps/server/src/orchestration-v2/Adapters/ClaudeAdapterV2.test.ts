@@ -714,6 +714,58 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     ]);
   });
 
+  it("keeps the thread's switched-on tools out of the provider's left-out list", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-thread-tool-overrides",
+      resume: true,
+      cwd: "/workspace",
+      settings: DEFAULT_CLAUDE_SETTINGS,
+      toolOverrides: {
+        enabledBuiltinTools: ["ScheduleWakeup", "Task"],
+        claudeAiConnectors: false,
+        omittedMcpServers: [],
+      },
+    });
+    assert.deepEqual(options.disallowedTools, [
+      "Artifact",
+      "ArtifactData",
+      "ArtifactComments",
+      "Workflow",
+      "ReportFindings",
+    ]);
+  });
+
+  it.each([
+    ["inherit", undefined, undefined],
+    ["off", undefined, "false"],
+    ["inherit", true, "true"],
+    ["off", true, "true"],
+    ["off", false, "false"],
+  ] as const)(
+    "sets the claude.ai connectors env for provider %s and thread %s to %s",
+    (provider, thread, expected) => {
+      const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "native-connectors",
+        resume: false,
+        cwd: "/workspace",
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, claudeAiConnectors: provider },
+        ...(thread === undefined
+          ? {}
+          : {
+              toolOverrides: {
+                enabledBuiltinTools: [],
+                claudeAiConnectors: thread,
+                omittedMcpServers: [],
+              },
+            }),
+      });
+      const settings = options.settings as { env?: Record<string, string> } | undefined;
+      assert.equal(settings?.env?.ENABLE_CLAUDEAI_MCP_SERVERS, expected);
+    },
+  );
+
   it("sends no disallowed tools when an empty selection is saved", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,

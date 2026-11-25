@@ -71,6 +71,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.reviewsSave,
       WS_METHODS.reviewsSubmit,
       WS_METHODS.messageFollowUpsUpdate,
+      ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides,
     ])
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
   });

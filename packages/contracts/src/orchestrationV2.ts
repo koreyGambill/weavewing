@@ -46,6 +46,7 @@ import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
+import { ThreadToolOverrides } from "./threadToolOverrides.ts";
 import { ThreadTitleRegenerationOutcome } from "./threadTitle.ts";
 import {
   OrchestrationSearchThreadsInput,
@@ -692,6 +693,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   tags: Schema.optional(StoredThreadTags),
   /** The user's sidebar group, matched by name across machines. Absent means never set, so a client may fall back to its own local grouping; null means explicitly ungrouped. */
   sidebarGroup: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Claude only: tools switched on, and MCP servers left out, for this thread. Absent means none. */
+  toolOverrides: Schema.optional(ThreadToolOverrides),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2269,6 +2272,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.active-reordered",
       "thread.tags-updated",
       "thread.sidebar-group-updated",
+      "thread.tool-overrides-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.metadata-updated",
@@ -2547,6 +2551,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   tags: Schema.optional(StoredThreadTags),
   /** The user's sidebar group, matched by name across machines. Absent means never set, so a client may fall back to its own local grouping; null means explicitly ungrouped. */
   sidebarGroup: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Claude only: tools switched on, and MCP servers left out, for this thread. Absent means none. */
+  toolOverrides: Schema.optional(ThreadToolOverrides),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   opens: Schema.optional(LenientThreadOpens),
   titleRegeneration: Schema.optional(
@@ -3262,6 +3268,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.active-reordered",
       "thread.tags-updated",
       "thread.sidebar-group-updated",
+      "thread.tool-overrides-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
@@ -3540,6 +3547,13 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     tag: ThreadTag,
     tagged: Schema.Boolean,
+  }),
+  /** Replaces the thread's tool overrides and reloads its Claude session, even when unchanged. */
+  Schema.Struct({
+    type: Schema.Literal("thread.tool-overrides.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    toolOverrides: ThreadToolOverrides,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.sidebar-group.set"),
@@ -4244,6 +4258,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getNativeChildWork: "orchestration.getNativeChildWork",
   stopWorkflow: "orchestration.stopWorkflow",
   forceStopThread: "orchestration.forceStopThread",
+  setThreadToolOverrides: "orchestration.setThreadToolOverrides",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
   subscribeShell: "orchestration.subscribeShell",
@@ -4705,6 +4720,46 @@ export class OrchestrationV2ForceStopThreadError extends Schema.TaggedError<Orch
   }
 }
 
+export const OrchestrationV2SetThreadToolOverridesInput = Schema.Struct({
+  threadId: ThreadId,
+  toolOverrides: ThreadToolOverrides,
+});
+export type OrchestrationV2SetThreadToolOverridesInput =
+  typeof OrchestrationV2SetThreadToolOverridesInput.Type;
+
+export const OrchestrationV2SetThreadToolOverridesResult = Schema.Struct({
+  /** False when the thread had no live session; the change applies when one next starts. */
+  reloaded: Schema.Boolean,
+});
+export type OrchestrationV2SetThreadToolOverridesResult =
+  typeof OrchestrationV2SetThreadToolOverridesResult.Type;
+
+export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedError<OrchestrationV2SetThreadToolOverridesError>()(
+  "OrchestrationV2SetThreadToolOverridesError",
+  {
+    threadId: ThreadId,
+    /**
+     * `busy`: a turn is running. `background-work`: a reload would end background agents or
+     * commands. `unsupported-provider`: the thread is not on Claude.
+     */
+    reason: Schema.Literals(["busy", "background-work", "unsupported-provider", "failed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "busy":
+        return "A turn is running. Stop it or wait for it to finish, then reload.";
+      case "background-work":
+        return "This session is running background agents or commands that a reload would end. Wait for them, or press Stop.";
+      case "unsupported-provider":
+        return "Per-thread tools are available only for Claude threads.";
+      case "failed":
+        return "Failed to reload the session with the new tools.";
+    }
+  }
+}
+
 export const OrchestrationV2GetWorkflowScriptInput = Schema.Struct({
   threadId: ThreadId,
   scriptPath: TrimmedNonEmptyString,
@@ -4985,6 +5040,10 @@ export const OrchestrationV2RpcSchemas = {
   forceStopThread: {
     input: OrchestrationV2ForceStopThreadInput,
     output: OrchestrationV2ForceStopThreadResult,
+  },
+  setThreadToolOverrides: {
+    input: OrchestrationV2SetThreadToolOverridesInput,
+    output: OrchestrationV2SetThreadToolOverridesResult,
   },
   getWorkflowScript: {
     input: OrchestrationV2GetWorkflowScriptInput,

@@ -118,6 +118,7 @@ function shouldPublishAgentAwarenessEvent(
     case "thread.active-reordered":
     case "thread.tags-updated":
     case "thread.sidebar-group-updated":
+    case "thread.tool-overrides-updated":
     case "thread.visited":
     case "thread.visit-recorded":
     case "thread.marked-unread":

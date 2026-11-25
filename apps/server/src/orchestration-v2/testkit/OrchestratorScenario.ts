@@ -156,6 +156,7 @@ function commandThreadIds(command: OrchestrationV2Command): ReadonlyArray<Thread
     case "thread.active.reorder":
     case "thread.tag.set":
     case "thread.sidebar-group.set":
+    case "thread.tool-overrides.set":
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
