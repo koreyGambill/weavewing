@@ -330,7 +330,7 @@ export function AssistantSelectionToolbar({
                 onClick={() => applyBookmark(true)}
               >
                 <FlagIcon aria-hidden="true" className="size-3.5 text-warning" />
-                Flag as to-do
+                Flag
               </Button>
             </>
           )}
