@@ -30,6 +30,7 @@ export const COMPOSER_CONTEXT_KINDS = [
   "thread",
   "environment",
   "response",
+  "waiting-item",
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 
@@ -267,6 +268,23 @@ export const ResponseContextRecord = Schema.Struct({
 });
 export type ResponseContextRecord = typeof ResponseContextRecord.Type;
 
+/**
+ * Something waiting on the user that their message is about, added by a card's Discuss. Only QA
+ * changes use it so far; `key` is `<landingId>/<changeId>`.
+ */
+export const WaitingItemContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("waiting-item"),
+  itemKind: Schema.Literal("qa"),
+  key: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  /** The thread's display reference, such as QA3. */
+  ref: TrimmedNonEmptyString.check(Schema.isMaxLength(32)),
+  title: ShortString,
+  /** The landing's target commit. */
+  sha: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+});
+export type WaitingItemContextRecord = typeof WaitingItemContextRecord.Type;
+
 const isJson = Schema.is(Schema.Json);
 
 /** Excludes known discriminators so malformed known records fail their own schema. */
@@ -300,6 +318,7 @@ export const KnownComposerContextRecord = Schema.Union([
   ThreadContextRecord,
   EnvironmentContextRecord,
   ResponseContextRecord,
+  WaitingItemContextRecord,
 ]);
 export type KnownComposerContextRecord = typeof KnownComposerContextRecord.Type;
 

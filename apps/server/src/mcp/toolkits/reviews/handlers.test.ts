@@ -103,7 +103,11 @@ const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
   record: (input) =>
     Effect.succeed({
       landingId: input.id,
-      changes: input.changes.map((change) => ({ id: change.id, qa: "pending" as const })),
+      changes: input.changes.map((change) => ({
+        id: change.id,
+        qa: "pending" as const,
+        raised: [],
+      })),
       warnings: [`${input.threadId} ${input.projectId}`],
     }),
   list: (input) =>
@@ -255,11 +259,12 @@ it.effect("exposes only the list and artifact schemas", () =>
     const tools = server.tools
       .map(({ tool }) => tool)
       .filter((tool) => /^(list_|artifact_|thread_workspace_|review_|evidence_)/.test(tool.name));
-    // Agents record evidence and read QA; no tool sets QA.
+    // Agents record evidence, read QA and record the user's QA from chat.
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "artifact_list",
       "artifact_read",
       "artifact_write",
+      "evidence_qa_update",
       "evidence_read",
       "evidence_record",
       "list_read",
@@ -386,7 +391,7 @@ it.effect("records evidence on the calling thread and reads summaries or one lan
     const shell = liveThreadShell(threadId);
     expect(recorded.structuredContent).toEqual({
       landingId: "batch-1",
-      changes: [{ id: "bw-1", qa: "pending" }],
+      changes: [{ id: "bw-1", qa: "pending", raised: [] }],
       warnings: [`${threadId} ${shell.projectId}`],
     });
     const reader: Invocation.McpInvocationScope = {

@@ -5,7 +5,9 @@ import {
   EvidenceError,
   EvidenceLanding,
   EvidenceLandingSummary,
+  EvidenceQaRaiseReason,
   EvidenceRecord,
+  type EvidenceAgentQaInput,
   type EvidenceChange,
   type EvidenceCounts,
   type EvidenceReviewThread,
@@ -14,10 +16,15 @@ import {
   type EvidenceGetInput,
   type EvidenceListInput,
   type EvidenceListResult,
+  type EvidenceQaBy,
   type EvidenceQaState,
   type EvidenceRecordInput,
   type EvidenceRecordResult,
   type EvidenceSetQaInput,
+  type EvidenceThreadInput,
+  type EvidenceThreadResult,
+  EVIDENCE_THREAD_LANDING_LIMIT,
+  type MessageId,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -49,6 +56,19 @@ export interface RecordInput extends Omit<EvidenceRecordInput, "threadId"> {
   readonly projectId: ProjectId | null;
 }
 
+export interface AgentSetQaInput extends EvidenceAgentQaInput {
+  /** The calling agent's thread; only a user message in its current run can settle QA. */
+  readonly threadId: ThreadId;
+}
+
+export interface MarkDiscussedInput {
+  readonly threadId: ThreadId;
+  readonly messageId: MessageId;
+  readonly changes: ReadonlyArray<{ readonly landingId: string; readonly changeId: string }>;
+}
+
+export const AGENT_QA_NEEDS_USER_MESSAGE = "Only the user's message in this turn can settle this.";
+
 export class EvidenceService extends Context.Service<
   EvidenceService,
   {
@@ -56,8 +76,19 @@ export class EvidenceService extends Context.Service<
     readonly record: (input: RecordInput) => Effect.Effect<EvidenceRecordResult, EvidenceError>;
     readonly list: (input: EvidenceListInput) => Effect.Effect<EvidenceListResult, EvidenceError>;
     readonly get: (input: EvidenceGetInput) => Effect.Effect<EvidenceLanding, EvidenceError>;
-    /** The user's QA verdict; agents have no path to it. */
+    /** The landings a thread shows cards for: recorded in it, or by its delegated children. */
+    readonly thread: (
+      input: EvidenceThreadInput,
+    ) => Effect.Effect<EvidenceThreadResult, EvidenceError>;
+    /** The user's QA from a card or the Evidence view. */
     readonly setQa: (input: EvidenceSetQaInput) => Effect.Effect<EvidenceChangeQa, EvidenceError>;
+    /**
+     * An agent's record of the user's QA. Accepted only while the agent's thread runs a turn whose
+     * input includes a message the user wrote; that message's id is stored with the outcome.
+     */
+    readonly agentSetQa: (input: AgentSetQaInput) => Effect.Effect<EvidenceChangeQa, EvidenceError>;
+    /** Marks pending changes as discussed by a user message sent with a Discuss reference. */
+    readonly markDiscussed: (input: MarkDiscussedInput) => Effect.Effect<void, EvidenceError>;
     readonly counts: () => Effect.Effect<EvidenceCounts, EvidenceError>;
     readonly subscribe: () => Stream.Stream<number>;
     /** Read-only; git runs at most once per project per TTL, and recomputes only when the tip or landings move. */
@@ -70,16 +101,46 @@ export class EvidenceService extends Context.Service<
 interface LandingRow {
   readonly landing_id: string;
   readonly thread_id: string;
+  readonly qa_thread_id: string | null;
   readonly project_id: string | null;
   readonly landed_at: string;
   readonly updated_at: string;
   readonly record_json: string;
 }
 interface QaRow {
+  readonly landing_id: string;
   readonly change_id: string;
   readonly state: EvidenceQaState;
   readonly note: string;
   readonly updated_at: string;
+  readonly by: EvidenceQaBy;
+  readonly ref: number | null;
+  readonly raised_json: string | null;
+  readonly message_id: string | null;
+  readonly discussed_message_id: string | null;
+}
+const QA_COLUMNS =
+  "landing_id, change_id, state, note, updated_at, by, ref, raised_json, message_id, discussed_message_id";
+
+/**
+ * Why a change asks for the user's QA; a change with none is recorded quietly. Nothing verifies a
+ * reviewer's verdict yet, so every approved or changes-requested claim is unverified.
+ *
+ * @example qaRaiseReasons({ captures: [], gaps: ["Not run on Safari."], review }, []) // [..., "gaps"]
+ */
+export function qaRaiseReasons(
+  change: Pick<EvidenceChange, "captures" | "gaps" | "review">,
+  verifications: EvidenceRecord["verifications"],
+): ReadonlyArray<EvidenceQaRaiseReason> {
+  const reasons: EvidenceQaRaiseReason[] = [];
+  if (change.captures.length > 0) reasons.push("captures");
+  if (change.review.verdict === "waived") reasons.push("review_waived");
+  else if (change.review.check !== "verified") reasons.push("review_unverified");
+  if (change.review.verdict === "changes_requested") reasons.push("review_changes_requested");
+  if (verifications.some((check) => check.result === "fail")) reasons.push("check_failed");
+  if (verifications.some((check) => check.result === "skipped")) reasons.push("check_skipped");
+  if (change.gaps.length > 0) reasons.push("gaps");
+  return reasons;
 }
 
 const RecordJson = Schema.fromJsonString(EvidenceRecord);
@@ -96,6 +157,22 @@ const decodeSummaryRow = Schema.decodeUnknownEffect(
   }),
 );
 const decodeQa = Schema.decodeUnknownEffect(EvidenceChangeQa);
+const RaisedJson = Schema.fromJsonString(Schema.Array(EvidenceQaRaiseReason));
+const encodeRaised = Schema.encodeEffect(RaisedJson);
+const decodeRaised = Schema.decodeUnknownOption(RaisedJson);
+const qaOf = (row: QaRow) => ({
+  state: row.state,
+  note: row.note,
+  updatedAt: row.updated_at,
+  by: row.by,
+  ...(row.ref === null ? {} : { ref: row.ref }),
+  ...Option.match(row.raised_json === null ? Option.none() : decodeRaised(row.raised_json), {
+    onNone: () => ({}),
+    onSome: (raised) => ({ raised }),
+  }),
+  ...(row.message_id === null ? {} : { messageId: row.message_id }),
+  ...(row.discussed_message_id === null ? {} : { discussedMessageId: row.discussed_message_id }),
+});
 
 const invalid = (message: string) => new EvidenceError({ code: "invalid", message });
 const storage = (cause: unknown) =>
@@ -249,8 +326,24 @@ const make = Effect.gen(function* () {
     return review.verdict === "waived" ? review : { ...review, check: "unverified" };
   };
 
-  const readQa = (landingId: string) =>
-    sql<QaRow>`SELECT change_id, state, note, updated_at FROM evidence_qa WHERE landing_id = ${landingId}`;
+  const readQa = (landingIds: ReadonlyArray<string>) =>
+    landingIds.length === 0
+      ? Effect.succeed<ReadonlyArray<QaRow>>([])
+      : sql<QaRow>`SELECT ${sql.literal(QA_COLUMNS)} FROM evidence_qa WHERE landing_id IN ${sql.in(landingIds)}`;
+
+  // A delegated child's landing shows in its lead's thread, and a grandchild's in the same lead's.
+  const resolveQaThread = (threadId: ThreadId) =>
+    sql<{ readonly thread_id: string }>`WITH RECURSIVE up(thread_id, depth) AS (
+        SELECT ${threadId}, 0
+        UNION ALL
+        SELECT json_extract(t.payload_json, '$.lineage.parentThreadId'), up.depth + 1
+        FROM up JOIN orchestration_v2_projection_threads t ON t.thread_id = up.thread_id
+        WHERE json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+          AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL
+          AND up.depth < 16)
+      SELECT thread_id FROM up ORDER BY depth DESC LIMIT 1`.pipe(
+      Effect.map(([row]) => ThreadId.make(row?.thread_id ?? threadId)),
+    );
 
   const record = Effect.fn("EvidenceService.record")(function* (input: RecordInput) {
     const ids = input.changes.map((change) => change.id);
@@ -265,7 +358,7 @@ const make = Effect.gen(function* () {
     const root = path.join(yield* HostProcess.HomeDirectory, EVIDENCE_ROOT_NAME);
     const warnings: string[] = [];
     const childRoles = yield* readChildRoles(input.threadId);
-    const changes = [];
+    const changes: EvidenceChange[] = [];
     for (const change of input.changes) {
       const captures = [];
       for (const capture of change.captures)
@@ -284,6 +377,10 @@ const make = Effect.gen(function* () {
       return yield* invalid(
         `Record is ${bytes} bytes; the limit is ${EVIDENCE_RECORD_MAX_BYTES}. Shorten summaries or gaps.`,
       );
+    const raised = new Map(
+      changes.map((change) => [change.id, qaRaiseReasons(change, input.verifications)]),
+    );
+    const qaThreadId = yield* resolveQaThread(input.threadId);
     const now = DateTime.formatIso(yield* DateTime.now);
     const qa = yield* sql
       .withTransaction(
@@ -295,26 +392,69 @@ const make = Effect.gen(function* () {
             return yield* invalid(
               `Landing id ${input.id} is already used by thread ${owner.thread_id}; pick another id.`,
             );
-          yield* sql`INSERT INTO evidence_landings (landing_id, thread_id, project_id, landed_at, record_json, updated_at)
-              VALUES (${input.id}, ${input.threadId}, ${input.projectId}, ${landedAt ?? now}, ${recordJson}, ${now})
-              ON CONFLICT (landing_id) DO UPDATE SET project_id = excluded.project_id,
+          yield* sql`INSERT INTO evidence_landings (landing_id, thread_id, qa_thread_id, project_id, landed_at, record_json, updated_at)
+              VALUES (${input.id}, ${input.threadId}, ${qaThreadId}, ${input.projectId}, ${landedAt ?? now}, ${recordJson}, ${now})
+              ON CONFLICT (landing_id) DO UPDATE SET project_id = excluded.project_id, qa_thread_id = excluded.qa_thread_id,
               landed_at = coalesce(${landedAt ?? null}, landed_at), record_json = excluded.record_json, updated_at = excluded.updated_at`;
-          yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
+          const nextRef = sql<{ readonly ref: number }>`SELECT coalesce(max(q.ref), 0) + 1 AS ref
+              FROM evidence_qa q JOIN evidence_landings l ON l.landing_id = q.landing_id
+              WHERE l.qa_thread_id = ${qaThreadId}`.pipe(Effect.map(([row]) => row?.ref ?? 1));
+          const existing = new Map(
+            (yield* readQa([input.id])).map((row) => [row.change_id, row] as const),
+          );
           for (const id of ids) {
-            yield* sql`INSERT INTO evidence_qa (landing_id, change_id, state, note, updated_at)
-                VALUES (${input.id}, ${id}, 'pending', '', ${now}) ON CONFLICT DO NOTHING`;
+            const reasons = raised.get(id) ?? [];
+            const raisedJson = yield* encodeRaised(reasons);
+            const row = existing.get(id);
+            const ref =
+              reasons.length > 0 && row?.ref == null ? yield* nextRef : (row?.ref ?? null);
+            if (row === undefined) {
+              yield* sql`INSERT INTO evidence_qa (landing_id, change_id, state, note, updated_at, by, raised_json, ref)
+                  VALUES (${input.id}, ${id}, ${reasons.length > 0 ? "pending" : "quiet"}, '', ${now}, 'server', ${raisedJson}, ${ref})`;
+              continue;
+            }
+            // The user's or an agent's QA stands; only the server's own pending or quiet follows the reasons.
+            const recompute =
+              (row.state === "pending" || row.state === "quiet") &&
+              (row.by === "server" || row.raised_json === null);
+            const state = recompute ? (reasons.length > 0 ? "pending" : "quiet") : row.state;
+            yield* sql`UPDATE evidence_qa SET raised_json = ${raisedJson}, ref = ${ref}, state = ${state},
+                by = ${recompute ? "server" : row.by}
+              WHERE landing_id = ${input.id} AND change_id = ${id}`;
           }
-          return yield* readQa(input.id);
+          // Removed changes go after numbering, so their QA numbers are not handed out again here.
+          yield* sql`DELETE FROM evidence_qa WHERE landing_id = ${input.id} AND change_id NOT IN ${sql.in(ids)}`;
+          for (const change of changes)
+            for (const fix of change.fixes ?? []) {
+              const [closed] = yield* sql<{ readonly change_id: string }>`UPDATE evidence_qa
+                  SET state = 'waived', by = 'agent', note = ${`Fixed by ${input.id} · ${change.id}`},
+                    message_id = NULL, discussed_message_id = NULL, updated_at = ${now}
+                  WHERE landing_id = ${fix.landingId} AND change_id = ${fix.changeId} AND state = 'problem'
+                  RETURNING change_id`;
+              if (closed === undefined)
+                warnings.push(
+                  `change ${change.id}: fixes ${fix.landingId}/${fix.changeId}, which is not a recorded problem`,
+                );
+            }
+          return yield* readQa([input.id]);
         }),
       )
       .pipe(Effect.mapError(passStorage));
     coverageGeneration++;
     coverageCache.clear();
-    const states = new Map(qa.map((row) => [row.change_id, row.state]));
+    const rows = new Map(qa.map((row) => [row.change_id, row]));
     yield* publish;
     return {
       landingId: input.id,
-      changes: ids.map((id) => ({ id, qa: states.get(id) ?? "pending" })),
+      changes: ids.map((id) => {
+        const row = rows.get(id);
+        return {
+          id,
+          qa: row?.state ?? "pending",
+          raised: [...(raised.get(id) ?? [])],
+          ...(row?.ref == null ? {} : { ref: row.ref }),
+        };
+      }),
       warnings,
     };
   }, Effect.mapError(passStorage));
@@ -342,7 +482,7 @@ const make = Effect.gen(function* () {
           SELECT landing_id, thread_id, project_id, landed_at, record_json FROM evidence_landings l
           WHERE ${input.threadId === undefined ? sql`1 = 1` : sql`l.thread_id = ${input.threadId}`}
             AND ${before === undefined ? sql`1 = 1` : sql`(l.landed_at < ${before.landedAt} OR (l.landed_at = ${before.landedAt} AND l.landing_id < ${before.id}))`}
-            AND ${input.needsQa === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q WHERE q.landing_id = l.landing_id AND q.state IN ('pending', 'failed'))` : sql`1 = 1`}
+            AND ${input.needsQa === true ? sql`EXISTS (SELECT 1 FROM evidence_qa q WHERE q.landing_id = l.landing_id AND q.state IN ('pending', 'problem'))` : sql`1 = 1`}
           ORDER BY l.landed_at DESC, l.landing_id DESC
           LIMIT ${EVIDENCE_LIST_PAGE_SIZE + 1})
         SELECT p.landing_id AS id, json_extract(p.record_json, '$.title') AS title, p.thread_id, p.project_id, p.landed_at,
@@ -354,8 +494,9 @@ const make = Effect.gen(function* () {
             FROM json_each(p.record_json, '$.verifications') v) AS verifications,
           json_array_length(p.record_json, '$.changes') AS change_count,
           (SELECT json_object('pending', count(*) FILTER (WHERE state = 'pending'),
+              'quiet', count(*) FILTER (WHERE state = 'quiet'),
               'confirmed', count(*) FILTER (WHERE state = 'confirmed'),
-              'failed', count(*) FILTER (WHERE state = 'failed'), 'waived', count(*) FILTER (WHERE state = 'waived'))
+              'problem', count(*) FILTER (WHERE state = 'problem'), 'waived', count(*) FILTER (WHERE state = 'waived'))
             FROM evidence_qa q WHERE q.landing_id = p.landing_id) AS qa
         FROM page p
         ORDER BY p.landed_at DESC, p.landing_id DESC`;
@@ -413,23 +554,16 @@ const make = Effect.gen(function* () {
     return states;
   });
 
-  const get = Effect.fn("EvidenceService.get")(function* (input: EvidenceGetInput) {
-    const [row] =
-      yield* sql<LandingRow>`SELECT * FROM evidence_landings WHERE landing_id = ${input.landingId}`;
-    if (row === undefined)
-      return yield* new EvidenceError({
-        code: "not_found",
-        message: `No evidence landing ${input.landingId}.`,
-      });
-    const stored = yield* decodeRecord(row.record_json);
-    const qa = new Map((yield* readQa(row.landing_id)).map((q) => [q.change_id, q]));
-    const cited = stored.changes.flatMap((change) =>
-      change.review.threadId === undefined ? [] : [change.review.threadId],
-    );
-    const threads = yield* readReviewThreads([...new Set(cited)]);
-    return yield* decodeLanding({
+  const toLanding = (
+    row: LandingRow,
+    stored: EvidenceRecord,
+    qa: ReadonlyMap<string, QaRow>,
+    threads: ReadonlyMap<string, EvidenceReviewThread>,
+  ) =>
+    decodeLanding({
       ...stored,
       threadId: row.thread_id,
+      qaThreadId: row.qa_thread_id ?? row.thread_id,
       projectId: row.project_id,
       landedAt: row.landed_at,
       updatedAt: row.updated_at,
@@ -442,39 +576,158 @@ const make = Effect.gen(function* () {
             threadId === undefined
               ? change.review
               : { ...change.review, thread: threads.get(threadId) ?? "missing" },
-          qa: {
-            state: state?.state ?? "pending",
-            note: state?.note ?? "",
-            updatedAt: state?.updated_at ?? row.updated_at,
-          },
+          qa:
+            state === undefined
+              ? { state: "pending", note: "", updatedAt: row.updated_at }
+              : qaOf(state),
         };
       }),
     });
+
+  // Every cited reviewer thread across these records, read in one query.
+  const readCitedThreads = (records: ReadonlyArray<EvidenceRecord>) =>
+    readReviewThreads([
+      ...new Set(
+        records.flatMap((stored) =>
+          stored.changes.flatMap((change) =>
+            change.review.threadId === undefined ? [] : [change.review.threadId],
+          ),
+        ),
+      ),
+    ]);
+
+  const get = Effect.fn("EvidenceService.get")(function* (input: EvidenceGetInput) {
+    const [row] =
+      yield* sql<LandingRow>`SELECT * FROM evidence_landings WHERE landing_id = ${input.landingId}`;
+    if (row === undefined)
+      return yield* new EvidenceError({
+        code: "not_found",
+        message: `No evidence landing ${input.landingId}.`,
+      });
+    const stored = yield* decodeRecord(row.record_json);
+    const qa = new Map((yield* readQa([row.landing_id])).map((q) => [q.change_id, q]));
+    return yield* toLanding(row, stored, qa, yield* readCitedThreads([stored]));
   }, Effect.mapError(passStorage));
 
-  const setQa = Effect.fn("EvidenceService.setQa")(function* (input: EvidenceSetQaInput) {
+  const thread = Effect.fn("EvidenceService.thread")(function* (input: EvidenceThreadInput) {
+    const rows = yield* sql<LandingRow>`SELECT * FROM evidence_landings
+        WHERE landing_id IN (
+          SELECT landing_id FROM evidence_landings WHERE thread_id = ${input.threadId}
+          UNION SELECT landing_id FROM evidence_landings WHERE qa_thread_id = ${input.threadId})
+        ORDER BY landed_at DESC, landing_id DESC LIMIT ${EVIDENCE_THREAD_LANDING_LIMIT}`;
+    const records = yield* Effect.forEach(rows, (row) => decodeRecord(row.record_json));
+    const qaRows = yield* readQa(rows.map((row) => row.landing_id));
+    const byLanding = Map.groupBy(qaRows, (row) => row.landing_id);
+    const threads = yield* readCitedThreads(records);
+    const landings = yield* Effect.forEach(rows, (row, index) =>
+      toLanding(
+        row,
+        records[index]!,
+        new Map((byLanding.get(row.landing_id) ?? []).map((q) => [q.change_id, q])),
+        threads,
+      ),
+    );
+    return { landings };
+  }, Effect.mapError(passStorage));
+
+  // The one writer of a user's or agent's QA, so both follow the same state rules.
+  const writeQa = Effect.fnUntraced(function* (input: {
+    readonly landingId: string;
+    readonly changeId: string;
+    readonly state: "pending" | "confirmed" | "problem" | "waived";
+    readonly note?: string | undefined;
+    readonly by: "user" | "agent";
+    readonly messageId: string | null;
+  }) {
     const now = DateTime.formatIso(yield* DateTime.now);
-    const [row] = yield* sql<QaRow>`UPDATE evidence_qa SET state = ${input.state},
-          note = coalesce(${input.note ?? null}, note), updated_at = ${now}
+    // A note given replaces the old one; none keeps it on the same state and clears it on a change.
+    const [row] = yield* sql<QaRow>`UPDATE evidence_qa SET
+          note = coalesce(${input.note ?? null}, CASE WHEN state = ${input.state} THEN note ELSE '' END),
+          state = ${input.state}, by = ${input.by}, message_id = ${input.messageId},
+          discussed_message_id = NULL, updated_at = ${now}
         WHERE landing_id = ${input.landingId} AND change_id = ${input.changeId}
-        RETURNING change_id, state, note, updated_at`;
+        RETURNING ${sql.literal(QA_COLUMNS)}`;
     if (row === undefined)
       return yield* new EvidenceError({
         code: "not_found",
         message: `No change ${input.changeId} in evidence landing ${input.landingId}.`,
       });
-    const result = yield* decodeQa({ state: row.state, note: row.note, updatedAt: row.updated_at });
+    const result = yield* decodeQa(qaOf(row));
     yield* publish;
     return result;
+  });
+
+  const setQa = Effect.fn("EvidenceService.setQa")(function* (input: EvidenceSetQaInput) {
+    return yield* writeQa({ ...input, by: "user", messageId: null });
+  }, Effect.mapError(passStorage));
+
+  // The user-authored input message of the thread's current run, as the per-turn question line reads it.
+  const currentUserMessage = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const [message] = yield* sql<{ readonly message_id: string }>`WITH run AS (
+          SELECT payload_json FROM orchestration_v2_projection_runs
+          WHERE thread_id = ${threadId} AND status IN ('starting', 'running', 'waiting')
+          ORDER BY ordinal DESC LIMIT 1),
+        input(message_id) AS (
+          SELECT json_extract(payload_json, '$.userMessageId') FROM run
+          UNION SELECT i.value FROM run, json_each(run.payload_json, '$.inputMessageIds') i)
+        SELECT m.message_id FROM orchestration_v2_projection_messages m
+        WHERE m.thread_id = ${threadId} AND m.message_id IN (SELECT message_id FROM input)
+          AND m.role = 'user'
+          AND json_extract(m.payload_json, '$.createdBy') = 'user'
+          AND coalesce(json_extract(m.payload_json, '$.origin.kind'), 'user') = 'user'
+          AND json_extract(m.payload_json, '$.scheduledTaskId') IS NULL
+          AND json_extract(m.payload_json, '$.senderThreadId') IS NULL
+          AND json_extract(m.payload_json, '$.linkedSender') IS NULL
+          AND json_extract(m.payload_json, '$.delegatedCompletion') IS NULL
+          AND json_extract(m.payload_json, '$.context.guest') IS NULL
+        ORDER BY m.created_at DESC LIMIT 1`;
+    return message?.message_id ?? null;
+  });
+
+  const agentSetQa = Effect.fn("EvidenceService.agentSetQa")(function* (input: AgentSetQaInput) {
+    const messageId = yield* currentUserMessage(input.threadId);
+    if (messageId === null) return yield* invalid(AGENT_QA_NEEDS_USER_MESSAGE);
+    const [landing] = yield* sql<{
+      readonly qa_thread_id: string | null;
+      readonly thread_id: string;
+    }>`SELECT qa_thread_id, thread_id FROM evidence_landings WHERE landing_id = ${input.landingId}`;
+    const qaThreadId = yield* resolveQaThread(input.threadId);
+    if (landing !== undefined && (landing.qa_thread_id ?? landing.thread_id) !== qaThreadId)
+      return yield* invalid(
+        `Landing ${input.landingId} shows its QA in another thread; settle it there.`,
+      );
+    return yield* writeQa({
+      landingId: input.landingId,
+      changeId: input.changeId,
+      state: input.state === "dismissed" ? "waived" : input.state,
+      note: input.note,
+      by: "agent",
+      messageId,
+    });
+  }, Effect.mapError(passStorage));
+
+  const markDiscussed = Effect.fn("EvidenceService.markDiscussed")(function* (
+    input: MarkDiscussedInput,
+  ) {
+    let marked = false;
+    for (const change of input.changes) {
+      const rows = yield* sql`UPDATE evidence_qa SET discussed_message_id = ${input.messageId}
+            WHERE landing_id = ${change.landingId} AND change_id = ${change.changeId} AND state = 'pending'
+              AND landing_id IN (SELECT landing_id FROM evidence_landings
+                WHERE coalesce(qa_thread_id, thread_id) = ${input.threadId})
+            RETURNING change_id`;
+      marked ||= rows.length > 0;
+    }
+    if (marked) yield* publish;
   }, Effect.mapError(passStorage));
 
   const counts = Effect.fn("EvidenceService.counts")(function* () {
     const rows = yield* sql<{
       readonly state: EvidenceQaState;
       readonly count: number;
-    }>`SELECT state, count(*) AS count FROM evidence_qa WHERE state IN ('pending', 'failed') GROUP BY state`;
+    }>`SELECT state, count(*) AS count FROM evidence_qa WHERE state IN ('pending', 'problem') GROUP BY state`;
     const of = (state: EvidenceQaState) => rows.find((row) => row.state === state)?.count ?? 0;
-    return { pending: of("pending"), failed: of("failed") };
+    return { pending: of("pending"), problem: of("problem") };
   }, Effect.mapError(storage));
 
   const runGit = (cwd: string, args: ReadonlyArray<string>, stdin?: string) =>
@@ -591,7 +844,10 @@ const make = Effect.gen(function* () {
     record,
     list,
     get,
+    thread,
     setQa,
+    agentSetQa,
+    markDiscussed,
     counts,
     coverage,
     subscribe: () =>

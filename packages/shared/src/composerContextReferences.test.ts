@@ -29,6 +29,26 @@ import {
 
 const ctx = (value: string) => value as ComposerContextId;
 
+describe("projectComposerContextForProvider with a Discuss reference", () => {
+  it("puts one short line about the QA change ahead of the user's words", () => {
+    const reference: ComposerContextRecord = {
+      version: 1,
+      kind: "waiting-item",
+      contextId: ctx("waiting-item_qa1"),
+      label: "QA1 · discuss · Toast shows the retry count",
+      itemKind: "qa",
+      key: "3f2a91c-batch/toast-retry-count",
+      ref: "QA1",
+      title: "Toast shows the retry count",
+      sha: "3f2a91c",
+    };
+    const text = `${formatComposerContextReference(reference)} The count overlaps the close button.`;
+    expect(projectComposerContextForProvider({ text, records: [reference] })).toBe(
+      "About QA1 (landing 3f2a91c, change toast-retry-count): Toast shows the retry count\n\nThe count overlaps the close button.",
+    );
+  });
+});
+
 describe("href codec", () => {
   it("round-trips kind and id", () => {
     const href = formatComposerContextHref("review-comment", ctx("ctx_1"));

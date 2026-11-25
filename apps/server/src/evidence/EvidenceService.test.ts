@@ -6,6 +6,7 @@ import {
   EvidenceRecord,
   EvidenceRecordInput,
   EvidenceSetQaInput,
+  MessageId,
   ProjectId,
   ThreadId,
   EvidenceChange,
@@ -141,33 +142,34 @@ it.effect(
       Effect.gen(function* () {
         const evidence = yield* Service.EvidenceService;
         const first = yield* evidence.record(recordInput("batch-1", [change("a"), change("b")]));
+        const unverified = ["review_unverified"] as const;
         assert.deepStrictEqual(first.changes, [
-          { id: "a", qa: "pending" },
-          { id: "b", qa: "pending" },
+          { id: "a", qa: "pending", raised: [...unverified], ref: 1 },
+          { id: "b", qa: "pending", raised: [...unverified], ref: 2 },
         ]);
         yield* evidence.setQa({
           landingId: "batch-1",
           changeId: "a",
-          state: "failed",
-          note: "Broken",
+          state: "waived",
+          note: "Not worth checking",
         });
         yield* evidence.setQa({ landingId: "batch-1", changeId: "b", state: "confirmed" });
-        assert.deepStrictEqual(yield* evidence.counts(), { pending: 0, failed: 1 });
+        assert.deepStrictEqual(yield* evidence.counts(), { pending: 0, problem: 0 });
 
         const again = yield* evidence.record(recordInput("batch-1", [change("a"), change("c")]));
         assert.deepStrictEqual(again.changes, [
-          { id: "a", qa: "failed" },
-          { id: "c", qa: "pending" },
+          { id: "a", qa: "waived", raised: [...unverified], ref: 1 },
+          { id: "c", qa: "pending", raised: [...unverified], ref: 3 },
         ]);
         const landing = yield* evidence.get({ landingId: "batch-1" });
         assert.deepStrictEqual(
           landing.changes.map((item) => [item.id, item.qa.state, item.qa.note]),
           [
-            ["a", "failed", "Broken"],
+            ["a", "waived", "Not worth checking"],
             ["c", "pending", ""],
           ],
         );
-        assert.deepStrictEqual(yield* evidence.counts(), { pending: 1, failed: 1 });
+        assert.deepStrictEqual(yield* evidence.counts(), { pending: 1, problem: 0 });
 
         // Another thread reusing the id is refused, so it can neither take the landing nor reset QA.
         const other = ThreadId.make("other");
@@ -185,31 +187,39 @@ it.effect(
         assert.strictEqual(kept.threadId, lead);
         assert.deepStrictEqual(
           kept.changes.map((item) => item.qa.state),
-          ["failed", "pending"],
+          ["waived", "pending"],
         );
       }),
     ).pipe(Effect.provide(testLayer)),
 );
 
 it.effect(
-  "walks QA through every state, keeps notes unless replaced, and refuses unknown ids",
+  "walks the user's QA through every state, keeps a note on the same state, and refuses unknown ids",
   () =>
     withHome(() =>
       Effect.gen(function* () {
         const evidence = yield* Service.EvidenceService;
         yield* evidence.record(recordInput("batch-1", [change("a")]));
-        const states = ["confirmed", "failed", "waived", "pending", "failed"] as const;
+        const states = ["confirmed", "waived", "pending", "confirmed"] as const;
         for (const state of states) {
           const qa = yield* evidence.setQa({ landingId: "batch-1", changeId: "a", state });
           assert.strictEqual(qa.state, state);
+          assert.strictEqual(qa.by, "user");
         }
-        yield* evidence.setQa({ landingId: "batch-1", changeId: "a", state: "failed", note: "x" });
+        yield* evidence.setQa({ landingId: "batch-1", changeId: "a", state: "waived" });
+        yield* evidence.setQa({ landingId: "batch-1", changeId: "a", state: "waived", note: "x" });
         const kept = yield* evidence.setQa({
           landingId: "batch-1",
           changeId: "a",
           state: "waived",
         });
         assert.strictEqual(kept.note, "x");
+        const reopened = yield* evidence.setQa({
+          landingId: "batch-1",
+          changeId: "a",
+          state: "pending",
+        });
+        assert.strictEqual(reopened.note, "");
         for (const input of [
           { landingId: "batch-1", changeId: "missing" },
           { landingId: "missing", changeId: "a" },
@@ -267,7 +277,7 @@ it.effect("lists compact summaries newest first, pages, and filters by thread an
         target: { branch: "main", sha: "abc1234" },
         verifications: [{ label: "gate", result: "pass" }],
         changeCount: 2,
-        qa: { pending: 2, confirmed: 0, failed: 0, waived: 0 },
+        qa: { pending: 2, quiet: 0, confirmed: 0, problem: 0, waived: 0 },
       });
       // Summaries never carry changes, summaries or captures.
       assert.isBelow(JSON.stringify(page.items[1]).length, 400);
@@ -1029,6 +1039,290 @@ it.effect("lists a skipped check's reason and leaves it off checks without one",
         { label: "unit", result: "pass" },
         { label: "e2e", result: "skipped", reason: "No browser here." },
       ]);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it("raises QA for each reason on its own and records a change with none quietly", () => {
+  const verified = { verdict: "approved", check: "verified" } as const;
+  const base = { captures: [], gaps: [], review: verified };
+  const pass = [{ label: "gate", result: "pass" }] as const;
+  const capture = { path: "/home/u/evidence/a.png", caption: "After" };
+  const cases = [
+    [base, pass, []],
+    [{ ...base, captures: [capture] }, pass, ["captures"]],
+    [{ ...base, review: { verdict: "waived", reason: "Docs." } }, pass, ["review_waived"]],
+    [
+      { ...base, review: { verdict: "approved", check: "unverified" } },
+      pass,
+      ["review_unverified"],
+    ],
+    [
+      { ...base, review: { verdict: "changes_requested", check: "verified" } },
+      pass,
+      ["review_changes_requested"],
+    ],
+    [base, [{ label: "unit", result: "fail" }], ["check_failed"]],
+    [base, [{ label: "e2e", result: "skipped", reason: "No display." }], ["check_skipped"]],
+    [{ ...base, gaps: ["Not run on Safari."] }, pass, ["gaps"]],
+  ] as const;
+  for (const [change, verifications, reasons] of cases)
+    assert.deepStrictEqual(Service.qaRaiseReasons(change, verifications), reasons);
+});
+
+it.effect("re-recording recomputes why a change raises QA and keeps the user's answer", () =>
+  withHome((_home, root) =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const captured = change("a", { captures: [{ path: `${root}/a.png`, caption: "After" }] });
+      const first = yield* evidence.record(recordInput("batch-1", [captured, change("b")]));
+      assert.deepStrictEqual(
+        first.changes.map((item) => [item.qa, item.raised]),
+        [
+          ["pending", ["captures", "review_unverified"]],
+          ["pending", ["review_unverified"]],
+        ],
+      );
+      yield* evidence.setQa({ landingId: "batch-1", changeId: "a", state: "confirmed" });
+      const again = yield* evidence.record(
+        recordInput("batch-1", [change("a"), change("b", { gaps: ["Not on Safari."] })]),
+      );
+      assert.deepStrictEqual(
+        again.changes.map((item) => [item.qa, item.raised, item.ref]),
+        [
+          ["confirmed", ["review_unverified"], 1],
+          ["pending", ["review_unverified", "gaps"], 2],
+        ],
+      );
+      const landing = yield* evidence.get({ landingId: "batch-1" });
+      assert.deepStrictEqual(
+        landing.changes.map(({ qa }) => [qa.state, qa.by, qa.raised]),
+        [
+          ["confirmed", "user", ["review_unverified"]],
+          ["pending", "server", ["review_unverified", "gaps"]],
+        ],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("shows a delegated child's or grandchild's landing in its lead's thread", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* seedThread({ id: "child", parent: "lead", role: "implementation" });
+      yield* seedThread({ id: "grandchild", parent: "child", role: "implementation" });
+      yield* seedThread({ id: "other-lead" });
+      for (const [id, threadId] of [
+        ["by-lead", "lead"],
+        ["by-child", "child"],
+        ["by-grandchild", "grandchild"],
+        ["elsewhere", "other-lead"],
+      ] as const)
+        yield* evidence.record(
+          recordInput(id, [change(`${id}-1`)], { threadId: ThreadId.make(threadId), landedAt }),
+        );
+      const qaThreads = (yield* evidence.thread({ threadId: lead })).landings.map((landing) => [
+        landing.id,
+        landing.threadId,
+        landing.qaThreadId,
+        landing.changes[0]!.qa.ref,
+      ]);
+      assert.deepStrictEqual(qaThreads, [
+        ["by-lead", "lead", "lead", 1],
+        ["by-grandchild", "grandchild", "lead", 3],
+        ["by-child", "child", "lead", 2],
+      ]);
+      // The child's own thread still lists its landing, which points at the lead.
+      assert.deepStrictEqual(
+        (yield* evidence.thread({ threadId: ThreadId.make("child") })).landings.map((landing) => [
+          landing.id,
+          landing.qaThreadId,
+        ]),
+        [["by-child", "lead"]],
+      );
+      assert.strictEqual(
+        (yield* evidence.get({ landingId: "elsewhere" })).qaThreadId,
+        "other-lead",
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+/** Seeds the thread's running turn and the messages it took as input. */
+const seedRunInput = (
+  threadId: string,
+  messages: ReadonlyArray<{ readonly id: string; readonly payload: Record<string, unknown> }>,
+  status = "running",
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const runId = `run-${threadId}`;
+    const ids = messages.map((message) => message.id);
+    yield* sql`INSERT INTO orchestration_v2_projection_runs (run_id, thread_id, ordinal, provider, status, requested_at, payload_json)
+      VALUES (${runId}, ${threadId}, 1, 'codex', ${status}, ${landedAt},
+        ${JSON.stringify({ userMessageId: ids[0], inputMessageIds: ids })})`;
+    for (const message of messages)
+      yield* sql`INSERT INTO orchestration_v2_projection_messages (message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json)
+        VALUES (${message.id}, ${threadId}, ${runId}, 'user', 0, ${landedAt}, ${landedAt}, ${JSON.stringify(message.payload)})`;
+  });
+
+it.effect("lets an agent settle QA only from a user's own message in its current turn", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      const refuse = (threadId: string) =>
+        errorOf(
+          evidence.agentSetQa({
+            threadId: ThreadId.make(threadId),
+            landingId: `landing-${threadId}`,
+            changeId: "a",
+            state: "confirmed",
+          }),
+        );
+      const cases = [
+        ["system", { createdBy: "system", origin: { kind: "system", event: "evidence prompt" } }],
+        ["brief", { createdBy: "agent", senderThreadId: "lead-thread" }],
+        [
+          "scheduled",
+          {
+            createdBy: "user",
+            origin: { kind: "scheduled-task", title: "Nightly" },
+            scheduledTaskId: "task-1",
+          },
+        ],
+      ] as const;
+      for (const [threadId, payload] of cases) {
+        yield* seedThread({ id: threadId });
+        yield* evidence.record(
+          recordInput(`landing-${threadId}`, [change("a")], { threadId: ThreadId.make(threadId) }),
+        );
+        yield* seedRunInput(threadId, [{ id: `message-${threadId}`, payload }]);
+        assert.strictEqual(yield* refuse(threadId), Service.AGENT_QA_NEEDS_USER_MESSAGE);
+      }
+      // A user message in a finished run no longer counts.
+      yield* seedThread({ id: "finished" });
+      yield* evidence.record(
+        recordInput("landing-finished", [change("a")], { threadId: ThreadId.make("finished") }),
+      );
+      yield* seedRunInput(
+        "finished",
+        [{ id: "message-finished", payload: { createdBy: "user" } }],
+        "completed",
+      );
+      assert.strictEqual(yield* refuse("finished"), Service.AGENT_QA_NEEDS_USER_MESSAGE);
+
+      yield* seedThread({ id: "user" });
+      yield* evidence.record(
+        recordInput("landing-user", [change("a")], { threadId: ThreadId.make("user") }),
+      );
+      yield* seedRunInput("user", [
+        {
+          id: "message-wake",
+          payload: { createdBy: "system", origin: { kind: "wake", detail: "x" } },
+        },
+        { id: "message-user", payload: { createdBy: "user", origin: { kind: "user" } } },
+      ]);
+      const recorded = yield* evidence.agentSetQa({
+        threadId: ThreadId.make("user"),
+        landingId: "landing-user",
+        changeId: "a",
+        state: "problem",
+        note: "The count overlaps the close button.",
+      });
+      assert.deepInclude(recorded, {
+        state: "problem",
+        by: "agent",
+        messageId: "message-user",
+        note: "The count overlaps the close button.",
+      });
+      assert.deepStrictEqual(yield* evidence.counts(), { pending: 4, problem: 1 });
+      // Another thread's QA is settled in that thread.
+      assert.strictEqual(
+        yield* errorOf(
+          evidence.agentSetQa({
+            threadId: ThreadId.make("user"),
+            landingId: "landing-system",
+            changeId: "a",
+            state: "confirmed",
+          }),
+        ),
+        "Landing landing-system shows its QA in another thread; settle it there.",
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("closes an agent's problem when a later landing names it in fixes", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(recordInput("first", [change("toast")]));
+      yield* seedRunInput("lead", [{ id: "message-1", payload: { createdBy: "user" } }]);
+      yield* evidence.agentSetQa({
+        threadId: lead,
+        landingId: "first",
+        changeId: "toast",
+        state: "problem",
+        note: "Overlaps the button.",
+      });
+      const fix = yield* evidence.record(
+        recordInput("second", [
+          change("toast-fix", { fixes: [{ landingId: "first", changeId: "toast" }] }),
+          change("other", { fixes: [{ landingId: "first", changeId: "missing" }] }),
+        ]),
+      );
+      assert.deepStrictEqual(fix.changes[0], {
+        id: "toast-fix",
+        qa: "pending",
+        raised: ["review_unverified"],
+        ref: 2,
+      });
+      assert.deepStrictEqual(fix.warnings, [
+        "change other: fixes first/missing, which is not a recorded problem",
+      ]);
+      const closed = (yield* evidence.get({ landingId: "first" })).changes[0]!.qa;
+      assert.deepInclude(closed, {
+        state: "waived",
+        by: "agent",
+        note: "Fixed by second · toast-fix",
+      });
+      assert.deepStrictEqual(yield* evidence.counts(), { pending: 2, problem: 0 });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("marks pending changes discussed until the user or agent next acts on them", () =>
+  withHome(() =>
+    Effect.gen(function* () {
+      const evidence = yield* Service.EvidenceService;
+      yield* seedThread({ id: "lead" });
+      yield* evidence.record(recordInput("first", [change("a"), change("b")]));
+      yield* evidence.setQa({ landingId: "first", changeId: "b", state: "confirmed" });
+      yield* evidence.markDiscussed({
+        threadId: lead,
+        messageId: MessageId.make("message-discuss"),
+        changes: [
+          { landingId: "first", changeId: "a" },
+          { landingId: "first", changeId: "b" },
+        ],
+      });
+      const discussed = () =>
+        evidence
+          .get({ landingId: "first" })
+          .pipe(Effect.map((landing) => landing.changes.map((item) => item.qa.discussedMessageId)));
+      assert.deepStrictEqual(yield* discussed(), ["message-discuss", undefined]);
+      // Another thread's message never marks this thread's changes.
+      yield* evidence.markDiscussed({
+        threadId: ThreadId.make("other"),
+        messageId: MessageId.make("message-other"),
+        changes: [{ landingId: "first", changeId: "a" }],
+      });
+      assert.deepStrictEqual(yield* discussed(), ["message-discuss", undefined]);
+      yield* evidence.setQa({ landingId: "first", changeId: "a", state: "pending" });
+      assert.deepStrictEqual(yield* discussed(), [undefined, undefined]);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

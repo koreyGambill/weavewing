@@ -11,6 +11,8 @@ import {
   ThreadArtifactReadInput,
   ThreadArtifactVersion,
   ThreadArtifactMetadata,
+  EvidenceAgentQaInput,
+  EvidenceChangeQa,
   EvidenceLanding,
   EvidenceListInput,
   EvidenceListResult,
@@ -19,7 +21,7 @@ import {
   EvidenceSlug,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 import { ThreadWorkspace as ThreadWorkspaceService } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -98,18 +100,30 @@ export const ReviewToolkit = Toolkit.make(
   Tool.make("evidence_record", {
     ...common,
     description:
-      "After work lands on the target branch, record its proof for the user to QA: one landing per merge or batch, one change per ask, with the user's ask, commits, review verdict, gate results, captures under ~/evidence and unproven gaps. A waived review needs review.reason and a skipped check needs reason, one line each. Recording an id again replaces it and keeps the user's QA. Omit threadId for this thread.",
+      "After work lands on the target branch, record its proof: one landing per merge or batch, one change per ask, with the user's ask, commits, review verdict, gate results, captures under ~/evidence and gaps. List as gaps only what the user could check and you did not. A waived review needs review.reason and a skipped check needs reason, one line each. Name problem changes this work fixes in `fixes`. Recording an id again replaces it and keeps the user's QA. Omit threadId for this thread.",
     parameters: EvidenceRecordInput,
     success: EvidenceRecordResult,
   }).annotate(Tool.Readonly, true),
   Tool.make("evidence_read", {
     ...common,
     description:
-      "The user's QA queue for landed work, across threads. Lists landings newest first (needsQa: changes awaiting or failing QA; threadId; pass `next` as `before`), or reads one by landingId with each change's QA state and the user's note. Only the user sets QA.",
+      "The user's QA queue for landed work, across threads. Lists landings newest first (needsQa: changes awaiting QA or marked problem; threadId; pass `next` as `before`), or reads one by landingId with each change's QA state, note and who set it.",
     parameters: Schema.Struct({
       ...EvidenceListInput.fields,
       landingId: Schema.optional(EvidenceSlug),
     }),
     success: Schema.Union([EvidenceListResult, EvidenceLanding]),
   }).annotate(Tool.Readonly, true),
+  Tool.make("evidence_qa_update", {
+    ...common,
+    description:
+      "Record the user's QA of a landed change from their message in this turn: `confirmed`, `problem` with what is wrong, `dismissed` with why, or `pending` to undo your record. Use only the user's own words; the user sees it marked as recorded by you.",
+    parameters: EvidenceAgentQaInput,
+    success: EvidenceChangeQa,
+  })
+    .annotate(Tool.Readonly, true)
+    .annotate(Tool.Destructive, false)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients)
+    // Settling QA waits on a user message, so Claude gets it up front like `question_update`.
+    .annotate(Tool.Meta, { "anthropic/alwaysLoad": true }),
 );

@@ -9,6 +9,7 @@ import {
   type KnownComposerContextRecord,
   type ScopedThreadRef,
   type ThreadContextRecord,
+  type WaitingItemContextRecord,
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
 } from "@t3tools/contracts";
@@ -530,6 +531,8 @@ export function composerContextPayloadFields(
       );
       return fields;
     }
+    case "waiting-item":
+      return [{ key: null, value: waitingItemAboutLine(record), shown: shownAs(null) }];
     case "environment":
       return [
         { key: "label", value: record.label },
@@ -545,6 +548,12 @@ export function composerContextPayloadFields(
 
 function formatComposerContextProviderPayload(record: KnownComposerContextRecord): string {
   return formatPayloadFields(composerContextPayloadFields(record));
+}
+
+/** What a Discuss reference tells the agent, ahead of the user's own words. */
+function waitingItemAboutLine(record: WaitingItemContextRecord): string {
+  const changeId = record.key.slice(record.key.indexOf("/") + 1);
+  return `About ${record.ref} (landing ${record.sha}, change ${changeId}): ${record.title}`;
 }
 
 function formatEnvelopeEntry(
@@ -571,14 +580,24 @@ export function projectComposerContextForProvider(input: {
   for (const record of input.records) {
     recordsById.set(record.contextId, recordsById.has(record.contextId) ? undefined : record);
   }
+  // A Discuss reference becomes a short line ahead of the message instead of an inline marker.
+  const about: string[] = [];
+  const replaced = replaceComposerContextReferences(input.text, (occurrence) => {
+    const record = recordsById.get(occurrence.contextId);
+    if (record?.kind === "waiting-item" && !("payload" in record)) {
+      const line = waitingItemAboutLine(record);
+      if (!about.includes(line)) about.push(line);
+      return "";
+    }
+    return formatComposerContextProviderMarker(
+      record?.kind ?? occurrence.kind,
+      occurrence.label,
+      occurrence.contextId,
+    );
+  });
+  const words = about.length === 0 ? replaced : replaced.replace(/^\s+/, "");
   const body = expandAssistantCitationsForProvider(
-    replaceComposerContextReferences(input.text, (occurrence) =>
-      formatComposerContextProviderMarker(
-        recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
-        occurrence.label,
-        occurrence.contextId,
-      ),
-    ),
+    about.length === 0 ? words : `${about.join("\n")}\n\n${words}`,
   );
   const seen = new Set<ComposerContextId>();
   const entries: string[] = [];
@@ -586,6 +605,7 @@ export function projectComposerContextForProvider(input: {
     if (seen.has(occurrence.contextId)) continue;
     seen.add(occurrence.contextId);
     const record = recordsById.get(occurrence.contextId);
+    if (record?.kind === "waiting-item" && !("payload" in record)) continue;
     const entry = formatEnvelopeEntry(
       record?.kind ?? occurrence.kind,
       occurrence.contextId,

@@ -308,6 +308,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.notificationsMarkAllRead]: "notifications",
   [WS_METHODS.evidenceList]: "evidence",
   [WS_METHODS.evidenceGet]: "evidence",
+  [WS_METHODS.evidenceThread]: "evidence",
   [WS_METHODS.evidenceSetQa]: "evidence",
   [WS_METHODS.evidenceCounts]: "evidence",
   [WS_METHODS.evidenceSubscribe]: "evidence",

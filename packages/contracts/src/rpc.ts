@@ -18,6 +18,8 @@ import {
   EvidenceListResult,
   EvidenceProjectCoverage,
   EvidenceSetQaInput,
+  EvidenceThreadInput,
+  EvidenceThreadResult,
 } from "./evidence.ts";
 import {
   MessageFollowUp,
@@ -795,6 +797,7 @@ export const WS_METHODS = {
   notificationsMarkAllRead: "notifications.markAllRead",
   evidenceList: "evidence.list",
   evidenceGet: "evidence.get",
+  evidenceThread: "evidence.thread",
   evidenceSetQa: "evidence.setQa",
   evidenceCounts: "evidence.counts",
   evidenceSubscribe: "evidence.subscribe",
@@ -2678,6 +2681,11 @@ const WsEvidenceGetRpc = Rpc.make(WS_METHODS.evidenceGet, {
   success: EvidenceLanding,
   error: evidenceErrors,
 });
+const WsEvidenceThreadRpc = Rpc.make(WS_METHODS.evidenceThread, {
+  payload: EvidenceThreadInput,
+  success: EvidenceThreadResult,
+  error: evidenceErrors,
+});
 const WsEvidenceSetQaRpc = Rpc.make(WS_METHODS.evidenceSetQa, {
   payload: EvidenceSetQaInput,
   success: EvidenceChangeQa,
@@ -2914,6 +2922,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsNotificationsMarkAllReadRpc,
   WsEvidenceListRpc,
   WsEvidenceGetRpc,
+  WsEvidenceThreadRpc,
   WsEvidenceSetQaRpc,
   WsEvidenceCountsRpc,
   WsEvidenceSubscribeRpc,

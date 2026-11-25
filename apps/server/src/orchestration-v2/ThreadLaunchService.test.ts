@@ -47,6 +47,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as EvidenceService from "../evidence/EvidenceService.ts";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
@@ -3101,6 +3102,7 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
         harness.layer,
         layerFiles,
         Layer.mock(DevelopmentEnvironments.DevelopmentEnvironments)({}),
+        Layer.mock(EvidenceService.EvidenceService)({}),
       ),
     ),
   );

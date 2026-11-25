@@ -7,6 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import { ThreadWorkspace } from "../../../threadWorkspace/ThreadWorkspace.ts";
 import * as EvidenceService from "../../../evidence/EvidenceService.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller, readThread } from "../../threadAccess.ts";
 import { ReviewToolkit } from "./tools.ts";
@@ -149,6 +150,18 @@ export const layer = McpToolAccess.toLayer(ReviewToolkit, {
           })
           .pipe(Effect.mapError(evidenceFailure));
       }),
+  ),
+  evidence_qa_update: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireThreadScope(
+        yield* McpInvocationContext.McpInvocationContext,
+        "Evidence QA",
+      );
+      const evidence = yield* EvidenceService.EvidenceService;
+      return yield* evidence
+        .agentSetQa({ ...input, threadId: scope.thread.threadId })
+        .pipe(Effect.mapError(evidenceFailure));
+    }),
   ),
   evidence_read: McpToolAccess.reads(({ landingId, ...input }) =>
     Effect.gen(function* () {

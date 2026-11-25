@@ -2,7 +2,9 @@ import * as Schema from "effect/Schema";
 
 import {
   IsoDateTime,
+  MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -15,8 +17,34 @@ export const EVIDENCE_RECORD_MAX_BYTES = 64 * 1024;
 
 export const EvidenceSlug = Text(120).check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/));
 
-export const EvidenceQaState = Schema.Literals(["pending", "confirmed", "failed", "waived"]);
+/**
+ * `pending` waits on the user; `quiet` had nothing for the user to judge; `problem` is a fix the
+ * agent owes; `waived` shows as "Dismissed".
+ */
+export const EvidenceQaState = Schema.Literals([
+  "pending",
+  "quiet",
+  "confirmed",
+  "problem",
+  "waived",
+]);
 export type EvidenceQaState = typeof EvidenceQaState.Type;
+
+/** Why a recorded change asks for the user's QA. A change with none is recorded quietly. */
+export const EvidenceQaRaiseReason = Schema.Literals([
+  "captures",
+  "review_waived",
+  "review_unverified",
+  "review_changes_requested",
+  "check_failed",
+  "check_skipped",
+  "gaps",
+]);
+export type EvidenceQaRaiseReason = typeof EvidenceQaRaiseReason.Type;
+
+/** Who set the QA state: the server when it recorded the change, the user, or an agent. */
+export const EvidenceQaBy = Schema.Literals(["server", "user", "agent"]);
+export type EvidenceQaBy = typeof EvidenceQaBy.Type;
 
 const Reason = Text(300);
 
@@ -72,6 +100,12 @@ export const EvidenceChange = Schema.Struct({
   ),
   gaps: Schema.Array(Text(300)).check(Schema.isMaxLength(10)),
   evidenceDir: Schema.optional(Text(1024)),
+  /** Earlier changes the agent recorded as `problem` that this change fixes. */
+  fixes: Schema.optional(
+    Schema.Array(Schema.Struct({ landingId: EvidenceSlug, changeId: EvidenceSlug })).check(
+      Schema.isMaxLength(20),
+    ),
+  ),
 });
 export type EvidenceChange = typeof EvidenceChange.Type;
 
@@ -123,6 +157,15 @@ export const EvidenceChangeQa = Schema.Struct({
   state: EvidenceQaState,
   note: Schema.String.check(Schema.isMaxLength(2000)),
   updatedAt: IsoDateTime,
+  by: Schema.optional(EvidenceQaBy),
+  /** The thread's QA number, shown as QA<ref>; set once the change raises a card. */
+  ref: Schema.optional(PositiveInt),
+  /** Why the change asks for QA; absent on landings recorded before reasons were kept. */
+  raised: Schema.optional(Schema.Array(EvidenceQaRaiseReason)),
+  /** The user message that settled it, when an agent recorded the outcome from chat. */
+  messageId: Schema.optional(MessageId),
+  /** The user's message about this change, sent with Discuss, still awaiting the agent. */
+  discussedMessageId: Schema.optional(MessageId),
 });
 export type EvidenceChangeQa = typeof EvidenceChangeQa.Type;
 
@@ -136,6 +179,8 @@ export type EvidenceReviewThread = typeof EvidenceReviewThread.Type;
 export const EvidenceLanding = Schema.Struct({
   ...EvidenceRecord.fields,
   threadId: ThreadId,
+  /** The top-level thread that shows this landing's QA: the lead, for a delegated child's landing. */
+  qaThreadId: Schema.optional(ThreadId),
   projectId: Schema.NullOr(ProjectId),
   landedAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -154,8 +199,9 @@ export type EvidenceLanding = typeof EvidenceLanding.Type;
 
 export const EvidenceQaTally = Schema.Struct({
   pending: NonNegativeInt,
+  quiet: NonNegativeInt,
   confirmed: NonNegativeInt,
-  failed: NonNegativeInt,
+  problem: NonNegativeInt,
   waived: NonNegativeInt,
 });
 export type EvidenceQaTally = typeof EvidenceQaTally.Type;
@@ -183,7 +229,7 @@ const EvidenceCursor = Schema.Struct({ landedAt: IsoDateTime, id: EvidenceSlug }
 
 export const EvidenceListInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
-  /** Only landings with a pending or failed change. */
+  /** Only landings with a pending or problem change. */
   needsQa: Schema.optional(Schema.Boolean),
   before: Schema.optional(EvidenceCursor),
 });
@@ -198,15 +244,42 @@ export type EvidenceListResult = typeof EvidenceListResult.Type;
 export const EvidenceGetInput = Schema.Struct({ landingId: EvidenceSlug });
 export type EvidenceGetInput = typeof EvidenceGetInput.Type;
 
+/** The user's QA: confirm, dismiss (stored as `waived`) or reopen. `problem` is the agent's to record. */
 export const EvidenceSetQaInput = Schema.Struct({
   landingId: EvidenceSlug,
   changeId: EvidenceSlug,
-  state: EvidenceQaState,
+  state: Schema.Literals(["pending", "confirmed", "waived"]),
   note: Schema.optional(EvidenceChangeQa.fields.note),
 });
 export type EvidenceSetQaInput = typeof EvidenceSetQaInput.Type;
 
-export const EvidenceCounts = Schema.Struct({ pending: NonNegativeInt, failed: NonNegativeInt });
+const EvidenceAgentQaInputFields = Schema.Struct({
+  landingId: EvidenceSlug,
+  changeId: EvidenceSlug,
+  state: Schema.Literals(["confirmed", "problem", "dismissed", "pending"]),
+  note: Schema.optional(Text(2000)),
+});
+
+/** An agent's record of the user's QA from the user's own message; `dismissed` is stored as `waived`. */
+export const EvidenceAgentQaInput = EvidenceAgentQaInputFields.check(
+  Schema.makeFilter((input: typeof EvidenceAgentQaInputFields.Type) =>
+    (input.state !== "problem" && input.state !== "dismissed") || input.note !== undefined
+      ? true
+      : `${input.state} needs a note: ${input.state === "problem" ? "what is wrong" : "why"}, in the user's words.`,
+  ),
+);
+export type EvidenceAgentQaInput = typeof EvidenceAgentQaInput.Type;
+
+export const EVIDENCE_THREAD_LANDING_LIMIT = 50;
+
+export const EvidenceThreadInput = Schema.Struct({ threadId: ThreadId });
+export type EvidenceThreadInput = typeof EvidenceThreadInput.Type;
+
+/** The landings a thread shows: recorded in it or for it, newest first and capped. */
+export const EvidenceThreadResult = Schema.Struct({ landings: Schema.Array(EvidenceLanding) });
+export type EvidenceThreadResult = typeof EvidenceThreadResult.Type;
+
+export const EvidenceCounts = Schema.Struct({ pending: NonNegativeInt, problem: NonNegativeInt });
 export type EvidenceCounts = typeof EvidenceCounts.Type;
 
 export const EvidenceCoverageInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });
@@ -227,7 +300,15 @@ export type EvidenceProjectCoverage = typeof EvidenceProjectCoverage.Type;
 
 export const EvidenceRecordResult = Schema.Struct({
   landingId: EvidenceSlug,
-  changes: Schema.Array(Schema.Struct({ id: EvidenceSlug, qa: EvidenceQaState })),
+  changes: Schema.Array(
+    Schema.Struct({
+      id: EvidenceSlug,
+      qa: EvidenceQaState,
+      /** Why the user sees a QA card for it; empty when it was recorded quietly. */
+      raised: Schema.Array(EvidenceQaRaiseReason),
+      ref: Schema.optional(PositiveInt),
+    }),
+  ),
   /** Problems kept in the record, such as a capture that is missing. */
   warnings: Schema.Array(Schema.String),
 });

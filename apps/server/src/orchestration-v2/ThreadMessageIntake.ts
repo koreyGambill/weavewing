@@ -1,11 +1,16 @@
 import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
 import { appendUserInputAttachmentPaths } from "../provider/userInputAttachments.ts";
-import type { ChatAttachment, OrchestrationV2Command } from "@t3tools/contracts";
+import type {
+  ChatAttachment,
+  OrchestrationMessageContext,
+  OrchestrationV2Command,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as EvidenceService from "../evidence/EvidenceService.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 
 import * as DevelopmentEnvironmentLifecycle from "../developmentEnvironments/DevelopmentEnvironmentLifecycle.ts";
@@ -88,6 +93,30 @@ const withGuestAttachments = Effect.fn("ThreadMessageIntake.withGuestAttachments
   );
   return { ...command, attachments: message?.attachments ?? [] };
 });
+
+/** The QA changes a user's message discusses, from the Discuss references it carries. */
+function discussedQaChanges(context: OrchestrationMessageContext | undefined) {
+  return (context?.records ?? []).flatMap((record) => {
+    if (record.kind !== "waiting-item" || !("itemKind" in record)) return [];
+    const slash = record.key.indexOf("/");
+    return slash > 0
+      ? [{ landingId: record.key.slice(0, slash), changeId: record.key.slice(slash + 1) }]
+      : [];
+  });
+}
+
+// Discussing is a display mirror the next user action clears, so a failed write is only logged.
+const markDiscussed = (command: Extract<OrchestrationV2Command, { type: "message.dispatch" }>) => {
+  const changes = discussedQaChanges(command.context);
+  if (changes.length === 0 || command.createdBy !== "user" || command.origin.kind !== "user")
+    return Effect.void;
+  return EvidenceService.EvidenceService.pipe(
+    Effect.flatMap((evidence) =>
+      evidence.markDiscussed({ threadId: command.threadId, messageId: command.messageId, changes }),
+    ),
+    Effect.catch((error) => Effect.logWarning("Could not mark QA as discussed", error)),
+  );
+};
 
 export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(function* (
   incoming: OrchestrationV2Command,
@@ -208,6 +237,9 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
             event.type === "message.updated" ? event.payload.attachments : [],
           ),
         ),
+      ),
+      Effect.tap(() =>
+        command.type === "message.dispatch" ? markDiscussed(command) : Effect.void,
       ),
       Effect.tapError((error) =>
         dispatchWasNotAccepted(error)

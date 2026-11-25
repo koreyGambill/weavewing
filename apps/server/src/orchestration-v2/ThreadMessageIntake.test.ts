@@ -28,6 +28,7 @@ import {
   resolveAttachmentPath,
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as EvidenceService from "../evidence/EvidenceService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   OrchestratorCommandPreviouslyRejectedError,
@@ -36,11 +37,17 @@ import {
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { dispatchCommand } from "./ThreadMessageIntake.ts";
 
+const discussed: EvidenceService.MarkDiscussedInput[] = [];
+const layerEvidence = Layer.mock(EvidenceService.EvidenceService)({
+  markDiscussed: (input) => Effect.sync(() => void discussed.push(input)),
+});
+
 const layerIntakeTest = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-question-intake-",
 }).pipe(
   Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
   Layer.provideMerge(ServerSettings.layerTest()),
+  Layer.provideMerge(layerEvidence),
 );
 
 const layerFailingDispatchHandler =
@@ -474,5 +481,47 @@ it.effect("refuses a queued edit that keeps a file another edit already deleted"
     NodeFS.rmSync(NodePath.join(config.attachmentsDir, `${kept.id}.png`));
     yield* edit([kept]);
     expect(captured).toHaveLength(2);
+  }).pipe(Effect.provide(layerIntakeTest)),
+);
+
+it.effect("marks the QA changes a user's Discuss message is about once it is accepted", () =>
+  Effect.gen(function* () {
+    discussed.length = 0;
+    const accepted = Layer.mock(ThreadManagementService.ThreadManagementService)({
+      dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [], replayed: false }),
+    });
+    const reference = {
+      version: 1 as const,
+      kind: "waiting-item",
+      contextId: "waiting-item_first-a",
+      label: "QA1 · discuss · Toast shows the retry count",
+      itemKind: "qa",
+      key: "first/a",
+      ref: "QA1",
+      title: "Toast shows the retry count",
+      sha: "abc1234",
+    };
+    const send = (id: string, createdBy: "user" | "agent") =>
+      dispatchCommand({
+        type: "message.dispatch",
+        commandId: CommandId.make(`command-${id}`),
+        threadId: ThreadId.make("thread-discuss"),
+        messageId: MessageId.make(id),
+        text: "The count overlaps the close button.",
+        attachments: [],
+        createdBy,
+        creationSource: "web",
+        origin: { kind: "user" },
+        context: { version: 1, records: [reference] },
+      } as OrchestrationV2Command).pipe(Effect.provide(accepted));
+    yield* send("message-user", "user");
+    yield* send("message-agent", "agent");
+    expect(discussed).toEqual([
+      {
+        threadId: "thread-discuss",
+        messageId: "message-user",
+        changes: [{ landingId: "first", changeId: "a" }],
+      },
+    ]);
   }).pipe(Effect.provide(layerIntakeTest)),
 );

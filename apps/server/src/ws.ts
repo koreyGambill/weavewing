@@ -1466,6 +1466,7 @@ export const layerWsRpc = (
         | ServerConfig.ServerConfig
         | ServerSettings.ServerSettingsService
         | DocumentText.DocumentText
+        | EvidenceService.EvidenceService
       >();
       const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
       const projectStore = yield* ProjectStore.ProjectStoreV2;
@@ -2414,6 +2415,7 @@ export const layerWsRpc = (
         [WS_METHODS.notificationsMarkAllRead]: () => notifications.markAllRead(),
         [WS_METHODS.evidenceList]: (input) => evidence.list(input),
         [WS_METHODS.evidenceGet]: (input) => evidence.get(input),
+        [WS_METHODS.evidenceThread]: (input) => evidence.thread(input),
         [WS_METHODS.evidenceSetQa]: (input) => evidence.setQa(input),
         [WS_METHODS.evidenceCounts]: () => evidence.counts(),
         [WS_METHODS.evidenceSubscribe]: () => evidence.subscribe(),
