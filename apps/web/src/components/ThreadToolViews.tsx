@@ -1041,7 +1041,7 @@ function ThreadRelated({ threadRef }: { threadRef: ScopedThreadRef }) {
               className="min-w-0 flex-1"
             >
               <span className="flex items-center gap-1.5 text-3xs text-muted-foreground">
-                {entry.relation}
+                <span className="shrink-0">{entry.relation}</span>
                 <DelegateRoleChip role={entry.role} />
               </span>
               <span className="block break-words text-primary hover:underline">{entry.title}</span>

@@ -502,8 +502,18 @@ function ChangeRow({
   const key = change.ticket?.key ?? change.id;
   const review = reviewDisplay(change.review);
   const [waiving, setWaiving] = useState(false);
+  const row = useRef<HTMLDivElement>(null);
+  // The note unmounts with focus in it, so hand focus back to the QA button.
+  const closeWaive = () => {
+    setWaiving(false);
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active !== null && active !== document.body && !row.current?.contains(active)) return;
+      row.current?.querySelector<HTMLElement>("[data-qa-trigger]")?.focus();
+    });
+  };
   return (
-    <div className="min-w-0 space-y-1.5 border-t border-border p-2">
+    <div ref={row} className="min-w-0 space-y-1.5 border-t border-border p-2">
       <div className="flex items-center gap-1">
         <span className="min-w-0 truncate font-medium">{key}</span>
         {long ? (
@@ -533,7 +543,7 @@ function ChangeRow({
           landingId={landingId}
           change={change}
           leaves={leaves("waived")}
-          onDone={() => setWaiving(false)}
+          onDone={closeWaive}
         />
       ) : change.qa.state === "waived" && change.qa.note.trim() ? (
         <p className="break-words text-muted-foreground">QA waived: {change.qa.note}</p>
@@ -711,6 +721,7 @@ function QaMenu({
         render={
           <Button
             ref={trigger}
+            data-qa-trigger
             variant="outline"
             size="micro"
             className="ml-auto shrink-0 justify-between @min-[11rem]/evidence:min-w-23"

@@ -573,6 +573,7 @@ export function ThreadRelationshipsPanel(props: {
           providerInstanceId: subagent.providerInstanceId,
           origin: subagent.origin,
           modelSelection: subagent.modelSelection,
+          delegateRole: subagent.delegateRole,
         },
       ]),
   );
@@ -950,7 +951,9 @@ export function ThreadRelationshipsPanel(props: {
             {threadTitle}
           </span>
         </span>
-        {isSubagent && !isParent ? <DelegateRoleChip role={node?.thread?.delegateRole} /> : null}
+        {isSubagent && !isParent ? (
+          <DelegateRoleChip role={node?.thread?.delegateRole ?? projectedAgent?.delegateRole} />
+        ) : null}
         {agent ? null : (
           <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         )}
