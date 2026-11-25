@@ -1574,6 +1574,158 @@ layer("ProviderEventIngestorV2", (it) => {
       }),
   );
 
+  it.effect("closes only approvals that are still open when the provider gives up", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const threadEvent = yield* threadCreatedEvent(now);
+      const threadId = threadEvent.threadId;
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      const providerThreadId = idAllocator.derive.providerThread({
+        driver: CODEX_DRIVER,
+        nativeThreadId: `${threadId}:expiry`,
+      });
+      const providerTurnId = idAllocator.derive.providerTurn({
+        driver: CODEX_DRIVER,
+        nativeTurnId: `${threadId}:expiry`,
+      });
+      const fixtures = (["waiting", "answered", "interrupted"] as const).map((key, ordinal) => {
+        const nodeId = NodeId.make(`${threadId}:${key}`);
+        const settledAt = key === "waiting" ? null : now;
+        const request: OrchestrationV2RuntimeRequest = {
+          id: RuntimeRequestId.make(`${threadId}:${key}`),
+          nodeId,
+          providerTurnId,
+          nativeRequestRef: null,
+          kind: "mcp-elicitation",
+          status: key === "waiting" ? "pending" : key === "answered" ? "resolved" : "cancelled",
+          responseCapability:
+            key === "interrupted"
+              ? { type: "not_resumable", reason: "The run was interrupted." }
+              : { type: "live", providerSessionId },
+          createdAt: now,
+          resolvedAt: settledAt,
+          ...(key === "answered" ? { decision: "acceptForSession" as const } : {}),
+        };
+        // Stop cancels the request and interrupts its node and card.
+        const status =
+          key === "waiting" ? "waiting" : key === "answered" ? "completed" : "interrupted";
+        const node: OrchestrationV2ExecutionNode = {
+          id: nodeId,
+          threadId,
+          runId: null,
+          parentNodeId: null,
+          rootNodeId: nodeId,
+          kind: "approval_request",
+          status,
+          countsForRun: false,
+          providerThreadId,
+          providerTurnId,
+          nativeItemRef: null,
+          runtimeRequestId: request.id,
+          checkpointScopeId: null,
+          startedAt: now,
+          completedAt: settledAt,
+        };
+        const item: OrchestrationV2TurnItem = {
+          id: TurnItemId.make(`${threadId}:${key}`),
+          threadId,
+          runId: null,
+          nodeId,
+          providerThreadId,
+          providerTurnId,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal,
+          status,
+          title: null,
+          startedAt: now,
+          completedAt: settledAt,
+          updatedAt: now,
+          type: "approval_request",
+          requestId: request.id,
+          requestKind: "mcp-elicitation",
+        };
+        return { key, request, node, item };
+      });
+      const seedEvents: Array<OrchestrationV2DomainEvent> = [threadEvent];
+      for (const fixture of fixtures) {
+        for (const payload of [
+          { type: "runtime-request.updated" as const, payload: fixture.request },
+          { type: "node.updated" as const, payload: fixture.node },
+          { type: "turn-item.updated" as const, payload: fixture.item },
+        ]) {
+          seedEvents.push({
+            id: yield* idAllocator.allocate.event({ threadId }),
+            threadId,
+            occurredAt: now,
+            ...payload,
+          });
+        }
+      }
+      yield* eventSink.write({ events: seedEvents });
+
+      // Closures built from stale snapshots. Codex expires the request first; the answered case
+      // takes Claude's abort shape instead, which cancels the request after its node and card.
+      for (const fixture of fixtures) {
+        const closures = [
+          {
+            type: "runtime_request.updated" as const,
+            driver: CODEX_DRIVER,
+            threadId,
+            runtimeRequest: {
+              ...fixture.request,
+              status: fixture.key === "answered" ? ("cancelled" as const) : ("expired" as const),
+              responseCapability: { type: "not_resumable" as const, reason: "Codex stopped" },
+              resolvedAt: now,
+            },
+          },
+          {
+            type: "node.updated" as const,
+            driver: CODEX_DRIVER,
+            node: { ...fixture.node, status: "cancelled" as const, completedAt: now },
+          },
+          {
+            type: "turn_item.updated" as const,
+            driver: CODEX_DRIVER,
+            turnItem: { ...fixture.item, status: "cancelled" as const, completedAt: now },
+          },
+        ];
+        for (const event of fixture.key === "answered" ? closures.toReversed() : closures) {
+          yield* ingestor.ingestNormalized({
+            providerSessionId,
+            providerInstanceId: modelSelection.instanceId,
+            threadId,
+            event,
+          });
+        }
+      }
+
+      const projection = yield* projectionStore.getThreadProjection(threadId);
+      const statuses = fixtures.map((fixture) => [
+        fixture.key,
+        projection.runtimeRequests.find((entry) => entry.id === fixture.request.id)?.status,
+        projection.nodes.find((entry) => entry.id === fixture.node.id)?.status,
+        projection.turnItems.find((entry) => entry.id === fixture.item.id)?.status,
+      ]);
+      assert.deepEqual(statuses, [
+        ["waiting", "expired", "cancelled", "cancelled"],
+        ["answered", "resolved", "completed", "completed"],
+        ["interrupted", "cancelled", "interrupted", "interrupted"],
+      ]);
+      assert.equal(
+        projection.runtimeRequests.find((entry) => entry.id === fixtures[1]!.request.id)?.decision,
+        "acceptForSession",
+      );
+    }),
+  );
+
   it.effect("persists a failed provider terminal as one expected error item", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;

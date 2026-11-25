@@ -10,6 +10,7 @@ import {
   bookmarkUpdate,
   findOverlappingBookmark,
   orderBookmarks,
+  bookmarkToggle,
 } from "./bookmarks.logic";
 
 const threadId = ThreadId.make("thread");
@@ -177,5 +178,22 @@ describe("bookmarkMenuActions", () => {
     expect(labels({ ...prompt, todo: true, doneAt: at(9) })[0]).toBe("Reopen");
     const { todo: _, ...legacy } = prompt;
     expect(labels(legacy)).toEqual(["Mark done", "Remove bookmark"]);
+  });
+});
+
+describe("bookmarkToggle", () => {
+  const send = (whole: MessageFollowUp | null, button: "bookmark" | "todo") => {
+    const { action, todo } = bookmarkToggle(prompt, whole, button);
+    return todo === undefined ? action : `${action}:${todo}`;
+  };
+
+  it("treats bookmarked and to-do as exclusive states of one record", () => {
+    expect(send(null, "bookmark")).toBe("flag:false");
+    expect(send(null, "todo")).toBe("flag:true");
+    expect(send({ ...prompt, todo: false }, "bookmark")).toBe("unflag");
+    expect(send({ ...prompt, todo: false }, "todo")).toBe("todo");
+    expect(send({ ...prompt, todo: true }, "todo")).toBe("unflag");
+    expect(send({ ...prompt, todo: true, doneAt: at(9) }, "todo")).toBe("unflag");
+    expect(send({ ...prompt, todo: true }, "bookmark")).toBe("untodo");
   });
 });

@@ -3806,6 +3806,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </div>
                   {activeThreadId && !dictationTakesFooter ? (
                     <ComposerContextRing
+                      threadRef={scopeThreadRef(environmentId, activeThreadId)}
                       usage={contextWindow}
                       cost={threadCost}
                       compactDisabled={compactDisabled}

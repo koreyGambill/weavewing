@@ -53,7 +53,8 @@ directly to the agent that asked, including a subagent. Other pending requests s
 
 Codex asks before its first computer-use action in a thread, in every mode including **Full
 access**. Choose **Allow any app this session** to let it control any app Codex permits for the rest of the
-session without asking again.
+session without asking again. If nobody answers, Codex stops waiting after a few minutes and the
+action fails; the prompt then closes and can no longer be answered.
 
 Antigravity can still send native approval requests in **Full access**. It only offers remembered
 approvals for actions that support them.

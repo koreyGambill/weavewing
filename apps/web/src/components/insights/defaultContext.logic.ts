@@ -115,3 +115,82 @@ export const formatTokens = (tokens: number) =>
   tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
 export const formatBytes = (bytes: number) =>
   bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+
+export interface UsedContextSource {
+  readonly key: string;
+  readonly label: string;
+  readonly tokens: number;
+  /** Counted items, largest first; empty for rows derived from the provider's report. */
+  readonly items: ReadonlyArray<DefaultContextItem>;
+}
+
+/**
+ * Splits used context into itemized estimates and inferred remainders that add up to the provider's
+ * count. A first-turn prompt splits off the conversation only while it lies between the itemized
+ * total and current use. Estimates above the count cannot reconcile and are reported as such.
+ */
+export function usedContextSources(preview: DefaultContextPreview, usedTokens: number) {
+  if (preview.support === "unsupported") return null;
+  const counted = preview.items.filter((item) => item.counted);
+  const isFile = (item: DefaultContextItem) => item.category === "files";
+  // Servers that predate the repository flag get one undivided files row.
+  const split = counted.some((item) => isFile(item) && item.repository !== undefined);
+  type Group = [key: string, label: string, test: (item: DefaultContextItem) => boolean];
+  const fileGroups: Group[] = split
+    ? [
+        [
+          "repository-files",
+          "Repository instructions",
+          (item) => isFile(item) && item.repository === true,
+        ],
+        ["global-files", "Global instructions", (item) => isFile(item) && item.repository !== true],
+      ]
+    : [["files", CATEGORY_LABELS.files, isFile]];
+  const groups: Group[] = [
+    ["t3", CATEGORY_LABELS.t3, (item) => item.category === "t3"],
+    ["app-context", CATEGORY_LABELS["app-context"], (item) => item.category === "app-context"],
+    ["custom", CATEGORY_LABELS.custom, (item) => item.category === "custom"],
+    ...fileGroups,
+    ["skills", CATEGORY_LABELS.skills, (item) => item.category === "skills"],
+    ["tools", CATEGORY_LABELS.tools, (item) => item.category === "tools"],
+  ];
+  const sources: UsedContextSource[] = groups.flatMap(([key, label, test]) => {
+    const items = counted.filter(test).toSorted((a, b) => b.estimatedTokens - a.estimatedTokens);
+    const tokens = items.reduce((sum, item) => sum + item.estimatedTokens, 0);
+    return tokens === 0 ? [] : [{ key, label, tokens, items }];
+  });
+  const known = sources.reduce((sum, source) => sum + source.tokens, 0);
+  const used = Math.max(0, usedTokens);
+  if (known > used) return { reconciles: false as const, knownTokens: known, usedTokens: used };
+  const reported = preview.firstTurn?.promptTokens ?? null;
+  const baseline = reported !== null && reported >= known && reported <= used ? reported : null;
+  if (baseline === null) {
+    sources.push({
+      key: "rest",
+      label: "Harness, built-in tools and conversation (not itemized)",
+      tokens: used - known,
+      items: [],
+    });
+  } else {
+    sources.push(
+      {
+        key: "harness",
+        label: "First turn: harness, tools and what it read",
+        tokens: baseline - known,
+        items: [],
+      },
+      {
+        key: "conversation",
+        label: "Conversation since the first turn",
+        tokens: used - baseline,
+        items: [],
+      },
+    );
+  }
+  return {
+    reconciles: true as const,
+    sources: sources.toSorted((a, b) => b.tokens - a.tokens),
+    knownTokens: known,
+    firstTurnTokens: baseline,
+  };
+}

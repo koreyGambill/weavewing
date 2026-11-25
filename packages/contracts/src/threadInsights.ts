@@ -162,6 +162,8 @@ export const DefaultContextItem = Schema.Struct({
   depth: Schema.optional(NonNegativeInt),
   /** The file whose markdown link lists this one, read on demand rather than loaded. */
   parentId: Schema.optional(Schema.String),
+  /** For an instruction file: whether it lies inside the thread's repository. */
+  repository: Schema.optional(Schema.Boolean),
   status: Schema.optional(
     Schema.Literals(["expected", "loaded", "not-loaded", "unexpected", "not-read", "secret"]),
   ),
@@ -188,6 +190,13 @@ export const DefaultContextPreview = Schema.Struct({
       /** T3, app-context and custom bytes sent that turn. */
       injectedBytes: NonNegativeInt,
     }),
+  ),
+  /**
+   * The prompt size the provider reported for the first turn on the thread's current provider
+   * thread: what loaded before the conversation, plus the first message and whatever that turn read.
+   */
+  firstTurn: Schema.optional(
+    Schema.NullOr(Schema.Struct({ promptTokens: NonNegativeInt, reportedAt: Schema.String })),
   ),
   estimateMethod: Schema.String,
 });

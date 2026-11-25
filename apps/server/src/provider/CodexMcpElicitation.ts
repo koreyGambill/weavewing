@@ -170,14 +170,16 @@ export function describeMcpElicitation(
       ...(persistenceOptions.has("acceptForSession") &&
       toMcpElicitationResponse(payload, "acceptForSession").action === "accept"
         ? [
-            {
-              decision: "acceptForSession" as const,
-              label:
-                persistenceOptions.get("acceptForSession") ||
-                (isComputerUseElicitation(payload)
-                  ? "Allow any app this session"
-                  : "Always allow this session"),
-            },
+            isComputerUseElicitation(payload)
+              ? {
+                  decision: "acceptForSession" as const,
+                  label: persistenceOptions.get("acceptForSession") || "Allow any app this session",
+                  prominent: true,
+                }
+              : {
+                  decision: "acceptForSession" as const,
+                  label: persistenceOptions.get("acceptForSession") || "Always allow this session",
+                },
           ]
         : []),
       ...(persistenceOptions.has("acceptAlways") &&

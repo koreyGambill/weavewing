@@ -1,18 +1,15 @@
-import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, MessageFollowUp } from "@t3tools/contracts";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
-import { messageFollowUpsUpdate, useMessageFollowUpUpdate } from "../../state/messageFollowUps";
+import { BookmarkToggles } from "../reviews/FollowUps";
 import {
   bookmarkKey,
-  bookmarkMenuActions,
   bookmarkRailBars,
-  bookmarkUpdate,
+  bookmarkText,
   isBookmarkTodo,
 } from "../reviews/bookmarks.logic";
-import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "../ui/preview-card";
 import { resolveTimelineMinimapHeightStyle } from "./MessagesTimeline.logic";
@@ -24,8 +21,6 @@ import {
 
 const BAR_CLASS =
   "pointer-events-auto absolute right-0 flex h-2.5 w-full -translate-y-1/2 cursor-pointer items-center justify-end gap-1 focus-visible:outline-2 focus-visible:outline-ring";
-
-const bookmarkText = (bookmark: MessageFollowUp) => bookmark.excerpt || "Message without text";
 
 /**
  * Gold bars on the transcript's right edge, placed beside the left minimap's turn strips. Click a
@@ -164,8 +159,6 @@ function BookmarkRailBarCard({
   onJump: () => void;
   children: ReactNode;
 }) {
-  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
-  const update = useMessageFollowUpUpdate();
   const todo = isBookmarkTodo(bookmark);
   const done = todo && bookmark.doneAt !== null;
   const text = bookmarkText(bookmark);
@@ -192,19 +185,13 @@ function BookmarkRailBarCard({
             {todo ? (done ? " · done" : " · to-do") : ""}
           </p>
           <p className="mt-0.5 line-clamp-3 wrap-anywhere">{text}</p>
-          <div className="mt-1.5 flex flex-wrap justify-end gap-1">
-            {bookmarkMenuActions(bookmark).map(({ label: actionLabel, action }) => (
-              <Button
-                key={action}
-                type="button"
-                size="xs"
-                variant="ghost"
-                disabled={!canWrite}
-                onClick={() => void update(environmentId, bookmarkUpdate(bookmark, action))}
-              >
-                {actionLabel}
-              </Button>
-            ))}
+          <div className="mt-1.5 flex justify-end gap-0.5">
+            <BookmarkToggles
+              environmentId={environmentId}
+              target={bookmark}
+              bookmark={bookmark}
+              showDone
+            />
           </div>
         </div>
       </PreviewCardPopup>

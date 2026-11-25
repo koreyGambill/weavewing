@@ -9,9 +9,9 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { BookmarkIcon, MoreHorizontalIcon } from "lucide-react";
+import { BookmarkIcon, CircleCheckIcon, FlagIcon, MoreHorizontalIcon } from "lucide-react";
 import { AsyncResult } from "effect/reactivity";
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useRef, useState, type ReactNode } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
@@ -45,6 +45,7 @@ import {
   bookmarkUpdate,
   isBookmarkTodo,
   isOpenBookmarkTodo,
+  bookmarkToggle,
 } from "./bookmarks.logic";
 
 /** Servers before bookmarks list only follow-ups, and reject the `bookmarks` mode. */
@@ -115,7 +116,7 @@ function BookmarkMenuItems({
   ));
 }
 
-/** Message action row menu for the whole-message bookmark; never shown to agents. */
+/** Message action row toggles between bookmarked and to-do for the whole message; never shown to agents. */
 export function MessageFollowUpButton({
   threadRef,
   messageId,
@@ -126,51 +127,113 @@ export function MessageFollowUpButton({
   bookmarks: ReadonlyArray<MessageFollowUp>;
 }) {
   const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(threadRef.environmentId));
-  const supported = useMessageBookmarksSupported(threadRef.environmentId);
-  const update = useMessageFollowUpUpdate();
   if (!canWrite) return null;
-  const whole = bookmarks.find((item) => item.anchor === undefined) ?? null;
-  const flag = (todo: boolean) =>
-    void update(threadRef.environmentId, {
-      threadId: threadRef.threadId,
-      messageId,
-      action: "flag",
-      todo,
-    });
-  const label = whole ? "Bookmarked" : "Bookmark";
   return (
-    <Menu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <MenuTrigger
-              render={
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost-muted"
-                  aria-label={label}
-                  aria-pressed={whole !== null}
-                />
-              }
-            />
+    <BookmarkToggles
+      environmentId={threadRef.environmentId}
+      target={{ threadId: threadRef.threadId, messageId }}
+      bookmark={bookmarks.find((item) => item.anchor === undefined) ?? null}
+    />
+  );
+}
+
+/**
+ * Icon toggles for one bookmark record: bookmark, to-do flag and, when asked, done. Every surface
+ * that changes a bookmark uses these so they keep one shape.
+ */
+export function BookmarkToggles({
+  environmentId,
+  target,
+  bookmark,
+  showDone = false,
+}: {
+  environmentId: EnvironmentId;
+  target: Pick<MessageFollowUp, "threadId" | "messageId">;
+  bookmark: MessageFollowUp | null;
+  showDone?: boolean;
+}) {
+  const canWrite = useAtomValue(messageFollowUpsUpdate.permissionAtom(environmentId));
+  const supported = useMessageBookmarksSupported(environmentId);
+  const update = useMessageFollowUpUpdate();
+  const todo = bookmark !== null && isBookmarkTodo(bookmark);
+  const bookmarked = bookmark !== null && !todo;
+  const done = todo && bookmark.doneAt !== null;
+  const toggle = (button: "bookmark" | "todo") =>
+    void update(environmentId, bookmarkToggle(target, bookmark, button));
+  return (
+    <>
+      {/* Servers before bookmarks hold only to-dos. */}
+      {supported ? (
+        <IconToggle
+          label={bookmarked ? "Remove bookmark" : todo ? "Keep as bookmark only" : "Bookmark"}
+          pressed={bookmarked}
+          disabled={!canWrite}
+          onClick={() => toggle("bookmark")}
+        >
+          <BookmarkIcon className={cn("size-3", bookmarked && "fill-current text-warning")} />
+        </IconToggle>
+      ) : null}
+      <IconToggle
+        label={todo ? "Remove to-do" : "Flag as to-do"}
+        pressed={todo}
+        disabled={!canWrite}
+        onClick={() => toggle("todo")}
+      >
+        <FlagIcon
+          className={cn(
+            "size-3",
+            todo && (done ? "text-muted-foreground/60" : "fill-current text-warning"),
+          )}
+        />
+      </IconToggle>
+      {showDone && todo ? (
+        <IconToggle
+          label={done ? "Reopen" : "Mark done"}
+          pressed={done}
+          disabled={!canWrite}
+          onClick={() =>
+            void update(environmentId, bookmarkUpdate(bookmark, done ? "reopen" : "done"))
           }
         >
-          <BookmarkIcon className={cn("size-3", whole && "fill-current text-warning")} />
-        </TooltipTrigger>
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
-      <MenuPopup align="end">
-        {whole ? (
-          <BookmarkMenuItems environmentId={threadRef.environmentId} bookmark={whole} />
-        ) : (
-          <>
-            {supported ? <MenuItem onClick={() => flag(false)}>Bookmark</MenuItem> : null}
-            <MenuItem onClick={() => flag(true)}>Bookmark as to-do</MenuItem>
-          </>
-        )}
-      </MenuPopup>
-    </Menu>
+          <CircleCheckIcon className={cn("size-3", done && "text-success-foreground")} />
+        </IconToggle>
+      ) : null}
+    </>
+  );
+}
+
+function IconToggle({
+  label,
+  pressed,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  pressed: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-muted"
+            aria-label={label}
+            aria-pressed={pressed}
+            disabled={disabled}
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 

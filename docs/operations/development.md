@@ -64,13 +64,19 @@ The main checkout defaults to `~/.t3/dev`. An explicit `--home-dir` wins in both
 The first start in a worktree seeds its empty database from a read-only copy of
 `~/.t3/userdata/statev2.sqlite` if the source is at most 500 MiB. Larger sources warn
 and dev starts with an empty database. `--no-seed` or `T3CODE_DEV_SEED=0` skips seeding.
-To copy a larger source, run `vp run migrate-dev-db` with dev stopped. It may use
-substantial disk space before pruning.
+To copy a larger source, or to refresh a seeded worktree, run `vp run migrate-dev-db` with dev
+stopped. It may use substantial disk space before pruning. It rebuilds
+`<worktree>/.t3/userdata/statev2.sqlite` from a read-only snapshot of the live database and keeps
+recent projects and their stopped threads. It drops scheduled tasks, pending work, auth sessions,
+and links to other environments, so the dev server never runs the developer's agents or reaches
+their other machines. Raise `--projects` and `--threads-per-project` for more data.
+Refresh `statev2.sqlite`, not `state.sqlite`: the server copies the V1 `state.sqlite` only when
+`statev2.sqlite` is missing. Bring `secrets` and `settings.json` only when the flow under test
+needs them. Copy data in, never symlink it; data flows into the worktree, never back out.
 The first start in any checkout also builds the native resource monitor with Cargo when
 `native/resource-monitor/target` has no binary. Without Rust, dev starts with a warning
 and no process telemetry; install Rust and run `vp run build:resource-monitor`.
-Never run a development server against the live `~/.t3/userdata`.
-See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
+Never run a development server against the live `~/.t3/userdata`, open it read-write, or clean it up.
 
 Read ports from the `[dev-runner]` output. Worktrees derive stable preferences from their paths,
 but occupied ports can shift them. `T3CODE_PORT_OFFSET` or `T3CODE_DEV_INSTANCE` can select a
@@ -127,6 +133,12 @@ Neither the Vite ready message nor the HTTP listener proves that a browser has r
 `vp run dev --share` publishes the web port over the machine's tailnet and prints a pairing URL
 for that origin. Give the tester the complete URL, including its token. The dev runner removes
 its mapping on exit.
+
+An agent sharing dev runs `vp run dev --share` in the background, waits for the `pairingUrl:` line,
+and hands that full URL to an unpaired browser. It does not wire up `tailscale serve` by hand, open
+the URL itself, or consume the user's pairing link. A browser holding the reusable dev cookie can
+use the bare origin. If a one-time token was consumed, mint a fresh one with
+`node apps/server/src/bin.ts pair`; it carries the same scopes as the startup URL.
 
 Leave `VITE_HTTP_URL` and `VITE_WS_URL` unset. Vite proxies the backend through the browser's
 origin so the same build works over localhost and remote connections.

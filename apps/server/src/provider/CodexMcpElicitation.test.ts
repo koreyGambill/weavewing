@@ -55,17 +55,29 @@ describe("Codex MCP elicitation approvals", () => {
       message: 'Allow Computer Use to use "TextEdit"?',
       serverName: "cua_repl",
       threadId: "provider-thread-1",
-      _meta: { codex_approval_kind: "mcp_tool_call", connector_id: "computer-use" },
+      _meta: {
+        codex_approval_kind: "mcp_tool_call",
+        connector_id: "computer-use",
+        persist: ["session"],
+      },
       requestedSchema: { type: "object", properties: {} },
     } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
+    const variants = [
+      computerUse,
+      { ...computerUse, serverName: "other-server" },
+      { ...computerUse, _meta: { ...computerUse._meta, codex_approval_kind: "elicitation" } },
+      { ...computerUse, _meta: { codex_approval_kind: "mcp_tool_call", persist: ["session"] } },
+    ];
+    NodeAssert.deepStrictEqual(variants.map(isComputerUseElicitation), [true, false, false, false]);
+    // Only computer use lifts its session choice out of the web overflow menu.
     NodeAssert.deepStrictEqual(
-      [
-        computerUse,
-        { ...computerUse, serverName: "other-server" },
-        { ...computerUse, _meta: { ...computerUse._meta, codex_approval_kind: "elicitation" } },
-        { ...computerUse, _meta: { codex_approval_kind: "mcp_tool_call" } },
-      ].map(isComputerUseElicitation),
-      [true, false, false, false],
+      variants.map(
+        (variant) =>
+          describeMcpElicitation(variant).options.find(
+            (option) => option.decision === "acceptForSession",
+          )?.prominent,
+      ),
+      [true, undefined, undefined, undefined],
     );
   });
 

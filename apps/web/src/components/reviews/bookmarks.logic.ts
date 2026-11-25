@@ -176,3 +176,29 @@ export function bookmarkMenuActions(bookmark: MessageFollowUp): ReadonlyArray<{
     { label: "Remove bookmark", action: "unflag" },
   ];
 }
+
+export const bookmarkText = (bookmark: MessageFollowUp) =>
+  bookmark.excerpt || "Message without text";
+
+/**
+ * What a bookmark or to-do flag toggle sends. Both share one record, so a message or passage is
+ * unmarked, bookmarked or a to-do: pressing the lit button clears the record, and pressing the
+ * other one switches to it. Only a whole message can be marked from unmarked here.
+ */
+export function bookmarkToggle(
+  target: Pick<MessageFollowUp, "threadId" | "messageId">,
+  bookmark: MessageFollowUp | null,
+  button: "bookmark" | "todo",
+): MessageFollowUpUpdateInput {
+  if (bookmark === null) {
+    return {
+      threadId: target.threadId,
+      messageId: target.messageId,
+      action: "flag",
+      todo: button === "todo",
+    };
+  }
+  const lit = isBookmarkTodo(bookmark) ? "todo" : "bookmark";
+  if (button === lit) return bookmarkUpdate(bookmark, "unflag");
+  return bookmarkUpdate(bookmark, button === "todo" ? "todo" : "untodo");
+}

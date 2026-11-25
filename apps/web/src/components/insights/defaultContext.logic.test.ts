@@ -8,6 +8,7 @@ import {
   homeOf,
   shortenPath,
   splitPath,
+  usedContextSources,
 } from "./defaultContext.logic";
 
 const item = (overrides: Partial<DefaultContextItem>): DefaultContextItem => ({
@@ -119,5 +120,92 @@ describe("paths", () => {
       directory: "~/.config/wing/",
       name: "AGENT_BOOTSTRAP.md",
     });
+  });
+});
+
+describe("usedContextSources", () => {
+  const items = [
+    item({ label: "t3 part", category: "t3", estimatedTokens: 2_000 }),
+    item({
+      label: "/home/me/.claude/CLAUDE.md",
+      category: "files",
+      estimatedTokens: 8_500,
+      repository: false,
+    }),
+    // Above the nested working folder below, yet inside the repository the server resolved.
+    item({
+      label: "/home/me/repo/AGENTS.md",
+      category: "files",
+      estimatedTokens: 9_000,
+      repository: true,
+    }),
+    item({
+      label: "/home/me/repo/app/x.md",
+      category: "files",
+      estimatedTokens: 700,
+      repository: true,
+    }),
+    item({ label: "skill", category: "skills", estimatedTokens: 4_400 }),
+    item({ label: "deferred", category: "tools", estimatedTokens: 5_000, counted: false }),
+  ];
+  const known = 24_600;
+  const withFirstTurn = (promptTokens: number | null) => ({
+    ...preview(items),
+    cwd: "/home/me/repo/app",
+    firstTurn:
+      promptTokens === null ? null : { promptTokens, reportedAt: "2026-11-25T00:00:00.000Z" },
+  });
+  const rows = (result: ReturnType<typeof usedContextSources>) =>
+    result?.reconciles ? result.sources.map((source) => [source.key, source.tokens]) : null;
+  const total = (result: ReturnType<typeof usedContextSources>) =>
+    result?.reconciles ? result.sources.reduce((sum, source) => sum + source.tokens, 0) : null;
+
+  it("groups instruction files by the server's repository flag and splits off the first turn", () => {
+    const result = usedContextSources(withFirstTurn(70_000), 163_000);
+    expect(rows(result)).toEqual([
+      ["conversation", 93_000],
+      ["harness", 70_000 - known],
+      ["repository-files", 9_700],
+      ["global-files", 8_500],
+      ["skills", 4_400],
+      ["t3", 2_000],
+    ]);
+    expect(total(result)).toBe(163_000);
+  });
+
+  it("keeps instruction files in one row when the server sends no repository flag", () => {
+    const unflagged = items.map(({ repository: _repository, ...rest }) => rest);
+    const result = usedContextSources({ ...preview(unflagged), firstTurn: null }, 70_000);
+    expect(rows(result)).toContainEqual(["files", 18_200]);
+  });
+
+  it("folds the conversation into one remainder without a first-turn report", () => {
+    const result = usedContextSources(withFirstTurn(null), 70_000);
+    expect(rows(result)?.at(0)).toEqual(["rest", 70_000 - known]);
+    expect(total(result)).toBe(70_000);
+  });
+
+  it("ignores a first-turn report larger than current use, as after compaction", () => {
+    const result = usedContextSources(withFirstTurn(100_000), 30_000);
+    expect(rows(result)).toContainEqual(["rest", 30_000 - known]);
+    expect(total(result)).toBe(30_000);
+  });
+
+  it("ignores a first-turn report smaller than the itemized estimates", () => {
+    const result = usedContextSources(withFirstTurn(10_000), 30_000);
+    expect(rows(result)?.some(([key]) => key === "harness")).toBe(false);
+    expect(total(result)).toBe(30_000);
+  });
+
+  it("reports estimates that exceed the provider's count instead of rows", () => {
+    expect(usedContextSources(withFirstTurn(10_000), 5_000)).toEqual({
+      reconciles: false,
+      knownTokens: known,
+      usedTokens: 5_000,
+    });
+  });
+
+  it("returns null when the provider's default context is unsupported", () => {
+    expect(usedContextSources({ ...preview(items), support: "unsupported" }, 1)).toBeNull();
   });
 });

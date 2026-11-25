@@ -1,4 +1,5 @@
 import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { formatUsd } from "@t3tools/shared/usageFormat";
 
 import { formatContextWindowTokens } from "../../lib/contextWindow";
@@ -7,6 +8,7 @@ import { Button } from "../ui/button";
 import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ComposerControl } from "./ComposerControl";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
+import { ComposerContextSources } from "./ComposerContextSources";
 import { contextBreakdown } from "./contextBreakdown.logic";
 import type { ThreadApiCost } from "./threadCost.logic";
 import { ThreadCostDetails } from "./ThreadDetailsUsage";
@@ -16,11 +18,13 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /** How full the context window is, with the breakdown and Compact one click away. Static: no animation. */
 export function ComposerContextRing({
+  threadRef,
   usage,
   cost,
   compactDisabled,
   onCompact,
 }: {
+  readonly threadRef: ScopedThreadRef;
   readonly usage: ContextWindowSnapshot | null;
   readonly cost: ThreadApiCost | null;
   readonly compactDisabled: boolean;
@@ -87,7 +91,7 @@ export function ComposerContextRing({
           {amount}
         </span>
       </PopoverTrigger>
-      <PopoverPopup side="top" align="end" width="sm">
+      <PopoverPopup side="top" align="end" width="md">
         <div className="flex items-baseline justify-between gap-3 text-sm">
           <span className="font-medium">Context</span>
           <span className="text-muted-foreground tabular-nums">{amount}</span>
@@ -110,6 +114,7 @@ export function ComposerContextRing({
             />
           ))}
         </dl>
+        <ComposerContextSources threadRef={threadRef} usedTokens={breakdown.usedTokens} />
         {breakdown.kinds.length > 0 ? (
           <>
             <p className="mt-3 text-muted-foreground text-xs">Latest report from the provider</p>

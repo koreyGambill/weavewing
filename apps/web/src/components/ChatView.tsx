@@ -349,6 +349,7 @@ import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsDestination } from "./chat/ThreadDetailsDestination";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
 import { useThreadApiCost } from "./chat/useThreadApiCost";
+import { ChatFooterBookmarks } from "./chat/ChatFooterBookmarks";
 import { ChatFooterLineage } from "./chat/ChatFooterLineage";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
@@ -3553,7 +3554,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const composerLineage =
     !embedded && isServerThread ? (
-      <ChatFooterLineage lineageHandle={threadLineageHandle} agents={serverProjection?.subagents} />
+      <>
+        <ChatFooterLineage
+          lineageHandle={threadLineageHandle}
+          agents={serverProjection?.subagents}
+        />
+        <ChatFooterBookmarks threadRef={displayedThreadRef} onReveal={revealBookmark} />
+      </>
     ) : null;
   const conversationColumn = (
     <div

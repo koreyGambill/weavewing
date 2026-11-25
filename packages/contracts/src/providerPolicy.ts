@@ -73,6 +73,8 @@ export const ProviderApprovalOption = Schema.Struct({
   decision: ProviderApprovalDecision,
   label: TrimmedNonEmptyString,
   warning: Schema.optional(TrimmedNonEmptyString),
+  /** Clients that tuck secondary choices into a menu show this one as its own button. */
+  prominent: Schema.optional(Schema.Boolean),
 });
 export type ProviderApprovalOption = typeof ProviderApprovalOption.Type;
 

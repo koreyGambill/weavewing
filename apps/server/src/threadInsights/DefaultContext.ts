@@ -5,6 +5,10 @@ import {
   type DefaultContextItemText,
   type DefaultContextPreview,
   type InstructionFootprint,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2ProviderThread,
+  type OrchestrationV2ProviderTurn,
+  type ProviderInstanceId,
   ThreadInsightsError,
 } from "@t3tools/contracts";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
@@ -13,6 +17,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -94,6 +99,46 @@ const withText = (part: PreparedContextPart, text: string): PreparedContextPart 
   return { ...part, text, bytes, estimatedTokens: Math.ceil(bytes / 4) };
 };
 const byteLength = (text: string) => Buffer.byteLength(text, "utf8");
+
+/**
+ * The prompt the provider reported for the first turn of a conversation that began in this thread.
+ * Null when that turn reported no input count, or when the conversation was forked, handed off or
+ * imported, since its first local prompt then also holds earlier history.
+ */
+export function firstTurnPrompt(input: {
+  readonly thread: Pick<OrchestrationV2AppThread, "historyOrigin">;
+  readonly firstRunRequestedAt: DateTime.Utc | undefined;
+  readonly providerThread:
+    | Pick<
+        OrchestrationV2ProviderThread,
+        "providerInstanceId" | "forkedFrom" | "handoffIds" | "createdAt"
+      >
+    | undefined;
+  readonly turns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "ordinal" | "tokenUsage">>;
+  readonly instanceId: ProviderInstanceId;
+}): DefaultContextPreview["firstTurn"] {
+  const { providerThread } = input;
+  if (
+    providerThread === undefined ||
+    providerThread.providerInstanceId !== input.instanceId ||
+    providerThread.forkedFrom !== null ||
+    providerThread.handoffIds.length > 0 ||
+    input.thread.historyOrigin !== undefined ||
+    input.firstRunRequestedAt === undefined ||
+    // A native import creates its provider thread with the app thread, before any run.
+    DateTime.isLessThan(providerThread.createdAt, input.firstRunRequestedAt)
+  )
+    return null;
+  const first = input.turns.reduce<(typeof input.turns)[number] | undefined>(
+    (earliest, turn) =>
+      earliest === undefined || turn.ordinal < earliest.ordinal ? turn : earliest,
+    undefined,
+  );
+  const usage = first?.tokenUsage;
+  return usage?.inputTokens === undefined
+    ? null
+    : { promptTokens: usage.inputTokens, reportedAt: usage.updatedAt };
+}
 const failure = (message: string) => (cause: unknown) =>
   new ThreadInsightsError({ message, cause });
 
@@ -294,6 +339,7 @@ const make = Effect.gen(function* () {
             estimatedTokens: tokens(file.bytes),
             counted: file.status === "expected" && !linked,
             readable,
+            repository: file.repository,
             ...(file.depth > 0 ? { depth: file.depth } : {}),
             ...(linked ? { parentId: `file:${file.linkedFrom}` } : {}),
             // A file read on demand is never expected to load with the session.
@@ -389,6 +435,29 @@ const make = Effect.gen(function* () {
     }
 
     if (instance === undefined) notes.push("This provider instance is not configured here.");
+    const providerThreadId = thread?.activeProviderThreadId ?? null;
+    const providerRecords =
+      providerThreadId === null
+        ? undefined
+        : yield* orchestrator
+            .getThreadRecords(input.threadId, ["providerThreads", "providerTurns"], {
+              providerThreadIds: [providerThreadId],
+              providerTurnThreadIds: [providerThreadId],
+            })
+            .pipe(Effect.orElseSucceed(() => undefined));
+    const firstRun = records?.runs.toSorted((a, b) => a.ordinal - b.ordinal).at(0);
+    const firstTurn =
+      providerRecords === undefined || thread === undefined
+        ? null
+        : firstTurnPrompt({
+            thread,
+            firstRunRequestedAt: firstRun?.requestedAt,
+            providerThread: providerRecords.providerThreads.find(
+              (entry) => entry.id === providerThreadId,
+            ),
+            turns: providerRecords.providerTurns,
+            instanceId,
+          });
     return {
       preview: {
         threadId: input.threadId,
@@ -411,6 +480,7 @@ const make = Effect.gen(function* () {
                 reportsFiles: footprint?.instructionSources !== undefined,
                 injectedBytes: lastFootprint.parts.reduce((sum, part) => sum + part.bytes, 0),
               },
+        firstTurn,
         estimateMethod:
           "UTF-8 bytes divided by four, rounded up; not tokenizer counts. Instruction files are what the provider documents loading for this folder, not what it reported.",
       } satisfies DefaultContextPreview,

@@ -3,7 +3,10 @@
 ## Primitives
 
 Controls come from [`components/ui`](../../apps/web/src/components/ui).
-[AGENTS.md](../../AGENTS.md#taste) says how to use and extend them.
+Each export owns its look: pick a `variant` or `size` instead of restyling it with `className`, and
+put layout classes (width, flex, margin, position) on the parent. When no variant fits and the look is
+a generic concept, add a variant to the component; a look that belongs to one feature stays in that
+feature's own component. `shadcn/no-restyle` fails lint on violations.
 
 Don't style a raw `<button>`, `<input>`, `<select>`, or `<textarea>` to look like a control a
 primitive provides. Raw elements are right when the element isn't that control: semantic rows, tabs,

@@ -28,6 +28,7 @@ import {
   ProviderThreadId,
   ProviderTurnId,
   RunAttemptId,
+  type RuntimeRequestId,
   RunId,
   ThreadId,
   TurnItemId,
@@ -1871,6 +1872,160 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         harness.terminalEvents().map((event) => event.status),
         ["completed"],
       );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect("expires approvals and questions that Codex resolves without an answer", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "provider-resolved-thread";
+      const nativeTurnId = "provider-resolved-turn";
+      const prompt = "Read the Notepad window title.";
+      const resolvedByCodex = (requestId: number) => ({
+        type: "emit_inbound" as const,
+        label: "serverRequest/resolved",
+        frame: {
+          method: "serverRequest/resolved",
+          params: { threadId: nativeThreadId, requestId },
+        },
+      });
+      const pendingIds = yield* Queue.unbounded<RuntimeRequestId>();
+      const allPending = yield* Deferred.make<ReadonlyArray<RuntimeRequestId>>();
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: "provider-resolved-requests",
+          entries: [
+            ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+            {
+              type: "emit_inbound",
+              frame: {
+                id: 0,
+                method: "mcpServer/elicitation/request",
+                params: {
+                  threadId: nativeThreadId,
+                  turnId: nativeTurnId,
+                  serverName: "cua_repl",
+                  mode: "form",
+                  _meta: {
+                    codex_approval_kind: "mcp_tool_call",
+                    connector_id: "computer-use",
+                    persist: ["session", "always"],
+                  },
+                  message: "Allow Codex to use Notepad?",
+                  requestedSchema: { type: "object", properties: {} },
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                id: 1,
+                method: "item/commandExecution/requestApproval",
+                params: {
+                  threadId: nativeThreadId,
+                  turnId: nativeTurnId,
+                  itemId: "provider-resolved-command",
+                  command: "touch probe.txt",
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                id: 2,
+                method: "item/tool/requestUserInput",
+                params: {
+                  threadId: nativeThreadId,
+                  turnId: nativeTurnId,
+                  itemId: "provider-resolved-question",
+                  questions: [{ id: "q", header: "Pick", question: "Which file?", options: null }],
+                },
+              },
+            },
+            resolvedByCodex(0),
+            resolvedByCodex(1),
+            resolvedByCodex(2),
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        }),
+        (event) =>
+          event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+            ? Queue.offer(pendingIds, event.runtimeRequest.id).pipe(
+                Effect.andThen(Queue.size(pendingIds)),
+                Effect.flatMap((size) =>
+                  size === 3
+                    ? Queue.takeAll(pendingIds).pipe(
+                        Effect.flatMap((ids) => Deferred.succeed(allPending, ids)),
+                      )
+                    : Effect.void,
+                ),
+              )
+            : Effect.void,
+        undefined,
+        undefined,
+        // Codex only resolves a request it sent and is still waiting on.
+        (entry) =>
+          entry.label === "serverRequest/resolved" ? Deferred.await(allPending) : Effect.void,
+      );
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("provider-resolved-requests-attempt"),
+          text: prompt,
+        }),
+      );
+      const requestIds = yield* Deferred.await(allPending);
+      yield* harness.firstTerminal;
+
+      const settled = (id: RuntimeRequestId) =>
+        harness.events.flatMap((event) =>
+          event.type === "runtime_request.updated" &&
+          event.runtimeRequest.id === id &&
+          event.runtimeRequest.status !== "pending"
+            ? [event.runtimeRequest]
+            : [],
+        );
+      for (const requestId of requestIds) {
+        const [request] = settled(requestId);
+        assert.equal(request?.status, "expired");
+        assert.equal(request?.responseCapability.type, "not_resumable");
+        const card = harness.events.findLast(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            (event.turnItem.type === "approval_request" ||
+              event.turnItem.type === "user_input_request") &&
+            event.turnItem.requestId === requestId,
+        );
+        assert.equal(
+          card?.type === "turn_item.updated" ? card.turnItem.status : undefined,
+          "cancelled",
+        );
+        // Valid for every kind here, so only a request that is gone can reject it.
+        const late = yield* harness.runtime
+          .respondToRuntimeRequest({ requestId, decision: "accept", answers: { q: "a" } })
+          .pipe(Effect.flip);
+        assert.equal(late._tag, "ProviderAdapterRuntimeRequestResponseError");
+      }
     }).pipe(
       Effect.scoped,
       Effect.provide(
