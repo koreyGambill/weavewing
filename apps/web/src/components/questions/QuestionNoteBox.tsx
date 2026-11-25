@@ -17,7 +17,7 @@ export function QuestionNoteBox({
   readonly actions: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-end gap-1 rounded-lg border border-input bg-background p-1 has-focus-visible:border-ring">
+    <div className="flex min-w-0 flex-wrap items-end gap-1 rounded-lg border border-foreground/55 bg-background p-1 has-focus-visible:border-ring">
       <div className="grid min-w-40 flex-[1_1_auto]">
         <span
           aria-hidden

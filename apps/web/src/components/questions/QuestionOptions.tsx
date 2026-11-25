@@ -38,10 +38,12 @@ export function QuestionOptions({
         )
           onChoose([]);
       }}
-      className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-muted/40 has-[[data-checked]]:bg-primary/8 has-[[data-disabled]]:cursor-default"
+      // The chosen row is outlined from the text colour as well as tinted, so it reads on any theme.
+      className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-muted/40 has-[[data-checked]]:ring-1 has-[[data-checked]]:ring-foreground/55 has-[[data-checked]]:ring-inset has-[[data-checked]]:bg-primary/10 has-[[data-disabled]]:cursor-default"
     >
       {question.multiSelect ? (
         <Checkbox
+          variant="contrast"
           checked={chosenOptionIds.includes(option.id)}
           disabled={disabled}
           onCheckedChange={(checked) =>
@@ -53,7 +55,7 @@ export function QuestionOptions({
           }
         />
       ) : (
-        <Radio value={option.id} disabled={disabled} />
+        <Radio variant="contrast" value={option.id} disabled={disabled} />
       )}
       <span className="shrink-0 font-medium">{option.label}</span>
       {question.recommendedOptionIds.includes(option.id) ? (

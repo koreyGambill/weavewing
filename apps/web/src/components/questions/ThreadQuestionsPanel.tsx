@@ -331,7 +331,7 @@ export function ThreadQuestionsPanel({
                             actions={
                               <Button
                                 size="xs"
-                                variant="ghost"
+                                variant="contrast-outline"
                                 onClick={() => showInChat(question.id)}
                               >
                                 Show in chat
@@ -358,7 +358,7 @@ export function ThreadQuestionsPanel({
           <TooltipTrigger render={<span className="inline-flex" />}>
             <Button
               size="sm"
-              variant={canAct && toAdd > 0 ? "default" : "outline"}
+              variant={canAct && toAdd > 0 ? "default" : "contrast-outline"}
               disabled={!canAct || toAdd === 0 || adding}
               onClick={() => void addDrafted()}
             >
