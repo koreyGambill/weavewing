@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import type { ThreadQuestion } from "@t3tools/contracts";
 import { sectionThreadQuestions } from "@t3tools/client-runtime/state/thread-questions";
 
@@ -86,4 +87,57 @@ export function questionInView(
   const focused = cards.find((card) => card.id === focusedId);
   if (focused !== undefined && visible(focused)) return focused.id;
   return cards.find((card) => card.bottom > view.top + 8)?.id ?? null;
+}
+
+/** The panel's filter chips. A replaced question goes with Dismissed: neither got an answer. */
+export const QUESTION_FILTERS = ["waiting", "deferred", "answered", "dismissed"] as const;
+export type QuestionFilter = (typeof QUESTION_FILTERS)[number];
+export const DEFAULT_QUESTION_FILTERS: ReadonlyArray<QuestionFilter> = ["waiting", "deferred"];
+/** Remembered per device, so every thread's panel opens on the same filters. */
+export const QUESTION_FILTERS_STORAGE_KEY = "t3code:questions-panel-filters:v1";
+export const QuestionFiltersSchema = Schema.Array(Schema.Literals(QUESTION_FILTERS));
+
+function questionFilterOf(question: Pick<ThreadQuestion, "state">): QuestionFilter {
+  switch (question.state) {
+    case "open":
+      return "waiting";
+    case "deferred":
+      return "deferred";
+    case "answered":
+      return "answered";
+    case "withdrawn":
+    case "replaced":
+      return "dismissed";
+  }
+}
+
+export function questionFilterCounts(
+  questions: ReadonlyArray<Pick<ThreadQuestion, "state">>,
+): Record<QuestionFilter, number> {
+  const counts: Record<QuestionFilter, number> = {
+    waiting: 0,
+    deferred: 0,
+    answered: 0,
+    dismissed: 0,
+  };
+  for (const question of questions) counts[questionFilterOf(question)]++;
+  return counts;
+}
+
+export function filterQuestions<Q extends Pick<ThreadQuestion, "state">>(
+  questions: ReadonlyArray<Q>,
+  filters: ReadonlyArray<QuestionFilter>,
+): Q[] {
+  return questions.filter((question) => filters.includes(questionFilterOf(question)));
+}
+
+/** `filters` with `filter` switched, in chip order, so the stored value is stable. */
+export function toggleQuestionFilter(
+  filters: ReadonlyArray<QuestionFilter>,
+  filter: QuestionFilter,
+): QuestionFilter[] {
+  const on = new Set(filters);
+  if (on.has(filter)) on.delete(filter);
+  else on.add(filter);
+  return QUESTION_FILTERS.filter((entry) => on.has(entry));
 }

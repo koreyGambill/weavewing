@@ -3,7 +3,12 @@ import type { ThreadQuestionStatus } from "@t3tools/client-runtime/state/thread-
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-type BadgeVariant = "outline" | "secondary" | "info" | "warning" | "success";
+type BadgeVariant =
+  | "outline"
+  | "secondary"
+  | "info-outline"
+  | "warning-outline"
+  | "success-outline";
 
 const STATUS: Record<
   ThreadQuestionStatus,
@@ -22,26 +27,26 @@ const STATUS: Record<
   drafted: {
     label: "Drafted",
     variant: "secondary",
-    help: "Your answer is saved here, not queued. Add it to the composer to send it.",
+    help: "Your answer is saved here, not queued. Answer puts it in the composer.",
   },
   "in-composer": {
     label: "In composer",
-    variant: "info",
+    variant: "info-outline",
     help: "In your composer. It goes with your next message.",
   },
   sent: {
     label: "Sent · waiting for the agent",
-    variant: "warning",
+    variant: "warning-outline",
     help: "Sent. The agent has not started the turn that carries it.",
   },
   received: {
     label: "Received by the agent",
-    variant: "success",
+    variant: "success-outline",
     help: "The agent's turn that carries this answer has started.",
   },
   recorded: {
     label: "Recorded by the agent",
-    variant: "success",
+    variant: "success-outline",
     help: "The agent recorded this from your message. Reopen it if the agent misread you.",
   },
   dismissed: {

@@ -27,6 +27,10 @@ const badgeVariants = cva(
         error: "bg-destructive/8 text-destructive-foreground dark:bg-destructive/16",
         "error-outline": "border-destructive/50 text-destructive-foreground",
         info: "bg-info/8 text-info-foreground dark:bg-info/16",
+        // Solid background, so the text keeps its contrast on tinted or highlighted rows.
+        "info-outline": "border-info/40 bg-background text-info-foreground",
+        "success-outline": "border-success/40 bg-background text-success-foreground",
+        "warning-outline": "border-warning/50 bg-background text-warning-foreground",
         outline:
           "border-input bg-background text-foreground dark:bg-input/32 [button&,a&]:hover:bg-accent/50 dark:[button&,a&]:hover:bg-input/48",
         secondary: "bg-secondary text-secondary-foreground [button&,a&]:hover:bg-secondary/90",

@@ -2,11 +2,24 @@ import type { ThreadQuestion } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  DEFAULT_QUESTION_FILTERS,
+  filterQuestions,
+  QUESTION_FILTERS_STORAGE_KEY,
+  questionFilterCounts,
+  QuestionFiltersSchema,
   questionInView,
   questionPanelKeyAction,
   questionPanelOrder,
   resolveSelectedQuestionId,
+  toggleQuestionFilter,
 } from "./ThreadQuestionsPanel.logic";
+import * as Schema from "effect/Schema";
+import {
+  readLocalStorageValue,
+  removeLocalStorageItem,
+  setLocalStorageItem,
+  writeLocalStorageValue,
+} from "../../hooks/useLocalStorage";
 
 const question = (
   id: string,
@@ -95,5 +108,61 @@ describe("question panel", () => {
     // Jumped to near the end, where the column cannot scroll it to the top.
     expect(questionInView(cards, view, "Q4")).toBe("Q4");
     expect(questionInView([], view, "Q4")).toBeNull();
+  });
+
+  it("filters by where a question stands, replaced with dismissed, and counts each chip", () => {
+    const questions = [
+      question("Q1", "open"),
+      question("Q2", "deferred"),
+      question("Q3", "answered"),
+      question("Q4", "withdrawn"),
+      question("Q5", "replaced"),
+      question("Q6", "open"),
+    ];
+    expect(questionFilterCounts(questions)).toEqual({
+      waiting: 2,
+      deferred: 1,
+      answered: 1,
+      dismissed: 2,
+    });
+    expect(filterQuestions(questions, DEFAULT_QUESTION_FILTERS).map((entry) => entry.id)).toEqual([
+      "Q1",
+      "Q2",
+      "Q6",
+    ]);
+    expect(filterQuestions(questions, ["dismissed"]).map((entry) => entry.id)).toEqual([
+      "Q4",
+      "Q5",
+    ]);
+    expect(filterQuestions(questions, [])).toEqual([]);
+  });
+
+  it("toggles a filter and keeps chip order", () => {
+    expect(toggleQuestionFilter(["waiting", "deferred"], "answered")).toEqual([
+      "waiting",
+      "deferred",
+      "answered",
+    ]);
+    expect(toggleQuestionFilter(["dismissed"], "waiting")).toEqual(["waiting", "dismissed"]);
+    expect(toggleQuestionFilter(["waiting", "deferred"], "waiting")).toEqual(["deferred"]);
+  });
+
+  it("remembers the filters and falls back to the defaults for a value it cannot read", () => {
+    const read = () =>
+      readLocalStorageValue(
+        QUESTION_FILTERS_STORAGE_KEY,
+        DEFAULT_QUESTION_FILTERS,
+        QuestionFiltersSchema,
+      );
+    writeLocalStorageValue(
+      QUESTION_FILTERS_STORAGE_KEY,
+      ["answered", "dismissed"],
+      DEFAULT_QUESTION_FILTERS,
+      QuestionFiltersSchema,
+    );
+    expect(read()).toEqual(["answered", "dismissed"]);
+    setLocalStorageItem(QUESTION_FILTERS_STORAGE_KEY, ["closed"], Schema.Array(Schema.String));
+    expect(read()).toEqual(DEFAULT_QUESTION_FILTERS);
+    removeLocalStorageItem(QUESTION_FILTERS_STORAGE_KEY);
   });
 });

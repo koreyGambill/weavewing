@@ -3,10 +3,12 @@ import type { ArtifactQuestion } from "@t3tools/contracts";
 import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
 import { Radio, RadioGroup } from "../ui/radio-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
- * A question's options as radios or checkboxes; recommendations are marked, never preselected.
- * Choosing the chosen option again clears it.
+ * A question's options, one row each, as radios or checkboxes; recommendations are marked, never
+ * preselected. A description is cut to the row, in full on hover. Choosing the chosen option
+ * again clears it.
  */
 export function QuestionOptions({
   question,
@@ -36,7 +38,7 @@ export function QuestionOptions({
         )
           onChoose([]);
       }}
-      className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-lg border border-border p-3 transition-colors hover:bg-muted/40 has-[[data-checked]]:border-primary/60 has-[[data-checked]]:bg-primary/5 has-[[data-disabled]]:cursor-default"
+      className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-muted/40 has-[[data-checked]]:bg-primary/8 has-[[data-disabled]]:cursor-default"
     >
       {question.multiSelect ? (
         <Checkbox
@@ -53,30 +55,34 @@ export function QuestionOptions({
       ) : (
         <Radio value={option.id} disabled={disabled} />
       )}
-      <span className="min-w-0 contents">
-        <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-medium break-words">
-          {option.label}
-          {question.recommendedOptionIds.includes(option.id) ? (
-            <Badge variant="info" size="sm">
-              Recommended
-            </Badge>
-          ) : null}
-        </span>
-        {option.description ? (
-          <span className="col-span-2 block text-xs leading-relaxed break-words text-muted-foreground @min-[320px]:col-start-2 @min-[320px]:col-span-1">
+      <span className="shrink-0 font-medium">{option.label}</span>
+      {question.recommendedOptionIds.includes(option.id) ? (
+        <Badge variant="info-outline" size="sm">
+          Recommended
+        </Badge>
+      ) : null}
+      {option.description ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="min-w-0 flex-1 truncate text-muted-foreground" />}
+          >
             {option.description}
-          </span>
-        ) : null}
-      </span>
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-96">
+            {option.description}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
     </label>
   ));
   return question.multiSelect ? (
-    <div role="group" aria-label={question.prompt} className="space-y-2">
+    <div role="group" aria-label={question.prompt} className="flex flex-col gap-px">
       {options}
     </div>
   ) : (
     <RadioGroup
       aria-label={question.prompt}
+      density="compact"
       value={chosenOptionIds[0] ?? ""}
       onValueChange={(value) => onChoose([value])}
     >

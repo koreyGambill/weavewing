@@ -3,10 +3,17 @@ import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
 
 import { cn } from "~/lib/utils";
 
-function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
+function RadioGroup({
+  className,
+  density = "default",
+  ...props
+}: RadioGroupPrimitive.Props & {
+  /** `compact` stacks rows that carry their own padding, such as one-line option rows. */
+  readonly density?: "default" | "compact";
+}) {
   return (
     <RadioGroupPrimitive
-      className={cn("flex flex-col gap-3", className)}
+      className={cn("flex flex-col", density === "compact" ? "gap-px" : "gap-3", className)}
       data-slot="radio-group"
       {...props}
     />

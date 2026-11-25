@@ -9,7 +9,7 @@ import { useState, type KeyboardEvent } from "react";
 import { cn } from "~/lib/utils";
 import { toastManager } from "../ui/toast";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
-import { useQuestionIdsInComposer } from "./questionComposer";
+import { useQuestionsInComposer } from "./questionComposer";
 import { requestQuestionReveal, threadQuestionElementId } from "./questionReveal";
 import { compactListKeyTarget } from "./ThreadQuestionsCompactList.logic";
 
@@ -30,7 +30,7 @@ export function ThreadQuestionsCompactList({
   readonly questions: ReadonlyArray<ThreadQuestion>;
   readonly onClose: () => void;
 }) {
-  const inComposer = useQuestionIdsInComposer(threadRef);
+  const inComposer = useQuestionsInComposer(threadRef);
   const sections = sectionThreadQuestions(questions);
   const rows = [...sections.waiting, ...sections.deferred];
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -95,7 +95,7 @@ export function ThreadQuestionsCompactList({
           </span>
           <span className="min-w-0 flex-1 truncate">{threadQuestionTitle(question.prompt)}</span>
           <QuestionStatusBadge
-            status={threadQuestionStatus(question, inComposer.has(question.id))}
+            status={threadQuestionStatus(question, inComposer.get(question.id) === "answer")}
           />
         </div>
       ))}

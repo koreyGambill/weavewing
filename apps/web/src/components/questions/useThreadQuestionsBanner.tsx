@@ -16,7 +16,7 @@ import { Button } from "../ui/button";
 import {
   addDraftedAnswersToComposer,
   syncQuestionAnswersInComposer,
-  useQuestionIdsInComposer,
+  useQuestionsInComposer,
 } from "./questionComposer";
 import { questionDraftWriter } from "./questionDraftWriter";
 import { ThreadQuestionsCompactList } from "./ThreadQuestionsCompactList";
@@ -38,7 +38,7 @@ export function useThreadQuestionsBanner(input: {
   const [openForThread, setOpenForThread] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const saveDraft = useSaveQuestionDraft(threadRef);
-  const inComposer = useQuestionIdsInComposer(threadRef);
+  const inComposer = useQuestionsInComposer(threadRef);
   useWorkspaceMutationRefresh({
     enabled: enabled && threadRef !== null,
     mutationId: input.refreshKey,
@@ -118,7 +118,7 @@ export function useThreadQuestionsBanner(input: {
             disabled={toAdd === 0 || adding}
             onClick={() => void addDrafted()}
           >
-            Add all drafted to composer
+            Answer all drafted
           </Button>
         ) : null}
         <Button

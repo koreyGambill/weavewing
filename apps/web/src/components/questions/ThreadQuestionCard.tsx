@@ -17,13 +17,15 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { QuestionNoteBox } from "./QuestionNoteBox";
 import { QuestionOptions } from "./QuestionOptions";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
+import { closedQuestionOutcome } from "./ThreadQuestionCard.logic";
 import { questionAnswerForComposer } from "./questionComposer.logic";
 import {
   addQuestionAnswersToComposer,
   removeQuestionAnswerFromComposer,
-  useQuestionIdsInComposer,
+  useQuestionsInComposer,
 } from "./questionComposer";
 import { questionDraftWriter, type QuestionDraft } from "./questionDraftWriter";
 import { requestQuestionReveal, threadQuestionElementId } from "./questionReveal";
@@ -33,11 +35,15 @@ const NOTE_SAVE_DELAY_MS = 600;
 const HELP = {
   defer:
     "Set this aside. It leaves your count, and the agent may raise it again when the work needs it.",
-  dismiss: "Close this without answering. The agent is told with your next message.",
-  add: "Queue this answer to go with your next message.",
-  addDisabled: "Choose an option or add a note first.",
-  remove: "Take this answer out of your composer. Your draft stays here.",
   reopen: "Open this again so you can answer it.",
+  dismiss: "Close this without answering. The agent is told with your next message.",
+  discuss: "Put your note in the composer as a comment on this question. It stays open.",
+  discussOff: "Take your comment out of the composer. Your note stays here.",
+  discussDisabled: "Write a note first; Discuss sends the note, not your choice.",
+  answer: "Queue this answer to go with your next message.",
+  answerDisabled: "Choose an option or add a note first.",
+  remove: "Take this answer out of your composer. Your draft stays here.",
+  sent: "Sent. Edit or cancel the queued message to change it.",
 };
 
 function HelpButton({
@@ -47,7 +53,7 @@ function HelpButton({
 }: {
   readonly help: string;
   readonly children: ReactNode;
-} & Pick<Parameters<typeof Button>[0], "disabled" | "onClick" | "variant">) {
+} & Pick<Parameters<typeof Button>[0], "disabled" | "onClick" | "variant" | "aria-pressed">) {
   return (
     <Tooltip>
       {/* A span keeps the hint reachable while the button is disabled. */}
@@ -63,26 +69,10 @@ function HelpButton({
   );
 }
 
-function AnswerText({ question }: { readonly question: ThreadQuestion }) {
-  const answer = question.answer;
-  if (answer === null) return null;
-  const choice = question.options
-    .filter((option) => answer.chosenOptionIds.includes(option.id))
-    .map((option) => option.label)
-    .join(", ");
-  const note = answer.notes.trim();
-  return (
-    <p className="text-sm break-words">
-      {choice ? <strong className="font-semibold">{choice}</strong> : null}
-      {choice && note ? " · " : null}
-      {note ? <span className="text-muted-foreground">“{note}”</span> : null}
-    </p>
-  );
-}
-
 /**
- * One agent question: answerable while open or deferred, its outcome once closed. Choosing an
- * option or typing a note saves a draft; Add to composer queues it for the user's next message.
+ * One agent question. While open or deferred: its options, one row each, and one box holding the
+ * note and the four buttons, so nothing appears or moves as the user chooses. Once closed: one
+ * line with the outcome, which expands to the full prompt.
  */
 export function ThreadQuestionCard({
   question,
@@ -100,17 +90,20 @@ export function ThreadQuestionCard({
   const saveDraft = useSaveQuestionDraft(threadRef);
   const writer = questionDraftWriter(scopedThreadKey(threadRef));
   const update = useAtomCommand(threadQuestionUpdate);
-  const inComposer = useQuestionIdsInComposer(threadRef).has(question.id);
+  const inComposer = useQuestionsInComposer(threadRef).get(question.id);
   // Local until the server returns them, so typing and choosing never wait on a round trip.
   const [pendingChoice, setPendingChoice] = useState<ReadonlyArray<string> | null>(null);
   const [pendingNotes, setPendingNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const chosenOptionIds = pendingChoice ?? question.answer?.chosenOptionIds ?? [];
   const notes = pendingNotes ?? question.answer?.notes ?? "";
-  const status = threadQuestionStatus(question, inComposer);
-  const editable =
-    (question.state === "open" || question.state === "deferred") && status !== "sent";
+  const status = threadQuestionStatus(question, inComposer === "answer");
+  const waiting = question.state === "open" || question.state === "deferred";
+  const editable = waiting && status !== "sent";
+  const usable = canAct && !busy && editable;
   const hasDraft = chosenOptionIds.length > 0 || notes.trim() !== "";
+  const outcome = closedQuestionOutcome(question);
 
   const edit = (change: Partial<QuestionDraft>, delayMs?: number) =>
     void writer
@@ -138,76 +131,65 @@ export function ThreadQuestionCard({
     });
     setBusy(false);
   };
-  const addToComposer = async () => {
+  const toComposer = async (kind: "answer" | "discuss") => {
     setBusy(true);
-    // Notes still waiting or in flight are part of the answer the user means to queue.
+    // Notes still waiting or in flight are part of what the user means to queue.
     const flushed = await writer.flush(question.id, saveDraft);
     setBusy(false);
-    const record = questionAnswerForComposer(threadRef.threadId, question, flushed);
+    const record = questionAnswerForComposer(threadRef.threadId, question, flushed, kind);
     if (record !== null) addQuestionAnswersToComposer(threadRef, [record]);
     else if (flushed === null)
       toastManager.add({
         type: "error",
-        title: `${question.id}'s answer did not save`,
+        title: `${question.id}'s draft did not save`,
         description: "Try again once the connection is back.",
       });
   };
 
-  const stateButton = (label: string, help: string, state: "open" | "deferred" | "withdrawn") => (
-    <HelpButton help={help} disabled={!canAct || busy} onClick={() => void changeState(state)}>
-      {label}
-    </HelpButton>
-  );
-
-  return (
-    <section
-      id={inTimeline ? threadQuestionElementId(question.id) : undefined}
-      aria-label={`${question.id}: ${question.prompt}`}
-      className={cn(
-        "@container min-w-0 space-y-3 rounded-lg border border-border border-l-2 bg-background p-3",
-        editable && question.state === "open" ? "border-l-primary" : "border-l-border",
-      )}
-    >
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span
-          className={cn(
-            "text-sm font-semibold tabular-nums",
-            editable ? "text-primary" : "text-muted-foreground",
-          )}
-        >
-          {question.id}
-        </span>
-        <span className="min-w-0 flex-1">
+  if (outcome !== null) {
+    const reopenable = question.state === "answered" || question.state === "withdrawn";
+    return (
+      <section
+        id={inTimeline ? threadQuestionElementId(question.id) : undefined}
+        aria-label={`${question.id}: ${question.prompt}`}
+        className="@container min-w-0 rounded-lg border border-border bg-background px-2.5 py-1.5"
+      >
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  onClick={() => setExpanded((open) => !open)}
+                  className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                />
+              }
+            >
+              <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
+                {question.id}
+              </span>
+              <span className={cn("min-w-0 flex-1", !expanded && "truncate")}>
+                {question.prompt}
+              </span>
+              <span className={cn("max-w-[45%] shrink-0 font-semibold", !expanded && "truncate")}>
+                {outcome}
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup side="top" className="max-w-96">
+              <p>{question.prompt}</p>
+              <p className="font-semibold">{outcome}</p>
+            </TooltipPopup>
+          </Tooltip>
           <QuestionStatusBadge status={status} />
-        </span>
-        <span className="flex flex-wrap items-center gap-1.5">
           {actions}
-          {editable && question.state === "open"
-            ? stateButton("Not yet", HELP.defer, "deferred")
-            : null}
-          {question.state === "deferred" && editable
-            ? stateButton("Reopen", HELP.reopen, "open")
-            : null}
-          {question.state === "answered" || question.state === "withdrawn"
-            ? stateButton("Reopen", HELP.reopen, "open")
-            : null}
-          {editable ? stateButton("Dismiss", HELP.dismiss, "withdrawn") : null}
-          {editable && inComposer ? (
+          {reopenable ? (
             <HelpButton
-              help={HELP.remove}
-              onClick={() => removeQuestionAnswerFromComposer(threadRef, question.id)}
+              help={HELP.reopen}
+              disabled={!canAct || busy}
+              onClick={() => void changeState("open")}
             >
-              Remove from composer
-            </HelpButton>
-          ) : null}
-          {editable && !inComposer ? (
-            <HelpButton
-              help={hasDraft ? HELP.add : HELP.addDisabled}
-              variant="default"
-              disabled={!canAct || busy || !hasDraft}
-              onClick={() => void addToComposer()}
-            >
-              Add to composer
+              Reopen
             </HelpButton>
           ) : null}
           {question.state === "replaced" && question.replacedBy !== null ? (
@@ -221,48 +203,157 @@ export function ThreadQuestionCard({
               See {question.replacedBy}
             </Button>
           ) : null}
+        </div>
+        {expanded && question.details ? (
+          <div className="pt-1.5 text-sm text-muted-foreground">
+            <ChatMarkdown text={question.details} cwd={undefined} threadRef={threadRef} />
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  return (
+    <section
+      id={inTimeline ? threadQuestionElementId(question.id) : undefined}
+      aria-label={`${question.id}: ${question.prompt}`}
+      className={cn(
+        "@container min-w-0 space-y-1.5 rounded-lg border border-border border-l-2 bg-background px-2.5 py-2",
+        editable && question.state === "open" ? "border-l-primary" : "border-l-border",
+      )}
+    >
+      <header className="flex min-w-0 items-start gap-2">
+        <span
+          className={cn(
+            "shrink-0 text-sm font-semibold tabular-nums",
+            editable ? "text-primary" : "text-muted-foreground",
+          )}
+        >
+          {question.id}
         </span>
+        <h3 className="min-w-0 flex-1 text-sm font-medium leading-snug break-words">
+          {question.prompt}
+        </h3>
+        {actions}
+        <QuestionStatusBadge status={status} />
       </header>
-      <h3 className="text-sm font-medium leading-relaxed break-words">{question.prompt}</h3>
       {question.details ? (
         <div className="text-sm text-muted-foreground">
           <ChatMarkdown text={question.details} cwd={undefined} threadRef={threadRef} />
         </div>
       ) : null}
-      {editable ? (
-        <>
-          {question.options.length > 0 ? (
-            <QuestionOptions
-              question={question}
-              chosenOptionIds={chosenOptionIds}
-              disabled={!canAct}
-              onChoose={(next) => {
-                setPendingChoice(next);
-                edit({ chosenOptionIds: next });
-              }}
-            />
-          ) : null}
+      {question.options.length > 0 ? (
+        <QuestionOptions
+          question={question}
+          chosenOptionIds={chosenOptionIds}
+          disabled={!canAct || !editable}
+          onChoose={(next) => {
+            setPendingChoice(next);
+            edit({ chosenOptionIds: next });
+          }}
+        />
+      ) : null}
+      <QuestionNoteBox
+        text={notes || (question.options.length > 0 ? "Add a note…" : "Your answer…")}
+        note={
           <Textarea
-            aria-label={`Note for ${question.id}`}
+            unstyled
             size="sm"
             rows={1}
+            aria-label={`Note for ${question.id}`}
             placeholder={question.options.length > 0 ? "Add a note…" : "Your answer…"}
             value={notes}
-            disabled={!canAct}
+            disabled={!canAct || !editable}
+            className="w-full"
             onBlur={() => void writer.flush(question.id, saveDraft)}
             onChange={(event) => {
               setPendingNotes(event.target.value);
               edit({ notes: event.target.value }, NOTE_SAVE_DELAY_MS);
             }}
           />
-        </>
-      ) : status === "sent" || question.state === "answered" ? (
-        <AnswerText question={question} />
-      ) : question.state === "replaced" && question.replacedBy !== null ? (
-        <p className="text-sm text-muted-foreground">
-          The agent replaced this with {question.replacedBy}.
-        </p>
-      ) : null}
+        }
+        actions={
+          <>
+            {question.state === "deferred" ? (
+              <HelpButton
+                help={editable ? HELP.reopen : HELP.sent}
+                disabled={!usable}
+                onClick={() => void changeState("open")}
+              >
+                Reopen
+              </HelpButton>
+            ) : (
+              <HelpButton
+                help={editable ? HELP.defer : HELP.sent}
+                disabled={!usable}
+                onClick={() => void changeState("deferred")}
+              >
+                Not yet
+              </HelpButton>
+            )}
+            <HelpButton
+              help={editable ? HELP.dismiss : HELP.sent}
+              disabled={!usable}
+              onClick={() => void changeState("withdrawn")}
+            >
+              Dismiss
+            </HelpButton>
+            <HelpButton
+              help={
+                !editable
+                  ? HELP.sent
+                  : inComposer === "discuss"
+                    ? HELP.discussOff
+                    : notes.trim()
+                      ? HELP.discuss
+                      : HELP.discussDisabled
+              }
+              variant={inComposer === "discuss" ? "secondary" : "outline"}
+              aria-pressed={inComposer === "discuss"}
+              disabled={!usable || (inComposer !== "discuss" && notes.trim() === "")}
+              onClick={() =>
+                inComposer === "discuss"
+                  ? removeQuestionAnswerFromComposer(threadRef, question.id)
+                  : void toComposer("discuss")
+              }
+            >
+              Discuss
+            </HelpButton>
+            <HelpButton
+              help={
+                !editable
+                  ? HELP.sent
+                  : inComposer === "answer"
+                    ? HELP.remove
+                    : hasDraft
+                      ? HELP.answer
+                      : HELP.answerDisabled
+              }
+              variant={inComposer === "answer" ? "outline" : "default"}
+              disabled={!usable || (inComposer !== "answer" && !hasDraft)}
+              onClick={() =>
+                inComposer === "answer"
+                  ? removeQuestionAnswerFromComposer(threadRef, question.id)
+                  : void toComposer("answer")
+              }
+            >
+              {/* Both labels share one cell, so the button keeps its width as they swap. */}
+              <span className="grid">
+                <span
+                  className={cn("col-start-1 row-start-1", inComposer === "answer" && "invisible")}
+                >
+                  Answer
+                </span>
+                <span
+                  className={cn("col-start-1 row-start-1", inComposer !== "answer" && "invisible")}
+                >
+                  Remove from composer
+                </span>
+              </span>
+            </HelpButton>
+          </>
+        }
+      />
     </section>
   );
 }
