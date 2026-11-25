@@ -1,7 +1,7 @@
 interface MarkdownActionFailureContext {
   readonly operation: string;
   readonly target?: string;
-  readonly format?: "markdown" | "csv" | "fixed-width";
+  readonly format?: "markdown" | "csv" | "fixed-width" | "fixed-width-wrapped";
   readonly language?: string;
   readonly fenceTitle?: string;
   readonly copyTarget?: string;

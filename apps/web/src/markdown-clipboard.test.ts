@@ -5,6 +5,7 @@ import {
   serializeRenderedMarkdownFragment,
   serializeTableElementToFixedWidth,
   serializeTableElementToMarkdown,
+  tableWidestCellWidth,
 } from "./markdown-clipboard";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import {
@@ -493,6 +494,36 @@ describe("copying rendered Markdown tables", () => {
 
     expect(serializeTableElementToFixedWidth(table as unknown as Element)).toBe(
       ["Word  Mark", "----------", "日本  ✅", "abc"].join("\n"),
+    );
+  });
+
+  it("wraps long cells at spaces and separates wrapped rows with blank lines", () => {
+    const text = (value: string) => new FakeText(value);
+    const table = renderedTable(
+      [text("Step"), text("Note")],
+      [text("Read"), text("Reads the manifest and every config file it names")],
+      [text("Edit"), text("+4 lines")],
+    );
+
+    expect(tableWidestCellWidth(table as unknown as Element)).toBe(49);
+    expect(serializeTableElementToFixedWidth(table as unknown as Element, 20)).toBe(
+      [
+        "Step  Note",
+        "------------------------",
+        "Read  Reads the manifest",
+        "      and every config",
+        "      file it names",
+        "",
+        "Edit  +4 lines",
+      ].join("\n"),
+    );
+  });
+
+  it("splits a word longer than the wrap width", () => {
+    const table = renderedTable([new FakeText("Id")], [new FakeText("abcdefghijklmnopqrstuvwxy")]);
+
+    expect(serializeTableElementToFixedWidth(table as unknown as Element, 20)).toBe(
+      ["Id", "--------------------", "abcdefghijklmnopqrst", "uvwxy"].join("\n"),
     );
   });
 

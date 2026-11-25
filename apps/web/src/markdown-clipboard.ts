@@ -494,26 +494,84 @@ function padCell(text: string, width: number, align: string): string {
   return `${text}${" ".repeat(gap)}`;
 }
 
-/** Columns padded with spaces, which line up wherever the text shows in a monospace font. */
-export function serializeTableElementToFixedWidth(table: Element): string {
+function fixedWidthCellTexts(table: Element): { cellRows: Element[][]; rows: string[][] } {
   const cellRows = tableCellRows(table);
-  if (cellRows.length === 0) return "";
   const rows = cellRows.map((cells) =>
     cells.map((cell) => csvCellText(cell).replace(/\s+/g, " ").trim()),
   );
+  return { cellRows, rows };
+}
+
+/** The display width of the table's widest cell, so callers know whether wrapping would change it. */
+export function tableWidestCellWidth(table: Element): number {
+  const { rows } = fixedWidthCellTexts(table);
+  return Math.max(0, ...rows.flat().map(monospaceWidth));
+}
+
+/** Breaks text at spaces into lines no wider than `width`, splitting a longer word. */
+function wrapCellText(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let current = "";
+  const push = (word: string) => {
+    if (!current) current = word;
+    else if (monospaceWidth(current) + 1 + monospaceWidth(word) <= width) current += ` ${word}`;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  };
+  for (const word of text.split(" ")) {
+    if (monospaceWidth(word) <= width) {
+      push(word);
+      continue;
+    }
+    let piece = "";
+    for (const { segment } of graphemes.segment(word)) {
+      if (piece && monospaceWidth(piece) + monospaceWidth(segment) > width) {
+        push(piece);
+        piece = "";
+      }
+      piece += segment;
+    }
+    push(piece);
+  }
+  lines.push(current);
+  return lines;
+}
+
+/**
+ * Columns padded with spaces, which line up wherever the text shows in a
+ * monospace font. With `wrapWidth`, longer cells continue on extra lines and a
+ * blank line separates the rows.
+ */
+export function serializeTableElementToFixedWidth(table: Element, wrapWidth?: number): string {
+  const { cellRows, rows } = fixedWidthCellTexts(table);
+  if (rows.length === 0) return "";
+  const wrapped = rows.map((row) =>
+    row.map((text) => (wrapWidth ? wrapCellText(text, wrapWidth) : [text])),
+  );
   const columnCount = Math.max(...rows.map((row) => row.length));
   const widths = Array.from({ length: columnCount }, (_, column) =>
-    Math.max(1, ...rows.map((row) => monospaceWidth(row[column] ?? ""))),
+    Math.max(
+      1,
+      ...wrapped.flatMap((row) => (row[column] ?? [""]).map((text) => monospaceWidth(text))),
+    ),
   );
   const alignments = widths.map((_, column) => cellAlignment(cellRows[0]?.[column]));
-  const line = (row: string[]) =>
-    widths
-      .map((width, column) => padCell(row[column] ?? "", width, alignments[column] ?? ""))
-      .join("  ")
-      .trimEnd();
-  const [header = [], ...body] = rows;
+  const lines = (row: string[][]) =>
+    Array.from({ length: Math.max(1, ...row.map((cell) => cell.length)) }, (_, index) =>
+      widths
+        .map((width, column) =>
+          padCell(row[column]?.[index] ?? "", width, alignments[column] ?? ""),
+        )
+        .join("  ")
+        .trimEnd(),
+    ).join("\n");
+  const [header = [], ...body] = wrapped;
   const rule = "-".repeat(widths.reduce((total, width) => total + width, 2 * (columnCount - 1)));
-  return [line(header), rule, ...body.map(line)].join("\n");
+  return [lines(header), rule, body.map(lines).join(wrapWidth ? "\n\n" : "\n")]
+    .filter((part) => part !== "")
+    .join("\n");
 }
 
 function mermaidSourceHtml(source: string) {
