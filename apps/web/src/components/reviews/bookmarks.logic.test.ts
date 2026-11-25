@@ -200,11 +200,11 @@ describe("bookmarkToggle", () => {
 });
 
 describe("bookmarkNoteBlock", () => {
-  it("quotes the bookmarked text above the note", () => {
+  it("labels and quotes the bookmarked text directly above the note", () => {
     const item = { ...prompt, excerpt: "first\nsecond" };
     expect(bookmarkNoteBlock(item, " check the expiry case ")).toBe(
-      "> first\n> second\n\ncheck the expiry case",
+      "> [from bookmark] first\n> second\ncheck the expiry case",
     );
-    expect(bookmarkNoteBlock(item, "  ")).toBe("> first\n> second");
+    expect(bookmarkNoteBlock(item, "  ")).toBe("> [from bookmark] first\n> second");
   });
 });

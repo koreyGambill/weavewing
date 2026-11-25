@@ -203,12 +203,12 @@ export function bookmarkToggle(
   return bookmarkUpdate(bookmark, button === "todo" ? "todo" : "untodo");
 }
 
-/** The bookmark as a thread-notes block: its text quoted, then the note. */
+/** The bookmark as a thread-notes block: its text quoted and labelled, then the note on the next line. */
 export function bookmarkNoteBlock(bookmark: MessageFollowUp, note: string): string {
-  const quote = bookmarkText(bookmark)
+  const quote = `[from bookmark] ${bookmarkText(bookmark)}`
     .split("\n")
     .map((line) => `> ${line}`.trimEnd())
     .join("\n");
   const trimmed = note.trim();
-  return trimmed === "" ? quote : `${quote}\n\n${trimmed}`;
+  return trimmed === "" ? quote : `${quote}\n${trimmed}`;
 }
