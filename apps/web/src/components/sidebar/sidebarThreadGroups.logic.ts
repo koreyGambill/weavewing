@@ -271,6 +271,15 @@ export function placeSidebarThreads(
   };
 }
 
+function stepTarget(arrangement: SidebarThreadGroupArrangement, key: string, delta: -1 | 1) {
+  const source = locate(arrangement, key);
+  if (source === null || !source.isHead) return null;
+  const neighbor = source.families[source.index + delta];
+  if (neighbor === undefined) return null;
+  const beforeKey = delta === -1 ? neighbor[0]! : (source.families[source.index + 2]?.[0] ?? null);
+  return { groupId: source.groupId, families: source.families, beforeKey };
+}
+
 /** Moves a thread one place up or down within its container; null at either end. */
 export function stepSidebarThread(
   state: SidebarThreadGroups,
@@ -278,12 +287,51 @@ export function stepSidebarThread(
   key: string,
   delta: -1 | 1,
 ): SidebarThreadGroups | null {
-  const source = locate(arrangement, key);
-  if (source === null || !source.isHead) return null;
-  const neighbor = source.families[source.index + delta];
-  if (neighbor === undefined) return null;
-  const beforeKey = delta === -1 ? neighbor[0]! : (source.families[source.index + 2]?.[0] ?? null);
-  return placeSidebarThread(state, arrangement, key, { groupId: source.groupId, beforeKey });
+  const target = stepTarget(arrangement, key, delta);
+  return target === null ? null : placeSidebarThread(state, arrangement, key, target);
+}
+
+/**
+ * Moves threads within one project folder, whose families are given in display order. The new
+ * order is written into Ungrouped's order, so the flat list keeps it; group membership stays.
+ */
+export function placeSidebarFolderThreads(
+  state: SidebarThreadGroups,
+  folder: ReadonlyArray<Family>,
+  keys: readonly string[],
+  beforeKey: string | null,
+): SidebarThreadGroups {
+  const placed = placeSidebarThreads(
+    { ...state, groups: [] },
+    { groups: [], ungrouped: [...folder], ungroupedAt: 0, freshAtEnd: true },
+    keys,
+    { groupId: null, beforeKey },
+  );
+  return { ...state, ungroupedOrder: placed.ungroupedOrder };
+}
+
+/** Where a dragged thread lands among project folders, given as groups; only its own folder takes it. */
+export function resolveSidebarFolderDrop(
+  folders: SidebarThreadGroupArrangement,
+  draggedKey: string,
+  hit: SidebarGroupHit,
+): SidebarGroupDropTarget | null {
+  const source = locate(folders, draggedKey);
+  const target = resolveSidebarGroupDrop(folders, draggedKey, hit);
+  return source !== null && target?.groupId === source.groupId ? target : null;
+}
+
+/** Moves a thread one place up or down within its project folder; null at either end. */
+export function stepSidebarFolderThread(
+  state: SidebarThreadGroups,
+  folders: SidebarThreadGroupArrangement,
+  key: string,
+  delta: -1 | 1,
+): SidebarThreadGroups | null {
+  const target = stepTarget(folders, key, delta);
+  return target === null
+    ? null
+    : placeSidebarFolderThreads(state, target.families, [key], target.beforeKey);
 }
 
 const REMOTE_GROUP_ID_PREFIX = "remote:";
