@@ -70,6 +70,8 @@ export interface ResolvedFile {
   readonly realPath: string;
   /** `link`: a markdown link an agent reads on demand, so it never loads by default. */
   readonly scope: "global" | "project" | "rule" | "import" | "link";
+  /** Inside the workspace's repository, whose root is the git root unless that is $HOME or above. */
+  readonly repository: boolean;
   readonly bytes: number;
   readonly depth: number;
   readonly status: "expected" | "not-read" | "secret";
@@ -235,6 +237,7 @@ export const resolveInstructionFiles = Effect.fn("DefaultContext.resolveInstruct
           path: file,
           realPath: resolved,
           scope,
+          repository: inRepo(file),
           bytes,
           depth,
           status,
@@ -341,6 +344,7 @@ export function reconcileFiles(
         path: source.path,
         realPath: source.path,
         scope: "project" as const,
+        repository: false,
         bytes: source.bytes ?? 0,
         depth: 0,
         status: "not-read" as const,

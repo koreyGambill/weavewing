@@ -124,27 +124,33 @@ export interface UsedContextSource {
   readonly items: ReadonlyArray<DefaultContextItem>;
 }
 
-const slashes = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "");
-const withinFolder = (path: string, folder: string) =>
-  slashes(path) === slashes(folder) || slashes(path).startsWith(`${slashes(folder)}/`);
-
 /**
- * Splits the context in use into what T3 can itemize and what it can only infer. The remainder is
- * the first reported prompt minus the itemized estimates; without that report it also holds the
- * conversation. Null when the provider's default context is unsupported.
+ * Splits used context into itemized estimates and inferred remainders that add up to the provider's
+ * count. A first-turn prompt splits off the conversation only while it lies between the itemized
+ * total and current use. Estimates above the count cannot reconcile and are reported as such.
  */
 export function usedContextSources(preview: DefaultContextPreview, usedTokens: number) {
   if (preview.support === "unsupported") return null;
   const counted = preview.items.filter((item) => item.counted);
   const isFile = (item: DefaultContextItem) => item.category === "files";
-  const inRepository = (item: DefaultContextItem) =>
-    preview.cwd !== null && withinFolder(item.label, preview.cwd);
-  const groups: Array<[key: string, label: string, test: (item: DefaultContextItem) => boolean]> = [
+  // Servers that predate the repository flag get one undivided files row.
+  const split = counted.some((item) => isFile(item) && item.repository !== undefined);
+  type Group = [key: string, label: string, test: (item: DefaultContextItem) => boolean];
+  const fileGroups: Group[] = split
+    ? [
+        [
+          "repository-files",
+          "Repository instructions",
+          (item) => isFile(item) && item.repository === true,
+        ],
+        ["global-files", "Global instructions", (item) => isFile(item) && item.repository !== true],
+      ]
+    : [["files", CATEGORY_LABELS.files, isFile]];
+  const groups: Group[] = [
     ["t3", CATEGORY_LABELS.t3, (item) => item.category === "t3"],
     ["app-context", CATEGORY_LABELS["app-context"], (item) => item.category === "app-context"],
     ["custom", CATEGORY_LABELS.custom, (item) => item.category === "custom"],
-    ["repository-files", "Repository instructions", (item) => isFile(item) && inRepository(item)],
-    ["global-files", "Global instructions", (item) => isFile(item) && !inRepository(item)],
+    ...fileGroups,
     ["skills", CATEGORY_LABELS.skills, (item) => item.category === "skills"],
     ["tools", CATEGORY_LABELS.tools, (item) => item.category === "tools"],
   ];
@@ -155,12 +161,14 @@ export function usedContextSources(preview: DefaultContextPreview, usedTokens: n
   });
   const known = sources.reduce((sum, source) => sum + source.tokens, 0);
   const used = Math.max(0, usedTokens);
-  const baseline = preview.firstTurn?.promptTokens ?? null;
+  if (known > used) return { reconciles: false as const, knownTokens: known, usedTokens: used };
+  const reported = preview.firstTurn?.promptTokens ?? null;
+  const baseline = reported !== null && reported >= known && reported <= used ? reported : null;
   if (baseline === null) {
     sources.push({
       key: "rest",
       label: "Harness, built-in tools and conversation (not itemized)",
-      tokens: Math.max(0, used - known),
+      tokens: used - known,
       items: [],
     });
   } else {
@@ -168,18 +176,19 @@ export function usedContextSources(preview: DefaultContextPreview, usedTokens: n
       {
         key: "harness",
         label: "First turn: harness, tools and what it read",
-        tokens: Math.max(0, baseline - known),
+        tokens: baseline - known,
         items: [],
       },
       {
         key: "conversation",
         label: "Conversation since the first turn",
-        tokens: Math.max(0, used - baseline),
+        tokens: used - baseline,
         items: [],
       },
     );
   }
   return {
+    reconciles: true as const,
     sources: sources.toSorted((a, b) => b.tokens - a.tokens),
     knownTokens: known,
     firstTurnTokens: baseline,

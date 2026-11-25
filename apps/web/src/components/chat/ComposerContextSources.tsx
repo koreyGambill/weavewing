@@ -48,6 +48,14 @@ export function ComposerContextSources({
     return <p className="mt-3 text-muted-foreground text-xs">Estimating what's using it…</p>;
   const breakdown = usedContextSources(preview, usedTokens);
   if (breakdown === null) return null;
+  if (!breakdown.reconciles)
+    return (
+      <p className="mt-3 text-muted-foreground text-xs">
+        T3's byte-based estimates of what it adds ({approx(breakdown.knownTokens)}) exceed the
+        provider's count ({formatContextWindowTokens(breakdown.usedTokens)}), so they can't break it
+        down. Default context in the Inspect panel lists them.
+      </p>
+    );
   const home = homeOf([
     ...(preview.cwd ? [preview.cwd] : []),
     ...preview.items.map((item) => item.label),
@@ -135,7 +143,7 @@ function SourceDetails({
       ? `Messages, tool calls and their output: the latest report (${formatContextWindowTokens(usedTokens)}) minus the first turn's prompt (${formatContextWindowTokens(firstTurnTokens)}). Compaction shrinks it.`
       : source.key === "harness"
         ? `The first turn's prompt as the provider reported it (${formatContextWindowTokens(firstTurnTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). It also holds your first message and anything that turn read.`
-        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). There is no clean first-turn report to separate them, because the thread was forked or handed off or the provider never sent one, so this includes the conversation.`;
+        : `The latest report (${formatContextWindowTokens(usedTokens)}) minus the parts T3 can itemize (${approx(knownTokens)}). No first-turn report can separate them, because the thread was forked, handed off, imported or compacted, or the provider never sent one, so this includes the conversation.`;
   return (
     <div className="text-muted-foreground">
       <p>{explanation}</p>

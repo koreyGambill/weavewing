@@ -162,6 +162,8 @@ export const DefaultContextItem = Schema.Struct({
   depth: Schema.optional(NonNegativeInt),
   /** The file whose markdown link lists this one, read on demand rather than loaded. */
   parentId: Schema.optional(Schema.String),
+  /** For an instruction file: whether it lies inside the thread's repository. */
+  repository: Schema.optional(Schema.Boolean),
   status: Schema.optional(
     Schema.Literals(["expected", "loaded", "not-loaded", "unexpected", "not-read", "secret"]),
   ),

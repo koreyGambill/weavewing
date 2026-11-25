@@ -461,10 +461,11 @@ it.effect("walks Codex's chain from the git root and reconciles reported sources
       { home, platform: "linux", configDir: path.join(home, "codex") },
       notInternal,
     );
-    expect(files.map((file) => path.relative(home, file.path))).toEqual([
-      "codex/AGENTS.md",
-      "repo/AGENTS.md",
-      "repo/app/AGENTS.override.md",
+    expect(files.map((file) => [path.relative(home, file.path), file.repository])).toEqual([
+      ["codex/AGENTS.md", false],
+      // Above the nested working folder, but still inside its repository.
+      ["repo/AGENTS.md", true],
+      ["repo/app/AGENTS.override.md", true],
     ]);
     const rows = reconcileFiles(files, [
       { path: path.join(home, "codex", "AGENTS.md"), bytes: 6 },
@@ -496,14 +497,20 @@ const serviceLayer = (input: {
   readonly projectRoot?: string;
   /** Counts full context resolutions, which every preview and uncached item read performs. */
   readonly resolutions?: { count: number };
+  readonly providerThreadId?: string;
+  readonly recordFilters?: Array<unknown>;
 }) =>
   defaultContextLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(Orchestrator.OrchestratorV2)({
-          getThreadRecords: () =>
-            Effect.succeed({
+          getThreadRecords: (_threadId, _fields, filter) => {
+            input.recordFilters?.push(filter);
+            return Effect.succeed({
+              providerThreads: [],
+              providerTurns: [],
               thread: {
+                activeProviderThreadId: input.providerThreadId ?? null,
                 deletedAt: null,
                 providerInstanceId: codex,
                 modelSelection: { instanceId: codex, model: "gpt-5.4" },
@@ -512,7 +519,8 @@ const serviceLayer = (input: {
                 interactionMode: "default",
               },
               runs: [{ id: runId, ordinal: 1 }],
-            } as never),
+            } as never);
+          },
         }),
         Layer.mock(InstructionFootprints)({
           list: () => Effect.succeed(input.footprint === undefined ? [] : [input.footprint]),
@@ -588,8 +596,16 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
       instructionSources: [{ path: path.join(home, "AGENTS.md"), bytes: 40 * 1024 }],
     };
     const resolutions = { count: 0 };
+    const recordFilters: Array<unknown> = [];
     const context = yield* Layer.build(
-      serviceLayer({ home, footprint, codexHomePath: path.join(home, "work-codex"), resolutions }),
+      serviceLayer({
+        home,
+        footprint,
+        codexHomePath: path.join(home, "work-codex"),
+        resolutions,
+        providerThreadId: "provider-thread",
+        recordFilters,
+      }),
     ).pipe(
       Effect.provideService(HostProcess.HomeDirectory, home),
       Effect.provideService(HostProcess.Environment, {}),
@@ -599,6 +615,11 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
     const byId = new Map(preview.items.map((item) => [item.id, item]));
     expect(preview.support).toBe("exact");
     expect(preview.lastTurn?.injectedBytes).toBe(40);
+    // The first-turn baseline reads only the active provider thread's turns.
+    expect(recordFilters).toContainEqual({
+      providerThreadIds: ["provider-thread"],
+      providerTurnThreadIds: ["provider-thread"],
+    });
     expect(byId.get(`file:${path.join(home, "AGENTS.md")}`)?.status).toBe("loaded");
     expect(byId.has(`file:${path.join(home, "work-codex", "AGENTS.md")}`)).toBe(true);
     expect(byId.has(`file:${path.join(home, ".codex", "AGENTS.md")}`)).toBe(false);
@@ -629,35 +650,56 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it("takes the baseline from the earliest reported prompt of a fresh provider thread only", () => {
+it("takes the baseline only from the first turn of a conversation that began here", () => {
   const instance = ProviderInstanceId.make("claude");
-  const fresh = { providerInstanceId: instance, forkedFrom: null, handoffIds: [] };
+  const runAt = DateTime.makeUnsafe(1_000);
+  const fresh = {
+    providerInstanceId: instance,
+    forkedFrom: null,
+    handoffIds: [],
+    createdAt: DateTime.makeUnsafe(2_000),
+  };
   const usage = (inputTokens: number | undefined, updatedAt: string) => ({
     usedTokens: 1,
     ...(inputTokens === undefined ? {} : { inputTokens }),
     updatedAt,
   });
-  const turns = [
-    { ordinal: 3, tokenUsage: usage(90_000, "c") },
-    { ordinal: 1, tokenUsage: usage(undefined, "a") },
-    { ordinal: 2, tokenUsage: usage(68_000, "b") },
+  const reported = [
+    { ordinal: 2, tokenUsage: usage(90_000, "b") },
+    { ordinal: 1, tokenUsage: usage(68_000, "a") },
   ];
-  expect(firstTurnPrompt(fresh, turns, instance)).toEqual({
-    promptTokens: 68_000,
-    reportedAt: "b",
-  });
-  expect(firstTurnPrompt(fresh, [], instance)).toBeNull();
-  expect(firstTurnPrompt(undefined, turns, instance)).toBeNull();
-  expect(firstTurnPrompt(fresh, turns, ProviderInstanceId.make("codex"))).toBeNull();
+  const baseline = (overrides: Partial<Parameters<typeof firstTurnPrompt>[0]> = {}) =>
+    firstTurnPrompt({
+      thread: {},
+      firstRunRequestedAt: runAt,
+      providerThread: fresh,
+      turns: reported,
+      instanceId: instance,
+      ...overrides,
+    });
+  expect(baseline()).toEqual({ promptTokens: 68_000, reportedAt: "a" });
+  // A later turn never stands in for a first turn that reported no input.
   expect(
-    firstTurnPrompt({ ...fresh, handoffIds: ["handoff" as never] }, turns, instance),
+    baseline({
+      turns: [
+        { ordinal: 1, tokenUsage: usage(undefined, "a") },
+        { ordinal: 2, tokenUsage: usage(68_000, "b") },
+      ],
+    }),
   ).toBeNull();
+  expect(baseline({ turns: [] })).toBeNull();
+  expect(baseline({ providerThread: undefined })).toBeNull();
+  expect(baseline({ instanceId: ProviderInstanceId.make("codex") })).toBeNull();
+  expect(baseline({ providerThread: { ...fresh, handoffIds: ["handoff" as never] } })).toBeNull();
   expect(
-    firstTurnPrompt(
-      { ...fresh, forkedFrom: { providerThreadId: "parent" as never } },
-      turns,
-      instance,
-    ),
+    baseline({
+      providerThread: { ...fresh, forkedFrom: { providerThreadId: "parent" as never } },
+    }),
+  ).toBeNull();
+  // Imported conversations carry history the first local prompt includes.
+  expect(baseline({ thread: { historyOrigin: "v1_import" } })).toBeNull();
+  expect(
+    baseline({ providerThread: { ...fresh, createdAt: DateTime.makeUnsafe(500) } }),
   ).toBeNull();
 });
 
