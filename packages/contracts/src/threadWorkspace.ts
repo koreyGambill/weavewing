@@ -239,6 +239,12 @@ export const ThreadQuestionSubmitInput = Schema.Struct({
   ids: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
 });
 export type ThreadQuestionSubmitInput = typeof ThreadQuestionSubmitInput.Type;
+/** A question's short title: its prompt's first eight words, at most 80 characters. */
+export const threadQuestionTitle = (prompt: string): string => {
+  const words = prompt.replace(/\s+/g, " ").trim().split(" ");
+  const title = words.slice(0, 8).join(" ").slice(0, 80);
+  return title.length < prompt.trim().length ? `${title}…` : title;
+};
 /** The `artifactId` of an answer record that answers a thread question rather than an artifact. */
 export const THREAD_QUESTIONS_ARTIFACT_ID = "thread-questions";
 

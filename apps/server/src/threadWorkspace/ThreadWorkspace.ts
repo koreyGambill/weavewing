@@ -12,6 +12,7 @@ import {
   artifactAnswerFits,
   artifactQuestionIsConsistent,
   THREAD_QUESTIONS_ARTIFACT_ID,
+  threadQuestionTitle,
   type ArtifactAnswerContextRecord,
   type OrchestrationV2AppThread,
   type OrchestrationV2ThreadQuestionSummary,
@@ -131,11 +132,6 @@ const missingQuestion = (id: string) =>
   new ThreadWorkspaceError({ code: "not_found", message: `${id} does not exist in this thread.` });
 
 /** The first words of a question, for the thread list and an agent's turn context. */
-const questionTitle = (prompt: string): string => {
-  const words = prompt.replace(/\s+/g, " ").trim().split(" ");
-  const title = words.slice(0, 8).join(" ").slice(0, 80);
-  return title.length < prompt.trim().length ? `${title}…` : title;
-};
 const isWaiting = (
   question: ThreadQuestion,
 ): question is ThreadQuestion & { readonly state: "open" | "deferred" } =>
@@ -150,7 +146,7 @@ const mirroredQuestions = (
       ? [
           {
             id: question.id,
-            title: questionTitle(question.prompt),
+            title: threadQuestionTitle(question.prompt),
             state: question.state as "open" | "deferred" | "withdrawn",
             ...(question.userChangedAt ? { userChangedAt: question.userChangedAt } : {}),
           },
@@ -867,7 +863,7 @@ const make = Effect.gen(function* () {
         };
         if (!artifactQuestionIsConsistent(question))
           return yield* invalid(
-            `Option ids and recommendations of "${questionTitle(ask.prompt)}" must match its options.`,
+            `Option ids and recommendations of "${threadQuestionTitle(ask.prompt)}" must match its options.`,
           );
         if (ask.replaces !== undefined) {
           const { index, question: old } = yield* findQuestion(
@@ -973,7 +969,7 @@ const make = Effect.gen(function* () {
         if (!isWaiting(question)) return yield* invalid(`${id} is already ${question.state}.`);
         if (!answer || (!answer.chosenOptionIds.length && !answer.notes.trim()))
           return yield* invalid(`Choose an answer or add a note to ${id} before sending.`);
-        const title = `${question.id}: ${questionTitle(question.prompt)}`;
+        const title = `${question.id}: ${threadQuestionTitle(question.prompt)}`;
         const key = NodeCrypto.createHash("sha256")
           .update(
             yield* encodeSnapshot([input.threadId, question, answer]).pipe(

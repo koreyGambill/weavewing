@@ -181,6 +181,8 @@ export interface EnvironmentThreadShell {
   readonly pendingSubagentRequest?: PendingSubagentRequest | null;
   /** Guest messages waiting for the owner to send or dismiss. */
   readonly pendingGuestMessageCount?: number;
+  /** Agent questions waiting on the user, deferred ones excluded; absent before the first. */
+  readonly openQuestionCount?: number;
   readonly hasActionableProposedPlan: boolean;
   readonly pendingBackgroundTasks: ReadonlyArray<
     NonNullable<OrchestrationV2ThreadShell["pendingBackgroundTasks"]>[number]
@@ -353,6 +355,9 @@ export function presentThreadShell(
         : null,
     pendingSubagentRequest,
     pendingGuestMessageCount: thread.pendingGuestMessageCount ?? 0,
+    ...(thread.openQuestionCount === undefined
+      ? {}
+      : { openQuestionCount: thread.openQuestionCount }),
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
     providerInstanceHistory: thread.providerInstanceHistory ?? [],

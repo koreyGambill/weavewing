@@ -415,6 +415,10 @@
       "types": "./src/state/threadUndo.ts",
       "default": "./src/state/threadUndo.ts"
     },
+    "./state/thread-questions": {
+      "types": "./src/state/threadQuestions.ts",
+      "default": "./src/state/threadQuestions.ts"
+    },
     "./state/thread-settled": {
       "types": "./src/state/threadSettled.ts",
       "default": "./src/state/threadSettled.ts"
