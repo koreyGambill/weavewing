@@ -142,7 +142,7 @@ const layerAdvertisedTools = McpHttpServer.layerTools.pipe(
 
 // Claude Code loads these tools up front instead of behind ToolSearch, outside this budget.
 it.effect(
-  "only request_secret, send_to_user and the question tools load up front in Claude Code",
+  "only request_secret, send_to_user, context_rewind and the question tools load up front in Claude Code",
   () =>
     Effect.gen(function* () {
       const mcp = yield* McpServer.McpServer;
@@ -153,6 +153,7 @@ it.effect(
         ["request_secret", { "anthropic/alwaysLoad": true }],
         ["question_ask", { "anthropic/alwaysLoad": true }],
         ["question_update", { "anthropic/alwaysLoad": true }],
+        ["context_rewind", { "anthropic/alwaysLoad": true }],
         ["send_to_user", { "anthropic/alwaysLoad": true }],
       ]);
     }).pipe(Effect.provide(layerAdvertisedTools)),

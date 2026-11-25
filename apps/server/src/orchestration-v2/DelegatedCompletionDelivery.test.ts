@@ -14,6 +14,7 @@ import {
   MessageId,
   type ModelSelection,
   NodeId,
+  type OrchestrationV2Command,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
@@ -65,6 +66,7 @@ import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAda
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationService from "./ProviderContinuationService.ts";
+import { contextRewindContinuationCommand } from "./contextRewind.ts";
 
 const layerPlatformTest = Layer.merge(
   Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
@@ -4240,7 +4242,13 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
     );
 
     // The child's follow-up run sends `t3_thread_send` to its own thread before it ends.
-    const startSelfQueuedFollowup = (name: string) =>
+    const startSelfQueuedFollowup = (
+      name: string,
+      selfSend?: (
+        childThreadId: ThreadId,
+        messageId: MessageId,
+      ) => Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
+    ) =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const eventSink = yield* EventSink.EventSinkV2;
@@ -4269,25 +4277,27 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           ],
         });
         const selfQueuedMessageId = MessageId.make(`message:${name}-self-send`);
-        yield* orchestrator.dispatch({
-          type: "message.dispatch",
-          createdBy: "agent",
-          creationSource: "mcp",
-          origin: {
-            kind: "thread",
-            event: "message",
-            title: "Child",
+        yield* orchestrator.dispatch(
+          selfSend?.(child.childThreadId, selfQueuedMessageId) ?? {
+            type: "message.dispatch",
+            createdBy: "agent",
+            creationSource: "mcp",
+            origin: {
+              kind: "thread",
+              event: "message",
+              title: "Child",
+              threadId: child.childThreadId,
+              environmentId: EnvironmentId.make("environment:delegated"),
+            },
+            commandId: CommandId.make(`command:${name}-self-send`),
             threadId: child.childThreadId,
-            environmentId: EnvironmentId.make("environment:delegated"),
+            senderThreadId: child.childThreadId,
+            messageId: selfQueuedMessageId,
+            text: "Finish the work after this turn.",
+            attachments: [],
+            dispatchMode: { type: "queue_after_active" },
           },
-          commandId: CommandId.make(`command:${name}-self-send`),
-          threadId: child.childThreadId,
-          senderThreadId: child.childThreadId,
-          messageId: selfQueuedMessageId,
-          text: "Finish the work after this turn.",
-          attachments: [],
-          dispatchMode: { type: "queue_after_active" },
-        });
+        );
         const selfQueuedRun = (yield* orchestrator.getThreadProjection(
           child.childThreadId,
         )).runs.find((row) => row.userMessageId === selfQueuedMessageId)!;
@@ -4841,10 +4851,24 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
         }),
     );
 
-    it.effect("waits for a run the follow-up's child queued on its own thread", () =>
+    it.effect.each([
+      ["a message to its own thread", "self-queued-followup"],
+      ["its context rewind continuation", "context-rewind-followup"],
+    ] as const)("waits for a run the follow-up's child queued: %s", ([, name]) =>
       Effect.gen(function* () {
         const requests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-        const followup = yield* startSelfQueuedFollowup("self-queued-followup");
+        const followup = yield* startSelfQueuedFollowup(
+          name,
+          name === "context-rewind-followup"
+            ? (threadId, messageId) =>
+                contextRewindContinuationCommand({
+                  threadId,
+                  messageId,
+                  removedToolCalls: 2,
+                  summary: "SUP-1047 belongs to Imani Okafor.",
+                })
+            : undefined,
+        );
         yield* followup.finishRun("handoff", followup.followupRun, "HANDOFF-C");
         const waiting = yield* followup.readFollowup;
         assert.isNull(

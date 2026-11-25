@@ -767,6 +767,128 @@ it.effect.each([
     }),
 );
 
+it.effect.each(["live", "unsupported-runtime", "refused"] as const)(
+  "rewinds the active provider thread's context and queues its continuation with state %s",
+  (state) =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread:context-rewind");
+      const providerThreadId = ProviderThreadId.make("provider-thread:context-rewind");
+      const providerSessionId = ProviderSessionId.make("provider-session:context-rewind");
+      const driver = ProviderDriverKind.make("claudeAgent");
+      const now = yield* DateTime.now;
+      const providerThread: OrchestrationV2ProviderThread = {
+        id: providerThreadId,
+        driver,
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        providerSessionId,
+        appThreadId: threadId,
+        ownerNodeId: null,
+        nativeThreadRef: { driver, nativeId: "native-thread", strength: "strong" },
+        nativeConversationHeadRef: null,
+        status: "active",
+        firstRunOrdinal: 1,
+        lastRunOrdinal: 1,
+        handoffIds: [],
+        forkedFrom: null,
+        contextUsage: null,
+        nativeMetadata: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const dispatched: Array<OrchestrationV2Command> = [];
+      const continuationMessageId = MessageId.make("message:context-rewind:turn-1");
+      const runtime = {
+        driver,
+        providerSessionId,
+        ...(state === "unsupported-runtime"
+          ? {}
+          : {
+              rewindContext: (
+                input: Parameters<
+                  NonNullable<ProviderAdapter.ProviderAdapterV2SessionRuntime["rewindContext"]>
+                >[0],
+              ) =>
+                state === "refused"
+                  ? Effect.fail(
+                      new ProviderAdapter.ProviderAdapterContextRewindRefusedError({
+                        driver,
+                        providerThreadId: input.providerThread.id,
+                        reason: "too_small",
+                      }),
+                    )
+                  : input
+                      .deliver({ removedToolCalls: 3, continuationMessageId })
+                      .pipe(Effect.as({ removedToolCalls: 3 })),
+            }),
+      } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+      const layerTest = ThreadManagementService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(Orchestrator.OrchestratorV2)({
+              getThreadRecords: () =>
+                Effect.succeed({
+                  thread: {
+                    id: threadId,
+                    projectId: ProjectId.make("project:context-rewind"),
+                    deletedAt: null,
+                    activeProviderThreadId: providerThreadId,
+                    modelSelection: { instanceId: providerThread.providerInstanceId, model: "m" },
+                  },
+                  providerThreads: [providerThread],
+                } as unknown as OrchestrationV2ThreadProjection),
+              dispatch: (command) =>
+                Effect.sync(() => {
+                  dispatched.push(command as OrchestrationV2Command);
+                  return { sequence: 1, storedEvents: [] } as never;
+                }),
+            }),
+            Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+              get: () => Effect.succeedSome(runtime),
+            }),
+          ),
+        ),
+        Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(layerReceiptsTest),
+      );
+      const result = yield* Effect.gen(function* () {
+        const service = yield* ThreadManagementService.ThreadManagementService;
+        return yield* service
+          .rewindContext({ threadId, summary: "SUP-1047 belongs to Imani Okafor." })
+          .pipe(Effect.result);
+      }).pipe(Effect.provide(Layer.merge(layerTest, ThreadCommandExecutor.layer)));
+
+      if (state === "live") {
+        expect(result).toMatchObject({ success: { removedToolCalls: 3 } });
+        expect(dispatched).toMatchObject([
+          {
+            type: "message.dispatch",
+            threadId,
+            senderThreadId: threadId,
+            messageId: continuationMessageId,
+            origin: { kind: "system", event: "context rewind" },
+            dispatchMode: { type: "queue_after_active" },
+            createdBy: "agent",
+            creationSource: "server",
+          },
+        ]);
+        expect(dispatched[0]?.type === "message.dispatch" && dispatched[0].text).toContain(
+          "SUP-1047 belongs to Imani Okafor.",
+        );
+      } else {
+        expect(result).toMatchObject({
+          failure: {
+            _tag: "ThreadManagementContextRewindError",
+            reason: state === "refused" ? "refused" : "unsupported",
+          },
+        });
+        if (result._tag === "Failure" && state === "refused") {
+          expect(result.failure.message).toContain("too small to be worth a rewind");
+        }
+        expect(dispatched).toEqual([]);
+      }
+    }),
+);
+
 it.effect.each([
   { status: "completed" as const, followUp: "none", settles: true },
   { status: "failed" as const, followUp: "none", settles: false },

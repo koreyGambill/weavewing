@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as McpToolExposure from "../../McpToolExposure.ts";
+import { CONTEXT_REWIND_TOOL_NAMES } from "../contextRewind/tools.ts";
 import { QUESTION_TOOL_NAMES } from "../questions/tools.ts";
 import { ToolSearchToolkit } from "./tools.ts";
 
@@ -17,7 +18,10 @@ export const layer = McpToolAccess.toLayer(ToolSearchToolkit, {
         tools: yield* exposure.search(
           thread.providerSessionId,
           query,
-          capabilities.has("questions") ? new Set() : QUESTION_TOOL_NAMES,
+          new Set([
+            ...(capabilities.has("questions") ? [] : QUESTION_TOOL_NAMES),
+            ...(capabilities.has("context-rewind") ? [] : CONTEXT_REWIND_TOOL_NAMES),
+          ]),
         ),
       };
     }),

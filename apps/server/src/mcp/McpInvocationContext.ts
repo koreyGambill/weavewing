@@ -23,6 +23,7 @@ const ALL_MCP_CAPABILITIES = [
   "terminal",
   "pull-requests",
   "questions",
+  "context-rewind",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 

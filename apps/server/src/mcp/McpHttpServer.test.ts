@@ -1958,7 +1958,20 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
         ["deferringToken", scopeFor("deferringToken")],
         ["otherToken", scopeFor("otherToken")],
         ["askingToken", scopeFor("askingToken", ["orchestration", "questions"])],
+        [
+          "rewindingToken",
+          // The caller check reads liveThreadsLayer, whose live shells run on `codex`.
+          {
+            ...scopeFor("rewindingToken", ["orchestration", "context-rewind"]),
+            thread: {
+              threadId: ThreadId.make("thread-rewindingToken"),
+              providerSessionId: "rewindingToken",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+            },
+          },
+        ],
       ]);
+      const rewindSummaries: Array<string> = [];
       const tool = (name: string, description: string) =>
         Tool.make(name, {
           description,
@@ -1984,10 +1997,28 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
           ),
           McpHttpServer.layerToolSearch,
           McpHttpServer.layerQuestionToolkit.pipe(Layer.provide(ThreadWorkspace.layerTest)),
+          McpHttpServer.layerContextRewindToolkit,
         ),
       ).pipe(
         Layer.provide(ServerSettings.layerTest()),
-        Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+        Layer.provide(
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadShell: (threadId) =>
+              Effect.succeed(McpToolAccessTestkit.liveThreadShell(threadId)),
+            rewindContext: ({ summary }) =>
+              summary === "refuse"
+                ? Effect.fail(
+                    new ThreadManagementService.ThreadManagementContextRewindError({
+                      threadId: ThreadId.make("thread-rewindingToken"),
+                      reason: "unsupported",
+                    }),
+                  )
+                : Effect.sync(() => {
+                    rewindSummaries.push(summary);
+                    return { removedToolCalls: 2 };
+                  }),
+          }),
+        ),
         Layer.provide(
           Layer.mock(McpSessionRegistry.McpSessionRegistry)({
             resolve: (token) => Effect.succeed(scopes.get(token)),
@@ -2093,6 +2124,26 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
           }
         ).tools.map((found) => found.name),
       ).toContain("question_ask");
+
+      // context_rewind follows the `context-rewind` capability, and a success ends Claude's turn.
+      expect(
+        (yield* deferring.call("tool_search", { query: "context_rewind" })).structuredContent,
+      ).toEqual({ tools: [] });
+      const rewinding = yield* session("rewindingToken", false);
+      expect(yield* rewinding.listed).toContain("context_rewind");
+      const rewound = (yield* rewinding.call("context_rewind", { summary: "SUP-1047" })) as {
+        readonly isError?: boolean;
+        readonly _meta?: Record<string, unknown>;
+      };
+      expect(rewound.isError).toBe(false);
+      expect(rewound._meta).toEqual({ "claude/endTurn": true });
+      expect(rewindSummaries).toEqual(["SUP-1047"]);
+      const refused = (yield* rewinding.call("context_rewind", { summary: "refuse" })) as {
+        readonly isError?: boolean;
+        readonly _meta?: Record<string, unknown>;
+      };
+      expect(refused.isError).toBe(true);
+      expect(refused._meta).toBeUndefined();
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

@@ -94,6 +94,8 @@ import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { MessageToolkit } from "./toolkits/message/tools.ts";
 import * as MessageHandlers from "./toolkits/message/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import * as ContextRewindHandlers from "./toolkits/contextRewind/handlers.ts";
+import { ContextRewindToolkit } from "./toolkits/contextRewind/tools.ts";
 import * as QuestionHandlers from "./toolkits/questions/handlers.ts";
 import { QuestionToolkit } from "./toolkits/questions/tools.ts";
 import * as ReviewHandlers from "./toolkits/reviews/handlers.ts";
@@ -1168,6 +1170,35 @@ const withToolSpans = Effect.fn("McpHttpServer.withToolSpans")(function* <A, E, 
   return yield* registration.pipe(Effect.provideService(McpServer.McpServer, tracingServer));
 });
 
+const isCallToolResult = Schema.is(McpSchema.CallToolResult);
+
+/** Claude Code ends its provider turn right after a successful result carrying `claude/endTurn`. */
+const withEndTurnResults = Effect.fn("McpHttpServer.withEndTurnResults")(function* <A, E, R>(
+  registration: Effect.Effect<A, E, R>,
+) {
+  const server = yield* McpServer.McpServer;
+  const endingServer = McpServer.McpServer.of({
+    ...server,
+    addTool: Effect.fn("McpServer.addTool")(function (options) {
+      return server.addTool({
+        ...options,
+        handle: (payload) =>
+          options.handle(payload).pipe(
+            Effect.map((result) =>
+              isCallToolResult(result) && result.isError !== true
+                ? new McpSchema.CallToolResult({
+                    ...result,
+                    _meta: { ...result._meta, "claude/endTurn": true },
+                  })
+                : result,
+            ),
+          ),
+      });
+    }),
+  });
+  return yield* registration.pipe(Effect.provideService(McpServer.McpServer, endingServer));
+});
+
 /** `McpServer.registerToolkit` advertises the full codec schema; agents get the compact one. */
 const withAdvertisedSchemas = Effect.fn("McpHttpServer.withAdvertisedSchemas")(function* <
   Tools extends Record<string, Tool.Any>,
@@ -1217,11 +1248,17 @@ const provideRegistrationServices = <Services>() =>
 export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, RX>(
   toolkit: Toolkit.Toolkit<Tools>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
+  options?: { readonly endsTurn?: true },
 ) =>
   Layer.effectDiscard(
     withToolAnalytics(
       withToolSpans(
-        withAdvertisedSchemas(toolkit, McpServer.registerToolkit(decodeAsAdvertised(toolkit))),
+        withAdvertisedSchemas(
+          toolkit,
+          options?.endsTurn === true
+            ? withEndTurnResults(McpServer.registerToolkit(decodeAsAdvertised(toolkit)))
+            : McpServer.registerToolkit(decodeAsAdvertised(toolkit)),
+        ),
       ),
     ),
   ).pipe(
@@ -1283,6 +1320,20 @@ export const layerQuestionToolkit = toolkitRegistration(
   QuestionToolkit,
   QuestionHandlers.layer,
 ).pipe(Layer.provide(questionToolsVisible.layer));
+
+// Untraced: it runs on every list request.
+const contextRewindVisible = McpServer.visibility(
+  Effect.fnUntraced(function* () {
+    const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
+    return Option.isSome(scope) && scope.value.capabilities.has("context-rewind");
+  }),
+);
+
+export const layerContextRewindToolkit = toolkitRegistration(
+  ContextRewindToolkit,
+  ContextRewindHandlers.layer,
+  { endsTurn: true },
+).pipe(Layer.provide(contextRewindVisible.layer));
 
 const layerMessageToolkit = toolkitRegistration(MessageToolkit, MessageHandlers.layer);
 
@@ -1387,6 +1438,7 @@ export const layerTools = Layer.mergeAll(
   layerHtmlToolkit,
   layerReviewToolkit,
   layerQuestionToolkit,
+  layerContextRewindToolkit,
   layerMessageToolkit,
 );
 

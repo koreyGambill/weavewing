@@ -64,7 +64,12 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import {
+  ProviderAdapterContextRewindDeliveryError,
+  ProviderAdapterContextRewindRefusedError,
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
+import { contextRewindContinuationCommand } from "./contextRewind.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { projectedRowEncodedBytes } from "./threadHistoryPaging.ts";
@@ -394,6 +399,34 @@ export class ThreadManagementBackgroundWaitError extends Schema.TaggedError<Thre
   }
 }
 
+const isProviderAdapterContextRewindRefusedError = Schema.is(
+  ProviderAdapterContextRewindRefusedError,
+);
+
+export class ThreadManagementContextRewindError extends Schema.TaggedError<ThreadManagementContextRewindError>()(
+  "ThreadManagementContextRewindError",
+  {
+    threadId: ThreadId,
+    reason: Schema.Literals(["unsupported", "unavailable", "refused", "failed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "unsupported":
+        return "Context rewind is not available on this thread: its provider cannot rewind, or the setting is off. Nothing was removed.";
+      case "unavailable":
+        return "This thread has no running turn to rewind. Nothing was removed.";
+      case "refused":
+        return isProviderAdapterContextRewindRefusedError(this.cause)
+          ? this.cause.message
+          : "The provider refused the rewind. Nothing was removed.";
+      case "failed":
+        return "The rewind failed. Nothing was removed; carry on with the task.";
+    }
+  }
+}
+
 export const ThreadManagementError = Schema.Union([
   ThreadManagementThreadNotFoundError,
   ThreadManagementRunNotFoundError,
@@ -535,6 +568,15 @@ export interface ThreadManagementServiceShape {
     { readonly matched: ReadonlyArray<string>; readonly unmatched: ReadonlyArray<string> },
     ThreadManagementBackgroundWaitError
   >;
+  /**
+   * Drops the thread's latest tool calls from its agent's context and queues `summary` as the
+   * message that continues the task. The thread keeps every item and shows that message.
+   */
+  readonly rewindContext: (input: {
+    readonly threadId: ThreadId;
+    readonly summary: string;
+    readonly toolCalls?: number | undefined;
+  }) => Effect.Effect<{ readonly removedToolCalls: number }, ThreadManagementContextRewindError>;
   readonly stopDelegatedTasks: (input: {
     readonly remoteDispatch?: Orchestrator.OrchestratorV2["Service"]["dispatch"];
     readonly threadId: ThreadId;
@@ -1747,6 +1789,57 @@ const make = Effect.gen(function* () {
     return { matched, unmatched: input.taskIds.filter((taskId) => !matchedIds.has(taskId)) };
   });
 
+  const rewindContext: ThreadManagementServiceShape["rewindContext"] = Effect.fn(
+    "ThreadManagementService.rewindContext",
+  )(function* (input) {
+    const fail = (reason: ThreadManagementContextRewindError["reason"], cause?: unknown) =>
+      new ThreadManagementContextRewindError({
+        threadId: input.threadId,
+        reason,
+        ...(cause === undefined ? {} : { cause }),
+      });
+    const records = yield* orchestrator
+      .getThreadRecords(input.threadId, ["providerThreads"])
+      .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
+    const providerThread = records.providerThreads.find(
+      (candidate) =>
+        candidate.id === records.thread.activeProviderThreadId &&
+        candidate.appThreadId === input.threadId,
+    );
+    if (records.thread.deletedAt !== null || providerThread?.providerSessionId == null) {
+      return yield* fail("unavailable");
+    }
+    const runtime = yield* sessions
+      .get(providerThread.providerSessionId)
+      .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
+    if (Option.isNone(runtime)) return yield* fail("unavailable");
+    if (runtime.value.rewindContext === undefined) return yield* fail("unsupported");
+    return yield* runtime.value
+      .rewindContext({
+        providerThread,
+        ...(input.toolCalls === undefined ? {} : { toolCalls: input.toolCalls }),
+        deliver: ({ removedToolCalls, continuationMessageId }) =>
+          dispatch(
+            contextRewindContinuationCommand({
+              threadId: input.threadId,
+              messageId: continuationMessageId,
+              removedToolCalls,
+              summary: input.summary,
+            }),
+          ).pipe(
+            Effect.asVoid,
+            Effect.mapError((cause) => new ProviderAdapterContextRewindDeliveryError({ cause })),
+          ),
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          isProviderAdapterContextRewindRefusedError(cause)
+            ? fail("refused", cause)
+            : fail("failed", cause),
+        ),
+      );
+  });
+
   const stopDelegatedTasks: ThreadManagementServiceShape["stopDelegatedTasks"] = Effect.fn(
     "ThreadManagementService.stopDelegatedTasks",
   )(function* (input) {
@@ -1915,6 +2008,7 @@ const make = Effect.gen(function* () {
     stopWorkflow,
     forceStopThread,
     awaitBackgroundTasks,
+    rewindContext,
     getThreadEventSequence: orchestrator.getThreadEventSequence,
     recoverDelegatedTask: orchestrator.recoverDelegatedTask,
     cancelDelegatedTask: orchestrator.cancelDelegatedTask,
