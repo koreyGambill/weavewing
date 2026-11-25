@@ -620,6 +620,17 @@ describe("Claude omitted built-in tools", () => {
     ).toEqual(["Artifact", "Task"]);
   });
 
+  it("keeps valid names from a mixed array and reads any other shape as no selection", () => {
+    expect(
+      decodeClaudeSettings({ omittedBuiltinTools: ["Artifact", 42] }).omittedBuiltinTools,
+    ).toEqual(["Artifact"]);
+    for (const malformed of ["Task", null, 7, { Task: true }]) {
+      const decoded = decodeClaudeSettings({ launchArgs: "--x", omittedBuiltinTools: malformed });
+      expect(decoded.omittedBuiltinTools).toEqual([]);
+      expect(decoded.launchArgs).toBe("--x");
+    }
+  });
+
   it("offers the seven measured tools and neither ToolSearch nor Skill", () => {
     expect(CLAUDE_REMOVABLE_BUILTIN_TOOLS.map((tool) => tool.value)).toEqual([
       "Artifact",

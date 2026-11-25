@@ -360,6 +360,7 @@ function ProviderSettingsChecklist({
               className="mt-0.5"
               checked={checked}
               disabled={disabled}
+              aria-labelledby={`${optionId}-label`}
               aria-describedby={option.description ? `${optionId}-description` : undefined}
               onCheckedChange={(next) =>
                 onChange(
@@ -374,7 +375,9 @@ function ProviderSettingsChecklist({
               }
             />
             <label htmlFor={optionId} className="min-w-0 text-xs">
-              <span className="font-medium text-foreground">{option.label}</span>
+              <span id={`${optionId}-label`} className="font-medium text-foreground">
+                {option.label}
+              </span>
               {option.description ? (
                 <span id={`${optionId}-description`} className="block text-muted-foreground">
                   {option.description}
@@ -400,30 +403,39 @@ function ProviderSettingsChecklistActions({
   readonly onChange: ProviderSettingsFormProps["onChange"];
 }) {
   const selected = readProviderConfigStrings(value, field.key);
+  // An action that is already applied stays focusable: disabling the button the keyboard just
+  // used would drop focus out of the checklist.
   return (
     <div className="flex flex-wrap gap-2">
-      {(field.presets ?? []).map((preset) => (
-        <Button
-          key={preset.label}
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={
-            disabled ||
-            (preset.values.length === selected.length &&
-              preset.values.every((item) => selected.includes(item)))
-          }
-          onClick={() => onChange(nextProviderConfigWithChecklist(value, field, preset.values))}
-        >
-          {preset.label}
-        </Button>
-      ))}
+      {(field.presets ?? []).map((preset) => {
+        const applied =
+          preset.values.length === selected.length &&
+          preset.values.every((item) => selected.includes(item));
+        return (
+          <Button
+            key={preset.label}
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            aria-disabled={applied || undefined}
+            onClick={() => {
+              if (!applied) onChange(nextProviderConfigWithChecklist(value, field, preset.values));
+            }}
+          >
+            {preset.label}
+          </Button>
+        );
+      })}
       <Button
         type="button"
         size="sm"
         variant="ghost"
-        disabled={disabled || selected.length === 0}
-        onClick={() => onChange(nextProviderConfigWithChecklist(value, field, []))}
+        disabled={disabled}
+        aria-disabled={selected.length === 0 || undefined}
+        onClick={() => {
+          if (selected.length > 0) onChange(nextProviderConfigWithChecklist(value, field, []));
+        }}
       >
         Clear
       </Button>

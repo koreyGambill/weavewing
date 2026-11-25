@@ -511,9 +511,15 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       resume: false,
       cwd: "/workspace",
       settings: OMITTED_TOOLS_CLAUDE_SETTINGS,
-      disallowedTools: ["Agent", "Task"],
+      disallowedTools: ["WebFetch"],
     });
-    assert.deepEqual(options.disallowedTools, ["Agent", "Task", "Artifact", "Workflow"]);
+    assert.deepEqual(options.disallowedTools, [
+      "WebFetch",
+      "Artifact",
+      "Agent",
+      "Task",
+      "Workflow",
+    ]);
   });
 
   it("sends no disallowed tools when nothing is omitted", () => {

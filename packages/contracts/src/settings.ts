@@ -939,16 +939,14 @@ export type ClaudeRemovableBuiltinTool = typeof ClaudeRemovableBuiltinTool.Type;
 
 const isClaudeRemovableBuiltinTool = Schema.is(ClaudeRemovableBuiltinTool);
 
-// Unknown names are dropped rather than rejected, so a hand-edited or outdated entry never
-// disables the whole Claude instance.
-const OmittedBuiltinTools = Schema.Array(Schema.String).pipe(
+// Unknown names and malformed values are dropped rather than rejected, so a hand-edited or
+// outdated entry never disables the whole Claude instance.
+const OmittedBuiltinTools = Schema.Unknown.pipe(
   Schema.decodeTo(
     Schema.Array(ClaudeRemovableBuiltinTool),
-    SchemaTransformation.transform<
-      ReadonlyArray<ClaudeRemovableBuiltinTool>,
-      ReadonlyArray<string>
-    >({
-      decode: (tools) => [...new Set(tools.filter(isClaudeRemovableBuiltinTool))],
+    SchemaTransformation.transform<ReadonlyArray<ClaudeRemovableBuiltinTool>, unknown>({
+      decode: (tools) =>
+        Array.isArray(tools) ? [...new Set(tools.filter(isClaudeRemovableBuiltinTool))] : [],
       encode: (tools) => tools,
     }),
   ),
