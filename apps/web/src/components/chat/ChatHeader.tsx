@@ -393,7 +393,8 @@ export const ChatHeader = memo(function ChatHeader({
             </WorkspaceBreadcrumbSeparator>
           </>
         ) : null}
-        <WorkspaceBreadcrumbItem current className="min-w-10 flex-1">
+        {/* On a narrow header the project item shrinks until the active title has two thirds of the row. */}
+        <WorkspaceBreadcrumbItem current className="min-w-[min(66%,20rem)] flex-1">
           {renamingTitle !== null ? (
             <input
               autoFocus
