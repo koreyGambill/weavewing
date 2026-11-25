@@ -4748,6 +4748,7 @@ export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedErr
       "background-work",
       "unsupported-provider",
       "protected-mcp-server",
+      "invalid-mcp-server",
       "failed",
     ]),
     cause: Schema.optional(Schema.Defect()),
@@ -4763,6 +4764,8 @@ export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedErr
         return "Per-thread tools are available only for Claude threads.";
       case "protected-mcp-server":
         return "T3 Code's own MCP server cannot be left out of a thread.";
+      case "invalid-mcp-server":
+        return "An MCP server name with a double underscore cannot be left out on its own.";
       case "failed":
         return "Failed to reload the session with the new tools.";
     }

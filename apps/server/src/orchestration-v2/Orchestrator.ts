@@ -87,6 +87,7 @@ import {
   T3_MCP_SERVER_NAME,
   type ThreadToolOverrides,
 } from "@t3tools/contracts";
+import { claudeMcpServerRule } from "@t3tools/shared/mcpApp";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
@@ -361,6 +362,7 @@ export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedE
       "background-work",
       "unsupported-provider",
       "protected-mcp-server",
+      "invalid-mcp-server",
     ]),
   },
 ) {
@@ -374,6 +376,8 @@ export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedE
         return "Per-thread tools are available only for Claude threads.";
       case "protected-mcp-server":
         return "T3 Code's own MCP server cannot be left out of a thread.";
+      case "invalid-mcp-server":
+        return "An MCP server name with a double underscore cannot be left out on its own.";
     }
   }
 }
@@ -6513,8 +6517,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       .get(thread.providerInstanceId)
       .pipe(mapDispatchError(command));
     if (adapter.driver !== "claudeAgent") return yield* reject("unsupported-provider");
-    if (command.toolOverrides.omittedMcpServers.includes(T3_MCP_SERVER_NAME)) {
-      return yield* reject("protected-mcp-server");
+    const protectedRule = claudeMcpServerRule(T3_MCP_SERVER_NAME);
+    for (const server of command.toolOverrides.omittedMcpServers) {
+      const rule = claudeMcpServerRule(server);
+      if (rule === undefined) return yield* reject("invalid-mcp-server");
+      if (rule === protectedRule) return yield* reject("protected-mcp-server");
     }
     if (projection.runs.some(isActiveRun)) return yield* reject("busy");
     const liveSessions = projection.providerSessions.filter(

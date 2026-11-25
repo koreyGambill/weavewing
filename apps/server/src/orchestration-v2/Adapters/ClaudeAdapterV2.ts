@@ -77,6 +77,7 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   claudeMcpToolName,
   claudeMcpToolNamePart,
+  claudeMcpServerRule,
   claudeMcpToolPrefix,
   MCP_APP_OUTPUT_KEY,
   mcpAppToolResourceUri,
@@ -2522,9 +2523,10 @@ export function makeClaudeQueryOptions(input: {
         .filter((tool) => !threadEnabledTools.includes(tool))
         .flatMap((tool) => (tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool])),
       // A server-level rule, `mcp__<server>`, removes every tool the server offers.
-      ...(input.toolOverrides?.omittedMcpServers ?? [])
-        .filter((server) => server !== T3_MCP_SERVER_NAME)
-        .map((server) => claudeMcpToolPrefix(server).slice(0, -2)),
+      ...(input.toolOverrides?.omittedMcpServers ?? []).flatMap((server) => {
+        const rule = claudeMcpServerRule(server);
+        return rule === undefined || rule === claudeMcpServerRule(T3_MCP_SERVER_NAME) ? [] : [rule];
+      }),
     ]),
   ];
   const options: ClaudeAgentSdkQueryOptions = {

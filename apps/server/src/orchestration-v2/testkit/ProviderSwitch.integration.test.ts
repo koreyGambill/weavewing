@@ -6324,6 +6324,21 @@ describe("orchestration v2 provider switching", () => {
             _tag: "OrchestratorThreadToolOverridesRejectedError",
             reason: "protected-mcp-server",
           });
+          // A `__` in the name part would make Claude Code read the rule as a single tool's name.
+          for (const [key, server] of [
+            ["delimiter", "fixture__notes"],
+            ["spaces", "fixture  notes"],
+            ["t3-tool", "t3-code__thread_send"],
+          ] as const) {
+            const invalid = yield* setTools(toolsThreadId, key, {
+              ...wakeupAndConnectors,
+              omittedMcpServers: [server],
+            }).pipe(Effect.flip);
+            assert.deepInclude(invalid, {
+              _tag: "OrchestratorThreadToolOverridesRejectedError",
+              reason: "invalid-mcp-server",
+            });
+          }
           assert.isUndefined(
             (yield* orchestrator.getThreadProjection(toolsThreadId)).thread.toolOverrides,
           );

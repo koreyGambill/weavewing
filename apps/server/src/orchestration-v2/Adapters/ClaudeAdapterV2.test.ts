@@ -746,7 +746,12 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       toolOverrides: {
         enabledBuiltinTools: [],
         claudeAiConnectors: true,
-        omittedMcpServers: ["fixture-notes", "claude.ai Fixture Board", "t3-code"],
+        omittedMcpServers: [
+          "fixture-notes",
+          "claude.ai Fixture Board",
+          "t3-code",
+          "t3-code__thread_send",
+        ],
       },
     });
     assert.deepEqual(options.disallowedTools, [
