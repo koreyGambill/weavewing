@@ -24,17 +24,16 @@ const box = (note: string, width = 640) => (
       }
       actions={
         <>
-          <Button size="xs" variant="outline">
+          <Button size="xs" variant="contrast-outline">
             Not yet
           </Button>
-          <Button size="xs" variant="outline">
+          <Button size="xs" variant="contrast-outline">
             Dismiss
           </Button>
-          <Button size="xs" variant="outline">
+          <Button size="xs" variant="contrast-outline">
             Discuss
           </Button>
-          {/* As wide as the card's Answer button, which reserves this label's width. */}
-          <Button size="xs">Remove from composer</Button>
+          <Button size="xs">Answer</Button>
         </>
       }
     />
@@ -45,7 +44,7 @@ it("keeps a short note beside the buttons and puts the buttons under a long one,
   // router: false because the box never navigates.
   await using screen = await render(box("Short"), { router: false });
   const note = () => screen.getByLabelText("Note").element().getBoundingClientRect();
-  const answer = () => screen.getByText("Remove from composer").element().getBoundingClientRect();
+  const answer = () => screen.getByText("Answer").element().getBoundingClientRect();
   expect(answer().top).toBeLessThan(note().bottom);
   expect(answer().left).toBeGreaterThan(note().right);
 

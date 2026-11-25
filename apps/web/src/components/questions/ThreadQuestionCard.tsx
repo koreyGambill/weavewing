@@ -20,7 +20,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { QuestionNoteBox } from "./QuestionNoteBox";
 import { QuestionOptions } from "./QuestionOptions";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
-import { closedQuestionOutcome } from "./ThreadQuestionCard.logic";
+import { closedQuestionOutcome, closedQuestionShownAnswer } from "./ThreadQuestionCard.logic";
 import { questionAnswerForComposer } from "./questionComposer.logic";
 import {
   addQuestionAnswersToComposer,
@@ -42,13 +42,14 @@ const HELP = {
   discussDisabled: "Write a note first; Discuss sends the note, not your choice.",
   answer: "Queue this answer to go with your next message.",
   answerDisabled: "Choose an option or add a note first.",
-  remove: "Take this answer out of your composer. Your draft stays here.",
+  cancel: "Take this answer out of your message. Your choice stays on the card.",
   sent: "Sent. Edit or cancel the queued message to change it.",
 };
 
 function HelpButton({
   help,
   children,
+  variant = "contrast-outline",
   ...props
 }: {
   readonly help: string;
@@ -58,7 +59,7 @@ function HelpButton({
     <Tooltip>
       {/* A span keeps the hint reachable while the button is disabled. */}
       <TooltipTrigger render={<span className="inline-flex" />}>
-        <Button size="xs" variant="outline" {...props}>
+        <Button size="xs" variant={variant} {...props}>
           {children}
         </Button>
       </TooltipTrigger>
@@ -72,7 +73,7 @@ function HelpButton({
 /**
  * One agent question. While open or deferred: its options, one row each, and one box holding the
  * note and the four buttons, so nothing appears or moves as the user chooses. Once closed: one
- * line with the outcome, which expands to the full prompt.
+ * line with the outcome, which expands to the same card, read-only.
  */
 export function ThreadQuestionCard({
   question,
@@ -146,8 +147,29 @@ export function ThreadQuestionCard({
       });
   };
 
-  if (outcome !== null) {
-    const reopenable = question.state === "answered" || question.state === "withdrawn";
+  const closed = outcome !== null;
+  const reopenable = question.state === "answered" || question.state === "withdrawn";
+  const reopen = () => {
+    setExpanded(false);
+    void changeState("open");
+  };
+  const reopenButton = reopenable ? (
+    <HelpButton help={HELP.reopen} disabled={!canAct || busy} onClick={reopen}>
+      Reopen
+    </HelpButton>
+  ) : null;
+  const replacementButton =
+    question.state === "replaced" && question.replacedBy !== null ? (
+      <Button
+        size="xs"
+        variant="contrast-outline"
+        onClick={() => requestQuestionReveal(scopedThreadKey(threadRef), question.replacedBy!)}
+      >
+        See {question.replacedBy}
+      </Button>
+    ) : null;
+
+  if (closed && !expanded) {
     return (
       <section
         id={inTimeline ? threadQuestionElementId(question.id) : undefined}
@@ -160,8 +182,8 @@ export function ThreadQuestionCard({
               render={
                 <button
                   type="button"
-                  aria-expanded={expanded}
-                  onClick={() => setExpanded((open) => !open)}
+                  aria-expanded={false}
+                  onClick={() => setExpanded(true)}
                   className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 />
               }
@@ -169,13 +191,9 @@ export function ThreadQuestionCard({
               <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
                 {question.id}
               </span>
-              <span className={cn("min-w-0 flex-1", !expanded && "truncate")}>
-                {question.prompt}
-              </span>
+              <span className="min-w-0 flex-1 truncate">{question.prompt}</span>
               {outcome ? (
-                <span className={cn("max-w-[45%] shrink-0 font-semibold", !expanded && "truncate")}>
-                  {outcome}
-                </span>
+                <span className="max-w-[45%] shrink-0 truncate font-semibold">{outcome}</span>
               ) : null}
             </TooltipTrigger>
             <TooltipPopup side="top" className="max-w-96">
@@ -185,35 +203,30 @@ export function ThreadQuestionCard({
           </Tooltip>
           <QuestionStatusBadge status={status} />
           {actions}
-          {reopenable ? (
-            <HelpButton
-              help={HELP.reopen}
-              disabled={!canAct || busy}
-              onClick={() => void changeState("open")}
-            >
-              Reopen
-            </HelpButton>
-          ) : null}
-          {question.state === "replaced" && question.replacedBy !== null ? (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() =>
-                requestQuestionReveal(scopedThreadKey(threadRef), question.replacedBy!)
-              }
-            >
-              See {question.replacedBy}
-            </Button>
-          ) : null}
+          {reopenButton}
+          {replacementButton}
         </div>
-        {expanded && question.details ? (
-          <div className="pt-1.5 text-sm text-muted-foreground">
-            <ChatMarkdown text={question.details} cwd={undefined} threadRef={threadRef} />
-          </div>
-        ) : null}
       </section>
     );
   }
+
+  // An expanded closed card keeps the open card's layout, read-only, so it can be inspected whole.
+  const shown = closed ? closedQuestionShownAnswer(question) : { chosenOptionIds, notes };
+  const heading = (
+    <>
+      <span
+        className={cn(
+          "shrink-0 text-sm font-semibold tabular-nums",
+          editable ? "text-primary" : "text-muted-foreground",
+        )}
+      >
+        {question.id}
+      </span>
+      <h3 className="min-w-0 flex-1 text-sm font-medium leading-snug break-words">
+        {question.prompt}
+      </h3>
+    </>
+  );
 
   return (
     <section
@@ -225,17 +238,18 @@ export function ThreadQuestionCard({
       )}
     >
       <header className="flex min-w-0 items-start gap-2">
-        <span
-          className={cn(
-            "shrink-0 text-sm font-semibold tabular-nums",
-            editable ? "text-primary" : "text-muted-foreground",
-          )}
-        >
-          {question.id}
-        </span>
-        <h3 className="min-w-0 flex-1 text-sm font-medium leading-snug break-words">
-          {question.prompt}
-        </h3>
+        {closed ? (
+          <button
+            type="button"
+            aria-expanded
+            onClick={() => setExpanded(false)}
+            className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            {heading}
+          </button>
+        ) : (
+          heading
+        )}
         {actions}
         <QuestionStatusBadge status={status} />
       </header>
@@ -247,116 +261,127 @@ export function ThreadQuestionCard({
       {question.options.length > 0 ? (
         <QuestionOptions
           question={question}
-          chosenOptionIds={chosenOptionIds}
-          disabled={!canAct || !editable}
+          chosenOptionIds={shown.chosenOptionIds}
+          disabled={closed || !canAct || !editable}
           onChoose={(next) => {
             setPendingChoice(next);
             edit({ chosenOptionIds: next });
           }}
         />
       ) : null}
-      <QuestionNoteBox
-        text={notes || (question.options.length > 0 ? "Add a note…" : "Your answer…")}
-        note={
-          <Textarea
-            unstyled
-            size="sm"
-            rows={1}
-            aria-label={`Note for ${question.id}`}
-            placeholder={question.options.length > 0 ? "Add a note…" : "Your answer…"}
-            value={notes}
-            disabled={!canAct || !editable}
-            className="w-full"
-            onBlur={() => void writer.flush(question.id, saveDraft)}
-            onChange={(event) => {
-              setPendingNotes(event.target.value);
-              edit({ notes: event.target.value }, NOTE_SAVE_DELAY_MS);
-            }}
-          />
-        }
-        actions={
-          <>
-            {question.state === "deferred" ? (
-              <HelpButton
-                help={editable ? HELP.reopen : HELP.sent}
-                disabled={!usable}
-                onClick={() => void changeState("open")}
-              >
-                Reopen
-              </HelpButton>
-            ) : (
-              <HelpButton
-                help={editable ? HELP.defer : HELP.sent}
-                disabled={!usable}
-                onClick={() => void changeState("deferred")}
-              >
-                Not yet
-              </HelpButton>
-            )}
-            <HelpButton
-              help={editable ? HELP.dismiss : HELP.sent}
-              disabled={!usable}
-              onClick={() => void changeState("withdrawn")}
+      {closed ? (
+        <QuestionNoteBox
+          text={shown.notes || "No note"}
+          note={
+            <p
+              className={cn(
+                "w-full px-2.5 py-1 text-sm whitespace-pre-wrap wrap-anywhere",
+                !shown.notes && "text-muted-foreground",
+              )}
             >
-              Dismiss
-            </HelpButton>
-            <HelpButton
-              help={
-                !editable
-                  ? HELP.sent
-                  : inComposer === "discuss"
-                    ? HELP.discussOff
-                    : notes.trim()
-                      ? HELP.discuss
-                      : HELP.discussDisabled
-              }
-              variant={inComposer === "discuss" ? "secondary" : "outline"}
-              aria-pressed={inComposer === "discuss"}
-              disabled={!usable || (inComposer !== "discuss" && notes.trim() === "")}
-              onClick={() =>
-                inComposer === "discuss"
-                  ? removeQuestionAnswerFromComposer(threadRef, question.id)
-                  : void toComposer("discuss")
-              }
-            >
-              Discuss
-            </HelpButton>
-            <HelpButton
-              help={
-                !editable
-                  ? HELP.sent
-                  : inComposer === "answer"
-                    ? HELP.remove
-                    : hasDraft
-                      ? HELP.answer
-                      : HELP.answerDisabled
-              }
-              // A disabled primary button still reads as live, so Answer is primary only when usable.
-              variant={inComposer !== "answer" && usable && hasDraft ? "default" : "outline"}
-              disabled={!usable || (inComposer !== "answer" && !hasDraft)}
-              onClick={() =>
-                inComposer === "answer"
-                  ? removeQuestionAnswerFromComposer(threadRef, question.id)
-                  : void toComposer("answer")
-              }
-            >
-              {/* Both labels share one cell, so the button keeps its width as they swap. */}
-              <span className="grid">
-                <span
-                  className={cn("col-start-1 row-start-1", inComposer === "answer" && "invisible")}
+              {shown.notes || "No note"}
+            </p>
+          }
+          actions={
+            <>
+              {reopenButton}
+              {replacementButton}
+            </>
+          }
+        />
+      ) : (
+        <QuestionNoteBox
+          text={notes || (question.options.length > 0 ? "Add a note…" : "Your answer…")}
+          note={
+            <Textarea
+              unstyled
+              size="sm"
+              rows={1}
+              aria-label={`Note for ${question.id}`}
+              placeholder={question.options.length > 0 ? "Add a note…" : "Your answer…"}
+              value={notes}
+              disabled={!canAct || !editable}
+              className="w-full"
+              onBlur={() => void writer.flush(question.id, saveDraft)}
+              onChange={(event) => {
+                setPendingNotes(event.target.value);
+                edit({ notes: event.target.value }, NOTE_SAVE_DELAY_MS);
+              }}
+            />
+          }
+          actions={
+            <>
+              {question.state === "deferred" ? (
+                <HelpButton
+                  help={editable ? HELP.reopen : HELP.sent}
+                  disabled={!usable}
+                  onClick={() => void changeState("open")}
                 >
-                  Answer
-                </span>
-                <span
-                  className={cn("col-start-1 row-start-1", inComposer !== "answer" && "invisible")}
+                  Reopen
+                </HelpButton>
+              ) : (
+                <HelpButton
+                  help={editable ? HELP.defer : HELP.sent}
+                  disabled={!usable}
+                  onClick={() => void changeState("deferred")}
                 >
-                  Remove from composer
-                </span>
-              </span>
-            </HelpButton>
-          </>
-        }
-      />
+                  Not yet
+                </HelpButton>
+              )}
+              <HelpButton
+                help={editable ? HELP.dismiss : HELP.sent}
+                disabled={!usable}
+                onClick={() => void changeState("withdrawn")}
+              >
+                Dismiss
+              </HelpButton>
+              <HelpButton
+                help={
+                  !editable
+                    ? HELP.sent
+                    : inComposer === "discuss"
+                      ? HELP.discussOff
+                      : notes.trim()
+                        ? HELP.discuss
+                        : HELP.discussDisabled
+                }
+                aria-pressed={inComposer === "discuss"}
+                disabled={!usable || (inComposer !== "discuss" && notes.trim() === "")}
+                onClick={() =>
+                  inComposer === "discuss"
+                    ? removeQuestionAnswerFromComposer(threadRef, question.id)
+                    : void toComposer("discuss")
+                }
+              >
+                Discuss
+              </HelpButton>
+              <HelpButton
+                help={
+                  !editable
+                    ? HELP.sent
+                    : inComposer === "answer"
+                      ? HELP.cancel
+                      : hasDraft
+                        ? HELP.answer
+                        : HELP.answerDisabled
+                }
+                // A disabled primary button still reads as live, so Answer is primary only when usable.
+                variant={
+                  inComposer !== "answer" && usable && hasDraft ? "default" : "contrast-outline"
+                }
+                disabled={!usable || (inComposer !== "answer" && !hasDraft)}
+                onClick={() =>
+                  inComposer === "answer"
+                    ? removeQuestionAnswerFromComposer(threadRef, question.id)
+                    : void toComposer("answer")
+                }
+              >
+                {inComposer === "answer" ? "Cancel" : "Answer"}
+              </HelpButton>
+            </>
+          }
+        />
+      )}
     </section>
   );
 }

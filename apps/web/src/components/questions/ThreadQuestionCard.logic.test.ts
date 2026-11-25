@@ -1,7 +1,7 @@
 import type { ThreadQuestion } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { closedQuestionOutcome } from "./ThreadQuestionCard.logic";
+import { closedQuestionOutcome, closedQuestionShownAnswer } from "./ThreadQuestionCard.logic";
 
 const question = (state: ThreadQuestion["state"], extra: Partial<ThreadQuestion> = {}) => ({
   state,
@@ -36,5 +36,29 @@ describe("closedQuestionOutcome", () => {
     ["a replacement", question("replaced", { replacedBy: "Q7" }), "Replaced by Q7"],
   ] as const)("shows %s", (_name, entry, outcome) => {
     expect(closedQuestionOutcome(entry)).toBe(outcome);
+  });
+});
+
+describe("closedQuestionShownAnswer", () => {
+  it.each([
+    [
+      "an answer's choice and trimmed note",
+      question("answered", { answer: answer(["b"], " check X ") }),
+      { chosenOptionIds: ["b"], notes: "check X" },
+    ],
+    ["an answer with nothing recorded", question("answered"), { chosenOptionIds: [], notes: "" }],
+    // A draft left on a dismissed question was never sent, so it is not shown as the answer.
+    [
+      "no draft on a dismissal",
+      question("withdrawn", { answer: answer(["a"], "maybe") }),
+      { chosenOptionIds: [], notes: "" },
+    ],
+    [
+      "no draft on a replacement",
+      question("replaced", { replacedBy: "Q7", answer: answer(["a"]) }),
+      { chosenOptionIds: [], notes: "" },
+    ],
+  ] as const)("shows %s", (_name, entry, shown) => {
+    expect(closedQuestionShownAnswer(entry)).toEqual(shown);
   });
 });

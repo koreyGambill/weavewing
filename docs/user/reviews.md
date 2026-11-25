@@ -34,7 +34,8 @@ chat where the agent asked it, with its options and a note field. Choosing an
 option or typing a note saves a draft; choosing the chosen option again clears
 it. Nothing reaches the agent by itself: **Answer** puts the answer in your
 message box, and it goes out with your next message, together with anything you
-type. Remove it from the card or the chip to keep it as a draft.
+type. **Cancel** on the card, or removing the chip, takes it back out and keeps
+your choice on the card as a draft.
 
 **Discuss** puts your note in the message box as a comment on the question
 instead of an answer, for when you want to ask the agent something first. The
@@ -45,7 +46,7 @@ Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
 starts. A sent answer stops counting as waiting on you. Editing or cancelling
 the queued message returns it with its draft. A closed question shrinks to one
-line; click it to see the whole question.
+line; click it to see the whole card again, with your choice and note, read-only.
 
 Clicking the line above the composer lists the waiting questions; picking one
 scrolls the chat to it, and **Answer all drafted** queues every draft.

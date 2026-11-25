@@ -32,3 +32,15 @@ export function closedQuestionOutcome(
       return question.replacedBy === null ? "Replaced" : `Replaced by ${question.replacedBy}`;
   }
 }
+
+/**
+ * The choice and note an expanded closed card shows. Only an answer is shown: a dismissed or
+ * replaced question may still hold a draft, which would read as if it had been answered.
+ */
+export function closedQuestionShownAnswer(question: Pick<ThreadQuestion, "state" | "answer">): {
+  readonly chosenOptionIds: ReadonlyArray<string>;
+  readonly notes: string;
+} {
+  const answer = question.state === "answered" ? question.answer : null;
+  return { chosenOptionIds: answer?.chosenOptionIds ?? [], notes: answer?.notes.trim() ?? "" };
+}
