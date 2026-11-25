@@ -87,6 +87,12 @@ The **Tools** control under the composer counts what a Claude thread leaves out,
 thread only. Each row shows an estimate of the context the item adds. Switches take effect when
 you choose **Reload session**.
 
+The popover also lists the MCP servers the thread's session can load, read when you open it.
+Switch a server off to leave it out of this thread; T3 Code's own server always stays in. The
+claude.ai connectors form a group: its switch brings them all in or out, and each connector has
+its own switch. Switching one connector on while the group is off brings in that connector alone.
+Only the connectors as a whole have a token estimate.
+
 A reload keeps the conversation: the next message resumes it with the new tools. That message
 re-reads the conversation once without the prompt cache, so it costs about as many input tokens
 as the conversation is long. The thread's timeline notes the reload. Choosing **Reload session**
