@@ -44,7 +44,9 @@ answer or a comment in the message box, not both. Once the agent's turn picks
 up your comment, the note clears from the card and the question reads
 **Discussing**; an option you chose stays as a draft. The agent replies in chat
 and, when the decision is still open, asks it again as a newer question that
-reflects the discussion.
+reflects the discussion. An answer whose note asks the agent something back
+goes the same way: the agent replies in chat and reopens the question, which
+reads **Discussing** with your choice and note kept as a draft.
 
 Paste or drop an image into a question's note to show the agent what you mean.
 The note gets a marker such as `[Q1 image 1]` and the card shows the image. The
@@ -57,7 +59,7 @@ size and count; an answer whose images would not fit is not added.
 
 Each question shows where its answer is: drafted, in the composer, sent (your
 message is waiting for the agent's next turn), or received once that turn
-starts; or, for a comment, in the composer or discussing. A sent answer stops counting as waiting on you. Editing or cancelling
+starts; or, for a comment or a reopened answer, in the composer or discussing. A sent answer stops counting as waiting on you. Editing or cancelling
 the queued message returns it with its draft. A closed question shrinks to one
 line; click it to see the whole card again, with your choice and note, read-only.
 A replaced question links to its replacement with **Replaced by Qn**, and the
