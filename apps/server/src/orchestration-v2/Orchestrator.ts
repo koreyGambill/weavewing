@@ -363,7 +363,6 @@ export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedE
       "unsupported-provider",
       "protected-mcp-server",
       "invalid-mcp-server",
-      "reload-pending",
     ]),
   },
 ) {
@@ -379,8 +378,6 @@ export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedE
         return "T3 Code's own MCP server cannot be left out of a thread.";
       case "invalid-mcp-server":
         return "An MCP server name with a double underscore cannot be left out on its own.";
-      case "reload-pending":
-        return "The previous reload is still ending the old session. Try again when it finishes.";
     }
   }
 }
@@ -746,29 +743,21 @@ function listInProse(items: ReadonlyArray<string>): string {
     : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** The timeline line after a tool change, e.g. "Session reloaded with ScheduleWakeup." */
-function threadToolOverridesNotice(
-  overrides: ThreadToolOverrides,
-  outcome: "stored" | "reloaded" | "reload-failed",
-): string {
+/** The timeline line after a tool change, e.g. "Tools changed: ScheduleWakeup on. …" */
+function threadToolOverridesNotice(overrides: ThreadToolOverrides): string {
   const switchedOn = [
     ...CLAUDE_REMOVABLE_BUILTIN_TOOLS.filter((tool) =>
       overrides.enabledBuiltinTools.includes(tool.value),
     ).map((tool) => tool.label),
     ...(overrides.claudeAiConnectors ? ["claude.ai connectors"] : []),
   ];
-  const tools = switchedOn.length === 0 ? "the provider's default tools" : listInProse(switchedOn);
   const omitted = overrides.omittedMcpServers.length;
-  const servers =
-    omitted === 0 ? "" : `, leaving out ${omitted} MCP ${omitted === 1 ? "server" : "servers"}`;
-  switch (outcome) {
-    case "stored":
-      return `Tools changed to ${tools}${servers}. They apply when the session next starts.`;
-    case "reloaded":
-      return `Session reloaded with ${tools}${servers}.`;
-    case "reload-failed":
-      return `Tools changed to ${tools}${servers}, but the old Claude session did not confirm it stopped, so it may still be running. Reload the session again from Tools, or press Stop.`;
-  }
+  const changes = [
+    ...(switchedOn.length === 0 ? [] : [`${listInProse(switchedOn)} on`]),
+    ...(omitted === 0 ? [] : [`${omitted} MCP ${omitted === 1 ? "server" : "servers"} off`]),
+  ];
+  const summary = changes.length === 0 ? "the provider's defaults" : changes.join(", ");
+  return `Tools changed: ${summary}. This applies from the next message.`;
 }
 
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
@@ -796,7 +785,6 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.tag.set":
     case "thread.sidebar-group.set":
     case "thread.tool-overrides.set":
-    case "thread.tool-overrides.reload-settle":
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
@@ -6536,7 +6524,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (rule === protectedRule) return yield* reject("protected-mcp-server");
     }
     if (projection.runs.some(isActiveRun)) return yield* reject("busy");
-    if (thread.toolOverridesReload?.status === "pending") return yield* reject("reload-pending");
     const liveSessions = projection.providerSessions.filter(
       (session) =>
         session.providerInstanceId === thread.providerInstanceId &&
@@ -6551,33 +6538,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
-    const { toolOverridesReload: _previousReload, ...withoutReload } = thread;
+    const updatedThread = { ...thread, toolOverrides: command.toolOverrides, updatedAt: now };
     yield* emitEvent({
       type: "thread.tool-overrides-updated",
       threadId: command.threadId,
       providerInstanceId: thread.providerInstanceId,
       occurredAt: now,
-      payload: {
-        ...withoutReload,
-        toolOverrides: command.toolOverrides,
-        ...(liveSessions.length === 0
-          ? {}
-          : { toolOverridesReload: { commandId: command.commandId, status: "pending" as const } }),
-        updatedAt: now,
-      },
+      payload: updatedThread,
     });
-    // The detach effect settles the reload, so its notice reports whether the process ended.
-    if (liveSessions.length === 0) {
-      yield* emitToolOverridesNotice({
-        command,
-        events,
-        runs: projection.runs,
-        reloadCommandId: command.commandId,
-        level: "info",
-        message: threadToolOverridesNotice(command.toolOverrides, "stored"),
-      });
-      return;
-    }
     const reason = "Tools changed.";
     for (const session of liveSessions) {
       yield* emitEvent({
@@ -6598,110 +6566,44 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             type: "provider-session.detach",
             providerSessionId: session.id,
             detail: reason,
-            reportsToolsReload: true,
           },
         } satisfies PendingOrchestrationEffectV2,
       ]);
     }
-  });
 
-  const dispatchThreadToolOverridesReloadSettle = Effect.fn(
-    "orchestrationV2.dispatch.threadToolOverridesReloadSettle",
-  )(function* (
-    command: Extract<
-      OrchestrationV2ServerCommand,
-      { readonly type: "thread.tool-overrides.reload-settle" }
-    >,
-    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
-  ) {
-    const projection = yield* projectionStore
-      .getThreadRecords(command.threadId, ["runs"], { turnItemTypes: [] })
-      .pipe(mapDispatchError(command));
-    const { thread } = projection;
-    // A newer tool change owns the thread's reload state and will report its own outcome.
-    if (thread.toolOverridesReload?.commandId !== command.reloadCommandId) return;
-    const now = yield* DateTime.now;
-    yield* emit(
-      events,
-      command,
-    )({
-      type: "thread.tool-overrides-updated",
+    const run = latestExecutedRun(projection.runs);
+    if (run === null || run === undefined) return;
+    yield* emitEvent({
+      type: "turn-item.updated",
       threadId: command.threadId,
-      providerInstanceId: thread.providerInstanceId,
+      runId: run.id,
+      ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
+      providerInstanceId: run.providerInstanceId,
       occurredAt: now,
       payload: {
-        ...thread,
-        toolOverridesReload: { commandId: command.reloadCommandId, status: command.outcome },
+        id: idAllocator.derive.runSignalTurnItem({
+          runId: run.id,
+          signal: `tools-changed:${command.commandId}`,
+        }),
+        threadId: command.threadId,
+        runId: run.id,
+        nodeId: run.rootNodeId,
+        providerThreadId: run.providerThreadId,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: yield* nextTurnItemOrdinal(projection),
+        status: "completed",
+        title: "Tools changed",
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+        type: "system_notice",
+        level: "info",
+        message: threadToolOverridesNotice(command.toolOverrides),
       },
     });
-    const overrides = thread.toolOverrides ?? {
-      enabledBuiltinTools: [],
-      claudeAiConnectors: false,
-      omittedMcpServers: [],
-    };
-    yield* emitToolOverridesNotice({
-      command,
-      events,
-      runs: projection.runs,
-      reloadCommandId: command.reloadCommandId,
-      level: command.outcome === "succeeded" ? "info" : "warning",
-      message: threadToolOverridesNotice(
-        overrides,
-        command.outcome === "succeeded" ? "reloaded" : "reload-failed",
-      ),
-    });
   });
-
-  const emitToolOverridesNotice = Effect.fn("orchestrationV2.dispatch.toolOverridesNotice")(
-    function* (input: {
-      readonly command: OrchestrationV2ServerCommand;
-      readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
-      readonly runs: ReadonlyArray<OrchestrationV2Run>;
-      readonly reloadCommandId: CommandId;
-      readonly level: "info" | "warning";
-      readonly message: string;
-    }) {
-      const run = latestExecutedRun(input.runs);
-      if (run === null || run === undefined) return;
-      const now = yield* DateTime.now;
-      const threadId = commandThreadId(input.command);
-      yield* emit(
-        input.events,
-        input.command,
-      )({
-        type: "turn-item.updated",
-        threadId,
-        runId: run.id,
-        ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
-        providerInstanceId: run.providerInstanceId,
-        occurredAt: now,
-        payload: {
-          id: idAllocator.derive.runSignalTurnItem({
-            runId: run.id,
-            signal: `tools-changed:${input.reloadCommandId}`,
-          }),
-          threadId,
-          runId: run.id,
-          nodeId: run.rootNodeId,
-          providerThreadId: run.providerThreadId,
-          providerTurnId: null,
-          nativeItemRef: null,
-          parentItemId: null,
-          ordinal: yield* projectionStore
-            .getNextTurnItemOrdinal(threadId)
-            .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
-          status: "completed",
-          title: "Tools changed",
-          startedAt: now,
-          completedAt: now,
-          updatedAt: now,
-          type: "system_notice",
-          level: input.level,
-          message: input.message,
-        },
-      });
-    },
-  );
 
   const refuseAboveDispatchModeLimit = Effect.fn("orchestrationV2.dispatch.refuseAboveModeLimit")(
     function* (
@@ -17474,9 +17376,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "thread.tool-overrides.set":
         yield* dispatchThreadToolOverridesSet(command, events, effects);
-        break;
-      case "thread.tool-overrides.reload-settle":
-        yield* dispatchThreadToolOverridesReloadSettle(command, events);
         break;
       case "message.dispatch": {
         if (command.advisoryOnly) yield* assertAdvisory(command);

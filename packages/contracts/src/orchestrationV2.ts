@@ -616,13 +616,6 @@ export const OrchestrationV2ThreadQuestionSummary = Schema.Struct({
 });
 export type OrchestrationV2ThreadQuestionSummary = typeof OrchestrationV2ThreadQuestionSummary.Type;
 
-export const ThreadToolOverridesReload = Schema.Struct({
-  commandId: CommandId,
-  /** `succeeded` once the old Claude process has ended; `failed` when that was not confirmed. */
-  status: Schema.Literals(["pending", "succeeded", "failed"]),
-});
-export type ThreadToolOverridesReload = typeof ThreadToolOverridesReload.Type;
-
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -702,8 +695,6 @@ export const OrchestrationV2AppThread = Schema.Struct({
   sidebarGroup: Schema.optional(Schema.NullOr(Schema.String)),
   /** Claude only: tools switched on, and MCP servers left out, for this thread. Absent means none. */
   toolOverrides: Schema.optional(ThreadToolOverrides),
-  /** The latest tool change that had a live session to reload, and how the reload ended. */
-  toolOverridesReload: Schema.optional(ThreadToolOverridesReload),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2562,8 +2553,6 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   sidebarGroup: Schema.optional(Schema.NullOr(Schema.String)),
   /** Claude only: tools switched on, and MCP servers left out, for this thread. Absent means none. */
   toolOverrides: Schema.optional(ThreadToolOverrides),
-  /** The latest tool change that had a live session to reload, and how the reload ended. */
-  toolOverridesReload: Schema.optional(ThreadToolOverridesReload),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   opens: Schema.optional(LenientThreadOpens),
   titleRegeneration: Schema.optional(
@@ -3985,14 +3974,6 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
 // Excluded from dispatchCommand so only the server can send these.
 const OrchestrationV2InternalCommand = Schema.Union([
-  /** Reports how a tool change's session reload ended, once its detach effect has run. */
-  Schema.Struct({
-    type: Schema.Literal("thread.tool-overrides.reload-settle"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    reloadCommandId: CommandId,
-    outcome: Schema.Literals(["succeeded", "failed"]),
-  }),
   /** Mirrors the thread workspace's waiting questions onto the thread after each change. */
   Schema.Struct({
     type: Schema.Literal("thread.questions.sync"),
@@ -4749,10 +4730,10 @@ export type OrchestrationV2SetThreadToolOverridesInput =
 
 export const OrchestrationV2SetThreadToolOverridesResult = Schema.Struct({
   /**
-   * `stored`: no live session, so the change applies when one next starts. `reloaded`: the old
-   * session's process ended. `reload-failed`: its end was not confirmed, so it may still run.
+   * `stored`: no live session, so the next one starts with the change. `restart-scheduled`: the
+   * live session is detached, so the next message starts a session with the change.
    */
-  outcome: Schema.Literals(["stored", "reloaded", "reload-failed"]),
+  outcome: Schema.Literals(["stored", "restart-scheduled"]),
 });
 export type OrchestrationV2SetThreadToolOverridesResult =
   typeof OrchestrationV2SetThreadToolOverridesResult.Type;
@@ -4771,7 +4752,6 @@ export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedErr
       "unsupported-provider",
       "protected-mcp-server",
       "invalid-mcp-server",
-      "reload-pending",
       "failed",
     ]),
     cause: Schema.optional(Schema.Defect()),
@@ -4789,8 +4769,6 @@ export class OrchestrationV2SetThreadToolOverridesError extends Schema.TaggedErr
         return "T3 Code's own MCP server cannot be left out of a thread.";
       case "invalid-mcp-server":
         return "An MCP server name with a double underscore cannot be left out on its own.";
-      case "reload-pending":
-        return "The previous reload is still ending the old session. Try again when it finishes.";
       case "failed":
         return "Failed to reload the session with the new tools.";
     }

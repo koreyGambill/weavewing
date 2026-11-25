@@ -257,11 +257,7 @@ export interface ProviderSessionManagerV2Shape {
     readonly threadId: ThreadId;
     readonly detail?: string;
     readonly revokeMcpCredential?: boolean;
-    /**
-     * `processEnded` is false when the session's scope did not close in time, so its process
-     * may still be running; it is true when the session ended or another thread still uses it.
-     */
-  }) => Effect.Effect<{ readonly processEnded: boolean }, ProviderSessionManagerV2Error>;
+  }) => Effect.Effect<void, ProviderSessionManagerV2Error>;
   /**
    * Releases the session unless, at the moment of removal, a turn is busy on it other than one
    * of `ownProviderThreadIds` from a run up to `throughRunOrdinal`. Checked atomically with turn
@@ -1373,8 +1369,6 @@ export const layerWithOptions = (
         readonly keepIf?: Effect.Effect<boolean>;
         readonly gracefulSubscribers?: boolean;
         readonly eventStreamCause?: Cause.Cause<ProviderAdapter.ProviderAdapterV2Error>;
-        /** Set false when the scope did not close within its timeout. */
-        readonly closedInTime?: Ref.Ref<boolean>;
       }) =>
         Effect.acquireUseRelease(
           removeLiveEntry(input),
@@ -1421,9 +1415,6 @@ export const layerWithOptions = (
                     providerSessionId: input.providerSessionId,
                     reason: input.reason,
                   });
-                  if (input.closedInTime !== undefined) {
-                    yield* Ref.set(input.closedInTime, Option.isSome(closeExit));
-                  }
                   const records = {
                     entry,
                     reason: input.reason,
@@ -3450,21 +3441,19 @@ export const layerWithOptions = (
               yield* clearMcpSession(input.threadId);
             }
             if (Option.isNone(detached)) {
-              return { processEnded: true };
+              return;
             }
             if (
               detached.value.attachedThreadIds.size === 0 &&
               !detached.value.supportsMultipleProviderThreads
             ) {
-              const closedInTime = yield* Ref.make(true);
               yield* releaseEntry({
                 providerSessionId: input.providerSessionId,
                 reason: "manual_shutdown",
                 ...(input.detail === undefined ? {} : { detail: input.detail }),
                 detachedThreadId: input.threadId,
-                closedInTime,
               });
-              return { processEnded: yield* Ref.get(closedInTime) };
+              return;
             }
             const unloadThread = detached.value.exposedRuntime.unloadThread;
             if (detached.value.supportsMultipleProviderThreads && unloadThread !== undefined) {
@@ -3502,7 +3491,6 @@ export const layerWithOptions = (
               }
             }
             yield* scheduleIdleRelease(input.providerSessionId);
-            return { processEnded: true };
           },
           (effect, input) =>
             effect.pipe(

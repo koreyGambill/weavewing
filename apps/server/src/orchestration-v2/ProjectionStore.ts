@@ -2059,9 +2059,6 @@ export function threadShellFromProjection(
     ...(projection.thread.toolOverrides === undefined
       ? {}
       : { toolOverrides: projection.thread.toolOverrides }),
-    ...(projection.thread.toolOverridesReload === undefined
-      ? {}
-      : { toolOverridesReload: projection.thread.toolOverridesReload }),
     lastVisitedAt: projection.thread.lastVisitedAt,
     opens: projection.thread.opens ?? null,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -2396,9 +2393,6 @@ function shellFromState(input: {
     ...(input.state.thread.toolOverrides === undefined
       ? {}
       : { toolOverrides: input.state.thread.toolOverrides }),
-    ...(input.state.thread.toolOverridesReload === undefined
-      ? {}
-      : { toolOverridesReload: input.state.thread.toolOverridesReload }),
     lastVisitedAt: input.state.thread.lastVisitedAt,
     opens: input.state.thread.opens ?? null,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,

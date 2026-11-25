@@ -236,6 +236,42 @@ it.effect("gives each tool override change its own command id within one clock t
   }).pipe(Effect.provide(layerTest));
 });
 
+it.effect("answers a tool change with a scheduled restart only when it detached a session", () => {
+  const threadId = ThreadId.make("thread:thread-management:tool-overrides-outcome");
+  const detached: Array<boolean> = [];
+  const layerTest = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+    Layer.provide(
+      Layer.mock(Orchestrator.OrchestratorV2)({
+        dispatch: () =>
+          Effect.sync(
+            () =>
+              ({
+                sequence: 1,
+                storedEvents: detached.shift()
+                  ? [{ event: { type: "provider-session.detached" } }]
+                  : [],
+              }) as never,
+          ),
+      }),
+    ),
+    Layer.provide(ServerSettings.layerTest({})),
+    Layer.provideMerge(layerReceiptsTest),
+  );
+  return Effect.gen(function* () {
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const set = (withSession: boolean) => {
+      detached.push(withSession);
+      return threads.setThreadToolOverrides({
+        threadId,
+        toolOverrides: { enabledBuiltinTools: [], claudeAiConnectors: true, omittedMcpServers: [] },
+      });
+    };
+    expect(yield* set(false)).toEqual({ outcome: "stored" });
+    expect(yield* set(true)).toEqual({ outcome: "restart-scheduled" });
+  }).pipe(Effect.provide(layerTest));
+});
+
 it.effect(
   "a replay of an already-accepted command id dispatches despite the instance now being disabled",
   () => {
@@ -1137,7 +1173,7 @@ it.effect.each([
           detach: () =>
             Effect.sync(() => teardowns.push("detach")).pipe(
               Effect.andThen(Deferred.succeed(tornDown, undefined)),
-              Effect.as({ processEnded: true }),
+              Effect.asVoid,
             ),
         }),
       ),

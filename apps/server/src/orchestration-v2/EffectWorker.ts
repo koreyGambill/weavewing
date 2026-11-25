@@ -187,53 +187,26 @@ export const layerExecutor: Layer.Layer<
               ),
             );
           }
-          case "provider-session.detach": {
-            const detach = providerSessions.detach({
-              providerSessionId: effect.request.providerSessionId,
-              threadId: effect.threadId,
-              ...(effect.request.detail === undefined ? {} : { detail: effect.request.detail }),
-              ...(effect.request.revokeMcpCredential === undefined
-                ? {}
-                : { revokeMcpCredential: effect.request.revokeMcpCredential }),
-            });
-            // One attempt only: a retry after the session was removed would report a clean end.
-            const settled =
-              effect.request.reportsToolsReload === true
-                ? detach.pipe(
-                    Effect.map(({ processEnded }) =>
-                      processEnded ? ("succeeded" as const) : ("failed" as const),
-                    ),
-                    Effect.catchCauseIf(
-                      (cause) => !Cause.hasInterruptsOnly(cause),
-                      (cause) =>
-                        Effect.logWarning("Tool change reload could not stop the old session", {
-                          effectId: effect.id,
-                          cause,
-                        }).pipe(Effect.as("failed" as const)),
-                    ),
-                    Effect.flatMap((outcome) =>
-                      threads.dispatch({
-                        type: "thread.tool-overrides.reload-settle",
-                        commandId: CommandId.make(`${effect.commandId}:reload-settle`),
-                        threadId: effect.threadId,
-                        reloadCommandId: effect.commandId,
-                        outcome,
-                      }),
-                    ),
-                    Effect.asVoid,
-                  )
-                : detach.pipe(Effect.asVoid);
-            return settled.pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationEffectExecutionError({
-                    effectId: effect.id,
-                    effectType: effect.request.type,
-                    cause,
-                  }),
-              ),
-            );
-          }
+          case "provider-session.detach":
+            return providerSessions
+              .detach({
+                providerSessionId: effect.request.providerSessionId,
+                threadId: effect.threadId,
+                ...(effect.request.detail === undefined ? {} : { detail: effect.request.detail }),
+                ...(effect.request.revokeMcpCredential === undefined
+                  ? {}
+                  : { revokeMcpCredential: effect.request.revokeMcpCredential }),
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause,
+                    }),
+                ),
+              );
           case "provider-session.apply-model-selection":
             return providerTurnControl
               .applyModelSelection({

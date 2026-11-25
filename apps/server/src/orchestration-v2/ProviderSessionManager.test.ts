@@ -2580,7 +2580,7 @@ it.effect(
 );
 
 it.effect(
-  "ProviderSessionManagerV2 gives the session reopened after a tool reload a working MCP credential",
+  "ProviderSessionManagerV2 issues the session reopened after a tool reload a credential that resolves to its thread",
   () =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
@@ -2611,12 +2611,11 @@ it.effect(
         });
 
         const before = yield* open;
-        const detached = yield* manager.detach({
+        yield* manager.detach({
           providerSessionId: before.providerSessionId,
           threadId,
           detail: "Tools changed.",
         });
-        assert.deepEqual(detached, { processEnded: true });
 
         const after = yield* open;
         assert.notEqual(after.providerSessionId, before.providerSessionId);
@@ -2630,47 +2629,6 @@ it.effect(
             idleTimeoutMs: 1_000,
             mcpConfigs,
             capabilities: ExclusiveCapabilities,
-          }),
-        ),
-      );
-    }),
-);
-
-it.effect(
-  "ProviderSessionManagerV2 reports a detach whose session never closes as unfinished",
-  () =>
-    Effect.gen(function* () {
-      const state = yield* Ref.make(emptyState);
-      const scopeCloseReached = yield* Deferred.make<void>();
-      yield* Effect.gen(function* () {
-        const eventSink = yield* EventSink.EventSinkV2;
-        const idAllocator = yield* IdAllocator.IdAllocatorV2;
-        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
-        const now = yield* DateTime.now;
-        const threadId = ThreadId.make("thread-provider-session-manager-hung-reload");
-        yield* eventSink.write({
-          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
-        });
-        const providerSessionId = yield* idAllocator.allocate.providerSession({
-          providerInstanceId: modelSelection.instanceId,
-          threadId,
-        });
-        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
-
-        const detaching = yield* manager
-          .detach({ providerSessionId, threadId, detail: "Tools changed." })
-          .pipe(Effect.forkChild);
-        yield* Deferred.await(scopeCloseReached);
-        yield* TestClock.adjust("31 seconds");
-        assert.deepEqual(yield* Fiber.join(detaching), { processEnded: false });
-      }).pipe(
-        Effect.provide(
-          layerTest({
-            state,
-            idleTimeoutMs: 60_000,
-            capabilities: ExclusiveCapabilities,
-            hangSessionScopeClose: true,
-            scopeCloseReached,
           }),
         ),
       );

@@ -685,38 +685,6 @@ function latestSteerableRun(
     .toSorted((left, right) => right.ordinal - left.ordinal)[0];
 }
 
-/** Waits for the detach effect to settle a tool change's reload, and reports how it ended. */
-export const awaitToolOverridesReload = Effect.fn(
-  "ThreadManagementService.awaitToolOverridesReload",
-)(function* (
-  orchestrator: Pick<Orchestrator.OrchestratorV2["Service"], "streamDomainEventsFrom">,
-  input: {
-    readonly threadId: ThreadId;
-    readonly commandId: CommandId;
-    readonly afterSequence: number;
-  },
-) {
-  const settled = yield* orchestrator
-    .streamDomainEventsFrom({
-      eventType: "thread.tool-overrides-updated",
-      afterSequence: input.afterSequence,
-    })
-    .pipe(
-      Stream.map(({ event }) =>
-        event.type === "thread.tool-overrides-updated" && event.threadId === input.threadId
-          ? event.payload.toolOverridesReload
-          : undefined,
-      ),
-      Stream.filter(
-        (reload) => reload?.commandId === input.commandId && reload.status !== "pending",
-      ),
-      Stream.runHead,
-    );
-  return Option.exists(settled, (reload) => reload?.status === "succeeded")
-    ? ("reloaded" as const)
-    : ("reload-failed" as const);
-});
-
 const SETTLE_AFTER_RUN_WAIT_MS = 24 * 60 * 60 * 1_000;
 const FORCE_STOP_REASON = "Force stopped by user";
 const FORCE_STOP_RELEASE_WAIT = "10 seconds";
@@ -1530,27 +1498,20 @@ const make = Effect.gen(function* () {
     "ThreadManagementService.setThreadToolOverrides",
   )(
     function* (input) {
-      const commandId = CommandId.make(
-        `server:tool-overrides:${input.threadId}:${yield* Effect.sync(() => SecureRandom.uuidV4Unsafe())}`,
-      );
       const result = yield* orchestrator.dispatch({
         type: "thread.tool-overrides.set",
-        commandId,
+        commandId: CommandId.make(
+          `server:tool-overrides:${input.threadId}:${yield* Effect.sync(() => SecureRandom.uuidV4Unsafe())}`,
+        ),
         threadId: input.threadId,
         toolOverrides: input.toolOverrides,
       });
-      const reloading = result.storedEvents.some(
-        ({ event }) =>
-          event.type === "thread.tool-overrides-updated" &&
-          event.payload.toolOverridesReload?.commandId === commandId,
-      );
-      if (!reloading) return { outcome: "stored" as const };
       return {
-        outcome: yield* awaitToolOverridesReload(orchestrator, {
-          threadId: input.threadId,
-          commandId,
-          afterSequence: result.sequence,
-        }),
+        outcome: result.storedEvents.some(
+          (stored) => stored.event.type === "provider-session.detached",
+        )
+          ? ("restart-scheduled" as const)
+          : ("stored" as const),
       };
     },
     Effect.catchTags({
