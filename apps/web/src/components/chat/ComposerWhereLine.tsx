@@ -90,6 +90,9 @@ export function ComposerWhereLine({
 
   if (project === null || folder === null) return null;
   const folderLabel = projectPickerPathLabel(folder, homes.get(environmentId));
+  // A project folder usually ends in the project's name, so the label names it once.
+  const showProjectTitle =
+    !isScratch && folderLabel.split(/[\\/]/).findLast(Boolean) !== project.title;
   const content = (
     <>
       <MapPinIcon className="shrink-0" />
@@ -100,12 +103,12 @@ export function ComposerWhereLine({
             atDefaultPlace ? "text-muted-foreground" : "text-foreground",
           )}
         >
-          {isScratch ? null : (
+          {showProjectTitle ? (
             // Phone widths drop the project name and keep the folder's tail.
-            <span className="min-w-0 max-w-[60%] shrink-0 truncate whitespace-pre font-medium @max-md/composer-surface:hidden">
+            <span className="min-w-0 max-w-[40%] shrink-0 truncate whitespace-pre font-medium @max-md/composer-surface:hidden">
               {project.title}{" "}
             </span>
-          )}
+          ) : null}
           <span className="flex min-w-0 font-mono">
             <MiddleTruncate value={folderLabel} showTitle={false} />
           </span>
@@ -122,7 +125,7 @@ export function ComposerWhereLine({
           render={
             <ComposerControl
               size="xs"
-              className="min-w-0 max-w-[35%] flex-initial justify-start"
+              className="min-w-0 max-w-full flex-initial justify-start"
               aria-label={`Change folder: ${ariaLabel}`}
               data-composer-context-control
               onClick={() => openChangeThreadFolder(threadRef)}
@@ -153,7 +156,7 @@ export function ComposerWhereLine({
         trigger={{
           content,
           ariaLabel: `Change project or folder: ${ariaLabel}`,
-          className: "min-w-0 max-w-[35%] flex-initial justify-start",
+          className: "min-w-0 max-w-full flex-initial justify-start",
         }}
         onSelect={selection.selectProject}
         onEnvironmentChange={onEnvironmentChange}
