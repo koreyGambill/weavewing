@@ -367,8 +367,9 @@ const make = Effect.gen(function* () {
       const delivery = deliveries.get(question.id);
       if (delivery?.received && question.answer) {
         changed = true;
+        const { discussedInMessageId: _ended, ...answered } = question;
         return {
-          ...question,
+          ...answered,
           state: "answered",
           closedAt: now,
           answeredBy: "user",
@@ -1047,10 +1048,14 @@ const make = Effect.gen(function* () {
       const { userChangedAt: _reported, discussedInMessageId: previous, ...changed } = next;
       // The agent reopening the user's answer is answering back, so the answer's message starts
       // a discussion; any other reopening, and every change of the user's own, ends one.
+      // A defer keeps a discussion; an answer or withdrawal closes the question and ends it.
       const discussed =
-        input.state !== "open"
+        input.state === "deferred"
           ? previous
-          : by === "agent" && question.state === "answered" && question.answeredBy === "user"
+          : input.state === "open" &&
+              by === "agent" &&
+              question.state === "answered" &&
+              question.answeredBy === "user"
             ? question.sentInMessageId
             : undefined;
       const questions = [...current.questions];

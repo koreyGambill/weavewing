@@ -94,7 +94,7 @@ describe("T3 question instructions", () => {
         { id: "Q2", title: "Cache size?", state: "open", discussing: true },
         { id: "Q4", title: "Region?", state: "deferred", discussing: true },
       ]),
-      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q2 Cache size? (discussing; once you have replied, ask it again with replaces); Q4 Region? (discussing; once you have replied, ask it again with replaces)",
+      "Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: Q2 Cache size? (discussing; once you have replied, ask it again with replaces while the decision is still open); Q4 Region? (deferred; reopen it if this task settles or describes it; discussing; once you have replied, ask it again with replaces while the decision is still open)",
     );
     // A message already carries the answer, so the question no longer waits on the user.
     assert.equal(

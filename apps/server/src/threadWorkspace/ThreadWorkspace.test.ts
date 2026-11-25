@@ -1328,6 +1328,7 @@ it.effect("discusses a user's answer the agent reopens until the agent acts on i
               "agent",
             );
       expect(ended.questions[0]?.state, end).toBe(end);
+      expect(ended.questions[0], end).not.toHaveProperty("discussedInMessageId");
       expect(h.mirror.questions, end).not.toContainEqual(expect.objectContaining({ id: "Q1" }));
     }
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

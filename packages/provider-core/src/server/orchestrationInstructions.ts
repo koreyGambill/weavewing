@@ -63,7 +63,7 @@ export const T3_CODE_QUESTION_TOOL_INSTRUCTIONS = `## T3 Code questions
 
 - A decision that is the user's to make but that you can work around for now, such as by choosing a safe default, goes to \`question_ask\` once, never only into your reply. Never ask the same decision twice. Ask as soon as you spot it, then keep working. A question you cannot continue without still uses your blocking question tool.
 - The user sees open questions in the thread. Never list, recap or remind the user of them in a reply, not even in a closing status line, unless the user's message is about one.
-- The user's messages list your open questions. T3 records an answer sent from a question's card itself, so never call \`question_update\` \`answered\` for one. When a message answers a question in its own words, call \`question_update\` with \`answered\` and the answer as you understood it; when one makes a question moot, \`withdrawn\`. A message that does neither leaves every question as it is.
+- The user's messages list your open questions. T3 records an answer sent from a question's card itself, so never call \`question_update\` \`answered\` for one. When a message answers a question in its own words, call \`question_update\` with \`answered\` and the answer as you understood it; when one makes a question moot, \`withdrawn\`. A message that does neither leaves every question as it is, except that one listed as discussing is asked again with \`replaces\` once you have replied and the decision is still open.
 - An answer the user sent can still leave the decision open. When its note asks you something back or sets a condition you have not met, reply to the note in chat and reopen the question with \`question_update\` \`open\`, which shows it as discussing; then, if the decision is still open, ask it again with \`question_ask\` \`replaces\` so the new card reflects your reply. A note that adds a request beside a clear answer settles it; do the request too. A comment on a question is not its answer. Reply in chat; then, if the decision is still open, ask it again with \`question_ask\` \`replaces\` so the new card reflects the discussion. Record the answer if the comment settled it, or withdraw the question if it made it moot.
 - Reopen a deferred question with \`question_update\` \`open\`, once, as soon as your current task would settle or describe its outcome, such as code, tests or docs about it; then keep working on your current default. Never answer or withdraw a deferred question yourself, and otherwise leave it alone.`;
 
@@ -74,13 +74,21 @@ export function t3OpenQuestionsContext(questions: ReadonlyArray<ThreadQuestionLi
   );
   if (waiting.length === 0) return "";
   const list = waiting
-    .map((question) =>
-      question.discussing === true
-        ? `${question.id} ${question.title} (discussing; once you have replied, ask it again with replaces)`
-        : question.state === "deferred"
-          ? `${question.id} ${question.title} (deferred; reopen it if this task settles or describes it)`
-          : `${question.id} ${question.title}`,
-    )
+    .map((question) => {
+      const notes = [
+        ...(question.state === "deferred"
+          ? ["deferred; reopen it if this task settles or describes it"]
+          : []),
+        ...(question.discussing === true
+          ? [
+              "discussing; once you have replied, ask it again with replaces while the decision is still open",
+            ]
+          : []),
+      ];
+      return notes.length === 0
+        ? `${question.id} ${question.title}`
+        : `${question.id} ${question.title} (${notes.join("; ")})`;
+    })
     .join("; ");
   return `Your open questions, which the user already sees, so leave them out of your reply unless this message is about one: ${list}`;
 }
