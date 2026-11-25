@@ -35,6 +35,7 @@ import {
   type SidebarSection,
   resolveSidebarDropVerb,
   groupSidebarThreadsByProject,
+  moveSidebarFolders,
   groupSidebarThreadFamilies,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
@@ -1751,6 +1752,26 @@ describe("groupSidebarThreadsByProject", () => {
       { projectKey: "t3code", threads: ["a", "b"] },
       { projectKey: "fleet", threads: [] },
     ]);
+  });
+});
+
+describe("moveSidebarFolders", () => {
+  const order = ["a", "b", "c", "d", "e"];
+  it("moves selected folders as one block beside the target", () => {
+    expect(moveSidebarFolders(order, new Set(["d", "b"]), "a", false)).toEqual([
+      "b",
+      "d",
+      "a",
+      "c",
+      "e",
+    ]);
+    expect(moveSidebarFolders(order, new Set(["a"]), "c", true)).toEqual(["b", "c", "a", "d", "e"]);
+  });
+
+  it("ignores a drop that changes nothing or lands on a moving folder", () => {
+    expect(moveSidebarFolders(order, new Set(["b"]), "c", false)).toBeNull();
+    expect(moveSidebarFolders(order, new Set(["b", "c"]), "c", true)).toBeNull();
+    expect(moveSidebarFolders(order, new Set(["b"]), "missing", true)).toBeNull();
   });
 });
 

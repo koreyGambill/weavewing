@@ -230,6 +230,14 @@ or **Settled** to drag a parked thread back into either live section. Each drop 
 **Move up** and **Move down** are also available in the thread menu. The server
 saves the order, so it survives a refresh and appears on your other connected devices.
 
+To move several threads at once, Ctrl-click (Cmd-click on Mac) or Shift-click to select them,
+then drag one of them. In named groups, the selected active threads land together where you drop.
+
+When the sidebar is grouped by project and **Fixed** is chosen under the View menu, project
+folders stay where you put them instead of following recent activity. Drag a folder header to
+move it, or select several headers with Ctrl-click (Cmd-click on Mac) or Shift-click and drag
+them together. Folder order is saved on this device.
+
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion
 preference. While dragging, rows follow the insertion gap without replaying a second transition

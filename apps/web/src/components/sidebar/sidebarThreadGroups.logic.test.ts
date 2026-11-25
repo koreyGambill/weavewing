@@ -13,6 +13,7 @@ import {
   hasSidebarManualThreadOrder,
   moveSidebarThreadGroup,
   placeSidebarThread,
+  placeSidebarThreads,
   sidebarThreadGroupsForOrder,
   renameSidebarThreadGroup,
   setSidebarUngroupedHeader,
@@ -245,6 +246,43 @@ describe("placeSidebarThread", () => {
     });
     const next = placeSidebarThread(current, arranged, "q", { groupId: null, beforeKey: "m" });
     expect(next.ungroupedOrder).toEqual(["q", "hidden-1", "m", "hidden-2", "p"]);
+  });
+
+  it("moves several threads as one block in the order given", () => {
+    const current = state([
+      ["demo", ["a", "b"]],
+      ["other", ["c", "d"]],
+    ]);
+    const arranged = arrangeSidebarThreadGroups(current, families("a", "b", "c", "d", "u"), {
+      hideEmptyGroups: false,
+    });
+    const intoGroup = placeSidebarThreads(current, arranged, ["a", "d", "u"], {
+      groupId: "other",
+      beforeKey: "c",
+    });
+    expect(intoGroup.groups.map((group) => group.threadKeys)).toEqual([
+      ["b"],
+      ["a", "d", "u", "c"],
+    ]);
+
+    const intoUngrouped = placeSidebarThreads(current, arranged, ["b", "c"], {
+      groupId: null,
+      beforeKey: "u",
+    });
+    expect(intoUngrouped.groups.map((group) => group.threadKeys)).toEqual([["a"], ["d"]]);
+    expect(intoUngrouped.ungroupedOrder).toEqual(["b", "c", "u"]);
+  });
+
+  it("places a block before the next staying thread when it drops on one of its own", () => {
+    const current = state([], ["a", "b", "c", "d"]);
+    const arranged = arrangeSidebarThreadGroups(current, families("a", "b", "c", "d"), {
+      hideEmptyGroups: false,
+    });
+    const next = placeSidebarThreads(current, arranged, ["a", "c"], {
+      groupId: null,
+      beforeKey: "c",
+    });
+    expect(next.ungroupedOrder).toEqual(["b", "a", "c", "d"]);
   });
 
   it("returns the state unchanged for a group that no longer exists", () => {

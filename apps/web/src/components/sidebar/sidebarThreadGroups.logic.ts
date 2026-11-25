@@ -203,26 +203,49 @@ export function placeSidebarThread(
   key: string,
   target: SidebarGroupDropTarget,
 ): SidebarThreadGroups {
+  return placeSidebarThreads(state, arrangement, [key], target);
+}
+
+/**
+ * Moves threads, in the order given, into a group or Ungrouped as one block at a position. A
+ * `beforeKey` that is itself moving resolves to the next shown thread that stays put.
+ */
+export function placeSidebarThreads(
+  state: SidebarThreadGroups,
+  arrangement: SidebarThreadGroupArrangement,
+  keys: readonly string[],
+  target: SidebarGroupDropTarget,
+): SidebarThreadGroups {
   if (target.groupId !== null && !state.groups.some((group) => group.id === target.groupId)) {
     return state;
   }
-  const insert = (keys: readonly string[]) => {
-    const next = keys.filter((candidate) => candidate !== key);
-    const at = target.beforeKey === null ? -1 : next.indexOf(target.beforeKey);
-    next.splice(at === -1 ? next.length : at, 0, key);
+  const moving = new Set(keys);
+  if (moving.size === 0) return state;
+  let beforeKey = target.beforeKey;
+  if (beforeKey !== null && moving.has(beforeKey)) {
+    const heads = (containerFamilies(arrangement, target.groupId) ?? []).map(
+      (family) => family[0]!,
+    );
+    beforeKey = heads.slice(heads.indexOf(beforeKey) + 1).find((key) => !moving.has(key)) ?? null;
+  }
+  const block = [...moving];
+  const insert = (list: readonly string[]) => {
+    const next = list.filter((candidate) => !moving.has(candidate));
+    const at = beforeKey === null ? -1 : next.indexOf(beforeKey);
+    next.splice(at === -1 ? next.length : at, 0, ...block);
     return next;
   };
   const groups = state.groups.map((group) => {
     if (group.id === target.groupId) return { ...group, threadKeys: insert(group.threadKeys) };
-    return group.threadKeys.includes(key)
-      ? { ...group, threadKeys: group.threadKeys.filter((candidate) => candidate !== key) }
+    return group.threadKeys.some((candidate) => moving.has(candidate))
+      ? { ...group, threadKeys: group.threadKeys.filter((candidate) => !moving.has(candidate)) }
       : group;
   });
   if (target.groupId !== null) {
     return {
       ...state,
       groups,
-      ungroupedOrder: state.ungroupedOrder.filter((candidate) => candidate !== key),
+      ungroupedOrder: state.ungroupedOrder.filter((candidate) => !moving.has(candidate)),
     };
   }
   // Shown threads take the new order in the slots shown threads held, so threads a filter or
@@ -233,9 +256,10 @@ export function placeSidebarThread(
   const order = arrangement.freshAtEnd
     ? [...state.ungroupedOrder, ...fresh]
     : [...fresh, ...state.ungroupedOrder];
-  if (!order.includes(key)) {
-    const at = target.beforeKey === null ? -1 : order.indexOf(target.beforeKey);
-    order.splice(at === -1 ? order.length : at, 0, key);
+  const missing = block.filter((key) => !order.includes(key));
+  if (missing.length > 0) {
+    const at = beforeKey === null ? -1 : order.indexOf(beforeKey);
+    order.splice(at === -1 ? order.length : at, 0, ...missing);
   }
   const shown = insert(shownBefore);
   const shownSet = new Set(shown);
