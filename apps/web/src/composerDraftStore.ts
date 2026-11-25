@@ -44,6 +44,7 @@ import {
   isThreadQuestionRecord,
   threadQuestionImageMarkerNumbers,
   threadQuestionImageNumber,
+  withoutThreadQuestionImageMarkers,
 } from "@t3tools/client-runtime/state/thread-questions";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
@@ -1685,12 +1686,70 @@ function scopedThreadRefOfDraft(
     : composerThreadRefFromKey(threadKey);
 }
 
+const heldQuestionNoteImages = (
+  state: ComposerThreadLookupState,
+  threadRef: ScopedThreadRef,
+  questionId: string,
+) => state.draftsByThreadKey[threadQuestionNoteImageDraftId(threadRef, questionId)]?.images ?? [];
+
 /**
- * The thread draft's images after its question chips change from `before` to `after`: a question
- * whose chip left takes its pasted images out, and one whose chip arrived brings those its note
- * marks. A question's images keep the ids its own draft gave them, so an image added any other
- * way never matches. Null when nothing changes.
+ * How the thread draft's images change when its question chips go from `before` to `after`.
+ * While a question's chip is staged, the composer holds exactly the pasted images its note marks;
+ * without a chip it holds none of them. A question's images keep the ids its own draft gave them,
+ * so an image added any other way never matches.
  */
+function planQuestionNoteImages(
+  state: ComposerThreadLookupState,
+  threadRef: ScopedThreadRef,
+  draft: Pick<ComposerThreadDraftState, "images">,
+  before: ReadonlyArray<ArtifactAnswerContextRecord>,
+  after: ReadonlyArray<ArtifactAnswerContextRecord>,
+) {
+  const staged = new Map(
+    after.filter(isThreadQuestionRecord).map((record) => [record.questionId, record.note]),
+  );
+  const questionIds = new Set([
+    ...before.filter(isThreadQuestionRecord).map((record) => record.questionId),
+    ...staged.keys(),
+  ]);
+  const present = new Set(draft.images.map((image) => image.id));
+  const leaving = new Set<string>();
+  const arriving: ComposerImageAttachment[] = [];
+  for (const questionId of questionIds) {
+    const note = staged.get(questionId);
+    const marked = note === undefined ? null : threadQuestionImageMarkerNumbers(questionId, note);
+    for (const image of heldQuestionNoteImages(state, threadRef, questionId)) {
+      const number = threadQuestionImageNumber(questionId, image.name);
+      const wanted = marked !== null && number !== null && marked.has(number);
+      if (wanted && !present.has(image.id)) arriving.push(image);
+      if (!wanted && present.has(image.id)) leaving.add(image.id);
+    }
+  }
+  return { leaving, arriving };
+}
+
+/**
+ * The thread composer's attachment count once its question chips become `records`, counting the
+ * images those chips bring and take away.
+ */
+export function composerAttachmentCountWithQuestionChips(
+  threadRef: ScopedThreadRef,
+  records: ReadonlyArray<ArtifactAnswerContextRecord>,
+): number {
+  const state = composerDraftStore.getState();
+  const draft = getComposerDraftState(state, threadRef);
+  const images = draft?.images ?? [];
+  const { leaving, arriving } = planQuestionNoteImages(
+    state,
+    threadRef,
+    { images },
+    draft?.artifactAnswers ?? [],
+    records,
+  );
+  return images.length - leaving.size + arriving.length + (draft?.files.length ?? 0);
+}
+
+/** The thread draft's images after its question chips change; null when nothing changes. */
 function questionNoteImagesAfterChipChange(
   state: ComposerThreadLookupState,
   threadRef: ScopedThreadRef | null,
@@ -1702,43 +1761,24 @@ function questionNoteImagesAfterChipChange(
   "images" | "nonPersistedImageIds" | "persistedAttachments"
 > | null {
   if (threadRef === null) return null;
-  const notes = (records: ReadonlyArray<ArtifactAnswerContextRecord>) =>
-    new Map(
-      records.filter(isThreadQuestionRecord).map((record) => [record.questionId, record.note]),
-    );
-  const previous = notes(before);
-  const next = notes(after);
-  const held = (questionId: string) =>
-    state.draftsByThreadKey[threadQuestionNoteImageDraftId(threadRef, questionId)]?.images ?? [];
-  const leaving = new Set(
-    [...previous.keys()]
-      .filter((questionId) => !next.has(questionId))
-      .flatMap((questionId) => held(questionId).map((image) => image.id)),
-  );
-  const present = new Set(draft.images.map((image) => image.id));
-  let room = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - draft.images.length - draft.files.length;
-  const arriving = [...next]
-    .filter(([questionId]) => !previous.has(questionId))
-    .flatMap(([questionId, note]) => {
-      const marked = threadQuestionImageMarkerNumbers(questionId, note);
-      return held(questionId).filter((image) => {
-        const number = threadQuestionImageNumber(questionId, image.name);
-        return number !== null && marked.has(number) && !present.has(image.id);
-      });
-    })
-    .filter(() => room-- > 0)
+  const { leaving, arriving } = planQuestionNoteImages(state, threadRef, draft, before, after);
+  if (leaving.size === 0 && arriving.length === 0) return null;
+  // Staging checks the limit first; this only keeps a later note change from passing it.
+  const room =
+    PROVIDER_SEND_TURN_MAX_ATTACHMENTS - draft.images.length + leaving.size - draft.files.length;
+  const added = arriving
+    .slice(0, Math.max(0, room))
     // Each draft revokes its own preview URL, so the composer's copy gets one of its own.
     .map((image) =>
       typeof URL !== "undefined" && image.previewUrl.startsWith("blob:")
         ? { ...image, previewUrl: URL.createObjectURL(image.file) }
         : image,
     );
-  if (leaving.size === 0 && arriving.length === 0) return null;
   for (const image of draft.images) {
     if (leaving.has(image.id)) revokeObjectPreviewUrl(image.previewUrl);
   }
   return {
-    images: [...draft.images.filter((image) => !leaving.has(image.id)), ...arriving],
+    images: [...draft.images.filter((image) => !leaving.has(image.id)), ...added],
     nonPersistedImageIds: draft.nonPersistedImageIds.filter((id) => !leaving.has(id)),
     persistedAttachments: draft.persistedAttachments.filter(
       (attachment) => !leaving.has(attachment.id),
@@ -3790,24 +3830,52 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (!current) {
               return state;
             }
-            const nextDraft: ComposerThreadDraftState = {
-              ...current,
+            const withoutImage = (draft: ComposerThreadDraftState): ComposerThreadDraftState => ({
+              ...draft,
               prompt: removeInlineContextReference(
-                current.prompt,
+                draft.prompt,
                 toKindScopedComposerContextId("image", imageId),
               ).prompt,
-              images: current.images.filter((image) => image.id !== imageId),
-              nonPersistedImageIds: current.nonPersistedImageIds.filter((id) => id !== imageId),
-              persistedAttachments: current.persistedAttachments.filter(
+              images: draft.images.filter((image) => image.id !== imageId),
+              nonPersistedImageIds: draft.nonPersistedImageIds.filter((id) => id !== imageId),
+              persistedAttachments: draft.persistedAttachments.filter(
                 (attachment) => attachment.id !== imageId,
               ),
-            };
+            });
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
-            if (shouldRemoveDraft(nextDraft)) {
-              delete nextDraftsByThreadKey[threadKey];
-            } else {
-              nextDraftsByThreadKey[threadKey] = nextDraft;
+            const put = (key: string, draft: ComposerThreadDraftState) => {
+              if (shouldRemoveDraft(draft)) delete nextDraftsByThreadKey[key];
+              else nextDraftsByThreadKey[key] = draft;
+            };
+            // A staged question's image leaves altogether: off its card, and its marker out of the
+            // chip's note, so the message never carries a marker without its image. The card's
+            // saved note follows from the chip (see reconcileQuestionNoteImages).
+            const owner = scopedThreadRefOfDraft(state, threadRef, threadKey);
+            let artifactAnswers = current.artifactAnswers;
+            for (const record of current.artifactAnswers) {
+              if (owner === null || !isThreadQuestionRecord(record)) continue;
+              const heldKey = threadQuestionNoteImageDraftId(owner, record.questionId);
+              const held = state.draftsByThreadKey[heldKey];
+              const image = held?.images.find((entry) => entry.id === imageId);
+              if (!held || !image) continue;
+              revokeObjectPreviewUrl(image.previewUrl);
+              put(heldKey, withoutImage(held));
+              const number = threadQuestionImageNumber(record.questionId, image.name);
+              if (number === null) continue;
+              artifactAnswers = artifactAnswers.map((entry) =>
+                entry === record
+                  ? {
+                      ...entry,
+                      note: withoutThreadQuestionImageMarkers(
+                        record.questionId,
+                        record.note,
+                        new Set([number]),
+                      ),
+                    }
+                  : entry,
+              );
             }
+            put(threadKey, { ...withoutImage(current), artifactAnswers });
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },

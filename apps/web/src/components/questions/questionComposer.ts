@@ -5,13 +5,18 @@ import {
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
 } from "@t3tools/client-runtime/state/thread-questions";
-import type {
-  ArtifactAnswerContextRecord,
-  ScopedThreadRef,
-  ThreadWorkspace,
+import {
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  type ArtifactAnswerContextRecord,
+  type ScopedThreadRef,
+  type ThreadWorkspace,
 } from "@t3tools/contracts";
 
-import { useComposerArtifactAnswers, useComposerDraftStore } from "../../composerDraftStore";
+import {
+  composerAttachmentCountWithQuestionChips,
+  useComposerArtifactAnswers,
+  useComposerDraftStore,
+} from "../../composerDraftStore";
 import { toastManager } from "../ui/toast";
 import { draftedAnswersForComposer } from "./questionComposer.logic";
 import type { questionDraftWriter, SaveQuestionDraft } from "./questionDraftWriter";
@@ -26,18 +31,29 @@ export function useQuestionsInComposer(
   return threadQuestionsInComposer(useComposerArtifactAnswers(threadRef));
 }
 
-/** Puts answers in the thread's composer, each replacing an earlier one for its question. */
+/**
+ * Puts answers in the thread's composer, each replacing an earlier one for its question, with
+ * the images their notes mark. Adds nothing and says why when those images would pass the
+ * message's attachment limit, so no chip is staged without its images.
+ */
 export function addQuestionAnswersToComposer(
   threadRef: ScopedThreadRef,
   records: ReadonlyArray<ArtifactAnswerContextRecord>,
-) {
-  if (records.length === 0) return;
-  useComposerDraftStore
-    .getState()
-    .setArtifactAnswers(
-      threadRef,
-      records.reduce(withComposerQuestionAnswer, answersOf(threadRef)),
-    );
+): boolean {
+  if (records.length === 0) return true;
+  const next = records.reduce(withComposerQuestionAnswer, answersOf(threadRef));
+  if (
+    composerAttachmentCountWithQuestionChips(threadRef, next) > PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+  ) {
+    toastManager.add({
+      type: "error",
+      title: `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`,
+      description: "Remove an attachment from your message, then try again.",
+    });
+    return false;
+  }
+  useComposerDraftStore.getState().setArtifactAnswers(threadRef, next);
+  return true;
 }
 
 /** Takes a question's answer out of the composer; its draft stays on the question. */
@@ -91,7 +107,7 @@ export async function addDraftedAnswersToComposer(input: {
     });
     return;
   }
-  addQuestionAnswersToComposer(input.threadRef, records);
+  if (!addQuestionAnswersToComposer(input.threadRef, records)) return;
   if (records.length > 0)
     toastManager.add({
       type: "success",

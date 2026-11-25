@@ -97,6 +97,7 @@ import {
   composerFileNeedsReattach,
   hydrateImagesFromPersisted,
   markDraftTerminalUsed,
+  composerAttachmentCountWithQuestionChips,
   partializeComposerDraftStoreState,
   threadQuestionNoteImageDraftId,
   useComposerDraftStore,
@@ -3097,6 +3098,52 @@ describe("composerDraftStore question note images", () => {
         .getComposerDraft(threadQuestionNoteImageDraftId(threadRef, "Q1"))
         ?.images.map((image) => image.id),
     ).toEqual(["q1-1", "q1-2"]);
+  });
+
+  it("keeps a staged question's composer images in step with its note", () => {
+    const store = useComposerDraftStore.getState();
+    store.setArtifactAnswers(threadRef, [record("Q1", "[Q1 image 1]")]);
+    expect(imageIds()).toEqual(["direct", "q1-1"]);
+    // Image 2 was pasted after the chip went in; the chip's note now marks it.
+    store.setArtifactAnswers(threadRef, [record("Q1", "[Q1 image 1] [Q1 image 2]")]);
+    expect(imageIds()).toEqual(["direct", "q1-1", "q1-2"]);
+    // Its marker was deleted from the note.
+    store.setArtifactAnswers(threadRef, [record("Q1", "[Q1 image 2]")]);
+    expect(imageIds()).toEqual(["direct", "q1-2"]);
+  });
+
+  it("takes a staged question's image off its card and its marker off the chip when the message drops it", () => {
+    const store = useComposerDraftStore.getState();
+    store.setArtifactAnswers(threadRef, [rollout, record("Q1", "see [Q1 image 1] [Q1 image 2]")]);
+    store.removeImage(threadRef, "q1-1");
+    expect(imageIds()).toEqual(["direct", "q1-2"]);
+    expect(
+      useComposerDraftStore
+        .getState()
+        .getComposerDraft(threadQuestionNoteImageDraftId(threadRef, "Q1"))
+        ?.images.map((image) => image.id),
+    ).toEqual(["q1-2"]);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.artifactAnswers).toEqual([
+      rollout,
+      record("Q1", "see [Q1 image 2]"),
+    ]);
+    // An image the user attached directly is just removed.
+    store.removeImage(threadRef, "direct");
+    expect(imageIds()).toEqual(["q1-2"]);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.artifactAnswers).toEqual([
+      rollout,
+      record("Q1", "see [Q1 image 2]"),
+    ]);
+  });
+
+  it("counts the attachments a change of chips would leave, after departing images go", () => {
+    const store = useComposerDraftStore.getState();
+    store.setArtifactAnswers(threadRef, [record("Q2", "[Q2 image 1]")]);
+    expect(
+      composerAttachmentCountWithQuestionChips(threadRef, [
+        record("Q1", "[Q1 image 1] [Q1 image 2]"),
+      ]),
+    ).toBe(3);
   });
 
   it("leaves images alone when only another artifact's answer changes", () => {
