@@ -26,6 +26,31 @@ Action items hold outstanding needs and future work. Mark one done or reopen it
 without starting an agent run. Add it to chat when you want the agent to act on
 its status or your notes.
 
+## Agent questions
+
+Turn on **Agent questions** in **Settings → Labs** to let agents ask for the
+decisions they need without stopping their work. Each question appears in the
+chat where the agent asked it, with its options and a note field. Choosing an
+option or typing a note saves a draft; nothing reaches the agent until you send.
+A line above the composer counts the questions waiting, and **Review** opens
+them all beside the chat, where **Send answers** sends every drafted answer in
+one message. In the review panel, J and K move, 1 to 9 choose an option, and N
+defers.
+
+A thread with questions waiting shows a count in the thread list, and an idle
+one reads **Needs Decision**. It stays out of automatic settling until you answer
+or close them; you can still settle it yourself.
+
+- **Not yet** defers a question. Deferred questions leave the count and no longer
+  hold the thread open, but stay answerable and reopenable.
+- **Dismiss** closes a question without starting a run. The agent learns that you
+  dismissed, deferred, or reopened questions with your next message.
+- When the agent records an answer it read from one of your messages, the card
+  says so, so you can reopen it if the agent misread you.
+
+Turning the setting off hides all of this, including questions already asked.
+Agents already running follow a change after they restart.
+
 ## Agent work
 
 **Agent work** keeps the work an agent takes on, what changed, and how to try it.
