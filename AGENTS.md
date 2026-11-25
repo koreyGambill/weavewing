@@ -12,7 +12,7 @@ Weavewing is a private fork of T3 Code, a GUI for coding agents. A Node WebSocke
 ## Dev servers
 
 - `vp i` installs. Worktree setup runs it in the background: while `.t3/setup-running` names a live PID, wait instead of running `vp i`. Setup ends with `.t3/setup-done` or `.t3/setup-failed` (with the error tail). With no marker, setup never ran, so run `vp i` yourself.
-- `vp run dev` starts server and web. In a worktree, state lives in the worktree's gitignored `.t3`, even when `T3CODE_HOME` is set; an explicit `--home-dir` wins. The first start seeds that database from a read-only copy of real data; `vp run migrate-dev-db` refreshes it with dev stopped.
+- `vp run dev` starts server and web. In a worktree, state lives in the worktree's gitignored `.t3`, even when `T3CODE_HOME` is set; an explicit `--home-dir` wins. The first start tries to seed that database from a read-only copy of real data, and skips seeding when the source is over 500 MiB or `--no-seed` is set, so an empty database is not a bug; `vp run migrate-dev-db` refreshes it with dev stopped.
 - Read the real ports from the `[dev-runner]` line; occupied ports shift the path-derived defaults.
 - Stop what you started with your harness's own background-task stop, which ends the whole tree. `vp` does not forward SIGTERM, so signalling the `vp run dev` PID alone leaves Vite and the server running.
 - Read the [development runbook](docs/operations/development.md) before seeding test data, sharing dev over the tailnet (`--share`), or setting up the reusable dev credential.
@@ -58,10 +58,10 @@ Clients send typed WebSocket requests that the server turns into _commands_. The
 
 - Complexity belongs at the adapter boundary. Orchestration stays pure; UI stays dumb.
 - Server features are services and transports stay thin: a `ws.ts` RPC handler, HTTP route, or MCP tool decodes input, calls one service method, and maps errors.
-- Client mutations use `createEnvironmentRpcCommand`. Add protected methods to `CLIENT_GUARDED_RPC_SCOPES` in contracts, gate UI on the command's `permissionAtom`, keep raw RPC clients inside `rpc/`, and extend the permission behavior tests.
+- Client mutations use `createEnvironmentRpcCommand`. Add protected methods to `CLIENT_GUARDED_RPC_SCOPES` in contracts, gate UI on the command's `permissionAtom`, keep raw RPC clients inside `rpc/`, and extend the permission behavior tests. The server stays authoritative: grants are checked at execution against the destination environment.
 - `apps/web/src/components/ui` exports own their look: pick a `variant` or `size` and put layout classes on the parent. See [Web UI](docs/internals/web-ui.md).
-- React effects synchronize with something outside React; derive in render and act in handlers instead of syncing state.
+- React effects synchronize with something outside React; derive in render and act in handlers instead of syncing state, but never hide real lifecycle work in refs or stores to dodge an effect.
 - Prefer inferred types over annotations, and never `any`.
 - Users notice a dropped frame, a lying spinner, or a stale label. Avoid continuously repainting animations (they peg the GPU) and oversized WebSocket payloads.
-- `t3code/*` and `shadcn/*` lint rules enforce comments, UI restyling, effect reasons, `Effect.fn` spans, and test waits; their messages say the fix.
+- `t3code/*` and `shadcn/*` lint rules enforce comments, UI restyling, effect reasons, the `Effect.fn` function pattern, and test waits; their messages say the fix. Span names and `Effect.fnUntraced` choices are in [Effect services](docs/internals/effect-services.md).
 - If a rule here fights the task, say so and get Korey's sign-off before breaking it.
