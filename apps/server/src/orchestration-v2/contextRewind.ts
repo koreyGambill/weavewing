@@ -10,29 +10,37 @@ import {
 export const CONTEXT_REWIND_ORIGIN = { kind: "system", event: "context rewind" } as const;
 
 /**
- * A rewind restarts the provider process, adds a model call and bills the summary as output, while
- * it saves only the removed tokens at the cached-read rate on each later step. Below this many
- * characters of removed tool results (about 5,000 tokens) it costs more than it saves.
+ * A rewind restarts the provider process, which writes about one turn start's worth of prompt
+ * cache again (11,000 to 16,000 tokens measured), and bills the summary as output. It saves only
+ * the removed tokens on each later step, so below this many characters of removed tool results
+ * (about 15,000 tokens) it costs more than it saves.
  */
-export const CONTEXT_REWIND_MIN_REMOVED_CHARS = 20_000;
+export const CONTEXT_REWIND_MIN_REMOVED_CHARS = 60_000;
 
 export const isContextRewindContinuation = (origin: TurnOrigin | undefined): boolean =>
   origin?.kind === "system" && origin.event === CONTEXT_REWIND_ORIGIN.event;
 
+/** The saved continuation: true whether or not the cut applies, and readable in the thread. */
 function contextRewindContinuationText(removedToolCalls: number, summary: string): string {
-  const calls = removedToolCalls === 1 ? "tool call" : `${removedToolCalls} tool calls`;
-  return `<context-rewind>
-You called context_rewind. Your last ${calls} and their results were removed from your context. This is the summary you wrote of what they found:
+  const calls = removedToolCalls === 1 ? "1 tool call" : `${removedToolCalls} tool calls`;
+  return `Context rewind: summary of ${calls}
 
-${summary}
-
-Continue the task from here. Do not repeat those lookups unless the summary lacks something you need.
-</context-rewind>`;
+${summary}`;
 }
 
-/** Sent in place of the continuation's claim when the rewind could not be applied. */
-export function contextRewindNotAppliedText(continuation: string): string {
-  return `The context rewind below did not take effect: your earlier tool calls and their results are still in your context. Continue the task from here.
+/**
+ * What the model reads: the adapter says the calls were removed only when it reopened the
+ * conversation at the cut (`removedToolCalls` set), and otherwise that its context still holds them.
+ */
+export function contextRewindModelText(
+  continuation: string,
+  removedToolCalls: number | undefined,
+): string {
+  const note =
+    removedToolCalls === undefined
+      ? "Your context_rewind call did not take effect: your earlier tool calls and their results are still in your context. Continue the task from here."
+      : `You called context_rewind. Your last ${removedToolCalls === 1 ? "tool call" : `${removedToolCalls} tool calls`} and their results were removed from your context, and the summary below, which you wrote, replaces them. Continue the task from here. Do not repeat those lookups unless the summary lacks something you need.`;
+  return `${note}
 
 ${continuation}`;
 }

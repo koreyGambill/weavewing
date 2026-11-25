@@ -87,6 +87,7 @@ import {
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
+import { isContextRewindContinuation } from "./contextRewind.ts";
 import { isPlaceholderThreadTitle } from "./placeholderThreadTitle.ts";
 import { combinePullRequestWatchWakes, type PullRequestWatchWake } from "./pullRequestWatch.ts";
 import { recordThreadOpen } from "@t3tools/shared/paletteSearch";
@@ -1202,6 +1203,8 @@ function queuedRunBatch(projection: OrchestrationV2ThreadProjection, first: Orch
       !isStalePullRequestWatchWake(projection, run) &&
       // Native wakes drain adapter-owned output without submitting a prompt.
       !(message.createdBy === "agent" && message.creationSource === "provider") &&
+      // The adapter applies a context rewind only to the turn that sends its own continuation.
+      !isContextRewindContinuation(message.origin) &&
       message.attachments.length === 0 &&
       !message.text.trimStart().startsWith("/")
     );

@@ -401,11 +401,38 @@ export const ProviderAdapterContextRewindRefusal = Schema.Literals([
   "no_active_turn",
   "background_work",
   "already_pending",
+  "message_pending",
   "nothing_to_remove",
   "too_small",
   "cut_not_found",
+  "split_tool_call",
+  "compacted",
 ]);
 export type ProviderAdapterContextRewindRefusal = typeof ProviderAdapterContextRewindRefusal.Type;
+
+/** What the agent is told when a rewind is refused; every refusal leaves the conversation unchanged. */
+export function contextRewindRefusalMessage(reason: ProviderAdapterContextRewindRefusal): string {
+  switch (reason) {
+    case "no_active_turn":
+      return "Context rewind works only during your own running turn. Nothing was removed.";
+    case "background_work":
+      return "Background work is still running, and rewinding would stop it. Nothing was removed; wait for it to finish first.";
+    case "already_pending":
+      return "A context rewind is already pending for this turn. End your turn now.";
+    case "message_pending":
+      return "A message sent during this turn has not reached you yet, and a rewind now would drop it. Nothing was removed; carry on.";
+    case "nothing_to_remove":
+      return "There are no tool calls since the last message to remove. Nothing was removed.";
+    case "too_small":
+      return "The tool results this would remove are too small to be worth a rewind, which costs more than it saves. Nothing was removed; carry on with the task.";
+    case "cut_not_found":
+      return "The rewind point could not be found in the conversation transcript. Nothing was removed.";
+    case "split_tool_call":
+      return "That rewind would separate a kept tool call from its result. Nothing was removed; try again without tool_calls.";
+    case "compacted":
+      return "Your context was compacted after those tool calls, so they can no longer be removed. Nothing was removed.";
+  }
+}
 
 /** The adapter left the conversation unchanged; `reason` says why. */
 export class ProviderAdapterContextRewindRefusedError extends Schema.TaggedError<ProviderAdapterContextRewindRefusedError>()(
@@ -417,20 +444,7 @@ export class ProviderAdapterContextRewindRefusedError extends Schema.TaggedError
   },
 ) {
   override get message(): string {
-    switch (this.reason) {
-      case "no_active_turn":
-        return "Context rewind works only during your own running turn. Nothing was removed.";
-      case "background_work":
-        return "Background work is still running, and rewinding would stop it. Nothing was removed; wait for it to finish first.";
-      case "already_pending":
-        return "A context rewind is already pending for this turn. End your turn now.";
-      case "nothing_to_remove":
-        return "There are no tool calls since the last message to remove. Nothing was removed.";
-      case "too_small":
-        return "The tool results this would remove are too small to be worth a rewind, which costs more than it saves. Nothing was removed; carry on with the task.";
-      case "cut_not_found":
-        return "The rewind point could not be found in the conversation transcript. Nothing was removed.";
-    }
+    return contextRewindRefusalMessage(this.reason);
   }
 }
 

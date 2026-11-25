@@ -360,48 +360,54 @@ describe("ClaudeAdapterV2 native resume history", () => {
   });
 });
 
+const transcriptLine = (
+  uuid: string,
+  parentUuid: string | null,
+  type: string,
+  content?: unknown,
+  messageId?: string,
+  extra?: Record<string, unknown>,
+) =>
+  JSON.stringify({
+    uuid,
+    parentUuid,
+    type,
+    ...extra,
+    ...(content === undefined
+      ? {}
+      : { message: { ...(messageId === undefined ? {} : { id: messageId }), content } }),
+  });
+const toolUse = (id: string, name: string) => [{ type: "tool_use", id, name, input: {} }];
+const toolResult = (id: string, chars: number) => [
+  { type: "tool_result", tool_use_id: id, content: "x".repeat(chars) },
+];
+
 // A turn that read a large file, ran one more lookup and called context_rewind, preceded by an
 // earlier turn and an abandoned branch from a previous rewind.
-function contextRewindTranscript(options?: { readonly lastResultChars?: number }) {
-  const line = (
-    uuid: string,
-    parentUuid: string | null,
-    type: string,
-    content?: unknown,
-    messageId?: string,
-  ) =>
-    JSON.stringify({
-      uuid,
-      parentUuid,
-      type,
-      ...(content === undefined
-        ? {}
-        : { message: { ...(messageId === undefined ? {} : { id: messageId }), content } }),
-    });
-  const toolUse = (id: string, name: string) => [{ type: "tool_use", id, name, input: {} }];
-  const toolResult = (id: string, chars: number) => [
-    { type: "tool_result", tool_use_id: id, content: "x".repeat(chars) },
-  ];
+function contextRewindTranscript(options?: {
+  readonly promptUuid?: string;
+  readonly lastResultChars?: number;
+}) {
+  const prompt = options?.promptUuid ?? "prompt";
   return [
-    line("earlier-prompt", null, "user", "Set up the repo"),
-    line("earlier-call", "earlier-prompt", "assistant", toolUse("t0", "Bash"), "msg_0"),
-    line("earlier-result", "earlier-call", "user", toolResult("t0", 30_000)),
-    line("earlier-reply", "earlier-result", "assistant", "Done.", "msg_0b"),
-    line("prompt", "earlier-reply", "user", "Find the checkout tickets"),
-    line("abandoned", "prompt", "assistant", toolUse("old", "Read"), "msg_old"),
-    line("attachment", "prompt", "attachment"),
-    line(
-      "thinking",
-      "attachment",
-      "assistant",
-      [{ type: "thinking", thinking: "Read it" }],
-      "msg_1",
+    transcriptLine("earlier-prompt", null, "user", "Set up the repo"),
+    transcriptLine("earlier-call", "earlier-prompt", "assistant", toolUse("t0", "Bash"), "msg_0"),
+    transcriptLine("earlier-result", "earlier-call", "user", toolResult("t0", 80_000)),
+    transcriptLine("earlier-reply", "earlier-result", "assistant", "Done.", "msg_0b"),
+    transcriptLine(prompt, "earlier-reply", "user", "Find the checkout tickets"),
+    transcriptLine("abandoned", prompt, "assistant", toolUse("old", "Read"), "msg_old"),
+    transcriptLine("attachment", prompt, "attachment"),
+    transcriptLine("thinking", "attachment", "assistant", [{ type: "thinking" }], "msg_1"),
+    transcriptLine("read", "thinking", "assistant", toolUse("t1", "Read"), "msg_1"),
+    transcriptLine("read-result", "read", "user", toolResult("t1", 70_000)),
+    transcriptLine("grep", "read-result", "assistant", toolUse("t2", "Grep"), "msg_2"),
+    transcriptLine(
+      "grep-result",
+      "grep",
+      "user",
+      toolResult("t2", options?.lastResultChars ?? 100),
     ),
-    line("read", "thinking", "assistant", toolUse("t1", "Read"), "msg_1"),
-    line("read-result", "read", "user", toolResult("t1", 25_000)),
-    line("grep", "read-result", "assistant", toolUse("t2", "Grep"), "msg_2"),
-    line("grep-result", "grep", "user", toolResult("t2", options?.lastResultChars ?? 100)),
-    line(
+    transcriptLine(
       "rewind",
       "grep-result",
       "assistant",
@@ -412,38 +418,113 @@ function contextRewindTranscript(options?: { readonly lastResultChars?: number }
 }
 
 describe("ClaudeAdapterV2 context rewind cut", () => {
+  const cut = (lines: ReadonlyArray<string>, toolCalls?: number) =>
+    ClaudeAdapterV2.claudeContextRewindCut(lines, { promptUuid: "prompt", toolCalls });
+
   it("removes every call since the prompt and the rest of the first call's API message", () => {
-    assert.deepEqual(ClaudeAdapterV2.claudeContextRewindCut(contextRewindTranscript(), undefined), {
+    assert.deepEqual(cut(contextRewindTranscript()), {
       cutUuid: "attachment",
       removedToolCalls: 2,
     });
   });
 
-  it("never cuts past the last prompt when asked for more calls than it has", () => {
-    assert.deepEqual(ClaudeAdapterV2.claudeContextRewindCut(contextRewindTranscript(), 5), {
+  it("never cuts past the active turn's prompt when asked for more calls than it has", () => {
+    assert.deepEqual(cut(contextRewindTranscript(), 5), {
       cutUuid: "attachment",
       removedToolCalls: 2,
     });
+  });
+
+  it("keeps a later user message, even one whose text looks like an interruption marker", () => {
+    const lines = contextRewindTranscript({ lastResultChars: 70_000 });
+    // A steer that arrived after the read, written as the user typed it.
+    lines.splice(
+      10,
+      0,
+      transcriptLine(
+        "steer",
+        "read-result",
+        "user",
+        "[Request interrupted] no, also check SUP-1163",
+      ),
+    );
+    lines[11] = transcriptLine("grep", "steer", "assistant", toolUse("t2", "Grep"), "msg_2");
+    assert.deepEqual(cut(lines), { cutUuid: "steer", removedToolCalls: 1 });
+  });
+
+  it("refuses when the prompt is not on the chain or a parent is missing", () => {
+    assert.deepEqual(
+      ClaudeAdapterV2.claudeContextRewindCut(contextRewindTranscript(), { promptUuid: "other" }),
+      { refused: "cut_not_found" },
+    );
+    const broken = contextRewindTranscript().filter((line) => !line.includes('"uuid":"thinking"'));
+    assert.deepEqual(cut(broken), { refused: "cut_not_found" });
   });
 
   it.each([
     [CONTEXT_REWIND_MIN_REMOVED_CHARS - 1, { refused: "too_small" }],
     [CONTEXT_REWIND_MIN_REMOVED_CHARS, { cutUuid: "read-result", removedToolCalls: 1 }],
-  ])("measures only the removed results against the minimum (%d characters)", (chars, cut) => {
-    assert.deepEqual(
-      ClaudeAdapterV2.claudeContextRewindCut(
-        contextRewindTranscript({ lastResultChars: chars }),
-        1,
-      ),
-      cut,
-    );
+  ])("measures only the removed results against the minimum (%d characters)", (chars, expected) => {
+    assert.deepEqual(cut(contextRewindTranscript({ lastResultChars: chars }), 1), expected);
   });
 
   it("refuses when no call follows the last prompt", () => {
-    const lines = contextRewindTranscript().slice(0, 7);
-    assert.deepEqual(ClaudeAdapterV2.claudeContextRewindCut(lines, undefined), {
-      refused: "nothing_to_remove",
-    });
+    assert.deepEqual(cut(contextRewindTranscript().slice(0, 7)), { refused: "nothing_to_remove" });
+  });
+
+  it("removes a whole API message whose calls an attachment separates", () => {
+    const lines = [
+      transcriptLine("prompt", null, "user", "Look both up"),
+      transcriptLine("first", "prompt", "assistant", toolUse("a", "Read"), "msg_1"),
+      transcriptLine("between", "first", "attachment"),
+      transcriptLine("second", "between", "assistant", toolUse("b", "Read"), "msg_1"),
+      transcriptLine("results", "second", "user", [
+        ...toolResult("a", 40_000),
+        ...toolResult("b", 40_000),
+      ]),
+    ];
+    assert.deepEqual(cut(lines, 1), { cutUuid: "prompt", removedToolCalls: 2 });
+  });
+
+  it("refuses a cut that would keep a call whose result it removes", () => {
+    const lines = [
+      transcriptLine("prompt", null, "user", "Look both up"),
+      transcriptLine("first", "prompt", "assistant", toolUse("a", "Read"), "msg_1"),
+      transcriptLine("second", "first", "assistant", toolUse("b", "Read"), "msg_2"),
+      transcriptLine("results", "second", "user", [
+        ...toolResult("a", 40_000),
+        ...toolResult("b", 70_000),
+      ]),
+    ];
+    assert.deepEqual(cut(lines, 1), { refused: "split_tool_call" });
+  });
+
+  it("refuses when a compaction lies in the removed range", () => {
+    const lines = contextRewindTranscript({ lastResultChars: 70_000 });
+    lines.splice(
+      10,
+      0,
+      transcriptLine("compacted", "read-result", "system", undefined, undefined, {
+        subtype: "compact_boundary",
+      }),
+    );
+    lines[11] = transcriptLine("grep", "compacted", "assistant", toolUse("t2", "Grep"), "msg_2");
+    assert.deepEqual(cut(lines), { refused: "compacted" });
+  });
+
+  it("counts the results of parallel calls, which hang off their own call", () => {
+    const lines = [
+      transcriptLine("prompt", null, "user", "Read both halves"),
+      transcriptLine("a", "prompt", "assistant", toolUse("ta", "Read"), "msg_1"),
+      transcriptLine("b", "a", "assistant", toolUse("tb", "Read"), "msg_1"),
+      transcriptLine("a-result", "a", "user", toolResult("ta", 35_000)),
+      transcriptLine("b-result", "b", "user", toolResult("tb", 35_000)),
+      transcriptLine("next", "b-result", "assistant", toolUse("tc", "Grep"), "msg_2"),
+      transcriptLine("next-result", "next", "user", toolResult("tc", 100)),
+    ];
+    assert.deepEqual(cut(lines), { cutUuid: "prompt", removedToolCalls: 3 });
+    // Keeping the parallel pair keeps both results, though one is off the main chain.
+    assert.deepEqual(cut(lines, 1), { refused: "too_small" });
   });
 });
 
@@ -9206,6 +9287,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     );
     const contentText = (message: SDKUserMessage | undefined) =>
       JSON.stringify(message?.message.content ?? "");
+    const isRefused = Schema.is(ProviderAdapter.ProviderAdapterContextRewindRefusedError);
+    const reasonOf = (error: unknown) => (isRefused(error) ? error.reason : error);
 
     const makeRewindHarness = Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -9216,7 +9299,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       const projectDir = path.join(configDir, "projects", "-workspace");
       yield* fileSystem.makeDirectory(projectDir, { recursive: true });
       const transcriptPath = path.join(projectDir, `${WAKE_NATIVE_SESSION}.jsonl`);
-      yield* fileSystem.writeFileString(transcriptPath, contextRewindTranscript().join("\n"));
       const harness = yield* makeWakeHarnessWithOptions({
         close: (sdkMessages) => Queue.shutdown(sdkMessages),
         freshQueueOnReopen: true,
@@ -9238,6 +9320,16 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           providerTurnOrdinal: ordinal,
           nativeThreadHasTurns: ordinal > 1,
         });
+      // The transcript names the prompt Claude stored for this turn, under the uuid T3 sent.
+      const start = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+        Effect.gen(function* () {
+          yield* harness.runtime.startTurn(input);
+          const promptUuid = harness.offeredMessages.at(-1)?.uuid;
+          yield* fileSystem.writeFileString(
+            transcriptPath,
+            contextRewindTranscript({ promptUuid: promptUuid ?? "missing" }).join("\n"),
+          );
+        });
       const continuation = (ordinal: number, messageId: MessageId) => {
         const base = turn(ordinal);
         return {
@@ -9246,18 +9338,19 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             ...base.message,
             messageId,
             origin: CONTEXT_REWIND_ORIGIN,
-            text: "<context-rewind>Your last 2 tool calls were removed.</context-rewind>",
+            text: "Context rewind: summary of 2 tool calls\n\nSUP-1047 belongs to Imani Okafor.",
             createdBy: "agent" as const,
             creationSource: "server" as const,
           },
         };
       };
-      const rewind = (toolCalls?: number) =>
-        rewindContext({
-          providerThread: harness.providerThread,
-          ...(toolCalls === undefined ? {} : { toolCalls }),
-          deliver: (plan) => Effect.sync(() => void delivered.push(plan)),
-        });
+      const rewindWith = (
+        deliver: (plan: {
+          readonly removedToolCalls: number;
+          readonly continuationMessageId: MessageId;
+        }) => Effect.Effect<void, ProviderAdapter.ProviderAdapterContextRewindDeliveryError>,
+      ) => rewindContext({ providerThread: harness.providerThread, deliver });
+      const rewind = () => rewindWith((plan) => Effect.sync(() => void delivered.push(plan)));
       const providerTurnId = (ordinal: number) =>
         IdAllocator.IdAllocatorV2.pipe(
           Effect.map((ids) =>
@@ -9267,6 +9360,17 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             }),
           ),
         );
+      const steer = (ordinal: number, messageId: string) =>
+        Effect.gen(function* () {
+          const input = turn(ordinal);
+          return yield* harness.runtime.steerTurn({
+            threadId: harness.threadId,
+            runId: input.runId,
+            providerThread: harness.providerThread,
+            providerTurnId: yield* providerTurnId(ordinal),
+            message: { ...input.message, messageId: MessageId.make(messageId) },
+          });
+        });
       const endTurn = (uuid: string) =>
         Effect.gen(function* () {
           yield* harness.offerAndWait(makeResultFrame({ uuid, result: "" }));
@@ -9278,9 +9382,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         transcriptPath,
         delivered,
         turn,
+        start,
         continuation,
         rewind,
-        providerTurnId,
+        rewindWith,
+        steer,
         endTurn,
       };
     });
@@ -9290,7 +9396,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       () =>
         Effect.gen(function* () {
           const rewind = yield* makeRewindHarness;
-          yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+          yield* rewind.start(rewind.turn(1));
           const result = yield* rewind.rewind();
           assert.equal(result.removedToolCalls, 2);
           const [plan] = rewind.delivered;
@@ -9308,19 +9414,18 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
           assert.equal(rewind.harness.processQueues.length, 2);
           assert.equal(rewind.harness.getOpenedOptions()?.resumeSessionAt, "attachment");
-          assert.notInclude(
-            contentText(rewind.harness.offeredMessages.at(-1)),
-            "did not take effect",
-          );
+          const prompt = contentText(rewind.harness.offeredMessages.at(-1));
+          assert.include(prompt, "Your last 2 tool calls and their results were removed");
+          assert.include(prompt, "SUP-1047 belongs to Imani Okafor.");
         }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
     );
 
     it.effect(
-      "drops the rewind when another turn runs first, and says so to the continuation",
+      "drops the rewind when another turn runs first, and tells the continuation its context is intact",
       () =>
         Effect.gen(function* () {
           const rewind = yield* makeRewindHarness;
-          yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+          yield* rewind.start(rewind.turn(1));
           yield* rewind.rewind();
           yield* rewind.endTurn("00000000-0000-4000-8000-000000038002");
           yield* rewind.harness.runtime.startTurn(rewind.turn(2));
@@ -9331,26 +9436,47 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
           assert.equal(rewind.harness.processQueues.length, 1);
           assert.isUndefined(rewind.harness.getOpenedOptions()?.resumeSessionAt);
-          assert.include(contentText(rewind.harness.offeredMessages.at(-1)), "did not take effect");
+          const prompt = contentText(rewind.harness.offeredMessages.at(-1));
+          assert.include(prompt, "did not take effect");
+          assert.notInclude(prompt, "were removed from your context");
         }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
     );
 
-    it.effect("declines a steer while the rewind is pending, so it queues instead", () =>
+    it.effect(
+      "declines steers and a second rewind once a rewind is reserved, before it is queued",
+      () =>
+        Effect.gen(function* () {
+          const rewind = yield* makeRewindHarness;
+          yield* rewind.start(rewind.turn(1));
+          const delivering = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const first = yield* rewind
+            .rewindWith(() =>
+              Deferred.succeed(delivering, undefined).pipe(Effect.andThen(Deferred.await(release))),
+            )
+            .pipe(Effect.forkScoped);
+          yield* Deferred.await(delivering);
+          assert.equal(
+            (yield* Effect.flip(rewind.steer(1, "message-steer")))._tag,
+            "ProviderAdapterSteerDeclinedError",
+          );
+          assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "already_pending");
+          yield* Deferred.succeed(release, undefined);
+          assert.equal((yield* Fiber.join(first)).removedToolCalls, 2);
+          assert.equal(
+            (yield* Effect.flip(rewind.steer(1, "message-steer-after")))._tag,
+            "ProviderAdapterSteerDeclinedError",
+          );
+        }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect("refuses while a steer has not reached Claude yet, so the steer is not cut", () =>
       Effect.gen(function* () {
         const rewind = yield* makeRewindHarness;
-        const first = rewind.turn(1);
-        yield* rewind.harness.runtime.startTurn(first);
-        yield* rewind.rewind();
-        const steered = yield* Effect.flip(
-          rewind.harness.runtime.steerTurn({
-            threadId: rewind.harness.threadId,
-            runId: first.runId,
-            providerThread: rewind.harness.providerThread,
-            providerTurnId: yield* rewind.providerTurnId(1),
-            message: { ...first.message, messageId: MessageId.make("message-steer") },
-          }),
-        );
-        assert.equal(steered._tag, "ProviderAdapterSteerDeclinedError");
+        yield* rewind.start(rewind.turn(1));
+        yield* rewind.steer(1, "message-steer");
+        assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "message_pending");
+        assert.lengthOf(rewind.delivered, 0);
       }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
     );
 
@@ -9358,40 +9484,84 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       "refuses without a running turn, twice in one turn, and while background work runs",
       () =>
         Effect.gen(function* () {
-          const isRefused = Schema.is(ProviderAdapter.ProviderAdapterContextRewindRefusedError);
-          const reasonOf = (error: unknown) => (isRefused(error) ? error.reason : error);
           const rewind = yield* makeRewindHarness;
           assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "no_active_turn");
 
-          yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+          yield* rewind.start(rewind.turn(1));
           yield* rewind.rewind();
           assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "already_pending");
           assert.lengthOf(rewind.delivered, 1);
           yield* rewind.endTurn("00000000-0000-4000-8000-000000038004");
 
-          yield* rewind.harness.runtime.startTurn(rewind.turn(2));
+          yield* rewind.start(rewind.turn(2));
           yield* rewind.harness.offerAndWait(wakeTaskStarted);
           assert.equal(reasonOf(yield* Effect.flip(rewind.rewind())), "background_work");
           assert.lengthOf(rewind.delivered, 1);
         }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
     );
 
-    it.effect("records nothing when the continuation cannot be queued", () =>
+    it.effect("releases the reservation when the continuation cannot be queued", () =>
       Effect.gen(function* () {
         const rewind = yield* makeRewindHarness;
-        yield* rewind.harness.runtime.startTurn(rewind.turn(1));
+        yield* rewind.start(rewind.turn(1));
         const failed = yield* Effect.flip(
-          rewind.harness.runtime.rewindContext!({
-            providerThread: rewind.harness.providerThread,
-            deliver: () =>
-              Effect.fail(
-                new ProviderAdapter.ProviderAdapterContextRewindDeliveryError({ cause: "full" }),
-              ),
-          }),
+          rewind.rewindWith(() =>
+            Effect.fail(
+              new ProviderAdapter.ProviderAdapterContextRewindDeliveryError({ cause: "full" }),
+            ),
+          ),
         );
         assert.equal(failed._tag, "ProviderAdapterContextRewindDeliveryError");
-        // Nothing pending, so a retry in the same turn is not refused as a duplicate.
-        assert.equal((yield* rewind.rewind()).removedToolCalls, 2);
+        // Nothing reserved, so a steer reaches Claude and a retry is not refused as a duplicate.
+        yield* rewind.steer(1, "message-steer");
+        assert.lengthOf(rewind.harness.offeredMessages, 2);
+      }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
+    );
+
+    it.effect("records a context_rewind result that ends the turn as the turn's cursor", () =>
+      Effect.gen(function* () {
+        const rewind = yield* makeRewindHarness;
+        yield* rewind.start(rewind.turn(1));
+        yield* rewind.harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            uuid: "00000000-0000-4000-8000-000000038010",
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: {
+              id: "msg_rewind",
+              type: "message",
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              content: toolUse("toolu_rewind", "mcp__t3-code__context_rewind"),
+              stop_reason: "tool_use",
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          }),
+        );
+        yield* rewind.harness.offerAndWait(
+          claudeSdkFrame({
+            type: "user",
+            uuid: "00000000-0000-4000-8000-000000038011",
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: {
+              role: "user",
+              content: [{ type: "tool_result", tool_use_id: "toolu_rewind", content: "ok" }],
+            },
+          }),
+        );
+        yield* rewind.endTurn("00000000-0000-4000-8000-000000038012");
+        const lastTurn = rewind.harness.events.findLast(
+          (event) => event.type === "provider_turn.updated",
+        );
+        assert.equal(
+          lastTurn?.type === "provider_turn.updated"
+            ? lastTurn.providerTurn.nativeTurnRef?.nativeId
+            : undefined,
+          "00000000-0000-4000-8000-000000038011",
+        );
       }).pipe(Effect.scoped, Effect.provide(rewindLayer)),
     );
   });

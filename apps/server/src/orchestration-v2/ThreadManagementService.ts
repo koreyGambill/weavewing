@@ -65,7 +65,9 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import {
+  contextRewindRefusalMessage,
   ProviderAdapterContextRewindDeliveryError,
+  ProviderAdapterContextRewindRefusal,
   ProviderAdapterContextRewindRefusedError,
 } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -403,11 +405,15 @@ const isProviderAdapterContextRewindRefusedError = Schema.is(
   ProviderAdapterContextRewindRefusedError,
 );
 
+/** `reason` is the service's own outcome or, for a refusal, the adapter's typed reason. */
 export class ThreadManagementContextRewindError extends Schema.TaggedError<ThreadManagementContextRewindError>()(
   "ThreadManagementContextRewindError",
   {
     threadId: ThreadId,
-    reason: Schema.Literals(["unsupported", "unavailable", "refused", "failed"]),
+    reason: Schema.Union([
+      Schema.Literals(["unsupported", "unavailable", "failed"]),
+      ProviderAdapterContextRewindRefusal,
+    ]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -417,12 +423,10 @@ export class ThreadManagementContextRewindError extends Schema.TaggedError<Threa
         return "Context rewind is not available on this thread: its provider cannot rewind, or the setting is off. Nothing was removed.";
       case "unavailable":
         return "This thread has no running turn to rewind. Nothing was removed.";
-      case "refused":
-        return isProviderAdapterContextRewindRefusedError(this.cause)
-          ? this.cause.message
-          : "The provider refused the rewind. Nothing was removed.";
       case "failed":
         return "The rewind failed. Nothing was removed; carry on with the task.";
+      default:
+        return contextRewindRefusalMessage(this.reason);
     }
   }
 }
@@ -1834,7 +1838,7 @@ const make = Effect.gen(function* () {
       .pipe(
         Effect.mapError((cause) =>
           isProviderAdapterContextRewindRefusedError(cause)
-            ? fail("refused", cause)
+            ? fail(cause.reason, cause)
             : fail("failed", cause),
         ),
       );

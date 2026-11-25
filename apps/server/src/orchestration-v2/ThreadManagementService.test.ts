@@ -878,7 +878,7 @@ it.effect.each(["live", "unsupported-runtime", "refused"] as const)(
         expect(result).toMatchObject({
           failure: {
             _tag: "ThreadManagementContextRewindError",
-            reason: state === "refused" ? "refused" : "unsupported",
+            reason: state === "refused" ? "too_small" : "unsupported",
           },
         });
         if (result._tag === "Failure" && state === "refused") {
