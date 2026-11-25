@@ -8,6 +8,7 @@ import {
   homeOf,
   shortenPath,
   splitPath,
+  usedContextSources,
 } from "./defaultContext.logic";
 
 const item = (overrides: Partial<DefaultContextItem>): DefaultContextItem => ({
@@ -119,5 +120,59 @@ describe("paths", () => {
       directory: "~/.config/wing/",
       name: "AGENT_BOOTSTRAP.md",
     });
+  });
+});
+
+describe("usedContextSources", () => {
+  const items = [
+    item({ label: "t3 part", category: "t3", estimatedTokens: 2_000 }),
+    item({ label: "/home/me/.claude/CLAUDE.md", category: "files", estimatedTokens: 8_500 }),
+    item({ label: "/home/me/repo/AGENTS.md", category: "files", estimatedTokens: 9_000 }),
+    item({ label: "/home/me/repo/docs/x.md", category: "files", estimatedTokens: 700 }),
+    item({ label: "skill", category: "skills", estimatedTokens: 4_400 }),
+    item({ label: "deferred", category: "tools", estimatedTokens: 5_000, counted: false }),
+  ];
+  const withCwd = (firstTurn: DefaultContextPreview["firstTurn"]) => ({
+    ...preview(items),
+    cwd: "/home/me/repo",
+    firstTurn,
+  });
+
+  it("splits instruction files by folder and infers the harness from the first prompt", () => {
+    const result = usedContextSources(
+      withCwd({ promptTokens: 70_000, reportedAt: "2026-11-25T00:00:00.000Z" }),
+      163_000,
+    );
+    expect(result?.sources.map((source) => [source.key, source.tokens])).toEqual([
+      ["conversation", 93_000],
+      ["harness", 45_400],
+      ["repository-files", 9_700],
+      ["global-files", 8_500],
+      ["skills", 4_400],
+      ["t3", 2_000],
+    ]);
+    expect(result?.sources[2]?.items.map((entry) => entry.label)).toEqual([
+      "/home/me/repo/AGENTS.md",
+      "/home/me/repo/docs/x.md",
+    ]);
+  });
+
+  it("folds the conversation into one remainder without a first-turn report", () => {
+    const result = usedContextSources(withCwd(null), 70_000);
+    expect(result?.sources.at(0)).toMatchObject({ key: "rest", tokens: 45_400 });
+    expect(result?.sources.some((source) => source.key === "harness")).toBe(false);
+  });
+
+  it("never reports negative remainders when estimates exceed the report", () => {
+    const result = usedContextSources(
+      withCwd({ promptTokens: 10_000, reportedAt: "2026-11-25T00:00:00.000Z" }),
+      5_000,
+    );
+    const derived = result?.sources.filter((source) => source.items.length === 0);
+    expect(derived?.map((source) => source.tokens)).toEqual([0, 0]);
+  });
+
+  it("returns null when the provider's default context is unsupported", () => {
+    expect(usedContextSources({ ...preview(items), support: "unsupported" }, 1)).toBeNull();
   });
 });

@@ -33,7 +33,7 @@ import * as ServerConfig from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import { SkillSources } from "../agentContext/SkillSources.ts";
-import { DefaultContext, layer as defaultContextLayer } from "./DefaultContext.ts";
+import { DefaultContext, firstTurnPrompt, layer as defaultContextLayer } from "./DefaultContext.ts";
 import { t3ContextParts } from "./defaultContextParts.ts";
 import { InstructionFootprints } from "./InstructionFootprints.ts";
 import {
@@ -628,6 +628,38 @@ it.effect("serves file text only for readable ids, and honours the instance's Co
     expect(refused.message).toBe("This item has no readable text.");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it("takes the baseline from the earliest reported prompt of a fresh provider thread only", () => {
+  const instance = ProviderInstanceId.make("claude");
+  const fresh = { providerInstanceId: instance, forkedFrom: null, handoffIds: [] };
+  const usage = (inputTokens: number | undefined, updatedAt: string) => ({
+    usedTokens: 1,
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    updatedAt,
+  });
+  const turns = [
+    { ordinal: 3, tokenUsage: usage(90_000, "c") },
+    { ordinal: 1, tokenUsage: usage(undefined, "a") },
+    { ordinal: 2, tokenUsage: usage(68_000, "b") },
+  ];
+  expect(firstTurnPrompt(fresh, turns, instance)).toEqual({
+    promptTokens: 68_000,
+    reportedAt: "b",
+  });
+  expect(firstTurnPrompt(fresh, [], instance)).toBeNull();
+  expect(firstTurnPrompt(undefined, turns, instance)).toBeNull();
+  expect(firstTurnPrompt(fresh, turns, ProviderInstanceId.make("codex"))).toBeNull();
+  expect(
+    firstTurnPrompt({ ...fresh, handoffIds: ["handoff" as never] }, turns, instance),
+  ).toBeNull();
+  expect(
+    firstTurnPrompt(
+      { ...fresh, forkedFrom: { providerThreadId: "parent" as never } },
+      turns,
+      instance,
+    ),
+  ).toBeNull();
+});
 
 it.effect("previews a draft from its project folder and rejects folders outside it", () =>
   Effect.gen(function* () {

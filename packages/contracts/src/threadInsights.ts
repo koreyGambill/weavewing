@@ -189,6 +189,13 @@ export const DefaultContextPreview = Schema.Struct({
       injectedBytes: NonNegativeInt,
     }),
   ),
+  /**
+   * The prompt size the provider reported for the first turn on the thread's current provider
+   * thread: what loaded before the conversation, plus the first message and whatever that turn read.
+   */
+  firstTurn: Schema.optional(
+    Schema.NullOr(Schema.Struct({ promptTokens: NonNegativeInt, reportedAt: Schema.String })),
+  ),
   estimateMethod: Schema.String,
 });
 export type DefaultContextPreview = typeof DefaultContextPreview.Type;
