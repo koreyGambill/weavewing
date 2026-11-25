@@ -207,7 +207,11 @@ export const ThreadQuestionAskInput = Schema.Struct({
           }),
         ),
       ),
-      recommendedOptionIds: Schema.optional(ArtifactQuestion.fields.recommendedOptionIds),
+      recommendedOptionIds: Schema.optional(
+        ArtifactQuestion.fields.recommendedOptionIds.annotate({
+          description: "Your pick; the user sees a badge, so keep labels plain.",
+        }),
+      ),
       multiSelect: Schema.optional(ArtifactQuestion.fields.multiSelect),
       replaces: Schema.optional(TrimmedNonEmptyString),
     }),
