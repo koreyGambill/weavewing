@@ -26,26 +26,60 @@ export function checkLabel(check: {
   return check.result === "skipped" && check.reason ? `${base}: ${check.reason}` : base;
 }
 
+/** The linked thread as this client knows it, or null when it is not in the client's thread list. */
+export interface ReviewLinkTarget {
+  readonly delegateRole?: string | undefined;
+  readonly archivedAt: string | null;
+  readonly deletedAt: string | null;
+}
+
+export type ReviewLink =
+  | {
+      readonly kind: "reviewer" | "linked";
+      readonly label: string;
+      readonly threadId: NonNullable<EvidenceChange["review"]["threadId"]>;
+    }
+  | { readonly kind: "unavailable"; readonly label: string; readonly description: string };
+
+const UNAVAILABLE_LINK: ReviewLink = {
+  kind: "unavailable",
+  label: "Linked thread unavailable",
+  description:
+    "This thread can't be opened from here: it is deleted, archived, in another environment, or an idle delegate this window has not loaded.",
+};
+
 /**
  * How a change's review reads. Nothing checks a reviewer's verdict yet, so every claim reads as
- * the agent's unverified word, with a link to the reviewer thread it named.
+ * the agent's unverified word. A linked thread is called the reviewer only when this client knows
+ * it as a review delegate, since older records could link any thread.
  */
-export function reviewDisplay(review: EvidenceChange["review"]): {
+export function reviewDisplay(
+  review: EvidenceChange["review"],
+  target: ReviewLinkTarget | null,
+): {
   readonly label: string;
   readonly hint: string | null;
-  readonly threadId: EvidenceChange["review"]["threadId"] | null;
+  readonly link: ReviewLink | null;
 } {
   if (review.verdict === "waived")
     return {
       label: review.reason ? `review waived: ${review.reason}` : "review waived",
       hint: null,
-      threadId: null,
+      link: null,
     };
   const claim = CLAIMS[review.verdict];
+  const threadId = review.threadId;
   return {
     label: `Unverified review · agent reported ${claim}`,
     hint: `Reported ${claim}${review.by ? ` by ${review.by}` : ""}. Reviewer verdicts are not checked yet.`,
-    threadId: review.threadId ?? null,
+    link:
+      threadId === undefined
+        ? null
+        : target === null || target.archivedAt !== null || target.deletedAt !== null
+          ? UNAVAILABLE_LINK
+          : target.delegateRole === "review"
+            ? { kind: "reviewer", label: "Reviewer", threadId }
+            : { kind: "linked", label: "Linked thread", threadId },
   };
 }
 

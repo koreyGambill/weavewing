@@ -514,7 +514,13 @@ function ChangeRow({
   });
   const long = change.ask.length > 90 || change.ask.includes("\n") || change.summary.length > 0;
   const key = change.ticket?.key ?? change.id;
-  const review = reviewDisplay(change.review);
+  const reviewTarget = useThreadShell(
+    change.review.threadId === undefined
+      ? null
+      : scopeThreadRef(environmentId, change.review.threadId),
+  );
+  const review = reviewDisplay(change.review, reviewTarget);
+  const link = review.link;
   return (
     <div className="min-w-0 space-y-1.5 border-t border-border p-2">
       <div className="flex items-center gap-1">
@@ -590,21 +596,36 @@ function ChangeRow({
             <TooltipPopup side="top">{review.hint}</TooltipPopup>
           </Tooltip>
         )}
-        {review.threadId !== null ? (
+        {link === null ? null : link.kind === "unavailable" ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  tabIndex={0}
+                  aria-description={link.description}
+                  className="rounded-sm px-1.5 text-2xs text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                />
+              }
+            >
+              {link.label}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{link.description}</TooltipPopup>
+          </Tooltip>
+        ) : (
           <Button
             variant="link"
             size="micro"
             onClick={() =>
               void navigate({
                 to: "/$environmentId/$threadId",
-                params: { environmentId, threadId: review.threadId! },
+                params: { environmentId, threadId: link.threadId },
               })
             }
           >
             <ArrowUpRightIcon />
-            Reviewer
+            {link.label}
           </Button>
-        ) : null}
+        )}
         {change.commits.map((sha, index) => (
           <Button
             // oxlint-disable-next-line react/no-array-index-key -- Records may repeat a commit.
