@@ -693,6 +693,27 @@ export function cloneComposerImageForRetry(
   }
 }
 
+/**
+ * The composer's context chips that can make up a message on their own, such as an agent
+ * question's answer. The send button and the send itself both count them here, so a message
+ * the send would accept is never left with a disabled button.
+ */
+export function composerElementContextCount(draft: {
+  readonly previewAnnotations: ReadonlyArray<unknown>;
+  readonly reviewComments: ReadonlyArray<unknown>;
+  readonly threadContexts: ReadonlyArray<unknown>;
+  readonly environmentContexts: ReadonlyArray<unknown>;
+  readonly artifactAnswers: ReadonlyArray<unknown>;
+}): number {
+  return (
+    draft.previewAnnotations.length +
+    draft.reviewComments.length +
+    draft.threadContexts.length +
+    draft.environmentContexts.length +
+    draft.artifactAnswers.length
+  );
+}
+
 export function deriveComposerSendState(options: {
   prompt: string;
   imageCount: number;

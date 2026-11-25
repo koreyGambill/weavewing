@@ -6,6 +6,7 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   shouldDockDraftHeroForSubmission,
   buildExpiredTerminalContextToastCopy,
+  composerElementContextCount,
   deriveComposerSendState,
   boundAttachmentIds,
   formatOutgoingPrompt,
@@ -743,12 +744,13 @@ export function useComposerSend(input: ComposerSendInput) {
       prompt: promptForSend,
       imageCount: composerImages.length + composerFiles.length,
       terminalContexts: composerTerminalContexts,
-      elementContextCount:
-        composerPreviewAnnotations.length +
-        composerReviewComments.length +
-        composerThreadContexts.length +
-        composerEnvironmentContexts.length +
-        composerArtifactAnswers.length,
+      elementContextCount: composerElementContextCount({
+        previewAnnotations: composerPreviewAnnotations,
+        reviewComments: composerReviewComments,
+        threadContexts: composerThreadContexts,
+        environmentContexts: composerEnvironmentContexts,
+        artifactAnswers: composerArtifactAnswers,
+      }),
     });
     const feedbackCommand =
       ctxSelectedProvider === "codex" &&

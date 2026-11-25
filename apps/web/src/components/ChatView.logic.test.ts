@@ -69,6 +69,7 @@ import {
   timelineHasEphemeralPreviewUrls,
   createLocalDispatchSnapshot,
   deriveCommittedServerUserMessageIds,
+  composerElementContextCount,
   deriveComposerSendState,
   deriveLockedProvider,
   hasCompactableConversation,
@@ -126,6 +127,26 @@ const readySession = {
 };
 
 describe("deriveComposerSendState", () => {
+  it("sends a question's answer chip with no typed text", () => {
+    const empty = {
+      previewAnnotations: [],
+      reviewComments: [],
+      threadContexts: [],
+      environmentContexts: [],
+      artifactAnswers: [],
+    };
+    const state = (artifactAnswers: ReadonlyArray<unknown>) =>
+      deriveComposerSendState({
+        prompt:
+          "[Q5: Request timeout for src/client.ts?](t3-context://v1/artifact-answer/answer_q5)",
+        imageCount: 0,
+        terminalContexts: [],
+        elementContextCount: composerElementContextCount({ ...empty, artifactAnswers }),
+      });
+    expect(state([{}]).hasSendableContent).toBe(true);
+    expect(state([]).hasSendableContent).toBe(false);
+  });
+
   it("keeps text sendable while excluding expired terminal pills", () => {
     const state = deriveComposerSendState({
       prompt: `yoo [Terminal 1](t3-context://v1/terminal/ctx-expired) waddup`,

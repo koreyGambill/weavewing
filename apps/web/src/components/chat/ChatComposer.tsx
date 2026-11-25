@@ -87,7 +87,11 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { DEFAULT_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
-import { deriveComposerSendState, getAntigravitySendBlockReason } from "../ChatView.logic";
+import {
+  composerElementContextCount,
+  deriveComposerSendState,
+  getAntigravitySendBlockReason,
+} from "../ChatView.logic";
 import { threadHasStarted } from "../../lib/chatThreadActions";
 import {
   dataTransferHasComposerMention,
@@ -1122,11 +1126,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     imageCount: composerImages.length + composerFiles.length,
     existingAttachmentCount: editingQueuedAttachments?.length ?? 0,
     terminalContexts: composerTerminalContexts,
-    elementContextCount:
-      composerPreviewAnnotations.length +
-      composerReviewComments.length +
-      composerThreadContexts.length +
-      composerEnvironmentContexts.length,
+    elementContextCount: composerElementContextCount({
+      previewAnnotations: composerPreviewAnnotations,
+      reviewComments: composerReviewComments,
+      threadContexts: composerThreadContexts,
+      environmentContexts: composerEnvironmentContexts,
+      artifactAnswers: composerArtifactAnswers,
+    }),
   });
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const compactSlashCommandAvailable =
