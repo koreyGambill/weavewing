@@ -7,7 +7,6 @@ import {
   type ServerSettings,
   type ThreadMcpServer,
   type ThreadToolOverrides,
-  type ThreadToolOverridesReload,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
@@ -99,7 +98,7 @@ export function toolsLabel(
     onCount,
     offCount,
     text:
-      onCount === 0 && offCount === 0
+      offCount === 0
         ? "Tools all on"
         : onCount === 0
           ? `Tools ${offCount} off`
@@ -139,10 +138,9 @@ function sameToolOverrides(left: ThreadToolOverrides, right: ThreadToolOverrides
 }
 
 export type ToolsFooterState =
-  | { readonly kind: "reloading" }
   | { readonly kind: "running" }
   | { readonly kind: "background" }
-  | { readonly kind: "unchanged"; readonly lastReloadFailed: boolean }
+  | { readonly kind: "unchanged" }
   | {
       readonly kind: "changed";
       readonly onCount: number;
@@ -155,24 +153,23 @@ export function toolsFooterState(input: {
   readonly rows: ReadonlyArray<ToolRow>;
   readonly saved: ThreadToolOverrides;
   readonly staged: ThreadToolOverrides;
-  /** Connector names the inventory has found, so a partial selection is recognised. */
-  readonly connectorNames: ReadonlyArray<string>;
-  readonly reload: ThreadToolOverridesReload["status"] | undefined;
+  /** Connector names from the inventory; undefined while it is loading, failed or not allowed. */
+  readonly connectorNames: ReadonlyArray<string> | undefined;
   readonly turnRunning: boolean;
   readonly backgroundWork: boolean;
 }): ToolsFooterState {
-  if (input.reload === "pending") return { kind: "reloading" };
   if (input.turnRunning) return { kind: "running" };
   if (input.backgroundWork) return { kind: "background" };
-  if (sameToolOverrides(input.saved, input.staged)) {
-    return { kind: "unchanged", lastReloadFailed: input.reload === "failed" };
-  }
+  if (sameToolOverrides(input.saved, input.staged)) return { kind: "unchanged" };
   const on = input.rows.filter((row) => isRowOn(row, input.staged));
   const connectorsOn = input.staged.claudeAiConnectors;
-  // The connectors' estimate covers all of them; a partial selection has no honest sum.
+  // The connectors' estimate covers all of them; a partial selection has no honest sum, and
+  // without the names any left-out server might be a connector.
   const partialConnectors =
     connectorsOn &&
-    input.staged.omittedMcpServers.some((name) => input.connectorNames.includes(name));
+    input.staged.omittedMcpServers.some(
+      (name) => input.connectorNames === undefined || input.connectorNames.includes(name),
+    );
   return {
     kind: "changed",
     onCount: on.length + (connectorsOn ? 1 : 0),
@@ -228,14 +225,19 @@ export function mcpServerSections(input: {
 }): McpServerSections {
   const mode = connectorsMode(input.provider);
   const row = (server: ThreadMcpServer): McpServerRow => {
-    // Connectors load when the thread forces them on, or, left to Claude Code, when it loaded them.
+    // With the provider keeping connectors out, picking one turns the group on for it; left to
+    // Claude Code, only connectors that load (forced on, or loaded now) can be left out.
     const switchable =
-      !server.connector || input.staged.claudeAiConnectors || (mode === "inherit" && server.active);
+      !server.connector || mode === "switch" || input.staged.claudeAiConnectors || server.active;
     return {
       name: server.name,
       active: server.active,
       switchable,
-      on: switchable && !input.staged.omittedMcpServers.includes(server.name),
+      // Under the provider's Off, a connector is in the thread only with the group on.
+      on:
+        switchable &&
+        !input.staged.omittedMcpServers.includes(server.name) &&
+        (!server.connector || mode === "inherit" || input.staged.claudeAiConnectors),
     };
   };
   return {
@@ -244,11 +246,26 @@ export function mcpServerSections(input: {
   };
 }
 
+/**
+ * `groupConnectors` lists the connectors when the provider keeps them out: switching one on while
+ * the group is off turns the group on and leaves the other connectors out.
+ */
 export function withMcpServerSwitched(
   staged: ThreadToolOverrides,
   server: string,
   on: boolean,
+  groupConnectors: ReadonlyArray<string> = [],
 ): ThreadToolOverrides {
+  if (on && !staged.claudeAiConnectors && groupConnectors.includes(server)) {
+    return {
+      ...staged,
+      claudeAiConnectors: true,
+      omittedMcpServers: [
+        ...staged.omittedMcpServers.filter((name) => !groupConnectors.includes(name)),
+        ...groupConnectors.filter((name) => name !== server),
+      ],
+    };
+  }
   const rest = staged.omittedMcpServers.filter((name) => name !== server);
   return { ...staged, omittedMcpServers: on ? rest : [...rest, server] };
 }

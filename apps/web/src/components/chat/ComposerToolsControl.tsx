@@ -6,7 +6,6 @@ import {
   type ThreadId,
   type ProviderInstanceId,
   type ThreadToolOverrides,
-  type ThreadToolOverridesReload,
   type OrchestrationV2ListThreadMcpServersResult,
 } from "@t3tools/contracts";
 import {
@@ -50,7 +49,6 @@ export interface ComposerToolsThread {
   readonly id: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
   readonly toolOverrides?: ThreadToolOverrides | undefined;
-  readonly toolOverridesReload?: ThreadToolOverridesReload | undefined;
   readonly runtime: { readonly status: string } | null;
   readonly pendingBackgroundTasks: ReadonlyArray<unknown>;
 }
@@ -122,8 +120,6 @@ export function ComposerToolsControl({
     readonly threadId: ThreadId;
     readonly value: ThreadToolOverrides;
   } | null>(null);
-  // The request waits for the old session to end; keep showing it across a closed popover.
-  const [sendingThreadId, setSendingThreadId] = useState<ThreadId | null>(null);
   const saved = thread.toolOverrides ?? EMPTY_TOOL_OVERRIDES;
   const stagedValue = staged?.threadId === thread.id ? staged.value : saved;
   const label = toolsLabel(provider, thread.toolOverrides);
@@ -160,8 +156,6 @@ export function ComposerToolsControl({
             provider={provider}
             saved={saved}
             staged={stagedValue}
-            sending={sendingThreadId === thread.id}
-            onSending={(sending) => setSendingThreadId(sending ? thread.id : null)}
             onStage={(value) => setStaged({ threadId: thread.id, value })}
             onApplied={() => {
               setStaged(null);
@@ -180,8 +174,6 @@ function ToolsPopoverContent({
   provider,
   saved,
   staged,
-  sending,
-  onSending,
   onStage,
   onApplied,
 }: {
@@ -190,8 +182,6 @@ function ToolsPopoverContent({
   provider: Pick<ClaudeSettings, "omittedBuiltinTools" | "claudeAiConnectors">;
   saved: ThreadToolOverrides;
   staged: ThreadToolOverrides;
-  sending: boolean;
-  onSending: (sending: boolean) => void;
   onStage: (value: ThreadToolOverrides) => void;
   onApplied: () => void;
 }) {
@@ -219,27 +209,31 @@ function ToolsPopoverContent({
     rows,
     saved,
     staged,
-    connectorNames,
-    reload: sending ? "pending" : thread.toolOverridesReload?.status,
+    connectorNames: canList && AsyncResult.isSuccess(inventory) ? connectorNames : undefined,
     turnRunning: threadTurnRunning(thread.runtime?.status),
     backgroundWork: thread.pendingBackgroundTasks.length > 0,
   });
+  const [sending, setSending] = useState(false);
   const reload = async () => {
-    onSending(true);
+    setSending(true);
     setFailure(null);
     const result = await setToolOverrides({
       environmentId,
       input: { threadId: thread.id, toolOverrides: staged },
     });
-    onSending(false);
+    setSending(false);
     if (result._tag === "Failure") {
       if (isAtomCommandInterrupted(result)) return;
       const error = squashAtomCommandFailure(result);
       setFailure(error instanceof Error ? error.message : "Could not reload the session.");
       return;
     }
-    toastManager.add(reloadToast(result.value.outcome));
-    if (result.value.outcome !== "reload-failed") onApplied();
+    toastManager.add({
+      type: "success",
+      title: "Tools saved",
+      description: "This applies from the next message.",
+    });
+    onApplied();
   };
   return (
     <div className="flex flex-col">
@@ -280,6 +274,7 @@ function ToolsPopoverContent({
         state={footer}
         permitted={permitted}
         failure={failure}
+        sending={sending}
         onReload={() => void reload()}
       />
     </div>
@@ -350,7 +345,16 @@ function McpServersSection({
               key={row.name}
               row={row}
               nested
-              onChange={(on) => onStage(withMcpServerSwitched(staged, row.name, on))}
+              onChange={(on) =>
+                onStage(
+                  withMcpServerSwitched(
+                    staged,
+                    row.name,
+                    on,
+                    connectorsMode(provider) === "switch" ? connectorNames : [],
+                  ),
+                )
+              }
             />
           ))}
         </ul>
@@ -477,25 +481,20 @@ function ToolsFooter({
   state,
   permitted,
   failure,
+  sending,
   onReload,
 }: {
   state: ToolsFooterState;
   permitted: boolean;
   failure: string | null;
+  sending: boolean;
   onReload: () => void;
 }) {
   const blocked = state.kind === "running" || state.kind === "background";
   return (
     <footer className="flex items-center gap-3 border-t bg-card px-3 py-2.5">
       <div className="min-w-0 flex-1 text-xs" aria-live="polite">
-        {state.kind === "reloading" ? (
-          <>
-            <p>Reloading the session</p>
-            <p className="text-muted-foreground">
-              Waiting for the old Claude process to end. The conversation is kept.
-            </p>
-          </>
-        ) : state.kind === "running" ? (
+        {state.kind === "running" ? (
           <p className="text-warning-foreground">
             A turn is running. Stop it or wait for it to finish, then reload. Your switches are
             kept.
@@ -506,24 +505,18 @@ function ToolsFooter({
             them, or press Stop.
           </p>
         ) : state.kind === "unchanged" ? (
-          state.lastReloadFailed ? (
-            <p className="text-warning-foreground">
-              The last reload did not confirm the old session stopped, so it may still be running.
-              Reload again, or press Stop.
+          <>
+            <p>Nothing changed</p>
+            <p className="text-muted-foreground">
+              Reload anyway to pick up changed settings, skills or MCP servers.
             </p>
-          ) : (
-            <>
-              <p>Nothing changed</p>
-              <p className="text-muted-foreground">
-                Reload anyway to pick up changed settings, skills or MCP servers.
-              </p>
-            </>
-          )
+          </>
         ) : (
           <>
             <p>{changedSummary(state)}</p>
             <p className="text-muted-foreground">
-              Reloading keeps the conversation. It can raise the uncached input on the next message.
+              The session restarts before the next message and keeps the conversation. That message
+              can raise the uncached input.
             </p>
           </>
         )}
@@ -534,11 +527,11 @@ function ToolsFooter({
       </div>
       <Button
         size="xs"
-        variant={state.kind === "unchanged" && !state.lastReloadFailed ? "outline" : "default"}
-        disabled={blocked || state.kind === "reloading" || !permitted}
+        variant={state.kind === "unchanged" ? "outline" : "default"}
+        disabled={blocked || sending || !permitted}
         onClick={onReload}
       >
-        {state.kind === "reloading" ? "Reloading…" : "Reload session"}
+        Reload session
       </Button>
     </footer>
   );
@@ -555,23 +548,4 @@ function changedSummary(state: Extract<ToolsFooterState, { readonly kind: "chang
   return state.estimatedTokens === undefined || state.estimatedTokens === 0
     ? summary
     : `${summary}, about +${formatTokenEstimate(state.estimatedTokens)} tokens`;
-}
-
-function reloadToast(outcome: "stored" | "reloaded" | "reload-failed") {
-  switch (outcome) {
-    case "stored":
-      return {
-        type: "success" as const,
-        title: "Tools saved",
-        description: "They apply when this thread's session next starts.",
-      };
-    case "reloaded":
-      return { type: "success" as const, title: "Session reloaded" };
-    case "reload-failed":
-      return {
-        type: "error" as const,
-        title: "The old session may still be running",
-        description: "Tools are saved. Reload the session again, or press Stop.",
-      };
-  }
 }

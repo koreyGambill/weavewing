@@ -62,9 +62,13 @@ describe("toolsLabel", () => {
       hidden: false,
       text: "Tools all on",
     });
+    // Everything the provider leaves out is switched on, so nothing is effectively off.
     expect(
-      toolsLabel(keepsEverything, { ...EMPTY_TOOL_OVERRIDES, claudeAiConnectors: true }),
-    ).toMatchObject({ hidden: false, text: "Tools 1 on · 0 off" });
+      toolsLabel(
+        { omittedBuiltinTools: ["ScheduleWakeup"], claudeAiConnectors: "off" },
+        wakeupAndConnectors,
+      ),
+    ).toMatchObject({ hidden: false, text: "Tools all on" });
   });
 });
 
@@ -88,7 +92,6 @@ describe("toolsFooterState", () => {
     rows,
     saved: EMPTY_TOOL_OVERRIDES,
     connectorNames: ["claude.ai Fixture Board", "claude.ai Fixture Mail"],
-    reload: undefined,
     turnRunning: false,
     backgroundWork: false,
   };
@@ -102,31 +105,39 @@ describe("toolsFooterState", () => {
     });
   });
 
-  it("gives no sum for a partial connector selection", () => {
+  it("gives no sum for a partial connector selection, or when the names are unknown", () => {
+    const partial = { ...wakeupAndConnectors, omittedMcpServers: ["claude.ai Fixture Mail"] };
+    expect(toolsFooterState({ ...base, staged: partial })).toEqual({
+      kind: "changed",
+      onCount: 2,
+      estimatedTokens: undefined,
+      serversLeftOut: 1,
+    });
+    expect(
+      toolsFooterState({ ...base, saved: partial, staged: partial, connectorNames: undefined })
+        .kind,
+    ).toBe("unchanged");
     expect(
       toolsFooterState({
         ...base,
-        staged: { ...wakeupAndConnectors, omittedMcpServers: ["claude.ai Fixture Mail"] },
+        saved: partial,
+        staged: { ...partial, enabledBuiltinTools: [] },
+        connectorNames: undefined,
       }),
-    ).toEqual({ kind: "changed", onCount: 2, estimatedTokens: undefined, serversLeftOut: 1 });
+    ).toMatchObject({ estimatedTokens: undefined });
   });
 
-  it("offers a reload anyway when nothing changed, and says when the last one failed", () => {
+  it("offers a reload anyway when nothing changed", () => {
     expect(toolsFooterState({ ...base, staged: EMPTY_TOOL_OVERRIDES })).toEqual({
       kind: "unchanged",
-      lastReloadFailed: false,
-    });
-    expect(toolsFooterState({ ...base, staged: EMPTY_TOOL_OVERRIDES, reload: "failed" })).toEqual({
-      kind: "unchanged",
-      lastReloadFailed: true,
     });
   });
 
-  it("shows a pending reload first, then a running turn, then background work", () => {
+  it("blocks during a running turn, then background work", () => {
     const staged = wakeupAndConnectors;
-    const busy = { ...base, staged, turnRunning: true, backgroundWork: true };
-    expect(toolsFooterState({ ...busy, reload: "pending" }).kind).toBe("reloading");
-    expect(toolsFooterState(busy).kind).toBe("running");
+    expect(
+      toolsFooterState({ ...base, staged, turnRunning: true, backgroundWork: true }).kind,
+    ).toBe("running");
     expect(toolsFooterState({ ...base, staged, backgroundWork: true }).kind).toBe("background");
   });
 
@@ -189,17 +200,47 @@ describe("MCP servers", () => {
         row.name,
         row.switchable,
       ]);
-    // The provider keeps them out and the thread has not forced them on: nothing loads.
+    // With the provider keeping them out, each connector can be picked on its own, from off.
     expect(switchable(connectorsOff, EMPTY_TOOL_OVERRIDES)).toEqual([
-      ["claude.ai Fixture Board", false],
-      ["claude.ai Fixture Mail", false],
+      ["claude.ai Fixture Board", true],
+      ["claude.ai Fixture Mail", true],
     ]);
+    expect(
+      mcpServerSections({
+        inventory,
+        provider: connectorsOff,
+        staged: EMPTY_TOOL_OVERRIDES,
+      }).connectors.map((row) => row.on),
+    ).toEqual([false, false]);
     expect(switchable(connectorsOff, wakeupAndConnectors)).toEqual([
       ["claude.ai Fixture Board", true],
       ["claude.ai Fixture Mail", true],
     ]);
     // Left to Claude Code, only the connector the live session loaded is known to load.
     expect(switchable(defaults, EMPTY_TOOL_OVERRIDES)).toEqual([
+      ["claude.ai Fixture Board", true],
+      ["claude.ai Fixture Mail", false],
+    ]);
+  });
+
+  it("switching one connector on with the group off turns the group on for it alone", () => {
+    const staged = withMcpServerSwitched(
+      EMPTY_TOOL_OVERRIDES,
+      "claude.ai Fixture Board",
+      true,
+      connectorNames,
+    );
+    expect(staged).toEqual({
+      enabledBuiltinTools: [],
+      claudeAiConnectors: true,
+      omittedMcpServers: ["claude.ai Fixture Mail"],
+    });
+    expect(
+      mcpServerSections({ inventory, provider: connectorsOff, staged }).connectors.map((row) => [
+        row.name,
+        row.on,
+      ]),
+    ).toEqual([
       ["claude.ai Fixture Board", true],
       ["claude.ai Fixture Mail", false],
     ]);
