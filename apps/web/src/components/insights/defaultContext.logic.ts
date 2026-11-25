@@ -167,7 +167,7 @@ export function usedContextSources(preview: DefaultContextPreview, usedTokens: n
     sources.push(
       {
         key: "harness",
-        label: "Harness and built-in tools (not itemized)",
+        label: "First turn: harness, tools and what it read",
         tokens: Math.max(0, baseline - known),
         items: [],
       },
