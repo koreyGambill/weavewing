@@ -179,12 +179,10 @@ export function ThreadQuestionsPanel({
     // A frame later, so a chat tab that was hidden has laid out before its list scrolls.
     requestAnimationFrame(() => revealQuestionInChat(scopedThreadKey(threadRef), id));
   };
-  // In the panel when the filters list it, else in the chat.
   const revealQuestion = (id: string) => {
     if (questions.some((question) => question.id === id)) jumpTo(id);
     else showInChat(id);
   };
-  // Nothing is sent: the request waits in the composer, after whatever the user already wrote.
   const requestRefresh = () => {
     const store = useComposerDraftStore.getState();
     store.setPrompt(

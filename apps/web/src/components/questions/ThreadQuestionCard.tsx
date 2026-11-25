@@ -172,6 +172,10 @@ export function ThreadQuestionCard({
       {label}
     </HelpButton>
   );
+  const replacesLink =
+    replaces === null
+      ? null
+      : questionLink(replaces, `Replaces ${replaces}`, `This replaces ${replaces}. Show it.`);
   // A replaced question links to its replacement where its badge would be, so it says it once.
   const statusControl =
     question.state === "replaced" && question.replacedBy !== null ? (
@@ -216,6 +220,7 @@ export function ThreadQuestionCard({
               {outcome ? <p className="font-semibold">{outcome}</p> : null}
             </TooltipPopup>
           </Tooltip>
+          {replacesLink}
           {statusControl}
           {actions}
           {reopenButton}
@@ -265,9 +270,7 @@ export function ThreadQuestionCard({
           heading
         )}
         {actions}
-        {replaces === null
-          ? null
-          : questionLink(replaces, `Replaces ${replaces}`, `This replaces ${replaces}. Show it.`)}
+        {replacesLink}
         {statusControl}
         {question.options.some((option) => option.description) ? (
           <Tooltip>
