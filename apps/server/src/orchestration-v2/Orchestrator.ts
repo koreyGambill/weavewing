@@ -11009,6 +11009,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
         ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
+        ...(command.delegateRole === undefined ? {} : { delegateRole: command.delegateRole }),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,
@@ -11030,6 +11031,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.completionGroup === undefined
           ? {}
           : { completionGroup: command.completionGroup }),
+        ...(command.delegateRole === undefined ? {} : { delegateRole: command.delegateRole }),
         status: "running",
         result: null,
         startedAt: now,
@@ -11517,6 +11519,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.completionGroup === undefined
           ? {}
           : { completionGroup: command.completionGroup }),
+        ...(command.delegateRole === undefined ? {} : { delegateRole: command.delegateRole }),
         status: "running",
         result: null,
         startedAt: now,

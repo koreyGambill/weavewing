@@ -1,4 +1,9 @@
-import type { NotificationSeverity, ScopedThreadRef, ThreadWorkspace } from "@t3tools/contracts";
+import type {
+  NotificationSeverity,
+  OrchestrationV2DelegateRole,
+  ScopedThreadRef,
+  ThreadWorkspace,
+} from "@t3tools/contracts";
 import type { RightPanelSurface } from "./rightPanelStore";
 import type { SidebarView, ThreadContextSection } from "./threadContextSidebarStore";
 import type { ThreadTileLayout } from "./threadTileLayout";
@@ -215,6 +220,7 @@ export interface TalkedWithRow {
   readonly title: string;
   readonly branch: string | null;
   readonly relation: TalkedWithRelation;
+  readonly role: OrchestrationV2DelegateRole | null;
 }
 
 /**
@@ -227,6 +233,7 @@ export function withDelegates(
     readonly childThreadId: string | null;
     readonly title: string | null;
     readonly remoteChild?: unknown;
+    readonly delegateRole?: OrchestrationV2DelegateRole | undefined;
   }>,
 ): TalkedWithRow[] {
   const seen = new Set(rows.map((row) => row.id));
@@ -240,6 +247,7 @@ export function withDelegates(
         title: subagent.title ?? "Delegated task",
         branch: null,
         relation: "Delegated to" as const,
+        role: subagent.delegateRole ?? null,
       },
     ];
   });

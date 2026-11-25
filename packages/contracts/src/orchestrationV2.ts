@@ -207,6 +207,16 @@ const OrchestrationV2ContextRewind = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** What the delegating agent asked a child to act as. Only `delegate_task` sets it. */
+export const OrchestrationV2DelegateRole = Schema.Literals([
+  "implementation",
+  "research",
+  "review",
+  "design",
+  "test",
+]);
+export type OrchestrationV2DelegateRole = typeof OrchestrationV2DelegateRole.Type;
+
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
@@ -628,6 +638,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+  /** Set on a delegated child when its parent named a role. */
+  delegateRole: Schema.optional(OrchestrationV2DelegateRole),
   lineage: OrchestrationV2AppThreadLineage,
   contextRewind: Schema.optionalKey(OrchestrationV2ContextRewind),
   contextSplit: Schema.optionalKey(
@@ -1125,6 +1137,7 @@ export const OrchestrationV2Subagent = Schema.Struct({
   originalTaskId: Schema.optional(NodeId),
   /** Tasks of one parent run that share this name report their results together. */
   completionGroup: Schema.optional(TrimmedNonEmptyString),
+  delegateRole: Schema.optional(OrchestrationV2DelegateRole),
   prompt: Schema.String,
   title: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
@@ -2471,6 +2484,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+  delegateRole: Schema.optional(OrchestrationV2DelegateRole),
   /** The automation whose run started this thread, named by its first message. Absent from older servers. */
   automationTaskId: Schema.optional(ScheduledTaskId),
   latestRunId: Schema.NullOr(RunId),
@@ -3898,6 +3912,7 @@ export const OrchestrationV2Command = Schema.Union([
     // Defaults to settled_only; fire-and-forget wakes require always.
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
     completionGroup: Schema.optional(TrimmedNonEmptyString),
+    delegateRole: Schema.optional(OrchestrationV2DelegateRole),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -4059,6 +4074,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     remoteChild: OrchestrationV2RemoteTaskChild,
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
     completionGroup: Schema.optional(TrimmedNonEmptyString),
+    delegateRole: Schema.optional(OrchestrationV2DelegateRole),
   }),
   /**
    * Completes a delegated task that ran in a linked environment, with what its

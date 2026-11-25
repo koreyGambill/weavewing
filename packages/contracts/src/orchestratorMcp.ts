@@ -48,6 +48,7 @@ import {
   OrchestrationV2CreationSource,
   OrchestrationV2IdleCompaction,
   OrchestrationV2DelegatedFrom,
+  OrchestrationV2DelegateRole,
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
@@ -147,11 +148,7 @@ export const OrchestratorMcpInteractionMode = Schema.Union([
 export type OrchestratorMcpInteractionMode = typeof OrchestratorMcpInteractionMode.Type;
 
 export const OrchestratorMcpTaskRole = Schema.Literals([
-  "implementation",
-  "research",
-  "review",
-  "design",
-  "test",
+  ...OrchestrationV2DelegateRole.literals,
   "general",
 ]);
 export type OrchestratorMcpTaskRole = typeof OrchestratorMcpTaskRole.Type;

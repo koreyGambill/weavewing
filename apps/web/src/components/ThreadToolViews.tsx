@@ -1,3 +1,4 @@
+import { DelegateRoleChip } from "./chat/DelegateRoleChip";
 import { Link } from "@tanstack/react-router";
 import { AuthOrchestrationReadScope, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
@@ -1016,6 +1017,7 @@ function ThreadRelated({ threadRef }: { threadRef: ScopedThreadRef }) {
       title: entry.title,
       branch: entry.branch ?? null,
       relation,
+      role: relation === "Delegated to" ? (entry.delegateRole ?? null) : null,
     })),
     projection?.subagents ?? [],
   );
@@ -1038,7 +1040,10 @@ function ThreadRelated({ threadRef }: { threadRef: ScopedThreadRef }) {
               params={buildThreadRouteParams(refOf(entry.id))}
               className="min-w-0 flex-1"
             >
-              <span className="block text-3xs text-muted-foreground">{entry.relation}</span>
+              <span className="flex items-center gap-1.5 text-3xs text-muted-foreground">
+                {entry.relation}
+                <DelegateRoleChip role={entry.role} />
+              </span>
               <span className="block break-words text-primary hover:underline">{entry.title}</span>
             </Link>
             <RowActions

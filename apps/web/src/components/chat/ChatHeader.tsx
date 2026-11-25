@@ -6,6 +6,7 @@ import { scratchProjectLabel } from "@t3tools/client-runtime/operations/projects
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type OrchestrationV2DelegateRole,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -26,6 +27,7 @@ import {
 } from "react";
 import { isThreadGlyphWorking, isTrailingDoubleClick } from "../Sidebar.logic";
 import { Badge } from "../ui/badge";
+import { DelegateRoleChip } from "./DelegateRoleChip";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -55,6 +57,7 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
   activeThreadLinkOrigin?: string | null | undefined;
+  activeThreadDelegateRole?: OrchestrationV2DelegateRole | undefined;
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   parentThreadLink: {
@@ -88,6 +91,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
   activeThreadLinkOrigin,
+  activeThreadDelegateRole,
   isServerThread,
   activeProject,
   parentThreadLink,
@@ -452,6 +456,16 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          {renamingTitle === null && activeThreadDelegateRole ? (
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+                <DelegateRoleChip role={activeThreadDelegateRole} />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                Delegated as the {activeThreadDelegateRole} sub-agent.
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           {renamingTitle === null && activeThreadLinkOrigin ? (
             <Tooltip>
               <TooltipTrigger render={<Badge variant="info" size="sm" />}>

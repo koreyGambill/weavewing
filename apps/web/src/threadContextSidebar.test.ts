@@ -281,19 +281,27 @@ describe("thread tool views", () => {
 
   it("adds finished delegates the shell list leaves out, once, and skips remote ones", () => {
     const rows = [
-      { id: "worker", title: "Worker", branch: null, relation: "Delegated to" as const },
+      {
+        id: "worker",
+        title: "Worker",
+        branch: null,
+        relation: "Delegated to" as const,
+        role: "implementation" as const,
+      },
     ];
     expect(
       withDelegates(rows, [
         { childThreadId: "worker", title: "Worker" },
-        { childThreadId: "short", title: "Short wait" },
+        { childThreadId: "short", title: "Short wait", delegateRole: "review" },
         { childThreadId: "short", title: "Short wait follow-up" },
+        { childThreadId: "legacy", title: "Older delegate" },
         { childThreadId: null, title: "Native" },
         { childThreadId: "remote", title: "Remote", remoteChild: {} },
-      ]).map((row) => [row.id, row.title, row.relation]),
+      ]).map((row) => [row.id, row.title, row.relation, row.role]),
     ).toEqual([
-      ["worker", "Worker", "Delegated to"],
-      ["short", "Short wait", "Delegated to"],
+      ["worker", "Worker", "Delegated to", "implementation"],
+      ["short", "Short wait", "Delegated to", "review"],
+      ["legacy", "Older delegate", "Delegated to", null],
     ]);
   });
 });

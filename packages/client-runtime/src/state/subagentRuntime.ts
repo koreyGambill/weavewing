@@ -215,6 +215,7 @@ export function projectedSubagentsToRuntime(
     readonly status: OrchestrationV2Subagent["status"];
     readonly progress?: string | undefined;
     readonly childThreadId?: string | null | undefined;
+    readonly delegateRole?: OrchestrationV2Subagent["delegateRole"];
     readonly workflow?: OrchestrationV2SubagentWorkflow | undefined;
     readonly result: string | null;
     readonly startedAt: DateTime.Utc | null;
@@ -232,7 +233,7 @@ export function projectedSubagentsToRuntime(
       id: subagent.id,
       kind: workflow === undefined ? "subagent" : "workflow",
       title: subagent.title ?? promptTitle(subagent.prompt),
-      role: null,
+      role: subagent.delegateRole ?? null,
       model: subagent.model,
       effort: null,
       status: subagent.status,

@@ -3536,6 +3536,7 @@ export default function ChatView(props: ChatViewProps) {
           isServerThread={isServerThread}
           activeThreadTitle={activeThread.title}
           activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
+          activeThreadDelegateRole={activeThreadShell?.delegateRole}
           activeProject={activeProject ?? null}
           parentThreadLink={headerParentThreadLink}
           onBringBack={canBringBackFork ? () => void bringForkBack() : undefined}

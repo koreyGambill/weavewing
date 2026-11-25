@@ -82,7 +82,10 @@ import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import * as ThreadWorkspace from "../threadWorkspace/ThreadWorkspace.ts";
 import * as ThreadMarks from "../threadWorkspace/ThreadMarks.ts";
 import { resolveRuntimeMode, withChildPreamble } from "./delegatedTaskModes.ts";
-import type { ProjectionRecordFilter } from "../orchestration-v2/ProjectionStore.ts";
+import {
+  type ProjectionRecordFilter,
+  threadShellFromProjection,
+} from "../orchestration-v2/ProjectionStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 const decodeTarget = Schema.decodeUnknownEffect(OrchestratorMcpTarget);
@@ -3455,6 +3458,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                     remoteChild,
                     completionWake: "settled_only",
                     ...(input.group === undefined ? {} : { completionGroup: input.group }),
+                    ...(input.role === "review" ? { delegateRole: input.role } : {}),
                   });
                   const parent = yield* orchestrator.getThreadProjection(parentThreadId);
                   return { taskId: parent.subagents[0]!.id };
@@ -3517,6 +3521,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                 : {}),
               mode: "wait",
               group: "review",
+              role: "review",
               clientRequestId: "delegate-wait-cancelled",
             })
             .pipe(Effect.forkChild);
@@ -3532,6 +3537,12 @@ describe("OrchestratorMcpService provider resolution", () => {
             "a cancelled blocking delegation left the task settled_only, so its result never reaches the still-live parent run",
           );
           assert.equal(task?.completionGroup, "review");
+          assert.equal(task?.delegateRole, "review");
+          if (placement === "local") {
+            const child = yield* orchestrator.getThreadProjection(task!.childThreadId!);
+            assert.equal(child.thread.delegateRole, "review");
+            assert.equal(threadShellFromProjection(child).delegateRole, "review");
+          }
         }).pipe(Effect.provide(layerTest));
       }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );

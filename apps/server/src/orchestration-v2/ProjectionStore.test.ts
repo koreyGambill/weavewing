@@ -12029,3 +12029,67 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+it.effect("shells carry a delegated child's role and show none for older children", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const create = (suffix: string, delegateRole: "review" | undefined) => {
+      const threadId = ThreadId.make(`thread:${suffix}:delegate-role`);
+      return store
+        .apply({
+          id: EventId.make(`event:${suffix}:delegate-role`),
+          type: "thread.created",
+          threadId,
+          occurredAt: now,
+          payload: {
+            createdBy: "agent",
+            creationSource: "mcp",
+            id: threadId,
+            projectId: ProjectId.make("project:delegate-role"),
+            title: suffix,
+            providerInstanceId,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            activeProviderThreadId: null,
+            ...(delegateRole === undefined ? {} : { delegateRole }),
+            lineage: {
+              parentThreadId: ThreadId.make("thread:delegate-role:parent"),
+              relationshipToParent: "subagent",
+              rootThreadId: ThreadId.make("thread:delegate-role:parent"),
+            },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+        })
+        .pipe(Effect.as(threadId));
+    };
+    const reviewer = yield* create("reviewer", "review");
+    const legacy = yield* create("legacy", undefined);
+    const listed = (yield* store.getShellSnapshot({ familyOf: reviewer })).threads;
+    for (const [threadId, expected] of [
+      [reviewer, "review"],
+      [legacy, undefined],
+    ] as const) {
+      const shells = [
+        yield* store.getThreadShell(threadId),
+        listed.find((shell) => shell.id === threadId),
+        ProjectionStore.threadShellFromProjection(yield* store.getThreadProjection(threadId)),
+      ];
+      assert.deepEqual(
+        shells.map((shell) => shell?.delegateRole),
+        [expected, expected, expected],
+        threadId,
+      );
+    }
+  }).pipe(Effect.provide(layerTest)),
+);

@@ -42,6 +42,7 @@ import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
 import {
   resolveInteractionMode,
   resolveRuntimeMode,
+  storedDelegateRole,
   taskPrompt,
 } from "../mcp/delegatedTaskModes.ts";
 import { followUpOwnerRun } from "../orchestration-v2/CommandPolicy.ts";
@@ -401,6 +402,7 @@ const make = Effect.gen(function* () {
           remoteChild,
           completionWake: input.mode === "wait" ? "settled_only" : "always",
           ...(input.group === undefined ? {} : { completionGroup: input.group }),
+          ...storedDelegateRole(input.role),
         })
         .pipe(
           // The cause goes to the log; the caller learns only that recording failed.

@@ -1,3 +1,4 @@
+import { DelegateRoleChip } from "./DelegateRoleChip";
 import { workLogIcons } from "@t3tools/client-runtime/work-log/presentation";
 import { WorkEntryIconTooltip } from "./TimelineToolActivityIcon";
 import { parseAssistantReactions } from "@t3tools/shared/messageReactions";
@@ -482,6 +483,7 @@ function SubagentTimelineLink(props: {
           {remote !== undefined ? (
             <span className="shrink-0 text-xs text-muted-foreground">on {remote.label}</span>
           ) : null}
+          <DelegateRoleChip role={agent?.delegateRole} />
         </span>
         <span
           className={cn(

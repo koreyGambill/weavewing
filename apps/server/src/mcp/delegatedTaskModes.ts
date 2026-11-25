@@ -98,6 +98,13 @@ export function withChildPreamble(preamble: string, task: string): string {
     : `<child_preamble source="parent thread Workspace">\n${trimmed}\n</child_preamble>\nWhere the preamble and the task differ, follow the task.\n\n${task}`;
 }
 
+/** The role recorded on the task and its child; `general` asks for nothing, so it records nothing. */
+export function storedDelegateRole(role: OrchestratorMcpDelegateTaskInput["role"]): {
+  readonly delegateRole?: Exclude<typeof role, "general" | undefined>;
+} {
+  return role === undefined || role === "general" ? {} : { delegateRole: role };
+}
+
 /** The task as its child receives it, with the role the caller asked for. */
 export function taskPrompt(input: OrchestratorMcpDelegateTaskInput): string {
   return input.role === undefined || input.role === "general"

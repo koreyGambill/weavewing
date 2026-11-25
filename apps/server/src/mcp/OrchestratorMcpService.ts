@@ -148,6 +148,7 @@ import {
   resolveInteractionMode,
   resolveRuntimeMode,
   runtimeModeRank,
+  storedDelegateRole,
   taskPrompt,
   withChildPreamble,
 } from "./delegatedTaskModes.ts";
@@ -3371,6 +3372,7 @@ const make = Effect.gen(function* () {
           // gives up the wait (timeout, cancelled call) and upgrades the wake.
           completionWake: input.mode === "wait" ? "settled_only" : "always",
           ...(input.group === undefined ? {} : { completionGroup: input.group }),
+          ...storedDelegateRole(input.role),
         })
         .pipe(
           Effect.mapError((error) =>

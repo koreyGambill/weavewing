@@ -1,3 +1,4 @@
+import { DelegateRoleChip } from "./DelegateRoleChip";
 import { useAtomValue } from "@effect/atom-react";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
@@ -949,6 +950,7 @@ export function ThreadRelationshipsPanel(props: {
             {threadTitle}
           </span>
         </span>
+        {isSubagent && !isParent ? <DelegateRoleChip role={node?.thread?.delegateRole} /> : null}
         {agent ? null : (
           <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         )}

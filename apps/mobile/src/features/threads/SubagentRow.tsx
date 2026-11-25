@@ -35,6 +35,7 @@ type SubagentRowSubagent = Pick<
   | "progress"
   | "result"
   | "remoteChild"
+  | "delegateRole"
 >;
 
 export function SubagentRow(props: {
@@ -78,6 +79,14 @@ export function SubagentRow(props: {
             {presentation.runsOn !== null ? (
               <Text numberOfLines={1} className="shrink text-xs text-foreground-muted">
                 on {presentation.runsOn}
+              </Text>
+            ) : null}
+            {props.subagent.delegateRole ? (
+              <Text
+                accessibilityLabel={`Delegated as ${props.subagent.delegateRole}`}
+                className="shrink-0 rounded bg-subtle px-1 text-2xs text-foreground-muted"
+              >
+                {props.subagent.delegateRole}
               </Text>
             ) : null}
           </View>
