@@ -975,13 +975,19 @@ const make = Effect.gen(function* () {
       return yield* commitQuestions(current, questions);
     }, lock.withPermit),
     questionUpdate: Effect.fn("ThreadWorkspace.questionUpdate")(function* (input, by) {
-      const current = yield* read(input.threadId);
+      // A full scan, so an answer already queued is marked sent before a revision can change.
+      const current = yield* read(input.threadId, "drafts");
       const { index, question } = yield* findQuestion(current, input.id);
       const now = DateTime.formatIso(yield* DateTime.now);
       let next: ThreadQuestion;
       switch (input.state) {
         case "open": {
           if (question.state === "open") return yield* invalid(`${question.id} is already open.`);
+          // An answer still on its way stays sent; the question only rejoins the waiting group.
+          if (question.state === "deferred" && question.sentInMessageId !== undefined) {
+            next = { ...question, state: "open" };
+            break;
+          }
           const { sentInMessageId: _sent, ...rest } = question;
           next = {
             ...rest,

@@ -1143,6 +1143,67 @@ it.effect("lets an answer queued after a comment keep its note, in either accept
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("keeps a queued answer sent when the user defers before any scan saw it", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Flag name?" }] });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "cache-v2" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    h.messages.push(userMessage("m1", [answerRecord("Q1", revision, "", "cache-v2")]));
+    h.threadRuns.push(threadRun("r1", "m1", "queued"));
+    const deferred = yield* h.service.questionUpdate(
+      { threadId, id: "Q1", state: "deferred" },
+      "user",
+    );
+    expect(deferred.questions[0]).toMatchObject({
+      state: "deferred",
+      sentInMessageId: "m1",
+      answer: { draftRevision: revision },
+    });
+    h.threadRuns[0] = threadRun("r1", "m1", "running");
+    h.acceptTurn("r1");
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      state: "answered",
+      answeredBy: "user",
+      sentInMessageId: "m1",
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("reopens a deferred question whose answer is queued without unsending it", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* h.service.questionAsk({ threadId, questions: [{ prompt: "Flag name?" }] });
+    const drafted = yield* h.service.questionDraft({
+      threadId,
+      answers: { Q1: { chosenOptionIds: [], notes: "cache-v2" } },
+    });
+    const revision = drafted.questions[0]!.answer!.draftRevision!;
+    yield* h.service.questionUpdate({ threadId, id: "Q1", state: "deferred" }, "user");
+    h.messages.push(userMessage("m1", [answerRecord("Q1", revision + 1, "", "cache-v2")]));
+    h.threadRuns.push(threadRun("r1", "m1", "queued"));
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      state: "deferred",
+      sentInMessageId: "m1",
+    });
+    const reopened = yield* h.service.questionUpdate({ threadId, id: "Q1", state: "open" }, "user");
+    expect(reopened.questions[0]).toMatchObject({
+      state: "open",
+      sentInMessageId: "m1",
+      answer: { draftRevision: revision + 1 },
+    });
+    h.threadRuns[0] = threadRun("r1", "m1", "running");
+    h.acceptTurn("r1");
+    expect((yield* h.service.get({ threadId })).questions[0]).toMatchObject({
+      state: "answered",
+      answeredBy: "user",
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("keeps the note of a comment deferred before its turn starts", () =>
   Effect.gen(function* () {
     const h = yield* harness();
