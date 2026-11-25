@@ -358,6 +358,7 @@ export function ThreadQuestionsPanel({
           <TooltipTrigger render={<span className="inline-flex" />}>
             <Button
               size="sm"
+              variant={canAct && toAdd > 0 ? "default" : "outline"}
               disabled={!canAct || toAdd === 0 || adding}
               onClick={() => void addDrafted()}
             >
