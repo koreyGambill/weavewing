@@ -28,6 +28,8 @@ import {
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   RunId,
+  THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
+  THREAD_QUESTIONS_ARTIFACT_ID,
   ThreadId,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ShellSnapshot,
@@ -96,6 +98,7 @@ import {
   hydrateImagesFromPersisted,
   markDraftTerminalUsed,
   partializeComposerDraftStoreState,
+  threadQuestionNoteImageDraftId,
   useComposerDraftStore,
   DraftId,
 } from "./composerDraftStore";
@@ -3018,5 +3021,89 @@ describe("composerDraftStore checkout pull request", () => {
       vi.useRealTimers();
       resetComposerDraftStore();
     }
+  });
+});
+
+describe("composerDraftStore question note images", () => {
+  const threadId = ThreadId.make("thread-with-questions");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+  const record = (questionId: string, note: string, artifactId = THREAD_QUESTIONS_ARTIFACT_ID) => ({
+    version: 1 as const,
+    kind: "artifact-answer" as const,
+    contextId: ComposerContextId.make(`${artifactId}_${questionId}`),
+    label: questionId,
+    artifactId,
+    title: questionId,
+    artifactVersion: 1,
+    questionId,
+    answerRevision: 1,
+    question: `Prompt ${questionId}`,
+    choice: "",
+    note,
+  });
+  // Another artifact's answer can share a question id; it never owns pasted images.
+  const rollout = record("Q1", "[Q1 image 2]", "rollout");
+  const imageIds = () => draftFor(threadId, TEST_ENVIRONMENT_ID)?.images.map((image) => image.id);
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+    const store = useComposerDraftStore.getState();
+    store.addImages(threadQuestionNoteImageDraftId(threadRef, "Q1"), [
+      makeImage({ id: "q1-1", previewUrl: "data:q1-1", name: "Q1-image-1.png", sizeBytes: 5 }),
+      makeImage({ id: "q1-2", previewUrl: "data:q1-2", name: "Q1-image-2.png", sizeBytes: 6 }),
+    ]);
+    store.addImages(threadQuestionNoteImageDraftId(threadRef, "Q2"), [
+      makeImage({ id: "q2-1", previewUrl: "data:q2-1", name: "Q2-image-1.png", sizeBytes: 7 }),
+    ]);
+    store.addImages(threadRef, [makeImage({ id: "direct", previewUrl: "data:direct" })]);
+  });
+
+  it("brings in the images a question's note marks when its chip arrives", () => {
+    const store = useComposerDraftStore.getState();
+    store.setArtifactAnswers(threadRef, [
+      rollout,
+      record("Q1", "see [Q1 image 1]"),
+      record("Q2", "[Q2 image 1]"),
+    ]);
+    expect(imageIds()).toEqual(["direct", "q1-1", "q2-1"]);
+    // Discussing instead of answering keeps the question's chip, so its images stay once.
+    store.setArtifactAnswers(threadRef, [
+      rollout,
+      record("Q1", "see [Q1 image 1]", THREAD_QUESTION_COMMENTS_ARTIFACT_ID),
+      record("Q2", "[Q2 image 1]"),
+    ]);
+    expect(imageIds()).toEqual(["direct", "q1-1", "q2-1"]);
+  });
+
+  it("takes only that question's images out when its chip leaves", () => {
+    const store = useComposerDraftStore.getState();
+    store.setArtifactAnswers(threadRef, [
+      rollout,
+      record("Q1", "[Q1 image 1] [Q1 image 2]"),
+      record("Q2", "[Q2 image 1]"),
+    ]);
+    store.setArtifactAnswers(threadRef, [rollout, record("Q2", "[Q2 image 1]")]);
+    expect(imageIds()).toEqual(["direct", "q2-1"]);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.artifactAnswers).toEqual([
+      rollout,
+      record("Q2", "[Q2 image 1]"),
+    ]);
+    store.setArtifactAnswers(threadRef, []);
+    expect(imageIds()).toEqual(["direct"]);
+    // The card keeps them for the next time the chip goes in.
+    expect(
+      useComposerDraftStore
+        .getState()
+        .getComposerDraft(threadQuestionNoteImageDraftId(threadRef, "Q1"))
+        ?.images.map((image) => image.id),
+    ).toEqual(["q1-1", "q1-2"]);
+  });
+
+  it("leaves images alone when only another artifact's answer changes", () => {
+    const store = useComposerDraftStore.getState();
+    store.setArtifactAnswers(threadRef, [rollout]);
+    expect(imageIds()).toEqual(["direct"]);
+    store.setArtifactAnswers(threadRef, []);
+    expect(imageIds()).toEqual(["direct"]);
   });
 });

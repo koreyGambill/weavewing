@@ -40,6 +40,11 @@ import {
   scopedThreadKey,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
+import {
+  isThreadQuestionRecord,
+  threadQuestionImageMarkerNumbers,
+  threadQuestionImageNumber,
+} from "@t3tools/client-runtime/state/thread-questions";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import * as Effect from "effect/Effect";
@@ -1653,6 +1658,92 @@ export function resolveComposerDraftKey(
   }
   const threadKey = composerTargetKey(normalizedTarget);
   return threadKey.length > 0 ? threadKey : null;
+}
+
+/**
+ * The draft that holds the images pasted into one agent question's note. They wait there, on the
+ * card, and join the thread's composer only while that question's answer or comment chip does.
+ */
+export function threadQuestionNoteImageDraftId(
+  threadRef: ScopedThreadRef,
+  questionId: string,
+): DraftId {
+  return DraftId.make(
+    `${encodeURIComponent(JSON.stringify(threadRef.environmentId))}:question-note-images-${encodeURIComponent(JSON.stringify([threadRef.threadId, questionId]))}`,
+  );
+}
+
+function scopedThreadRefOfDraft(
+  state: ComposerThreadLookupState,
+  target: ComposerThreadTarget,
+  threadKey: string,
+): ScopedThreadRef | null {
+  if (typeof target !== "string") return target;
+  const session = state.draftThreadsByThreadKey[threadKey];
+  return session
+    ? scopeThreadRef(session.environmentId, session.threadId)
+    : composerThreadRefFromKey(threadKey);
+}
+
+/**
+ * The thread draft's images after its question chips change from `before` to `after`: a question
+ * whose chip left takes its pasted images out, and one whose chip arrived brings those its note
+ * marks. A question's images keep the ids its own draft gave them, so an image added any other
+ * way never matches. Null when nothing changes.
+ */
+function questionNoteImagesAfterChipChange(
+  state: ComposerThreadLookupState,
+  threadRef: ScopedThreadRef | null,
+  draft: ComposerThreadDraftState,
+  before: ReadonlyArray<ArtifactAnswerContextRecord>,
+  after: ReadonlyArray<ArtifactAnswerContextRecord>,
+): Pick<
+  ComposerThreadDraftState,
+  "images" | "nonPersistedImageIds" | "persistedAttachments"
+> | null {
+  if (threadRef === null) return null;
+  const notes = (records: ReadonlyArray<ArtifactAnswerContextRecord>) =>
+    new Map(
+      records.filter(isThreadQuestionRecord).map((record) => [record.questionId, record.note]),
+    );
+  const previous = notes(before);
+  const next = notes(after);
+  const held = (questionId: string) =>
+    state.draftsByThreadKey[threadQuestionNoteImageDraftId(threadRef, questionId)]?.images ?? [];
+  const leaving = new Set(
+    [...previous.keys()]
+      .filter((questionId) => !next.has(questionId))
+      .flatMap((questionId) => held(questionId).map((image) => image.id)),
+  );
+  const present = new Set(draft.images.map((image) => image.id));
+  let room = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - draft.images.length - draft.files.length;
+  const arriving = [...next]
+    .filter(([questionId]) => !previous.has(questionId))
+    .flatMap(([questionId, note]) => {
+      const marked = threadQuestionImageMarkerNumbers(questionId, note);
+      return held(questionId).filter((image) => {
+        const number = threadQuestionImageNumber(questionId, image.name);
+        return number !== null && marked.has(number) && !present.has(image.id);
+      });
+    })
+    .filter(() => room-- > 0)
+    // Each draft revokes its own preview URL, so the composer's copy gets one of its own.
+    .map((image) =>
+      typeof URL !== "undefined" && image.previewUrl.startsWith("blob:")
+        ? { ...image, previewUrl: URL.createObjectURL(image.file) }
+        : image,
+    );
+  if (leaving.size === 0 && arriving.length === 0) return null;
+  for (const image of draft.images) {
+    if (leaving.has(image.id)) revokeObjectPreviewUrl(image.previewUrl);
+  }
+  return {
+    images: [...draft.images.filter((image) => !leaving.has(image.id)), ...arriving],
+    nonPersistedImageIds: draft.nonPersistedImageIds.filter((id) => !leaving.has(id)),
+    persistedAttachments: draft.persistedAttachments.filter(
+      (attachment) => !leaving.has(attachment.id),
+    ),
+  };
 }
 
 const QUEUED_RUN_EDIT_DRAFT_PREFIX = "queued-edit:";
@@ -4420,7 +4511,18 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               prompt,
               artifactAnswers.map(artifactAnswerReference),
             );
-            const nextDraft = { ...existing, prompt, artifactAnswers };
+            const nextDraft = {
+              ...existing,
+              prompt,
+              artifactAnswers,
+              ...questionNoteImagesAfterChipChange(
+                state,
+                scopedThreadRefOfDraft(state, threadRef, threadKey),
+                existing,
+                existing.artifactAnswers,
+                artifactAnswers,
+              ),
+            };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey];
             else nextDraftsByThreadKey[threadKey] = nextDraft;
