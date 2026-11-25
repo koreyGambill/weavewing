@@ -295,6 +295,7 @@ export function restoreComposerDraft(
   store.setReviewComments(draftTarget, snapshot.reviewComments);
   store.setThreadContexts(draftTarget, snapshot.threadContexts);
   store.setEnvironmentContexts(draftTarget, snapshot.environmentContexts);
+  store.setWaitingItems(draftTarget, snapshot.waitingItems);
   store.setArtifactAnswers(draftTarget, snapshot.artifactAnswers);
   return images;
 }

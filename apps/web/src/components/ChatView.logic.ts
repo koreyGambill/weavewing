@@ -38,6 +38,7 @@ import {
   type ScopedThreadRef,
   type ThreadContextRecord,
   type EnvironmentContextRecord,
+  type WaitingItemContextRecord,
   type ArtifactAnswerContextRecord,
   type ResponseContextRecord,
   type ThreadId,
@@ -703,6 +704,7 @@ export function composerElementContextCount(draft: {
   readonly reviewComments: ReadonlyArray<unknown>;
   readonly threadContexts: ReadonlyArray<unknown>;
   readonly environmentContexts: ReadonlyArray<unknown>;
+  readonly waitingItems: ReadonlyArray<unknown>;
   readonly artifactAnswers: ReadonlyArray<unknown>;
 }): number {
   return (
@@ -710,6 +712,7 @@ export function composerElementContextCount(draft: {
     draft.reviewComments.length +
     draft.threadContexts.length +
     draft.environmentContexts.length +
+    draft.waitingItems.length +
     draft.artifactAnswers.length
   );
 }
@@ -1266,6 +1269,7 @@ export interface ComposerSendContents {
   readonly reviewComments: ReadonlyArray<ReviewCommentContext>;
   readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
   readonly environmentContexts: ReadonlyArray<EnvironmentContextRecord>;
+  readonly waitingItems: ReadonlyArray<WaitingItemContextRecord>;
   readonly artifactAnswers: ReadonlyArray<ArtifactAnswerContextRecord>;
   /** The response the message replies to. `prompt` already leads with its reference. */
   readonly replyTo: ResponseContextRecord | null;
@@ -1297,6 +1301,7 @@ export function snapshotComposerSend(contents: ComposerSendContents) {
     reviewComments: [...contents.reviewComments],
     threadContexts: [...contents.threadContexts],
     environmentContexts: [...contents.environmentContexts],
+    waitingItems: [...contents.waitingItems],
     artifactAnswers: [...contents.artifactAnswers],
     replyTo: contents.replyTo,
     messageText,

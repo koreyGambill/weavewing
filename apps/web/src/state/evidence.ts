@@ -68,6 +68,14 @@ const evidenceCounts = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime
   idleTtlMs: 60_000,
   refreshTrigger,
 });
+/** The open thread's landings; dropped once no row reads them, so a thread switch ends the read. */
+const evidenceThread = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "evidence:thread",
+  tag: WS_METHODS.evidenceThread,
+  staleTimeMs: 0,
+  idleTtlMs: 0,
+  refreshTrigger,
+});
 export const evidenceCoverage = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "evidence:coverage",
   tag: WS_METHODS.evidenceCoverage,
@@ -91,6 +99,17 @@ export function useEvidenceEnvironment(threadRef: ScopedThreadRef | null) {
     environment.serverConfig?.environment.capabilities.evidence === true &&
     canRead;
   return supported ? environmentId : null;
+}
+
+/** The landings a thread shows QA for; null `threadRef` reads nothing. */
+export function useThreadEvidence(threadRef: ScopedThreadRef | null) {
+  const environmentId = useEvidenceEnvironment(threadRef);
+  const query = useEnvironmentQuery(
+    threadRef === null || environmentId === null
+      ? null
+      : evidenceThread({ environmentId, input: { threadId: threadRef.threadId } }),
+  );
+  return { ...query, supported: environmentId !== null };
 }
 
 export function useEvidenceCounts(environmentId: EnvironmentId | null) {

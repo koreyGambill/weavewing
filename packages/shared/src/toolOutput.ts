@@ -26,6 +26,10 @@ const MAX_METADATA_BYTES = 8_192;
 const MAX_ID_LENGTH = 256;
 const MAX_THREADS = 100;
 const QUESTION_ASK_TOOL_NAME = "question_ask";
+// Review tools have no presentation entry, so the T3 server prefix is matched here.
+const EVIDENCE_RECORD_TOOL =
+  /^(?:(?:mcp__)?t3[-_]?code(?:[-_]direct)?(?:__|[.:/_]))?evidence_record$/i;
+const EVIDENCE_SLUG = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const MAX_CONTENT_BLOCKS = 32;
 const MAX_ENVELOPE_DEPTH = 4;
 const MAX_ENVELOPE_NODES = 128;
@@ -65,6 +69,8 @@ interface CompactToolOutput {
   sentMessage?: string;
   /** The ids `question_ask` assigned, so clients place each question's card at the call. */
   questionIds?: string[];
+  /** The landing `evidence_record` stored, so clients place its QA cards at the call. */
+  landingId?: string;
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -277,6 +283,13 @@ export function compactDynamicToolOutput(
     ) {
       output.questionIds = questionIds;
     }
+    if (
+      toolName != null &&
+      EVIDENCE_RECORD_TOOL.test(toolName) &&
+      typeof data.landingId === "string" &&
+      EVIDENCE_SLUG.test(data.landingId)
+    )
+      output.landingId = data.landingId;
     const htmlRender = readHtmlRenderReference(data.htmlRender);
     if (htmlRender !== undefined) output.htmlRender = htmlRender;
     const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
@@ -374,6 +387,16 @@ export function questionIdsFromToolItem(item: {
   if (resolveT3McpToolId(item.toolName) !== QUESTION_ASK_TOOL_NAME) return [];
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? [] : (output?.questionIds ?? []);
+}
+
+/** The landing an `evidence_record` call stored; undefined when it failed or is another tool. */
+export function evidenceLandingIdFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): string | undefined {
+  if (item.toolName == null || !EVIDENCE_RECORD_TOOL.test(item.toolName)) return undefined;
+  const output = compactDynamicToolOutput(item.output, item.toolName);
+  return output?.isError ? undefined : output?.landingId;
 }
 
 /** The thread-owned file `preview_recording_stop` stored for the agent. */

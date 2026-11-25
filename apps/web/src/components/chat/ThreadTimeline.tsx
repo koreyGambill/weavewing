@@ -9,6 +9,8 @@ import {
   resolveThreadSwitchTimeline,
   timelineHasEphemeralPreviewUrls,
 } from "../ChatView.logic";
+import { useThreadEvidence } from "../../state/evidence";
+import { completionChild, withChildLandingCards } from "../evidence/qaCard.logic";
 import { withQuestionDismissals } from "../questions/questionDismissals.logic";
 import { MessagesTimeline } from "./MessagesTimeline";
 
@@ -57,8 +59,20 @@ export function ThreadTimeline({
               (row.item.runId !== null && inlineArchiveRunIds.has(row.item.runId)),
           ),
   });
-  const entries =
+  const plainEntries =
     draftEntries ?? withQuestionDismissals(serverEntries, questionDismissals, historyComplete);
+  // QA cards read the thread's landings only when the timeline has somewhere to put them.
+  const evidence = useThreadEvidence(
+    plainEntries.some(
+      (entry) => entry.kind === "thread-evidence" || completionChild(entry) !== undefined,
+    )
+      ? threadDetailRef
+      : null,
+  );
+  const entries =
+    evidence.data === null || threadDetailRef === null
+      ? plainEntries
+      : withChildLandingCards(threadDetailRef.threadId, plainEntries, evidence.data.landings);
   // The standalone archive needs the complete timeline when it opens from the inline pane.
   const cacheKey = inlineArchiveRunIds === undefined ? activeThreadKey : null;
   const displayedEntries = resolveThreadSwitchTimeline({

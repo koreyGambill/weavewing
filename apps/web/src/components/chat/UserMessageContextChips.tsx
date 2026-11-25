@@ -31,6 +31,7 @@ import {
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown from "../ChatMarkdown";
 import { EnvironmentContextChip } from "../EnvironmentContextChip";
+import { WaitingItemChip } from "../evidence/WaitingItemChip";
 import { ThreadContextChip } from "../ThreadContextChip";
 import { ResponseReplyCard } from "./AssistantCitationChip";
 import { MessageCircleIcon, MousePointerClickIcon, PaintbrushIcon } from "lucide-react";
@@ -309,6 +310,12 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
 >({
   requiredKinds: COMPOSER_CONTEXT_KINDS,
   handlers: [
+    {
+      kind: "waiting-item",
+      canRender: (record) => record.kind === "waiting-item",
+      render: (record) =>
+        record.kind === "waiting-item" ? <WaitingItemChip record={record} /> : null,
+    },
     {
       kind: "artifact-answer",
       canRender: (record) => record.kind === "artifact-answer",

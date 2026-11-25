@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   compactDynamicToolOutput,
+  evidenceLandingIdFromToolItem,
   MAX_TOOL_OUTPUT_IMAGES,
   mcpToolResultOutput,
   questionIdsFromToolItem,
@@ -50,6 +51,23 @@ describe("compactDynamicToolOutput", () => {
     expect(questionIdsFromToolItem({ toolName: "send_to_user", output: compact })).toEqual([]);
     expect(
       compactDynamicToolOutput({ ids: ["Q1", "not a question"] }, "question_ask"),
+    ).toBeUndefined();
+  });
+
+  it("keeps the landing evidence_record stored so its QA cards can sit at the call", () => {
+    const result = { landingId: "2026-11-25-toast", changes: [{ id: "toast", qa: "pending" }] };
+    const output = [{ type: "text", text: JSON.stringify(result) }];
+    const compact = compactDynamicToolOutput(output, "mcp__t3-code__evidence_record");
+    expect(compact).toEqual({ landingId: "2026-11-25-toast" });
+    expect(
+      evidenceLandingIdFromToolItem({ toolName: "mcp__t3-code__evidence_record", output: compact }),
+    ).toBe("2026-11-25-toast");
+    expect(compactDynamicToolOutput(output, "evidence_read")).toBeUndefined();
+    expect(
+      evidenceLandingIdFromToolItem({
+        toolName: "evidence_record",
+        output: { isError: true, content: "Duplicate change id: a" },
+      }),
     ).toBeUndefined();
   });
 

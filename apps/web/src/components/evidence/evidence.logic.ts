@@ -1,16 +1,43 @@
-import type {
-  EvidenceChange,
-  EvidenceLanding,
-  EvidenceProjectCoverage,
-  EvidenceQaState,
-} from "@t3tools/contracts";
-import { CheckIcon, CircleDashedIcon, MinusIcon, XIcon } from "lucide-react";
+import type { EvidenceLanding, EvidenceProjectCoverage, EvidenceQaState } from "@t3tools/contracts";
+import { CheckIcon, CircleDashedIcon, CircleIcon, MinusIcon, WrenchIcon } from "lucide-react";
 
+/** Every QA state; the user sets only the ones marked `user`, and the agent records a problem. */
 export const QA_STATES = [
-  { state: "pending", label: "Pending", icon: CircleDashedIcon, tone: "text-warning-foreground" },
-  { state: "confirmed", label: "Confirmed", icon: CheckIcon, tone: "text-success-foreground" },
-  { state: "failed", label: "Failed", icon: XIcon, tone: "text-destructive-foreground" },
-  { state: "waived", label: "Waived", icon: MinusIcon, tone: "text-muted-foreground" },
+  {
+    state: "pending",
+    label: "Open",
+    icon: CircleDashedIcon,
+    tone: "text-warning-foreground",
+    user: true,
+  },
+  {
+    state: "confirmed",
+    label: "Confirmed",
+    icon: CheckIcon,
+    tone: "text-success-foreground",
+    user: true,
+  },
+  {
+    state: "problem",
+    label: "Agent fixing",
+    icon: WrenchIcon,
+    tone: "text-warning-foreground",
+    user: false,
+  },
+  {
+    state: "waived",
+    label: "Dismissed",
+    icon: MinusIcon,
+    tone: "text-muted-foreground",
+    user: true,
+  },
+  {
+    state: "quiet",
+    label: "Nothing to check",
+    icon: CircleIcon,
+    tone: "text-muted-foreground",
+    user: false,
+  },
 ] as const;
 
 const CLAIMS = { approved: "approved", changes_requested: "changes requested" } as const;
@@ -104,22 +131,8 @@ export function leavesNeedsQa(
 ): boolean {
   return changes.every((change) => {
     const state = change.id === changeId ? next : change.qa.state;
-    return state === "confirmed" || state === "waived";
+    return state === "confirmed" || state === "waived" || state === "quiet";
   });
-}
-
-/** The failed-QA message for the landing's thread, added after any draft already there. */
-export function failedQaDraft(
-  existing: string,
-  change: Pick<EvidenceChange, "id" | "ask" | "ticket">,
-  note: string,
-): string {
-  const ask = change.ask.split("\n", 1)[0]!.trim();
-  const message = [
-    `QA failed on ${change.ticket?.key ?? change.id}: ${note.trim() || "(no note)"}`,
-    `Ask: ${ask}`,
-  ].join("\n");
-  return appendDraft(existing, message);
 }
 
 export function coverageDraft(

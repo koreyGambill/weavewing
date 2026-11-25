@@ -1,5 +1,6 @@
 import type {
   EnvironmentContextRecord,
+  WaitingItemContextRecord,
   ArtifactAnswerContextRecord,
   PreviewAnnotationPayload,
   ThreadContextRecord,
@@ -26,6 +27,7 @@ export interface RetainedContextPayloads extends RetainedAttachmentContextPayloa
   reviewComments: Map<string, ReviewCommentContext>;
   threads: Map<string, ThreadContextRecord>;
   environments: Map<string, EnvironmentContextRecord>;
+  waitingItems: Map<string, WaitingItemContextRecord>;
   artifactAnswers: Map<string, ArtifactAnswerContextRecord>;
 }
 
@@ -35,6 +37,7 @@ function createRetainedContextPayloads(): RetainedContextPayloads {
     reviewComments: new Map(),
     threads: new Map(),
     environments: new Map(),
+    waitingItems: new Map(),
     artifactAnswers: new Map(),
     files: new Map(),
     previewAnnotations: new Map(),

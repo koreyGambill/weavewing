@@ -12,6 +12,7 @@ import type {
   ComposerContextId,
   ComposerContextRecord,
   EnvironmentContextRecord,
+  WaitingItemContextRecord,
   ArtifactAnswerContextRecord,
   EnvironmentId,
   FileContextRecord,
@@ -225,6 +226,10 @@ export function environmentContextReference(
   return { kind: "environment", contextId: record.contextId, label: record.label };
 }
 
+export function waitingItemReference(record: WaitingItemContextRecord): ComposerContextReference {
+  return { kind: "waiting-item", contextId: record.contextId, label: record.label };
+}
+
 export function artifactAnswerReference(
   record: ArtifactAnswerContextRecord,
 ): ComposerContextReference {
@@ -391,6 +396,7 @@ export function buildMessageContext(input: {
   previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
   environmentContexts?: ReadonlyArray<EnvironmentContextRecord>;
+  waitingItems?: ReadonlyArray<WaitingItemContextRecord>;
   artifactAnswers?: ReadonlyArray<ArtifactAnswerContextRecord>;
   replyTo?: ResponseContextRecord | null;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
@@ -405,6 +411,7 @@ export function buildMessageContext(input: {
     ...input.reviewComments.map(reviewCommentContextRecord),
     ...(input.threadContexts ?? []),
     ...(input.environmentContexts ?? []),
+    ...(input.waitingItems ?? []),
     ...(input.artifactAnswers ?? []),
     ...(input.replyTo ? [input.replyTo] : []),
     ...input.previewAnnotations.map((annotation) =>

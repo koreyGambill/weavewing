@@ -20,6 +20,7 @@ export function composerDraftContentChanged(
     before.reviewComments !== after.reviewComments ||
     before.threadContexts !== after.threadContexts ||
     before.environmentContexts !== after.environmentContexts ||
+    before.waitingItems !== after.waitingItems ||
     before.replyTo !== after.replyTo
   );
 }

@@ -14,6 +14,16 @@ const decodeContext = Schema.decodeUnknownSync(OrchestrationMessageContext);
 const base = { version: 1, contextId: "ctx_1" } as const;
 
 const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<string, unknown>> = {
+  "waiting-item": {
+    ...base,
+    kind: "waiting-item",
+    label: "QA1 · discuss · Toast shows the retry count",
+    itemKind: "qa",
+    key: "2026-11-25-toast/toast-retry-count",
+    ref: "QA1",
+    title: "Toast shows the retry count",
+    sha: "3f2a91c",
+  },
   "artifact-answer": {
     ...base,
     kind: "artifact-answer",

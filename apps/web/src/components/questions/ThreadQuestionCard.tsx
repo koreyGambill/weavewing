@@ -28,6 +28,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { QuestionNoteBox } from "./QuestionNoteBox";
 import { QuestionOptions } from "./QuestionOptions";
 import { QuestionStatusBadge } from "./QuestionStatusBadge";
+import { HelpButton, ThreadCard, ThreadCardClosedLine, ThreadCardHeading } from "./ThreadCardShell";
 import { closedQuestionOutcome, closedQuestionShownAnswer } from "./ThreadQuestionCard.logic";
 import { questionAnswerForComposer } from "./questionComposer.logic";
 import {
@@ -59,30 +60,6 @@ const HELP = {
   cancel: "Take this answer out of your message. Your choice stays on the card.",
   sent: "Sent. Edit or cancel the queued message to change it.",
 };
-
-function HelpButton({
-  help,
-  children,
-  variant = "contrast-outline",
-  ...props
-}: {
-  readonly help: string;
-  readonly children: ReactNode;
-} & Pick<Parameters<typeof Button>[0], "disabled" | "onClick" | "variant" | "aria-pressed">) {
-  return (
-    <Tooltip>
-      {/* A span keeps the hint reachable while the button is disabled. */}
-      <TooltipTrigger render={<span className="inline-flex" />}>
-        <Button size="xs" variant={variant} {...props}>
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipPopup side="top" className="max-w-72">
-        {help}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
 
 /**
  * One agent question. While open or deferred: its options, one row each, and one box holding the
@@ -246,114 +223,66 @@ export function ThreadQuestionCard({
 
   if (closed && !expanded) {
     return (
-      <section
+      <ThreadCardClosedLine
         id={inTimeline ? threadQuestionElementId(question.id) : undefined}
-        aria-label={`${question.id}: ${question.prompt}`}
-        className="@container min-w-0 rounded-lg border border-border bg-background px-2.5 py-1.5"
+        label={`${question.id}: ${question.prompt}`}
+        refLabel={question.id}
+        title={question.prompt}
+        outcome={outcome}
+        onExpand={() => setExpanded(true)}
       >
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-expanded={false}
-                  onClick={() => setExpanded(true)}
-                  className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                />
-              }
-            >
-              <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
-                {question.id}
-              </span>
-              <span className="min-w-0 flex-1 truncate">{question.prompt}</span>
-              {outcome ? (
-                <span className="max-w-[45%] shrink-0 truncate font-semibold">{outcome}</span>
-              ) : null}
-            </TooltipTrigger>
-            <TooltipPopup side="top" className="max-w-96">
-              <p>{question.prompt}</p>
-              {outcome ? <p className="font-semibold">{outcome}</p> : null}
-            </TooltipPopup>
-          </Tooltip>
-          {replacesLink}
-          {statusControl}
-          {actions}
-          {reopenButton}
-        </div>
-      </section>
+        {replacesLink}
+        {statusControl}
+        {actions}
+        {reopenButton}
+      </ThreadCardClosedLine>
     );
   }
 
   // An expanded closed card keeps the open card's layout, read-only, so it can be inspected whole.
   const shown = closed ? closedQuestionShownAnswer(question) : { chosenOptionIds, notes };
-  const heading = (
-    <>
-      <span
-        className={cn(
-          "shrink-0 text-sm font-semibold tabular-nums",
-          editable ? "text-primary" : "text-muted-foreground",
-        )}
-      >
-        {question.id}
-      </span>
-      <h3 className="min-w-0 flex-1 text-sm font-medium leading-snug break-words">
-        {question.prompt}
-      </h3>
-    </>
-  );
-
   return (
-    <section
+    <ThreadCard
       id={inTimeline ? threadQuestionElementId(question.id) : undefined}
-      aria-label={`${question.id}: ${question.prompt}`}
-      className={cn(
-        "@container min-w-0 space-y-1.5 rounded-lg border border-border border-l-2 bg-background px-2.5 py-2",
-        editable && question.state === "open" ? "border-l-primary" : "border-l-border",
-      )}
+      label={`${question.id}: ${question.prompt}`}
+      waiting={editable && question.state === "open"}
+      heading={
+        <ThreadCardHeading refLabel={question.id} title={question.prompt} editable={editable} />
+      }
+      onCollapse={closed ? () => setExpanded(false) : undefined}
+      controls={
+        <>
+          {actions}
+          {replacesLink}
+          {statusControl}
+          {question.options.some((option) => option.description) ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-micro"
+                    variant="contrast-outline"
+                    aria-label={
+                      descriptionsCollapsed
+                        ? "Expand option descriptions"
+                        : "Collapse option descriptions"
+                    }
+                    onClick={() => setDescriptionsCollapsed((current) => !current)}
+                  />
+                }
+              >
+                {descriptionsCollapsed ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {descriptionsCollapsed
+                  ? "Expand option descriptions"
+                  : "Collapse option descriptions"}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+        </>
+      }
     >
-      <header className="flex min-w-0 items-start gap-2">
-        {closed ? (
-          <button
-            type="button"
-            aria-expanded
-            onClick={() => setExpanded(false)}
-            className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-          >
-            {heading}
-          </button>
-        ) : (
-          heading
-        )}
-        {actions}
-        {replacesLink}
-        {statusControl}
-        {question.options.some((option) => option.description) ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-micro"
-                  variant="contrast-outline"
-                  aria-label={
-                    descriptionsCollapsed
-                      ? "Expand option descriptions"
-                      : "Collapse option descriptions"
-                  }
-                  onClick={() => setDescriptionsCollapsed((current) => !current)}
-                />
-              }
-            >
-              {descriptionsCollapsed ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              {descriptionsCollapsed
-                ? "Expand option descriptions"
-                : "Collapse option descriptions"}
-            </TooltipPopup>
-          </Tooltip>
-        ) : null}
-      </header>
       {question.details ? (
         <div className="text-sm text-muted-foreground">
           <ChatMarkdown text={question.details} cwd={undefined} threadRef={threadRef} />
@@ -536,6 +465,6 @@ export function ThreadQuestionCard({
           ))}
         </ul>
       ) : null}
-    </section>
+    </ThreadCard>
   );
 }

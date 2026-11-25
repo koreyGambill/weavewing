@@ -26,6 +26,7 @@ import {
   ThreadContextRecord,
   EnvironmentContextRecord,
   ArtifactAnswerContextRecord,
+  WaitingItemContextRecord,
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
@@ -99,6 +100,7 @@ import {
   threadContextReference,
   environmentContextReference,
   artifactAnswerReference,
+  waitingItemReference,
 } from "./lib/composerContextRecords";
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
@@ -120,6 +122,7 @@ const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
 const isThreadContextRecord = Schema.is(ThreadContextRecord);
 const isEnvironmentContextRecord = Schema.is(EnvironmentContextRecord);
+const isWaitingItemContextRecord = Schema.is(WaitingItemContextRecord);
 const isArtifactAnswerContextRecord = Schema.is(ArtifactAnswerContextRecord);
 const isSnapShotSource = Schema.is(SnapShotSource);
 const isPreviewAnnotationPayload = Schema.is(PreviewAnnotationPayloadSchema);
@@ -354,6 +357,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   reviewComments: Schema.optionalKey(Schema.Array(ReviewCommentContextSchema)),
   threadContexts: Schema.optionalKey(Schema.Array(ThreadContextRecord)),
   environmentContexts: Schema.optionalKey(Schema.Array(EnvironmentContextRecord)),
+  waitingItems: Schema.optionalKey(Schema.Array(WaitingItemContextRecord)),
   artifactAnswers: Schema.optionalKey(Schema.Array(ArtifactAnswerContextRecord)),
   replyTo: Schema.optionalKey(ResponseContextRecord),
   modelSelectionByProvider: Schema.optionalKey(Schema.Record(ProviderInstanceId, ModelSelection)),
@@ -487,6 +491,8 @@ export interface ComposerThreadDraftState {
   reviewComments: ReviewCommentContext[];
   threadContexts: ThreadContextRecord[];
   environmentContexts: EnvironmentContextRecord[];
+  /** Discuss references to items waiting on the user, such as a QA change. */
+  waitingItems: WaitingItemContextRecord[];
   artifactAnswers: ArtifactAnswerContextRecord[];
   /** The response this message replies to. It becomes a context record when the message is sent. */
   replyTo: ResponseContextRecord | null;
@@ -513,6 +519,7 @@ export function composerDraftHasUserContent(
     draft.reviewComments.length > 0 ||
     draft.threadContexts.length > 0 ||
     draft.environmentContexts.length > 0 ||
+    draft.waitingItems.length > 0 ||
     draft.artifactAnswers.length > 0 ||
     draft.replyTo !== null
   );
@@ -780,6 +787,10 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     records: ReadonlyArray<EnvironmentContextRecord>,
   ) => void;
+  setWaitingItems: (
+    threadRef: ComposerThreadTarget,
+    records: ReadonlyArray<WaitingItemContextRecord>,
+  ) => void;
   addArtifactAnswers: (
     threadRef: ComposerThreadTarget,
     records: ReadonlyArray<ArtifactAnswerContextRecord>,
@@ -899,6 +910,7 @@ const EMPTY_PREVIEW_ANNOTATIONS: PreviewAnnotationPayload[] = [];
 const EMPTY_REVIEW_COMMENTS: ReviewCommentContext[] = [];
 const EMPTY_THREAD_CONTEXTS: ThreadContextRecord[] = [];
 const EMPTY_ENVIRONMENT_CONTEXTS: EnvironmentContextRecord[] = [];
+const EMPTY_WAITING_ITEMS: WaitingItemContextRecord[] = [];
 const EMPTY_ARTIFACT_ANSWERS: ArtifactAnswerContextRecord[] = [];
 Object.freeze(EMPTY_IMAGES);
 Object.freeze(EMPTY_FILES);
@@ -908,6 +920,7 @@ Object.freeze(EMPTY_PREVIEW_ANNOTATIONS);
 Object.freeze(EMPTY_REVIEW_COMMENTS);
 Object.freeze(EMPTY_THREAD_CONTEXTS);
 Object.freeze(EMPTY_ENVIRONMENT_CONTEXTS);
+Object.freeze(EMPTY_WAITING_ITEMS);
 Object.freeze(EMPTY_ARTIFACT_ANSWERS);
 const EMPTY_MODEL_SELECTION_BY_PROVIDER: Partial<Record<ProviderDriverKind, ModelSelection>> =
   Object.freeze({});
@@ -928,6 +941,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   reviewComments: EMPTY_REVIEW_COMMENTS,
   threadContexts: EMPTY_THREAD_CONTEXTS,
   environmentContexts: EMPTY_ENVIRONMENT_CONTEXTS,
+  waitingItems: EMPTY_WAITING_ITEMS,
   artifactAnswers: EMPTY_ARTIFACT_ANSWERS,
   replyTo: null,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
@@ -948,6 +962,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     reviewComments: [],
     threadContexts: [],
     environmentContexts: [],
+    waitingItems: [],
     artifactAnswers: [],
     replyTo: null,
     modelSelectionByProvider: {},
@@ -1063,6 +1078,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.reviewComments.length === 0 &&
     draft.threadContexts.length === 0 &&
     draft.environmentContexts.length === 0 &&
+    draft.waitingItems.length === 0 &&
     draft.artifactAnswers.length === 0 &&
     draft.replyTo === null &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
@@ -2311,6 +2327,9 @@ function normalizePersistedDraftsByThreadId(
     const environmentContexts = Array.isArray(draftCandidate.environmentContexts)
       ? draftCandidate.environmentContexts.filter(isEnvironmentContextRecord)
       : [];
+    const waitingItems = Array.isArray(draftCandidate.waitingItems)
+      ? draftCandidate.waitingItems.filter(isWaitingItemContextRecord)
+      : [];
     const artifactAnswers = Array.isArray(draftCandidate.artifactAnswers)
       ? draftCandidate.artifactAnswers.filter(isArtifactAnswerContextRecord)
       : [];
@@ -2432,6 +2451,7 @@ function normalizePersistedDraftsByThreadId(
       reviewComments.length === 0 &&
       threadContexts.length === 0 &&
       environmentContexts.length === 0 &&
+      waitingItems.length === 0 &&
       artifactAnswers.length === 0 &&
       replyTo === null &&
       !hasModelData &&
@@ -2461,6 +2481,7 @@ function normalizePersistedDraftsByThreadId(
       ...(reviewComments.length > 0 ? { reviewComments } : {}),
       ...(threadContexts.length > 0 ? { threadContexts } : {}),
       ...(environmentContexts.length > 0 ? { environmentContexts } : {}),
+      ...(waitingItems.length > 0 ? { waitingItems } : {}),
       ...(artifactAnswers.length > 0 ? { artifactAnswers } : {}),
       ...(replyTo ? { replyTo: replyTo as DeepMutable<ResponseContextRecord> } : {}),
       ...(hasModelData
@@ -2488,6 +2509,7 @@ function persistedComposerDraftHasUserContent(draft: PersistedComposerThreadDraf
     (draft.reviewComments?.length ?? 0) > 0 ||
     (draft.threadContexts?.length ?? 0) > 0 ||
     (draft.environmentContexts?.length ?? 0) > 0 ||
+    (draft.waitingItems?.length ?? 0) > 0 ||
     (draft.artifactAnswers?.length ?? 0) > 0 ||
     draft.replyTo !== undefined
   );
@@ -2570,6 +2592,7 @@ export function partializeComposerDraftStoreState(
       draft.reviewComments.length === 0 &&
       draft.threadContexts.length === 0 &&
       draft.environmentContexts.length === 0 &&
+      draft.waitingItems.length === 0 &&
       draft.artifactAnswers.length === 0 &&
       draft.replyTo === null &&
       !hasModelData &&
@@ -2629,6 +2652,9 @@ export function partializeComposerDraftStoreState(
         : {}),
       ...(draft.environmentContexts.length > 0
         ? { environmentContexts: draft.environmentContexts.map((record) => ({ ...record })) }
+        : {}),
+      ...(draft.waitingItems.length > 0
+        ? { waitingItems: draft.waitingItems.map((record) => ({ ...record })) }
         : {}),
       ...(draft.artifactAnswers.length > 0
         ? { artifactAnswers: draft.artifactAnswers.map((record) => ({ ...record })) }
@@ -2900,6 +2926,7 @@ function toHydratedThreadDraft(
       ...(persistedDraft.previewAnnotations ?? []).map(previewAnnotationContextReference),
       ...(persistedDraft.threadContexts ?? []).map(threadContextReference),
       ...(persistedDraft.environmentContexts ?? []).map(environmentContextReference),
+      ...(persistedDraft.waitingItems ?? []).map(waitingItemReference),
       ...(persistedDraft.artifactAnswers ?? []).map(artifactAnswerReference),
       ...files.map(fileContextReference),
     ]),
@@ -2917,6 +2944,7 @@ function toHydratedThreadDraft(
     reviewComments: persistedDraft.reviewComments?.map((comment) => ({ ...comment })) ?? [],
     threadContexts: persistedDraft.threadContexts?.map((record) => ({ ...record })) ?? [],
     environmentContexts: persistedDraft.environmentContexts?.map((record) => ({ ...record })) ?? [],
+    waitingItems: persistedDraft.waitingItems?.map((record) => ({ ...record })) ?? [],
     artifactAnswers: persistedDraft.artifactAnswers?.map((record) => ({ ...record })) ?? [],
     replyTo: persistedDraft.replyTo ?? null,
     modelSelectionByProvider,
@@ -4518,6 +4546,28 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
+        setWaitingItems: (threadRef, records) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef);
+          if (!threadKey) return;
+          const waitingItems = records
+            .filter(isWaitingItemContextRecord)
+            .map((record) => ({ ...record }));
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            const retainedIds = new Set(waitingItems.map((record) => record.contextId));
+            let prompt = existing.prompt;
+            for (const previous of existing.waitingItems) {
+              if (retainedIds.has(previous.contextId)) continue;
+              prompt = removeInlineContextReference(prompt, previous.contextId).prompt;
+            }
+            prompt = ensureInlineContextReferences(prompt, waitingItems.map(waitingItemReference));
+            const nextDraft = { ...existing, prompt, waitingItems };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey];
+            else nextDraftsByThreadKey[threadKey] = nextDraft;
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
 
         addArtifactAnswers: (threadRef, records, options) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef);
@@ -4715,6 +4765,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 ...current.reviewComments.map(reviewCommentContextReference),
                 ...current.threadContexts.map(threadContextReference),
                 ...current.environmentContexts.map(environmentContextReference),
+                ...current.waitingItems.map(waitingItemReference),
                 ...current.artifactAnswers.map(artifactAnswerReference),
                 ...current.previewAnnotations.map(previewAnnotationContextReference),
               ]),
@@ -4988,6 +5039,16 @@ export function useComposerArtifactAnswers(
     threadRef === null
       ? EMPTY_ARTIFACT_ANSWERS
       : (getComposerDraftState(state, threadRef)?.artifactAnswers ?? EMPTY_ARTIFACT_ANSWERS),
+  );
+}
+
+export function useComposerWaitingItems(
+  threadRef: ComposerThreadTarget | null,
+): ReadonlyArray<WaitingItemContextRecord> {
+  return useComposerDraftStore((state) =>
+    threadRef === null
+      ? EMPTY_WAITING_ITEMS
+      : (getComposerDraftState(state, threadRef)?.waitingItems ?? EMPTY_WAITING_ITEMS),
   );
 }
 

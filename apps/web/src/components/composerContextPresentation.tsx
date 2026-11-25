@@ -5,6 +5,7 @@ import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
 import type {
   EnvironmentContextRecord,
   ArtifactAnswerContextRecord,
+  WaitingItemContextRecord,
   PreviewAnnotationPayload,
   ThreadContextRecord,
 } from "@t3tools/contracts";
@@ -37,6 +38,7 @@ import type { TerminalContextDraft } from "~/lib/terminalContext";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
 import { EnvironmentContextChip } from "./EnvironmentContextChip";
+import { WaitingItemChip } from "./evidence/WaitingItemChip";
 import { ThreadContextChip } from "./ThreadContextChip";
 import { useLinkedEnvironments } from "~/state/peerLinks";
 import {
@@ -67,6 +69,7 @@ export type ComposerDraftContextRecord =
   | { kind: "file"; record: ComposerFileAttachment; upload?: AttachmentUploadState | undefined }
   | { kind: "thread"; record: ThreadContextRecord }
   | { kind: "environment"; record: EnvironmentContextRecord }
+  | { kind: "waiting-item"; record: WaitingItemContextRecord }
   | { kind: "artifact-answer"; record: ArtifactAnswerContextRecord };
 
 export {
@@ -93,6 +96,7 @@ export function composerContextRecordsFromDraft(input: {
   previewAnnotations?: ReadonlyArray<PreviewAnnotationPayload>;
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
   environmentContexts?: ReadonlyArray<EnvironmentContextRecord>;
+  waitingItems?: ReadonlyArray<WaitingItemContextRecord>;
   artifactAnswers?: ReadonlyArray<ArtifactAnswerContextRecord>;
   images?: ReadonlyArray<ComposerImageAttachment>;
   files?: ReadonlyArray<ComposerFileAttachment>;
@@ -132,6 +136,9 @@ export function composerContextRecordsFromDraft(input: {
   }
   for (const record of input.environmentContexts ?? []) {
     records.set(record.contextId, { kind: "environment", record });
+  }
+  for (const record of input.waitingItems ?? []) {
+    records.set(record.contextId, { kind: "waiting-item", record });
   }
   for (const record of input.artifactAnswers ?? []) {
     records.set(record.contextId, { kind: "artifact-answer", record });
@@ -384,8 +391,19 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
     "thread",
     "environment",
     "artifact-answer",
+    "waiting-item",
   ],
   handlers: [
+    {
+      kind: "waiting-item",
+      canRender: (entry) => entry.kind === "waiting-item",
+      render: (entry, context) =>
+        entry.kind === "waiting-item" ? (
+          <WaitingItemChip record={entry.record} />
+        ) : (
+          <UnresolvedContextChip label={context.label} />
+        ),
+    },
     {
       kind: "artifact-answer",
       canRender: (entry) => entry.kind === "artifact-answer",

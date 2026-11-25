@@ -39,6 +39,7 @@ const CONTEXT_REFERENCE_ICONS: Record<
   "preview-annotation": () => <MousePointerClickIcon />,
   "review-comment": () => <MessageCircleIcon />,
   "artifact-answer": () => <MessageCircleIcon />,
+  "waiting-item": () => <MessageCircleIcon />,
   thread: () => <MessagesSquareIcon />,
   environment: () => <MonitorIcon />,
 };
@@ -98,7 +99,11 @@ export function CollapsedComposerPromptPreview(props: {
         return entry ? (
           <ContextChipShell
             key={key}
-            kind={entry.kind === "artifact-answer" ? "neutral" : entry.kind}
+            kind={
+              entry.kind === "artifact-answer" || entry.kind === "waiting-item"
+                ? "neutral"
+                : entry.kind
+            }
             icon={CONTEXT_REFERENCE_ICONS[entry.kind](segment.label, props.theme)}
             label={segment.label}
           />

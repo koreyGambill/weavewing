@@ -118,6 +118,7 @@ import { TimelineMinimap } from "./TimelineMinimap";
 import { BookmarkRail } from "./BookmarkRail";
 import { QuestionDismissedTimelineRow } from "../questions/QuestionDismissedTimelineRow";
 import { ThreadQuestionsTimelineRow } from "../questions/ThreadQuestionsTimelineRow";
+import { ThreadEvidenceTimelineRow } from "../evidence/ThreadEvidenceTimelineRow";
 import { useQuestionReveal } from "../questions/useQuestionReveal";
 import {
   scrollQuestionReferenceIntoRow,
@@ -1817,6 +1818,13 @@ function ThreadQuestionsRow({ questionIds }: { questionIds: ReadonlyArray<string
   ) : null;
 }
 
+function ThreadEvidenceRow({ landingIds }: { landingIds: ReadonlyArray<string> }) {
+  const ctx = use(TimelineRowCtx);
+  return ctx.threadRef ? (
+    <ThreadEvidenceTimelineRow threadRef={ctx.threadRef} landingIds={landingIds} />
+  ) : null;
+}
+
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
 }
@@ -1861,6 +1869,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "html-render" ||
                   row.kind === "sent-message" ||
                   row.kind === "thread-questions" ||
+                  row.kind === "thread-evidence" ||
                   row.kind === "question-dismissed" ||
                   row.kind === "mcp-app" ||
                   row.kind === "viewed-images"
@@ -1916,6 +1925,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "thread-questions" ? (
         <ThreadQuestionsRow questionIds={row.questionIds} />
       ) : null}
+      {row.kind === "thread-evidence" ? <ThreadEvidenceRow landingIds={row.landingIds} /> : null}
       {row.kind === "question-dismissed" ? (
         <QuestionDismissedRow questionId={row.questionId} title={row.title} />
       ) : null}

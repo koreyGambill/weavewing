@@ -5,6 +5,7 @@ import {
   type EnvironmentId,
   type EvidenceChange,
   type EvidenceChangeQa,
+  type EvidenceSetQaInput,
   type EvidenceLandingSummary,
   type EvidenceListInput,
   type EvidenceProjectCoverage,
@@ -19,8 +20,6 @@ import {
   ChevronRightIcon,
   ChevronsUpDownIcon,
   ClipboardCheckIcon,
-  FileIcon,
-  PlayIcon,
   SendIcon,
   TriangleAlertIcon,
   XIcon,
@@ -28,7 +27,6 @@ import {
 import * as Option from "effect/Option";
 import { useRef, useState } from "react";
 
-import { useAssetUrlState } from "../../assets/assetUrls";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -53,7 +51,6 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadContextSidebarStore } from "../../threadContextSidebarStore";
 import { formatDayAwareTimestamp } from "../../timestampFormat";
-import { ExpandedImageDialog } from "../chat/ExpandedImageDialog";
 import { CheckedLabel, ToolFilterMenuTrigger } from "../ToolFilterMenuTrigger";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -73,12 +70,11 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { CaptureTile } from "./CaptureTile";
 import {
-  captureKind,
   CHECKS,
   checkLabel,
   coverageDraft,
-  failedQaDraft,
   leavesNeedsQa,
   QA_STATES,
   reviewDisplay,
@@ -505,7 +501,6 @@ function ChangeRow({
   leaves: (next: EvidenceChangeQa["state"]) => boolean;
 }) {
   const [full, setFull] = useState(false);
-  const [focusNote, setFocusNote] = useState(false);
   const navigate = useNavigate();
   const [copied, setCopied] = useState<string | null>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard<string>({
@@ -537,20 +532,13 @@ function ChangeRow({
           change={change}
           label={key}
           leaves={leaves}
-          onFocusNote={setFocusNote}
         />
       </div>
       {change.qa.state === "waived" ? (
         <WaivedNote environmentId={environmentId} landingId={landingId} change={change} />
       ) : null}
-      {change.qa.state === "failed" ? (
-        <FailedNote
-          environmentId={environmentId}
-          landingId={landingId}
-          threadId={threadId}
-          change={change}
-          autoFocus={focusNote}
-        />
+      {change.qa.state === "problem" && change.qa.note ? (
+        <p className="break-words text-warning-foreground">Agent fixing: {change.qa.note}</p>
       ) : null}
       <p className={cn("whitespace-pre-wrap break-words", !full && "line-clamp-2")}>
         “{change.ask}”
@@ -693,32 +681,31 @@ function focusAfterCardLeaves(trigger: HTMLElement | null) {
   target?.focus();
 }
 
+const USER_QA_STATES = QA_STATES.filter(
+  (entry): entry is Extract<(typeof QA_STATES)[number], { user: true }> => entry.user,
+);
+
 function QaMenu({
   environmentId,
   landingId,
   change,
   label,
   leaves,
-  onFocusNote,
 }: {
   environmentId: EnvironmentId;
   landingId: string;
   change: Change;
   label: string;
   leaves: (next: EvidenceChangeQa["state"]) => boolean;
-  onFocusNote: (focus: boolean) => void;
 }) {
   const setQa = useSetQa();
   const canSet = useAtomValue(evidenceSetQa.permissionAtom(environmentId));
   const trigger = useRef<HTMLButtonElement>(null);
   const current = QA_STATES.find((entry) => entry.state === change.qa.state)!;
-  const choose = async (next: EvidenceChangeQa["state"]) => {
+  const choose = async (next: EvidenceSetQaInput["state"]) => {
     if (next === change.qa.state) return;
-    if (next === "failed") onFocusNote(true);
-    if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } }))) {
-      onFocusNote(false);
+    if (!(await setQa({ environmentId, input: { landingId, changeId: change.id, state: next } })))
       return;
-    }
     if (leaves(next)) focusAfterCardLeaves(trigger.current);
     reloadEvidence();
   };
@@ -744,16 +731,16 @@ function QaMenu({
         <MenuRadioGroup
           value={change.qa.state}
           onValueChange={(next) => {
-            const chosen = QA_STATES.find((entry) => entry.state === next);
+            const chosen = USER_QA_STATES.find((entry) => entry.state === next);
             if (chosen) void choose(chosen.state);
           }}
         >
-          {QA_STATES.map(({ state, label: name, icon: Icon, tone }) => (
+          {USER_QA_STATES.map(({ state, label: name, icon: Icon, tone }) => (
             <MenuRadioItem key={state} value={state} closeOnClick>
               <CheckedLabel>
                 <span className="flex items-center gap-2">
                   <Icon aria-hidden className={tone} />
-                  {state === "failed" ? "Failed…" : name}
+                  {name}
                 </span>
               </CheckedLabel>
             </MenuRadioItem>
@@ -799,7 +786,7 @@ function WaivedNote({
   if (!editing)
     return (
       <div className="min-w-0 space-y-0.5 text-muted-foreground">
-        {change.qa.note.trim() ? <p className="break-words">QA waived: {change.qa.note}</p> : null}
+        {change.qa.note.trim() ? <p className="break-words">Dismissed: {change.qa.note}</p> : null}
         <Button
           autoFocus={returnFocus}
           variant="ghost"
@@ -824,8 +811,8 @@ function WaivedNote({
     >
       <Textarea
         size="sm"
-        aria-label={`Why QA was waived for ${key}`}
-        placeholder="Why waive QA? (optional)"
+        aria-label={`Why ${key} was dismissed`}
+        placeholder="Why dismiss it? (optional)"
         value={note}
         maxLength={2000}
         autoFocus
@@ -849,135 +836,5 @@ function WaivedNote({
         </Button>
       </div>
     </form>
-  );
-}
-
-function FailedNote({
-  environmentId,
-  landingId,
-  threadId,
-  change,
-  autoFocus,
-}: {
-  environmentId: EnvironmentId;
-  landingId: string;
-  threadId: ThreadId;
-  change: Change;
-  autoFocus: boolean;
-}) {
-  const [note, setNote] = useState(change.qa.note);
-  const [saved, setSaved] = useState(change.qa.note);
-  const setQa = useSetQa();
-  const navigate = useNavigate();
-  const target = scopeThreadRef(environmentId, threadId);
-  const thread = useLandingThread(environmentId, threadId);
-  const save = async () => {
-    if (note === saved) return true;
-    setSaved(note);
-    const ok = await setQa({
-      environmentId,
-      input: { landingId, changeId: change.id, state: "failed", note },
-    });
-    if (!ok) setSaved(saved);
-    return ok;
-  };
-  const send = async () => {
-    if (thread.missing) {
-      toastManager.add({
-        type: "error",
-        title: "Can't send the QA note",
-        description: "This landing's thread no longer exists.",
-      });
-      return;
-    }
-    if (!(await save())) return;
-    const store = useComposerDraftStore.getState();
-    store.setPrompt(
-      target,
-      failedQaDraft(store.getComposerDraft(target)?.prompt ?? "", change, note),
-    );
-    await navigate({ to: "/$environmentId/$threadId", params: { environmentId, threadId } });
-  };
-  return (
-    <div className="space-y-1.5 rounded-md border border-destructive/30 p-1.5">
-      <Textarea
-        size="sm"
-        aria-label={`What failed in ${change.ticket?.key ?? change.id}`}
-        placeholder="What failed?"
-        value={note}
-        maxLength={2000}
-        autoFocus={autoFocus}
-        onChange={(event) => setNote(event.target.value)}
-        onBlur={() => void save()}
-      />
-      <Button size="micro" onClick={() => void send()}>
-        <SendIcon />
-        Send to thread
-      </Button>
-    </div>
-  );
-}
-
-function CaptureTile({
-  environmentId,
-  threadId,
-  path,
-  caption,
-}: {
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
-  path: string;
-  caption: string;
-}) {
-  const kind = captureKind(path);
-  const asset = useAssetUrlState(environmentId, { _tag: "media-file", threadId, path });
-  const [broken, setBroken] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const url = asset._tag === "Success" ? asset.url : null;
-  const missing = broken || asset._tag === "Failure";
-  const name = path.split(/[\\/]/).at(-1) ?? path;
-  return (
-    <figure className="min-w-0 space-y-0.5">
-      <button
-        type="button"
-        aria-label={`Open capture: ${caption}`}
-        disabled={url === null || missing}
-        className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40 text-muted-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-default"
-        onClick={() => {
-          if (url !== null && kind === "file") window.open(url, "_blank", "noopener,noreferrer");
-          else setExpanded(true);
-        }}
-      >
-        {missing ? (
-          <span className="min-w-0 px-1 text-center text-2xs">
-            Missing
-            <span className="block truncate">{name}</span>
-          </span>
-        ) : kind === "image" && url ? (
-          <img
-            src={url}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="size-full object-cover object-top"
-            onError={() => setBroken(true)}
-          />
-        ) : kind === "video" ? (
-          <PlayIcon aria-hidden className="size-4" />
-        ) : kind === "file" ? (
-          <FileIcon aria-hidden className="size-4" />
-        ) : null}
-      </button>
-      <figcaption className="truncate text-2xs text-muted-foreground">{caption}</figcaption>
-      {expanded && url ? (
-        <ExpandedImageDialog
-          preview={{
-            images: [{ src: url, name: caption, ...(kind === "video" ? { type: "video" } : {}) }],
-            index: 0,
-          }}
-          onClose={() => setExpanded(false)}
-        />
-      ) : null}
-    </figure>
   );
 }

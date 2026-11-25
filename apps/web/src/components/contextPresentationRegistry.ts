@@ -13,6 +13,10 @@ export interface ContextPresentationDefinition {
 
 const DEFINITIONS = [
   {
+    kind: "waiting-item",
+    capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
+  },
+  {
     kind: "artifact-answer",
     capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
   },

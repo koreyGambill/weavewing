@@ -358,24 +358,27 @@ function EvidenceStripButton({
   const environmentId = useEvidenceEnvironment(threadRef);
   useReloadEvidenceOnReturn(environmentId !== null);
   const counts = useEvidenceCounts(environmentId).data;
-  const waiting = (counts?.pending ?? 0) + (counts?.failed ?? 0);
-  const failed = counts?.failed ?? 0;
+  // A problem is the agent's to fix, so it stays out of what waits on the user.
+  const waiting = counts?.pending ?? 0;
+  const fixing = counts?.problem ?? 0;
   return (
     <StripButton
       id="evidence"
       title="Evidence"
       active={active}
       tooltip={tooltip}
-      badge={waiting ? `${waiting} waiting for QA${failed ? `, ${failed} failed` : ""}` : undefined}
+      badge={
+        waiting ? `${waiting} waiting for QA${fixing ? `, ${fixing} agent fixing` : ""}` : undefined
+      }
       icon={ClipboardCheckIcon}
     >
       {waiting ? (
         <span
           aria-hidden
-          data-failed={failed > 0}
+          data-fixing={fixing > 0}
           className={cn(
             "pointer-events-none absolute -right-1 -top-1 min-w-3.5 rounded-full px-1 text-center text-3xs leading-3.5 font-medium ring-2 ring-sidebar",
-            failed ? "bg-destructive text-white" : "bg-muted-foreground text-sidebar",
+            "bg-muted-foreground text-sidebar",
           )}
         >
           {waiting > 99 ? "99+" : waiting}

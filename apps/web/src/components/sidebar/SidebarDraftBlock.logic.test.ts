@@ -37,6 +37,7 @@ const composer = (prompt: string) =>
     reviewComments: [],
     threadContexts: [],
     environmentContexts: [],
+    waitingItems: [],
     artifactAnswers: [],
     replyTo: null,
     modelSelectionByProvider: {},

@@ -2,28 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ThreadId } from "@t3tools/contracts";
 
-import {
-  checkLabel,
-  coverageDraft,
-  failedQaDraft,
-  leavesNeedsQa,
-  reviewDisplay,
-} from "./evidence.logic";
-
-describe("failedQaDraft", () => {
-  const change = {
-    id: "bw-3612",
-    ask: "Watcher fires twice\nsecond line",
-    ticket: { key: "BW-3612" },
-  };
-
-  it.each([
-    ["", "QA failed on BW-3612: still two rows\nAsk: Watcher fires twice"],
-    ["my draft\n", "my draft\n\nQA failed on BW-3612: still two rows\nAsk: Watcher fires twice"],
-  ])("keeps an existing draft %j", (existing, expected) => {
-    expect(failedQaDraft(existing, change, " still two rows ")).toBe(expected);
-  });
-});
+import { checkLabel, coverageDraft, leavesNeedsQa, reviewDisplay } from "./evidence.logic";
 
 describe("coverageDraft", () => {
   it("lists each merge and counts the ones past the cap", () => {
@@ -58,7 +37,8 @@ describe("leavesNeedsQa", () => {
   it.each([
     ["b", "confirmed", true],
     ["b", "waived", true],
-    ["b", "failed", false],
+    ["b", "problem", false],
+    ["b", "quiet", true],
     ["a", "waived", false],
   ] as const)("setting %s to %s leaves the list: %s", (id, next, expected) => {
     expect(leavesNeedsQa(changes, id, next)).toBe(expected);

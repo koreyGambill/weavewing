@@ -34,6 +34,7 @@ import {
   htmlRenderFromToolItem,
   mcpAppFromToolItem,
   questionIdsFromToolItem,
+  evidenceLandingIdFromToolItem,
   sentMessageFromToolItem,
 } from "@t3tools/shared/toolOutput";
 import {
@@ -158,6 +159,14 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: RunId | null;
       readonly questionIds: ReadonlyArray<string>;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "thread-evidence";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      /** At an `evidence_record` call, its one landing; at a child's completion, the child's. */
+      readonly landingIds: ReadonlyArray<string>;
     }
   | {
       readonly id: string;
@@ -718,6 +727,22 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         createdAt,
         runId: item.runId,
         questionIds,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const landingId =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? evidenceLandingIdFromToolItem(item)
+        : undefined;
+    if (landingId !== undefined) {
+      entries.push({
+        id: item.id,
+        kind: "thread-evidence",
+        createdAt,
+        runId: item.runId,
+        landingIds: [landingId],
         ...attemptMetadata,
       });
       continue;

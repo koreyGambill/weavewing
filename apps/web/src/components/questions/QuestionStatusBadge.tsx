@@ -3,7 +3,7 @@ import type { ThreadQuestionStatus } from "@t3tools/client-runtime/state/thread-
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-type BadgeVariant =
+export type CardBadgeVariant =
   | "outline"
   | "secondary"
   | "info-outline"
@@ -12,7 +12,7 @@ type BadgeVariant =
 
 const STATUS: Record<
   ThreadQuestionStatus,
-  { readonly label: string; readonly variant: BadgeVariant; readonly help: string }
+  { readonly label: string; readonly variant: CardBadgeVariant; readonly help: string }
 > = {
   open: {
     label: "Open",
@@ -73,7 +73,19 @@ const STATUS: Record<
 
 /** A question's status, with what it means on hover; the same hue everywhere it shows. */
 export function QuestionStatusBadge({ status }: { readonly status: ThreadQuestionStatus }) {
-  const { label, variant, help } = STATUS[status];
+  return <CardStatusBadge {...STATUS[status]} />;
+}
+
+/** A card's status badge with its meaning on hover and focus, shared by every card kind. */
+export function CardStatusBadge({
+  label,
+  variant,
+  help,
+}: {
+  readonly label: string;
+  readonly variant: CardBadgeVariant;
+  readonly help: string;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger render={<Badge variant={variant} size="sm" />}>{label}</TooltipTrigger>

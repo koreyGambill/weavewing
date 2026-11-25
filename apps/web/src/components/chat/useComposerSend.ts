@@ -532,6 +532,7 @@ export function useComposerSend(input: ComposerSendInput) {
                   previewAnnotations: context.previewAnnotations,
                   threadContexts: context.threadContexts,
                   environmentContexts: context.environmentContexts,
+                  waitingItems: context.waitingItems,
                   artifactAnswers: context.artifactAnswers,
                   attachments: [],
                 }),
@@ -577,6 +578,7 @@ export function useComposerSend(input: ComposerSendInput) {
         sendCtx.reviewComments.length > 0 ||
         sendCtx.threadContexts.length > 0 ||
         sendCtx.environmentContexts.length > 0 ||
+        sendCtx.waitingItems.length > 0 ||
         sendCtx.artifactAnswers.length > 0 ||
         useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.replyTo
       ) {
@@ -654,6 +656,7 @@ export function useComposerSend(input: ComposerSendInput) {
       reviewComments: composerReviewComments,
       threadContexts: composerThreadContexts,
       environmentContexts: composerEnvironmentContexts,
+      waitingItems: composerWaitingItems,
       artifactAnswers: composerArtifactAnswers,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
@@ -727,6 +730,7 @@ export function useComposerSend(input: ComposerSendInput) {
           previewAnnotations: composerPreviewAnnotations,
           threadContexts: composerThreadContexts,
           environmentContexts: composerEnvironmentContexts,
+          waitingItems: composerWaitingItems,
           artifactAnswers: composerArtifactAnswers,
           replyTo,
         },
@@ -749,6 +753,7 @@ export function useComposerSend(input: ComposerSendInput) {
         reviewComments: composerReviewComments,
         threadContexts: composerThreadContexts,
         environmentContexts: composerEnvironmentContexts,
+        waitingItems: composerWaitingItems,
         artifactAnswers: composerArtifactAnswers,
       }),
     });
@@ -761,6 +766,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerReviewComments.length === 0 &&
       composerThreadContexts.length === 0 &&
       composerEnvironmentContexts.length === 0 &&
+      composerWaitingItems.length === 0 &&
       composerArtifactAnswers.length === 0
         ? parseCodexFeedbackCommand(trimmed)
         : null;
@@ -818,6 +824,7 @@ export function useComposerSend(input: ComposerSendInput) {
       composerReviewComments.length === 0 &&
       composerThreadContexts.length === 0 &&
       composerEnvironmentContexts.length === 0 &&
+      composerWaitingItems.length === 0 &&
       composerArtifactAnswers.length === 0 &&
       replyTo === null;
     if (freshSessionAvailable && composerHoldsOnlyText && isClearComposerCommand(trimmed)) {
@@ -866,6 +873,7 @@ export function useComposerSend(input: ComposerSendInput) {
       reviewComments: composerReviewComments,
       threadContexts: composerThreadContexts,
       environmentContexts: composerEnvironmentContexts,
+      waitingItems: composerWaitingItems,
       artifactAnswers: composerArtifactAnswers,
       replyTo,
     });
@@ -877,6 +885,7 @@ export function useComposerSend(input: ComposerSendInput) {
       reviewComments: composerReviewCommentsSnapshot,
       threadContexts: composerThreadContextsSnapshot,
       environmentContexts: composerEnvironmentContextsSnapshot,
+      waitingItems: composerWaitingItemsSnapshot,
       artifactAnswers: composerArtifactAnswersSnapshot,
       messageText: messageTextForSend,
     } = sendSnapshot;
@@ -918,6 +927,7 @@ export function useComposerSend(input: ComposerSendInput) {
         previewAnnotations: composerPreviewAnnotationsSnapshot,
         threadContexts: composerThreadContextsSnapshot,
         environmentContexts: composerEnvironmentContextsSnapshot,
+        waitingItems: composerWaitingItemsSnapshot,
         artifactAnswers: composerArtifactAnswersSnapshot,
         replyTo,
         attachments: composerAttachmentsSnapshot.map((attachment, index) => ({

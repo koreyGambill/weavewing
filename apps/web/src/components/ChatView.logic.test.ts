@@ -133,6 +133,7 @@ describe("deriveComposerSendState", () => {
       reviewComments: [],
       threadContexts: [],
       environmentContexts: [],
+      waitingItems: [],
       artifactAnswers: [],
     };
     const state = (artifactAnswers: ReadonlyArray<unknown>) =>
@@ -1283,6 +1284,7 @@ describe("snapshotComposerSend", () => {
       reviewComments: [],
       threadContexts: [],
       environmentContexts: [],
+      waitingItems: [],
       artifactAnswers: answers,
       replyTo: null,
     });
@@ -1322,6 +1324,7 @@ describe("snapshotComposerSend", () => {
       reviewComments: [],
       threadContexts: [],
       environmentContexts: [],
+      waitingItems: [],
       artifactAnswers: [],
       replyTo,
     });
