@@ -17,6 +17,7 @@ import "~/index.css";
 const state = vi.hoisted(() => ({
   permitted: true,
   run: vi.fn(),
+  inventory: vi.fn(),
 }));
 
 vi.mock(import("../../state/orchestration"), async (original) => {
@@ -30,6 +31,10 @@ vi.mock(import("../../state/orchestration"), async (original) => {
         ...actual.orchestrationEnvironment.setThreadToolOverrides,
         permissionAtom: () => Atom.make(state.permitted),
       },
+      threadMcpServers: ((target: unknown) =>
+        Atom.make(
+          state.inventory(target),
+        )) as typeof actual.orchestrationEnvironment.threadMcpServers,
     },
   };
 });
@@ -38,9 +43,21 @@ vi.mock(import("../../state/use-atom-command"), async (original) => ({
   useAtomCommand: (() => state.run) as never,
 }));
 
-function setup(permitted = true) {
+const fixtureInventory = {
+  servers: [
+    { name: "fixture-notes", connector: false, status: "connected" },
+    { name: "claude.ai Fixture Board", connector: true, status: "pending" },
+    { name: "claude.ai Fixture Mail", connector: true, status: "pending" },
+  ],
+};
+
+function setup(
+  permitted = true,
+  inventory: AsyncResult.AsyncResult<unknown, unknown> = AsyncResult.success(fixtureInventory),
+) {
   state.permitted = permitted;
   state.run.mockReset().mockResolvedValue({ _tag: "Success", value: { reloaded: true } });
+  state.inventory.mockReset().mockReturnValue(inventory);
 }
 
 const environmentId = EnvironmentId.make("environment-test");
@@ -167,3 +184,55 @@ it("shows the server's refusal in the footer and keeps the popover open", async 
     .element(dialog.getByText("A turn is running. Stop it or wait for it to finish, then reload."))
     .toBeVisible();
 });
+
+it("lists MCP servers only once open, and one connector switched on leaves the others out", async () => {
+  setup();
+  await using screen = await renderControl();
+  expect(state.inventory).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+  expect(state.inventory).toHaveBeenCalledWith({
+    environmentId,
+    input: { threadId: idleThread.id },
+  });
+  const connectors = page.getByRole("list", { name: "claude.ai connectors" });
+  await userEvent.click(connectors.getByRole("switch").first());
+  const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
+  await expect
+    .element(dialog.getByText("1 switched on, 1 MCP server left out, about +3,200 tokens"))
+    .toBeVisible();
+  await userEvent.click(dialog.getByRole("button", { name: "Reload session" }));
+  expect(state.run).toHaveBeenCalledWith({
+    environmentId,
+    input: {
+      threadId: idleThread.id,
+      toolOverrides: {
+        enabledBuiltinTools: [],
+        claudeAiConnectors: true,
+        omittedMcpServers: ["claude.ai Fixture Mail"],
+      },
+    },
+  });
+});
+
+it.each([
+  ["loading", AsyncResult.initial(true), "Loading MCP servers…"],
+  [
+    "failed",
+    AsyncResult.failure(Cause.fail("probe failed")),
+    "Could not list this thread's MCP servers.",
+  ],
+] as const)(
+  "keeps built-in tools usable while the inventory is %s",
+  async (_name, inventory, text) => {
+    setup(true, inventory);
+    await using screen = await renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /Tools 8 off/ }));
+    const dialog = page.getByRole("dialog", { name: "Tools left out of this thread" });
+    await expect.element(dialog.getByText(text)).toBeVisible();
+    if (_name === "failed") {
+      await expect.element(dialog.getByRole("button", { name: "Retry" })).toBeVisible();
+    }
+    await userEvent.click(dialog.getByRole("switch").first());
+    await expect.element(dialog.getByText("1 switched on, about +12,900 tokens")).toBeVisible();
+  },
+);
