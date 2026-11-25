@@ -1,6 +1,7 @@
 import {
   THREAD_QUESTION_COMMENTS_ARTIFACT_ID,
   THREAD_QUESTIONS_ARTIFACT_ID,
+  THREAD_QUESTIONS_REFRESH_REQUEST,
   threadQuestionTitle,
   type ArtifactAnswerContextRecord,
   type ThreadQuestion,
@@ -78,16 +79,24 @@ export type ThreadQuestionStatus =
   | "deferred"
   | "drafted"
   | "in-composer"
+  | "comment-in-composer"
   | "sent"
+  | "discussing"
   | "received"
   | "recorded"
   | "dismissed"
   | "replaced";
 
-/** Where a question's answer is; `inComposer` is whether this device's composer holds it. */
+/**
+ * Where a question's answer or comment is; `inComposer` is what this device's composer holds for
+ * it. A sent comment outranks the draft it leaves, so a chosen option still reads as discussing.
+ */
 export function threadQuestionStatus(
-  question: Pick<ThreadQuestion, "state" | "answer" | "answeredBy" | "sentInMessageId">,
-  inComposer: boolean,
+  question: Pick<
+    ThreadQuestion,
+    "state" | "answer" | "answeredBy" | "sentInMessageId" | "discussedInMessageId"
+  >,
+  inComposer: "answer" | "discuss" | undefined,
 ): ThreadQuestionStatus {
   switch (question.state) {
     case "answered":
@@ -99,9 +108,27 @@ export function threadQuestionStatus(
     case "open":
     case "deferred":
       if (threadQuestionIsSent(question)) return "sent";
-      if (!threadQuestionHasDraft(question)) return question.state;
-      return inComposer ? "in-composer" : "drafted";
+      if (inComposer === "discuss") return "comment-in-composer";
+      if (inComposer === "answer" && threadQuestionHasDraft(question)) return "in-composer";
+      if (question.discussedInMessageId !== undefined) return "discussing";
+      return threadQuestionHasDraft(question) ? "drafted" : question.state;
   }
+}
+
+/** A composer prompt with the questions refresh request after its text, unless it already has it. */
+export function withQuestionsRefreshRequest(prompt: string): string {
+  if (prompt.includes(THREAD_QUESTIONS_REFRESH_REQUEST)) return prompt;
+  return prompt.trim()
+    ? `${prompt.trimEnd()}\n\n${THREAD_QUESTIONS_REFRESH_REQUEST}`
+    : THREAD_QUESTIONS_REFRESH_REQUEST;
+}
+
+/** The question `id` replaced, or null when it replaced none. */
+export function threadQuestionReplaced(
+  questions: ReadonlyArray<Pick<ThreadQuestion, "id" | "replacedBy">>,
+  id: string,
+): string | null {
+  return questions.find((question) => question.replacedBy === id)?.id ?? null;
 }
 
 const isQuestionAnswer = (record: ArtifactAnswerContextRecord) =>

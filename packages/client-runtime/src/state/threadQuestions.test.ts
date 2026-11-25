@@ -1,4 +1,4 @@
-import type { ThreadQuestion } from "@t3tools/contracts";
+import { THREAD_QUESTIONS_REFRESH_REQUEST, type ThreadQuestion } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,7 +9,9 @@ import {
   threadQuestionCounts,
   threadQuestionDiscussRecord,
   threadQuestionsInComposer,
+  threadQuestionReplaced,
   threadQuestionStatus,
+  withQuestionsRefreshRequest,
   withComposerQuestionAnswer,
   withoutComposerQuestionAnswer,
   withoutThreadQuestionRecords,
@@ -77,24 +79,56 @@ describe("thread questions", () => {
     ).toEqual({ waiting: 3, deferred: 1, drafted: 2 });
   });
 
-  it("names where each answer is", () => {
-    const cases: Array<[ThreadQuestion, boolean, string]> = [
-      [question("Q1", "open"), false, "open"],
-      [question("Q1", "open"), true, "open"],
-      [question("Q1", "deferred"), false, "deferred"],
-      [question("Q1", "open", { answer: draft([], " ") }), true, "open"],
-      [question("Q1", "open", { answer: draft(["a"]) }), false, "drafted"],
-      [question("Q1", "deferred", { answer: draft([], "later") }), false, "drafted"],
-      [question("Q1", "open", { answer: draft(["a"]) }), true, "in-composer"],
-      [question("Q1", "open", { answer: draft(["a"]), sentInMessageId: sentIn }), true, "sent"],
+  it("names where each answer or comment is", () => {
+    const discussedIn = "message-2" as ThreadQuestion["discussedInMessageId"];
+    const cases: Array<[ThreadQuestion, "answer" | "discuss" | undefined, string]> = [
+      [question("Q1", "open"), undefined, "open"],
+      [question("Q1", "open"), "answer", "open"],
+      [question("Q1", "deferred"), undefined, "deferred"],
+      [question("Q1", "open", { answer: draft([], " ") }), "answer", "open"],
+      [question("Q1", "open", { answer: draft(["a"]) }), undefined, "drafted"],
+      [question("Q1", "deferred", { answer: draft([], "later") }), undefined, "drafted"],
+      [question("Q1", "open", { answer: draft(["a"]) }), "answer", "in-composer"],
+      [question("Q1", "open", { answer: draft(["a"], "why") }), "discuss", "comment-in-composer"],
+      [question("Q1", "open", { answer: draft(["a"]), sentInMessageId: sentIn }), "answer", "sent"],
+      // A sent comment outranks the choice it left behind as a draft.
+      [
+        question("Q1", "open", { answer: draft(["a"]), discussedInMessageId: discussedIn }),
+        undefined,
+        "discussing",
+      ],
+      [
+        question("Q1", "open", { answer: draft([], "why"), discussedInMessageId: discussedIn }),
+        undefined,
+        "discussing",
+      ],
+      [
+        question("Q1", "open", { answer: draft(["a"]), discussedInMessageId: discussedIn }),
+        "answer",
+        "in-composer",
+      ],
+      [
+        question("Q1", "open", { answer: draft([], "more"), discussedInMessageId: discussedIn }),
+        "discuss",
+        "comment-in-composer",
+      ],
+      [
+        question("Q1", "open", {
+          answer: draft(["a"]),
+          discussedInMessageId: discussedIn,
+          sentInMessageId: sentIn,
+        }),
+        undefined,
+        "sent",
+      ],
       [
         question("Q1", "answered", { answeredBy: "user", sentInMessageId: sentIn }),
-        false,
+        undefined,
         "received",
       ],
-      [question("Q1", "answered", { answeredBy: "agent" }), false, "recorded"],
-      [question("Q1", "withdrawn"), false, "dismissed"],
-      [question("Q1", "replaced"), false, "replaced"],
+      [question("Q1", "answered", { answeredBy: "agent" }), undefined, "recorded"],
+      [question("Q1", "withdrawn"), undefined, "dismissed"],
+      [question("Q1", "replaced", { discussedInMessageId: discussedIn }), undefined, "replaced"],
     ];
     for (const [entry, inComposer, status] of cases)
       expect([entry.state, inComposer, threadQuestionStatus(entry, inComposer)]).toEqual([
@@ -102,6 +136,26 @@ describe("thread questions", () => {
         inComposer,
         status,
       ]);
+  });
+
+  it("adds the refresh request after what the composer holds, once", () => {
+    expect(withQuestionsRefreshRequest("")).toBe(THREAD_QUESTIONS_REFRESH_REQUEST);
+    const added = withQuestionsRefreshRequest("Also rename the flag.\n");
+    expect(added).toBe(`Also rename the flag.\n\n${THREAD_QUESTIONS_REFRESH_REQUEST}`);
+    expect(withQuestionsRefreshRequest(added)).toBe(added);
+  });
+
+  it("finds the question a replacement replaced", () => {
+    const questions = [
+      question("Q1", "replaced", { replacedBy: "Q2" }),
+      question("Q2", "replaced", { replacedBy: "Q3" }),
+      question("Q3", "open"),
+    ];
+    expect(["Q1", "Q2", "Q3"].map((id) => threadQuestionReplaced(questions, id))).toEqual([
+      null,
+      "Q1",
+      "Q2",
+    ]);
   });
 
   it("builds a composer answer only from a draft, with one context id per question", () => {
@@ -282,8 +336,8 @@ describe("thread questions", () => {
         questions: [question("Q1", "deferred", { answer: draft([], " ", 4) })],
       }),
     ).toEqual([]);
-    // Its status stays the question's own: a discussion is not an answer in the composer.
-    expect(threadQuestionStatus(after, false)).toBe("drafted");
+    expect(threadQuestionStatus(after, undefined)).toBe("drafted");
+    expect(threadQuestionStatus(after, "discuss")).toBe("comment-in-composer");
   });
 
   it("shows the answer or the start of the note on a question's chip", () => {
