@@ -19,9 +19,9 @@ Weavewing is a public fork of T3 Code, a GUI for coding agents. The repository i
 
 ## Verifying
 
-- A landing is gated by `vp run check:changed` (format, lint, knip, typecheck, and the tests near the changed files), focused tests with `vp test run <files>` (add `-t "<name>"` for big files), and review. Full suites do not gate a landing, so do not run one before landing.
-- A test-channel (nightly) release is gated by the release pipeline's own smoke checks only: the release builds, the clean-bundle check, and the per-platform CLI and native artifact smoke checks. It runs no full CI.
-- A stable release is gated by full CI, which the release pipeline runs itself. See [Weavewing release](docs/operations/weavewing-release.md). When someone does need one full suite, run it through admission, never as bare commands in parallel: `sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web`, with `server` or `packages` for the others.
+- A landing is gated by `vp run check:changed` (format, lint, knip, typecheck, and the tests near the changed files), focused tests with `vp test run <files>` (add `-t "<name>"` for big files), and review. Full suites do not gate a landing, so do not run one before landing. A fix for a broken default branch or gate may land on its focused proof alone, with the review following.
+- A test-channel (nightly) release is gated by the release pipeline's own preflight tests and smoke checks: the release builds, the clean-bundle check, and the per-platform CLI and native artifact smoke checks. It runs full CI only when `--force-ci` is passed.
+- A stable release is gated by the full Sparkwing `ci` pipeline, which the release pipeline runs itself or accepts from a matching receipt. See [Weavewing release](docs/operations/weavewing-release.md). When someone does need one full suite, run it through admission, never as bare commands in parallel: `sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web`, with `server` or `packages` for the others.
 - While iterating, run focused tests and `vp run typecheck`. The checker is `effect-tsgo`; there is no `typescript` package to run.
 - Never run repo-wide checks (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked; CI owns the full suite.
 - Run `node -e` snippets from `apps/server` or the owning package; `effect` does not resolve from the repo root.

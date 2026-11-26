@@ -230,8 +230,8 @@ the recorded pass when a checkout with identical content already passed through 
 key does not read installed package files or files under ignored build, cache and state directories
 such as `dist`; run `vp i` after editing inside `node_modules`, and pass `--no-memo` when a check
 reads one of the others.
-`sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web|server|packages` runs one
-full suite as CI does, when someone needs one, and reports every failing file or package.
+`sparkwing run suite -C <checkout> -- --worktree <checkout> --suite web` runs one full suite as CI
+does (`web`, `server` or `packages`), when someone needs one, and reports every failing file or package.
 `sparkwing run gate --help` and `sparkwing run suite --help` list their arguments.
 
 The steps run side by side, as many at once as the machine allows: one per two cores and per 6 GiB
