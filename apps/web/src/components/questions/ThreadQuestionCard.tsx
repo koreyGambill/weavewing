@@ -21,6 +21,7 @@ import {
 } from "../../state/threadQuestions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
+import { ComposerImageThumbnail } from "../chat/ComposerImageThumbnail";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
@@ -429,15 +430,14 @@ export function ThreadQuestionCard({
               className="flex items-start gap-1 rounded-md border border-foreground/30 p-0.5"
             >
               <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <img
-                      src={image.previewUrl}
-                      alt={marker}
-                      className="h-10 w-auto max-w-24 rounded-sm object-contain"
-                    />
-                  }
-                />
+                <TooltipTrigger render={<span className="inline-flex" />}>
+                  <ComposerImageThumbnail
+                    file={image.file}
+                    alt={marker}
+                    className="h-10 w-auto max-w-24 rounded-sm object-contain"
+                    fallback={<span className="block size-10 rounded-sm bg-muted" />}
+                  />
+                </TooltipTrigger>
                 <TooltipPopup side="top">{marker}</TooltipPopup>
               </Tooltip>
               {editable ? (
