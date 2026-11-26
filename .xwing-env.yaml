@@ -17,8 +17,13 @@ commands:
   build:
     argv: [vp, run, build]
   test:
-    argv: [vp, run, check:changed]
-    description: CI's fast checks for changed files; CI runs the full suites
+    # The main checkout's pipelines run the gate, so every worktree of it shares recorded passes.
+    argv:
+      - sh
+      - -c
+      - exec sparkwing run gate -C "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" -- --worktree "$(git rev-parse --show-toplevel)" "$@"
+      - gate
+    description: CI's fast checks for changed files through the Sparkwing gate; CI runs the full suites
   run:
     argv: [vp, run, dev]
     description: Server and web dev servers with single-origin Vite proxying

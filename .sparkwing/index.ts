@@ -8,6 +8,8 @@ import "./jobs/gate.ts";
 
 import "./jobs/test.ts";
 
+import "./jobs/suite.ts";
+
 import "./jobs/desktop-install.ts";
 
 import "./jobs/upstream-contracts.ts";

@@ -15,6 +15,7 @@ import {
   packageTestNames,
   typecheckPackageNames,
 } from "../lib/checkout.ts";
+import { eachPackage, SUITES } from "../lib/suites.ts";
 
 // Mirrors .github/workflows/ci.yml. Not ported: Rust tests, the xvfb desktop launch smoke and
 // mobile_native_static_analysis (macOS). .sparkwing/workflows.json tracks them.
@@ -73,21 +74,6 @@ definePipeline({
         !(await decided(ctx)).outputs[key];
     const run = (ctx: Context, name: string, argv: readonly [string, ...string[]]) =>
       logged(ctx, checkout(ctx), name, argv);
-    // vp run stops every remaining task after the first failure, so each package runs as its own
-    // vp run, four at a time, and the job names every failing package.
-    const eachPackage = async (ctx: Context, label: string, names: string[], script: readonly string[]) => {
-      const queue = [...names];
-      const failed: string[] = [];
-      const worker = async () => {
-        for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
-          await run(ctx, `${label}-${name.replace(/[^\w.-]+/g, "-")}`, ["vp", "run", "--filter", name, ...script]).catch(
-            () => failed.push(name),
-          );
-        }
-      };
-      await Promise.all(Array.from({ length: 4 }, worker));
-      if (failed.length > 0) throw new Error(`${label} failed in: ${failed.sort().join(", ")}`);
-    };
 
     const electron = p
       .job("electron", (ctx) => run(ctx, "electron", ["vp", "run", "--filter", "@t3tools/desktop", "ensure:electron"]))
@@ -109,7 +95,7 @@ definePipeline({
     lint.step("check", (ctx) => run(ctx, "check", ["vp", "check"]));
 
     p.job("typecheck", (ctx) =>
-      eachPackage(ctx, "typecheck", typecheckPackageNames(checkout(ctx).root), ["--cache", "typecheck"]),
+      eachPackage(ctx, checkout(ctx), "typecheck", typecheckPackageNames(checkout(ctx).root), ["--cache", "typecheck"]),
     )
       .inline()
       .cores(4)
@@ -157,20 +143,19 @@ definePipeline({
     test.step("release-checks", (ctx) => run(ctx, "release-checks", ["node", "--test", ...NODE_SCRIPT_TESTS]));
     test.step("packages", async (ctx) => {
       const chosen = (await decided(ctx)).outputs.test_packages.split(" ").filter(Boolean);
-      await eachPackage(ctx, "packages", chosen.length > 0 ? chosen : packageTestNames(checkout(ctx).root), ["test"]);
+      const co = checkout(ctx);
+      await eachPackage(ctx, co, "packages", chosen.length > 0 ? chosen : packageTestNames(co.root), ["test"]);
     });
 
-    p.job("test-web", (ctx) => run(ctx, "test-web", ["vp", "run", "--filter", "@t3tools/web", "test"]))
+    p.job("test-web", (ctx) => SUITES.web.run(ctx, checkout(ctx)))
       .inline()
-      .cores(6)
+      .cores(SUITES.web.cores)
       .needs(changes)
       .skipIf(unless("test_web"));
 
-    // One vitest run reports every failing file; test:cached runs a vp task per file, and vp run
-    // stops the rest after the first failure.
-    p.job("test-server", (ctx) => run(ctx, "test-server", ["vp", "run", "--filter", "t3", "test", "--maxWorkers=4"]))
+    p.job("test-server", (ctx) => SUITES.server.run(ctx, checkout(ctx)))
       .inline()
-      .cores(6)
+      .cores(SUITES.server.cores)
       .needs(changes)
       .skipIf(unless("test_server"));
 
