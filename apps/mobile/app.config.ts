@@ -1,7 +1,12 @@
 import type { ExpoConfig } from "expo/config";
+import { withDangerousMod } from "expo/config-plugins";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
-import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import {
+  clerkFrontendApiHostnameFromPublishableKey,
+  loadRepoEnv,
+  MOBILE_APP_VARIANTS,
+} from "../../scripts/lib/public-config.ts";
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -19,6 +24,10 @@ const runtimeVersionPolicy =
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
+// Push notifications reach the app only through the relay, so a build without one requests no APNs
+// entitlement. A Personal Team cannot sign it either.
+const relayConfigured = Boolean(repoEnv.T3CODE_RELAY_URL?.trim());
+
 // Compiled into the native project. Without a relay, Observe's native side could dispatch to
 // Expo's own ingest before observe.ts turns it off; `.invalid` never resolves (RFC 6761).
 const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
@@ -34,8 +43,55 @@ if (
     !IOS_BUNDLE_IDENTIFIER_PATTERN.test(personalTeamBundleIdentifier))
 ) {
   throw new Error(
-    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code when T3CODE_IOS_PERSONAL_TEAM=1.",
+    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.weavewing when T3CODE_IOS_PERSONAL_TEAM=1.",
   );
+}
+
+const appleTeamId = repoEnv.T3CODE_APPLE_TEAM_ID?.trim() || undefined;
+const expoOwner = repoEnv.T3CODE_EXPO_OWNER?.trim() || undefined;
+const expoProjectId = repoEnv.T3CODE_EXPO_PROJECT_ID?.trim() || undefined;
+
+// Preview and production builds of either platform build and update through the owner's Expo
+// project, and iOS builds also sign with the owner's Apple team. Development builds need neither,
+// and a Personal Team iOS build signs locally without them.
+const isDistributionVariant = APP_VARIANT !== "development";
+const missingExpoSettings = missingSettings({
+  T3CODE_EXPO_OWNER: expoOwner,
+  T3CODE_EXPO_PROJECT_ID: expoProjectId,
+});
+const missingIosSettings = missingSettings({
+  T3CODE_APPLE_TEAM_ID: appleTeamId,
+  T3CODE_EXPO_OWNER: expoOwner,
+  T3CODE_EXPO_PROJECT_ID: expoProjectId,
+});
+
+function missingSettings(settings: Record<string, string | undefined>): string[] {
+  return Object.entries(settings)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+}
+
+function missingSettingsError(missing: readonly string[]): Error {
+  const variant =
+    repoEnv.APP_VARIANT === undefined
+      ? `APP_VARIANT=${APP_VARIANT} (the default)`
+      : `APP_VARIANT=${APP_VARIANT}`;
+  return new Error(
+    `${variant} needs ${missing.join(", ")}. Set them in the repository-root .env.local or as EAS environment variables; docs/operations/weavewing-ios-release.md says where each value comes from. APP_VARIANT=development builds without them.`,
+  );
+}
+
+// A named variant fails as soon as the config loads, which covers EAS commands. Tools such as knip
+// load the config with no variant; prebuild checks that case per platform below. The platform is
+// unknown here, so the Personal Team flag, which only iOS builds set, skips this check; Android
+// prebuild still applies it.
+if (
+  repoEnv.APP_VARIANT !== undefined &&
+  isDistributionVariant &&
+  !isIosPersonalTeamBuild &&
+  missingExpoSettings.length > 0
+) {
+  throw missingSettingsError(missingExpoSettings);
 }
 
 const DEVELOPMENT_ASSETS = {
@@ -79,27 +135,24 @@ const RELEASE_ASSETS = {
 
 const VARIANT_CONFIG = {
   development: {
-    appName: "T3 Code Dev",
+    appName: MOBILE_APP_VARIANTS.development.name,
     scheme: "t3code-dev",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: MOBILE_APP_VARIANTS.development.identifier,
+    androidPackage: MOBILE_APP_VARIANTS.development.identifier,
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "T3 Code Preview",
+    appName: MOBILE_APP_VARIANTS.preview.name,
     scheme: "t3code-preview",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: MOBILE_APP_VARIANTS.preview.identifier,
+    androidPackage: MOBILE_APP_VARIANTS.preview.identifier,
     assets: PREVIEW_ASSETS,
   },
   production: {
-    appName: "T3 Code",
+    appName: MOBILE_APP_VARIANTS.production.name,
     scheme: "t3code",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: MOBILE_APP_VARIANTS.production.identifier,
+    androidPackage: MOBILE_APP_VARIANTS.production.identifier,
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -118,11 +171,33 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
-// Copied thread links open the app. app.t3.codes/.well-known lists every variant's identifiers.
-const HOSTED_APP_HOST = "app.t3.codes";
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
+
+// Passkeys and Clerk's OAuth return links are bound to the Clerk instance's Frontend API host.
+const clerkPublishableKey = repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || undefined;
+const clerkFrontendApiHost = clerkPublishableKey
+  ? clerkFrontendApiHostnameFromPublishableKey(clerkPublishableKey)
+  : undefined;
+// Copied thread links open the app only while this host's .well-known files list its identifiers.
+const hostedAppUrl = resolveHostedAppUrl(repoEnv.T3CODE_HOSTED_APP_URL?.trim());
+const hostedAppHost = hostedAppUrl?.host;
+const associatedDomains = [
+  ...(clerkFrontendApiHost
+    ? [`applinks:${clerkFrontendApiHost}`, `webcredentials:${clerkFrontendApiHost}`]
+    : []),
+  ...(hostedAppHost ? [`applinks:${hostedAppHost}`] : []),
+];
+
+function resolveHostedAppUrl(value: string | undefined): URL | undefined {
+  if (!value) return undefined;
+  const url = URL.canParse(value) ? new URL(value) : undefined;
+  if (url?.protocol !== "https:") {
+    throw new Error("T3CODE_HOSTED_APP_URL must be an https URL such as https://app.example.com.");
+  }
+  return url;
+}
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
@@ -135,7 +210,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   {
     bundleIdentifier: `${iosBundleIdentifier}.widgets`,
     groupIdentifier: `group.${iosBundleIdentifier}`,
-    enablePushNotifications: true,
+    enablePushNotifications: relayConfigured,
     // Frequent updates need the iOS entitlement to avoid early throttling.
     frequentUpdates: true,
     enableAndroid: true,
@@ -143,7 +218,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "SubscriptionUsage",
         displayName: "Subscription usage",
-        description: "Subscription quotas from your connected T3 Code environments.",
+        description: "Subscription quotas from your connected Weavewing environments.",
         ios: {
           configuration: {
             title: "Subscription usage",
@@ -193,7 +268,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
+        description: "Shows the current state of active Weavewing agents.",
         android: null,
         ios: {
           supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
@@ -234,10 +309,10 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: "weavewing",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
-  version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.3.0",
+  version: repoEnv.T3CODE_MOBILE_VERSION ?? "0.1.0",
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.
     policy: runtimeVersionPolicy,
@@ -245,26 +320,27 @@ const config: ExpoConfig = {
   orientation: "portrait",
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
-  updates: {
-    enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    checkAutomatically: "ON_LOAD",
-    fallbackToCacheTimeout: 0,
-  },
+  // Off unless asked for: an update check tells Expo about every launch, which the privacy policy must then disclose.
+  updates:
+    expoProjectId && repoEnv.T3CODE_MOBILE_UPDATES_ENABLED === "1"
+      ? {
+          enabled: true,
+          url: `https://u.expo.dev/${expoProjectId}`,
+          checkAutomatically: "ON_LOAD",
+          fallbackToCacheTimeout: 0,
+        }
+      : { enabled: false },
   ios: {
     icon: variant.assets.iosIcon,
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
     // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
-    appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-      `applinks:${HOSTED_APP_HOST}`,
-    ],
+    ...(appleTeamId ? { appleTeamId } : {}),
+    // An empty list would still request the entitlement, which the provisioning profile must then grant.
+    ...(associatedDomains.length > 0 ? { associatedDomains } : {}),
     entitlements: {
-      "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
       UISupportedInterfaceOrientations: [
@@ -276,8 +352,8 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
-      NSPhotoLibraryAddUsageDescription: "Allow T3 Code to save images to your photo library.",
+        "Allow Weavewing to connect to Weavewing servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow Weavewing to save images to your photo library.",
       // System picture in picture needs background audio to start and survive outside the app.
       UIBackgroundModes: ["audio"],
       ITSAppUsesNonExemptEncryption: false,
@@ -312,14 +388,18 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: true,
     // expo-sensors declares this for its pedometer, which the app does not use.
     blockedPermissions: ["android.permission.ACTIVITY_RECOGNITION"],
-    intentFilters: [
-      {
-        action: "VIEW",
-        autoVerify: true,
-        data: [{ scheme: "https", host: HOSTED_APP_HOST, pathPrefix: "/threads/" }],
-        category: ["BROWSABLE", "DEFAULT"],
-      },
-    ],
+    ...(hostedAppHost
+      ? {
+          intentFilters: [
+            {
+              action: "VIEW",
+              autoVerify: true,
+              data: [{ scheme: "https", host: hostedAppHost, pathPrefix: "/threads/" }],
+              category: ["BROWSABLE", "DEFAULT"],
+            },
+          ],
+        }
+      : {}),
   },
   web: {
     favicon: variant.assets.appIcon,
@@ -361,10 +441,18 @@ const config: ExpoConfig = {
         icon: variant.assets.androidNotificationIcon,
         color: variant.assets.androidNotificationColor,
         mode: APP_VARIANT === "development" ? "development" : "production",
+        // Gated here: withoutIosPersonalTeamCapabilities runs too early to strip aps-environment.
+        enableRemoteNotifications: relayConfigured && !isIosPersonalTeamBuild,
       },
     ],
     // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    [
+      "@clerk/expo",
+      {
+        theme: "./clerk-theme.json",
+        appleSignIn: clerkPublishableKey !== undefined && !isIosPersonalTeamBuild,
+      },
+    ],
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -383,7 +471,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        microphonePermission: "Allow Weavewing to use your microphone for voice input.",
         recordAudioAndroid: true,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
@@ -392,7 +480,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow Weavewing to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,
@@ -403,7 +491,7 @@ const config: ExpoConfig = {
       {
         photosPermission: false,
         // `false` makes this plugin add RECORD_AUDIO to blockedPermissions, breaking Android dictation.
-        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        microphonePermission: "Allow Weavewing to use your microphone for voice input.",
       },
     ],
     [
@@ -471,6 +559,9 @@ const config: ExpoConfig = {
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },
+    hostedApp: {
+      url: hostedAppUrl?.origin ?? null,
+    },
     clerk: {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
@@ -486,15 +577,34 @@ const config: ExpoConfig = {
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
     eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+      ...(expoProjectId ? { projectId: expoProjectId } : {}),
       observe: { endpointUrl: observeEndpointUrl },
     },
   },
-  owner: "pingdotgg",
+  ...(expoOwner ? { owner: expoOwner } : {}),
   experiments: {
     // Metro only runs babel-plugin-react-compiler when this is set; see src/reactCompilerCoverage.test.ts.
     reactCompiler: true,
   },
 };
 
-export default config;
+// Prebuild runs these for each platform whose native project it generates, so EAS builds and local
+// builds that generate a fresh project are checked. A local build from an existing ios/ or android/
+// folder skips prebuild and keeps whatever the prebuild that generated it allowed. Introspection
+// and `expo config` skip dangerous mods, so inspecting the config still works.
+function requireAccountsAtPrebuild(missing: readonly string[], exempt: boolean) {
+  return <T>(modConfig: T): T => {
+    if (isDistributionVariant && !exempt && missing.length > 0) {
+      throw missingSettingsError(missing);
+    }
+    return modConfig;
+  };
+}
+
+export default withDangerousMod(
+  withDangerousMod(config, [
+    "ios",
+    requireAccountsAtPrebuild(missingIosSettings, isIosPersonalTeamBuild),
+  ]),
+  ["android", requireAccountsAtPrebuild(missingExpoSettings, false)],
+);

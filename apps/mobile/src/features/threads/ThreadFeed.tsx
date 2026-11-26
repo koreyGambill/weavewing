@@ -287,6 +287,10 @@ import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { useMessageTimeFormatter } from "./useMessageTimeFormatter";
 import { APP_BASE_NAME } from "../../lib/mobileBranding";
+import { resolveCloudPublicConfig } from "../cloud/publicConfig";
+
+// A copied thread link opens through this host, so a build without one offers no link to copy.
+const hostedAppUrl = resolveCloudPublicConfig().hostedApp.url;
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   // iOS blockquotes and selectable text measure separately; definite bubble width matches UIKit's drawing width.
@@ -3133,7 +3137,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             appAtomRegistry.get(environmentThreadShells.threadShellAtom(thread))?.title ?? "Thread",
           actions: [
             { id: "open-thread", title: "Open thread" },
-            { id: "copy-thread-link", title: "Copy link" },
+            ...(hostedAppUrl ? [{ id: "copy-thread-link", title: "Copy link" }] : []),
           ],
         };
       }
@@ -3156,7 +3160,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       const thread = resolveLinkedThread(href);
       if (thread) {
         if (actionId === "open-thread") onMarkdownLinkPress(href);
-        else if (actionId === "copy-thread-link") copyTextWithHaptic(hostedThreadLink(thread));
+        else if (actionId === "copy-thread-link" && hostedAppUrl)
+          copyTextWithHaptic(hostedThreadLink(thread, hostedAppUrl));
         return;
       }
       const target = resolveFileChipTarget(href, props.workspaceRoot);

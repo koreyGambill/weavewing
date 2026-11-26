@@ -85,3 +85,4 @@ Most code changes need no documentation change; agents can read the code.
 - [Observability](./operations/observability.md)
 - [Relay observability](./operations/relay-observability.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+- [Release the Weavewing iOS app](./operations/weavewing-ios-release.md)

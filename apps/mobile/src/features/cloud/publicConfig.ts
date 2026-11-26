@@ -22,6 +22,10 @@ export interface CloudPublicConfig {
   readonly relay: {
     readonly url: string | null;
   };
+  /** Origin of the hosted web app that copied thread links open; null when none is configured. */
+  readonly hostedApp: {
+    readonly url: string | null;
+  };
   readonly observability: {
     readonly tracesUrl: string | null;
     readonly tracesDataset: string | null;
@@ -56,6 +60,11 @@ function normalizeSecureUrl(value: unknown): string | null {
   }
 }
 
+function secureOrigin(value: unknown): string | null {
+  const url = normalizeSecureUrl(value);
+  return url === null ? null : new URL(url).origin;
+}
+
 export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig?.extra) {
   return {
     clerk: {
@@ -64,6 +73,9 @@ export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig
     },
     relay: {
       url: normalizeSecureRelayUrl(trimNonEmpty(extra?.relay?.url) ?? ""),
+    },
+    hostedApp: {
+      url: secureOrigin(extra?.hostedApp?.url),
     },
     observability: {
       tracesUrl: normalizeSecureUrl(extra?.observability?.tracesUrl),

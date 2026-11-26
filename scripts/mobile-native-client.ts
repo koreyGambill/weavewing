@@ -19,6 +19,8 @@ import { Argument, Command, Flag } from "effect/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
+import { MOBILE_APP_VARIANTS, mobileIosProjectName } from "./lib/public-config.ts";
+
 export type NativePlatform = "ios" | "android";
 const NativeClientRecord = Schema.Struct({ fingerprint: Schema.String, binary: Schema.String });
 const encodeRecord = Schema.encodeEffect(Schema.fromJsonString(NativeClientRecord));
@@ -135,7 +137,8 @@ export const hashBundle = Effect.fn("hashBundle")(function* (root: string) {
 });
 type FileSystemError = import("effect/PlatformError").PlatformError;
 
-const bundleId = "com.t3tools.t3code.dev";
+const bundleId = MOBILE_APP_VARIANTS.development.identifier;
+const iosProject = mobileIosProjectName(MOBILE_APP_VARIANTS.development.name);
 const roots = Effect.gen(function* () {
   const path = yield* Path.Path;
   const repo = yield* path.fromFileUrl(new URL("../", import.meta.url));
@@ -743,9 +746,9 @@ const build = Effect.fn("nativeClient.build")(function* (
         [
           "xcodebuild",
           "-workspace",
-          path.join(mobile, "ios/T3CodeDev.xcworkspace"),
+          path.join(mobile, `ios/${iosProject}.xcworkspace`),
           "-scheme",
-          "T3CodeDev",
+          iosProject,
           "-configuration",
           "Debug",
           "-destination",
@@ -759,7 +762,7 @@ const build = Effect.fn("nativeClient.build")(function* (
         true,
       );
       yield* command("ditto", [
-        path.join(output, "Build/Products/Debug-iphonesimulator", artifactNames.ios),
+        path.join(output, "Build/Products/Debug-iphonesimulator", `${iosProject}.app`),
         path.join(staging, artifactNames.ios),
       ]);
     } else {
@@ -832,6 +835,18 @@ const decodeWorkflowRuns = Schema.decodeUnknownEffect(
 );
 
 /** The workflow names each run after the client it builds, which is how a waiting machine finds it. */
+/**
+ * `owner/name` of a GitHub remote URL, or null for any other host. The build is dispatched to the
+ * repository `origin` names because `gh` prefers an `upstream` remote, which in a fork is the parent.
+ */
+export function githubRepository(remoteUrl: string): string | null {
+  const match =
+    /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(
+      remoteUrl.trim(),
+    );
+  return match?.[1] ?? null;
+}
+
 export const buildRunTitle = (platform: NativePlatform, abi: string | null, fingerprint: string) =>
   `Dev client ${platform}${abi ? ` ${abi}` : ""} ${fingerprint}`;
 
@@ -876,8 +891,15 @@ const buildOnBlacksmith = Effect.fn("nativeClient.buildOnBlacksmith")(
     if (environment.GITHUB_ACTIONS === "true" || environment.T3_NATIVE_CLIENT_BUILD === "local")
       return false;
     if (!(yield* isCommandAvailable("gh"))) return false;
-    const repository = environment.T3_NATIVE_CLIENT_REPOSITORY ?? "pingdotgg/t3code";
     const { repo } = yield* roots;
+    const repository =
+      environment.T3_NATIVE_CLIENT_REPOSITORY ??
+      githubRepository(
+        yield* command("git", ["remote", "get-url", "origin"], false, repo).pipe(
+          Effect.orElseSucceed(() => ""),
+        ),
+      );
+    if (!repository) return false;
     const sha = yield* command("git", ["rev-parse", "HEAD"], false, repo);
     const pushed = yield* command(
       "gh",

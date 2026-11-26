@@ -9,7 +9,12 @@ import { AppActivityIndicator } from "../../../components/ui/AppActivityIndicato
 import { AppText as Text } from "../../../components/ui/AppText";
 import { LoadingStrip } from "../../../components/ui/LoadingStrip";
 import { SymbolView } from "../../../components/ui/AppSymbol";
-import { isLegalDocumentUrl, LEGAL_URL } from "../lib/legal-document-url";
+import {
+  isLegalDocumentUrl,
+  LEGAL_DOCUMENT_ORIGIN_WHITELIST,
+  LEGAL_URL,
+  shouldLoadLegalDocument,
+} from "../lib/legal-document-url";
 import { webViewDecelerationRate } from "../../../lib/webViewDecelerationRate";
 
 interface SettingsLegalDocumentRouteScreenProps {
@@ -97,7 +102,7 @@ export function SettingsLegalDocumentRouteScreen({
       <WebView
         key={reloadKey}
         source={{ uri: documentUrl }}
-        originWhitelist={["http://*", "https://*", "mailto:*"]}
+        originWhitelist={LEGAL_DOCUMENT_ORIGIN_WHITELIST}
         cacheEnabled={false}
         cacheMode="LOAD_NO_CACHE"
         allowsBackForwardNavigationGestures
@@ -109,12 +114,7 @@ export function SettingsLegalDocumentRouteScreen({
         sharedCookiesEnabled={false}
         thirdPartyCookiesEnabled={false}
         startInLoadingState
-        onShouldStartLoadWithRequest={(request) => {
-          if (isLegalDocumentUrl(request.url)) return true;
-
-          openExternalUrl(request.url);
-          return false;
-        }}
+        onShouldStartLoadWithRequest={shouldLoadLegalDocument}
         onLoadProgress={(event) => {
           setLoadProgress(event.nativeEvent.progress);
         }}

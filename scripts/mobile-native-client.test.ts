@@ -8,6 +8,7 @@ import * as Path from "effect/Path";
 import {
   androidSdk,
   buildRunTitle,
+  githubRepository,
   NativeClientError,
   prebuildAndroid,
   remoteBuildState,
@@ -89,6 +90,20 @@ it.layer(NodeServices.layer)("androidSdk", (it) => {
       assert.strictEqual(resolved, sdk);
     }),
   );
+});
+
+it("dispatches builds to the GitHub repository the origin remote names", () => {
+  for (const remote of [
+    "https://github.com/example/weavewing.git",
+    "https://github.com/example/weavewing",
+    "git@github.com:example/weavewing.git",
+    "ssh://git@github.com/example/weavewing.git\n",
+  ]) {
+    assert.strictEqual(githubRepository(remote), "example/weavewing");
+  }
+  for (const remote of ["", "https://gitlab.com/example/weavewing.git", "/srv/git/weavewing"]) {
+    assert.strictEqual(githubRepository(remote), null);
+  }
 });
 
 it("finds a Blacksmith build by its run title and reads its state", () => {

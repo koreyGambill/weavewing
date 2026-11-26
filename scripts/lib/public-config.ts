@@ -6,6 +6,27 @@ import * as NodeUtil from "node:util";
 
 import { UNBAKED_TELEMETRY_ENV_KEYS } from "@t3tools/shared/weavewingOutbound";
 
+// Expo loads app.config.ts as CommonJS, which cannot resolve @t3tools/shared's import-only exports.
+export { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
+
+/**
+ * The mobile app's display name and native identifier (iOS bundle ID and Android package) for each
+ * build variant. `apps/mobile/app.config.ts` and the scripts that drive native builds share it.
+ */
+export const MOBILE_APP_VARIANTS = {
+  development: { name: "Weavewing Dev", identifier: "dev.wingstack.weavewing.mobile.dev" },
+  preview: { name: "Weavewing Preview", identifier: "dev.wingstack.weavewing.mobile.preview" },
+  production: { name: "Weavewing", identifier: "dev.wingstack.weavewing.mobile" },
+} as const;
+
+/**
+ * The Xcode workspace, scheme and product name `expo prebuild` derives from an app name, such as
+ * `WeavewingDev` for `Weavewing Dev`.
+ */
+export function mobileIosProjectName(appName: string): string {
+  return appName.replace(/[^A-Za-z0-9]/g, "");
+}
+
 export interface T3CodePublicConfig {
   readonly clerkPublishableKey: string | undefined;
   readonly clerkJwtTemplate: string | undefined;

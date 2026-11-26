@@ -1,4 +1,4 @@
-const DEFAULT_MARKETING_SITE_URL = "https://t3.codes";
+const DEFAULT_MARKETING_SITE_URL = "https://weavewing.wingstack.dev";
 
 function resolveMarketingSiteUrl(override: string | undefined): URL {
   try {
@@ -55,4 +55,18 @@ const ALLOWED_LEGAL_DOCUMENT_IDENTITIES = new Set(
 export function isLegalDocumentUrl(value: string): boolean {
   const identity = webDocumentIdentity(value);
   return identity !== null && ALLOWED_LEGAL_DOCUMENT_IDENTITIES.has(identity);
+}
+
+/**
+ * The WebView's originWhitelist for legal documents. It admits every URL because react-native-webview
+ * hands a URL outside the whitelist to the system itself, before the app's callback can refuse it.
+ */
+export const LEGAL_DOCUMENT_ORIGIN_WHITELIST = ["*"];
+
+/**
+ * The WebView's onShouldStartLoadWithRequest for legal documents: it loads only the allowed pages
+ * and drops every other navigation without opening it anywhere else.
+ */
+export function shouldLoadLegalDocument(request: { readonly url: string }): boolean {
+  return isLegalDocumentUrl(request.url);
 }
