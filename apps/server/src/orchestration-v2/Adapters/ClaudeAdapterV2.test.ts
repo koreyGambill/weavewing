@@ -4572,7 +4572,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           },
           targetThreadId: ThreadId.make("thread-claude-fork-earlier"),
         });
-        assert.isUndefined(earlier.nativeMetadata?.claudeInstructions);
+        assert.deepEqual(
+          earlier.nativeMetadata?.claudeInstructions,
+          ClaudeInstructionUpdates.CLAUDE_UNKNOWN_INSTRUCTIONS,
+        );
       }).pipe(Effect.scoped, Effect.provide(layers)),
     );
 
@@ -4647,6 +4650,104 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.deepEqual(persisted(harness).nativeMetadata?.claudeInstructions, record);
         const next = yield* startTurn(harness, { ordinal: 2, providerThread: persisted(harness) });
         assert.equal(noticeOf(next), noticeOf(first));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    // A result with neither an echo of the prompt nor a lifecycle start for it.
+    const completeWithoutAck = Effect.fnUntraced(function* (harness: Harness, ordinal: number) {
+      yield* harness.offerAndWait(
+        makeResultFrame({
+          uuid: `00000000-0000-4000-8000-00000000${String(9300 + ordinal)}`,
+          result: "Done.",
+        }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+    });
+
+    it.effect("sends an unacknowledged notice with at most two completed prompts", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const first = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(harness.providerThread, startedWithout(PR)),
+        });
+        assert.isNotNull(noticeOf(first));
+        yield* completeWithoutAck(harness, 1);
+        // A background task's result settling the turn is not a prompt that carried the notice.
+        const second = yield* startTurn(harness, {
+          ordinal: 2,
+          providerThread: persisted(harness),
+        });
+        assert.isNotNull(noticeOf(second));
+        yield* harness.offerAndWait(wakeResult);
+        yield* Queue.take(harness.terminalReceipts);
+        const third = yield* startTurn(harness, { ordinal: 3, providerThread: persisted(harness) });
+        assert.equal(noticeOf(third), noticeOf(first));
+        yield* completeWithoutAck(harness, 3);
+        const fourth = yield* startTurn(harness, {
+          ordinal: 4,
+          providerThread: persisted(harness),
+        });
+        assert.isTrue(isPlainPrompt(fourth));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("keeps the count of unacknowledged prompts across a restart", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const first = yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: withRecord(harness.providerThread, startedWithout(PR)),
+        });
+        yield* completeWithoutAck(harness, 1);
+        const restarted = yield* makeWakeHarness;
+        const second = yield* startTurn(restarted, {
+          ordinal: 2,
+          providerThread: persisted(harness),
+        });
+        assert.equal(noticeOf(second), noticeOf(first));
+        yield* completeWithoutAck(restarted, 2);
+        const again = yield* makeWakeHarness;
+        const third = yield* startTurn(again, { ordinal: 3, providerThread: persisted(restarted) });
+        assert.isTrue(isPlainPrompt(third));
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    );
+
+    it.effect("stores an unknown record at a rollback, so a closed query still sends the set", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const current = ClaudeInstructionUpdates.claudeInstructionRecord(sections);
+        const rolledBack = yield* harness.runtime.rollbackThread({
+          providerThread: {
+            ...withRecord(harness.providerThread, current),
+            nativeMetadata: { claudeInstructions: current, forkHeadMessageId: "fork-head" },
+          },
+          target: {
+            type: "thread_start",
+            checkpointId: CheckpointId.make("checkpoint-instruction-rollback"),
+            appRunOrdinal: 0,
+          },
+          providerThreadTurns: [],
+        });
+        assert.deepEqual(
+          rolledBack.providerThread.nativeMetadata?.claudeInstructions,
+          ClaudeInstructionUpdates.CLAUDE_UNKNOWN_INSTRUCTIONS,
+        );
+        // A slash command settles the cut without carrying the correction.
+        yield* startTurn(harness, {
+          ordinal: 1,
+          providerThread: rolledBack.providerThread,
+          text: "/context",
+        });
+        yield* finishTurn(harness, 1);
+        assert.isNull(persisted(harness).nativeConversationHeadRef);
+        // The query closes; the next one resumes from what was stored.
+        const restarted = yield* makeWakeHarness;
+        const next = yield* startTurn(restarted, {
+          ordinal: 2,
+          providerThread: persisted(harness),
+        });
+        assert.include(noticeOf(next), "here is the complete current set");
       }).pipe(Effect.scoped, Effect.provide(layers)),
     );
 

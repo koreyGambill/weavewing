@@ -126,7 +126,37 @@ export function claudeSectionLabel(name: string): string {
 }
 
 const NOT_FROM_USER =
-  "This is ambient context from T3 Code, not a message from the user; do not mention it unless the user asks.";
+  "This came from T3 Code, not from the user, so do not mention it to the user unless they ask.";
+
+/** The record of a session whose instructions are an unknown mix, such as after a rollback. */
+export const CLAUDE_UNKNOWN_INSTRUCTIONS: ClaudeInstructionRecord = {
+  start: null,
+  sections: [],
+  unknown: true,
+};
+
+/** Delivery is assumed once this many completed prompts carried a notice nobody acknowledged. */
+const CARRIED_PROMPTS_BEFORE_ASSUMED = 2;
+
+/** Identifies a notice's text, so a count of prompts that carried it survives restarts. */
+const claudeNoticeDigest = (text: string) =>
+  NodeCrypto.createHash("sha256").update(text).digest("hex").slice(0, 12);
+
+/**
+ * Counts a completed prompt that carried `update`'s notice without an acknowledgment. Returns the
+ * record to store: the delivered record once the bound is reached, otherwise the count.
+ */
+export function claudeInstructionNoticeCarried(
+  record: ClaudeInstructionRecord | undefined,
+  update: ClaudeInstructionUpdate,
+): ClaudeInstructionRecord {
+  if (update.notice === null) return update.next;
+  const notice = claudeNoticeDigest(update.notice);
+  const carried = (record?.owed?.notice === notice ? record.owed.carried : 0) + 1;
+  if (carried >= CARRIED_PROMPTS_BEFORE_ASSUMED) return update.next;
+  const { owed: _owed, ...base } = record ?? CLAUDE_UNKNOWN_INSTRUCTIONS;
+  return { ...base, owed: { notice, carried } };
+}
 
 const sectionBlock = (section: ClaudeAppendSection, change?: "added" | "replaced") =>
   `<section name="${displayName(section.name)}"${change === undefined ? "" : ` change="${change}"`}>\n${sectionBody(section.text)}\n</section>`;
@@ -145,7 +175,7 @@ export function claudeInstructionUpdate(input: {
   readonly cut: boolean;
 }): ClaudeInstructionUpdate {
   const { sections } = input;
-  const record = input.cut ? undefined : input.record;
+  const record = input.cut || input.record?.unknown === true ? undefined : input.record;
   const current = claudeInstructionRecord(sections).sections;
   const next = {
     start: record?.start ?? null,
@@ -155,7 +185,7 @@ export function claudeInstructionUpdate(input: {
   if (record === undefined) {
     return {
       notice: notice([
-        `T3 Code cannot tell which version of its instructions this session has, so here is the complete current set. Each section below replaces its earlier copy, and any section of T3 Code's earlier instructions that is not repeated here no longer applies. ${NOT_FROM_USER}`,
+        `T3 Code cannot tell which version of its instructions this session has, so here is the complete current set. Apply these sections from now on; each replaces its earlier copy, and any section of T3 Code's earlier instructions that is not repeated here no longer applies. ${NOT_FROM_USER}`,
         "",
         sections.map((section) => sectionBlock(section)).join("\n\n"),
       ]),
@@ -173,7 +203,7 @@ export function claudeInstructionUpdate(input: {
   if (changes.length === 0 && removed.length === 0) return { notice: null, next };
   return {
     notice: notice([
-      `T3 Code's instructions changed after this session started. The sections below differ from their earlier copies: each replaces its earlier copy, and the rest of T3 Code's instructions still apply. ${NOT_FROM_USER}`,
+      `T3 Code's instructions changed after this session started. Apply the sections below from now on; each replaces its earlier copy, and the rest of T3 Code's instructions still apply. ${NOT_FROM_USER}`,
       ...(changes.length === 0 ? [] : ["", changes.join("\n\n")]),
       ...(removed.length === 0
         ? []
@@ -187,13 +217,17 @@ export function claudeInstructionUpdate(input: {
 }
 
 /**
- * Removes a leading T3 instruction notice from transcript text, keeping whatever the user wrote
- * after it. Text that does not open with the notice's marker is returned unchanged.
+ * Removes a T3 instruction notice that opens the text, from its marker line through its own
+ * closing tag, and keeps everything after it. When that span cannot be bounded exactly, such as
+ * when another reminder opens inside it, the text is returned unchanged: showing a notice is
+ * better than losing what the user wrote.
  */
 export function withoutClaudeInstructionNotice(text: string): string {
   if (!text.startsWith(NOTICE_OPENING)) return text;
-  // The notice is its own content block; a merged string ends it at its first closing tag.
-  if (text.endsWith(NOTICE_CLOSING)) return "";
   const end = text.indexOf(NOTICE_CLOSING, NOTICE_OPENING.length);
-  return end === -1 ? text : text.slice(end + NOTICE_CLOSING.length).trimStart();
+  if (end === -1) return text;
+  if (text.slice(NOTICE_OPENING.length, end).includes("<system-reminder>")) return text;
+  const after = end + NOTICE_CLOSING.length;
+  if (after < text.length && text[after] !== "\n") return text;
+  return text.slice(after).replace(/^\n+/, "");
 }

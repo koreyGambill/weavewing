@@ -9,8 +9,10 @@ import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTa
 import {
   claudeAppendSections,
   claudeInstructionRecord,
+  claudeInstructionNoticeCarried,
   claudeInstructionUpdate,
   claudeSectionDigest,
+  CLAUDE_UNKNOWN_INSTRUCTIONS,
   claudeSectionLabel,
   CLAUDE_CUSTOM_APPEND_SECTION,
   sameClaudeInstructionRecord,
@@ -6761,6 +6763,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           yield* persistAdapterNativeMetadata(context.nativeThreadId);
         });
 
+        // Without an acknowledgment, the notice stays owed; the record counts the completed prompts
+        // that carried it and assumes delivery at the bound, so it is never sent more than twice.
+        const countInstructionNoticeCarried = Effect.fnUntraced(function* (
+          context: ActiveClaudeTurnContext,
+        ) {
+          const update = context.instructionUpdate;
+          if (update === null) return;
+          context.instructionUpdate = null;
+          const next = claudeInstructionNoticeCarried(
+            instructionRecords.get(context.nativeThreadId) ??
+              context.input.providerThread.nativeMetadata?.claudeInstructions,
+            update,
+          );
+          instructionRecords.set(context.nativeThreadId, next);
+          if (
+            next === update.next &&
+            pendingInstructionUpdates.get(context.nativeThreadId) === update
+          ) {
+            pendingInstructionUpdates.delete(context.nativeThreadId);
+          }
+          yield* persistAdapterNativeMetadata(context.nativeThreadId);
+        });
+
         // Usage without input is a placeholder, not a context measurement.
         const emitContextUsage = Effect.fnUntraced(function* (
           context: ActiveClaudeTurnContext,
@@ -9612,6 +9637,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly threadDisposition?: "reusable" | "broken";
           readonly result?: SDKResultMessage;
         }) {
+          // A prompt's own result counts toward the bound on unacknowledged resends; a background
+          // task's result says nothing about the prompt.
+          if (
+            requested.status === "completed" &&
+            requested.result !== undefined &&
+            requested.result.origin?.kind !== "task-notification"
+          ) {
+            yield* countInstructionNoticeCarried(requested.context);
+          }
           // A turn stopped by the retry budget settles as failed with the retry's error.
           const retryBudgetFailure = requested.context.retryBudgetFailure;
           const input =
@@ -15179,9 +15213,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 };
               }
 
+              // A cut leaves an unknown mix of the notices the session accepted. Storing that now
+              // means no later turn can resume with the old record before the correction is sent.
+              if (resumeSessionAt !== null) {
+                instructionRecords.set(nativeThreadId, CLAUDE_UNKNOWN_INSTRUCTIONS);
+                pendingInstructionUpdates.delete(nativeThreadId);
+              }
               return {
                 providerThread: {
                   ...rollbackInput.providerThread,
+                  ...(resumeSessionAt === null
+                    ? {}
+                    : {
+                        nativeMetadata: {
+                          ...rollbackInput.providerThread.nativeMetadata,
+                          claudeInstructions: CLAUDE_UNKNOWN_INSTRUCTIONS,
+                        },
+                      }),
                   providerSessionId: input.providerSessionId,
                   nativeConversationHeadRef:
                     resumeSessionAt === null
@@ -15253,7 +15301,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 forkInput.sourceProviderThread.nativeMetadata?.claudeInstructions;
               const claudeInstructions = claudeForkIsAtHead(forkInput)
                 ? sourceInstructions
-                : undefined;
+                : CLAUDE_UNKNOWN_INSTRUCTIONS;
               return makeProviderThread({
                 idAllocator,
                 providerInstanceId: adapterOptions.instanceId,

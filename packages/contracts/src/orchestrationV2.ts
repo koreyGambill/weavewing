@@ -1345,6 +1345,10 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
       sections: Schema.Array(Schema.Struct({ name: Schema.String, digest: Schema.String })),
       /** Compaction replaced the start append, so a resume at an earlier point may see an older one. */
       compacted: Schema.optional(Schema.Boolean),
+      /** A rollback or earlier fork left an unknown mix of notices; the next resume sends them all. */
+      unknown: Schema.optional(Schema.Literal(true)),
+      /** A notice not yet acknowledged, by digest, and how many completed prompts carried it. */
+      owed: Schema.optional(Schema.Struct({ notice: Schema.String, carried: NonNegativeInt })),
     }),
   ),
 });

@@ -4,6 +4,8 @@ import { claudeSystemPromptAppend, claudeSystemPromptSections } from "./ClaudeAd
 import {
   CLAUDE_INSTRUCTION_NOTICE_MARKER,
   claudeAppendSections,
+  CLAUDE_UNKNOWN_INSTRUCTIONS,
+  claudeInstructionNoticeCarried,
   claudeInstructionRecord,
   claudeInstructionUpdate,
   claudeSectionDigest,
@@ -134,18 +136,55 @@ describe("claudeInstructionUpdate", () => {
   });
 });
 
-describe("withoutClaudeInstructionNotice", () => {
-  const notice = claudeInstructionUpdate({ record: undefined, sections, cut: false }).notice!;
+describe("claudeInstructionNoticeCarried", () => {
+  const record = claudeInstructionRecord(without(QA));
+  const update = claudeInstructionUpdate({ record, sections, cut: false });
 
-  it("removes the notice block and keeps what the user wrote after it", () => {
-    expect(withoutClaudeInstructionNotice(notice)).toBe("");
-    expect(withoutClaudeInstructionNotice(`${notice}\n\nFix the toast.`)).toBe("Fix the toast.");
+  it("counts the first unacknowledged prompt and assumes delivery at the second", () => {
+    const once = claudeInstructionNoticeCarried(record, update);
+    expect(once.owed?.carried).toBe(1);
+    expect(once.sections).toEqual(record.sections);
+    // The stored count leaves the notice itself unchanged.
+    expect(claudeInstructionUpdate({ record: once, sections, cut: false }).notice).toBe(
+      update.notice,
+    );
+    expect(claudeInstructionNoticeCarried(once, update)).toEqual(update.next);
   });
 
-  it("keeps text that only mentions the marker or uses a reminder of its own", () => {
+  it("starts the count again for a different notice", () => {
+    const once = claudeInstructionNoticeCarried(record, update);
+    const other = claudeInstructionUpdate({ record: undefined, sections, cut: false });
+    expect(claudeInstructionNoticeCarried(once, other).owed?.carried).toBe(1);
+  });
+
+  it("keeps a session with no record unknown while it counts", () => {
+    const unknown = claudeInstructionUpdate({ record: undefined, sections, cut: false });
+    const once = claudeInstructionNoticeCarried(undefined, unknown);
+    expect(once).toMatchObject({ ...CLAUDE_UNKNOWN_INSTRUCTIONS, owed: { carried: 1 } });
+    expect(claudeInstructionUpdate({ record: once, sections, cut: false }).notice).toBe(
+      unknown.notice,
+    );
+  });
+});
+
+describe("withoutClaudeInstructionNotice", () => {
+  const notice = claudeInstructionUpdate({ record: undefined, sections, cut: false }).notice!;
+  const reminder = "<system-reminder>\nRun the tests first.\n</system-reminder>";
+
+  it("removes the notice and keeps what the user wrote after it", () => {
+    expect(withoutClaudeInstructionNotice(notice)).toBe("");
+    expect(withoutClaudeInstructionNotice(`${notice}\n\nFix the toast.`)).toBe("Fix the toast.");
+    expect(withoutClaudeInstructionNotice(`${notice}\nFix the toast.\n${reminder}`)).toBe(
+      `Fix the toast.\n${reminder}`,
+    );
+  });
+
+  it("leaves text untouched unless the notice opens it and ends exactly", () => {
+    const later = `Fix the toast.\n${notice}\n${reminder}`;
     const mention = `Why does ${CLAUDE_INSTRUCTION_NOTICE_MARKER} show up in my logs?`;
-    const reminder = "<system-reminder>\nRun the tests first.\n</system-reminder>";
-    expect(withoutClaudeInstructionNotice(mention)).toBe(mention);
-    expect(withoutClaudeInstructionNotice(reminder)).toBe(reminder);
+    const unclosed = notice.slice(0, -"</system-reminder>".length);
+    const nested = notice.replace("<section", `${reminder}\n<section`);
+    for (const text of [later, mention, reminder, unclosed, `${notice}Fix it.`, nested])
+      expect(withoutClaudeInstructionNotice(text)).toBe(text);
   });
 });
