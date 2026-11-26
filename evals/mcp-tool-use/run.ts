@@ -72,6 +72,11 @@ import { t3OpenQuestionsContext } from "../../packages/provider-core/src/server/
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
 import { ticketExport } from "./ticketExport.ts";
 import {
+  CONTEXT_REWIND_SUMMARY_ORIGIN,
+  contextRewindSummaryPrompt,
+} from "../../apps/server/src/orchestration-v2/contextRewind.ts";
+import { renderTurnOriginText } from "../../packages/provider-core/src/server/turnOriginText.ts";
+import {
   CONTEXT_REWIND_TOOL_NAMES,
   ContextRewindToolkit,
 } from "../../apps/server/src/mcp/toolkits/contextRewind/tools.ts";
@@ -418,6 +423,13 @@ export const McpToolUseCase = Schema.Struct({
   ),
   /** Records for the context chips `prompt` links, projected as T3 sends them. */
   promptContext: Schema.optional(Schema.Struct({ records: Schema.Array(ComposerContextRecord) })),
+  /**
+   * The user chose Rewind to here and keep a summary: T3's summary request replaces `prompt`. The
+   * agent's earlier reply that begins `replyExcerpt` is the point, and `turns` follow it.
+   */
+  rewindSummary: Schema.optional(
+    Schema.Struct({ turns: Schema.Number, replyExcerpt: Schema.String }),
+  ),
   expect: McpToolUseExpect,
   /** Model calls this case may need. Overrides `--max-steps`. */
   maxSteps: Schema.optional(Schema.Number),
@@ -2974,6 +2986,18 @@ const main = Effect.gen(function* () {
       item.idleCheckinTaskId === undefined
         ? item
         : { ...item, prompt: idleCheckinPrompt(ScheduledTaskId.make(item.idleCheckinTaskId)) },
+    )
+    .map((item) =>
+      item.rewindSummary === undefined
+        ? item
+        : {
+            ...item,
+            prompt: renderTurnOriginText(
+              CONTEXT_REWIND_SUMMARY_ORIGIN,
+              contextRewindSummaryPrompt(item.rewindSummary),
+              null,
+            ),
+          },
     )
     .map((item) =>
       item.automationRun === undefined
