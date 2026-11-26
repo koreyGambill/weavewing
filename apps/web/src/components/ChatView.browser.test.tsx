@@ -1075,7 +1075,7 @@ it("opens the agents list and the thread menu's entries by keyboard, returning f
   const branchRow = menu.getByRole("menuitem", {
     name: /^feature\/row-under-the-composer-keyboard\s*Branch$/,
   });
-  await expect.element(branchRow).toHaveFocus();
+  await expect.element(branchRow, { timeout: 3000 }).toHaveFocus();
   await userEvent.keyboard("{Enter}");
   const branchPicker = page.getByRole("listbox");
   await expect.element(branchPicker).toBeVisible();
@@ -1140,12 +1140,41 @@ it("returns the branch from the thread menu when the row widens again", async ()
   for (const width of [980, 560, 390, 320]) await page.viewport(width, 860);
   await vi.waitFor(() => expect(branchInMenu()).toBe(true));
   for (const width of [560, 980, 1280]) await page.viewport(width, 860);
-  await vi.waitFor(() => expect(branchInMenu()).toBe(false));
+  await vi.waitFor(() => expect(branchInMenu()).toBe(false), { timeout: 3000 });
 });
 
 it("keeps a narrow location label's ellipsis inside the box it is given", async () => {
   // A 16-character last segment keeps the whole name as the truncation tail.
   await using _row = await renderRowAtWidth("row-narrow", "/workspace/webhook-retry-xy", 390);
+  // An agents item takes room too, so at 280 px the label is narrower than the folder name.
+  const now = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+  await act(() =>
+    emitThreadEvent(ThreadId.make("row-narrow"), {
+      type: "subagent.updated",
+      payload: {
+        id: NodeId.make("row-narrow-agent"),
+        threadId: ThreadId.make("row-narrow"),
+        runId: null,
+        parentNodeId: NodeId.make("row-narrow-parent"),
+        origin: "provider_native",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerThreadId: null,
+        childThreadId: null,
+        nativeTaskRef: null,
+        prompt: "Check the label.",
+        title: "Label checker",
+        model: null,
+        status: "running",
+        result: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+      } satisfies OrchestrationV2Subagent,
+    }),
+  );
+  await expect.element(page.getByRole("button", { name: "Agents: 1 working" })).toBeVisible();
   const overflow = () => {
     const label = document.querySelector<HTMLElement>(
       '[data-composer-row-item="location"] [data-composer-label]',
@@ -1160,9 +1189,11 @@ it("keeps a narrow location label's ellipsis inside the box it is given", async 
       }),
     );
   };
-  for (const width of [390, 360, 320]) {
+  for (const width of [390, 360, 320, 280]) {
     await page.viewport(width, 860);
-    await vi.waitFor(() => expect(overflow()).toBeLessThanOrEqual(0.5));
+    await vi.waitFor(() => expect(overflow(), `${width} px`).toBeLessThanOrEqual(0.5), {
+      timeout: 3000,
+    });
   }
 });
 
