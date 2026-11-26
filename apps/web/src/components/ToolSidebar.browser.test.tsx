@@ -9,6 +9,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { AppRoot } from "~/AppRoot";
 // The route loads ChatView lazily; importing it here keeps its first transform out of the timeout.
 import "~/components/ChatView";
+import "~/index.css";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
 import { useToolSidebarStore } from "~/toolSidebarStore";
@@ -76,25 +77,29 @@ function widthOf(selector: string) {
 it("covers the chat without changing the chat's or the thread list's width", async () => {
   const { stack, screen } = await mountApp([threadWithHistory("cover", 2)], 1280);
   await using _app = stack;
-  const before = {
+  const widths = () => ({
+    main: widthOf("main"),
     chat: widthOf("[data-thread-tiling]"),
     threads: widthOf("[data-app-sidebar]"),
-  };
+  });
+  const before = widths();
   await userEvent.click(screen.getByRole("button", { name: "Toggle side panel", exact: true }));
   const panel = screen.getByRole("complementary", { name: "Side panel" });
   await expect.element(panel).toBeVisible();
   expect(panel.element().getBoundingClientRect().width).toBe(300);
-  expect(widthOf("[data-thread-tiling]")).toBe(before.chat);
-  expect(widthOf("[data-app-sidebar]")).toBe(before.threads);
+  expect(widths()).toEqual(before);
   await act(() => useToolSidebarStore.getState().dispatch({ type: "resize", width: 640 }));
   await vi.waitFor(() => expect(panel.element().getBoundingClientRect().width).toBe(640));
-  expect(widthOf("[data-thread-tiling]")).toBe(before.chat);
+  expect(widths()).toEqual(before);
   await userEvent.click(panel.getByRole("button", { name: "Maximize side panel" }));
   await expect
     .element(panel.getByRole("button", { name: "Restore side panel size" }))
     .toBeVisible();
   expect(widthOf("[data-app-sidebar]")).toBe(before.threads);
   await expect.element(screen.getByRole("navigation", { name: "Threads" })).toBeVisible();
+  await userEvent.click(panel.getByRole("button", { name: "Close side panel" }));
+  await expect.element(panel).not.toBeInTheDocument();
+  expect(widths()).toEqual(before);
 });
 
 it("moves focus into the side panel, returns it on Escape, and never traps it when pinned", async () => {
