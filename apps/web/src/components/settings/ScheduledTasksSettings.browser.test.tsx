@@ -247,10 +247,14 @@ describe("ScheduledTasksSettings", () => {
     await userEvent.click(page.getByRole("menuitem", { name: "Delete", exact: true }));
     await userEvent.click(page.getByRole("button", { name: "Confirm", exact: true }));
     await vi.waitFor(() =>
-      expect(state.remove).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
-        environmentId,
-        input: { id: task.id },
-      }),
+      expect(state.remove).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        {
+          environmentId,
+          input: { id: task.id },
+        },
+        undefined,
+      ),
     );
   });
 
@@ -320,14 +324,18 @@ describe("ScheduledTasksSettings", () => {
       .toHaveTextContent("Moved project");
     await userEvent.click(screen.getByRole("button", { name: "Save task" }));
     await vi.waitFor(() =>
-      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
-        environmentId,
-        input: expect.objectContaining({
-          projectId: movedProjectId,
-          threadId: task.threadId,
-          workspaceStrategy: state.workspaceStrategy,
-        }),
-      }),
+      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        {
+          environmentId,
+          input: expect.objectContaining({
+            projectId: movedProjectId,
+            threadId: task.threadId,
+            workspaceStrategy: state.workspaceStrategy,
+          }),
+        },
+        undefined,
+      ),
     );
   });
 
@@ -342,14 +350,18 @@ describe("ScheduledTasksSettings", () => {
     await userEvent.click(page.getByRole("option", { name: "Project", exact: true }));
     await userEvent.click(screen.getByRole("button", { name: "Save task" }));
     await vi.waitFor(() =>
-      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
-        environmentId,
-        input: expect.objectContaining({
-          projectId,
-          threadId: null,
-          detachFromThread: true,
-        }),
-      }),
+      expect(state.upsert).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        {
+          environmentId,
+          input: expect.objectContaining({
+            projectId,
+            threadId: null,
+            detachFromThread: true,
+          }),
+        },
+        undefined,
+      ),
     );
   });
 
