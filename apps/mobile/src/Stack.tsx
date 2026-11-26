@@ -114,6 +114,7 @@ import {
   ScheduledTaskThreadPickerRouteScreen,
 } from "./features/settings/ScheduledTaskPickerScreens";
 import { SettingsKeyboardRouteScreen } from "./features/settings/SettingsKeyboardRouteScreen";
+import { SettingsStatusSourcesRouteScreen } from "./features/status-sources/SettingsStatusSourcesRouteScreen";
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
 import { SettingsVoiceRouteScreen } from "./features/settings/SettingsVoiceRouteScreen";
 import { SettingsVoiceModelsRouteScreen } from "./features/settings/SettingsVoiceModelsRouteScreen";
@@ -207,6 +208,11 @@ const SETTINGS_SCREENS = {
     screen: SettingsProviderAccountsRouteScreen,
     linking: "settings/provider-accounts",
     options: settingsPage("Providers"),
+  }),
+  SettingsStatusSources: createNativeStackScreen({
+    screen: SettingsStatusSourcesRouteScreen,
+    linking: "settings/status-sources",
+    options: settingsPage("Status"),
   }),
   SettingsEnvironmentMaintenance: createNativeStackScreen({
     screen: SettingsEnvironmentMaintenanceRouteScreen,

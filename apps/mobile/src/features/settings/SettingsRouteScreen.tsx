@@ -305,6 +305,7 @@ function useSettingsIndexSections(): SettingsListSection[] {
     },
     {
       rows: [
+        page("SettingsStatusSources", "stethoscope", gt("Status")),
         serverPage("SettingsEnvironmentMaintenance", "arrow.clockwise", gt("Maintenance")),
         page("SettingsLabs", "flask", gt("Labs")),
         page("SettingsAbout", "info.circle", gt("About")),
