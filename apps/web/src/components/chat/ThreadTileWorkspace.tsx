@@ -1118,13 +1118,15 @@ export function ThreadTileWorkspace(props: {
       ) || 26;
     if ((y - hovered.rect.y) * bounds.height <= titlebarHeight)
       return { groupId: hovered.id, zone: "tabs" };
-    const zone = tileDropZone(
-      localX,
-      localY,
-      (edge) =>
-        dragging !== null &&
-        tooNarrow(currentLayout(), edgeDropAction(dragging, hovered.id, edge, probeIds)),
-    );
+    const zone = tileDropZone(localX, localY, (edge) => {
+      if (dragging === null) return false;
+      const action = edgeDropAction(dragging, hovered.id, edge, probeIds);
+      // A dragged view is not a tab yet, so its split is probed as the empty tile it will fill.
+      return tooNarrow(
+        currentLayout(),
+        localDrag === null && action.type === "split" ? { ...action, type: "new-group" } : action,
+      );
+    });
     return zone ? { groupId: hovered.id, zone } : null;
   };
   // Floating tiles only move and resize; docking is an explicit button or menu choice.

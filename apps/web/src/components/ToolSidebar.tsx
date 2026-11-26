@@ -472,7 +472,7 @@ function SideArea({
         "workspace-tools-panel absolute right-0 bottom-0 top-[var(--workspace-topbar-height)] z-30 flex min-h-0 min-w-0 flex-col border-l bg-background shadow-xl",
         maximized && "left-0 shadow-none",
         // The tiles under the panel take a view dragged from its grip.
-        viewDragging && "pointer-events-none opacity-60",
+        viewDragging && "pointer-events-none opacity-30",
       )}
       style={maximized ? undefined : { width }}
     >

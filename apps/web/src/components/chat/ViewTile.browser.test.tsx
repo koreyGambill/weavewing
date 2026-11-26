@@ -266,3 +266,35 @@ it("drops the side panel's view on a tile edge to split it, and cancels a drop e
   await expect.element(panel).not.toBeInTheDocument();
   await vi.waitFor(() => expect(focusedTile()).toBe("view:related"));
 });
+
+it("offers no split of a tile too narrow to divide when a view is dragged onto its edge", async () => {
+  const thread = here;
+  const { stack, screen } = await mountApp(THREADS, () => {
+    useRightPanelStore.getState().openView(refOf(thread), "todos", null, "tile-2");
+  });
+  await using _app = stack;
+  const split = selectThreadTileLayout(
+    useRightPanelStore.getState().byThreadKey,
+    refOf(thread),
+  ).root;
+  await act(() =>
+    useRightPanelStore
+      .getState()
+      .applyTileAction(refOf(thread), { type: "resize", splitId: split.id, ratio: 0.25 }),
+  );
+  await act(() => useToolSidebarStore.getState().dispatch({ type: "show", view: "related" }));
+  const panel = screen.getByRole("complementary", { name: "Side panel" });
+  await expect.element(panel).toBeVisible();
+  const grip = panel.element().querySelector<HTMLElement>("[data-view-drag-grip]")!;
+  const chat = screen.getByRole("region", { name: "Tile: Main chat", exact: true });
+  const box = chat.element().getBoundingClientRect();
+  await userEvent.dragAndDrop(grip, chat, {
+    targetPosition: { x: 12, y: box.height / 2 },
+    force: true,
+  });
+  expect(groupsOf(thread).map((group) => group.tabs)).toEqual([
+    [CONVERSATION_TAB_ID],
+    ["view:todos"],
+  ]);
+  expect(useToolSidebarStore.getState().open).toBe(true);
+});

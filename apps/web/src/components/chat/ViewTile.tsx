@@ -140,17 +140,19 @@ function ViewTileBody({ surface, owner }: { surface: ViewSurface; owner: ScopedT
         />
       ) : null}
       {narrow ? (
-        <div className="flex shrink-0 justify-end border-b px-1.5 py-1">
+        <div className="flex shrink-0 items-center gap-1 border-b px-1.5 py-1">
           <Button size="xs" variant="outline" onClick={openFullSize}>
             <Maximize2 />
             Open full size
           </Button>
+          <div ref={setActions} className="ms-auto flex items-center gap-1" />
         </div>
-      ) : null}
-      <div
-        ref={setActions}
-        className="flex shrink-0 items-center justify-end gap-1 border-b px-1.5 py-1 empty:hidden"
-      />
+      ) : (
+        <div
+          ref={setActions}
+          className="flex shrink-0 items-center justify-end gap-1 border-b px-1.5 py-1 empty:hidden"
+        />
+      )}
       <DeferEnvironmentQueries value={deferred}>
         {definition.render({
           target: { threadRef: thread, draft: null },
