@@ -153,6 +153,15 @@ export function claudeMcpToolPrefix(server: string): string {
   return `mcp__${server.startsWith("claude.ai ") ? part.replace(/_+/g, "_").replace(/^_|_$/g, "") : part}__`;
 }
 
+/**
+ * The `mcp__<server>` rule that removes every tool `server` offers, or undefined when the name
+ * cannot form one: Claude Code reads a `__` inside the name part as the start of a tool name.
+ */
+export function claudeMcpServerRule(server: string): string | undefined {
+  const part = claudeMcpToolPrefix(server).slice("mcp__".length, -"__".length);
+  return part.length === 0 || part.includes("__") ? undefined : `mcp__${part}`;
+}
+
 /** Claude Code names MCP tools `mcp__<server>__<tool>`, replacing characters outside `[a-zA-Z0-9_-]`. */
 export function claudeMcpToolName(server: string, tool: string): string {
   return `${claudeMcpToolPrefix(server)}${claudeMcpToolNamePart(tool)}`;

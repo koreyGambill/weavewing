@@ -97,6 +97,12 @@ import { useTallEnoughToFold } from "./useTallEnoughToFold";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
 import { UserMessageContextReferenceChip } from "./UserMessageContextChips";
+import { sentContextBlocks } from "@t3tools/shared/sentContext";
+import {
+  SentContextBlocks,
+  SentContextExpandToggle,
+  SentContextExpansionProvider,
+} from "./SentContextBlocks";
 import {
   resolvePreviewAnnotationImage,
   userMessageFileLabel,
@@ -426,6 +432,7 @@ function UserTimelineRow({
   const senderShell = useQuietThreadShell(sender ?? null);
   const senderLabel = sender?.title.trim() || senderShell?.title.trim() || "Agent";
   const resolvedContext = resolveUserMessageContext({ ...row.message, text: userMessage.text });
+  const sentBlocks = sentContextBlocks(resolvedContext);
   const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
   const revertTurnCount = row.revertTurnCount;
   const attachmentReferences = collectComposerContextReferences(resolvedContext.text).flatMap(
@@ -617,6 +624,9 @@ function UserTimelineRow({
             if (preview) onImageExpand(preview);
           }}
         />
+        <span className="-my-1 ms-0.5 inline-flex align-middle">
+          <SentContextExpandToggle contextId={reference.contextId} />
+        </span>
       </span>
     );
   };
@@ -807,235 +817,257 @@ function UserTimelineRow({
     </div>
   );
   return (
-    <div
-      className={cn(
-        "group @container flex flex-col gap-1",
-        cardBody ? "relative items-stretch" : "items-end",
-      )}
-      data-user-message-attribution={folded ? "agent" : undefined}
-    >
-      {folded && sender ? (
-        <InlineButton
-          role="link"
-          render={
-            sender.environmentId === ctx.activeThreadEnvironmentId ? undefined : (
-              <Link to="/$environmentId/$threadId" params={buildThreadRouteParams(sender)} />
-            )
-          }
-          onClick={
-            sender.environmentId === ctx.activeThreadEnvironmentId
-              ? () => ctx.onOpenThread(sender.threadId)
-              : undefined
-          }
-          tone="muted"
-        >
-          {senderLabel}
-        </InlineButton>
-      ) : null}
-      {!cardBody && userMessage.attribution === "t3code" ? (
-        <p
-          className="me-1 text-2xs text-muted-foreground/70"
-          data-user-message-attribution="t3code"
-        >
-          Sent by T3 Code
-        </p>
-      ) : null}
-      {/* The row's heading already names the guest for screen readers. */}
-      {userMessage.guestName !== undefined ? (
-        <div aria-hidden>
-          <GuestMessageName name={userMessage.guestName} />
-        </div>
-      ) : null}
-      {(row.message.inputIntent === "steer" ||
-        row.message.inputIntent === "promoted_queued_to_steer") &&
-      !row.continuesSteer ? (
-        <UserMessageIntentMarker
-          intent={row.message.inputIntent}
-          unread={row.projectedItem?.item.status === "pending"}
-        />
-      ) : null}
-      {mediaAboveText ? (
-        <div className="flex max-w-[80%] justify-end">
-          {/* The heading leads the media so screen readers reach it before the images. */}
-          <MessageAuthorHeading>You</MessageAuthorHeading>
-          {mediaBlock}
-        </div>
-      ) : null}
+    <SentContextExpansionProvider messageId={row.message.id} blocks={sentBlocks}>
       <div
         className={cn(
-          cardBody
-            ? "relative min-w-0 w-full"
-            : "relative min-w-0 max-w-[80%] rounded-2xl text-message-foreground",
-          (mediaAboveText || row.groupedWithPrevious) && "rounded-tr-md",
-          row.groupedWithNext && "rounded-br-md",
-          BUBBLE_CHIP_CLASS_NAME,
-          !cardBody &&
-            (userMessage.attribution === "guest"
-              ? guestBubbleClassName(false)
-              : !mediaOnly && !fileCardsOnly && !audioOnly && "bg-message"),
-          !cardBody && !folded && !mediaOnly && !fileCardsOnly && !audioOnly && "p-3",
-          folded && "border border-primary/20 bg-primary/5",
-          folded && expanded && "w-full",
+          "group @container flex flex-col gap-1",
+          cardBody ? "relative items-stretch" : "items-end",
         )}
-        data-user-message-bubble=""
+        data-user-message-attribution={folded ? "agent" : undefined}
       >
-        {ctx.threadRef && !cardBody ? (
-          <MessageBookmarkMarker threadRef={ctx.threadRef} bookmarks={bookmarks} />
+        {folded && sender ? (
+          <InlineButton
+            role="link"
+            render={
+              sender.environmentId === ctx.activeThreadEnvironmentId ? undefined : (
+                <Link to="/$environmentId/$threadId" params={buildThreadRouteParams(sender)} />
+              )
+            }
+            onClick={
+              sender.environmentId === ctx.activeThreadEnvironmentId
+                ? () => ctx.onOpenThread(sender.threadId)
+                : undefined
+            }
+            tone="muted"
+          >
+            {senderLabel}
+          </InlineButton>
         ) : null}
-        {/* Outside the fold so a collapsed message still has a heading to navigate to. */}
-        {mediaAboveText || cardBody ? null : (
-          <MessageAuthorHeading>
-            {folded
-              ? senderLabel
-              : userMessage.guestName === undefined
-                ? "You"
-                : `${userMessage.guestName} (guest)`}
-          </MessageAuthorHeading>
-        )}
-        {folded ? (
-          <FoldedMessageHeader
-            icon={MessagesSquareIcon}
-            label={senderLabel}
-            summary={foldSummary}
-            reaction={row.message.reaction}
-            expanded={expanded}
-            onToggle={() => setExpanded((value) => !value)}
+        {!cardBody && userMessage.attribution === "t3code" ? (
+          <p
+            className="me-1 text-2xs text-muted-foreground/70"
+            data-user-message-attribution="t3code"
+          >
+            Sent by T3 Code
+          </p>
+        ) : null}
+        {/* The row's heading already names the guest for screen readers. */}
+        {userMessage.guestName !== undefined ? (
+          <div aria-hidden>
+            <GuestMessageName name={userMessage.guestName} />
+          </div>
+        ) : null}
+        {(row.message.inputIntent === "steer" ||
+          row.message.inputIntent === "promoted_queued_to_steer") &&
+        !row.continuesSteer ? (
+          <UserMessageIntentMarker
+            intent={row.message.inputIntent}
+            unread={row.projectedItem?.item.status === "pending"}
           />
         ) : null}
-        {/* Find reads the DOM, so a folded message stays mounted but hidden while find is open. */}
-        {!folded || expanded || ctx.findActive ? (
-          <div
-            ref={folded ? revealFoldRef : undefined}
-            hidden={folded && !expanded}
-            dir={markdownProseDirection(resolvedContext.text)}
-            className={cn(
-              folded && "px-3 pb-3",
-              folded && !ctx.findActive && "max-h-96 overflow-auto",
-            )}
-          >
-            {!mediaAboveText && mediaBlock}
-            {userAudio.length > 0 ? (
-              <div className={cn("flex max-w-full flex-col gap-1", !audioOnly && "mb-2")}>
-                {userAudio.map((file) => (
-                  <InlineAudioPreview
-                    key={file.id}
-                    name={file.name}
-                    variant={audioOnly ? "bubble" : "chip"}
-                    environmentId={ctx.activeThreadEnvironmentId}
-                    resource={{
-                      _tag: "attachment",
-                      attachmentId: file.id,
-                      fileName: file.name,
-                      mimeType: file.mimeType,
-                      disposition: "inline",
-                    }}
-                    onOpen={() => ctx.onFileOpen(file)}
-                  />
-                ))}
-              </div>
-            ) : null}
-            {fileCardsOnly ? (
-              <div className="flex flex-col items-end gap-1" onCopyCapture={onBodyCopyCapture}>
-                {otherUserFiles.map((file) => (
-                  <UserFileCard
-                    key={file.id}
-                    file={file}
-                    copyMarkdown={
-                      attachmentReferences.find((reference) => reference.attachmentId === file.id)
-                        ?.source
+        {mediaAboveText ? (
+          <div className="flex max-w-[80%] justify-end">
+            {/* The heading leads the media so screen readers reach it before the images. */}
+            <MessageAuthorHeading>You</MessageAuthorHeading>
+            {mediaBlock}
+          </div>
+        ) : null}
+        <div
+          className={cn(
+            cardBody
+              ? "relative min-w-0 w-full"
+              : "relative min-w-0 max-w-[80%] rounded-2xl text-message-foreground",
+            (mediaAboveText || row.groupedWithPrevious) && "rounded-tr-md",
+            row.groupedWithNext && "rounded-br-md",
+            BUBBLE_CHIP_CLASS_NAME,
+            !cardBody &&
+              (userMessage.attribution === "guest"
+                ? guestBubbleClassName(false)
+                : !mediaOnly && !fileCardsOnly && !audioOnly && "bg-message"),
+            !cardBody && !folded && !mediaOnly && !fileCardsOnly && !audioOnly && "p-3",
+            folded && "border border-primary/20 bg-primary/5",
+            folded && expanded && "w-full",
+          )}
+          data-user-message-bubble=""
+        >
+          {ctx.threadRef && !cardBody ? (
+            <MessageBookmarkMarker threadRef={ctx.threadRef} bookmarks={bookmarks} />
+          ) : null}
+          {/* Outside the fold so a collapsed message still has a heading to navigate to. */}
+          {mediaAboveText || cardBody ? null : (
+            <MessageAuthorHeading>
+              {folded
+                ? senderLabel
+                : userMessage.guestName === undefined
+                  ? "You"
+                  : `${userMessage.guestName} (guest)`}
+            </MessageAuthorHeading>
+          )}
+          {folded ? (
+            <FoldedMessageHeader
+              icon={MessagesSquareIcon}
+              label={senderLabel}
+              summary={foldSummary}
+              reaction={row.message.reaction}
+              expanded={expanded}
+              onToggle={() => setExpanded((value) => !value)}
+            />
+          ) : null}
+          {/* Find reads the DOM, so a folded message stays mounted but hidden while find is open. */}
+          {!folded || expanded || ctx.findActive ? (
+            <div
+              ref={folded ? revealFoldRef : undefined}
+              hidden={folded && !expanded}
+              dir={markdownProseDirection(resolvedContext.text)}
+              className={cn(
+                folded && "px-3 pb-3",
+                folded && !ctx.findActive && "max-h-96 overflow-auto",
+              )}
+            >
+              {!mediaAboveText && mediaBlock}
+              {userAudio.length > 0 ? (
+                <div className={cn("flex max-w-full flex-col gap-1", !audioOnly && "mb-2")}>
+                  {userAudio.map((file) => (
+                    <InlineAudioPreview
+                      key={file.id}
+                      name={file.name}
+                      variant={audioOnly ? "bubble" : "chip"}
+                      environmentId={ctx.activeThreadEnvironmentId}
+                      resource={{
+                        _tag: "attachment",
+                        attachmentId: file.id,
+                        fileName: file.name,
+                        mimeType: file.mimeType,
+                        disposition: "inline",
+                      }}
+                      onOpen={() => ctx.onFileOpen(file)}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {fileCardsOnly ? (
+                <div className="flex flex-col items-end gap-1" onCopyCapture={onBodyCopyCapture}>
+                  {otherUserFiles.map((file) => (
+                    <UserFileCard
+                      key={file.id}
+                      file={file}
+                      copyMarkdown={
+                        attachmentReferences.find((reference) => reference.attachmentId === file.id)
+                          ?.source
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {!fileCardsOnly && (unchippedFiles.length > 0 || unknownAttachments.length > 0) ? (
+                <div className="mb-2 flex flex-col gap-1">
+                  {unchippedFiles.map((file) => {
+                    const pastedText = file.source?._tag === "pasted-text";
+                    const label = userMessageFileLabel(file);
+                    const fileIdentity = (
+                      <>
+                        <PierreEntryIcon
+                          pathValue={file.name}
+                          kind="file"
+                          theme={ctx.resolvedTheme}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{label}</span>
+                          {file.downloadable === false || pastedText ? (
+                            <span className="block text-xs text-muted-foreground tabular-nums">
+                              {file.downloadable === false
+                                ? "Sending…"
+                                : formatBytes(file.sizeBytes)}
+                            </span>
+                          ) : null}
+                        </span>
+                      </>
+                    );
+                    if (file.downloadable !== false) {
+                      return (
+                        <div key={file.id} className="flex min-w-0 items-center gap-1">
+                          <button
+                            type="button"
+                            aria-label={`Preview ${label}`}
+                            onClick={() => ctx.onFileOpen(file)}
+                            className="focus-visible:ring-ring/70 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left text-sm hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:outline-none"
+                          >
+                            {fileIdentity}
+                            <EyeIcon className="size-4 shrink-0" />
+                          </button>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost-muted"
+                                  aria-label={`Download ${label}`}
+                                  onClick={() => ctx.onFileDownload(file)}
+                                />
+                              }
+                            >
+                              <DownloadIcon />
+                            </TooltipTrigger>
+                            <TooltipPopup side="top">Download {label}</TooltipPopup>
+                          </Tooltip>
+                        </div>
+                      );
                     }
-                  />
-                ))}
-              </div>
-            ) : null}
-            {!fileCardsOnly && (unchippedFiles.length > 0 || unknownAttachments.length > 0) ? (
-              <div className="mb-2 flex flex-col gap-1">
-                {unchippedFiles.map((file) => {
-                  const pastedText = file.source?._tag === "pasted-text";
-                  const label = userMessageFileLabel(file);
-                  const fileIdentity = (
-                    <>
+
+                    return (
+                      <div key={file.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
+                        {fileIdentity}
+                      </div>
+                    );
+                  })}
+                  {unknownAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex min-w-0 items-center gap-2 py-1 text-sm"
+                    >
                       <PierreEntryIcon
-                        pathValue={file.name}
+                        pathValue={attachment.name}
                         kind="file"
                         theme={ctx.resolvedTheme}
                       />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">{label}</span>
-                        {file.downloadable === false || pastedText ? (
-                          <span className="block text-xs text-muted-foreground tabular-nums">
-                            {file.downloadable === false ? "Sending…" : formatBytes(file.sizeBytes)}
-                          </span>
-                        ) : null}
-                      </span>
-                    </>
-                  );
-                  if (file.downloadable !== false) {
-                    return (
-                      <div key={file.id} className="flex min-w-0 items-center gap-1">
-                        <button
-                          type="button"
-                          aria-label={`Preview ${label}`}
-                          onClick={() => ctx.onFileOpen(file)}
-                          className="focus-visible:ring-ring/70 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left text-sm hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:outline-none"
-                        >
-                          {fileIdentity}
-                          <EyeIcon className="size-4 shrink-0" />
-                        </button>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                aria-label={`Download ${label}`}
-                                onClick={() => ctx.onFileDownload(file)}
-                              />
-                            }
-                          >
-                            <DownloadIcon />
-                          </TooltipTrigger>
-                          <TooltipPopup side="top">Download {label}</TooltipPopup>
-                        </Tooltip>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={file.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
-                      {fileIdentity}
+                      <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
                     </div>
-                  );
-                })}
-                {unknownAttachments.map((attachment) => (
-                  <div key={attachment.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
-                    <PierreEntryIcon
-                      pathValue={attachment.name}
-                      kind="file"
-                      theme={ctx.resolvedTheme}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {fileCardsOnly || audioOnly ? null : (
-              <div onCopyCapture={onBodyCopyCapture}>
-                <CollapsibleUserMessageBody
-                  text={resolvedContext.text}
-                  renderContextReference={renderContextReference}
-                  skills={ctx.skills}
-                  markdownCwd={ctx.markdownCwd}
-                  collapsible={!folded && !cardBody}
-                />
-              </div>
-            )}
-          </div>
-        ) : null}
-        {floatActions ? (
+                  ))}
+                </div>
+              ) : null}
+              {fileCardsOnly || audioOnly ? null : (
+                <div onCopyCapture={onBodyCopyCapture}>
+                  <CollapsibleUserMessageBody
+                    text={resolvedContext.text}
+                    renderContextReference={renderContextReference}
+                    skills={ctx.skills}
+                    markdownCwd={ctx.markdownCwd}
+                    collapsible={!folded && !cardBody}
+                  />
+                </div>
+              )}
+              <SentContextBlocks />
+            </div>
+          ) : null}
+          {floatActions ? (
+            <div
+              className={cn(
+                "absolute end-full top-1/2 me-2 hidden w-max max-w-[calc(20cqw-0.5rem)] -translate-y-1/2 @min-[37rem]:flex",
+                ACTIONS_REVEAL_CLASS_NAME,
+              )}
+            >
+              {messageActions}
+            </div>
+          ) : null}
+        </div>
+        <UserMessageProjectedStatus row={row} />
+        {!folded || expanded ? (
           <div
             className={cn(
-              "absolute end-full top-1/2 me-2 hidden w-max max-w-[calc(20cqw-0.5rem)] -translate-y-1/2 @min-[37rem]:flex",
+              cardBody
+                ? "absolute bottom-0 end-0 flex justify-end bg-background/95"
+                : "flex w-full max-w-[80%] justify-end pe-1",
+              floatActions && "@min-[37rem]:hidden",
               ACTIONS_REVEAL_CLASS_NAME,
             )}
           >
@@ -1043,21 +1075,7 @@ function UserTimelineRow({
           </div>
         ) : null}
       </div>
-      <UserMessageProjectedStatus row={row} />
-      {!folded || expanded ? (
-        <div
-          className={cn(
-            cardBody
-              ? "absolute bottom-0 end-0 flex justify-end bg-background/95"
-              : "flex w-full max-w-[80%] justify-end pe-1",
-            floatActions && "@min-[37rem]:hidden",
-            ACTIONS_REVEAL_CLASS_NAME,
-          )}
-        >
-          {messageActions}
-        </div>
-      ) : null}
-    </div>
+    </SentContextExpansionProvider>
   );
 }
 

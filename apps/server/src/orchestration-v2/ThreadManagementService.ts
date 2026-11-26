@@ -25,6 +25,9 @@ import {
   OrchestrationV2ForceStopThreadError,
   type OrchestrationV2ForceStopThreadInput,
   type OrchestrationV2ForceStopThreadResult,
+  OrchestrationV2SetThreadToolOverridesError,
+  type OrchestrationV2SetThreadToolOverridesInput,
+  type OrchestrationV2SetThreadToolOverridesResult,
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2Command,
@@ -429,7 +432,7 @@ export class ThreadManagementContextRewindError extends Schema.TaggedError<Threa
   {
     threadId: ThreadId,
     reason: Schema.Union([
-      Schema.Literals(["unsupported", "unavailable", "failed"]),
+      Schema.Literals(["unsupported", "unavailable", "failed", "queued", "delegated_work"]),
       ProviderAdapterContextRewindRefusal,
     ]),
     cause: Schema.optional(Schema.Defect()),
@@ -443,6 +446,10 @@ export class ThreadManagementContextRewindError extends Schema.TaggedError<Threa
         return "This thread has no running turn to rewind. Nothing was removed.";
       case "failed":
         return "The rewind failed. Nothing was removed; carry on with the task.";
+      case "delegated_work":
+        return "Tasks you delegated are still running, and a rewind would drop your record of them. Nothing was removed; carry on, and rewind once they have reported back.";
+      case "queued":
+        return "A message is already queued to run after this turn, so a rewind could not continue straight from your summary. Nothing was removed; carry on with the task.";
       default:
         return contextRewindRefusalMessage(this.reason);
     }
@@ -582,6 +589,16 @@ export interface ThreadManagementServiceShape {
   readonly forceStopThread: (
     input: OrchestrationV2ForceStopThreadInput,
   ) => Effect.Effect<OrchestrationV2ForceStopThreadResult, OrchestrationV2ForceStopThreadError>;
+  /**
+   * Replaces a Claude thread's tool overrides and reloads its session so the next turn resumes
+   * the same conversation with the new tools. Refuses while a turn or background work runs.
+   */
+  readonly setThreadToolOverrides: (
+    input: OrchestrationV2SetThreadToolOverridesInput,
+  ) => Effect.Effect<
+    OrchestrationV2SetThreadToolOverridesResult,
+    OrchestrationV2SetThreadToolOverridesError
+  >;
   readonly awaitBackgroundTasks: (input: {
     readonly threadId: ThreadId;
     readonly taskIds: ReadonlyArray<string>;
@@ -1507,6 +1524,47 @@ const make = Effect.gen(function* () {
     return { type: "interrupt_requested", run: interruptibleRun, dispatch } as const;
   });
 
+  const setThreadToolOverrides: ThreadManagementServiceShape["setThreadToolOverrides"] = Effect.fn(
+    "ThreadManagementService.setThreadToolOverrides",
+  )(
+    function* (input) {
+      const result = yield* orchestrator.dispatch({
+        type: "thread.tool-overrides.set",
+        commandId: CommandId.make(
+          `server:tool-overrides:${input.threadId}:${yield* Effect.sync(() => SecureRandom.uuidV4Unsafe())}`,
+        ),
+        threadId: input.threadId,
+        toolOverrides: input.toolOverrides,
+      });
+      return {
+        outcome: result.storedEvents.some(
+          (stored) => stored.event.type === "provider-session.detached",
+        )
+          ? ("restart-scheduled" as const)
+          : ("stored" as const),
+      };
+    },
+    Effect.catchTags({
+      OrchestratorThreadToolOverridesRejectedError: (cause) =>
+        Effect.fail(
+          new OrchestrationV2SetThreadToolOverridesError({
+            threadId: cause.threadId,
+            reason: cause.reason,
+          }),
+        ),
+    }),
+    (effect, input) =>
+      Effect.mapError(effect, (cause) =>
+        cause._tag === "OrchestrationV2SetThreadToolOverridesError"
+          ? cause
+          : new OrchestrationV2SetThreadToolOverridesError({
+              threadId: input.threadId,
+              reason: "failed",
+              cause,
+            }),
+      ),
+  );
+
   const forceStopThread: ThreadManagementServiceShape["forceStopThread"] = Effect.fn(
     "ThreadManagementService.forceStopThread",
   )(
@@ -1830,7 +1888,7 @@ const make = Effect.gen(function* () {
         ...(cause === undefined ? {} : { cause }),
       });
     const records = yield* orchestrator
-      .getThreadRecords(input.threadId, ["providerThreads"])
+      .getThreadRecords(input.threadId, ["providerThreads", "runs", "subagents"])
       .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
     const providerThread = records.providerThreads.find(
       (candidate) =>
@@ -1845,6 +1903,16 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => fail("unavailable", cause)));
     if (Option.isNone(runtime)) return yield* fail("unavailable");
     if (runtime.value.rewindContext === undefined) return yield* fail("unsupported");
+    // The continuation queues behind these, and a run that starts first moves past the cut.
+    if (records.runs.some((run) => run.status === "queued")) return yield* fail("queued");
+    // The rewind would drop the agent's record of tasks it delegated that are still working.
+    if (
+      records.subagents.some(
+        (task) => task.origin === "app_owned" && isOrchestrationV2WorkActive(task.status),
+      )
+    ) {
+      return yield* fail("delegated_work");
+    }
     return yield* runtime.value
       .rewindContext({
         providerThread,
@@ -2184,6 +2252,7 @@ const make = Effect.gen(function* () {
     stopDelegatedTasks,
     stopWorkflow,
     forceStopThread,
+    setThreadToolOverrides,
     awaitBackgroundTasks,
     rewindContext,
     rewindWithSummary,

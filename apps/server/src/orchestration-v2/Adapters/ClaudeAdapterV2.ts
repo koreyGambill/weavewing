@@ -77,6 +77,7 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   claudeMcpToolName,
   claudeMcpToolNamePart,
+  claudeMcpServerRule,
   claudeMcpToolPrefix,
   MCP_APP_OUTPUT_KEY,
   mcpAppToolResourceUri,
@@ -97,6 +98,8 @@ import {
   type ChatAttachment,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   ClaudeSettings,
+  type ThreadToolOverrides,
+  T3_MCP_SERVER_NAME,
   TrimmedNonEmptyString,
   defaultInstanceIdForDriver,
   isCompactionCommandMessage,
@@ -948,6 +951,12 @@ function claudeMcpServerPrefixOverlaps(
     const other = claudeMcpToolPrefix(status.name);
     return other.startsWith(prefix) || prefix.startsWith(other);
   });
+}
+
+export function claudeMcpServerSummary(
+  status: Pick<ClaudeMcpServerStatus, "name" | "status" | "source" | "scope">,
+): ProviderAdapter.ProviderAdapterV2McpServer {
+  return { name: status.name, source: status.source ?? status.scope, status: status.status };
 }
 
 function findClaudeMcpTool(
@@ -2409,6 +2418,8 @@ export function makeClaudeQueryOptions(input: {
   readonly appendSystemPromptFileText?: string;
   // Flag settings, because a user's settings.json env beats the process env in Claude Code.
   readonly toolSearchOverride?: "true";
+  /** The thread's own tool overrides, applied on top of `settings`. */
+  readonly toolOverrides?: ThreadToolOverrides;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection, input.modelCatalog);
   const {
@@ -2471,11 +2482,18 @@ export function makeClaudeQueryOptions(input: {
           [`ANTHROPIC_DEFAULT_${compiledSelection.pinnedAlias.toUpperCase()}_MODEL`]:
             compiledSelection.pinnedAlias,
         };
+  // Unset leaves the choice to Claude Code and the user's own settings.
+  const claudeAiConnectorsEnv = input.toolOverrides?.claudeAiConnectors
+    ? "true"
+    : input.settings?.claudeAiConnectors === "off"
+      ? "false"
+      : undefined;
   // A settings file path cannot take extra keys, so it goes through unchanged.
   const effectiveQuerySettings =
     (input.toolSearchOverride === undefined &&
       aliasOverrideEnv === undefined &&
-      autoCompactWindow === undefined) ||
+      autoCompactWindow === undefined &&
+      claudeAiConnectorsEnv === undefined) ||
     typeof compactQuerySettings === "string"
       ? compactQuerySettings
       : ({
@@ -2490,16 +2508,25 @@ export function makeClaudeQueryOptions(input: {
             ...(input.toolSearchOverride === undefined
               ? {}
               : { ENABLE_TOOL_SEARCH: input.toolSearchOverride }),
+            ...(claudeAiConnectorsEnv === undefined
+              ? {}
+              : { ENABLE_CLAUDEAI_MCP_SERVERS: claudeAiConnectorsEnv }),
           },
         } as ClaudeSdkSettings);
   const deviceInstructions = input.mcpServers !== undefined && input.deviceToolsAvailable === true;
   // The SDK removes disallowed tools from the model's context, not only their calls.
+  const threadEnabledTools = input.toolOverrides?.enabledBuiltinTools ?? [];
   const disallowedTools = [
     ...new Set([
       ...(input.disallowedTools ?? []),
-      ...(input.settings?.omittedBuiltinTools ?? []).flatMap((tool) =>
-        tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool],
-      ),
+      ...(input.settings?.omittedBuiltinTools ?? [])
+        .filter((tool) => !threadEnabledTools.includes(tool))
+        .flatMap((tool) => (tool === "Task" ? CLAUDE_NATIVE_SUBAGENT_TOOLS : [tool])),
+      // A server-level rule, `mcp__<server>`, removes every tool the server offers.
+      ...(input.toolOverrides?.omittedMcpServers ?? []).flatMap((server) => {
+        const rule = claudeMcpServerRule(server);
+        return rule === undefined || rule === claudeMcpServerRule(T3_MCP_SERVER_NAME) ? [] : [rule];
+      }),
     ]),
   ];
   const options: ClaudeAgentSdkQueryOptions = {
@@ -3786,8 +3813,10 @@ export function claudeEffectiveQueryPolicyKey(
     readonly allowedTools?: ReadonlyArray<string>;
     readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   },
+  toolOverrides?: ThreadToolOverrides,
 ): string {
   return JSON.stringify({
+    toolOverrides,
     runtimePolicy: claudeRuntimeQueryPolicyKey({
       ...queryPolicy,
       ...(mcpOverrides.allowedTools === undefined
@@ -5787,6 +5816,8 @@ export interface ClaudeAdapterV2Options {
    * SessionStart hooks have run, so cwd-keyed workspace scans can be refreshed.
    */
   readonly onSessionInit?: (cwd: string) => Effect.Effect<void>;
+  /** Lists the MCP servers a new session in `cwd` could load, without a model request. */
+  readonly probeMcpServers?: ProviderAdapter.ProviderAdapterV2["Service"]["probeMcpServers"];
   /**
    * Applies Claude Code's reported model ids for a turn's cwd, so turns send ids its backend
    * accepts. Defaults to the catalog unchanged.
@@ -6048,13 +6079,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
     driver: CLAUDE_PROVIDER,
-    ...(offersContextRewind ? { offersContextRewind: true as const } : {}),
+    ...(offersContextRewind ? { offersContextRewind: "tool_calls" as const } : {}),
     getCapabilities: Effect.fn("ClaudeAdapterV2.getCapabilities")(function () {
       return Effect.succeed(ClaudeProviderCapabilitiesV2);
     }),
     planSelectionTransition: Effect.fn("ClaudeAdapterV2.planSelectionTransition")(function () {
       return Effect.succeed(turnScopedSelectionTransition());
     }),
+    ...(adapterOptions.probeMcpServers === undefined
+      ? {}
+      : { probeMcpServers: adapterOptions.probeMcpServers }),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const promptSuggestionsEnabled = input.promptSuggestions ?? Effect.succeed(false);
@@ -12952,10 +12986,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 ? {}
                 : { additionalDirectories: existing.queryPolicy.additionalDirectories }),
             };
-            if (claudeEffectiveQueryPolicyKey(retained, mcpOverrides) === existing.queryPolicyKey)
+            if (
+              claudeEffectiveQueryPolicyKey(
+                retained,
+                mcpOverrides,
+                turnInput.appThread.toolOverrides,
+              ) === existing.queryPolicyKey
+            )
               queryPolicy = retained;
           }
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          const queryPolicyKey = claudeEffectiveQueryPolicyKey(
+            queryPolicy,
+            mcpOverrides,
+            turnInput.appThread.toolOverrides,
+          );
           // Continuations drain existing output without prompting; retain the live process regardless of selection.
           if (
             existing !== null &&
@@ -13131,6 +13175,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             supportedDialogKinds: ["resume_return"],
             ...(appendSystemPromptFileText === undefined ? {} : { appendSystemPromptFileText }),
             ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
+            ...(turnInput.appThread.toolOverrides === undefined
+              ? {}
+              : { toolOverrides: turnInput.appThread.toolOverrides }),
           });
           if (turnInput.onContextPrepared) {
             const prompt = queryOptions.systemPrompt;
@@ -14510,6 +14557,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               message: { ...turnInput.message, text: "/compact" },
             }),
           steerTurn,
+          listMcpServers: Effect.fn("ClaudeAdapterV2.listMcpServers")(function* ({
+            providerThread,
+          }) {
+            const liveQuery = yield* Ref.get(queryContext);
+            if (
+              liveQuery === null ||
+              liveQuery.stopping ||
+              liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId
+            ) {
+              return undefined;
+            }
+            const statuses = yield* liveQuery.query.mcpServerStatus.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: "Failed to list Claude MCP servers.",
+                    cause,
+                  }),
+              ),
+            );
+            return statuses.map(claudeMcpServerSummary);
+          }),
           mcpApps: {
             listTools: Effect.fn("ClaudeAdapterV2.listMcpTools")(function* ({
               providerThread,
@@ -14996,7 +15066,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
     hooks: Pick<
       ClaudeAdapterV2Options,
-      "scopedLimitNames" | "onUsageLimits" | "onSessionInit" | "modelCatalog" | "routeModelCatalog"
+      | "scopedLimitNames"
+      | "onUsageLimits"
+      | "onSessionInit"
+      | "modelCatalog"
+      | "routeModelCatalog"
+      | "probeMcpServers"
     > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;

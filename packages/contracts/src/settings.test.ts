@@ -11,8 +11,8 @@ import {
   ClientSettingsSchema,
   ClientSettingsPatch,
   ClientServerSettingsPatch,
-  CLAUDE_REMOVABLE_BUILTIN_TOOLS,
   ClaudeSettings,
+  CodexSettings,
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
   idleCompactionPatch,
@@ -25,6 +25,7 @@ import {
   ServerSettingsPatch,
   withIdleCompaction,
 } from "./settings.ts";
+import { CLAUDE_REMOVABLE_BUILTIN_TOOLS } from "./threadToolOverrides.ts";
 
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
@@ -43,6 +44,7 @@ const decodeClientServerSettingsPatch = Schema.decodeUnknownSync(ClientServerSet
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 
 it("keeps remote media opt-in and accepts changes in both directions", () => {
   expect(decodeServerSettings({}).autoLoadRemoteMedia).toBe(false);
@@ -612,6 +614,11 @@ it("turns Claude's context rewind on unless a user turns it off", () => {
   expect(decodeClaudeSettings({ contextRewind: false }).contextRewind).toBe(false);
 });
 
+it("turns Codex's context rewind on unless a user turns it off", () => {
+  expect(decodeCodexSettings({}).contextRewind).toBe(true);
+  expect(decodeCodexSettings({ contextRewind: false }).contextRewind).toBe(false);
+});
+
 describe("Claude omitted built-in tools", () => {
   it("leaves out all seven tools, including the artifact tools, when nothing is saved", () => {
     expect(decodeClaudeSettings({}).omittedBuiltinTools).toEqual([
@@ -652,6 +659,11 @@ describe("Claude omitted built-in tools", () => {
       expect(decoded.omittedBuiltinTools).toEqual(decodeClaudeSettings({}).omittedBuiltinTools);
       expect(decoded.launchArgs).toBe("--x");
     }
+  });
+
+  it("leaves the claude.ai connectors to Claude Code unless a mode is saved", () => {
+    expect(decodeClaudeSettings({}).claudeAiConnectors).toBe("inherit");
+    expect(decodeClaudeSettings({ claudeAiConnectors: "off" }).claudeAiConnectors).toBe("off");
   });
 
   it("offers the seven measured tools and neither ToolSearch nor Skill", () => {

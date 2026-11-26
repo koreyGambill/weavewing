@@ -714,6 +714,82 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     ]);
   });
 
+  it("keeps the thread's switched-on tools out of the provider's left-out list", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-thread-tool-overrides",
+      resume: true,
+      cwd: "/workspace",
+      settings: DEFAULT_CLAUDE_SETTINGS,
+      toolOverrides: {
+        enabledBuiltinTools: ["ScheduleWakeup", "Task"],
+        claudeAiConnectors: false,
+        omittedMcpServers: [],
+      },
+    });
+    assert.deepEqual(options.disallowedTools, [
+      "Artifact",
+      "ArtifactData",
+      "ArtifactComments",
+      "Workflow",
+      "ReportFindings",
+    ]);
+  });
+
+  it("leaves a thread's omitted MCP servers out by server rule, never T3 Code's own", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-omitted-mcp",
+      resume: false,
+      cwd: "/workspace",
+      settings: NO_OMITTED_TOOLS_CLAUDE_SETTINGS,
+      toolOverrides: {
+        enabledBuiltinTools: [],
+        claudeAiConnectors: true,
+        omittedMcpServers: [
+          "fixture-notes",
+          "claude.ai Fixture Board",
+          "t3-code",
+          "t3-code__thread_send",
+        ],
+      },
+    });
+    assert.deepEqual(options.disallowedTools, [
+      "mcp__fixture-notes",
+      "mcp__claude_ai_Fixture_Board",
+    ]);
+  });
+
+  it.each([
+    ["inherit", undefined, undefined],
+    ["off", undefined, "false"],
+    ["inherit", true, "true"],
+    ["off", true, "true"],
+    ["off", false, "false"],
+  ] as const)(
+    "sets the claude.ai connectors env for provider %s and thread %s to %s",
+    (provider, thread, expected) => {
+      const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "native-connectors",
+        resume: false,
+        cwd: "/workspace",
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, claudeAiConnectors: provider },
+        ...(thread === undefined
+          ? {}
+          : {
+              toolOverrides: {
+                enabledBuiltinTools: [],
+                claudeAiConnectors: thread,
+                omittedMcpServers: [],
+              },
+            }),
+      });
+      const settings = options.settings as { env?: Record<string, string> } | undefined;
+      assert.equal(settings?.env?.ENABLE_CLAUDEAI_MCP_SERVERS, expected);
+    },
+  );
+
   it("sends no disallowed tools when an empty selection is saved", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
@@ -5720,6 +5796,48 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             ),
           ),
         ),
+    );
+
+    it.effect("opens a turn with the thread's switched-on tools and connectors", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarnessWithOptions({ settings: DEFAULT_CLAUDE_SETTINGS });
+        const turnInput = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-thread-tools"),
+          text: "Run git status.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn({
+          ...turnInput,
+          appThread: {
+            ...turnInput.appThread,
+            toolOverrides: {
+              enabledBuiltinTools: ["ScheduleWakeup"],
+              claudeAiConnectors: true,
+              omittedMcpServers: [],
+            },
+          },
+        });
+        const options = harness.getOpenedOptions()!;
+        assert.notInclude(options.disallowedTools ?? [], "ScheduleWakeup");
+        assert.include(options.disallowedTools ?? [], "Workflow");
+        const settings = options.settings;
+        assert.equal(
+          typeof settings === "object" ? settings.env?.ENABLE_CLAUDEAI_MCP_SERVERS : undefined,
+          "true",
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
     );
 
     it.effect("pins tool search on when the user's Claude settings choose auto", () =>

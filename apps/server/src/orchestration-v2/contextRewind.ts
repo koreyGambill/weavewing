@@ -45,6 +45,22 @@ export function contextRewindModelText(
 ${continuation}`;
 }
 
+/** The tool a provider that rewinds whole turns offers in place of `context_rewind`. */
+export const CONTEXT_REWIND_TURN_TOOL = "context_rewind_turn";
+
+/**
+ * What the model reads after a whole-turn rewind. The provider dropped the turn, so the user's
+ * message for it is sent again just before this text, and the work done since then still happened.
+ */
+export function contextRewindTurnModelText(continuation: string, applied: boolean): string {
+  const note = applied
+    ? `You already worked on the message above, then called ${CONTEXT_REWIND_TURN_TOOL}. Everything you did since that message was removed from your context, and the summary below, which you wrote, replaces it. Files you changed and commands you ran still took effect. Continue the task from here. Do not repeat that work unless the summary lacks something you need.`
+    : `Your ${CONTEXT_REWIND_TURN_TOOL} call did not take effect: your earlier tool calls and their results are still in your context. Continue the task from here.`;
+  return `${note}
+
+${continuation}`;
+}
+
 /** Queues the continuation behind the rewinding run, as the thread's own message. */
 export function contextRewindContinuationCommand(input: {
   readonly threadId: ThreadId;

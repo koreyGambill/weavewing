@@ -125,6 +125,7 @@ import {
 } from "./composerContextUndo";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerSurface } from "./ComposerSurface";
+import { openComposerRowControl } from "./composerRow";
 import { CollapsedComposerPromptPreview } from "./CollapsedComposerPromptPreview";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
 import { useOfflineOutbox } from "../../state/offlineOutbox";
@@ -3162,7 +3163,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (element) =>
             !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true }),
         );
-        if (!trigger) return;
+        if (!trigger) {
+          openComposerRowControl(shell, command);
+          return;
+        }
         trigger.focus({ preventScroll: true });
         if (command === "composer.mode") markOpenToPermissions(trigger);
         if (command === "composer.effort") markOpenToEffort(trigger);

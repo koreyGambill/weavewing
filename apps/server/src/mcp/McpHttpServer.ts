@@ -95,7 +95,7 @@ import { MessageToolkit } from "./toolkits/message/tools.ts";
 import * as MessageHandlers from "./toolkits/message/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 import * as ContextRewindHandlers from "./toolkits/contextRewind/handlers.ts";
-import { ContextRewindToolkit } from "./toolkits/contextRewind/tools.ts";
+import { ContextRewindToolkit, ContextRewindTurnToolkit } from "./toolkits/contextRewind/tools.ts";
 import * as QuestionHandlers from "./toolkits/questions/handlers.ts";
 import { QuestionToolkit } from "./toolkits/questions/tools.ts";
 import * as ReviewHandlers from "./toolkits/reviews/handlers.ts";
@@ -1331,6 +1331,20 @@ export const layerContextRewindToolkit = toolkitLayer(
   withEndTurnResults(McpServer.registerToolkit(decodeAsAdvertised(ContextRewindToolkit))),
 ).pipe(Layer.provide(contextRewindVisible.layer));
 
+// Untraced: it runs on every list request.
+const contextRewindTurnVisible = McpServer.visibility(
+  Effect.fnUntraced(function* () {
+    const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
+    return Option.isSome(scope) && scope.value.capabilities.has("context-rewind-turn");
+  }),
+);
+
+// The adapter ends the provider turn itself once the call completes.
+export const layerContextRewindTurnToolkit = toolkitRegistration(
+  ContextRewindTurnToolkit,
+  ContextRewindHandlers.turnLayer,
+).pipe(Layer.provide(contextRewindTurnVisible.layer));
+
 const layerMessageToolkit = toolkitRegistration(MessageToolkit, MessageHandlers.layer);
 
 const layerWorktreeToolkitRegistration = toolkitRegistration(
@@ -1435,6 +1449,7 @@ export const layerTools = Layer.mergeAll(
   layerReviewToolkit,
   layerQuestionToolkit,
   layerContextRewindToolkit,
+  layerContextRewindTurnToolkit,
   layerMessageToolkit,
 );
 

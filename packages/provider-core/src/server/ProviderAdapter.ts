@@ -407,6 +407,8 @@ export const ProviderAdapterContextRewindRefusal = Schema.Literals([
   "cut_not_found",
   "split_tool_call",
   "compacted",
+  "legacy_history",
+  "message_not_rebuildable",
 ]);
 export type ProviderAdapterContextRewindRefusal = typeof ProviderAdapterContextRewindRefusal.Type;
 
@@ -431,6 +433,10 @@ export function contextRewindRefusalMessage(reason: ProviderAdapterContextRewind
       return "That rewind would separate a kept tool call from its result. Nothing was removed; try again without tool_calls.";
     case "compacted":
       return "Your context was compacted after those tool calls, so they can no longer be removed. Nothing was removed.";
+    case "legacy_history":
+      return "This conversation's history format cannot drop a turn. Nothing was removed; carry on with the task.";
+    case "message_not_rebuildable":
+      return "The message that started this turn cannot be sent to you again exactly, so a rewind would change your task. Nothing was removed; carry on with the task.";
   }
 }
 
@@ -770,6 +776,13 @@ export type ProviderAdapterV2SubagentOutcome = {
   readonly result: OrchestrationV2Subagent["result"];
 };
 
+/** An MCP server a provider session reports; `source` is the provider's own origin label. */
+export interface ProviderAdapterV2McpServer {
+  readonly name: string;
+  readonly source: string | undefined;
+  readonly status: string;
+}
+
 export interface ProviderAdapterV2SessionRuntime {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
@@ -895,6 +908,13 @@ export interface ProviderAdapterV2SessionRuntime {
   }) => Effect.Effect<{ readonly feedbackId: string }, ProviderAdapterV2Error>;
   /** Absent means non-interactive apps with plain tool rows. */
   readonly mcpApps?: ProviderAdapterV2McpApps;
+  /** The MCP servers the thread's live process loaded; none when no process is open for it. */
+  readonly listMcpServers?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+  }) => Effect.Effect<
+    ReadonlyArray<ProviderAdapterV2McpServer> | undefined,
+    ProviderAdapterV2Error
+  >;
   readonly rollbackThread: (
     input: ProviderAdapterV2RollbackThreadInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;
@@ -908,8 +928,11 @@ export class ProviderAdapterV2 extends Context.Service<
   {
     readonly instanceId: ProviderInstanceId;
     readonly driver: ProviderDriverKind;
-    /** This instance's settings turned on context rewind, so its sessions implement `rewindContext`. */
-    readonly offersContextRewind?: true;
+    /**
+     * This instance's settings turned on context rewind, so its sessions implement `rewindContext`.
+     * `tool_calls` cuts back a chosen number of tool calls; `turn` removes the whole provider turn.
+     */
+    readonly offersContextRewind?: "tool_calls" | "turn";
     readonly getCapabilities: () => Effect.Effect<
       OrchestrationV2ProviderCapabilities,
       ProviderAdapterV2Error
@@ -920,5 +943,12 @@ export class ProviderAdapterV2 extends Context.Service<
     readonly openSession: (
       input: ProviderAdapterV2OpenSessionInput,
     ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
+    /**
+     * Every MCP server a new session in `cwd` could load, including ones a setting switches off,
+     * read without a model request. Absent where the provider has no such probe.
+     */
+    readonly probeMcpServers?: (input: {
+      readonly cwd: string | null;
+    }) => Effect.Effect<ReadonlyArray<ProviderAdapterV2McpServer>, ProviderAdapterV2Error>;
   }
 >()("@t3tools/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}

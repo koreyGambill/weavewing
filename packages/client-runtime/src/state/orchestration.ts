@@ -22,6 +22,7 @@ import {
 import {
   createEnvironmentQueryAtomFamily,
   createEnvironmentRpcCommand,
+  createEnvironmentGuardedRpcQueryAtomFamily,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
   createEnvironmentCommand,
@@ -209,6 +210,17 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
     rewindWithSummary: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:orchestration:rewind-with-summary",
       tag: ORCHESTRATION_V2_WS_METHODS.rewindWithSummary,
+    }),
+    // Mounted only while a thread's tools popover is open; closing or switching threads cancels it.
+    threadMcpServers: createEnvironmentGuardedRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:thread-mcp-servers",
+      tag: ORCHESTRATION_V2_WS_METHODS.listThreadMcpServers,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
+    setThreadToolOverrides: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:set-thread-tool-overrides",
+      tag: ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides,
     }),
     turnItem: (target: {
       readonly environmentId: EnvironmentId;

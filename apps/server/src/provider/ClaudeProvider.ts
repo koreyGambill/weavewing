@@ -12,6 +12,9 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Exit from "effect/Exit";
+import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -230,6 +233,10 @@ function claudeAuthStatus(
 
 // Bedrock initialization includes backend startup and awsAuthRefresh, taking longer than first-party auth.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000;
+// At least one second, and up to six, of re-reads while MCP servers finish connecting.
+const MCP_SERVERS_PROBE_POLL = Duration.millis(250);
+const MCP_SERVERS_PROBE_SETTLE_READS = 24;
+const MCP_SERVERS_PROBE_MIN_READS = 4;
 // Native CLI startup on Windows can exceed the shared probe deadline.
 const CLAUDE_VERSION_CHECK_TIMEOUT_MS = 20_000;
 
@@ -488,6 +495,84 @@ class ClaudeCapabilitiesProbeSdkError extends Schema.TaggedError<ClaudeCapabilit
   }
 }
 
+const claudeProbeSpawnVia = Effect.gen(function* () {
+  const platform = yield* HostProcess.Platform;
+  return platform === "win32"
+    ? ("launcher-thread" as const)
+    : platform === "linux" && (yield* Effect.promise(supportsEnvChdir))
+      ? ("env" as const)
+      : undefined;
+});
+
+const PROBE_KILL_GRACE_MS = 2_000;
+
+type ClaudeProbeChild = ReturnType<NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>>;
+
+function spawnClaudeProbeDirectly({ command, args, cwd, env, signal }: ClaudeSpawnOptions) {
+  return NodeChildProcess.spawn(command, args, {
+    ...(cwd === undefined ? {} : { cwd }),
+    env,
+    signal,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+}
+
+/**
+ * Owns the child a spawner starts. Its terminal state is recorded from spawn on, because a failed
+ * launch reports one error and no exit, possibly before anyone asks to end it.
+ */
+function trackSpawnedChild() {
+  let child: ClaudeProbeChild | undefined;
+  let ended = false;
+  let whenEnded = Promise.resolve();
+  const wrap =
+    (
+      spawn: NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>,
+    ): NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]> =>
+    (options) => {
+      const started = spawn(options);
+      child = started;
+      whenEnded = new Promise((resolve) => {
+        const markEnded = () => {
+          ended = true;
+          resolve();
+        };
+        started.once("exit", markEnded);
+        // Only a launch that never produced a process has no pid; other errors precede an exit.
+        started.on("error", () => {
+          if ((started as { readonly pid?: number }).pid === undefined) markEnded();
+        });
+      });
+      return started;
+    };
+  /** Sends SIGTERM, then SIGKILL after `graceMs`, and resolves once the child has ended. */
+  const end = async (graceMs: number) => {
+    if (child === undefined || ended) return;
+    const running = child;
+    // @effect-diagnostics-next-line globalTimers:off -- The grace runs in the release step on wall time, so a test clock cannot stall a hard kill.
+    const kill = setTimeout(() => running.kill("SIGKILL"), graceMs);
+    running.kill("SIGTERM");
+    await whenEnded;
+    clearTimeout(kill);
+  };
+  return { wrap, end };
+}
+
+/** Starts Claude with a prompt that never yields; aborting `abort` ends the process. */
+function startPromptlessClaudeQuery(
+  buildOptions: (abortController: AbortController) => ClaudeQueryOptions,
+  abort = new AbortController(),
+) {
+  const query = claudeQuery({
+    // oxlint-disable-next-line require-yield -- never yields, so no prompt reaches the API
+    prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+      await waitForAbortSignal(abort.signal);
+    })(),
+    options: buildOptions(abort),
+  });
+  return { query, abort };
+}
+
 /** A never-yielding prompt allows local initialization IPC without sending an Anthropic request. */
 const probeClaudeCapabilities = (
   claudeSettings: ClaudeSettings,
@@ -513,29 +598,21 @@ const probeClaudeCapabilities = (
           ...(yield* readClaudeSettingsEnv(claudeSettings, cwd, claudeEnvironment)),
         })
       : 0;
-    const platform = yield* HostProcess.Platform;
-    const spawnVia =
-      platform === "win32"
-        ? "launcher-thread"
-        : platform === "linux" && (yield* Effect.promise(supportsEnvChdir))
-          ? "env"
-          : undefined;
+    const spawnVia = yield* claudeProbeSpawnVia;
     return yield* Effect.tryPromise({
       try: async () => {
-        const q = claudeQuery({
-          // oxlint-disable-next-line require-yield -- never yields, so no prompt reaches the API
-          prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-            await waitForAbortSignal(abort.signal);
-          })(),
-          options: buildClaudeCapabilitiesProbeQueryOptions({
-            executablePath,
-            abortController: abort,
-            environment: claudeEnvironment,
-            cwd,
-            managedMcpConfig,
-            spawnVia,
-          }),
-        });
+        const { query: q } = startPromptlessClaudeQuery(
+          (abortController) =>
+            buildClaudeCapabilitiesProbeQueryOptions({
+              executablePath,
+              abortController,
+              environment: claudeEnvironment,
+              cwd,
+              managedMcpConfig,
+              spawnVia,
+            }),
+          abort,
+        );
         const init = await q.initializationResult();
         return { q, init, graceMs };
       },
@@ -632,6 +709,104 @@ const probeClaudeCapabilities = (
 };
 
 type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
+
+export class ClaudeMcpServersProbeError extends Schema.TaggedError<ClaudeMcpServersProbeError>()(
+  "ClaudeMcpServersProbeError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Claude MCP server probe failed.";
+  }
+}
+
+const MCP_SERVERS_PROBE_TTL = Duration.minutes(2);
+
+/**
+ * Lists the MCP servers a session in a folder would load, with the claude.ai connectors switched
+ * on so their names are known even where a setting keeps them out. Like the capability probe, a
+ * prompt that never yields keeps it off the API; it does start the configured servers. Results
+ * are cached per folder, so a burst of popover opens starts one process.
+ */
+export const makeClaudeMcpServersProbe = Effect.fn("makeClaudeMcpServersProbe")(function* (
+  claudeSettings: ClaudeSettings,
+  environment: NodeJS.ProcessEnv,
+) {
+  const probe = Effect.fn("probeClaudeMcpServers")(
+    function* (cwd: string) {
+      const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+      const executablePath = yield* resolveClaudeSdkExecutablePath(
+        claudeSettings.binaryPath,
+        claudeEnvironment,
+      );
+      const spawnVia = yield* claudeProbeSpawnVia;
+      // Taken before initialization, so a deadline or a cancelled request ends the process.
+      const { query } = yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const spawned = trackSpawnedChild();
+          const started = startPromptlessClaudeQuery((abortController) => {
+            const { mcpServers: _noServers, ...options } = buildClaudeCapabilitiesProbeQueryOptions(
+              {
+                executablePath,
+                abortController,
+                environment: claudeEnvironment,
+                cwd: cwd === "" ? undefined : cwd,
+                // Filesystem MCP servers are the point here, so strict MCP config stays off.
+                managedMcpConfig: true,
+                spawnVia,
+              },
+            );
+            return {
+              ...options,
+              spawnClaudeCodeProcess: spawned.wrap(
+                options.spawnClaudeCodeProcess ?? spawnClaudeProbeDirectly,
+              ),
+              env: { ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: "true" },
+              // Flag settings too, because a user's settings.json env beats the process env.
+              settings: { disableAllHooks: true, env: { ENABLE_CLAUDEAI_MCP_SERVERS: "true" } },
+            };
+          });
+          return { ...started, spawned };
+        }),
+        // The SDK's abort only starts a graceful close, so the probe ends its own child for certain
+        // first: aborting a child spawned with the signal reports an error before it exits.
+        ({ abort, spawned }) =>
+          Effect.promise(() => spawned.end(PROBE_KILL_GRACE_MS)).pipe(
+            Effect.andThen(Effect.sync(() => abort.abort())),
+          ),
+      );
+      const call = <A>(run: () => Promise<A>) =>
+        Effect.tryPromise({
+          try: run,
+          catch: (cause) => new ClaudeMcpServersProbeError({ cause }),
+        });
+      yield* call(() => query.initializationResult());
+      // Claude Code reports no event when servers finish connecting. Right after init it may not
+      // have registered any yet, and claude.ai connectors arrive a second or two later, so read
+      // for a short minimum and then for a bounded while any is pending.
+      let statuses = yield* call(() => query.mcpServerStatus());
+      for (
+        let attempt = 0;
+        attempt < MCP_SERVERS_PROBE_SETTLE_READS &&
+        (attempt < MCP_SERVERS_PROBE_MIN_READS ||
+          statuses.some((status) => status.status === "pending"));
+        attempt++
+      ) {
+        yield* Effect.sleep(MCP_SERVERS_PROBE_POLL);
+        statuses = yield* call(() => query.mcpServerStatus());
+      }
+      return statuses;
+    },
+    Effect.scoped,
+    Effect.timeout(
+      resolveProviderProbeTimeoutMs("claude", CAPABILITIES_PROBE_TIMEOUT_MS, environment),
+    ),
+  );
+  const cache = yield* Cache.makeWith(probe, {
+    capacity: 32,
+    timeToLive: (exit) => (Exit.isSuccess(exit) ? MCP_SERVERS_PROBE_TTL : Duration.zero),
+  });
+  return (cwd: string | null) => Cache.get(cache, cwd ?? "");
+});
 
 function describeClaudeUsageFailure(error: { readonly _tag: string }) {
   if (error._tag !== "ClaudeCapabilitiesProbeSdkError") {

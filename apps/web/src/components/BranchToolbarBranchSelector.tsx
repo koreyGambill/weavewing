@@ -26,6 +26,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type Ref,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
@@ -44,6 +45,7 @@ import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./chat/threadDetailsPanelStyles
 import { parsePullRequestReference } from "@t3tools/client-runtime/pull-request-link-input";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
+import { useComposerRowItemPlacement } from "./chat/ComposerRow";
 import {
   type BranchHold,
   deriveLocalBranchNameFromRemoteRef,
@@ -118,6 +120,7 @@ export function BranchToolbarBranchSelector({
   onComposerFocusRequest,
 }: BranchToolbarBranchSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const rowPlacement = useComposerRowItemPlacement();
   const canWriteSourceControl = useEnvironmentScope(environmentId, AuthSourceControlWriteScope);
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const updateThreadMetadata = useAtomCommand(
@@ -806,6 +809,9 @@ export function BranchToolbarBranchSelector({
         side: displayMode === "panel" ? "bottom" : "top",
         className: cn("flex flex-col", displayMode === "panel" ? "w-(--anchor-width)" : "w-80"),
         ...(displayMode === "toolbar" ? composerFloatingLayerProps : {}),
+        ...(rowPlacement?.inMenu
+          ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.finalFocus }
+          : {}),
       }}
     >
       <div
@@ -866,6 +872,7 @@ export function BranchToolbarBranchSelector({
               />
             </ComposerContextLabel>
           </ComboboxTrigger>
+          {rowPlacement?.menuValue ? createPortal(triggerLabel, rowPlacement.menuValue) : null}
         </span>
       </div>
     </BranchPicker>

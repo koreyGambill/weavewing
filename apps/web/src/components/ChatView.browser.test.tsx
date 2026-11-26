@@ -2,6 +2,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   EnvironmentId,
+  MessageId,
   NodeId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -855,7 +856,7 @@ it("preserves chat width, details visibility and focus as the tile resizes", asy
   });
 });
 
-it("shows lineage counts in the chat bar and agents in Thread Details", async () => {
+it("shows agent counts in the row under the composer and agents in Thread Details", async () => {
   await import("~/index.css");
   await using viewport = new AsyncDisposableStack();
   const initial = { width: window.innerWidth, height: window.innerHeight };
@@ -909,10 +910,12 @@ it("shows lineage counts in the chat bar and agents in Thread Details", async ()
     } satisfies OrchestrationV2Subagent;
     await act(() => emitThreadEvent(thread.id, { type: "subagent.updated", payload: agent }));
   }
-  const lineageControl = page.getByRole("button", { name: "Lineage, 1 working, 1 failed, 1 past" });
-  await expect.element(lineageControl).toHaveAttribute("data-chat-lineage");
+  const lineageControl = page.getByRole("button", {
+    name: "Agents: 1 working, 1 failed, 1 done",
+  });
+  await expect.element(lineageControl).toHaveTextContent("1 working");
   await lineageControl.click();
-  const lineage = page.getByRole("dialog", { name: "Thread lineage" });
+  const lineage = page.getByRole("dialog", { name: "Agents" });
   const agent = lineage.getByRole("button", { name: /Fixture running agent/ });
   await agent.click();
   await expect.element(lineage.getByText("Check the composer.")).toBeVisible();
@@ -930,6 +933,274 @@ it("shows lineage counts in the chat bar and agents in Thread Details", async ()
   await expect.element(card).toBeVisible();
   await expect.element(card.getByRole("button", { name: /Fixture running agent/ })).toBeVisible();
   await expect.element(card.getByRole("button", { name: /Change folder/ })).not.toBeInTheDocument();
+});
+
+it("opens the agents list and the thread menu's entries by keyboard, returning focus", async () => {
+  await import("~/index.css");
+  await using viewport = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  viewport.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(1400, 860);
+
+  const thread = {
+    ...threadWithHistory("row-keyboard", 1),
+    olderSettled: true as const,
+    worktreePath: "/workspace/row-keyboard",
+  };
+  using _environment = installFakeEnvironment([thread], {
+    vcsStatus: {
+      _tag: "snapshot",
+      local: {
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: true,
+        refName: "feature/row-under-the-composer-keyboard",
+        hasWorkingTreeChanges: false,
+        workingTree: { files: [], insertions: 0, deletions: 0 },
+      },
+      remote: null,
+    },
+  });
+  using _bookmarks = answerRpc(WS_METHODS.messageFollowUpsList, () =>
+    Effect.succeed([
+      {
+        threadId: thread.id,
+        threadTitle: thread.title,
+        messageId: MessageId.make("row-keyboard-bookmark"),
+        role: "assistant" as const,
+        todo: false,
+        excerpt: "Bookmarked reply",
+        flaggedAt: "2026-01-01T00:00:00.000Z",
+        doneAt: null,
+      },
+    ]),
+  );
+  using _refs = answerRpc(WS_METHODS.vcsListRefs, () =>
+    Effect.succeed({
+      refs: [
+        {
+          name: "feature/row-under-the-composer-keyboard",
+          current: true,
+          isDefault: false,
+          worktreePath: null,
+        },
+      ],
+      isRepo: true,
+      hasPrimaryRemote: true,
+      nextCursor: null,
+      totalCount: 1,
+    }),
+  );
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  const now = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+  await act(() =>
+    emitThreadEvent(thread.id, {
+      type: "subagent.updated",
+      payload: {
+        id: NodeId.make("row-keyboard-agent"),
+        threadId: thread.id,
+        runId: null,
+        parentNodeId: NodeId.make("row-keyboard-parent"),
+        origin: "provider_native",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerThreadId: null,
+        childThreadId: null,
+        nativeTaskRef: null,
+        prompt: "Review the row.",
+        title: "Row reviewer",
+        model: null,
+        status: "running",
+        result: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+      } satisfies OrchestrationV2Subagent,
+    }),
+  );
+
+  const agents = page.getByRole("button", { name: "Agents: 1 working" });
+  (await agents.element()).focus();
+  await userEvent.keyboard("{Enter}");
+  const agentsList = page.getByRole("dialog", { name: "Agents" });
+  await expect.element(agentsList.getByRole("button", { name: /Row reviewer/ })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(agentsList).not.toBeInTheDocument();
+  await expect.element(agents).toHaveFocus();
+
+  const menuButton = page.getByRole("button", { name: "Thread menu" });
+  (await menuButton.element()).focus();
+  await userEvent.keyboard("{Enter}");
+  const menu = page.getByRole("menu");
+  await expect.element(menu.getByRole("menuitem", { name: /bookmark/ })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(menu).not.toBeInTheDocument();
+  await expect.element(menuButton).toHaveFocus();
+
+  await userEvent.keyboard("{Enter}");
+  await expect.element(menu.getByRole("menuitem", { name: /bookmark/ })).toBeVisible();
+  await userEvent.keyboard("{ArrowDown}");
+  await expect.element(menu.getByRole("menuitem", { name: /bookmark/ })).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  const bookmarks = page.getByRole("dialog", { name: "Bookmarks" });
+  await expect.element(bookmarks.getByText("Bookmarked reply")).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(bookmarks).not.toBeInTheDocument();
+  await expect.element(menuButton).toHaveFocus();
+
+  // Narrow enough that the branch leaves the row for the menu.
+  await page.viewport(390, 860);
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector('[data-composer-row-item="branch"][data-in-menu]'),
+    ).not.toBeNull(),
+  );
+  (await menuButton.element()).focus();
+  await userEvent.keyboard("{Enter}");
+  // The menu lists items that left the row before its own entries, and opens on the first.
+  // The thread's metadata still says main; the row names the checkout's ref, as the picker does.
+  const branchRow = menu.getByRole("menuitem", {
+    name: /^feature\/row-under-the-composer-keyboard\s*Branch$/,
+  });
+  await expect.element(branchRow, { timeout: 3000 }).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  const branchPicker = page.getByRole("listbox");
+  await expect.element(branchPicker).toBeVisible();
+  const menuRect = (await menuButton.element()).getBoundingClientRect();
+  const pickerRect = (await branchPicker.element()).getBoundingClientRect();
+  expect(pickerRect.bottom).toBeLessThanOrEqual(menuRect.top);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(branchPicker).not.toBeInTheDocument();
+  await expect.element(menuButton).toHaveFocus();
+});
+
+async function renderRowAtWidth(name: string, worktreePath: string, width: number) {
+  await import("~/index.css");
+  const stack = new AsyncDisposableStack();
+  const initial = { width: window.innerWidth, height: window.innerHeight };
+  stack.defer(() => page.viewport(initial.width, initial.height));
+  await page.viewport(width, 860);
+  const thread = { ...threadWithHistory(name, 1), olderSettled: true as const, worktreePath };
+  stack.use(
+    installFakeEnvironment([thread], {
+      vcsStatus: {
+        _tag: "snapshot",
+        local: {
+          isRepo: true,
+          hasPrimaryRemote: true,
+          isDefaultRef: true,
+          refName: "feature/row-under-the-composer-sweep",
+          hasWorkingTreeChanges: false,
+          workingTree: { files: [], insertions: 0, deletions: 0 },
+        },
+        remote: null,
+      },
+    }),
+  );
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  stack.use(
+    await render(<AppRoot router={router} />, {
+      // AppRoot brings its own router.
+      router: false,
+    }),
+  );
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  return stack.move();
+}
+
+const branchInMenu = () =>
+  document.querySelector('[data-composer-row-item="branch"][data-in-menu]') !== null;
+
+it("returns the branch from the thread menu when the row widens again", async () => {
+  // A folder named like the project gives a short label with no room to shorten, so only
+  // the width the row charges for the thread menu decides whether the branch fits.
+  await using _row = await renderRowAtWidth("row-sweep", "/w/render", 1280);
+  await vi.waitFor(() => expect(branchInMenu()).toBe(false));
+  // Two widths from the review's sweep: narrow until the branch leaves, then widen back.
+  await page.viewport(320, 860);
+  await vi.waitFor(() => expect(branchInMenu()).toBe(true));
+  await page.viewport(1280, 860);
+  await vi.waitFor(() => expect(branchInMenu()).toBe(false), { timeout: 3000 });
+});
+
+it("keeps a narrow location label's ellipsis inside the box it is given", async () => {
+  // A 16-character last segment keeps the whole name as the truncation tail.
+  await using _row = await renderRowAtWidth("row-narrow", "/workspace/webhook-retry-xy", 390);
+  // An agents item takes room too, so at 280 px the label is narrower than the folder name.
+  const now = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+  await act(() =>
+    emitThreadEvent(ThreadId.make("row-narrow"), {
+      type: "subagent.updated",
+      payload: {
+        id: NodeId.make("row-narrow-agent"),
+        threadId: ThreadId.make("row-narrow"),
+        runId: null,
+        parentNodeId: NodeId.make("row-narrow-parent"),
+        origin: "provider_native",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerThreadId: null,
+        childThreadId: null,
+        nativeTaskRef: null,
+        prompt: "Check the label.",
+        title: "Label checker",
+        model: null,
+        status: "running",
+        result: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+      } satisfies OrchestrationV2Subagent,
+    }),
+  );
+  await expect.element(page.getByRole("button", { name: "Agents: 1 working" })).toBeVisible();
+  // How far any text in the location's labels runs past its label's box.
+  const overflow = () => {
+    const labels = document.querySelectorAll<HTMLElement>(
+      '[data-composer-row-item="location"] [data-composer-label]',
+    );
+    if (labels.length === 0) return Number.POSITIVE_INFINITY;
+    return Math.max(
+      0,
+      ...Array.from(labels, (label) => {
+        const right = label.getBoundingClientRect().right;
+        return Math.max(
+          0,
+          ...Array.from(label.querySelectorAll<HTMLElement>("span"), (span) => {
+            const box = span.getBoundingClientRect();
+            return box.width === 0 ? 0 : box.right - right;
+          }),
+        );
+      }),
+    );
+  };
+  for (const width of [390, 360, 320, 280]) {
+    await page.viewport(width, 860);
+    await vi.waitFor(() => expect(overflow(), `${width} px`).toBeLessThanOrEqual(0.5), {
+      timeout: 3000,
+    });
+  }
 });
 
 it("uses the remembered base and whitespace-filtered Diff counts beside the branch", async () => {

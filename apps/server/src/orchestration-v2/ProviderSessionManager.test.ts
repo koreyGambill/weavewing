@@ -445,7 +445,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   state: Ref.Ref<TestProviderRuntimeState>,
   options: {
     readonly failEventStream?: boolean;
-    readonly offersContextRewind?: true;
+    readonly offersContextRewind?: "tool_calls" | "turn";
     readonly normalizeThreadLoadModelSelection?: (selection: ModelSelection) => ModelSelection;
     readonly capabilities?: OrchestrationV2ProviderCapabilities;
     readonly extensionStatuses?: OrchestrationV2ProviderSession["extensionStatuses"];
@@ -490,7 +490,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: ProviderInstanceId.make("codex"),
     driver: CODEX_DRIVER,
-    ...(options.offersContextRewind ? { offersContextRewind: true as const } : {}),
+    ...(options.offersContextRewind ? { offersContextRewind: options.offersContextRewind } : {}),
     getCapabilities: () => Effect.succeed(options.capabilities ?? CodexCapabilities),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (input) =>
@@ -620,7 +620,7 @@ function layerTest(input: {
   readonly idleTimeoutMs: number;
   readonly maxIdlePinMs?: number;
   readonly failEventStream?: boolean;
-  readonly offersContextRewind?: true;
+  readonly offersContextRewind?: "tool_calls" | "turn";
   readonly normalizeThreadLoadModelSelection?: (selection: ModelSelection) => ModelSelection;
   readonly capabilities?: OrchestrationV2ProviderCapabilities;
   readonly extensionStatuses?: OrchestrationV2ProviderSession["extensionStatuses"];
@@ -671,7 +671,7 @@ function layerTest(input: {
   const layerRegistry = Layer.unwrap(
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
-      ...(input.offersContextRewind ? { offersContextRewind: true as const } : {}),
+      ...(input.offersContextRewind ? { offersContextRewind: input.offersContextRewind } : {}),
       ...(input.normalizeThreadLoadModelSelection === undefined
         ? {}
         : { normalizeThreadLoadModelSelection: input.normalizeThreadLoadModelSelection }),
@@ -2579,6 +2579,62 @@ it.effect(
     }),
 );
 
+it.effect(
+  "ProviderSessionManagerV2 issues the session reopened after a tool reload a credential that resolves to its thread",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const mcpConfigs = yield* Ref.make<
+        ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+      >([]);
+      const effect = Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const registry = yield* McpSessionRegistry.McpSessionRegistry;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-provider-session-manager-tool-reload");
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        const open = Effect.gen(function* () {
+          const providerSessionId = yield* idAllocator.allocate.providerSession({
+            providerInstanceId: modelSelection.instanceId,
+            threadId,
+          });
+          yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+          const config = (yield* Ref.get(mcpConfigs)).at(-1);
+          return {
+            providerSessionId,
+            token: config?.authorizationHeader.replace(/^Bearer\s+/, "") ?? "",
+          };
+        });
+
+        const before = yield* open;
+        yield* manager.detach({
+          providerSessionId: before.providerSessionId,
+          threadId,
+          detail: "Tools changed.",
+        });
+
+        const after = yield* open;
+        assert.notEqual(after.providerSessionId, before.providerSessionId);
+        assert.equal((yield* registry.resolve(after.token))?.thread.threadId, threadId);
+      });
+
+      yield* effect.pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1_000,
+            mcpConfigs,
+            capabilities: ExclusiveCapabilities,
+          }),
+        ),
+      );
+    }),
+);
+
 it.effect.each([
   { relationshipToParent: null, subagent: false },
   { relationshipToParent: "subagent", subagent: true },
@@ -2690,9 +2746,13 @@ it.effect(
     }),
 );
 
-it.effect.each([true, false])(
-  "ProviderSessionManagerV2 grants context rewind only when the adapter offers it (%s)",
-  (offered) =>
+it.effect.each([
+  { offered: "tool_calls", granted: "context-rewind" },
+  { offered: "turn", granted: "context-rewind-turn" },
+  { offered: undefined, granted: undefined },
+] as const)(
+  "ProviderSessionManagerV2 grants the context rewind capability the adapter offers ($offered)",
+  ({ offered, granted }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
@@ -2726,11 +2786,12 @@ it.effect.each([true, false])(
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
-            ...(offered ? { offersContextRewind: true as const } : {}),
+            ...(offered === undefined ? {} : { offersContextRewind: offered }),
           }),
         ),
       );
-      assert.equal(capabilities?.has("context-rewind"), offered);
+      assert.equal(capabilities?.has("context-rewind"), granted === "context-rewind");
+      assert.equal(capabilities?.has("context-rewind-turn"), granted === "context-rewind-turn");
     }),
 );
 

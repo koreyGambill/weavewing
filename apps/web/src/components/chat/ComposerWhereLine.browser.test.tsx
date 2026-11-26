@@ -180,7 +180,8 @@ it("drills through folders with repeated Tab and opens with Enter in the where-l
   await userEvent.keyboard("{Enter}");
   await expect.element(search).not.toBeInTheDocument();
   await vi.waitFor(() =>
-    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toMatch(/^code/),
+    // The folder ends in the project's name, so the label names it once.
+    expect(document.querySelector("[data-draft-project-trigger]")?.textContent).toBe("~/code"),
   );
   expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
     "Keep this unsent prompt",

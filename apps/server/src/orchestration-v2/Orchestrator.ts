@@ -83,7 +83,10 @@ import {
   TurnItemId,
   TrimmedNonEmptyString,
   managedRuntimeModeCeilingMessage,
+  T3_MCP_SERVER_NAME,
+  threadToolOverridesNotice,
 } from "@t3tools/contracts";
+import { claudeMcpServerRule } from "@t3tools/shared/mcpApp";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
@@ -352,6 +355,36 @@ export class OrchestratorProviderSelectionBusyError extends Schema.TaggedError<O
   }
 }
 
+export class OrchestratorThreadToolOverridesRejectedError extends Schema.TaggedError<OrchestratorThreadToolOverridesRejectedError>()(
+  "OrchestratorThreadToolOverridesRejectedError",
+  {
+    commandId: CommandId,
+    threadId: ThreadId,
+    reason: Schema.Literals([
+      "busy",
+      "background-work",
+      "unsupported-provider",
+      "protected-mcp-server",
+      "invalid-mcp-server",
+    ]),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "busy":
+        return "A turn is running. Stop it or wait for it to finish, then reload.";
+      case "background-work":
+        return "The current session is still running background agents or commands, and this change would end them. Wait for them to finish, or press Stop, then try again.";
+      case "unsupported-provider":
+        return "Per-thread tools are available only for Claude threads.";
+      case "protected-mcp-server":
+        return "T3 Code's own MCP server cannot be left out of a thread.";
+      case "invalid-mcp-server":
+        return "An MCP server name with a double underscore cannot be left out on its own.";
+    }
+  }
+}
+
 const isOrchestratorDispatchError = Schema.is(OrchestratorDispatchError);
 
 /** The ceiling refusal under however many dispatch errors wrapped it on the way out. */
@@ -448,6 +481,7 @@ export const OrchestratorV2Error = Schema.Union([
   OrchestratorProviderSelectionBusyError,
   OrchestratorRuntimeModeAboveCeilingError,
   OrchestratorWorkspaceSelectionRejectedError,
+  OrchestratorThreadToolOverridesRejectedError,
 ]);
 export type OrchestratorV2Error = typeof OrchestratorV2Error.Type;
 
@@ -730,6 +764,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.active.reorder":
     case "thread.tag.set":
     case "thread.sidebar-group.set":
+    case "thread.tool-overrides.set":
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
@@ -6013,13 +6048,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.interaction-mode.set":
           return { ...thread, interactionMode: command.interactionMode, updatedAt: now };
         case "thread.model-selection.set":
-        case "provider.switch":
+        case "provider.switch": {
+          // Tool overrides are relative to one Claude instance's defaults, so a handoff drops them.
+          const { toolOverrides: _toolOverrides, ...withoutToolOverrides } = thread;
           return {
-            ...thread,
+            ...(thread.providerInstanceId === command.modelSelection.instanceId
+              ? thread
+              : withoutToolOverrides),
             providerInstanceId: command.modelSelection.instanceId,
             modelSelection: command.modelSelection,
             updatedAt: now,
           };
+        }
       }
     })();
     if (command.type === "thread.pull-request-watch.checks-reopen") {
@@ -6424,6 +6464,126 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       yield* Ref.update(effects, (existing) => [...existing, pendingEffect]);
     },
   );
+
+  // Claude loads its tool list at process start, so a change reloads the session; the next
+  // turn resumes the saved conversation with the new list.
+  const dispatchThreadToolOverridesSet = Effect.fn(
+    "orchestrationV2.dispatch.threadToolOverridesSet",
+  )(function* (
+    command: Extract<OrchestrationV2Command, { readonly type: "thread.tool-overrides.set" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) {
+    const reject = (reason: OrchestratorThreadToolOverridesRejectedError["reason"]) =>
+      new OrchestratorThreadToolOverridesRejectedError({
+        commandId: command.commandId,
+        threadId: command.threadId,
+        reason,
+      });
+    const projection = yield* loadProjectionForCommand(
+      command,
+      ["runs", "providerSessions", "providerThreads"],
+      { turnItemTypes: [], omitSettledSubagentRecords: true },
+    );
+    const { thread } = projection;
+    if (thread.deletedAt !== null || thread.archivedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.threadId} is ${thread.deletedAt !== null ? "deleted" : "archived"}.`,
+      });
+    }
+    const adapter = yield* providerAdapters
+      .get(thread.providerInstanceId)
+      .pipe(mapDispatchError(command));
+    if (adapter.driver !== "claudeAgent") return yield* reject("unsupported-provider");
+    const protectedRule = claudeMcpServerRule(T3_MCP_SERVER_NAME);
+    for (const server of command.toolOverrides.omittedMcpServers) {
+      const rule = claudeMcpServerRule(server);
+      if (rule === undefined) return yield* reject("invalid-mcp-server");
+      if (rule === protectedRule) return yield* reject("protected-mcp-server");
+    }
+    if (projection.runs.some(isActiveRun)) return yield* reject("busy");
+    const liveSessions = projection.providerSessions.filter(
+      (session) =>
+        session.providerInstanceId === thread.providerInstanceId &&
+        session.status !== "stopped" &&
+        session.status !== "error",
+    );
+    for (const session of liveSessions) {
+      if (yield* sessionHasBackgroundWork(session, projection.providerThreads)) {
+        return yield* reject("background-work");
+      }
+    }
+
+    const now = yield* DateTime.now;
+    const emitEvent = emit(events, command);
+    const updatedThread = { ...thread, toolOverrides: command.toolOverrides, updatedAt: now };
+    yield* emitEvent({
+      type: "thread.tool-overrides-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: now,
+      payload: updatedThread,
+    });
+    const reason = "Tools changed.";
+    for (const session of liveSessions) {
+      yield* emitEvent({
+        type: "provider-session.detached",
+        threadId: command.threadId,
+        driver: session.driver,
+        providerInstanceId: session.providerInstanceId,
+        occurredAt: now,
+        payload: { providerSessionId: session.id, detachedAt: now, reason },
+      });
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        {
+          id: `effect:${command.commandId}:provider-session.detach:${session.id}`,
+          commandId: command.commandId,
+          threadId: command.threadId,
+          request: {
+            type: "provider-session.detach",
+            providerSessionId: session.id,
+            detail: reason,
+          },
+        } satisfies PendingOrchestrationEffectV2,
+      ]);
+    }
+
+    const run = latestExecutedRun(projection.runs);
+    if (run === null || run === undefined) return;
+    yield* emitEvent({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      runId: run.id,
+      ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
+      providerInstanceId: run.providerInstanceId,
+      occurredAt: now,
+      payload: {
+        id: idAllocator.derive.runSignalTurnItem({
+          runId: run.id,
+          signal: `tools-changed:${command.commandId}`,
+        }),
+        threadId: command.threadId,
+        runId: run.id,
+        nodeId: run.rootNodeId,
+        providerThreadId: run.providerThreadId,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: yield* nextTurnItemOrdinal(projection),
+        status: "completed",
+        title: "Tools changed",
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+        type: "system_notice",
+        level: "info",
+        message: threadToolOverridesNotice(command.toolOverrides),
+      },
+    });
+  });
 
   const refuseAboveDispatchModeLimit = Effect.fn("orchestrationV2.dispatch.refuseAboveModeLimit")(
     function* (
@@ -17281,6 +17441,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
+        break;
+      case "thread.tool-overrides.set":
+        yield* dispatchThreadToolOverridesSet(command, events, effects);
         break;
       case "message.dispatch": {
         if (command.advisoryOnly) yield* assertAdvisory(command);

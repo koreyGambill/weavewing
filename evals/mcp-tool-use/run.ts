@@ -78,7 +78,9 @@ import {
 import { renderTurnOriginText } from "../../packages/provider-core/src/server/turnOriginText.ts";
 import {
   CONTEXT_REWIND_TOOL_NAMES,
+  CONTEXT_REWIND_TURN_TOOL_NAMES,
   ContextRewindToolkit,
+  ContextRewindTurnToolkit,
 } from "../../apps/server/src/mcp/toolkits/contextRewind/tools.ts";
 import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
@@ -136,6 +138,7 @@ const MODELS = {
   "claude-haiku-5-5": "Haiku 5.5",
   "gpt-6.1-sol": "GPT-6.1 Sol",
   "gpt-6-astra": "GPT-6 Astra",
+  "gpt-6-luna": "GPT-6 Luna",
 } as const;
 type Model = keyof typeof MODELS;
 /** GPT models replay a Codex capture through CLIProxyAPI, the rest a Claude Code capture. */
@@ -351,7 +354,10 @@ export const McpToolUseCase = Schema.Struct({
     harness: Schema.optional(Schema.Literals(["claude", "codex"])),
     /** The Linked environments beta is on, so T3 lists its link tools. */
     linkedEnvironments: Schema.optional(Schema.Boolean),
-    /** The Claude context rewind setting is on, so T3 lists context_rewind. */
+    /**
+     * The provider's context rewind setting is on, so T3 lists context_rewind to Claude and
+     * context_rewind_turn to Codex.
+     */
     contextRewind: Schema.optional(Schema.Boolean),
     /**
      * The Agent questions beta is on: T3 lists the question tools, adds their text, and puts these
@@ -552,6 +558,7 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   MessageToolkit,
   QuestionToolkit,
   ContextRewindToolkit,
+  ContextRewindTurnToolkit,
 ].flatMap((toolkit): ReadonlyArray<Tool.Any> => Object.values(toolkit.tools));
 // McpHttpServer decodes arguments with each tool's JSON codec, which drops undeclared keys.
 const t3InputDecoders = new Map(
@@ -608,12 +615,14 @@ const hiddenFromSubagents = enabledWhen(McpInvocationContext.hiddenFromSubagents
 // The Linked environments beta starts off, and T3 lists its tools only while it is on.
 const hiddenWhileLinksOff = enabledWhen(McpInvocationContext.hiddenWhileLinksOff);
 // T3 lists the question tools only to sessions the Agent questions setting grants them.
-// T3 lists context_rewind only to Claude sessions whose provider setting turns it on.
+// T3 lists context_rewind to Claude sessions and context_rewind_turn to Codex sessions whose
+// provider setting turns rewind on.
 const visibleT3Tools = (options: {
   readonly subagent?: boolean;
   readonly links?: boolean;
   readonly questionTools?: boolean;
   readonly contextRewind?: boolean;
+  readonly contextRewindTurn?: boolean;
 }) =>
   t3Tools.filter(
     (tool) =>
@@ -622,7 +631,9 @@ const visibleT3Tools = (options: {
       (options.questionTools === true ||
         !QUESTION_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))) &&
       (options.contextRewind === true ||
-        !CONTEXT_REWIND_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))),
+        !CONTEXT_REWIND_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))) &&
+      (options.contextRewindTurn === true ||
+        !CONTEXT_REWIND_TURN_TOOL_NAMES.has(tool.name.slice(T3_PREFIX.length))),
   );
 
 /**
@@ -840,6 +851,8 @@ const buildCodexBase = (
     readonly browserAccess?: boolean;
     /** The Agent questions setting is on: T3 lists the question tools and adds their text. */
     readonly questionTools?: boolean;
+    /** The Codex context rewind setting is on: T3 lists context_rewind_turn. */
+    readonly contextRewindTurn?: boolean;
   },
 ): Base => {
   const t3 = visibleT3Tools(options);
@@ -3079,6 +3092,7 @@ const main = Effect.gen(function* () {
               deviceAccess,
               browserAccess,
               questionTools,
+              contextRewindTurn: contextRewind,
             }),
           ),
         )

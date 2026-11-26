@@ -208,6 +208,8 @@ export interface EnvironmentThreadShell {
   readonly activeOrderKey: string | null;
   /** Absent when the server never recorded one, so the client's local grouping still applies. */
   readonly sidebarGroup?: string | null;
+  /** Claude only: tools switched on, and MCP servers left out, for this thread. */
+  readonly toolOverrides?: import("@t3tools/contracts").ThreadToolOverrides;
   readonly pullRequests: ReadonlyArray<import("@t3tools/contracts").ThreadPullRequestLink>;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly branchPullRequest?: ThreadLinkedPullRequest | null;
@@ -381,6 +383,7 @@ export function presentThreadShell(
     pinOrderKey: thread.pinOrderKey ?? null,
     activeOrderKey: thread.activeOrderKey ?? null,
     ...(thread.sidebarGroup === undefined ? {} : { sidebarGroup: thread.sidebarGroup }),
+    ...(thread.toolOverrides === undefined ? {} : { toolOverrides: thread.toolOverrides }),
     ...(thread.lastVisitedAt === undefined
       ? {}
       : { lastVisitedAt: nullableIso(thread.lastVisitedAt) }),

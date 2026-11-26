@@ -997,6 +997,43 @@ export function createEnvironmentRpcQueryAtomFamily<
   });
 }
 
+/**
+ * A query whose RPC needs a client-guarded scope. Read `permissionAtom` before mounting a member,
+ * so a connection without the scope shows that instead of a failed request.
+ */
+export function createEnvironmentGuardedRpcQueryAtomFamily<
+  R,
+  ER,
+  TTag extends EnvironmentUnaryRpcTag & ClientGuardedRpcTag,
+>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  options: {
+    readonly label: string;
+    readonly tag: TTag;
+    readonly staleTimeMs?: number;
+    readonly idleTtlMs?: number;
+  },
+) {
+  const permissions = createCommandPermissions(runtime, options.tag);
+  const family = createEnvironmentQueryAtomFamily(runtime, {
+    label: options.label,
+    ...(options.staleTimeMs === undefined ? {} : { staleTimeMs: options.staleTimeMs }),
+    ...(options.idleTtlMs === undefined ? {} : { idleTtlMs: options.idleTtlMs }),
+    execute: Effect.fn("EnvironmentGuardedRpcQuery.execute")(function* (
+      input: EnvironmentRpcInput<TTag>,
+    ) {
+      const registry = yield* AtomRegistry.AtomRegistry;
+      return yield* requestGuarded(options.tag, input).pipe(
+        Effect.provideService(RpcPermissionGuard, {
+          authorize: (id, method, payload) =>
+            createCommandPermissions(runtime, method).authorize(registry, id, payload),
+        }),
+      );
+    }),
+  });
+  return Object.assign(family, { permissionAtom: permissions.permissionAtom });
+}
+
 export function createEnvironmentRpcSubscriptionAtomFamily<
   R,
   ER,

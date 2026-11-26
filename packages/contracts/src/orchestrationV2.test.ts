@@ -6,6 +6,7 @@ import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
   OrchestrationV2CheckpointFileSummary,
+  OrchestrationV2Command,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -495,6 +496,69 @@ describe("thread open stats", () => {
     const opens = { openedAt: 1, score: 1, picks: [{ query: "upl", at: 1 }] };
     expect(decode({ ...shell, opens }).opens).toEqual(opens);
     expect(decode({ ...shell, opens: { openedAt: "2026-10-01", score: 1 } }).opens).toBeNull();
+  });
+});
+
+describe("thread tool overrides", () => {
+  const decodeCommand = Schema.decodeUnknownSync(OrchestrationV2Command);
+
+  it("reads a thread shell written before tool overrides, and fills an absent MCP list", () => {
+    const decode = Schema.decodeUnknownSync(OrchestrationV2ThreadShellJson);
+    const shell = {
+      id: "thread-test",
+      projectId: "project-test",
+      title: "Thread",
+      providerInstanceId: "claudeAgent",
+      modelSelection: { instanceId: "claudeAgent", model: "claude-haiku-4-5" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: { rootThreadId: "thread-test", parentThreadId: null, relationshipToParent: null },
+      forkedFrom: null,
+      createdBy: "user",
+      creationSource: "web",
+      latestRunId: null,
+      activeRunId: null,
+      status: "idle",
+      pendingRuntimeRequest: null,
+      latestVisibleMessage: null,
+      latestUserMessageAt: null,
+      hasActionableProposedPlan: false,
+      itemCount: 0,
+      visibleItemCount: 0,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      deletedAt: null,
+    };
+    expect(decode(shell).toolOverrides).toBeUndefined();
+    expect(
+      decode({
+        ...shell,
+        toolOverrides: { enabledBuiltinTools: ["ScheduleWakeup"], claudeAiConnectors: true },
+      }).toolOverrides,
+    ).toEqual({
+      enabledBuiltinTools: ["ScheduleWakeup"],
+      claudeAiConnectors: true,
+      omittedMcpServers: [],
+    });
+  });
+
+  it("refuses to switch on ToolSearch, Skill or an unknown tool", () => {
+    for (const tool of ["ToolSearch", "Skill", "Bash"]) {
+      expect(() =>
+        decodeCommand({
+          type: "thread.tool-overrides.set",
+          commandId: "command-test",
+          threadId: "thread-test",
+          toolOverrides: { enabledBuiltinTools: [tool], claudeAiConnectors: false },
+        }),
+      ).toThrow();
+    }
   });
 });
 

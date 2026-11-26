@@ -551,6 +551,10 @@
       "types": "./src/markdownPipeline.ts",
       "import": "./src/markdownPipeline.ts"
     },
+    "./sentContext": {
+      "types": "./src/sentContext.ts",
+      "import": "./src/sentContext.ts"
+    },
     "./threadFindText": {
       "types": "./src/threadFindText.ts",
       "import": "./src/threadFindText.ts"

@@ -1,5 +1,4 @@
 import { ThreadListSummary } from "../reviews/ThreadListView";
-import { Popover, PopoverPopup } from "../ui/popover";
 import { ThreadDetailsLocation } from "./ThreadDetailsDestination";
 import type {
   EditorId,
@@ -96,7 +95,6 @@ interface ThreadDetailsPanelProps extends Pick<
   ) => Promise<ProjectScriptActionResult>;
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   usage: ThreadDetailsUsageInput;
-  lineageHandle?: ThreadDetailsPanelProps["handle"];
 }
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
@@ -105,9 +103,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     (settings) => settings.forkHistoryPolicy === "require_native",
   );
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
-  const threadKey = `${props.environmentId}:${props.threadId}`;
-  const [lineageThreadKey, setLineageThreadKey] = useState<string | null>(null);
-  const lineageOpen = lineageThreadKey === threadKey;
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
@@ -352,33 +347,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       >
         {(density) => renderItems(density)}
       </ThreadDetailsLocation>
-      {props.lineageHandle ? (
-        <Popover
-          handle={props.lineageHandle}
-          open={lineageOpen}
-          onOpenChange={(open) => setLineageThreadKey(open ? threadKey : null)}
-        >
-          <PopoverPopup
-            aria-label="Thread lineage"
-            width="md"
-            padding="none"
-            side="top"
-            align="start"
-          >
-            {lineageOpen ? (
-              <ThreadRelationshipsPanel
-                environmentId={props.environmentId}
-                threadId={props.threadId}
-                showLineage
-                showSideChats
-                empty={
-                  <p className="px-3 py-2 text-xs text-muted-foreground">No related threads yet.</p>
-                }
-              />
-            ) : null}
-          </PopoverPopup>
-        </Popover>
-      ) : null}
     </>
   );
 }

@@ -42,6 +42,7 @@ import {
   type ServerProviderCompatibilityAdvisory,
   type ServerProviderModel,
   isDelegatedAppThread,
+  MessageId,
   ThreadId,
 } from "@t3tools/contracts";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
@@ -111,6 +112,13 @@ import * as PortScanner from "../../preview/PortScanner.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { withTurnOriginPrefix } from "@t3tools/provider-core/server/turnOriginText";
+import {
+  CONTEXT_REWIND_MIN_REMOVED_CHARS,
+  CONTEXT_REWIND_TURN_TOOL,
+  contextRewindTurnModelText,
+  isContextRewindContinuation,
+} from "../contextRewind.ts";
 import { buildCodexAdditionalContext } from "../../provider/CodexDeveloperInstructions.ts";
 import {
   describeMcpElicitation,
@@ -1296,8 +1304,25 @@ function failureResetAt(
   );
 }
 
+const isProviderAdapterSteerDeclinedError = Schema.is(
+  ProviderAdapter.ProviderAdapterSteerDeclinedError,
+);
+
+/** What a whole-turn context rewind would remove from a root turn, and what it would send again. */
+interface CodexTurnRewindRecord {
+  /** The input turn/start sent; empty or absent when the turn cannot be started again from it. */
+  sentInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput> | undefined;
+  readonly steerInputs: Array<CodexSchema.V2TurnStartParams__UserInput>;
+  pendingSteers: number;
+  toolCalls: number;
+  toolOutputChars: number;
+  compacted: boolean;
+}
+
 interface ActiveCodexTurnContext {
   hookStopReason?: string;
+  /** Present while a root turn runs with context rewind on; released when it settles. */
+  rewind?: CodexTurnRewindRecord | undefined;
   capacityRetryAttempt?: number;
   capacityRetryPending?: Deferred.Deferred<ActiveCodexTurnContext | undefined>;
   closedCommandItemIds?: ReadonlySet<string>;
@@ -1521,7 +1546,62 @@ const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 // Holds T3 tools Codex must call directly, never from Code Mode. Calls arrive as
 // `t3-code-direct.<tool>`; t3McpToolPresentation.ts must keep resolving that form.
 const CODEX_T3_DIRECT_MCP_SERVER = "t3-code-direct";
-const CODEX_DIRECT_ONLY_T3_TOOLS = ["t3_thread_wait", "delegate_task"];
+const CODEX_DIRECT_ONLY_T3_TOOLS = ["t3_thread_wait", "delegate_task", CONTEXT_REWIND_TURN_TOOL];
+
+// Steer inputs a rewind will hold in memory to resend; a turn steered more often cannot rewind.
+const CODEX_REWIND_MAX_STEER_INPUTS = 32;
+
+// A rendered `<t3_origin n="…">` header: replies resolve its number against the continuation's
+// own messages, so a resent copy would point a reply at the wrong one.
+const NUMBERED_TURN_ORIGIN = '<t3_origin n="';
+
+// Items that are not tool calls; every other item a turn completes is one a rewind removes.
+const CODEX_NON_TOOL_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "userMessage",
+  "hookPrompt",
+  "agentMessage",
+  "plan",
+  "reasoning",
+  "enteredReviewMode",
+  "exitedReviewMode",
+  "contextCompaction",
+  "subAgentActivity",
+]);
+
+const isCodexContextRewindCall = (item: { readonly type: string }) =>
+  item.type === "mcpToolCall" &&
+  "server" in item &&
+  item.server === CODEX_T3_DIRECT_MCP_SERVER &&
+  "tool" in item &&
+  item.tool === CONTEXT_REWIND_TURN_TOOL;
+
+/** Characters of tool output a completed item put in the model's context. */
+function codexToolOutputChars(item: CodexSchema.V2ItemCompletedNotification__ThreadItem): number {
+  const output =
+    item.type === "commandExecution"
+      ? item.aggregatedOutput
+      : item.type === "mcpToolCall"
+        ? (item.result ?? item.error)
+        : item.type === "dynamicToolCall"
+          ? item.contentItems
+          : item.type === "functionCallOutput"
+            ? item.output
+            : item.type === "webSearch"
+              ? item.results
+              : undefined;
+  if (output == null) return 0;
+  return typeof output === "string" ? output.length : JSON.stringify(output).length;
+}
+
+function recordCodexRewindItem(
+  record: CodexTurnRewindRecord,
+  item: CodexSchema.V2ItemCompletedNotification__ThreadItem,
+) {
+  if (item.type === "contextCompaction") record.compacted = true;
+  if (CODEX_NON_TOOL_ITEM_TYPES.has(item.type) || isCodexContextRewindCall(item)) return;
+  record.toolCalls += 1;
+  record.toolOutputChars += codexToolOutputChars(item);
+}
 
 function codexThreadRuntimeParams(input: {
   readonly threadId: ThreadId | null;
@@ -1943,6 +2023,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
     driver: CODEX_PROVIDER,
+    ...(adapterOptions.settings.contextRewind ? { offersContextRewind: "turn" as const } : {}),
     getCapabilities: Effect.fn("CodexAdapterV2.getCapabilities")(function () {
       return Effect.succeed(CodexProviderCapabilitiesV2);
     }),
@@ -2118,6 +2199,56 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           new Map<ProviderThreadId, Extract<OrchestrationV2TurnItem, { type: "error" }>>(),
         );
         const activeTurns = yield* Ref.make(new Map<string, ActiveCodexTurnContext>());
+        // By native thread id, and held in memory: after a restart the continuation says no rewind
+        // happened. A rewind is reserved before any await, so steers and a second call see it, then
+        // confirmed once its continuation is queued. A confirmed one lives only while the rewound
+        // turn is the thread's latest, so reverting one turn removes exactly it.
+        const pendingContextRewinds = new Map<
+          string,
+          {
+            readonly providerTurnId: ProviderTurnId;
+            readonly confirmed?: {
+              readonly nativeTurnId: string;
+              readonly continuationMessageId: MessageId;
+              readonly resentInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
+              reverted?: true;
+            };
+            interruptRequested?: boolean;
+          }
+        >();
+        const confirmedContextRewind = (context: ActiveCodexTurnContext) => {
+          const nativeThreadId = context.providerThread.nativeThreadRef?.nativeId;
+          const pending =
+            nativeThreadId == null ? undefined : pendingContextRewinds.get(nativeThreadId);
+          return context.subagent === null &&
+            pending?.providerTurnId === context.providerTurnId &&
+            pending.confirmed !== undefined
+            ? pending
+            : undefined;
+        };
+        // Codex has no end-turn result, so once the rewind call's result reached the model the
+        // adapter interrupts the turn before the model samples again.
+        const endContextRewindTurn = Effect.fn("CodexAdapterV2.endContextRewindTurn")(function* (
+          context: ActiveCodexTurnContext,
+          nativeThreadId: string,
+          nativeTurnId: string,
+        ) {
+          const pending = confirmedContextRewind(context);
+          if (pending?.confirmed?.nativeTurnId !== nativeTurnId || pending.interruptRequested) {
+            return;
+          }
+          pending.interruptRequested = true;
+          yield* client
+            .request("turn/interrupt", { threadId: nativeThreadId, turnId: nativeTurnId })
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("orchestration-v2.codex-context-rewind-interrupt-failed", {
+                  cause,
+                }),
+              ),
+              Effect.forkIn(scope),
+            );
+        });
         // Codex reports MCP startup on thread start, usually before the turn context exists.
         const mcpStartupFailures = new Map<string, Map<string, string>>();
         const turnTokenUsageByThread = new Map<string, CodexTurnTokenUsageState>();
@@ -2147,8 +2278,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             context.nativeTurnId,
           ).hasSubagents = true;
         };
+        // By native thread id: the turn being started and the input turn/start sent for it.
         const pendingRootTurns = yield* Ref.make(
-          new Map<string, ProviderAdapter.ProviderAdapterV2TurnInput>(),
+          new Map<
+            string,
+            {
+              readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
+              readonly sentInput?: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
+            }
+          >(),
         );
         const turnWaiters = yield* Ref.make(new Map<string, Deferred.Deferred<void, never>>());
         const subagentThreads = yield* Ref.make(new Map<string, CodexSubagentThreadContext>());
@@ -2466,6 +2604,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         const registerRootTurn = Effect.fn("CodexAdapterV2.registerRootTurn")(function* (input: {
           readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
+          /** Absent when Codex started the turn itself, so no message of its own can be resent. */
+          readonly sentInput?: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
           readonly nativeTurnId: string;
           readonly startedAt: DateTime.Utc;
           readonly waitForNativeStart?: boolean;
@@ -2499,6 +2639,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             messagePhases: new Map(),
             runningCompactionItemIds: new Set(),
             runningWebSearchItems: new Map(),
+            ...(adapterOptions.settings.contextRewind
+              ? {
+                  rewind: {
+                    sentInput: input.sentInput,
+                    steerInputs: [],
+                    pendingSteers: 0,
+                    toolCalls: 0,
+                    toolOutputChars: 0,
+                    compacted: false,
+                  },
+                }
+              : {}),
           };
           const nativeThreadId = input.turnInput.providerThread.nativeThreadRef?.nativeId;
           const continuation =
@@ -5104,6 +5256,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("turn/started", (payload) =>
           Effect.gen(function* () {
+            // Any other turn moves the conversation past the rewound one.
+            const rewind = pendingContextRewinds.get(payload.threadId)?.confirmed;
+            if (rewind !== undefined && rewind.nativeTurnId !== payload.turn.id) {
+              pendingContextRewinds.delete(payload.threadId);
+            }
             const context = (yield* Ref.get(activeTurns)).get(payload.turn.id);
             if (context !== undefined) {
               if (context.nativeStartReady !== undefined) {
@@ -5114,7 +5271,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const pendingRootTurn = (yield* Ref.get(pendingRootTurns)).get(payload.threadId);
             if (pendingRootTurn !== undefined) {
               yield* registerRootTurn({
-                turnInput: pendingRootTurn,
+                ...pendingRootTurn,
                 nativeTurnId: payload.turn.id,
                 startedAt: codexTimestamp(payload.turn.startedAt),
               });
@@ -5587,6 +5744,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
             const { context, settled } = resolved;
+            if (!settled && context.rewind !== undefined) {
+              recordCodexRewindItem(context.rewind, payload.item);
+            }
+            if (isCodexContextRewindCall(payload.item)) {
+              yield* endContextRewindTurn(context, payload.threadId, payload.turnId);
+            }
 
             if (payload.item.type === "reasoning") {
               yield* completeReasoning(payload.turnId, payload.item);
@@ -6860,6 +7023,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   return false;
                 input.context.latestProviderFailure ??= input.stalledRetry.failure;
               }
+              // A confirmed rewind keeps its own copy of the input it resends.
+              input.context.rewind = undefined;
               input.context.fileChangeKindsByItem.clear();
               const providerRetry = yield* Ref.modify(providerRetries, (current) => {
                 const retry = current.get(input.context.providerTurnId);
@@ -7127,7 +7292,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 input.context.subagent === null &&
                 !input.continueRun &&
                 !holdsForGoal &&
-                nativeThreadId != null
+                nativeThreadId != null &&
+                confirmedContextRewind(input.context) === undefined
               ) {
                 yield* samplePromptSuggestion(
                   input.context,
@@ -7396,11 +7562,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
             const nativeStatus = mapCodexTurnStatus(payload.turn.status);
+            const userInterrupted = (yield* Ref.get(interruptingNativeTurns)).has(payload.turn.id);
             const status =
-              nativeStatus === "completed" &&
-              (yield* Ref.get(interruptingNativeTurns)).has(payload.turn.id)
+              nativeStatus === "completed" && userInterrupted
                 ? "interrupted"
-                : nativeStatus;
+                : // A rewind's own interrupt ends a hop the user asked nothing to stop.
+                  nativeStatus === "interrupted" &&
+                    !userInterrupted &&
+                    confirmedContextRewind(context)?.interruptRequested === true
+                  ? "completed"
+                  : nativeStatus;
             const terminal = {
               context,
               nativeTurnId: payload.turn.id,
@@ -7616,6 +7787,91 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           );
         });
 
+        /** Drops the thread's latest turns from Codex's history, resuming the thread first if needed. */
+        const revertNativeTurns = Effect.fn("CodexAdapterV2.revertNativeTurns")(function* (
+          providerThread: OrchestrationV2ProviderThread,
+          numTurns: number,
+          removable?: (nativeTurnId: string) => boolean,
+        ) {
+          const threadId = yield* getNativeThreadId(providerThread);
+          const { historyMode, loaded } = yield* ensureInitialized.pipe(
+            Effect.andThen(readCodexThreadHistoryMetadata(client.raw, threadId)),
+          );
+          if (historyMode !== "paginated") {
+            return yield* new ProviderAdapter.ProviderAdapterRollbackThreadError({
+              driver: CODEX_PROVIDER,
+              providerThreadId: providerThread.id,
+              cause: `Cannot roll back Codex thread ${threadId}: the thread uses legacy history, which Codex 0.156 cannot revert.`,
+            });
+          }
+          // thread/revert requires the thread loaded in this app-server; resume after restart or idle release.
+          if (!loaded) {
+            yield* resumeNativeThread(threadId, {
+              excludeTurns: true,
+              ...codexThreadRuntimeParams({
+                threadId: providerThread.appThreadId,
+                mcpSession: yield* readMcpSession(providerThread.appThreadId),
+                modelSelection: input.modelSelection,
+                runtimePolicy: input.runtimePolicy,
+              }),
+            });
+          }
+          const reverted = yield* ensureInitialized.pipe(
+            Effect.andThen(revertCodexThread(client, threadId, numTurns, removable)),
+          );
+          turnTokenUsageByThread.delete(threadId);
+          return reverted;
+        });
+
+        /**
+         * The input a context rewind continuation sends. An applied rewind first drops the rewound
+         * turn, which takes the user's message with it, so that message and its steers go first.
+         */
+        const contextRewindContinuationInput = Effect.fn(
+          "CodexAdapterV2.contextRewindContinuationInput",
+        )(function* (
+          turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+          nativeThreadId: string,
+        ) {
+          const pending = pendingContextRewinds.get(nativeThreadId);
+          const rewind =
+            isContextRewindContinuation(turnInput.message.origin) &&
+            pending?.confirmed?.continuationMessageId === turnInput.message.messageId
+              ? pending.confirmed
+              : undefined;
+          // Kept until Codex accepts this turn, so a failed start retries with the same input.
+          if (rewind === undefined) pendingContextRewinds.delete(nativeThreadId);
+          if (!isContextRewindContinuation(turnInput.message.origin)) return undefined;
+          if (rewind !== undefined && !rewind.reverted) {
+            const { reverted } = yield* revertNativeTurns(
+              turnInput.providerThread,
+              1,
+              (nativeTurnId) => nativeTurnId === rewind.nativeTurnId,
+            );
+            if (reverted === 0) pendingContextRewinds.delete(nativeThreadId);
+            else rewind.reverted = true;
+          }
+          const applied = rewind?.reverted === true;
+          const note = yield* toCodexInput({
+            message: {
+              ...turnInput.message,
+              text: withTurnOriginPrefix(turnInput.message.text, turnInput.message.origin, (body) =>
+                contextRewindTurnModelText(body, applied),
+              ),
+            },
+          });
+          return applied ? [...rewind.resentInput, ...note] : note;
+        });
+
+        const settleContextRewind = (nativeThreadId: string, messageId: MessageId) => {
+          if (
+            pendingContextRewinds.get(nativeThreadId)?.confirmed?.continuationMessageId ===
+            messageId
+          ) {
+            pendingContextRewinds.delete(nativeThreadId);
+          }
+        };
+
         const startNativeTurn = Effect.fn("CodexAdapterV2.startNativeTurn")(
           function* (
             turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -7648,7 +7904,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);
-              updated.set(threadId, turnInput);
+              updated.set(threadId, { turnInput, sentInput: codexInput });
               return updated;
             });
             yield* Ref.update(additionalContextByThread, (current) => {
@@ -7725,9 +7981,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               });
             }
             // A turn/started notification may have registered and completed this turn already.
-            if ((yield* Ref.get(pendingRootTurns)).get(threadId) !== turnInput) return;
+            if ((yield* Ref.get(pendingRootTurns)).get(threadId)?.turnInput !== turnInput) return;
             yield* registerRootTurn({
               turnInput,
+              sentInput: codexInput,
               nativeTurnId: started.turn.id,
               startedAt: codexTimestamp(started.turn.startedAt),
               waitForNativeStart: started.turn.startedAt === null,
@@ -7738,7 +7995,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               Effect.ensuring(
                 Effect.flatMap(getNativeThreadId(turnInput.providerThread), (threadId) =>
                   Ref.update(pendingRootTurns, (current) => {
-                    if (current.get(threadId) !== turnInput) return current;
+                    if (current.get(threadId)?.turnInput !== turnInput) return current;
                     const updated = new Map(current);
                     updated.delete(threadId);
                     return updated;
@@ -7986,6 +8243,150 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           ),
         };
 
+        // Codex reverts whole turns only, so this removes the current turn and resends its message.
+        const rewindContext = Effect.fn("CodexAdapterV2.rewindContext")(function* (
+          rewindInput: Parameters<
+            NonNullable<ProviderAdapter.ProviderAdapterV2SessionRuntime["rewindContext"]>
+          >[0],
+        ) {
+          const refuse = (reason: ProviderAdapter.ProviderAdapterContextRewindRefusal) =>
+            new ProviderAdapter.ProviderAdapterContextRewindRefusedError({
+              driver: CODEX_PROVIDER,
+              providerThreadId: rewindInput.providerThread.id,
+              reason,
+            });
+          const rewindCheckFailed = (cause: unknown) =>
+            new ProviderAdapter.ProviderAdapterProtocolError({
+              driver: CODEX_PROVIDER,
+              detail: "Codex could not report whether the turn can be rewound.",
+              cause,
+            });
+          if (rewindInput.toolCalls !== undefined) {
+            return yield* toProtocolError("Codex context rewinds remove whole turns only.");
+          }
+          const nativeThreadId = yield* getNativeThreadId(rewindInput.providerThread);
+          // Masked so an interrupt cannot land between the reservation and its cleanup handler.
+          return yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              // Checked and reserved in one synchronous step, as steerTurn registers a steer.
+              const reserved = yield* Ref.modify(
+                activeTurns,
+                (
+                  turns,
+                ): readonly [
+                  (
+                    | ProviderAdapter.ProviderAdapterContextRewindRefusal
+                    | {
+                        readonly turn: ActiveCodexTurnContext;
+                        readonly record: CodexTurnRewindRecord;
+                        readonly reservation: { readonly providerTurnId: ProviderTurnId };
+                      }
+                  ),
+                  Map<string, ActiveCodexTurnContext>,
+                ] => {
+                  const turn = [...turns.values()].find(
+                    (candidate) =>
+                      candidate.subagent === null &&
+                      candidate.providerThread.nativeThreadRef?.nativeId === nativeThreadId,
+                  );
+                  if (turn?.rewind === undefined) return ["no_active_turn", turns];
+                  if (
+                    pendingContextRewinds.get(nativeThreadId)?.providerTurnId ===
+                    turn.providerTurnId
+                  ) {
+                    return ["already_pending", turns];
+                  }
+                  if (turn.rewind.pendingSteers > 0) return ["message_pending", turns];
+                  const reservation = { providerTurnId: turn.providerTurnId };
+                  pendingContextRewinds.set(nativeThreadId, reservation);
+                  return [{ turn, record: turn.rewind, reservation }, turns];
+                },
+              );
+              if (typeof reserved === "string") return yield* refuse(reserved);
+              const { turn, record, reservation } = reserved;
+              return yield* restore(
+                Effect.gen(function* () {
+                  if (record.compacted || turn.runningCompactionItemIds.size > 0) {
+                    return yield* refuse("compacted");
+                  }
+                  // Goal and retry turns carry no message of their own to send again.
+                  if (
+                    record.sentInput === undefined ||
+                    record.sentInput.length === 0 ||
+                    [...record.sentInput, ...record.steerInputs].some(
+                      (item) => item.type === "text" && item.text.includes(NUMBERED_TURN_ORIGIN),
+                    ) ||
+                    continuedRuns.has(turn.providerTurnId) ||
+                    goalActivations.has(nativeThreadId) ||
+                    goalsByNativeThread.get(nativeThreadId)?.status === "active"
+                  ) {
+                    return yield* refuse("message_not_rebuildable");
+                  }
+                  if (record.toolCalls === 0) return yield* refuse("nothing_to_remove");
+                  if (record.toolOutputChars < CONTEXT_REWIND_MIN_REMOVED_CHARS) {
+                    return yield* refuse("too_small");
+                  }
+                  // An interrupt would cut other running tools short and can leave terminals running.
+                  const otherTools = (yield* Ref.get(runningDynamicToolsByTurn)).get(
+                    turn.nativeTurnId,
+                  );
+                  if (
+                    turn.runningWebSearchItems.size > 0 ||
+                    [...(otherTools?.values() ?? [])].some(
+                      (item) => !isCodexContextRewindCall(item),
+                    ) ||
+                    (yield* runtime.hasPendingBackgroundWorkForThread!(
+                      rewindInput.providerThread,
+                    )) ||
+                    (yield* client.raw
+                      .request("thread/backgroundTerminals/list", { threadId: nativeThreadId })
+                      .pipe(
+                        Effect.flatMap(decodeCodexBackgroundTerminalsListResponse),
+                        Effect.map((page) => page.data.length > 0),
+                        Effect.mapError(rewindCheckFailed),
+                      ))
+                  ) {
+                    return yield* refuse("background_work");
+                  }
+                  const { historyMode } = yield* readCodexThreadHistoryMetadata(
+                    client.raw,
+                    nativeThreadId,
+                  ).pipe(Effect.mapError(rewindCheckFailed));
+                  if (historyMode !== "paginated") return yield* refuse("legacy_history");
+                  const resentInput = [...record.sentInput, ...record.steerInputs];
+                  // The reservation allows one rewind per provider turn, so its id names the continuation.
+                  const continuationMessageId = MessageId.make(
+                    `message:context-rewind:${turn.providerTurnId}`,
+                  );
+                  yield* rewindInput.deliver({
+                    removedToolCalls: record.toolCalls,
+                    continuationMessageId,
+                  });
+                  if (pendingContextRewinds.get(nativeThreadId) === reservation) {
+                    pendingContextRewinds.set(nativeThreadId, {
+                      providerTurnId: turn.providerTurnId,
+                      confirmed: {
+                        nativeTurnId: turn.nativeTurnId,
+                        continuationMessageId,
+                        resentInput,
+                      },
+                    });
+                  }
+                  return { removedToolCalls: record.toolCalls };
+                }),
+              ).pipe(
+                Effect.onError(() =>
+                  Effect.sync(() => {
+                    if (pendingContextRewinds.get(nativeThreadId) === reservation) {
+                      pendingContextRewinds.delete(nativeThreadId);
+                    }
+                  }),
+                ),
+              );
+            }),
+          );
+        });
+
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           instanceId: adapterOptions.instanceId,
           driver: CODEX_PROVIDER,
@@ -8143,7 +8544,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             function* (turnInput) {
               const threadId = yield* getNativeThreadId(turnInput.providerThread);
               yield* Ref.update(pendingRootTurns, (current) =>
-                new Map(current).set(threadId, turnInput),
+                new Map(current).set(threadId, { turnInput }),
               );
               // Clear on interruption; a late turn/started must not be adopted after an interrupted start.
               yield* client.request("thread/compact/start", { threadId }).pipe(
@@ -8212,10 +8613,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ) {
                 return yield* activateGoal(turnInput, nativeThreadId, toCodexInput(turnInput));
               }
+              const rewound =
+                nativeThreadId == null || continuation
+                  ? undefined
+                  : yield* contextRewindContinuationInput(turnInput, nativeThreadId);
               yield* startNativeTurn(
                 turnInput,
-                !continuation ? yield* toCodexInput(turnInput) : [],
+                rewound ?? (!continuation ? yield* toCodexInput(turnInput) : []),
               );
+              if (rewound !== undefined && nativeThreadId != null) {
+                settleContextRewind(nativeThreadId, turnInput.message.messageId);
+              }
             }).pipe(
               Effect.mapError(
                 (cause) =>
@@ -8229,6 +8637,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ),
             );
           },
+          ...(adapterOptions.settings.contextRewind ? { rewindContext } : {}),
           steerTurn: Effect.fn("CodexAdapterV2.steerTurn")(
             function* (turnInput) {
               const threadId = yield* getNativeThreadId(turnInput.providerThread);
@@ -8255,22 +8664,60 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               }
 
               const codexInput = yield* toCodexInput(turnInput);
-              yield* client.request("turn/steer", {
-                expectedTurnId: activeTurn.nativeTurnId,
-                input: codexInput,
-                threadId,
+              const rewind = activeTurn.rewind;
+              const rewindTurn = activeTurn.providerTurnId;
+              // Checked and registered in one synchronous step, as rewindContext reserves.
+              const declined = yield* Effect.sync(() => {
+                if (pendingContextRewinds.get(threadId)?.providerTurnId === rewindTurn) return true;
+                if (rewind !== undefined) rewind.pendingSteers += 1;
+                return false;
               });
+              // The rewind would drop this steer with its turn; declined, it queues behind the
+              // continuation.
+              if (declined) {
+                return yield* new ProviderAdapter.ProviderAdapterSteerDeclinedError({
+                  driver: CODEX_PROVIDER,
+                  providerThreadId: turnInput.providerThread.id,
+                  providerTurnId: turnInput.providerTurnId,
+                });
+              }
+              yield* client
+                .request("turn/steer", {
+                  expectedTurnId: activeTurn.nativeTurnId,
+                  input: codexInput,
+                  threadId,
+                })
+                .pipe(
+                  Effect.onExit((exit) =>
+                    Effect.sync(() => {
+                      if (rewind === undefined) return;
+                      rewind.pendingSteers -= 1;
+                      if (!Exit.isSuccess(exit)) return;
+                      // Past the cap the turn cannot be resent whole, so a rewind refuses it.
+                      if (
+                        rewind.steerInputs.length + codexInput.length >
+                        CODEX_REWIND_MAX_STEER_INPUTS
+                      ) {
+                        rewind.sentInput = undefined;
+                        rewind.steerInputs.length = 0;
+                      } else {
+                        rewind.steerInputs.push(...codexInput);
+                      }
+                    }),
+                  ),
+                );
             },
             (effect, turnInput) =>
               effect.pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderAdapter.ProviderAdapterSteerRunError({
-                      driver: CODEX_PROVIDER,
-                      providerThreadId: turnInput.providerThread.id,
-                      providerTurnId: turnInput.providerTurnId,
-                      cause,
-                    }),
+                Effect.mapError((cause) =>
+                  isProviderAdapterSteerDeclinedError(cause)
+                    ? cause
+                    : new ProviderAdapter.ProviderAdapterSteerRunError({
+                        driver: CODEX_PROVIDER,
+                        providerThreadId: turnInput.providerThread.id,
+                        providerTurnId: turnInput.providerTurnId,
+                        cause,
+                      }),
                 ),
               ),
           ),
@@ -8894,7 +9341,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           ),
           rollbackThread: Effect.fn("CodexAdapterV2.rollbackThread")(
             function* (threadInput) {
-              const threadId = yield* getNativeThreadId(threadInput.providerThread);
+              yield* getNativeThreadId(threadInput.providerThread);
               const numTurns = yield* resolveCodexRollbackTurnCount(threadInput);
               const nativeConversationHeadRef =
                 threadInput.target.type === "provider_turn"
@@ -8912,32 +9359,21 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   runtimeRequests: [],
                 };
               }
-              const { historyMode, loaded } = yield* ensureInitialized.pipe(
-                Effect.andThen(readCodexThreadHistoryMetadata(client.raw, threadId)),
+              // A turn a context rewind already removed counts in Weavewing but not in Codex, so the
+              // revert also stops at the native turn of the target or of any turn before it.
+              const target = threadInput.target;
+              const keptNativeTurnIds = new Set(
+                target.type === "provider_turn"
+                  ? threadInput.providerThreadTurns
+                      .filter((turn) => turn.ordinal <= target.providerTurn.ordinal)
+                      .map((turn) => turn.nativeTurnRef?.nativeId)
+                  : [],
               );
-              if (historyMode !== "paginated") {
-                return yield* new ProviderAdapter.ProviderAdapterRollbackThreadError({
-                  driver: CODEX_PROVIDER,
-                  providerThreadId: threadInput.providerThread.id,
-                  cause: `Cannot roll back Codex thread ${threadId}: the thread uses legacy history, which Codex 0.156 cannot revert.`,
-                });
-              }
-              // thread/revert requires the thread loaded in this app-server; resume after restart or idle release.
-              if (!loaded) {
-                yield* resumeNativeThread(threadId, {
-                  excludeTurns: true,
-                  ...codexThreadRuntimeParams({
-                    threadId: threadInput.providerThread.appThreadId,
-                    mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
-                    modelSelection: input.modelSelection,
-                    runtimePolicy: input.runtimePolicy,
-                  }),
-                });
-              }
-              const response = yield* ensureInitialized.pipe(
-                Effect.andThen(revertCodexThread(client, threadId, numTurns)),
+              const { response } = yield* revertNativeTurns(
+                threadInput.providerThread,
+                numTurns,
+                (nativeTurnId) => !keptNativeTurnIds.has(nativeTurnId),
               );
-              turnTokenUsageByThread.delete(threadId);
               return {
                 providerThread: {
                   ...threadInput.providerThread,
@@ -9040,7 +9476,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                         cause,
                       }),
                   ),
-                )).thread;
+                )).response.thread;
               }
               if (threadInput.verifyTurnBoundary) {
                 const forkedId = forkedThread.id;

@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { searchableMessageSegments, searchablePlanSegments } from "@t3tools/shared/threadFindText";
 import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
+import { sentContextSearchSegments } from "@t3tools/shared/sentContext";
 import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
@@ -450,7 +451,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
           } else {
             const decoded = yield* decode(row);
             const key = textKey(decoded.item, cwd, input.skills ?? []);
-            const segments =
+            const textSegments =
               decoded.item.type === "assistant_message" &&
               decoded.item.text === "" &&
               embeddedResultRunIds.has(decoded.item.runId)
@@ -459,6 +460,11 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
                     key.text.length <= 32_768 ? textCache.text : textCache.largeText,
                     key,
                   );
+            // The timeline renders what each reference sent below the message text, in this order.
+            const segments =
+              decoded.item.type === "user_message"
+                ? [...textSegments, ...sentContextSearchSegments(decoded.item)]
+                : textSegments;
             rendered = { ...documentFor(decoded, 0), segments, sourceLength: key.text.length };
           }
           const document = {

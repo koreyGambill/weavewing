@@ -7,11 +7,12 @@ import { shortcutLabelForCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon, ScaleIcon } from "lucide-react";
-import { memo } from "react";
+import { type Ref, memo, useImperativeHandle, useState } from "react";
 
 import { ADD_TO_MACHINE_LABEL_CLASS, type EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
+import { useComposerRowItemPlacement } from "./chat/ComposerRow";
 import {
   Select,
   SelectGroup,
@@ -21,7 +22,12 @@ import {
   SelectValue,
 } from "./ui/select";
 
+export interface BranchToolbarEnvironmentSelectorHandle {
+  open: () => void;
+}
+
 interface BranchToolbarEnvironmentSelectorProps {
+  ref?: Ref<BranchToolbarEnvironmentSelectorHandle>;
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
@@ -50,6 +56,7 @@ export function BranchToolbarEnvironmentBadge({
 }
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
+  ref,
   autoEnvironmentLabel,
   onAutoEnvironment,
   envLocked,
@@ -59,6 +66,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   onAddToMachine,
 }: BranchToolbarEnvironmentSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const rowPlacement = useComposerRowItemPlacement();
+  const [open, setOpen] = useState(false);
+  useImperativeHandle(ref, () => ({ open: () => setOpen(true) }), []);
   const shortcutLabel = shortcutLabelForCommand(
     useAtomValue(primaryServerKeybindingsAtom),
     "composer.host",
@@ -105,6 +115,8 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
+      open={open}
+      onOpenChange={setOpen}
       value={autoEnvironmentLabel ? AUTO_VALUE : environmentValue(environmentId)}
       onValueChange={(value) => {
         if (value === ADD_MACHINE_VALUE) {
@@ -152,7 +164,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
       </Tooltip>
-      <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+      <SelectPopup
+        alignItemWithTrigger={false}
+        {...composerFloatingLayerProps}
+        {...(rowPlacement?.inMenu
+          ? { anchor: rowPlacement.anchor, finalFocus: rowPlacement.finalFocus }
+          : {})}
+      >
         <SelectGroup>
           <SelectGroupLabel>Run on</SelectGroupLabel>
           {onAutoEnvironment && (

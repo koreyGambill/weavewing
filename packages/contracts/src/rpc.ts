@@ -332,6 +332,8 @@ import {
   OrchestrationV2StopWorkflowError,
   OrchestrationV2ForceStopThreadError,
   OrchestrationV2RewindWithSummaryError,
+  OrchestrationV2SetThreadToolOverridesError,
+  OrchestrationV2ListThreadMcpServersError,
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2CommandOutputError,
@@ -2525,6 +2527,27 @@ const WsOrchestrationV2RewindWithSummaryRpc = Rpc.make(
   },
 );
 
+const WsOrchestrationV2SetThreadToolOverridesRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.setThreadToolOverrides,
+  {
+    payload: OrchestrationV2RpcSchemas.setThreadToolOverrides.input,
+    success: OrchestrationV2RpcSchemas.setThreadToolOverrides.output,
+    error: Schema.Union([
+      OrchestrationV2SetThreadToolOverridesError,
+      EnvironmentAuthorizationError,
+    ]),
+  },
+);
+
+const WsOrchestrationV2ListThreadMcpServersRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.listThreadMcpServers,
+  {
+    payload: OrchestrationV2RpcSchemas.listThreadMcpServers.input,
+    success: OrchestrationV2RpcSchemas.listThreadMcpServers.output,
+    error: Schema.Union([OrchestrationV2ListThreadMcpServersError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsOrchestrationV2GetWorkflowScriptRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
   {
@@ -3104,6 +3127,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2StopWorkflowRpc,
   WsOrchestrationV2ForceStopThreadRpc,
   WsOrchestrationV2RewindWithSummaryRpc,
+  WsOrchestrationV2SetThreadToolOverridesRpc,
+  WsOrchestrationV2ListThreadMcpServersRpc,
   WsOrchestrationV2GetTurnItemRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,

@@ -103,6 +103,7 @@ const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
   shadowHomePath: "",
   launchArgs: "",
   customModels: [],
+  contextRewind: false,
   ...overrides,
 });
 
@@ -116,6 +117,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   omittedBuiltinTools: [],
   idleCompaction: "default",
   contextRewind: false,
+  claudeAiConnectors: "inherit",
   ...overrides,
 });
 
