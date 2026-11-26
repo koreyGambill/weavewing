@@ -164,4 +164,13 @@ it("dismisses in one click and takes an optional reason afterwards", async () =>
   await userEvent.click(edit);
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await expect.element(edit).toHaveFocus();
+  // Escape closes the form from its buttons too, not only from the textarea.
+  await userEvent.click(edit);
+  await userEvent.keyboard("{Tab}");
+  await expect.element(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  await expect
+    .element(screen.getByRole("textbox", { name: "Why QA1 was dismissed" }))
+    .not.toBeInTheDocument();
+  await expect.element(edit).toHaveFocus();
 });

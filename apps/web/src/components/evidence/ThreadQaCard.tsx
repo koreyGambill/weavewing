@@ -351,6 +351,13 @@ export function ThreadQaCard({
             event.preventDefault();
             void saveReason();
           }}
+          // On the form, so Escape closes it from the textarea, Cancel or Save alike.
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeReason();
+            }
+          }}
         >
           <Textarea
             size="sm"
@@ -360,12 +367,6 @@ export function ThreadQaCard({
             maxLength={2000}
             autoFocus
             onChange={(event) => setReason(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                closeReason();
-              }
-            }}
           />
           <div className="flex justify-end gap-1">
             <Button size="xs" variant="ghost" type="button" onClick={closeReason}>
