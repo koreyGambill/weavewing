@@ -3,7 +3,10 @@ import type {
   ThreadPendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
 import { linkRequestTargetName } from "@t3tools/client-runtime/link-request";
-import { turnItemIsWorkspacePreparation } from "@t3tools/client-runtime/state/turn-item-presentation";
+import {
+  turnItemIsReactionOnlyAssistantMessage,
+  turnItemIsWorkspacePreparation,
+} from "@t3tools/client-runtime/state/turn-item-presentation";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
 import {
@@ -35,7 +38,9 @@ import {
   type WorkLogPresentationEntry,
   type WorkLogToolLifecycleStatus,
   workEntryHiddenByToolCallVisibility,
+  workEntryOutgoingMessage,
 } from "@t3tools/client-runtime/work-log/presentation";
+import { parseAssistantReactions } from "@t3tools/shared/messageReactions";
 import type { ToolCallVisibility } from "@t3tools/contracts/settings";
 import {
   resolveT3McpToolDefinition,
@@ -913,7 +918,10 @@ function toFeedActivity(
     icon: workEntry.toolSurface ?? itemIcon(item),
     logo: toolPresentation?.logo ?? null,
     toolLike: itemIsToolLike(item),
-    prominent: itemIsProminent(item) || (item.type === "error" && item.status === "failed"),
+    prominent:
+      itemIsProminent(item) ||
+      (item.type === "error" && item.status === "failed") ||
+      workEntryOutgoingMessage(workEntry) !== null,
     status:
       item.type === "error" && item.failure.class === "usage_limit"
         ? itemStatus(item)
@@ -2457,7 +2465,12 @@ export function buildThreadFeed(
     const row = visibleTurnItems[index]!;
     const item = row.item;
     if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
-    if (item.type === "todo_list" || item.type === "checkpoint") continue;
+    if (
+      item.type === "todo_list" ||
+      item.type === "checkpoint" ||
+      turnItemIsReactionOnlyAssistantMessage(item)
+    )
+      continue;
     if (
       item.type === "user_message" &&
       item.inputIntent === "queued_turn" &&
@@ -2531,7 +2544,8 @@ export function buildThreadFeed(
         message: {
           id: item.messageId,
           role: item.type === "user_message" ? "user" : "assistant",
-          text: item.text,
+          text:
+            item.type === "assistant_message" ? parseAssistantReactions(item.text).body : item.text,
           ...(item.type === "user_message" && item.context ? { context: item.context } : {}),
           attachments: item.attachments ?? [],
           runId: item.runId,

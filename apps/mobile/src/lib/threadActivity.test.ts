@@ -480,6 +480,29 @@ function assistantMessage(updatedAt = "2026-06-20T00:00:03.000Z") {
 }
 
 describe("buildThreadFeed", () => {
+  it("drops reaction lines from replies and hides replies that only react", () => {
+    const reactionOnly = {
+      ...assistantMessage(),
+      id: TurnItemId.make("item-reaction"),
+      messageId: MessageId.make("message-reaction"),
+      text: "[react 1:ack]",
+    };
+    const withBody = { ...assistantMessage(), text: "[react 1:ack]\nShipped the fix." };
+    const feed = buildThreadFeed([
+      projected(userMessage(), 0),
+      projected(reactionOnly, 1),
+      projected(withBody, 2),
+    ]);
+    expect(
+      feed.flatMap((entry) =>
+        entry.type === "message" ? [[entry.message.role, entry.message.text]] : [],
+      ),
+    ).toEqual([
+      ["user", "Run checks"],
+      ["assistant", "Shipped the fix."],
+    ]);
+  });
+
   it("keeps async answers in question history instead of user bubbles", () => {
     const requestId = RuntimeRequestId.make("question");
     const question: OrchestrationV2TurnItem = {
@@ -1147,7 +1170,7 @@ describe("buildThreadFeed", () => {
     );
   });
 
-  it("folds subagents while keeping created-thread and fork cards visible", () => {
+  it("folds subagents while keeping created-thread, fork and outgoing message cards visible", () => {
     const { providerThreadId: _providerThreadId, ...forkBase } = base(
       "item-fork",
       "2026-06-20T00:00:02.000Z",
@@ -1179,11 +1202,19 @@ describe("buildThreadFeed", () => {
         targetProviderInstanceId: ProviderInstanceId.make("codex"),
         targetModel: "gpt-5.4",
       },
+      {
+        ...base("item-thread-send", "2026-06-20T00:00:04.500Z", 5),
+        type: "dynamic_tool",
+        toolName: "mcp__t3-code__t3_thread_send",
+        input: { threadId: "target", message: "Ready for review" },
+        output: { structuredContent: { threadId: "target" } },
+      },
     ] satisfies ReadonlyArray<OrchestrationV2TurnItem>;
     const projectedResources = [
       projected(resourceItems[0]!, 1),
       projected(resourceItems[1]!, 2),
       projected(resourceItems[2]!, 4),
+      projected(resourceItems[3]!, 5),
     ];
     const feed = buildThreadFeed([
       projected(userMessage(), 0),
@@ -1191,13 +1222,15 @@ describe("buildThreadFeed", () => {
       projectedResources[1]!,
       projected(command("2026-06-20T00:00:03.000Z"), 3),
       projectedResources[2]!,
-      projected(assistantMessage("2026-06-20T00:00:05.000Z"), 5),
+      projectedResources[3]!,
+      projected(assistantMessage("2026-06-20T00:00:05.000Z"), 6),
     ]);
 
     const collapsed = deriveThreadFeedPresentation(feed, null, new Set());
     expect(collapsed.map((entry) => entry.type)).toEqual([
       "message",
       "run-fold",
+      "activity-group",
       "activity-group",
       "activity-group",
       "message",
